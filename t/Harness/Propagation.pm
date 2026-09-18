@@ -2586,6 +2586,52 @@ sub fixture_director {
 }
 
 # }}}
+# _sigint_snippet - the interrupt GENESIS_HARNESS_SIGINT_BEFORE_BOSH raises {{{
+#
+# It rides on the blueprint hook rather than on the bosh script's deploy arm,
+# and the reason is Perl's own.  Genesis runs the BOSH deployment through
+# system(), which ignores SIGINT in the parent for the length of the call, so
+# a signal raised from inside that call is discarded and the deploy goes on to
+# report an ordinary failure.  A hook is run through a pipe instead, where the
+# handler bin/genesis installs does fire.  The blueprint is the hook this
+# builder already owns, and it runs after the gate has switched and before any
+# deployment begins, which is the window T232 is about.
+#
+# The signal goes to the genesis process rather than to this one, because the
+# session and its handler live there.  A shell may stand between the two, so
+# the parents are walked, and the embedded copy of genesis is stepped over:
+# .genesis/bin/genesis is a member of the propagation set, so a parent whose
+# command line named it would take a signal meant for the command under test.
+#
+# Where the walk finds nothing it says so and fails, rather than falling
+# through to a plain failure a row would read as a refusal from the director.
+sub _sigint_snippet {
+	return <<'EOS';
+if [ -n "${GENESIS_HARNESS_SIGINT_BEFORE_BOSH:-}" ]; then
+  pid=$PPID
+  target=
+  while [ -n "$pid" ] && [ "$pid" != "0" ] && [ "$pid" != "1" ]; do
+    case "$(ps -o command= -p "$pid" 2>/dev/null)" in
+      *.genesis/bin/genesis*) ;;
+      *bin/genesis*) target="$pid"; break ;;
+    esac
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+  done
+  if [ -z "$target" ]; then
+    echo >&2 "the harness found no genesis process to interrupt"
+    exit 1
+  fi
+  kill -INT "$target"
+  # Held open with this hook's own output closed, so genesis reads the end of
+  # the hook and takes the signal rather than being handed a hook that merely
+  # failed, and so nothing waits on a process genesis has already left.
+  exec >/dev/null 2>&1
+  sleep 5
+  exit 1
+fi
+EOS
+}
+
 # fixture_bosh - the director, the bosh, and the kit a whole deploy needs {{{
 #
 # Every other fixture here builds state a command reads.  This one builds the
@@ -2600,9 +2646,9 @@ sub fixture_director {
 # GENESIS_HARNESS_BOSH_FAILS makes the deploy call exit non-zero instead, so
 # a row can watch the bail path without breaking anything else the deploy
 # asks the director for.  GENESIS_HARNESS_SIGINT_BEFORE_BOSH raises SIGINT in
-# the genesis process at the same point instead, so a row can watch the signal
-# path, which is the window between the gate's switch and the first thing the
-# director is asked to do.  interpolate is handed to the real bosh, because a
+# the genesis process instead, from the blueprint hook rather than from here,
+# for the reason _sigint_snippet gives.  interpolate is handed to the real
+# bosh, because a
 # manifest carrying BOSH variables is resolved by running it and no fake
 # answer would resolve anything.
 #
@@ -2677,30 +2723,6 @@ done
 
 case "\$subcommand" in
 deploy)
-  if [ -n "\${GENESIS_HARNESS_SIGINT_BEFORE_BOSH:-}" ]; then
-    # The interrupt a row wants is the one that arrives after the gate has
-    # switched and before the director has been asked for anything, and this
-    # is that moment: the deploy has reached its BOSH call and no deployment
-    # has begun.  The signal goes to the genesis process rather than to this
-    # one, because the session and its handler live there, and this script is
-    # reached through a shell whose own parent may or may not be genesis, so
-    # the parents are walked until one of them is running it.
-    pid=\$PPID
-    while [ -n "\$pid" ] && [ "\$pid" != "0" ] && [ "\$pid" != "1" ]; do
-      case "\$(ps -o command= -p "\$pid" 2>/dev/null)" in
-        *bin/genesis*) kill -INT "\$pid"; break ;;
-      esac
-      pid=\$(ps -o ppid= -p "\$pid" 2>/dev/null | tr -d ' ')
-    done
-    # Held open afterwards, so the deploy is interrupted rather than told the
-    # director refused: an exit here would reach genesis as an ordinary
-    # failure and might be read before the signal is taken.  The wait happens
-    # with this script's own output closed, so the command's captured output
-    # ends when genesis does and nothing waits on a process genesis has left.
-    exec >/dev/null 2>&1
-    sleep 5
-    exit 1
-  fi
   if [ -n "\${GENESIS_HARNESS_BOSH_FAILS:-}" ]; then
     # Five lines of output before the refusal, because the failure path
     # reads the last five lines of what bosh said to decide whether the
@@ -2823,7 +2845,7 @@ EOS
 	unless (defined $opts{kit} && !$opts{kit}) {
 		my $manifest = $opts{manifest} // "---\nharness: deployed\n";
 		$self->fixture_kit(%opts, hooks => {
-			blueprint => "cat > manifest.yml <<'MANIFEST'\n$manifest"
+			blueprint => _sigint_snippet() . "cat > manifest.yml <<'MANIFEST'\n$manifest"
 				. "MANIFEST\necho manifest.yml\n",
 			%{$opts{hooks} || {}},
 		});

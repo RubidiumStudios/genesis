@@ -553,7 +553,26 @@ sub _gate_deployed_state {
 	# an operator edit a file on the deployment branch and deploy it in
 	# place, which is the qualifier I3 carries and the one thing they need in
 	# order to test a change before committing it.
-	return $fn->() if ($git->current_branch // '') eq $branch;
+	#
+	# It says so, as the two arms below do, because this is the arm an
+	# operator is likeliest to be in without having meant to be: standing on
+	# a deployment branch is an easy state to arrive at, and a deploy of the
+	# working tree as it stands reads no differently from any other until
+	# something in it was not meant to ship.
+	#
+	# The words avoid calling it a deployment branch, and that is not an
+	# accident: t/integration-tests/branch_class-deployed_state.t reads this
+	# arm's output for the absence of that phrase, because the pre-deploy
+	# refusal this class must never meet is the one that says a branch "is a
+	# deployment branch".  Saying it here would answer that row with our own
+	# line.
+	if (($git->current_branch // '') eq $branch) {
+		info(
+			"Already standing on #C{%s}, so no branch change is made and this ".
+			"runs on the working tree as it stands.",
+			$branch);
+		return $fn->();
+	}
 
 	# An environment that has never been delivered has no branch to read,
 	# and switching to a name nothing resolves refuses at DATAERR with a

@@ -5221,7 +5221,15 @@ sub _post_deploy {
 			# are left out of a warning whose subject is what wrote into the
 			# repository without being asked to (D35).  Under the exodus
 			# store they are already gone and the filter matches nothing.
-			my $legacy = $self->manifest_store ne 'exodus';
+			#
+			# The fact is read off the variable that decided the write rather
+			# than off the accessor.  manifest_store answers repository
+			# outright for an environment below minimum_version 3.1.0,
+			# whatever the configuration says, so on such an environment
+			# configured for exodus the legacy write never runs and the
+			# accessor would nonetheless drop a path under .genesis/manifests/
+			# that really is a kit hook's.
+			my $legacy = $manifest_store ne 'exodus';
 			my @modified = grep {
 				!($legacy && m{(?:^|/)\.genesis/manifests/})
 			} grep {

@@ -254,12 +254,15 @@ every environment between C<genesis new> and its first deploy, and the
 command runs where it stands and reports in its own words that there is
 nothing deployed to read.
 
-Each of those two arms says which one it took, in one line, before the
+Each of those three arms says which one it took, in one line, before the
 command runs. A command reading the deployment branch and a command reading
 whatever the operator is standing on answer different questions, and the
 answer alone does not say which was asked. The line states the fact and
-nothing more; refusing on either state belongs to each command's own
-classification of it.
+nothing more; refusing on any of the three states belongs to each command's
+own classification of it. The arm an operator meets by accident is the first,
+since standing on a deployment branch is an easy state to arrive at and a
+deploy of the working tree as it stands reads no differently from any other
+until something in it was not meant to ship.
 
 A branch that C<genesis pipeline-apply> cut and no C<genesis propagate> run
 has delivered to is not switched onto either. It carries its init file and
@@ -1988,7 +1991,11 @@ raises its own usage error rather than meeting a bug report about an
 undefined name.
 
 A command already standing on the branch it would switch to is not switched
-either, and it opens no session at all.  D80 makes the trigger the switch
+either, and it opens no session at all.  It says so in one C<info> line
+before it runs, the way the two arms below do, and that line calls the branch
+by name rather than calling it a deployment branch, because the phrase belongs
+to the pre-deploy refusal this class must never meet and a row reads this
+arm's output for its absence.  D80 makes the trigger the switch
 rather than the class, so a command that is already where it would be going
 takes no switch lock and asserts no cleanliness, since a session exists to
 leave a branch and come back and there is nothing here to leave.  That is
@@ -2012,8 +2019,8 @@ branch is asked for the deployment root's C<.genesis/config>, and where it
 does not carry it the session closes without having moved anything and the
 command runs where it stands.
 
-Both of those arms print one C<info> line naming the branch that was not
-read and why, before the command runs.  The line is a statement and not a
+All three of those arms print one C<info> line naming the branch and why it
+was not switched to, before the command runs.  The line is a statement and not a
 refusal: whether either state should stop a command is each command's own
 question, and the deploy's classification of it answers differently from
 C<info>'s.
