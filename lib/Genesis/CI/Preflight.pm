@@ -360,7 +360,8 @@ sub assert_provider_gate {
 # writes and the refusal states the corrective measure beside the branch.  A
 # caller that passes read_only is reporting rather than running, and it is
 # given the classification without the refusal, because there is no write in
-# front of it for the gate to stand before.
+# front of it for the gate to stand before.  Each branch record then carries
+# what its class was, so the report can say it.
 #
 # The whole DAG is classified rather than the cascade's scope, because the
 # initial state is a property of the repository rather than of the run: a
@@ -433,6 +434,12 @@ sub initial_state {
 			assumed         => undef,
 			assumed_move    => undef,
 			assumed_commits => undef,
+			# Whether this branch and the remote's of the same name share a
+			# commit.  The divergence states cannot tell an orphan from an
+			# ordinary divergence, because both sides hold the name and both
+			# sides are ahead of nothing, so the answer is recorded here for
+			# the reader that has to tell them apart.
+			unrelated       => 0,
 		};
 
 		# Nothing downstream of this stage makes a deployment branch any
@@ -456,8 +463,9 @@ sub initial_state {
 		# has to say what a branch in this state means there.
 		next if $div->{state} eq 'no-local';
 
-		push @unrelated, $branch
-			unless _shares_history($git, $branch, $remote);
+		next if _shares_history($git, $branch, $remote);
+		push @unrelated, $branch;
+		$state->{branches}{$env}{unrelated} = 1;
 	}
 
 	# Each branch's local-only commits, classified.  A marker means the walk
@@ -499,16 +507,27 @@ sub initial_state {
 	# argument as a format and a branch name or a commit subject can carry a
 	# percent sign.
 	#
-	# A caller that only ever reports is not refused.  D96 makes an illegal
-	# initial state a gate in front of the first write, and the refusal's own
-	# closing sentence says what was not written, so a command that was never
-	# going to write anything has nothing for the gate to stop.  The states
-	# it names are the states such a command was written to describe: a hand
-	# commit above the newest marker is D33's hatch, which is legal and
-	# temporary, and refusing it would leave the snapshot axis unreachable in
-	# the one command that reports it.  A preview is refused all the same,
-	# because a preview stands for a run that would be refused and showing
-	# that run would be a lie about what happens next.
+	# A caller that only ever reports is not refused.  D96 frames the illegal
+	# initial state as a gate in front of the propagate run's first write, and
+	# the refusal's own closing sentence says what was not written, so a
+	# command that was never going to write anything has nothing for the gate
+	# to stop.  Commands and flags gives the status one refusal, the disowned
+	# pipeline of D64, and this is not it.
+	#
+	# What the suppression admits is worth naming exactly, because it is not
+	# D33's hatch.  D33 gives a hand commit two fates, and the legal one is
+	# the commit pushed to the remote, which no branch here is ever refused
+	# over: an in-sync branch has no local-only commit for the classification
+	# to find.  What reaches a report through this arm is the unpushed hand
+	# commit, the branch the remote has never had, and the branch that shares
+	# no ancestor with the remote's, and D33 calls the first of those a state
+	# that refuses a run.  So the report describes all three and names the
+	# remedy beside each, rather than refusing to describe the repository at
+	# all because one branch in it is in a state no run may start from.
+	#
+	# A preview is refused all the same, because a preview stands for a run
+	# that would be refused and showing that run would be a lie about what
+	# happens next.
 	bail({exitcode => DATAERR}, '%s',
 		_illegal_state_refusal($action, $outcome, $remote,
 			\@local_only, \@unrelated, \@hand))

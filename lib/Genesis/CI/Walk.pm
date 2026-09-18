@@ -13,6 +13,7 @@ use strict;
 use warnings;
 
 use Exporter qw/import/;
+use JSON::PP ();
 use Scalar::Util ();
 use Genesis qw/run bug bail info/;
 use Genesis::CI::Marker qw/STAGE RELEASE_STAGE/;
@@ -478,7 +479,7 @@ sub hold_for {
 		# The key is inert under the manual provider, where an environment
 		# waits for a person rather than for a trigger, so both conditions
 		# are required before the reason reads awaiting its trigger.
-		my $automated = defined $provider && $provider ne 'manual';
+		my $automated = _automated($provider);
 		my $waits_for_trigger = $automated
 			&& $ancestor->{env}->lookup('genesis.pipeline.manual', 0);
 
@@ -493,6 +494,19 @@ sub hold_for {
 	}
 
 	return undef;
+}
+
+# }}}
+# _automated - whether a provider triggers a deploy without a person {{{
+#
+# One answer, because two readers ask it: the hold reason that says an
+# ancestor awaits its trigger, and the row's own manual marker.  A provider
+# nobody named is not automated, since nothing then exists to do the
+# triggering, and two readers that disagreed about that would put the marker
+# on a row whose hold reason beside it said the opposite.
+sub _automated {
+	my ($provider) = @_;
+	return defined $provider && $provider ne 'manual' ? 1 : 0;
 }
 
 # }}}
@@ -1071,9 +1085,13 @@ sub plan {
 				? {branch => $entry->{pr_branch}} : undef,
 			manual         => undef,
 			divergence     => $settled ? {
-				state  => $settled->{state},
-				ahead  => $settled->{ahead},
-				behind => $settled->{behind},
+				state     => $settled->{state},
+				ahead     => $settled->{ahead},
+				behind    => $settled->{behind},
+				# The pre-flight's own answer, carried across with the rest,
+				# because the three states above cannot tell an orphan from
+				# an ordinary divergence.
+				unrelated => $settled->{unrelated},
 			} : undef,
 			discovery      => undef,
 			error          => undef,
@@ -1106,12 +1124,17 @@ sub plan {
 			# already in hand, because nothing below holds one and a reader
 			# that asked later would load every environment a second time.
 			# The key is inert under the manual provider, where every deploy
-			# waits for a person anyway, and the ancestor hold reads it under
-			# that same condition, so the two cannot come to disagree about
-			# what the declaration means.
+			# waits for a person anyway, and _automated is the one answer to
+			# that question, so the marker on the row and the hold reason
+			# beside it cannot come to disagree about what it means.
+			#
+			# It is the encoder's own boolean, so --json writes true and
+			# false where the record's other booleans write them, and
+			# _jsonable passes it through untouched.
 			$env_record->{manual} =
-				(($state->{provider} // '') ne 'manual'
-					&& $env->lookup('genesis.pipeline.manual', 0)) ? 1 : 0;
+				(_automated($state->{provider})
+					&& $env->lookup('genesis.pipeline.manual', 0))
+				? JSON::PP::true() : JSON::PP::false();
 
 			# The certified commit, which is the control commit the
 			# environment's last successful deployment was made from.  A

@@ -574,9 +574,14 @@ True where the caller only ever reports, as C<genesis pipeline-status> does.
 The stage moves no branch, exactly as under C<dry_run>, and says nothing about
 a preview, because nobody is about to make the run those caveats are about.
 It also raises none of the illegal-state refusals below, since those stand in
-front of the first write and this caller makes none.  The branches are still
-classified, so a caller reading the records back sees each of those states
-rather than being refused over it.
+front of the propagate run's first write and this caller makes none.  The
+branches are still classified, and each record says which class it fell in, so
+a caller reading them back can describe the branch rather than being refused
+over it.  The three states this admits are the unpushed hand commit, the
+branch the remote has never had, and the branch that shares no ancestor with
+the remote's.  A hand commit that was pushed is not among them: an in-sync
+branch has no local-only commit for the classification to find, so that one
+was never refused to begin with.
 
 =back
 
@@ -598,7 +603,10 @@ One record per environment that has a branch on either side, keyed by the
 environment's name.  A branch this stage reset carries C<reset> set on its
 record and one it fast-forwarded carries C<fast_forwarded>, and either way
 C<state> is then C<in-sync> and both counts are 0, because the branch stands
-on its tracking ref.  Under C<dry_run> or C<read_only> no record is settled
+on its tracking ref.  C<unrelated> is 1 where this branch and the remote's of
+the same name share no commit, which the divergence states cannot say on their
+own, since an orphan and an ordinary divergence both hold the name on both
+sides.  Under C<dry_run> or C<read_only> no record is settled
 that way.  The one
 the stage would have moved carries C<assumed>, which is the ref a real run
 would have left the branch on, and its C<state> and counts are the ones the

@@ -105,8 +105,12 @@ B<Examples:>
   my $drift = Genesis::CI::Status::drift_for($git, 'lab/bosh');
 
 Returns a hash reference of C<files>, every path that differs between the
-branch's newest marked commit and its tip, and C<commit>, the hand edit that
-changed them.  Propagation writes a marker on every commit it makes, so the
+branch's newest marked commit and its tip, and C<commit>, the newest hand
+commit standing above that snapshot.  The two do not have to belong together:
+C<files> is the diff across every commit above the marker, so where a branch
+carries two hand commits the paths one of them changed are listed beside the
+sha of the other.  C<commit> says where the hand edits start, not which commit
+made a given change.  Propagation writes a marker on every commit it makes, so the
 newest marked commit is the snapshot the branch is certified to hold and
 everything above it was put there by a person.  That edit is legal and
 temporary, so this is a report rather than a refusal, and it names every file
@@ -203,12 +207,17 @@ B<Examples:>
 
 Returns one environment's status phrase as a list of class and text pairs, in
 the fixed order the design gives, which is the certification word, the routing
-summary, the snapshot flag, and C<[manual]>.  Detail belongs in square
-brackets after the word it qualifies, so a branch carrying a hand edit reads
-C<drifted [ops/shared.yml differs]>, and the trailing C<[manual]> is a marker
-rather than detail, which its own dim class tells apart.  An environment that
-failed to load carries its error alone, because nothing else the row holds was
-read.
+summary, the branch's own state where no run may start from it, the snapshot
+flag, and C<[manual]>.  Detail belongs in square brackets after the word it
+qualifies, so a branch carrying a hand edit reads
+C<drifted [ops/shared.yml differs: hand commit]>, and the trailing C<[manual]>
+is a marker
+rather than detail, which its own dim class tells apart.  A branch the remote
+has never had and one that shares no ancestor with the remote's each read as
+what they are with the operator's remedy in the brackets, because a report
+that only refused to describe them would leave the repository unexplained.  An
+environment that failed to load carries its error alone, because nothing else
+the row holds was read.
 
 B<Parameters:>
 
