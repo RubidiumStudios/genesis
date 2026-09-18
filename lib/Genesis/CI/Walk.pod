@@ -1112,7 +1112,10 @@ passes one that asks the environment's ancestors through L</hold_for>.
 
 B<Returns:> The record it was given, with C<pending> and C<held> filled in.
 The pending entry for a gate written in the hold form also carries
-C<hold_trailer_reason>.
+C<hold_trailer_reason>.  So does every entry held behind that gate, which
+takes the whole gate hashref, and there the key says only that the gate ahead
+was written in the hold form rather than that the entry set a hold.  The one
+entry a hold is written from is the gate's own, and it is a pending entry.
 
 B<Examples:>
 

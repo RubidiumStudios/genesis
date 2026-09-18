@@ -27,13 +27,13 @@ subtest 'a delivered hold trailer writes the record' => sub {
 	# commit and wrote no record reads the reason back as the empty string.
 	#
 	# The last row is weaker than D53's claim, and it says so in its own
-	# name.  Ruling 19 holds that a pipeline-enabled deploy cannot succeed
-	# against the harness at this base, because the branch is looked up by
-	# basename where the harness names it by slug, and that the replacement
-	# is M13's and Task 19.6 re-arms the pipeline-enabled form once the
-	# rebase carries it.  So what this row can say here is that the record
-	# the delivery wrote survives the deploy command rather than that a
-	# deploy of the gated commit met it.
+	# name.  A pipeline-enabled deploy cannot succeed against the harness
+	# here, because the deploy looks its branch up by the environment's
+	# basename where the harness names every branch by its slug, so the two
+	# never meet.  The pipeline-enabled form of this row is re-armed once
+	# that lookup reads the slug.  What the row can say until then is that
+	# the record the delivery wrote survives the deploy command, rather
+	# than that a deploy of the gated commit met it.
 	plan tests => 6;
 
 	my $h = held_prod_delivered();
