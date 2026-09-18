@@ -1090,8 +1090,12 @@ sub plan {
 				behind    => $settled->{behind},
 				# The pre-flight's own answer, carried across with the rest,
 				# because the three states above cannot tell an orphan from
-				# an ordinary divergence.
-				unrelated => $settled->{unrelated},
+				# an ordinary divergence.  It is the encoder's own boolean,
+				# as the manual marker below is, so --json writes true and
+				# false for both rather than a word for one and a digit for
+				# the other.
+				unrelated => $settled->{unrelated}
+					? JSON::PP::true() : JSON::PP::false(),
 			} : undef,
 			discovery      => undef,
 			error          => undef,
