@@ -348,23 +348,15 @@ sub render_run {
 		info "    #R{error}: %s", $env->{error} if $env->{error};
 		next if $opts{outcomes_only};
 
-		if (my $detail = hold_detail($env)) {
-			info "    #Y{%s}", $detail;
-			info "    Release it with #C{genesis %s pipeline-release}",
-				$env->{env};
-		}
+		_hold_lines(hold_detail($env), $env->{env});
 
 		# D53 puts a trailer's hold after the delivery, so an environment
 		# that took one on this run reads as delivered with one line saying
 		# so beneath it.  It is not held_qualifier's held, needs clearing,
 		# which is what the next run reads off the record this one wrote:
 		# a report says what this run did, and this run delivered.
-		if (my $reason = $env->{hold_set}) {
-			info "    #Y{a hold was set by the commit just delivered}: %s",
-				$reason;
-			info "    Release it with #C{genesis %s pipeline-release}",
-				$env->{env};
-		}
+		_hold_lines('a hold was set by the commit just delivered',
+			$env->{env}, $env->{hold_set}) if $env->{hold_set};
 
 		# The commit axis, in control order: what the environment received
 		# first, and then what it is holding behind it.
@@ -578,6 +570,31 @@ sub _commits {
 	my ($n) = @_;
 
 	return sprintf('%d commit%s', $n, $n == 1 ? '' : 's');
+}
+
+# }}}
+# _hold_lines - a hold's own line and the sentence that always follows it {{{
+#
+# Two hold lines are printed for an environment, one for a hold that was
+# already standing and one for a hold this run's delivery set, and they end
+# with the same sentence.  Two copies of one sentence are two that drift
+# apart, so the sentence is written here and nowhere else.
+#
+# The message is printed outside the colour span for the reason the error
+# line gives: csprintf tolerates one level of balanced braces inside a span,
+# and an unbalanced brace in text somebody else wrote ends the span early and
+# moves the characters after it.  A hold's reason is text somebody else
+# wrote, where the phrases above it are the report's own.
+sub _hold_lines {
+	my ($phrase, $env_name, $message) = @_;
+
+	return unless defined $phrase && length $phrase;
+
+	defined $message && length $message
+		? info("    #Y{%s}: %s", $phrase, $message)
+		: info("    #Y{%s}", $phrase);
+	info "    Release it with #C{genesis %s pipeline-release}", $env_name;
+	return;
 }
 
 # }}}

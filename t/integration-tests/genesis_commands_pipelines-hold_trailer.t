@@ -15,6 +15,9 @@ use Harness::Propagation;
 
 use Test::More;
 
+$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{NOCOLOR} = 1;
+
 subtest 'a delivered hold trailer writes the record' => sub {
 	# Five rows, one of which is this row's own restoration assertion, and
 	# one more for the deploy run, which asserts its restoration for itself.
@@ -22,9 +25,15 @@ subtest 'a delivered hold trailer writes the record' => sub {
 	# The third row is the one that discriminates.  Nothing before this task
 	# writes a hold out of a trailer, so a run that delivered the gated
 	# commit and wrote no record reads the reason back as the empty string.
-	# The last row says the record the delivery wrote is still standing when
-	# the deploy of that same commit runs, which is what D53 moves the write
-	# forward for.
+	#
+	# The last row is weaker than D53's claim, and it says so in its own
+	# name.  Ruling 19 holds that a pipeline-enabled deploy cannot succeed
+	# against the harness at this base, because the branch is looked up by
+	# basename where the harness names it by slug, and that the replacement
+	# is M13's and Task 19.6 re-arms the pipeline-enabled form once the
+	# rebase carries it.  So what this row can say here is that the record
+	# the delivery wrote survives the deploy command rather than that a
+	# deploy of the gated commit met it.
 	plan tests => 6;
 
 	my $h = held_prod_delivered();
@@ -49,7 +58,7 @@ subtest 'a delivered hold trailer writes the record' => sub {
 	fake_bosh();
 	run_genesis($h, 'prod', 'deploy', '-y');
 	is(secret("$path:reason"), 'run the capacity report',
-		'the deploy of the gated commit finds the hold already standing');
+		'the record the delivery wrote survives the deploy command');
 };
 
 subtest 'a rejected push takes no hold' => sub {
@@ -88,9 +97,73 @@ subtest 'a rejected push takes no hold' => sub {
 		'the environment whose push landed took the hold');
 	no_secret $h->env_path('prod').'/hold';
 
-	my @said = $said =~ /a hold was set by the commit just delivered/g;
-	is(scalar(@said), 1,
+	my @sentences = $said =~ /a hold was set by the commit just delivered/g;
+	is(scalar(@sentences), 1,
 		'and the run says a hold was set once, for the one delivery that landed');
+};
+
+subtest 'a gate control has released takes no hold' => sub {
+	# Three rows, and one more for the run's own restoration assertion.
+	#
+	# The delivery row is what keeps the last row from passing for the wrong
+	# reason, since a run that delivered nothing would write no hold either.
+	# The last row is the one that discriminates.  A writer that reads the
+	# trailer a second time, without the set of gates the control branch has
+	# released, holds prod over a gate that control itself already took
+	# back, and the operator has to clear by hand a hold nothing accounts
+	# for.
+	plan tests => 4;
+
+	my $h = held_prod_delivered();
+
+	my $gate = commit_on_control($h,
+		files    => {'prod.yml' => env_body('prod', 1)},
+		message  => 'raise the instance count',
+		trailers => {'Genesis-Stage' => 'hold: run the capacity report'},
+		push     => 1);
+
+	# git's own revert body line is one of the two things released_gates
+	# reads, and it names the full sha of the commit it takes back, so this
+	# releases the gate with no deploy and no trailer of its own.
+	my $revert = commit_on_control($h,
+		files   => {'prod.yml' => env_body('prod', 2)},
+		message => "Revert \"raise the instance count\"\n\n".
+		           "This reverts commit $gate.",
+		push    => 1);
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	is($exit, 0, 'the run finished')
+		or diag(unfolded($out, $err));
+	is(harness_marker($h, $h->slug('prod')), $revert,
+		'both commits were delivered, since the revert released the gate');
+	no_secret $h->env_path('prod').'/hold';
+};
+
+subtest 'a gate without the hold form takes no hold' => sub {
+	# Three rows, and one more for the run's own restoration assertion.
+	#
+	# The hold form is the only one that sets a hold, and every other
+	# subtest here uses it, so an implementation that wrote the reason for
+	# any gate at all would pass this file without this subtest.  The guard
+	# it makes explicit is the one genesis_ci_walk-gates.t keeps by
+	# accident, where a second run has to deliver the commit behind the gate
+	# and would instead find the environment wrongly held.
+	plan tests => 4;
+
+	my $h = held_prod_delivered();
+
+	my $gate = commit_on_control($h,
+		files    => {'prod.yml' => env_body('prod', 1)},
+		message  => 'raise the instance count',
+		trailers => {'Genesis-Stage' => 'run the capacity report'},
+		push     => 1);
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	is($exit, 0, 'the run finished')
+		or diag(unfolded($out, $err));
+	is(harness_marker($h, $h->slug('prod')), $gate,
+		'the gated commit was delivered');
+	no_secret $h->env_path('prod').'/hold';
 };
 
 done_testing;
