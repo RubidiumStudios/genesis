@@ -587,7 +587,19 @@ sub deployed_target {
 	# of an undeployed environment says more than a refusal here could.
 	my $record = $env->deployed_record;
 	return undef unless $record && $record->{git} && $record->{git}{commit};
-	return $record->{git}{commit};
+
+	# The path the commit was read from goes back beside it, because D94 has
+	# the refusal name the record as well as the commit: the record is the
+	# input, and an operator told only which commit is missing is not told
+	# which of their records to go and correct.  It is answered here rather
+	# than worked out again by the caller, because this environment is the
+	# one that read it and a second one built in the gate merely to ask for
+	# the path would announce a vault target the gate has no business
+	# announcing.  A caller that wants the commit alone asks in scalar
+	# context and is answered exactly as it was before.
+	return wantarray
+		? ($record->{git}{commit}, $env->exodus_base . '/deployments')
+		: $record->{git}{commit};
 } # }}}
 
 # _gate_branch_class - run a command under its declared class {{{
@@ -638,12 +650,18 @@ sub _gate_branch_class {
 	# turned a path resolving to a file into its basename by the time this
 	# runs, so the directory half earns its place by keeping the two
 	# derivations identical rather than by the work it does here.
+	#
+	# The record the target came out of comes back with it, in list context,
+	# so that a commit the repository cannot reach is refused by the name of
+	# the record an operator has to go and correct (D94).  The resolver reads
+	# that record already, and this is the only caller that knows which one
+	# this run was answered from.
 	my $name = $COMMAND_ARGS[0];
-	my $target;
+	my ($target, $record);
 	if (defined($name) && length($name)) {
 		$name =~ s{^.*/}{};
 		$name =~ s/\.ya?ml$//;
-		$target = deployed_target($name, $top);
+		($target, $record) = deployed_target($name, $top);
 	}
 
 	# Outside a pipeline every command behaves as it always has, on any
@@ -656,7 +674,8 @@ sub _gate_branch_class {
 	# registration declares.  It is read before the class, because the flag
 	# is the operator saying which of the two questions they are asking and
 	# the class is only the default answer.
-	return _gate_deployed_state($top, $git, $fn, $name, target => $target)
+	return _gate_deployed_state($top, $git, $fn, $name,
+			target => $target, record => $record)
 		if defined($target) || $class eq DEPLOYED_STATE;
 
 	if ($class eq PRE_DEPLOY) {
@@ -851,7 +870,14 @@ sub _gate_deployed_state {
 	# than on a branch, and finish restores the operator's branch either
 	# way.  A run that resolved no target stands on the branch, as every run
 	# did before the flags existed.
-	$session->switch($opts{target} // $branch);
+	#
+	# The record the target was read from goes down with it, because switch
+	# asks whether a commit is here before it moves anything and refuses at
+	# DATAERR where it is not, and D94 has that refusal name the record as
+	# well as the commit.  A run standing on the branch tip carries none,
+	# which is right: a branch is not read out of a record, and switch asks
+	# the question of a commit alone.
+	$session->switch($opts{target} // $branch, record => $opts{record});
 
 	# The directory now holds another branch's files, so the root the gate
 	# kept is dropped.  The $top and $git above are the gate's own and go
