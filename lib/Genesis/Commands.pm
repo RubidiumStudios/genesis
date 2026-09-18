@@ -205,6 +205,9 @@ sub define_command { # {{{
 		function_group     => GENESIS,
 		option_group       => BASE_OPTIONS,
 		option_passthrough => 0,
+		# D87: a deployed-state command declares which commit it means, and
+		# every command that says nothing means the branch tip.
+		default_target     => 'tip',
 		branch_class       => undef,
 		branch_target      => undef,
 		branch_fast_forward => 0,
@@ -563,9 +566,28 @@ sub deployed_target {
 	# bare environment that reader needs is built here, below the question
 	# and below the refusal, so that a run which named no flag never builds
 	# one and a flagged run under no pipeline is refused before it pays for
-	# one.  Until that reader lands every run targets the tip, which is what
-	# it targeted before the flags existed.
-	return undef;
+	# one.
+	#
+	# The root the gate keeps carries no vault: it is loaded with no_vault
+	# so that reading a command's class announces no vault target, which is
+	# a side effect a gate has no business having.  The record is in the
+	# vault, so it is read through a root loaded again with the vault the
+	# repository configures, which is the root the command itself is about
+	# to load a moment later and is paid for only by a run that named the
+	# deployed commit.
+	require Genesis::Top;
+	require Genesis::Env;
+	my $env = Genesis::Env->bare($name, Genesis::Top->new($top->path));
+
+	# An environment that has never deployed successfully names no commit,
+	# and neither does a record written before the field existed, so both
+	# take the tip, which is where they stood before the flags existed.  A
+	# flagged run is not refused for it: the operator asked for the deployed
+	# commit of an environment that has none, and the command's own reading
+	# of an undeployed environment says more than a refusal here could.
+	my $record = $env->deployed_record;
+	return undef unless $record && $record->{git} && $record->{git}{commit};
+	return $record->{git}{commit};
 } # }}}
 
 # _gate_branch_class - run a command under its declared class {{{
@@ -603,10 +625,9 @@ sub _gate_branch_class {
 
 	# D88: the two deployed-commit flags refuse where no session opens, so
 	# the resolver is asked above the return that leaves every other command
-	# alone with the pipeline off.  It answers undef for every run that did
-	# not ask for the deployed commit, and nothing names the answer yet,
-	# because resolving the commit is D87's other half; the refusal is what
-	# this call earns its place with today.
+	# alone with the pipeline off.  It answers the commit the run targets,
+	# or undef where the run targets the tip, which is every run that named
+	# neither flag under a registration declaring no deployed default.
 	#
 	# The name derivation lives here rather than in _gate_deployed_state,
 	# for the reason the comment there gave: two derivations of one name are
@@ -618,15 +639,25 @@ sub _gate_branch_class {
 	# runs, so the directory half earns its place by keeping the two
 	# derivations identical rather than by the work it does here.
 	my $name = $COMMAND_ARGS[0];
+	my $target;
 	if (defined($name) && length($name)) {
 		$name =~ s{^.*/}{};
 		$name =~ s/\.ya?ml$//;
-		deployed_target($name, $top);
+		$target = deployed_target($name, $top);
 	}
 
 	# Outside a pipeline every command behaves as it always has, on any
 	# branch, which is D80's last sentence and D81's silent premise.
 	return $fn->() unless $top->pipeline_enabled;
+
+	# D87 makes the secrets family pre-deploy by class and lets
+	# --as-deployed opt it into the deployed commit, so a run that resolved
+	# a target is sent down the deployed-state arm whatever class its
+	# registration declares.  It is read before the class, because the flag
+	# is the operator saying which of the two questions they are asking and
+	# the class is only the default answer.
+	return _gate_deployed_state($top, $git, $fn, $name, target => $target)
+		if defined($target) || $class eq DEPLOYED_STATE;
 
 	if ($class eq PRE_DEPLOY) {
 		# Two pre-deploy commands make no network call of their own, and
@@ -669,9 +700,6 @@ sub _gate_branch_class {
 		return $fn->();
 	}
 
-	return _gate_deployed_state($top, $git, $fn, $name)
-		if $class eq DEPLOYED_STATE;
-
 	return $fn->();
 } # }}}
 
@@ -683,7 +711,7 @@ sub _gate_branch_class {
 # tree.  The session is opened here rather than inside each command, so that
 # deploy, info, and the bosh subcommands share one switch.
 sub _gate_deployed_state {
-	my ($top, $git, $fn, $name) = @_;
+	my ($top, $git, $fn, $name, %opts) = @_;
 
 	# The name is derived once, in _gate_branch_class, and comes down here
 	# already stripped of its leading directories and its suffix.  The
@@ -691,10 +719,11 @@ sub _gate_deployed_state {
 	# and two derivations of one name are two chances to disagree.
 	return $fn->() unless defined($name) && length($name);
 
-	# The branch tip.  D87 has a deployed-state command default to the
-	# commit the environment last deployed, and M14 supplies that commit
-	# through deployed_target; until it does, the tip is what the session
-	# stands on.
+	# The environment's deployment branch, which every question below is
+	# asked of: whether there is one, whether it carries a repository, and
+	# how far behind the remote this clone holds it.  Which commit on it the
+	# session stands on is a different question, and deployed_target has
+	# already answered that one.
 	my $branch = $top->branch_for($name);
 
 	# D80 settles the trigger as "will switch", so a command already standing
@@ -817,7 +846,12 @@ sub _gate_deployed_state {
 	}
 
 	$BRANCH_SESSION = $session;
-	$session->switch($branch);
+
+	# D94 gives both flags one code path, which is switch on a commit rather
+	# than on a branch, and finish restores the operator's branch either
+	# way.  A run that resolved no target stands on the branch, as every run
+	# did before the flags existed.
+	$session->switch($opts{target} // $branch);
 
 	# The directory now holds another branch's files, so the root the gate
 	# kept is dropped.  The $top and $git above are the gate's own and go

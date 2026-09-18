@@ -2,6 +2,10 @@
 # Proves T194: every pipeline-aware registration declares one branch class,
 # every declared class appears as a marker in the help listing, and the two
 # are read from the same attribute so they cannot disagree.
+#
+# Proves T243's half of the same declaration: every registration also says
+# which commit it means by default, which is the deployed commit for info
+# and the bosh subcommands and the branch tip everywhere else.
 use strict;
 use warnings;
 use utf8;
@@ -67,6 +71,38 @@ subtest 'one class per pipeline-aware registration' => sub {
 	is(command_properties('deploy')->{branch_class},
 		Genesis::Commands::DEPLOYED_STATE,
 		'deploy declares the deployed-state branch class');
+};
+
+subtest 'every registration declares which commit it means' => sub {
+	# D87 puts the default target beside the branch class, so one
+	# declaration says both which branch a command belongs to and which
+	# commit on that branch the command means.  info and the bosh
+	# subcommands report on the running deployment, so they name the deployed
+	# commit; every other command means the tip of the branch, and says so by
+	# saying nothing.
+	my %targets = map {$_ => 'tip'} keys %expected;
+	$targets{$_} = 'deployed' for qw/info bosh/;
+
+	for my $cmd (sort keys %targets) {
+		is(command_properties($cmd)->{default_target}, $targets{$cmd},
+			"$cmd targets the $targets{$cmd} by default");
+	}
+
+	# The attribute is defaulted in define_command rather than at each
+	# registration, so a command outside the pipeline surface answers the
+	# same word and no reader of it has to know what undef meant.
+	is(command_properties('version')->{default_target}, 'tip',
+		'a command with no branch class still targets the tip');
+
+	# The sweep alone would pass for a tree where the declaration had moved
+	# from one of the two to a third command, and the rows above alone would
+	# pass for a tree that had given it to a command outside the class as
+	# well, so both are read.
+	my @deployed = sort grep {
+		(command_properties($_)->{default_target} // '') eq 'deployed'
+	} Genesis::Commands::commands();
+	is_deeply(\@deployed, ['bosh', 'info'],
+		'and they are the only two commands in the tree that declare it');
 };
 
 subtest 'only the command that deploys fast-forwards its branch' => sub {

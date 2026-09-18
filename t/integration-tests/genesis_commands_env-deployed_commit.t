@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# Proves T243: each of the four commands takes the target its registration
+# declares, which is the deployed commit for info and the bosh subcommands,
+# the branch tip for deploy, and the deployed commit for the secrets family
+# only where --as-deployed opts it in.
+#
 # Proves T244: both flags refuse at Genesis::Exit::CONFIG when the pipeline is
 # not enabled, each naming the recorded deployed commit and the session that
 # opens only under a pipeline, and each writes nothing.
@@ -95,6 +100,154 @@ subtest 'the two flags share one help sentence' => sub {
 	my $squash = sub { my $t = shift // ''; $t =~ s/\s+/ /g; $t =~ s/^\s|\s$//g; $t };
 	is($squash->($info_sentence), $squash->($deploy_sentence),
 		'both flags print the same sentence about the deployed commit');
+};
+
+subtest 'each command takes the target its registration declares' => sub {
+	plan tests => 17;
+
+	# The discriminator is a line in the environment file rather than a
+	# printed sha, because no command in this family prints the commit its
+	# tree is standing on and a row asserting that it did would assert
+	# nothing.  The two versions of the file name two different directors
+	# and carry two different markers, so each command below says which of
+	# the two it served in its own output.
+	my $deployed_env = <<'YAML';
+---
+kit:
+  name:     dev
+  version:  latest
+  features: []
+genesis:
+  env:      qa
+  bosh_env: deployed-director
+params:
+  marker: the-deployed-version
+YAML
+	my $tip_env = <<'YAML';
+---
+kit:
+  name:     dev
+  version:  latest
+  features: []
+genesis:
+  env:      qa
+  bosh_env: coming-director
+params:
+  marker: the-coming-version
+YAML
+
+	my $h = make_harness(envs => ['qa'], type => 'bosh');
+
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => $deployed_env},
+		message => 'the certified content',
+		push    => 1,
+	);
+	init_branch($h, 'qa');
+	my $deployed = deliver($h, 'qa', control => $control);
+	certify($h, 'qa', commit => $deployed, control_commit => $control);
+
+	my $later = commit_on_control($h,
+		files   => {'qa.yml' => $tip_env},
+		message => 'the undeployed content',
+		push    => 1,
+	);
+	deliver($h, 'qa', control => $later);
+	refresh($h, 'a');
+
+	# Both directors are written, and both answer, because a row that made
+	# one of them unreachable would read a refusal where it means to read a
+	# choice.  The two hooks are the kit's own reading of the working tree:
+	# the info hook prints the marker the tree it was run in carries, and the
+	# blueprint hook says the same thing on its way to writing a manifest,
+	# which is how the deploy's own output names the version it rendered.
+	# The kit is untracked, so it is the same kit on every branch while the
+	# file it reads is not.  The builder's catch-up brings the operator's
+	# copy of the deployment branch up to the delivery, which is what a
+	# pull would have done, and it runs before the row stands anywhere.
+	fixture_bosh($h,
+		envs  => ['qa', 'deployed-director', 'coming-director'],
+		hooks => {
+			info      => qq{grep '^  marker:' "\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml"\n},
+			blueprint =>
+				qq{grep '^  marker:' "\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml" >&2\n}.
+				qq{cat > manifest.yml <<'MANIFEST'\n---\nharness: deployed\nMANIFEST\n}.
+				qq{echo manifest.yml\n},
+		},
+	);
+	stand_on($h, $h->control);
+
+	my ($info_out, $info_err, $info_exit) = run_genesis($h, 'qa', 'info');
+	is($info_exit, 0, 'the info run succeeded');
+	like("$info_out$info_err", qr/marker:\s*the-deployed-version/,
+		'info reports the marker the deployed version carries');
+	unlike("$info_out$info_err", qr/marker:\s*the-coming-version/,
+		'info does not report the marker only the coming version carries');
+
+	# --connect is the one shape of the bosh subcommand that says which
+	# director it was pointed at, and it is pointed at it by the environment
+	# file in the tree the session stood on.  The director's own answer
+	# names neither, because the harness director answers every run alike.
+	my ($bosh_out, $bosh_err, $bosh_exit) = run_genesis($h, 'qa', 'bosh', '--connect');
+	is($bosh_exit, 0, 'the bosh run succeeded');
+	like("$bosh_out$bosh_err", qr/\bdeployed-director\b/,
+		'bosh targets the director the deployed version names');
+	unlike("$bosh_out$bosh_err", qr/\bcoming-director\b/,
+		'bosh does not target the director only the coming version names');
+
+	my ($dep_out, $dep_err, $dep_exit) = run_genesis($h,
+		'qa', 'deploy', '--no-propagate', '-y', 'r');
+	is($dep_exit, 0, 'the deploy succeeded');
+	like("$dep_out$dep_err", qr/marker:\s*the-coming-version/,
+		'deploy renders the branch tip with no flag');
+	unlike("$dep_out$dep_err", qr/marker:\s*the-deployed-version/,
+		'deploy does not render the deployed version without --redeploy');
+
+	# The secrets family is pre-deploy by class and opts into the deployed
+	# commit with the flag, so its two runs read two different feature sets
+	# and write two different credentials.  They need a kit that declares
+	# credentials per feature, which the dev kit above does not, so they run
+	# against a repository of their own.
+	my $deployed_secrets = $deployed_env =~ s/features: \[\]/features: [gh-oauth]/r;
+	my $tip_secrets      = $tip_env      =~ s/features: \[\]/features: [cf-uaa]/r;
+
+	my $s = make_harness(envs => ['qa'], type => 'bosh', kit => 'omega-v2.7.0');
+	my $s_control = commit_on_control($s,
+		files   => {'qa.yml' => $deployed_secrets},
+		message => 'the certified content',
+		push    => 1,
+	);
+	init_branch($s, 'qa');
+	my $s_deployed = deliver($s, 'qa', control => $s_control);
+	certify($s, 'qa', commit => $s_deployed, control_commit => $s_control);
+
+	my $s_later = commit_on_control($s,
+		files   => {'qa.yml' => $tip_secrets},
+		message => 'the undeployed content',
+		push    => 1,
+	);
+	deliver($s, 'qa', control => $s_later);
+	refresh($s, 'a');
+
+	# The kit the harness installed is the one these rows want, so the
+	# builder is told to leave it alone; it is called for the catch-up that
+	# brings the operator's copy of the deployment branch up to the
+	# delivery, without which there is no repository on the branch to switch
+	# onto.
+	fixture_bosh($s, kit => 0);
+	stand_on($s, $s->control);
+
+	my $before = snapshot_w($s);
+	run_genesis($s, {restore => 0}, 'qa', 'rotate-secrets', '--as-deployed', '-y');
+	ok(record_at($s, '/secret/qa/bosh/auth/github/oauth'),
+		'the secrets family opts in with --as-deployed');
+	ok(!record_at($s, '/secret/qa/bosh/auth/cf/uaa'),
+		'and reads none of the features only the coming version selects');
+	assert_w_restored($before, 'finish restored the branch the operator started on');
+
+	run_genesis($s, 'qa', 'rotate-secrets', '-y');
+	ok(record_at($s, '/secret/qa/bosh/auth/cf/uaa'),
+		'the secrets family stays pre-deploy without the flag');
 };
 
 done_testing;
