@@ -64,7 +64,8 @@ our @EXPORT = qw/
 	compilable_pipeline shuttle
 
 	ready_envs ready_harness seeded_harness staged due_harness gated_harness
-	held_harness held_prod tracked_harness two_env_harness inherited_harness
+	held_harness held_prod deployable_prod tracked_harness two_env_harness
+	inherited_harness
 	ready with_open_pr two_roots a_delivery seeded two_due three_due three
 	chain gated proposed automated top_for
 	stale_set_delivery stage_unrelated modify_unrelated
@@ -2661,9 +2662,11 @@ sub fixture_proposed {
 # whose kit is not a director unless the record says otherwise, and a row
 # that wanted to say otherwise would be saying it in three places.
 #
-# Nothing here is reachable: the url names an address no test dials, and the
-# commands under test are driven through the fake bosh on
-# GENESIS_BOSH_COMMAND rather than over the wire.
+# The default url names an address no test dials, and the commands under test
+# are driven through the fake bosh on GENESIS_BOSH_COMMAND rather than over
+# the wire.  A row that needs the address answered passes one that is, which
+# is what deployable_prod does with the port its listener took, because the
+# director's status check dials the host before it runs a BOSH command.
 sub fixture_director {
 	my ($self, $env, %opts) = @_;
 	return $self->_write_record($self->env_path($env, %opts),
@@ -4804,6 +4807,53 @@ sub held_prod {
 	return ready_harness(%opts, envs => $opts{envs} // ['prod'],
 		delivered => $opts{delivered} // [],
 		certified => $opts{certified} // []);
+}
+
+# deployable_prod is held_prod with everything a spawned `genesis deploy`
+# needs to reach success, which is five things and not one: a kit that
+# merges, the base domain that kit asks for, the credentials it declares, a
+# director whose address something is listening on, and the fake bosh the
+# commands are driven through.  The director's status check dials the host
+# with tcp_listening before it runs a single BOSH command, so a record
+# naming an address nobody answers is not enough.
+#
+# The listener and the director record are both the harness's, because the
+# url has to carry the port the listener actually took and splitting the two
+# across two files would leave that coupling with no home.  Test::TCP's
+# DESTROY stops the child, so the object is kept on the harness and the port
+# stays open for as long as the caller holds it.
+#
+# The secrets run is given restore => 0, so the builder builds and asserts
+# nothing.  A builder that quietly emitted a row would move every caller's
+# plan count with no way to see why from the count alone.
+#
+# kit and pipeline are both the caller's.  The kit has a default because
+# every caller so far wants the same one, and the pipeline has none, because
+# a pipeline-managed deploy and a plain one are two different rows and the
+# helper should not decide which one is being written.
+sub deployable_prod {
+	my (%opts) = @_;
+	my $domain = delete($opts{base_domain}) // 'example.com';
+
+	my $h = held_prod(kit => 'omega-v2.7.0', %opts);
+	$h->write_env_file('prod', params => {base_domain => $domain});
+
+	# write_env_file commits in copy A and pushes nothing, and a control
+	# branch ahead of its remote meets the pre-flight's refusal, so control
+	# goes up here and a caller running with the pipeline on is not left to
+	# discover that for itself.
+	$h->push_from('a', $h->control);
+
+	$h->{director} = helper::fake_bosh_director('prod');
+	$h->fixture_director('prod',
+		url => sprintf('https://127.0.0.1:%s', $h->{director}->port));
+	helper::fake_bosh();
+
+	my (undef, $err, $rc) = $h->run_genesis({restore => 0},
+		'prod', 'add-secrets');
+	die "deployable_prod could not generate prod's secrets: $err\n" if $rc;
+
+	return $h;
 }
 
 # tracked_harness names its prerequisites positionally, because every call

@@ -22,8 +22,8 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'set_hold writes the four fields and nothing else' => sub {
-	# Seven rows and no run, so nothing here asserts a restoration.
-	plan tests => 7;
+	# Eight rows and no run, so nothing here asserts a restoration.
+	plan tests => 8;
 
 	my $h = held_prod();
 
@@ -39,6 +39,14 @@ subtest 'set_hold writes the four fields and nothing else' => sub {
 	have_secret "$path:hostname";
 	have_secret "$path:at";
 
+	# The key set is read raw rather than through hold_record, because that
+	# reader builds a literal four-key hashref and so answers the same four
+	# names whatever the vault holds.  This row is the one that can see a
+	# fifth key, and it is the row the subtest's own title claims.
+	is_deeply([sort keys %{$env->vault->get($path)}],
+		[qw(at hostname reason user)],
+		'and no fifth key stands beside them');
+
 	is(secret("$path:reason"), 'waiting on the capacity report',
 		'the reason is the string it was given');
 
@@ -48,12 +56,13 @@ subtest 'set_hold writes the four fields and nothing else' => sub {
 };
 
 subtest 'the record round-trips through a fresh environment' => sub {
-	# Nine rows and no run.  Every read is made through an environment
+	# Ten rows and no run.  Every read is made through an environment
 	# built after the write, so what comes back is what vault holds and
 	# not what the writing object happens to remember.
-	plan tests => 9;
+	plan tests => 10;
 
-	my $h = held_prod();
+	my $h    = held_prod();
+	my $path = $h->env_path('prod').'/hold';
 
 	my $top = Genesis::Top->new($h->a);
 	Genesis::Env->bare('prod', $top)->with_vault->set_hold(
@@ -66,20 +75,30 @@ subtest 'the record round-trips through a fresh environment' => sub {
 	my $record = Genesis::Env->bare('prod', Genesis::Top->new($h->a))
 		->with_vault->hold_record;
 	is_deeply([sort keys %$record], [qw(at hostname reason user)],
-		'the record carries the four fields and no fifth');
+		'the reader answers with its four fields');
 	is($record->{reason},   'the first hold',           'the reason came back');
 	is($record->{user},     'operator',                 'the user came back');
 	is($record->{hostname}, 'bastion.example.com',      'the hostname came back');
 	is($record->{at},       '2026-09-18 10:04:12 -0400','the time came back');
 
+	# A key of a shape set_hold never writes, standing at the path before the
+	# replacing hold.  Without the clear inside set_hold it would still be
+	# there afterwards, and nothing else in this file would notice, because
+	# every other read of the key set goes through a reader that builds its
+	# own four names.
+	Genesis::Env->bare('prod', Genesis::Top->new($h->a))->with_vault
+		->vault->set($path, released_by => 'somebody');
+
 	Genesis::Env->bare('prod', Genesis::Top->new($h->a))->with_vault
 		->set_hold(reason => 'the second hold');
 
-	my $replaced = Genesis::Env->bare('prod', Genesis::Top->new($h->a))
-		->with_vault->hold_record;
-	is($replaced->{reason}, 'the second hold',
+	my $after = Genesis::Env->bare('prod', Genesis::Top->new($h->a))
+		->with_vault;
+	is($after->hold_record->{reason}, 'the second hold',
 		'the later hold replaced the earlier one');
-	is_deeply([sort keys %$replaced], [qw(at hostname reason user)],
+	no_secret "$path:released_by";
+	is_deeply([sort keys %{$after->vault->get($path)}],
+		[qw(at hostname reason user)],
 		'and left none of the first hold behind');
 
 	my $fresh = Genesis::Env->bare('prod', Genesis::Top->new($h->a))->with_vault;
@@ -105,32 +124,29 @@ subtest 'clear_hold deletes the path and keeps no fields' => sub {
 };
 
 subtest 'the hold survives the deploy rewrite of the deployment data' => sub {
-	# Seven rows, two of which are restorations.  The secrets run asserts its
-	# own in run_genesis's words, and the deploy is given restore => 0 so
-	# this row asserts the deploy's in its own.
-	plan tests => 7;
+	# Five rows, one of which is this row's own restoration assertion, since
+	# the deploy is given restore => 0 and deployable_prod's own secrets run
+	# contributes none.
+	#
+	# This row guards a property that already held before the writers landed.
+	# The rewrite update_deployment_exodus makes removes the base blob with a
+	# delete that is not recursive, so a key under <exodus_base>/hold was
+	# always out of its reach, and the strategy calls T306 a gap in the
+	# coverage rather than a defect in the code.  The row says what the
+	# sibling path must go on meaning now that something writes to it.
+	plan tests => 5;
 
 	# The deploy is the real one, taken to success, because the rewrite this
 	# row is about is the one update_deployment_exodus makes and only a
-	# successful deploy makes it.  Which means the environment has to be one
-	# a deploy can finish: a kit that merges, the base domain that kit asks
-	# for, the secrets it declares, and a director whose address something is
-	# listening on, since the director's status check dials the host before
-	# it runs a single BOSH command.  The pipeline is off, because a
-	# pipeline-managed deploy first switches to the environment's own branch
-	# and the branch it looks for is not the slug the harness stands up.
-	my $h = held_prod(kit => 'omega-v2.7.0', pipeline => 0);
-	write_env_file($h, 'prod', params => {base_domain => 'example.com'});
-	my $director = fake_bosh_director('prod', 25555);
-	fixture_director($h, 'prod', url => 'https://127.0.0.1:25555');
-	fake_bosh();
+	# successful deploy makes it.  deployable_prod owns the five things that
+	# takes.  The pipeline is off, because a pipeline-managed deploy first
+	# switches to the environment's own branch and the branch it looks for is
+	# not the slug the harness stands up.
+	my $h = deployable_prod(pipeline => 0);
 
 	my $top  = Genesis::Top->new($h->a);
 	my $env  = Genesis::Env->bare('prod', $top)->with_vault;
 	my $path = $env->set_hold(reason => 'waiting on the capacity report');
-
-	my (undef, undef, $secrets_exit) = run_genesis($h, 'prod', 'add-secrets');
-	is($secrets_exit, 0, 'the secrets the kit declares were generated');
 
 	my $w = snapshot_w($h);
 	my (undef, $err, $exit) = run_genesis($h, {restore => 0},
@@ -141,9 +157,16 @@ subtest 'the hold survives the deploy rewrite of the deployment data' => sub {
 	like($err, qr/updating exodus data for this deployment/,
 		'and it rewrote the deployment data under the exodus base');
 
-	have_secret "$path:reason";
 	is(secret("$path:reason"), 'waiting on the capacity report',
 		'the sibling record survived the rewrite of the deployment data');
+
+	# Read back through the reader the walk itself uses, which is the half of
+	# T306 that says the record still holds the next run.  A record left
+	# readable to safe but broken for the module would pass the row above
+	# and fail this one.
+	ok(Genesis::Env->bare('prod', Genesis::Top->new($h->a))
+		->with_vault->hold_record,
+		'and the reader still answers a hold for the next run');
 };
 
 done_testing;
