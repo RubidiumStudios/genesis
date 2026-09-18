@@ -183,6 +183,34 @@ sub supersedes_paragraph {
 }
 
 # }}}
+# freeze - the approved arm, which writes nothing at all {{{
+#
+# D51 freezes an approved pull request, so the branch is left exactly as the
+# reviewer read it and every new due commit is held with the reason
+# awaiting-merge.  A long-stale approval is the operator's to merge or to
+# dismiss, and the run never dismisses one on their behalf.
+#
+# It answers undef rather than a word, because the outcome is the bare enum
+# word held and the qualifier beside it is held_qualifier's to compose, so the
+# run, the preview, and pipeline-status all read one phrase from one place.
+sub freeze {
+	my ($record, $commits) = @_;
+
+	my $pr = $record->{pr};
+	$pr->{action} = 'freeze';
+
+	push @{$record->{held}}, {
+		control_commit => $_->{control_commit} // $_->{sha},
+		subject        => $_->{subject},
+		reason         => 'awaiting-merge',
+		number         => $pr->{number},
+	} for @$commits;
+	$record->{pending} = [];
+
+	return undef;
+}
+
+# }}}
 # deliver - the pull request arm for one environment {{{
 #
 # The branch carries exactly one commit above the deployment branch, so the
@@ -213,6 +241,16 @@ sub deliver {
 	$pr->{superseded} = $state ? $state->{superseded} : [];
 
 	return 'idempotent' unless @$commits;
+
+	# The approved arm, which answers undef, so the report settles the
+	# environment as held with the qualifier held_qualifier composes.
+	#
+	# The state is read off the record rather than off the answer itself, for
+	# the reason the supersedes guard below carries: the answer is undef for a
+	# run given no token at all, and the record already holds the one copy
+	# every reader here takes.
+	return freeze($record, $commits)
+		if ($pr->{state} // '') eq 'approved';
 
 	# The switch cuts the branch where neither side holds it, because it is
 	# derived state and the deployment branch is what it is derived from, and

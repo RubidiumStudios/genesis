@@ -76,7 +76,9 @@ my %COLOUR = (
 # dry run, and the routing column of genesis pipeline-status can never
 # disagree about a word.  The overlap form carries the ancestor's own state
 # under D72 and the never-certified form carries no such clause, an
-# environment that has never deployed being already clear about why.
+# environment that has never deployed being already clear about why.  The
+# frozen form names the pull request an operator merges to release the commit,
+# because a number is what they act on.
 sub hold_reason {
 	my ($held) = @_;
 
@@ -112,6 +114,12 @@ sub hold_reason {
 	return sprintf('held (%s)', $held->{hold_reason})
 		if $reason eq 'on-hold' && defined $held->{hold_reason};
 
+	# D51: an approved pull request is frozen, so what holds this commit is
+	# the merge nobody has made yet, and the number is what an operator acts
+	# on.  The enum already carries the reason and this is its wording.
+	return sprintf('awaiting merge (#%d)', $held->{number})
+		if $reason eq 'awaiting-merge' && defined $held->{number};
+
 	return sprintf('held (%s)', $reason);
 }
 
@@ -122,7 +130,8 @@ sub hold_reason {
 # any one commit is held.  An environment the pipeline was never applied to
 # waits for that command, one whose environment the run could not read has
 # failed instead, and one holding commits behind an ancestor waits for that
-# ancestor to certify the commit it has not deployed.
+# ancestor to certify the commit it has not deployed.  One whose pull request
+# a reviewer approved waits for that merge and for nothing else.
 #
 # It answers the qualifier alone and not the whole phrase, because ruling 22
 # puts the bare enum word in the record's outcome and the qualifier beside it
@@ -144,6 +153,13 @@ sub held_qualifier {
 
 	my ($first) = @{$record->{held} || []};
 	return undef unless $first;
+
+	# The same fact on the environment axis.  An environment whose pull
+	# request is approved waits for the merge rather than for an ancestor to
+	# certify anything, so it is read before the ancestor wording below.
+	return sprintf('awaiting merge (#%d)', $first->{number})
+		if ($first->{reason} // '') eq 'awaiting-merge'
+		&& defined $first->{number};
 
 	# The environment named is whoever has to certify, which is the ancestor
 	# where an ancestor holds the commit and the environment itself where a

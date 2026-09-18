@@ -326,6 +326,53 @@ B<Examples:>
     #         'Supersedes #8, closed without merging: ' .
     #         'https://github.test/o/r/pull/8.'
 
+=head2 freeze($record, $commits)
+
+    my $word = Genesis::CI::PullRequest::freeze($record, \@pending);
+
+Takes the approved arm of D51. It writes nothing, holds every due commit with
+the reason C<awaiting-merge> and the pull request's number, and answers
+C<undef>, so the report settles the environment as C<held> with the qualifier
+C<Genesis::CI::Report::held_qualifier> composes.
+
+Rebuilding a branch somebody has already approved would throw that review
+away, and on a repository that does not dismiss stale approvals it would leave
+the approval standing over a change nobody read. So the branch is left exactly
+as the reviewer saw it, and the merge is what releases the commits waiting
+behind it on a later run. A long-stale approval is the operator's to merge or
+to dismiss, and the run never dismisses one for them.
+
+It answers C<undef> rather than a word because the outcome is the bare enum
+word C<held> and the qualifier beside it is composed where every other hold's
+qualifier is, so C<genesis propagate>, its dry run, and C<genesis
+pipeline-status> all read one phrase from one place.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The walk's per-environment record. Its C<pr> is the pull request object, whose
+C<number> each held entry carries and whose C<action> is set to C<freeze>; its
+C<pending> is emptied and its C<held> is what the commits move onto.
+
+=item C<$commits>
+
+The arrayref of due control commits, oldest first, each with its
+C<control_commit> and its C<subject>.
+
+=back
+
+B<Returns:> C<undef>, always.
+
+B<Examples:>
+
+    freeze($record, [{control_commit => '1a2b3c4', subject => 'Raise it'}]);
+    # returns undef, with $record->{pending} emptied and $record->{held}
+    # carrying {reason => 'awaiting-merge', number => 42}, which the report
+    # renders as "awaiting merge (#42)"
+
 =head2 deliver($session, $record, %opts)
 
     my $word = Genesis::CI::PullRequest::deliver($session, $record,
@@ -342,6 +389,11 @@ branch on every run, because it is derived state. The switch cuts the branch
 where neither this repository nor the remote holds it, and the session
 records the absence so a run that is declined or aborted can take it off
 again.
+
+An environment whose pull request a reviewer has approved takes C<freeze>
+instead, ahead of everything below, so nothing is built and nothing is
+pushed. That state is read off C<< $record->{pr} >> for the reason the
+supersedes paragraph's is.
 
 The single writer is called once, at the newest due commit's source. D69
 makes a delivery a mirror, so the mirror of the newest commit is the whole
@@ -428,6 +480,10 @@ B<Examples:>
 
     deliver($session, $record, env => $env, commits => []);
     # returns 'idempotent', having written nothing
+
+    deliver($session, $record, env => $env, commits => \@pending,
+        state => {state => 'approved', number => 42});
+    # returns undef, having frozen the branch and held every due commit
 
 =head2 pr_state($github, $owner_repo, $record, %opts)
 

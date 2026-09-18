@@ -375,6 +375,7 @@ integration-tests/genesis_ci_publish-retry_code.t             # the exit code sa
 integration-tests/genesis_ci_pullrequest-aggregate.t          # two due commits become one aggregate whose body says what it carries
 integration-tests/genesis_ci_pullrequest-align.t              # the pull request branch is levelled with what the remote carries now
 integration-tests/genesis_ci_pullrequest-proposed_record.t    # a run that opens a pull request writes the run's own pointer to it
+integration-tests/genesis_ci_pullrequest-review_arms.t        # an approved pull request is frozen and its new commits held
 integration-tests/genesis_ci_pullrequest-review_state.t       # what a reviewer decided, and the refusal when it cannot be read
 integration-tests/genesis_ci_pullrequest-title.t              # the marker in the pull request title, and which one a run acts on
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
