@@ -42,7 +42,8 @@ our @EXPORT = qw/
 	set_repo_config move_on_r_at
 
 	fixture_vault fixture_applied fixture_pipeline_record certify
-	fixture_hold fixture_proposed fixture_director break_vault restore_vault
+	fixture_hold fixture_proposed fixture_director fixture_bosh
+	break_vault restore_vault
 	record_at vault_read_log fixture_preflight fixture_kit
 	fixture_command install_compiled_kit shimmed_git real_tool
 	fixture_fly
@@ -2585,6 +2586,248 @@ sub fixture_director {
 }
 
 # }}}
+# fixture_bosh - the director, the bosh, and the kit a whole deploy needs {{{
+#
+# Every other fixture here builds state a command reads.  This one builds the
+# three things a deploy has to reach before it finishes at all, because no
+# row can assert what a deploy did until one of them gets that far.
+#
+# The first is a bosh on GENESIS_BOSH_COMMAND.  It answers env, configs, and
+# config with the tables Service::BOSH::Director reads for its status, its
+# configs listing, and each config's content, answers the deploy with a
+# success line, and answers everything else with an empty table, so a reader
+# walking the rows of one answer never reads a config row as a stemcell.
+# GENESIS_HARNESS_BOSH_FAILS makes the deploy call exit non-zero instead, so
+# a row can watch the bail path without breaking anything else the deploy
+# asks the director for.  interpolate is handed to the real bosh, because a
+# manifest carrying BOSH variables is resolved by running it and no fake
+# answer would resolve anything.
+#
+# The second is a listener.  The director's status dials the host and port of
+# the url in the exodus record before it runs a single bosh command, so a
+# record naming an address nothing answers on refuses with a timeout however
+# good the script is.  The listener is a loopback socket that accepts and
+# echoes, which is all tcp_listening asks of it, and fixture_director's url
+# is pointed at the port it took.  It lives on the harness so that it
+# outlives this call and stops when the harness goes.
+#
+# The third is a kit.  The blueprint hook writes the manifest it names, so the
+# merge has a file to read and the deploy reaches the BOSH call with a real
+# manifest rather than dying on a name nothing wrote.  The hook runs with the
+# kit directory as its working directory, which is where the merge looks for
+# the file, so it writes there and names it relative.
+#
+# The variables are armed in the parent and named again in run_genesis, the
+# way fault_git's are: the parent's own in-process reads need them here, and
+# the child reads the environment it was handed rather than ours.
+sub fixture_bosh {
+	my ($self, %opts) = @_;
+	my @envs = @{$opts{envs} // $self->{envs}};
+
+	require Test::TCP;
+	require IO::Socket::IP;
+	my $port = Test::TCP::empty_port();
+	$self->{bosh}{listener} = Test::TCP->new(
+		listen     => 0,
+		auto_start => 1,
+		port       => $port,
+		code       => sub {
+			my $p = shift;
+			my $sock = IO::Socket::IP->new(
+				LocalAddr => '127.0.0.1',
+				LocalPort => $p,
+				Proto     => 'tcp',
+				Listen    => 5,
+				ReuseAddr => 1,
+			) or die "the harness director cannot listen on $p: $!\n";
+			while (my $remote = $sock->accept) {
+				while (my $line = <$remote>) {
+					print {$remote} $line;
+					exit 0 if $line eq "quit\n";
+				}
+			}
+		},
+	);
+
+	my $dir = "$self->{tmp}/bosh";
+	helper::mkdir_or_fail($dir) unless -d $dir;
+	my $command = "$dir/bosh";
+	helper::put_file($command, 0755, <<"EOS");
+#!/usr/bin/env bash
+# The harness director.  It answers the four subcommands a deploy asks of a
+# director and nothing else, and every other call is a plain success, so a
+# reader can tell what this stands in for from the script alone.
+if [ "\$1" = "interpolate" ]; then
+  exec "@{[_real_tool('bosh')]}" "\$@"
+fi
+
+# The subcommand is the first word that is not a flag, because the target and
+# the credentials reach bosh through the environment rather than the command
+# line.
+subcommand=
+for arg in "\$@"; do
+  case "\$arg" in
+    -*) ;;
+    *) subcommand="\$arg"; break ;;
+  esac
+done
+
+case "\$subcommand" in
+deploy)
+  if [ -n "\${GENESIS_HARNESS_BOSH_FAILS:-}" ]; then
+    # Five lines of output before the refusal, because the failure path
+    # reads the last five lines of what bosh said to decide whether the
+    # operator cancelled, and a shorter answer makes it read past the end.
+    echo "Task 1"
+    echo "Task 1 | 00:00:00 | Preparing deployment: Preparing deployment"
+    echo "Task 1 | 00:00:01 | Error: the harness director refused the deployment"
+    echo "Task 1 Started"
+    echo "Task 1 Failed"
+    echo >&2 "the harness director refused the deployment"
+    exit 1
+  fi
+  echo "Succeeded"
+  exit 0
+  ;;
+env)
+  cat <<'JSON'
+{
+  "Tables": [
+    {
+      "Content": "",
+      "Header": {"cpi": "CPI", "name": "Name", "user": "User", "uuid": "UUID", "version": "Version"},
+      "Rows": [
+        {
+          "cpi": "harness-cpi",
+          "name": "harness-director",
+          "user": "admin",
+          "uuid": "00000000-0000-0000-0000-000000000000",
+          "version": "999.0.0 (00000000)"
+        }
+      ],
+      "Notes": []
+    }
+  ],
+  "Blocks": null,
+  "Lines": ["Succeeded"]
+}
+JSON
+  exit 0
+  ;;
+configs)
+  cat <<'JSON'
+{
+  "Tables": [
+    {
+      "Content": "configs",
+      "Header": {"created_at": "Created At", "id": "ID", "name": "Name", "team": "Team", "type": "Type"},
+      "Rows": [
+        {
+          "created_at": "2026-01-01 00:00:00 UTC",
+          "id": "1*",
+          "name": "default",
+          "team": "",
+          "type": "cloud"
+        }
+      ],
+      "Notes": []
+    }
+  ],
+  "Blocks": null,
+  "Lines": ["Succeeded"]
+}
+JSON
+  exit 0
+  ;;
+config)
+  cat <<'JSON'
+{
+  "Tables": [
+    {
+      "Content": "configs",
+      "Header": {"content": "Content"},
+      "Rows": [{"content": "--- {}\\n"}],
+      "Notes": []
+    }
+  ],
+  "Blocks": null,
+  "Lines": ["Succeeded"]
+}
+JSON
+  exit 0
+  ;;
+esac
+
+# Everything else answers an empty table, so a reader that walks the rows
+# walks none rather than reading a config row as a stemcell.
+case " \$* " in
+  *" --json "*|*" --json")
+    echo '{"Tables": [{"Content": "", "Header": {}, "Rows": [], "Notes": []}], "Blocks": null, "Lines": ["Succeeded"]}'
+    exit 0
+    ;;
+esac
+
+echo "Succeeded"
+exit 0
+EOS
+
+	_guard_env(GENESIS_BOSH_COMMAND => $command);
+	$self->{bosh}{command} = $command;
+
+	$self->fixture_director($_, %opts, url => "https://127.0.0.1:$port")
+		for @envs;
+
+	# The operator's own clone is left holding the branch as the apply cut
+	# it, because init_branch writes the root commit in copy A and every
+	# delivery after that is published from the teammate's copy.  A branch
+	# carrying one init file carries no repository, so the gate leaves the
+	# command where it stands and the deploy never reads the branch at all.
+	# Genesis fast-forwards that branch itself, but only after it has loaded
+	# the root, and the step that moves the fast-forward in front of the
+	# switch is M13's own Task 13.5.  Until then the fixture hands the deploy
+	# the branch an operator who had pulled would be standing on.  A row that
+	# wants the branch left behind says catch_up => 0.
+	$self->_catch_up($_) for (defined $opts{catch_up} && !$opts{catch_up})
+		? () : @envs;
+
+	# A row that brings its own kit says so, because a second dev kit in the
+	# same root would be written over this one and neither would be the one
+	# the row meant.
+	unless (defined $opts{kit} && !$opts{kit}) {
+		my $manifest = $opts{manifest} // "---\nharness: deployed\n";
+		$self->fixture_kit(%opts, hooks => {
+			blueprint => "cat > manifest.yml <<'MANIFEST'\n$manifest"
+				. "MANIFEST\necho manifest.yml\n",
+			%{$opts{hooks} || {}},
+		});
+	}
+
+	return $self;
+}
+
+# }}}
+# _catch_up - move copy A's deployment branch up to what R carries {{{
+#
+# Only where R is ahead and the move is a fast-forward, so a row that built a
+# divergence on purpose keeps it.  The ref is written rather than checked out,
+# because the fixture runs before a row has stood anywhere and a checkout here
+# would move a working tree the row is about to place itself.
+sub _catch_up {
+	my ($self, $env, %opts) = @_;
+	my $branch = $self->slug($env, %opts);
+	my $local  = ref_in($self->{a}, "refs/heads/$branch")   or return $self;
+	my $remote = ref_in($self->{a}, "refs/remotes/origin/$branch")
+		or return $self;
+	return $self if $local eq $remote;
+	return $self unless run({dir => $self->{a}, passfail => 1, stderr => 0},
+		'git', 'merge-base', '--is-ancestor', $local, $remote);
+
+	run({dir => $self->{a}, onfailure => "Failed to catch $branch up to origin"},
+		'git', 'update-ref', "refs/heads/$branch", $remote, $local);
+	return $self;
+}
+
+# }}}
 # break_vault - make a read refuse, so a row can assert the refusal {{{
 #
 # The records are moved aside rather than deleted, so restore_vault can put
@@ -3064,6 +3307,13 @@ sub run_genesis {
 	# subclass installs itself in the child through PERL5OPT.  The child's own
 	# -I has to name lib/ as well as t/, because PERL5OPT is read before
 	# bin/genesis compiles and puts GENESIS_LIB on @INC itself.
+	# The fixture bosh reaches the child the same way, because the command
+	# under test runs the director's script out of its own environment.
+	if ($self->{bosh}) {
+		$env{GENESIS_BOSH_COMMAND}         = $self->{bosh}{command};
+		$env{GENESIS_HARNESS_BOSH_FAILS}   = $ENV{GENESIS_HARNESS_BOSH_FAILS};
+	}
+
 	if ($self->{fault}) {
 		$env{GENESIS_HARNESS_GIT_PLAN} = $self->{fault}{plan};
 		$env{GENESIS_HARNESS_GIT_LOG}  = $self->{fault}{log};
