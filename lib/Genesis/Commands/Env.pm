@@ -1296,6 +1296,26 @@ sub _deploy_preflight {
 	my ($due_record) = @{$walk->{environments}};
 
 	my $due = _warn_commits_due($bare, $due_record);
+
+	# 10.  The last of the warnings, and the only one about the branch itself
+	# rather than about what has not reached it.  It runs after the other two
+	# because a branch that has drifted is a smaller thing to know than a
+	# pipeline that no longer matches control, and it runs before the prompt
+	# below because that prompt is the last place a deploy can be stopped and
+	# an operator answering it should have heard everything the pre-flight
+	# had to say (D33).
+	#
+	# It is the one read of the pre-flight made through a loaded environment
+	# rather than through the bare one above.  The propagation set is built
+	# from the kit as much as from the environment file, since the kit source
+	# is a kind of the set and the blueprint names the fragments the merge
+	# consumes, and a bare environment has no kit to ask.  The load reads the
+	# kit off the branch and connects to nothing, and the deploy loads the
+	# same environment a step later, so a repository whose kit cannot be
+	# loaded fails here rather than there and says the same thing either way.
+	my $drifted = _warn_drifted($top->load_env($name), $git);
+
+	# The one prompt --yes answers, asked once every warning has printed.
 	_confirm_commits_due($name, $due, $options);
 
 	return {
@@ -1306,6 +1326,7 @@ sub _deploy_preflight {
 		bare    => $bare,
 		prior   => $prior_record,
 		due     => $due,
+		drifted => $drifted,
 	};
 }
 
@@ -2023,6 +2044,47 @@ sub _confirm_commits_due {
 
 	return 1 if prompt_for_boolean("Deploy #C{$env_name} anyway? [y|n]", 0);
 	bail({exitcode => ABORTED}, "Aborted.  Nothing was deployed.");
+}
+
+# }}}
+# _warn_drifted - the third of the pre-flight's warnings, under D33 {{{
+#
+# The branch should be a verified mirror of the control commit its newest
+# marker names, over the propagation set and nothing else.  Where it is not,
+# somebody pushed a hand commit, which is the emergency hatch: legal,
+# temporary by construction, and never silent.  We name the files and deploy,
+# because refusing would leave the operator with nothing to do in the case
+# the hatch exists for, and the record tells the two commits apart afterwards
+# (D87).
+#
+# A branch carrying no marker anywhere has been delivered nothing, and there
+# is no snapshot to compare it against, so this says nothing rather than
+# reading the whole branch as drift.
+#
+# The environment is the loaded one rather than the pre-flight's bare one,
+# because the set is built from the kit as well as from the environment file
+# and a bare environment has none to ask.
+#
+# propagation_files answers a list, so it goes straight into diff_files's
+# pathspecs and no reference reaches git.
+sub _warn_drifted {
+	my ($env, $git) = @_;
+
+	my $branch    = $env->deployment_slug;
+	my $certified = Genesis::CI::Marker::newest($git, $branch) or return [];
+	my $diff  = $git->diff_files($branch, $certified, $env->propagation_files);
+	my @files = sort(@{$diff->{changed}}, @{$diff->{deleted}});
+	return [] unless @files;
+
+	warning(
+		"\nThe branch #C{%s} differs from the snapshot of control\@%s that its ".
+		"newest marker names, in %s:\n%s\n\nDeploying it anyway, and the ".
+		"deployment record will name the branch commit as deployed and ".
+		"control\@%s as certified.",
+		$branch, substr($certified, 0, 8), count_nouns(scalar(@files), 'file'),
+		join("\n", map {"  - $_"} @files), substr($certified, 0, 8)
+	);
+	return \@files;
 }
 
 # }}}

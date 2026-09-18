@@ -393,6 +393,7 @@ integration-tests/genesis_commands_env-deploy_prior_env.t  # the predecessor's r
 integration-tests/genesis_commands_env-deploy_provider_gate.t  # an automated provider's pipeline owns the deploy, and --force is the only way past
 integration-tests/genesis_commands_env-deploy_stale_pipeline.t  # the stale-pipeline warning names the changed environments and the apply
 integration-tests/genesis_commands_env-deploy_due_commits.t  # the due-commits warning, its silence, the proposed record, and the warning order
+integration-tests/genesis_commands_env-deploy_drifted.t  # the drifted warning names the files and deploys anyway, over the two-hash record
 integration-tests/genesis_commands_repo-init.t   # repo-init validate + execute against real workdirs (fs, git, tarball, symlink)
 #integration-tests/genesis_env-terminate.t   # Replaced by genesis_env-terminate_workflow.t
 # Genesis::Env workflow integration tests
