@@ -6,16 +6,15 @@ Genesis::CI::Propagation - the pull request half of pipeline propagation
 
     use Genesis::CI::Propagation;
 
-    # The idempotency check for a rolling pr/<env>/<type> branch, and the
-    # commit it is written with.  Nothing here is public: what is left is
-    # what other test files still reach for by name.
+    # The commit a propagation is written with, and nothing else.  Nothing
+    # here is public: what is left is what other test files still reach for
+    # by name.
 
 =head1 DESCRIPTION
 
 C<Genesis::CI::Propagation> holds what is left of the module that used to
-execute pipeline propagation, which is the idempotent re-run check for a
-rolling C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch and the commit that branch
-was written with.
+execute pipeline propagation, which is the commit a delivery onto a branch
+was written with and nothing more.
 
 Everything else it held has gone.  C<propagate_envs> applied a target list to
 a real git working tree in one loop that recorded the first error and stopped,
@@ -36,8 +35,13 @@ and a body that name the control commits being proposed are what
 L<Genesis::CI::PullRequest/title_for> and
 L<Genesis::CI::PullRequest/aggregate_message> compose, and
 L<Genesis::CI::PullRequest/sync_pull_request> is the one place that sends
-them.  What is left is what other test files still reach for by name, and
-retiring the module outright would take three of them with it.
+them.  The idempotent re-run check for a rolling
+C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch went with them as well.  It read the
+branch's newest marker and compared it with the commit being propagated, and
+D48 replaced that with the marker walk on both branches and a comparison of
+the two trees, which is L<Genesis::CI::PullRequest/settled>.  What is left is
+what other test files still reach for by name, and retiring the module
+outright would take them with it.
 
 =head1 DESIGN CONSIDERATIONS
 
@@ -53,7 +57,10 @@ The rolling-branch decision, which is whether an existing pull request
 already carries the change, was the part most likely to be wrong and the
 hardest to observe in a live pipeline run.  Separating it from command
 dispatch is what allowed it to be exercised directly in tests, and it is the
-reason this module outlived the loop it was extracted with.
+reason this module outlived the loop it was extracted with.  That decision
+now belongs to L<Genesis::CI::PullRequest/settled>, which is asked once the
+single writer has built the aggregate, so the comparison is between two trees
+rather than between two guesses about them.
 
 
 =head1 INTERNAL FUNCTIONS
@@ -78,32 +85,6 @@ B<Examples:>
 
   _apply_propagation_commit($git, 'staging', $sha, 'a1b2c3d', $detail);
   # no return value; commits "[pipeline] control@a1b2c3d -> staging"
-
-=head2 _pr_branch_has_control_sha
-
-  my $bool = _pr_branch_has_control_sha($git, $branch, $control_short);
-
-Returns true when the branch's newest propagation marker names this control
-commit -- the idempotency check that lets a re-run skip an env entirely
-rather than stacking a duplicate commit.
-
-The marker is read with L<Genesis::CI::Marker/newest>, which walks subjects
-and bodies and skips commits carrying no marker, so a squash merge, an
-amended subject, and a hand commit pushed on top all leave the answer alone.
-
-Both sides are compared as full shas, because a marker spells its commit at
-whatever width the delivery abbreviated it to.  A side this clone cannot
-expand to forty hex digits is a commit it cannot name, and the check reports
-that the branch is not idempotent rather than guessing.
-
-B<Returns:> C<1> or C<0>.  C<0> when the branch does not exist, when it
-carries no marker at all, when either sha will not expand, or when the marker
-names another commit.
-
-B<Examples:>
-
-  _pr_branch_has_control_sha($git, 'pr/staging', 'a1b2c3d');
-  # returns 1 when pr/staging's newest marker names control@a1b2c3d
 
 =head1 LIMITATIONS
 
