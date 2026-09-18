@@ -3117,6 +3117,13 @@ EOS
 # a genesis child of its own has nothing else to build on.  A row that wants
 # one of the two kits the suite ships names it through make_harness's kit
 # option instead, and those two are exodus-reader and broken-blueprint.
+#
+# The kit is left uncommitted by default, which is all a row needs where the
+# command under test only ever renders a manifest from the working tree.  A
+# row whose command walks control asks for commit, because the kit source is a
+# kind of the propagation set in its own right and reading that set at a
+# commit carrying no kit refuses by name, so every control commit such a row
+# lays has to carry it, as a real repository's do.
 sub fixture_kit {
 	my ($self, %opts) = @_;
 	my $name    = $opts{name}    // 'pipeline';
@@ -3132,6 +3139,25 @@ sub fixture_kit {
 	for my $hook (sort keys %{$opts{hooks} || {}}) {
 		helper::put_file("$dir/hooks/$hook", 0755,
 			"#!/bin/bash\nset -eu\n" . $opts{hooks}{$hook});
+	}
+
+	if ($opts{commit}) {
+		# The commit is made where copy A already stands rather than by
+		# checking the control branch out, because this builder runs before a
+		# row has placed itself and a checkout here would move a working tree
+		# the row is about to use.  Standing anywhere else is refused for the
+		# reason _catch_up refuses it: the kit would land on whatever branch
+		# happened to be out.
+		my $on = $self->git('a')->current_branch // '';
+		die "fixture_kit commits the kit on $self->{control}, and copy A is "
+		  . "standing on $on.  Call it before standing anywhere else.\n"
+			unless $on eq $self->{control};
+
+		my $rel = join('/', grep {length} $root, 'dev');
+		run({dir => $self->{a}}, 'git', 'add', '--', $rel);
+		run({dir => $self->{a}, onfailure => "Failed to commit the dev kit"},
+			'git', 'commit', '-q', '-m', "Add the $name kit");
+		$self->push_from('a', $self->{control});
 	}
 
 	return $dir;
@@ -4471,7 +4497,25 @@ sub automation_block_lines {
 sub ready_harness {
 	my (%opts) = @_;
 	my $h = make_harness(%opts, envs => $opts{envs} // ['lab', 'qa']);
-	return $h->ready_envs(%opts);
+	return $h->ready_envs(%opts) unless $opts{bosh};
+
+	# bosh stands the director, the fake bosh, and the kit up before the
+	# seeding rather than after it, and it takes either a true value or the
+	# options fixture_bosh itself takes.  The order is the point: the kit is
+	# a kind of the propagation set, so a control commit that does not carry
+	# it cannot be routed at all, and a row whose command walks control needs
+	# every commit from the seeding onwards to carry it.  A row that only
+	# deploys and never walks calls fixture_bosh itself, afterwards.
+	#
+	# The catch-up waits until ready_envs has cut and delivered the branches,
+	# since there is nothing to catch up before that, and a row that means to
+	# keep a stale clone says catch_up => 0 the way it says it to fixture_bosh.
+	my %how      = ref($opts{bosh}) eq 'HASH' ? %{$opts{bosh}} : ();
+	my $catch_up = exists $how{catch_up} ? $how{catch_up} : 1;
+	$h->fixture_bosh(%how, commit => 1, catch_up => 0);
+	$h->ready_envs(%opts);
+	$h->_catch_up($_) for $catch_up ? @{$h->{envs}} : ();
+	return $h;
 }
 
 # seeded_harness is the same shape over one environment, and its applied

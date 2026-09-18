@@ -1385,8 +1385,15 @@ reads through it once the run is over.
 Writes a dev kit into the deployment root with the hook bodies a row needs and
 returns its path.  The options are C<hooks>, a hashref of hook name to shell
 body, C<name>, which defaults to C<pipeline>, C<version>, which defaults to
-C<0.0.1>, and C<root>.  Each hook is written executable with a C<bash> shebang
-and C<set -eu> above the body it was given.
+C<0.0.1>, C<root>, and C<commit>.  Each hook is written executable with a
+C<bash> shebang and C<set -eu> above the body it was given.
+
+C<commit> stages the kit and commits it on control, and it defaults off.  A
+row whose command only renders a manifest from the working tree wants the
+default, and a row whose command walks control wants C<commit>, because the
+kit source is a kind of the propagation set in its own right and reading that
+set at a commit that carries no kit refuses by name.  Copy A has to be
+standing on control when it is asked, and it says so when it is not.
 
 C<helper::mk_test_kit> builds a kit with no hooks at all, so a row that needs a
 blueprint that raises, or a hook that probes the lock, or a hook that spawns a
@@ -1563,7 +1570,18 @@ uncertified environment up without building the tree by hand.
 The scenario most walking rows start from, which is C<lab> and C<qa> walked,
 delivered, and certified.  It hands its options on to C<make_harness> and to
 C<ready_envs>, so a row that wants a third environment, a second deployment
-type, or a narrower delivery set asks for it in the call.
+type, or a narrower delivery set asks for it in the call.  Every named shape
+below is built on it, so they all take the options it takes.
+
+C<bosh> stands the director, the fake C<bosh>, and the kit up before the
+seeding, and it takes either a true value or the options C<fixture_bosh>
+itself takes.  The order is what it is for: the kit is a kind of the
+propagation set, so a control commit that does not carry it cannot be routed
+at all, and a row whose command walks control needs every commit from the
+seeding onwards to carry it.  The catch-up waits until there are branches to
+catch up, and a row that means to keep a stale clone says C<< catch_up => 0 >>
+inside the C<bosh> options the way it would say it to C<fixture_bosh>.  A row
+that only deploys and never walks calls C<fixture_bosh> itself, afterwards.
 
 =head2 seeded_harness(%opts)
 
