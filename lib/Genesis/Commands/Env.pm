@@ -1247,13 +1247,14 @@ sub _deploy_preflight {
 	# an unlocked deploy, so nothing here reads it.
 	#
 	# It sits after the predecessor's record and before the warnings, which
-	# makes it the last of the gates rather than the first.  Every refusal
-	# above it is one no acknowledgement can settle: an operator who types
-	# the phrase past a branch that carries no repository still has nothing
-	# to deploy.  This gate is the one question --force is an answer to, so
-	# it is asked once everything that is not negotiable has passed, and the
-	# warnings that follow it are things to know rather than things to
-	# settle.
+	# makes it the last refusal we raise on our own judgment rather than the
+	# first.  Every refusal above it is one no acknowledgement can settle: an
+	# operator who types the phrase past a branch that carries no repository
+	# still has nothing to deploy.  This gate is the one question --force is
+	# an answer to, so it is asked once everything that is not negotiable has
+	# passed, and what follows it is a warning rather than a refusal of ours.
+	# The operator can still stop the deploy below, by declining the prompt
+	# beside the due-commits warning, which exits ABORTED.
 	Genesis::CI::Preflight::assert_provider_gate($top, $options,
 		owns        => 'deploys of this environment',
 		outcome     => 'Nothing was deployed.',
@@ -1293,7 +1294,13 @@ sub _deploy_preflight {
 		scope    => [$name],
 		branches => {$name => {branch => $branch}},
 	);
-	my ($due_record) = @{$walk->{environments}};
+	# The walk was asked about one environment, so it answers about one, and
+	# a list with nothing in it is the walk disagreeing with its own scope.
+	# The read below would hand undef on and every warning would then read as
+	# nothing due, which is the one wrong answer this step can give.
+	my ($due_record) = @{$walk->{environments} || []};
+	bug("The walk answered no environment for #C{%s}.", $name)
+		unless $due_record;
 
 	my $due = _warn_commits_due($bare, $due_record);
 
@@ -1988,10 +1995,34 @@ sub _warn_stale_pipeline {
 sub _warn_commits_due {
 	my ($env, $record) = @_;
 
+	# A walk that failed for this environment empties its pending list, so a
+	# reader that went straight to that list would print the silence of a
+	# branch with nothing due over a question nobody answered.  We say which
+	# it was, and we warn nothing else, the rest of the record being whatever
+	# the failure left behind.
+	if (my $error = $record->{error}) {
+		warning(
+			"\nCould not tell what is due to #C{%s}: %s\n\nThe deploy goes ".
+			"ahead with what the branch carries.  Run #C{genesis propagate} ".
+			"once the reason above is settled.",
+			$env->name, $error
+		);
+		return [];
+	}
+
+	my @due = @{$record->{pending} || []};
+
+	# The uncertified ancestor of D43, which holds everything below it.  It is
+	# read with the pending list rather than ahead of it, because the sentence
+	# below says that nothing is due and only an empty list makes that true.
+	# Nothing routed can stand beside such a hold today, hold_for returning on
+	# the uncertified ancestor at lib/Genesis/CI/Walk.pm:459 before it reads
+	# any file, but a hold order that changed would otherwise turn the
+	# sentence into a claim that suppressed the list underneath it.
 	my ($uncertified) = grep {
 		($_->{reason} // '') eq 'ancestor-uncertified'
 	} @{$record->{held} || []};
-	if ($uncertified) {
+	if ($uncertified && !@due) {
 		warning(
 			"\nNothing is due to #C{%s}.  Its ancestor #C{%s} has certified no ".
 			"control commit, so it holds everything below it until it deploys.",
@@ -2000,7 +2031,6 @@ sub _warn_commits_due {
 		return [];
 	}
 
-	my @due = @{$record->{pending} || []};
 	return [] unless @due;
 
 	# The proposed record is read here rather than above, because an
@@ -2013,10 +2043,10 @@ sub _warn_commits_due {
 		"propagate} to deliver %s.",
 		count_nouns(scalar(@due), 'commit'), $env->name, $env->deployment_slug,
 		join("\n", map {
-			sprintf("  - control@%s  %s",
+			sprintf("  - control\@%s  %s",
 				substr($_->{control_commit}, 0, 8), $_->{subject})
 		} @due),
-		$proposed ? sprintf("\nPR #%s proposes control@%s, not yet merged.\n",
+		$proposed ? sprintf("\nPR #%s proposes control\@%s, not yet merged.\n",
 			$proposed->{number}, substr($proposed->{control_commit}, 0, 8)) : '',
 		scalar(@due) == 1 ? 'it' : 'them'
 	);

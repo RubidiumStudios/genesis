@@ -142,6 +142,38 @@ subtest 'a holding ancestor is named, and nothing is said to be due' => sub {
 	is_deeply($answer, [], 'and it answers an empty due list');
 };
 
+subtest 'a walk that failed says so rather than saying nothing is due' => sub {
+	plan tests => 3;
+
+	# The record a failed walk leaves: the reason it failed, and an empty
+	# pending list, which is the shape that would otherwise read as a branch
+	# with nothing waiting for it.  It is composed here rather than provoked,
+	# because what this row is about is which of the two the warning says.
+	my $h   = make_harness(envs => ['qa'], vault => 0);
+	my $top = top_for($h);
+	my $env = Genesis::Env->bare('qa', $top);
+
+	my $record = {
+		pending => [],
+		held    => [],
+		error   => 'the vault at http://127.0.0.1:8201 is unreachable',
+		outcome => 'failed',
+	};
+
+	my $answer;
+	my ($out, $err) = output_from {
+		$answer = Genesis::Commands::Env::_warn_commits_due($env, $record)
+	};
+	my $said = unfolded($out, $err);
+
+	like($said, qr/Could not tell what is due to qa/,
+		'it says that it could not tell')
+		or diag("what it said:\n$out$err");
+	like($said, qr/\Qis unreachable\E/, 'and why')
+		or diag("what it said:\n$out$err");
+	is_deeply($answer, [], 'and it answers an empty due list');
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet
