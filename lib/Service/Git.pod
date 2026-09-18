@@ -2030,10 +2030,15 @@ B<Examples:>
 
 =head2 delete_remote_branch
 
-  $git->delete_remote_branch($branch);
-  $git->delete_remote_branch($branch, $remote);
+  my $result = $git->delete_remote_branch($branch);
+  my $result = $git->delete_remote_branch($branch, remote => 'origin');
+  my $result = $git->delete_remote_branch($branch, expect => $tip);
 
-Deletes a branch on the remote.
+Removes a branch from the remote by pushing the deletion refspec through the
+same one-ref push every other ref takes. Returns the push result, or C<undef>
+when no remote is configured. A refusal comes back as a result with C<ok> set
+to 0 rather than as an error, because the caller records it as that
+environment's outcome.
 
 B<Parameters:>
 
@@ -2041,31 +2046,28 @@ B<Parameters:>
 
 =item C<$branch>
 
-The branch to delete.
+The branch to remove from the remote.
 
-=item C<$remote>
+=item C<%opts>
 
-Defaults to C<default_remote>.
-
-=back
-
-B<Returns:> C<$self>. No-op when no remote is configured.
-
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"Failed to delete remote branch #C{%s} on #C{%s}: %s"> -- raised via
-C<bail()> carrying git's message.
+C<remote> is the remote to push to, defaulting to C<default_remote>, and
+C<expect> is the value the removal is leased against, so a branch somebody
+moved since the run read it refuses its own deletion. The lease is left off
+where the key is absent.
 
 =back
+
+B<Returns:> The push result, which carries C<branch>, C<ok>, C<ref>,
+C<status>, C<reason>, C<stderr>, and C<summary>. C<undef> when no remote is
+configured.
+
+B<Errors:> Whatever C<_push_one> raises, which is a spec with no branch name.
+A push the remote turns down is a result and not an error.
 
 B<Examples:>
 
-  $git->delete_remote_branch('old-env');
-  # returns $self
+  my $result = $git->delete_remote_branch('pr/qa/bosh', expect => $tip);
+  # returns {branch => 'pr/qa/bosh', ok => 1, status => 'deleted', ...}
 
 =head2 delete_branch
 
@@ -2109,6 +2111,54 @@ B<Examples:>
 
   $git->delete_branch($git->current_branch);
   # returns $self, having done nothing
+
+=head2 forget_branch
+
+  $git->forget_branch($branch);
+  $git->forget_branch($branch, 'origin');
+
+Drops the remote-tracking ref for one branch, and does nothing where there is
+no such ref or no remote at all.
+
+C<fetch_branches> never prunes, because the local-only commit query reads the
+tracking refs a prune would delete, so a branch the remote no longer carries
+leaves its tracking ref standing and every reader of that ref is told the
+remote still has it. One reader pays for that, which is the lease. A push
+leased against a value the remote has not got is refused, and it stays refused
+on every run afterwards, so the caller that has just asked the remote and been
+told the branch is gone takes the ref off here.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch whose tracking ref goes.
+
+=item C<$remote>
+
+Defaults to C<default_remote>.
+
+=back
+
+B<Returns:> C<$self>, so the call chains.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to forget the remote-tracking ref for '%s'"> -- raised via C<run>'s
+C<onfailure>. C<%s> is the branch name.
+
+=back
+
+B<Examples:>
+
+  $git->forget_branch('pr/qa/bosh');
+  # returns $self, with refs/remotes/origin/pr/qa/bosh gone
 
 =head2 fetch_branches
 
