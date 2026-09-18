@@ -630,8 +630,8 @@ sub _gate_branch_class {
 	# neither flag under a registration declaring no deployed default.
 	#
 	# The name derivation lives here rather than in _gate_deployed_state,
-	# for the reason the comment there gave: two derivations of one name are
-	# two chances to disagree, and now two callers want it.  An operator may
+	# for the reason the comment there gave, which is that two derivations
+	# of one name are two chances to disagree, and now two callers want it.  An operator may
 	# name the environment by a path, so the leading directories and the
 	# suffix both come off, which is what the deploy does to the same
 	# argument in Genesis::Commands::Env::deploy.  set_top_path has already

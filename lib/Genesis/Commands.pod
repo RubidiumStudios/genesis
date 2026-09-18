@@ -2140,7 +2140,19 @@ command declares no class; it declares C<branch_target =E<gt> 'control'>,
 which C<propagate> does because it switches to control inside its own
 session; it has no repo or env scope, so there is no C<Genesis::Top> to
 read; the C<Top> or the git handle could not be loaded; or the repository
-has no pipeline enabled, where every command behaves as it always has.
+has no pipeline enabled, where every command behaves as it always has.  The
+last of those is qualified by the two deployed-commit flags: a run that
+named C<--redeploy> or C<--as-deployed> with the pipeline off never reaches
+it, because C<deployed_target> has already bailed at
+C<Genesis::Exit::CONFIG>.
+
+The environment name is derived here, once, from the first command argument,
+with any leading directories and any C<.yml> or C<.yaml> suffix removed.  Two
+callers want it.  C<deployed_target> is asked for the target before the
+pipeline question, so that a flagged run meets its refusal where no session
+would open, and C<_gate_deployed_state> is handed the name rather than
+deriving a second one, because two derivations of one name are two chances
+to disagree.
 
 The target is read before anything is loaded.  Loading a C<Genesis::Top>
 names the deployment root and the vault target in the environment, and a
@@ -2188,7 +2200,8 @@ B<Examples:>
 
 =head2 _gate_deployed_state
 
-  my @out = _gate_deployed_state($top, $git, $fn);
+  my @out = _gate_deployed_state($top, $git, $fn, $name);
+  my @out = _gate_deployed_state($top, $git, $fn, $name, target => $commit);
 
 Runs a deployed-state command inside a branch session standing on the
 deployment branch of the environment the command was given, which is
@@ -2213,12 +2226,14 @@ behind the remote this clone holds it. The commit the run targets lies on
 that branch, so a branch there is nothing to read on is a branch there is no
 deployed commit to stand on either.
 
-The environment name is taken from the first command argument, with any
-leading directories and any C<.yml> or C<.yaml> suffix removed, because an
-operator may name an environment by its path.  A command called with no
-argument at all switches nothing and runs where it stands, so the command
-raises its own usage error rather than meeting a bug report about an
-undefined name.
+The environment name comes in already derived.  C<_gate_branch_class> takes
+it off the first command argument and removes any leading directories and
+any C<.yml> or C<.yaml> suffix, because an operator may name an environment
+by its path, and it derives it there rather than here because
+C<deployed_target> wants the same name off the same argument.  A command
+called with no argument at all switches nothing and runs where it stands, so
+the command raises its own usage error rather than meeting a bug report
+about an undefined name.
 
 A command already standing on the branch it would switch to is not switched
 either, and it opens no session at all.  It says so in one C<info> line
@@ -2301,6 +2316,11 @@ session that tree may have open.
 The command's own function, as a code reference taking no arguments.  Every
 path calls it exactly once, inside the session where there is one to open.
 
+=item C<$name>
+
+The environment name, with any leading directories and any C<.yml> or
+C<.yaml> suffix already stripped by the caller.
+
 =item C<< target => $commit >>
 
 Optional.  The commit the session stands on, as C<deployed_target> resolved
@@ -2324,18 +2344,18 @@ there is then no path on the branch to read it from.
 
 B<Examples:>
 
-  _gate_deployed_state($top, $git, $fn);
+  _gate_deployed_state($top, $git, $fn, 'qa');
   # `genesis qa info` reads qa/bosh and is returned to control
 
-  _gate_deployed_state($top, $git, $fn);
+  _gate_deployed_state($top, $git, $fn, 'staging');
   # `genesis staging info` runs where it stands, because staging has
   # never been delivered and has no branch to read
 
-  _gate_deployed_state($top, $git, $fn);
+  _gate_deployed_state($top, $git, $fn, 'qa');
   # `genesis qa deploy` runs where it stands, because qa/bosh was cut by
   # pipeline-apply and carries no repository to read yet
 
-  _gate_deployed_state($top, $git, $fn);
+  _gate_deployed_state($top, $git, $fn, 'qa');
   # `genesis qa deploy` run from qa/bosh opens no session at all, so the
   # operator's uncommitted edit is deployed rather than refused
 

@@ -105,7 +105,11 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		# the spelling six of the seven commands take, so a step that gave
 		# one of them a third spelling of its own is what these rows catch.
 		# Their other flags are not swept, because what they declare is a
-		# matter for the secrets surface and not for this one.
+		# matter for the secrets surface and not for this one.  The
+		# registration and branch-class rows of the four were green on
+		# arrival, M12 having declared those classes, and they stand as
+		# guards on those declarations rather than as proof of anything
+		# here.
 		'check-secrets' => {
 			class   => Genesis::Commands::PRE_DEPLOY,
 			options => [qw/as-deployed/],

@@ -64,7 +64,10 @@ subtest 'both flags refuse where the pipeline is not enabled' => sub {
 
 	# The same flag in a repository whose pipeline is on, so that the two
 	# refusals above are about the pipeline being off and not about a flag
-	# the parser never heard of.
+	# the parser never heard of.  Green before the flags existed, when an
+	# unknown option exited at the usage error rather than at CONFIG, and a
+	# guard rather than a proof: what it catches is a refusal written to
+	# meet every use of the flags rather than the ones outside a pipeline.
 	my $g = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
 	my $gc = commit_on_control($g,
 		files   => {'ops/base.yml' => "---\nversion: one\n"},
@@ -97,6 +100,10 @@ subtest 'the two flags share one help sentence' => sub {
 	ok(defined $deploy_sentence, 'the deploy help carries --redeploy');
 	ok(defined $info_sentence, 'the info help carries --as-deployed');
 
+	# Green on arrival, because both captures were undefined before the
+	# flags existed and two undefined captures squash to one empty string.
+	# It stands as a guard on the one constant: what it catches is a step
+	# that gives each flag a wording of its own.
 	my $squash = sub { my $t = shift // ''; $t =~ s/\s+/ /g; $t =~ s/^\s|\s$//g; $t };
 	is($squash->($info_sentence), $squash->($deploy_sentence),
 		'both flags print the same sentence about the deployed commit');
