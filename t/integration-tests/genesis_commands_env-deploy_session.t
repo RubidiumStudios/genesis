@@ -5,10 +5,14 @@
 # shape in which the root the deploy read was rebuilt out of whatever its own
 # checkout had left behind.
 #
+# The fifth row is the cleanliness precondition on the path that opens no
+# session, which is the one D84 asserts and the session cannot, because on
+# that path begin never runs.
+#
 # The first three rows assert the restoration in their own words, so each of
-# them passes restore => 0 and no run is asserted twice.  The fourth leaves
-# nothing anywhere else, so it lets run_genesis make that assertion for it and
-# reads the environment file the deploy saw on top.
+# them passes restore => 0 and no run is asserted twice.  The fourth and the
+# fifth leave nothing anywhere else, so each of them lets run_genesis make
+# that assertion for it.
 use strict;
 use warnings;
 use utf8;
@@ -38,8 +42,12 @@ subtest 'a deploy from a feature branch in a subdirectory restores W' => sub {
 	stand_on($h, 'wip/a-change', dir => 'bosh');
 
 	my $w = snapshot_w($h);
+	# --no-propagate, as the no-git-write rows do: the auto-cascade hands off
+	# to a child genesis propagate, which writes to deployment branches on
+	# purpose and which M15 owns, so a row about what this deploy did should
+	# not be reading the child's work as the deploy's own.
 	my ($out, $err, $exit) = run_genesis($h, {dir => 'bosh', restore => 0},
-		'qa', 'deploy', '-y', 'a reason');
+		'qa', 'deploy', '--no-propagate', '-y', 'a reason');
 	is($exit, 0, 'the deploy succeeded');
 
 	assert_w_restored($w, 'the success path');
@@ -52,11 +60,15 @@ subtest 'a BOSH failure after the switch restores W and reports the failure' => 
 	fixture_bosh($h);
 	run({dir => $h->a}, 'git', 'checkout', '-b', 'wip/a-change');
 	stand_on($h, 'wip/a-change');
-	$ENV{GENESIS_HARNESS_BOSH_FAILS} = 1;
+	# Scoped rather than set and deleted, so a death anywhere below cannot
+	# leave the flag armed for every later row in this file, where it would
+	# turn a success into a failure that reads as a product bug.
+	local $ENV{GENESIS_HARNESS_BOSH_FAILS} = 1;
 
 	my $w = snapshot_w($h);
+	# --no-propagate for the reason the row above gives.
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
-		'qa', 'deploy', '-y', 'a reason');
+		'qa', 'deploy', '--no-propagate', '-y', 'a reason');
 	isnt($exit, 0, 'the command reports the failure');
 	# The environment's own bail is the one that speaks here, and it says
 	# "Deployment failed."  The command's own line reads "Deployment
@@ -65,7 +77,6 @@ subtest 'a BOSH failure after the switch restores W and reports the failure' => 
 	like($err, qr/Deployment failed/i, 'and names it as a deployment failure');
 
 	assert_w_restored($w, 'the bail path');
-	delete $ENV{GENESIS_HARNESS_BOSH_FAILS};
 };
 
 subtest 'the process-lifetime handle restores nothing it did not set' => sub {
@@ -78,8 +89,9 @@ subtest 'the process-lifetime handle restores nothing it did not set' => sub {
 
 	# The H16 shape: one caller switches, a second caller runs, and the
 	# first caller's remembered branch is what the process exits on.
+	# --no-propagate for the reason the first row gives.
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
-		'qa', 'deploy', '-y', 'a reason');
+		'qa', 'deploy', '--no-propagate', '-y', 'a reason');
 
 	# The exit is read first, because a deploy that refused before it
 	# switched anything would leave the branch exactly where this row wants
@@ -143,6 +155,47 @@ subtest 'the deploy reads the branch it switched to, not the one it left' => sub
 		'the deploy read the environment file the deployment branch carries');
 	unlike("$out$err", qr/marker:\s*control/,
 		'and not the one control carries');
+};
+
+subtest 'a deploy that opens no session still refuses a dirty tree' => sub {
+	plan tests => 6;
+
+	# The gate opens no session for an environment with no deployment branch,
+	# so begin never runs and nothing there asserts the tree clean.  A deploy
+	# from a dirty tree would deploy content it then records a commit not
+	# holding, which is the audit trail describing something other than what
+	# shipped, so the deploy makes the assertion itself on that path.
+	my $h = seeded_harness();
+	fixture_bosh($h);
+
+	# The branch is taken away everywhere the gate looks for it, which is the
+	# local ref and the remote-tracking one, and from R as well so that the
+	# deploy's own refresh does not bring it back.
+	my $slug = $h->slug('qa');
+	delete_on_r($h, $slug);
+	delete_local($h, 'a', $slug);
+	run({dir => $h->a}, 'git', 'update-ref', '-d', "refs/remotes/origin/$slug");
+
+	stand_on($h, $h->control);
+
+	# Armed with nothing planned, because only fault_git arms the step log the
+	# last assertion reads.
+	my $git = fault_git($h);
+
+	my ($edited) = grep {$_ eq 'qa.yml'} propagation_set($h, 'qa');
+	my $body = slurp($h->a.'/'.$edited)."# edited in place\n";
+	mkfile_or_fail($h->a.'/'.$edited, $body);
+
+	my ($out, $err, $exit) = run_genesis($h,
+		'qa', 'deploy', '--no-propagate', '-y', 'a reason');
+
+	isnt($exit, 0, 'the deploy refused');
+	like($err, qr/Working tree has uncommitted changes/,
+		'in the words the switch used to refuse in');
+	like($err, qr{\Q$edited\E}, 'naming the file that is modified');
+	is(slurp($h->a.'/'.$edited), $body, 'leaving the edit as it was');
+	my @writes = grep {$_->[0] =~ /^(checkout|commit|push)$/} step_log($git);
+	is_deeply(\@writes, [], 'and refusing before its first write');
 };
 
 done_testing;

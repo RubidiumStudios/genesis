@@ -2839,9 +2839,20 @@ EOS
 # divergence on purpose keeps it.  The ref is written rather than checked out,
 # because the fixture runs before a row has stood anywhere and a checkout here
 # would move a working tree the row is about to place itself.
+#
+# That invariant is asserted rather than assumed, because this is a builder
+# any row may call in any order.  move_on_r carries the comment about what
+# a ref write does to a copy standing on the branch: the working tree and
+# the index stay where they were, so the next commit records the removal of
+# everything the branch had gained.  A row that has already stood on the
+# branch is told to stand on it afterwards instead.
 sub _catch_up {
 	my ($self, $env, %opts) = @_;
 	my $branch = $self->slug($env, %opts);
+	die "fixture_bosh catches $branch up by writing the ref, and copy A is "
+	  . "standing on it, which would leave the index behind the branch.  "
+	  . "Call fixture_bosh before stand_on, or pass catch_up => 0.\n"
+		if ($self->git('a')->current_branch // '') eq $branch;
 	my $local  = ref_in($self->{a}, "refs/heads/$branch")   or return $self;
 	my $remote = ref_in($self->{a}, "refs/remotes/origin/$branch")
 		or return $self;

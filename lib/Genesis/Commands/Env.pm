@@ -1029,6 +1029,38 @@ sub deploy {
 			on_divergence => 'report');
 		info("  #Gi{%s}", $_) for @{$control_state->{events}};
 
+		# The session the gate opened asserts the tree clean in begin, and
+		# for a deploy that switches that is the whole of the check.  Three
+		# arms of the gate open no session at all, though, and two of them
+		# have nothing to do with cleanliness: an environment with no
+		# deployment branch, and a branch pipeline-apply cut that carries no
+		# repository.  A deploy from a dirty tree there deploys uncommitted
+		# content and records a commit that does not hold it, which is the
+		# audit trail describing something other than what shipped, so D84's
+		# precondition is asserted here for those two.
+		#
+		# The third arm is exempt on purpose.  A command already standing on
+		# the branch it would switch to is leaving nothing behind, and D80
+		# lets an operator deploy an edit in place, which is how a change is
+		# tested before it is committed.  That is the same branch the
+		# retired switch asked about, and it is asked the same way.
+		if (!Genesis::Commands::branch_session()
+				&& ($pipeline_git->current_branch // '') ne $branch_name) {
+			unless ($pipeline_git->is_clean) {
+				# The list is filtered the way the session's own
+				# modified_paths filters it, so an operator refused here and
+				# an operator refused by the session are shown one list.
+				my $status = $pipeline_git->status;
+				my @modified =
+					sort grep {($status->{$_} // '') !~ /^\?\?/} keys %$status;
+				bail(
+					"Working tree has uncommitted changes.  Commit or stash them\n".
+					"before deploying:\n%s",
+					join("", map {"  - $_\n"} @modified)
+				);
+			}
+		}
+
 		if (my $remote = $pipeline_git->default_remote) {
 			info "Pulling latest #C{%s} from #C{%s}...", $branch_name, $remote;
 			$pipeline_git->pull_ff_only($branch_name, $remote);
