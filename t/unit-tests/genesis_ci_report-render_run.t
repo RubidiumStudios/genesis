@@ -79,16 +79,24 @@ subtest 'an error message prints whole whatever braces it carries' => sub {
 };
 
 subtest 'the commit axis takes its words from the enum' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	my $commit = {
 		control_commit => 'abcdef1234567890abcdef1234567890abcdef12',
 		subject        => 'Tune qa',
 	};
 
-	my ($out, $died) = rendered(a_record(pending => [$commit]));
+	my ($out, $died) =
+		rendered(a_record(pending => [{%$commit, outcome => 'delivered'}]));
 	is($died, undef, 'a commit the enum knows renders');
 	like($out, qr/\bdelivered\b/, 'and reads with the enum word');
+
+	# A commit nothing wrote a word onto is one that went nowhere, and the
+	# axis says nothing about it rather than reading it the word for the one
+	# thing that did not happen to it.
+	my ($bare) = rendered(a_record(pending => [$commit]));
+	unlike($bare, qr/\bdelivered\b/,
+		'and a commit with no word of its own is not called delivered');
 
 	my (undef, $refused) = rendered(
 		a_record(pending => [{%$commit, outcome => 'shipped'}]));

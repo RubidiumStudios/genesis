@@ -606,8 +606,8 @@ The line the run ends on counts the commits it published, which is the
 commits of the environments whose outcome is C<propagated>.  A branch the
 remote refused contributes none, and a run that had work due and published
 none of it ends on the per-environment outcomes rather than on a count.  A
-preview publishes nothing and settles no outcome, so what it counts is what
-it routed.
+preview publishes nothing, so what it counts is the environments its own
+report marked as ones that would propagate.
 
 B<Options (via C<get_options>):>
 

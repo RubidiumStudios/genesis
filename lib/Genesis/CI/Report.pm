@@ -357,10 +357,14 @@ sub render_run {
 		# The commit axis, in control order: what the environment received
 		# first, and then what it is holding behind it.
 		for my $pending (@{$env->{pending} || []}) {
-			info "    #Gi{control\@%s} %s  %s",
+			# The word is appended rather than printed into a fixed slot,
+			# because a commit the publish left without one has no word to
+			# print and a slot would leave two spaces hanging off the line.
+			my $word = _commit_word($pending->{outcome}, $preview);
+			info "    #Gi{control\@%s} %s%s",
 				substr($pending->{control_commit}, 0, 7),
 				$pending->{subject},
-				_commit_word($pending->{outcome} // 'delivered', $preview);
+				length($word) ? "  $word" : '';
 			info "      #G{M} %s", $_ for _paths($git, $pending->{delivered});
 			info "      #R{D} %s", $_ for _paths($git, $pending->{removed});
 
@@ -524,18 +528,28 @@ sub _settle {
 # outside it is a defect in whoever wrote the record, and the guard says so by
 # name rather than printing it.
 #
-# The word is taken off the record with a default beside it, because nothing
-# writes one yet and the axis still has to have a reader that can be handed
-# the wrong thing.  The default is the caller's rather than this sub's, and
-# there are two of them: a commit under pending reads delivered and one under
-# held reads held.  Both go once the publish stage writes a word per commit.
+# A preview writes no per-commit outcome, because nothing was published, and
+# what it says of a routed commit is the verb for the delivery it would have
+# made.  So a commit with no word at all reads would deliver under a preview,
+# and the enum's own word reads the same way where the record carries one.
+#
+# Under a run a commit with no word is one that went nowhere, and the axis
+# says nothing about it.  Genesis::CI::Publish::_mark_delivered writes
+# delivered onto the commits of an environment the remote took and leaves a
+# refused environment's commits alone, so the default this sub's caller used
+# to carry called those commits delivered under an environment reading publish
+# rejected.  The held axis keeps a default of its own, because every commit
+# under held is held by definition and nothing writes that word per commit.
 sub _commit_word {
 	my ($outcome, $preview) = @_;
+
+	return WOULD_DELIVER if $preview && !defined $outcome;
+	return '' unless defined $outcome;
 
 	my %known = map {$_ => 1} COMMIT_OUTCOMES;
 	bug("Genesis::CI::Report::render_run was handed the commit outcome ".
 		"'%s', which is not one of the words I8 fixes", $outcome)
-		unless defined $outcome && $known{$outcome};
+		unless $known{$outcome};
 
 	return WOULD_DELIVER if $preview && $outcome eq 'delivered';
 	return $outcome;
