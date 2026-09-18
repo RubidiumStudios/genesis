@@ -87,12 +87,12 @@ happened to ask first. C<DESTROY> restores nothing either: the last-resort net
 for a command that exits partway through belongs to the session, which
 registers it through C<at_exit>.
 
-C<checkout_one_way> is the one exception, and a temporary one. The deploy
-moves onto the environment branch and means to stay there, and the post-deploy
+C<checkout_one_way> is the one exception, and a temporary one. The post-deploy
 block moves onto control and hands off to a child command that expects to find
-it there. A session would put both back. Those three call sites come through
-C<checkout_one_way> until the steps that own them decide what returning should
-mean.
+it there, and a session would put it back. That one call site comes through
+C<checkout_one_way> until the step that owns it decides what returning should
+mean. The deploy no longer does: it declares a branch class and switches
+inside the session the gate opens.
 
 =head1 METHODS
 
@@ -471,15 +471,16 @@ B<Examples:>
 Checks a branch out and leaves you there. It is C<checkout> with the guard
 lifted for the length of the call, and it is temporary.
 
-Two call sites move onto a branch and mean to stay on it. The deploy switches
-to the environment branch and deploys from there, and the post-deploy block
-moves onto control and hands off to a child command that expects to find it
-there. A session would put both back, which is the opposite of what they
-mean, so they come through here until the steps that own them decide what
-returning should mean. Nothing else may use it, and a test names the two.
+One call site moves onto a branch and means to stay on it. The post-deploy
+block moves onto control and hands off to a child command that expects to find
+it there, and a session would put it back, which is the opposite of what it
+means, so it comes through here until the step that owns it decides what
+returning should mean. Nothing else may use it, and a test names the one.
 
-There was a third, on the deploy's C<--pull> path, and it went with the flag
-when the refresh became unconditional.
+There were two others. The deploy switched to the environment branch and
+deployed from there, and it now declares a branch class and switches inside
+the session the gate opens. The one before that was the deploy's C<--pull>
+path, and it went with the flag when the refresh became unconditional.
 
 B<Parameters:>
 

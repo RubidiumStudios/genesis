@@ -20,8 +20,9 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 
 require_ok './bin/genesis';
 
-# deploy is absent on purpose.  It declares its class at M13, where its own
-# checkout_one_way is retired, so that one state never carries two switches.
+# deploy is here now.  It declared no class while it carried a
+# checkout_one_way of its own, because one state would then have taken two
+# switches, and it declares one now that the switch has gone.
 my %expected = (
 	'create'             => Genesis::Commands::PRE_DEPLOY,
 	'propagate'          => Genesis::Commands::PRE_DEPLOY,
@@ -35,6 +36,7 @@ my %expected = (
 	'remove-secrets'     => Genesis::Commands::PRE_DEPLOY,
 	'info'               => Genesis::Commands::DEPLOYED_STATE,
 	'bosh'               => Genesis::Commands::DEPLOYED_STATE,
+	'deploy'             => Genesis::Commands::DEPLOYED_STATE,
 );
 
 subtest 'one class per pipeline-aware registration' => sub {
@@ -59,10 +61,12 @@ subtest 'one class per pipeline-aware registration' => sub {
 	ok(!defined(command_properties('list-kits')->{branch_class}),
 		'list-kits declares no branch class');
 
-	# M13's half of the same attribute, asserted here so that a step which
-	# declared it early would be caught by the file that owns the surface.
-	ok(!defined(command_properties('deploy')->{branch_class}),
-		'deploy declares no branch class until M13 retires its own switch');
+	# The deploy's own half, said in its own words rather than left to the
+	# sweep above, because this is the declaration that let the deploy stop
+	# switching for itself.
+	is(command_properties('deploy')->{branch_class},
+		Genesis::Commands::DEPLOYED_STATE,
+		'deploy declares the deployed-state branch class');
 };
 
 subtest 'only the command that commits on control declares it' => sub {
