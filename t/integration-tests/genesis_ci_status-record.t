@@ -160,7 +160,11 @@ subtest 'the tree renders the record in DAG order' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
 	is($exit, 0, 'the command exits zero');
 
-	my @rows = grep { /\b(lab|qa|prod)\b/ } split(/\n/, $out);
+	# The environment rows alone, selected by the indent that opens one as
+	# well as by the name.  A bare name match would take in any header line
+	# that happened to name an environment, and the header above the rows
+	# names every environment the pipeline has gone stale for.
+	my @rows = grep { /^\s{2,}(?:lab|qa|prod)\s/ } split(/\n/, $out);
 	like($rows[0], qr/^\s{2}lab\b/,    'lab sits at the root of the tree');
 	like($rows[1], qr/^\s{4}qa\b/,     'qa is indented one level under lab');
 	like($rows[2], qr/^\s{6}prod\b/,   'prod is indented two levels under qa');
