@@ -868,6 +868,17 @@ five lines of task output and exit non-zero, which is what the deploy's own
 failure path reads to tell a refusal from a cancellation, so a row can watch
 the bail path without breaking anything else the deploy asks for.
 
+Setting C<GENESIS_HARNESS_SIGINT_BEFORE_BOSH> in the parent makes that same
+C<deploy> call raise C<SIGINT> in the genesis process instead, which is how a
+row watches the signal path.  The moment is the one T232 is about, after the
+gate has switched and before the director has been asked to do anything.  The
+signal goes to the genesis process rather than to the script, because the
+session and its handler live there, and the script walks its parents until it
+finds the one running C<bin/genesis>, since a shell may stand between them.
+It then holds itself open with its own output closed, so the deploy is
+interrupted rather than told the director refused and nothing waits on a
+process genesis has already left behind.
+
 The second is a listener.  C<Service::BOSH::Director::status> dials the host
 and the port of the C<url> in the exodus record before it runs any C<bosh> at
 all, so a record naming an address nothing answers on refuses with a timeout
@@ -995,11 +1006,11 @@ The fixture binaries the harness writes reach the child through the path this
 run builds and through nothing else, so no helper puts a fixture on the
 parent's own C<PATH> and a run that asks for none sees none.
 
-Where C<fixture_bosh> has run, C<GENESIS_BOSH_COMMAND> and
-C<GENESIS_HARNESS_BOSH_FAILS> are named in the child's environment as well,
-the way the fault plan's variables are, so a row arms the failure by setting
-it in the parent and the command under test reads it out of the environment
-it was handed.
+Where C<fixture_bosh> has run, C<GENESIS_BOSH_COMMAND>,
+C<GENESIS_HARNESS_BOSH_FAILS>, and C<GENESIS_HARNESS_SIGINT_BEFORE_BOSH> are
+named in the child's environment as well, the way the fault plan's variables
+are, so a row arms the failure or the signal by setting it in the parent and
+the command under test reads it out of the environment it was handed.
 
 =head2 run_genesis_in($h, $copy, @argv)
 
