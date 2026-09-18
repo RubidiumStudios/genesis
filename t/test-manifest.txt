@@ -375,6 +375,7 @@ integration-tests/genesis_ci_status-rendering.t               # detail in bracke
 integration-tests/genesis_ci_status-roots_and_mapping.t       # each root reports its own branch and reading, and every line of the mapping table has a fixture
 integration-tests/genesis_ci_report-outcomes.t                # one outcome per environment, one line per routed commit, and the overwritten file
 integration-tests/genesis_ci_report-preview_warnings.t        # the preview warns where its answer rests on a push or a reset it did not make
+integration-tests/genesis_ci_report-totals.t                  # the totals line counts the commits the run published, and no others
 integration-tests/genesis_ci_publish-outcomes.t               # one push per branch, and a refused branch's rejection as its outcome
 integration-tests/genesis_ci_publish-independence.t           # a partial publish leaves every branch true, and the next run converges
 integration-tests/genesis_ci_publish-control.t                # control is re-checked before the first push, and never pushed
