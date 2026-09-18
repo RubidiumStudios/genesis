@@ -96,6 +96,80 @@ B<Examples:>
     align_with_remote($git, 'pr/prod/bosh');
     # returns 0, and touches nothing, where the remote has never had it
 
+=head2 aggregate_message($git, $env, $commits, %opts)
+
+    my $message = Genesis::CI::PullRequest::aggregate_message($git, $env,
+        \@pending);
+
+The aggregate commit's whole message.
+
+The subject is the marker naming the newest commit in C<$commits>, and the
+body lists every commit oldest first with its short hash, its subject, and
+its C<diff --stat> lines within the environment's propagation set as that set
+stood at the delivered commit. The pull request carries that body verbatim,
+so the commit and the pull request can never disagree about what is being
+proposed.
+
+The sha in the subject is abbreviated, which is the form every other builder
+in the tree hands the marker. Nothing downstream loses by it:
+C<Genesis::CI::Marker::in_text> parses four to forty hex digits, so the
+subject is still the machine-read marker, and a reader wanting the whole sha
+resolves the abbreviation through the git handle it already holds, which is
+what the marker's own contract asks of it.
+
+The set is read at the commit being delivered rather than from the working
+tree, through the same reader C<< $session->apply_files >> uses, because a
+restructure moves the prefix that defines the set and a body scoped by
+today's configuration would name files the delivery did not move.
+
+The sha of each commit is read under the name the walk writes on a pending
+entry, which is C<control_commit>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The repository handle, used to abbreviate each sha and to take each
+summary.
+
+=item C<$env>
+
+The environment being delivered, which is what names the propagation set and
+what the marker addresses.
+
+=item C<$commits>
+
+The due control commits, oldest first, each carrying C<control_commit> and
+C<subject>.
+
+=item C<%opts>
+
+C<gate>, C<supersedes>, and C<review> each append one closing paragraph, in
+that order, where the caller has one.
+
+=back
+
+B<Returns:> The whole message as one string, ending in a single newline.
+
+B<Errors:> Whatever the marker builder raises for a sha or an environment it
+will not accept, and whatever C<< $git->diff_stat >> raises for a commit the
+repository cannot summarise.
+
+B<Examples:>
+
+    aggregate_message($git, $env, [
+        {control_commit => $a, subject => 'Raise the instance count'},
+        {control_commit => $b, subject => 'Rotate the uaa signing key'},
+    ]);
+    # returns "[pipeline] control\@a1b2c3d -> prod\n\n" .
+    #         "Carries 2 control commits:\n\n" .
+    #         "9e8d7c6 Raise the instance count\n" .
+    #         " prod.yml | 2 ++\n 1 file changed, 2 insertions(+)\n\n" .
+    #         "a1b2c3d Rotate the uaa signing key\n" .
+    #         " prod.yml | 1 +\n 1 file changed, 1 insertion(+)\n"
+
 =head2 deliver($session, $record, %opts)
 
     my $word = Genesis::CI::PullRequest::deliver($session, $record,
@@ -117,6 +191,10 @@ The single writer is called once, at the newest due commit's source. D69
 makes a delivery a mirror, so the mirror of the newest commit is the whole
 aggregate's tree, and the writer's own index assertions run against that same
 commit.
+
+The message it writes is what C<aggregate_message> composes, so the one
+commit says which control commits it carries and what each of them changed,
+and the pull request opened from it carries that same body.
 
 What the publish and the pull request sync read afterwards is left on
 C<< $record->{pr} >>: the action, the control commit the aggregate names, the

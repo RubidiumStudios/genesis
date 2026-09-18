@@ -45,6 +45,63 @@ sub align_with_remote {
 }
 
 # }}}
+# aggregate_message - the whole aggregate commit message D49 fixes {{{
+#
+# The subject is the marker naming the newest due control commit, and the body
+# lists every commit the aggregate carries, oldest first, each with its short
+# hash and subject and the diff --stat lines for the files it changed inside
+# this environment's propagation set.  The pull request body is this body
+# verbatim, so the commit and the pull request can never disagree.
+#
+# The sha is abbreviated, which is the form T259 reads off the subject and the
+# form every other builder in the tree hands the marker.  Nothing downstream
+# loses by it: Marker::in_text parses four to forty hex digits, so the marker
+# is still machine-read, and a reader that wants the whole sha resolves the
+# abbreviation through the git handle it already holds, which is what the
+# marker's own contract says it must do.
+#
+# The set is read at the commit being delivered, through the same reader the
+# writer uses (D69), because a restructure moves the prefix that defines it and
+# a body scoped by today's configuration would name files the delivery did not
+# move.
+#
+# The sha of each entry is read under the name the walk writes on a pending
+# entry, which is control_commit rather than sha.
+sub aggregate_message {
+	my ($git, $env, $commits, %opts) = @_;
+
+	my $newest = $commits->[-1];
+	my @paths  = $env->propagation_files_at($newest->{control_commit},
+		git => $git);
+
+	my @lines = (
+		Genesis::CI::Marker::build(
+			$git->sha($newest->{control_commit}, short => 1), $env->name),
+		'',
+		sprintf('Carries %d control commit%s:',
+			scalar(@$commits), @$commits == 1 ? '' : 's'),
+		'',
+	);
+
+	for my $commit (@$commits) {
+		push @lines, sprintf('%s %s',
+			$git->sha($commit->{control_commit}, short => 1),
+			$commit->{subject});
+		push @lines, $git->diff_stat($commit->{control_commit}.'^',
+			$commit->{control_commit}, @paths);
+		push @lines, '';
+	}
+
+	push @lines, $opts{gate}, ''       if $opts{gate};
+	push @lines, $opts{supersedes}, '' if $opts{supersedes};
+	push @lines, $opts{review}, ''     if $opts{review};
+
+	my $message = join("\n", @lines);
+	$message =~ s/\n+$/\n/;
+	return $message;
+}
+
+# }}}
 # deliver - the pull request arm for one environment {{{
 #
 # The branch carries exactly one commit above the deployment branch, so the
@@ -87,7 +144,8 @@ sub deliver {
 	# it on each pending entry, which is control_commit and not sha.
 	my $newest  = $commits->[-1];
 	my $source  = $newest->{control_commit};
-	my $message = Genesis::CI::Marker::build($source, $env->name);
+	my %body;
+	my $message = aggregate_message($git, $env, $commits, %body);
 	my $written = $session->apply_files($source,
 		env     => $env,
 		message => $message,
