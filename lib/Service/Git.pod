@@ -555,17 +555,11 @@ B<Examples:>
   $git->set_branch_ref($branch, $ref);
 
 Forces one local branch ref to another ref. This is the write the design
-admits in three cases and no others, which are the pre-flight's reset of a
-branch whose only local commits are ones a re-run reproduces, the session's
-abort of a branch it committed to, and the branch gate's fast-forward of a
-deployment branch this clone holds behind its counterpart, made before the
-gate switches onto it. Nothing else may call it, and in particular nothing
-may call it for the control branch, whose committed work is never discarded.
-
-The third case discards nothing: the caller has asked
-C<resolve_branch> first and makes the move only where the answer is
-C<behind>, which is the one state that promises the local ref is an ancestor
-of the ref it is moving to.
+admits in two cases and no others, which are the pre-flight's reset of a
+branch whose only local commits are ones a re-run reproduces, and the
+session's abort of a branch it committed to. Nothing else may call it, and in
+particular nothing may call it for the control branch, whose committed work is
+never discarded.
 
 B<Parameters:>
 
@@ -577,8 +571,8 @@ The local branch to move.
 
 =item C<$ref>
 
-Where to move it to, which the callers spell as a remote-tracking ref or as a
-commit.
+Where to move it to, which the two callers spell as a remote-tracking ref or
+as a commit.
 
 =back
 
@@ -592,9 +586,9 @@ B<Errors:>
 
 A refusal at C<SOFTWARE> when the branch is the one this working tree is on,
 since the ref and the tree would then disagree. The caller switches away
-first. It is a defect rather than an operator's mistake, because every
-caller the design admits knows where it is standing and nothing an operator
-types reaches it.
+first. It is a defect rather than an operator's mistake, because the two
+callers the design admits both know where they are standing and nothing an
+operator types reaches it.
 
 =item *
 

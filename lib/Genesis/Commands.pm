@@ -372,9 +372,20 @@ sub branch_session { $BRANCH_SESSION }
 # because two readings of one question are two chances to disagree about which
 # branches are deployable.
 #
-# What the branch holds is read off the local ref where there is one, for the
-# reason the checkout prefers it, and the deployment root is named as a path
-# under the git root, which is empty where the two are the same directory.
+# What the branch holds is read off the local ref where there is one, and off
+# the remote-tracking ref otherwise, which is how the checkout chooses too.
+# The local ref rather than the tracking ref, because the checkout takes the
+# working tree to the commit the local ref names and the tree is what the
+# command then reads: a question answered off the tracking ref would pass a
+# branch this clone holds at the init commit, and the command would be stood
+# on an empty tree with the answer saying it had a repository on it.
+#
+# Nothing is written and nothing is fetched here.  This answers a question,
+# and the one ref move a stale clone needs belongs to the command that
+# deploys; every other deployed-state command reads, and a read moves no ref.
+#
+# The deployment root is named as a path under the git root, which is empty
+# where the two are the same directory.
 #
 # Both paths are resolved the same way before they are compared.  A deployment
 # root reached through a symlink, or named as /var where git answers
@@ -388,10 +399,10 @@ sub branch_session { $BRANCH_SESSION }
 sub branch_carries_repository {
 	my ($top, $git, $branch) = @_;
 
-	my $remote = $git->default_remote;
+	my $remote = $git->default_remote // 'origin';
 	my $root   = Cwd::realpath($git->root) // $git->root;
-	my $read   = $git->branch_exists($branch) ? $branch : "$remote/$branch";
 	my $path   = Cwd::realpath($top->path) // $top->path;
+	my $read   = $git->branch_exists($branch) ? $branch : "$remote/$branch";
 
 	my $under_root = '';
 	if ($path ne $root) {
@@ -652,32 +663,6 @@ sub _gate_deployed_state {
 	my $session = $git->session(control => $top->control_branch);
 	$session->begin;
 
-	# The operator's own copy of the branch may sit behind what the remote
-	# has delivered, and that is a clone nobody has pulled rather than an
-	# environment awaiting a delivery.  The branch is brought up to its
-	# counterpart before anything below asks what it carries, because a
-	# branch still holding the init commit answers that question with a no
-	# and the command then reports, or refuses, about a state the operator is
-	# one pull away from not being in.
-	#
-	# The ref is written rather than pulled, because the working tree is not
-	# standing on this branch -- the arm above returned where it was -- and a
-	# pull merges into the branch the tree holds, which here is control.  The
-	# move is made on the one state that promises it is a fast-forward, so it
-	# creates and discards nothing, which is the one ref move D35's span
-	# allows.  Nothing is fetched: the refresh is its own step under D40, and
-	# the tracking ref is read as the last refresh left it.
-	if ($remote) {
-		my $behind = $git->resolve_branch($branch, remote => $remote);
-		if ($behind && $behind->{state} eq 'behind') {
-			info(
-				"Fast-forwarding #C{%s} to #C{%s/%s}, %d commit%s behind.",
-				$branch, $remote, $branch, $behind->{behind},
-				$behind->{behind} == 1 ? '' : 's');
-			$git->set_branch_ref($branch, "refs/remotes/$remote/$branch");
-		}
-	}
-
 	# A branch that pipeline-apply cut and no propagate run has delivered to
 	# carries its init file and nothing else, so there is no repository on it
 	# to read and the switch would leave the command looking at a tree with
@@ -692,10 +677,25 @@ sub _gate_deployed_state {
 	# first, a repository git declines to trust would answer with the
 	# listing's complaint instead of the pre-flight's sentence.
 	unless (branch_carries_repository($top, $git, $branch)) {
+		# An environment awaiting its first delivery and a clone nobody has
+		# pulled since the apply cut the branch look alike from the local ref,
+		# and they are not alike at all: the second has a delivery waiting for
+		# it on the remote.  The counts say which one this is, so an operator
+		# reads whether they are waiting for a propagation or for a pull.  No
+		# ref is moved either way, because the commands in this class read and
+		# a read moves no ref; the one ref move belongs to the deploy.
+		my $d = $remote
+			? $git->resolve_branch($branch, remote => $remote) : undef;
 		info(
 			"Not reading the deployment branch #C{%s}: it carries no ".
-			"repository yet, so this runs on #C{%s}.",
-			$branch, $git->current_branch // 'the current commit');
+			"repository yet%s, so this runs on #C{%s}.",
+			$branch,
+			($d && $d->{state} eq 'behind')
+				? sprintf(" and this clone holds it %s behind #C{%s/%s}",
+				          Genesis::count_nouns($d->{behind}, 'commit'),
+				          $remote, $branch)
+				: '',
+			$git->current_branch // 'the current commit');
 		$session->finish;
 		return $fn->();
 	}

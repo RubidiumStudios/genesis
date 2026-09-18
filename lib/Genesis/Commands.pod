@@ -264,15 +264,6 @@ since standing on a deployment branch is an easy state to arrive at and a
 deploy of the working tree as it stands reads no differently from any other
 until something in it was not meant to ship.
 
-Before that question is asked, a branch this clone holds behind its
-remote-tracking ref is fast-forwarded to it. That is a clone nobody has
-pulled rather than an environment awaiting a delivery, and the two look alike
-from here: both carry the init file and nothing else. The move is made with a
-ref write, since the working tree is standing somewhere else by now, and only
-on the one state that promises it is a fast-forward, so it creates and
-discards nothing. Nothing is fetched, because the refresh is its own step
-under D40 and the tracking ref is read as the last one left it.
-
 A branch that C<genesis pipeline-apply> cut and no C<genesis propagate> run
 has delivered to is not switched onto either. It carries its init file and
 nothing else, so there is no repository on it to read, and a command switched
@@ -281,10 +272,19 @@ so rather than saying what was really wrong. The question asked is whether
 the branch carries the deployment root's own C<.genesis/config>, because
 every delivery mirrors that file and nothing else on the branch is
 guaranteed. C<branch_carries_repository> is where that question is asked,
-and the command asks it again where it classifies the branch for itself: the
-gate only declines to switch, and a command that went on to read whatever
-the operator was standing on would deploy or report from the wrong place
+and the command asks it again where it classifies the branch for itself. The
+gate only declines to switch, and a command that went on to read whatever the
+operator was standing on would deploy or report from the wrong place
 entirely.
+
+Two states answer that question the same way, and the line the gate prints
+says which one this is. An environment nothing has been delivered to waits
+for a propagation. A clone nobody has pulled since the apply cut the branch
+holds the init commit while the remote holds every delivery, and that one
+waits for a pull, so the line names how far behind its counterpart the branch
+stands. No ref is moved for either: the branch is the working tree the
+command reads, and bringing it forward is a write, which every command in
+this class but the deploy has no business making.
 
 C<branch_session> answers the session the gate opened for this command, or
 C<undef> where it opened none. A command reads it rather than asking the git
@@ -793,19 +793,28 @@ Answers whether a deployment branch holds the deployment root, which is
 asked by looking for the root's own C<.genesis/config> on the branch. Every
 delivery mirrors that file and nothing else on the branch is guaranteed, so
 a branch that answers false is one C<genesis pipeline-apply> cut and no
-C<genesis propagate> run has delivered to.
+C<genesis propagate> run has delivered to, or one this clone has not pulled
+the delivery of.
 
 The gate asks before it switches, so a command is not left looking at a tree
-with no configuration in it. C<genesis deploy> asks again as it classifies
-the branch, because a deploy the gate left standing on control would
-otherwise deploy from wherever the operator happened to be and certify a
-commit no propagation routed anywhere. One function answers both, since two
-readings of one question are two chances to disagree about which branches
-are deployable.
+with no configuration in it. C<genesis deploy> asks again in its pre-flight,
+after the fast-forward its classification ordered, because a deploy the gate
+left standing on control would otherwise deploy from wherever the operator
+happened to be and certify a commit no propagation routed anywhere. One
+function answers both, since two readings of one question are two chances to
+disagree about which branches are deployable.
 
 What the branch holds is read off the local ref where there is one, and off
 the remote-tracking ref otherwise, which is how the switch chooses too. The
-deployment root is named as a path under the git root, and both paths are
+local ref rather than the tracking ref, because a checkout takes the working
+tree to the commit the local ref names and the tree is what a command then
+reads: answered off the tracking ref, a branch this clone holds at the init
+commit would pass, and the command would be stood on an empty tree by an
+answer saying it had a repository on it. Nothing is written and nothing is
+fetched, so the one ref move a stale clone needs is left to the command that
+deploys.
+
+The deployment root is named as a path under the git root, and both paths are
 resolved through C<Cwd::realpath> before they are compared, so a root
 reached through a symlink is not mistaken for one outside the repository.
 
@@ -827,7 +836,7 @@ The deployment branch to read, as C<< <env>/<type> >>.
 
 =back
 
-B<Returns:> 1 when the branch carries the deployment root's
+B<Returns:> 1 when the ref it reads carries the deployment root's
 C<.genesis/config>, and 0 when it does not.
 
 B<Errors:>

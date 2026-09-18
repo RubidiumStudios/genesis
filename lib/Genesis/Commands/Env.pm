@@ -1019,49 +1019,21 @@ sub _deploy_branch_action {
 		);
 	}
 
-	# The three states that would deploy, and the one move and one question
-	# left for them.  no-local sits with them for the reason the propagate
-	# run's own initial state gives: the refresh two steps above materialises
-	# the local ref from the tracking ref, so nothing reaches here in that
-	# state, and the gate's switch would have created the ref in any case.
+	# The three states that would deploy, and the one ref move among them.
+	# What the branch carries is not asked here: the pre-flight asks it after
+	# this move has been made, because a branch behind a delivery carries the
+	# init commit until the fast-forward lands and the answer before it would
+	# be an answer about the wrong commit.
+	#
+	# no-local sits with the other two for the reason the propagate run's own
+	# initial state gives: the refresh two steps above materialises the local
+	# ref from the tracking ref, so nothing reaches here in that state, and
+	# the gate's switch would have created the ref in any case.
 	if ($d->{state} eq 'in-sync' || $d->{state} eq 'behind'
 			|| $d->{state} eq 'no-local') {
-		# The fast-forward comes before the question, because a branch this
-		# clone holds behind a delivery is a clone nobody pulled rather than
-		# an environment awaiting one.  The move is ordered only where the
-		# deploy is standing on the branch: pull_ff_only merges into the
-		# branch the working tree holds, so ordered anywhere else it would
-		# pull the deployment branch into control.  The gate makes the same
-		# move with a ref write ahead of its own switch, which is how a stale
-		# clone comes to be standing here at all.
-		my $on_branch = ($git->current_branch // '') eq $branch;
 		return {action => 'fast-forward', divergence => $d}
-			if $on_branch && $d->{state} eq 'behind';
-
-		# Standing on the branch is also what answers the question below: the
-		# gate switched onto it, and it only switches onto a branch carrying
-		# the repository the deploy then read its root from.
-		return {action => 'proceed', divergence => $d} if $on_branch;
-
-		# Not standing on it means the gate declined to switch, and for a
-		# branch in one of these three states the one reason it declines is a
-		# branch with nothing on it: the apply cut it and no propagation has
-		# filled it, on either side.  A deploy would then run from wherever
-		# the operator happens to be standing and certify a commit no
-		# propagation routed anywhere, so it is refused here, at the last
-		# read before the deploy runs.
-		bail({exitcode => DATAERR},
-			"Refusing to deploy.  The branch #C{%s} carries no repository ".
-			"where this clone reads it, so nothing has been delivered to the ".
-			"environment #C{%s} that a deploy could read.  A deploy certifies ".
-			"the commit of the branch it stands on, and from a branch carrying ".
-			"only what #C{pipeline-apply} cut it would deploy from control, ".
-			"certifying a commit no propagation routed there.  The branch is ".
-			"#C{genesis pipeline-apply}'s to create and #C{genesis propagate}'s ".
-			"to fill, so run #C{genesis propagate} to deliver control to it.  ".
-			"Nothing was deployed.",
-			$branch, $env_name
-		);
+			if $d->{state} eq 'behind';
+		return {action => 'proceed', divergence => $d};
 	}
 
 	# resolve_branch has no unrelated state: a branch sharing no ancestor
@@ -1084,15 +1056,22 @@ sub _deploy_branch_action {
 		);
 	}
 
+	# Two states share this refusal and they read differently, so the verb
+	# comes off the state rather than the state's own name being read as one.
+	# Both counts carry their noun, because a number with no noun beside it
+	# is a number an operator has to guess the unit of.
 	bail({exitcode => DATAERR},
-		"Refusing to deploy.  The branch #C{%s} is %s of #C{%s/%s} by %d ".
-		"commit%s%s.  A deploy never discards a commit, so run #C{genesis ".
-		"propagate}, which resets a marker-only commit and refuses a hand ".
-		"commit by name.  Nothing was deployed.",
-		$branch, $d->{state}, $remote, $branch,
-		$d->{ahead}, $d->{ahead} == 1 ? '' : 's',
+		"Refusing to deploy.  The branch #C{%s} %s.  A deploy never discards ".
+		"a commit, so run #C{genesis propagate}, which resets a marker-only ".
+		"commit and refuses a hand commit by name.  Nothing was deployed.",
+		$branch,
 		$d->{state} eq 'diverged'
-			? sprintf(" and behind by %d", $d->{behind}) : ''
+			? sprintf("has diverged from #C{%s/%s}, standing %s ahead of it ".
+			          "and %s behind", $remote, $branch,
+			          count_nouns($d->{ahead}, 'commit'),
+			          count_nouns($d->{behind}, 'commit'))
+			: sprintf("is ahead of #C{%s/%s} by %s", $remote, $branch,
+			          count_nouns($d->{ahead}, 'commit'))
 	);
 }
 
@@ -1187,13 +1166,61 @@ sub _deploy_preflight {
 	# made where the deploy stands, which the gate has stood on the branch,
 	# and it is the fast-forward D5 named as its precedent rather than the
 	# unconditional pull the deploy used to make of every branch alike.
-	my $action = _deploy_branch_action($top, $name, $git);
-	if ($action->{action} eq 'fast-forward') {
+	my $on_branch = ($git->current_branch // '') eq $branch;
+	my $action    = _deploy_branch_action($top, $name, $git);
+	if ($action->{action} eq 'fast-forward' && $on_branch) {
 		# The remote is named the way the classification named it, so the
 		# move is made against the ref the class was read from.
 		my $remote = $git->default_remote // 'origin';
 		info "Fast-forwarding #C{%s} to #C{%s/%s}...", $branch, $remote, $branch;
 		$git->pull_ff_only($branch, $remote);
+	}
+
+	# 5.  What the branch carries, asked after the move, because a branch
+	# behind a delivery holds the commit before it until the fast-forward
+	# lands and the answer taken first would be an answer about the wrong
+	# commit.
+	#
+	# Standing on the branch is asked as well, and the two are one question
+	# rather than two.  The pull above merges into the branch the working tree
+	# holds, so it is made only where the deploy stands on the branch, and a
+	# deploy that is not standing there is one the branch-class gate declined
+	# to switch: the root it read is control's, whatever the branch carries
+	# now, so the commit it would record is not the commit it would deploy.
+	unless ($on_branch
+			&& Genesis::Commands::branch_carries_repository($top, $git, $branch)) {
+		my $remote = $git->default_remote // 'origin';
+
+		# Two states reach here and they need different remedies.  A branch
+		# behind its counterpart has a delivery waiting on the remote that
+		# this clone has not pulled, and telling such an operator to propagate
+		# sends them to a command that cannot help them: nothing is due, and
+		# the deploy would refuse the same way on the next run.  The gate
+		# cannot pull it for them, because every other command in the class
+		# reads and a read moves no ref.
+		bail({exitcode => DATAERR},
+			"Refusing to deploy.  The branch #C{%s} carries no repository as ".
+			"this clone holds it, and it stands %s behind #C{%s/%s}, so a ".
+			"delivery has been made and this clone has not pulled it.  Nothing ".
+			"was switched onto, because there is no deployment root on the ".
+			"branch to read, and a deploy from here would read control and ".
+			"record the branch.  Bring the branch up to its counterpart with ".
+			"#C{git fetch %s %s:%s}, then deploy again.  Nothing was deployed.",
+			$branch, count_nouns($action->{divergence}{behind}, 'commit'),
+			$remote, $branch, $remote, $branch, $branch
+		) if $action->{divergence}{state} eq 'behind';
+
+		bail({exitcode => DATAERR},
+			"Refusing to deploy.  The branch #C{%s} carries no repository, so ".
+			"nothing has been delivered to the environment #C{%s} that a deploy ".
+			"could read.  A deploy certifies the commit of the branch it stands ".
+			"on, and from a branch carrying only what #C{pipeline-apply} cut it ".
+			"would deploy from control, certifying a commit no propagation routed ".
+			"there.  The branch is #C{genesis pipeline-apply}'s to create and ".
+			"#C{genesis propagate}'s to fill, so run #C{genesis propagate} to ".
+			"deliver control to it.  Nothing was deployed.",
+			$branch, $name
+		);
 	}
 
 	return {
