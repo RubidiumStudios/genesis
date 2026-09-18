@@ -366,6 +366,7 @@ integration-tests/genesis_ci_walk-two_roots.t                 # two roots sharin
 integration-tests/genesis_ci_walk-exit_codes.t                # the status says which stage the run ended in
 integration-tests/genesis_ci_walk-preview.t                   # the withdrawn flags are refused, and the preview names each commit, its files, and its verdict
 integration-tests/genesis_ci_status-drift.t                   # both axes reported at once, and every drifted file named beside the hand commit
+integration-tests/genesis_ci_status-held.t                    # the held qualifier and the routing reason in the words the propagation run prints
 integration-tests/genesis_ci_status-record.t                  # one canonical record per environment, emitted as JSON and rendered as the tree
 integration-tests/genesis_ci_status-rendering.t               # detail in brackets, each component in its own colour, and the row in the worst one
 integration-tests/genesis_ci_report-outcomes.t                # one outcome per environment, one line per routed commit, and the overwritten file

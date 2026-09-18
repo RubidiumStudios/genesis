@@ -144,10 +144,16 @@ C<Genesis::CI::PullRequest::freeze> is the only writer of the reason and it
 always writes the number beside it.
 
 An environment with a propagation hold standing against it reads C<< needs
-clearing (<reason>) >> ahead of any of those, because a hold is a decision
-somebody made for a reason the pipeline cannot see and only a person clears
-it, so it outranks whatever the commits underneath it happen to be waiting
-for.
+clearing (<reason>) >> ahead of any of those, the never-applied answer
+included, because a hold is a decision somebody made for a reason the pipeline
+cannot see and only a person clears it, so it outranks whatever the commits
+underneath it happen to be waiting for.  An environment can be in both states
+at once, since both are read for every environment the run and C<genesis
+pipeline-status> read, and the ranking is settled here so that the two
+commands cannot rank them apart.  The hold wins because the apply is a command
+the operator may run at once while the hold is a decision standing in front of
+it, and clearing the hold leaves the apply as what the environment waits for.
+L</hold_detail> says meanwhile what the hold is holding.
 
 A record carrying no certified state at all is read ahead of even that, and
 so outranks the standing hold.  The walk fills the certified state for every

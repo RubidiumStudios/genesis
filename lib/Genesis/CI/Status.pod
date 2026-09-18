@@ -224,8 +224,8 @@ B<Examples:>
 Returns one environment's status phrase as a list of class and text pairs, in
 the fixed order the design gives, which is the certification word, the routing
 summary, the branch's own state where no run may start from it, the snapshot
-flag, and C<[manual]>.  Detail belongs in square brackets after the word it
-qualifies, so a branch carrying a hand edit reads
+flag, the hold, and C<[manual]>.  Detail belongs in square brackets after the
+word it qualifies, so a branch carrying a hand edit reads
 C<drifted [ops/shared.yml differs: hand commit]>, and the trailing C<[manual]>
 is a marker
 rather than detail, which its own dim class tells apart.  A branch the remote
@@ -234,6 +234,19 @@ what they are with the operator's remedy in the brackets, because a report
 that only refused to describe them would leave the repository unexplained.  An
 environment that failed to load carries its error alone, because nothing else
 the row holds was read.
+
+A held environment carries the word C<held> and then the qualifier the
+propagation run records for it, which is one of C<needs clearing> with the
+reason, C<awaiting pipeline-apply>, and C<awaiting deployment> with the
+environment and the commit, followed by the reason the walk gave the held
+commit.  Where an ancestor's undeployed set is what holds that commit, the
+reason carries the ancestor's own state as a clause, so the phrase reads the
+same words C<genesis propagate --dry-run> prints.  Both come from
+C<Genesis::CI::Report>, which owns every word an operator reads about an
+outcome, and the word C<held> is written here because this is where the
+command decides the outcome.  Every held component takes the on-ice class,
+because a hold is something a person set or the topology imposed and nothing
+is moving until it is cleared.
 
 B<Parameters:>
 

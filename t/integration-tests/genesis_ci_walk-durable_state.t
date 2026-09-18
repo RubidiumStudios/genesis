@@ -225,15 +225,20 @@ subtest 'an absent input is read and never guessed at' => sub {
 	# environment the run reads.  An environment the pipeline was never applied
 	# to is one the run reads and does not walk, and D56 asks that a hold
 	# standing over it be reported rather than left unsaid.
+	#
+	# D56 also decides which of the two the qualifier names.  A hold is a
+	# decision somebody made and only a person clears it, so it outranks the
+	# apply the environment is otherwise waiting for, and the apply is what
+	# the environment reads as waiting for once the hold is gone.
 	my $held = two_stage(certified => ['lab']);
 	certify($held, 'qa');
 	fixture_hold($held, 'qa', reason => 'the kit upgrade lands first');
 
 	my (undef, $held_err) = run_genesis($held, {answers => ['y']}, 'propagate');
-	like($held_err, qr/^\s*qa: held, awaiting pipeline-apply/m,
-		'the environment still reads as awaiting the apply');
+	like($held_err, qr/^\s*qa: held, needs clearing \(the kit upgrade lands first\)/m,
+		'the hold answers ahead of the apply the environment also waits for');
 	like($held_err, qr/pipeline-release/,
-		'and the hold standing over it is reported too');
+		'and the command that clears it is named');
 };
 
 subtest 'two overlapping runs read only durable state' => sub {
