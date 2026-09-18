@@ -584,37 +584,62 @@ sub restore_branch {
 	bail("A branch session never restores #C{%s}, which is the control branch",
 		$branch) if defined $self->{control} && $branch eq $self->{control};
 
-	return 'reset' if $self->_reset_to_remote($branch);
-
-	# The remote has no tip for it, so the tip this session read at the
-	# switch is the only thing there is to put it back to.  A hard reset is
-	# what puts the tree back with the ref where we are standing on the
-	# branch, and set_branch_ref refuses that case by name.
-	my $found = $self->{switched}{$branch};
-	if (defined $found) {
-		($git->current_branch // '') eq $branch
-			? $git->reset_hard($found)
-			: $git->set_branch_ref($branch, $found);
-		return 'reset';
+	my $put_back = 'reset';
+	unless ($self->_reset_to_remote($branch)) {
+		# The remote has no tip for it, so the tip this session read at the
+		# switch is the only thing there is to put it back to.  A hard reset
+		# is what puts the tree back with the ref where we are standing on the
+		# branch, and set_branch_ref refuses that case by name.
+		my $found = $self->{switched}{$branch};
+		if (defined $found) {
+			($git->current_branch // '') eq $branch
+				? $git->reset_hard($found)
+				: $git->set_branch_ref($branch, $found);
+		} else {
+			# Neither the remote nor this run's own record has a tip for it,
+			# so the branch is one this run created and putting it back is
+			# taking it off.  git will not delete the branch the tree stands
+			# on, and the run may have stopped while standing on this one, so
+			# the session steps back to the branch it began on before the ref
+			# goes.
+			#
+			# The step back is a checkout rather than a switch, and it asks
+			# nothing about the session being open.  An abort clears that flag
+			# before it puts any branch back, so a switch here would be refused
+			# on exactly the path that most needs the step, and the delete
+			# would then answer for a branch still standing.  A session begun
+			# on a detached HEAD has no branch to step back to, and the guard
+			# reads the recorded name for that.
+			$self->_through_the_door(
+				sub {$git->checkout($self->{origin}{branch})})
+				if $self->{origin} && defined $self->{origin}{branch}
+				&& ($git->current_branch // '') eq $branch;
+			$git->delete_branch($branch) if $git->branch_exists($branch);
+			$put_back = 'deleted';
+		}
 	}
 
-	# Neither the remote nor this run's own record has a tip for it, so the
-	# branch is one this run created and putting it back is taking it off.
-	# git will not delete the branch the tree stands on, and the run may have
-	# stopped while standing on this one, so the session steps back to the
-	# branch it began on before the ref goes.
-	#
-	# The step back is a checkout rather than a switch, and it asks nothing
-	# about the session being open.  An abort clears that flag before it puts
-	# any branch back, so a switch here would be refused on exactly the path
-	# that most needs the step, and the delete would then answer for a branch
-	# still standing.  A session begun on a detached HEAD has no branch to
-	# step back to, and the guard reads the recorded name for that.
-	$self->_through_the_door(sub {$git->checkout($self->{origin}{branch})})
-		if $self->{origin} && defined $self->{origin}{branch}
-		&& ($git->current_branch // '') eq $branch;
-	$git->delete_branch($branch) if $git->branch_exists($branch);
-	return 'deleted';
+	# The branch leaves the committed set once it is back where the run found
+	# it, exactly as discard takes it off.  An abort running afterwards has no
+	# business revisiting a branch that is already put back, and for a branch
+	# this run cut the second pass would answer 'deleted' for a delete it never
+	# made.
+	delete $self->{committed}{$branch};
+	return $put_back;
+}
+
+# }}}
+# switched_to - whether this session recorded a switch to one branch {{{
+#
+# restore_branch puts a branch back to the tip the session read at the switch,
+# and takes off a branch neither the remote nor that record has a tip for,
+# because such a branch is one this run cut.  A branch this session never
+# switched to has no record either, so restoring one would take off a local
+# branch this run did not make.  A caller that reaches for the restore over a
+# branch it may never have stood on asks here first.
+sub switched_to {
+	my ($self, $branch) = @_;
+	return (defined $branch && exists $self->{switched}{$branch}) ? 1 : 0;
 }
 
 # }}}

@@ -450,6 +450,15 @@ exit as a bare 1 instead.  The run therefore stops on a colliding prefix with
 the operator still on the branch they started from and no call made to the
 API.
 
+That first reading is of whatever branch the operator is standing on, so the
+same question is asked again once the session has stood the run on control,
+which is what catches a collision only control's own files carry.  The second
+refusal goes through the run's own closure, so the session closes and the
+named exit survives, and the message it caught is quoted once rather than
+re-raised with a second banner on top of it.  What it composes is kept for
+the state read below, since naming a pull request branch compares it against
+every deployment branch in the pipeline.
+
 A run with no C<GITHUB_AUTH_TOKEN> still writes and publishes those branches
 and says so, because the branches are the delivery and the pull request is
 what the next run with a token opens on top of it.

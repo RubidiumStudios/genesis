@@ -673,6 +673,17 @@ a switch and asks nothing about the session still being open, so a branch this
 run cut is taken off on an abort exactly as it is on a decline. A session begun
 on a detached HEAD has no branch to step back to, and the step is skipped.
 
+The branch then leaves the set L</committed_branches> answers, exactly as
+C<discard> takes it off. An abort running afterwards has no business
+revisiting a branch that is already back where the run found it, and for a
+branch this run cut the second pass would answer C<deleted> for a delete it
+never made.
+
+It restores what the session recorded, so a caller holding a branch name it
+may never have switched to asks L</switched_to($branch)> first. A branch with no
+remote tip and no recorded tip is read here as one this run cut, and one the
+session never stood on is indistinguishable from that.
+
 B<Parameters:>
 
 =over 4
@@ -710,6 +721,40 @@ B<Examples:>
   $session->restore_branch('pr/qa/bosh');
   # returns 'deleted', where this run cut the branch and the remote never
   # held it
+
+=head2 switched_to($branch)
+
+  $session->restore_branch($branch) if $session->switched_to($branch);
+
+Whether this session recorded a switch to one branch. Returns 1 or 0.
+
+L</restore_branch($branch)> puts a branch back to the tip the session read at the
+switch, and takes off a branch neither the remote nor that record has a tip
+for, because such a branch is one this run cut. A branch this session never
+switched to has no record either, so restoring one would take off a local
+branch this run did not make. A caller that reaches for the restore over a
+branch it may never have stood on asks here first.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch to ask about. An undefined name answers 0.
+
+=back
+
+B<Returns:> 1 where the session recorded a switch to the branch, whether or
+not the branch existed at the time, and 0 otherwise.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  $session->switch('pr/qa/bosh', create_from => 'qa/bosh');
+  $session->switched_to('pr/qa/bosh');   # 1, the run cut it
+  $session->switched_to('prod/bosh');    # 0, never stood on
 
 =head2 apply_files($source_sha, %opts)
 

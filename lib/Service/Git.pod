@@ -1158,18 +1158,26 @@ B<Examples:>
   my @files = $git->diff_names('HEAD~1', 'HEAD');
   # returns ('ops/thing.yml')
 
-=head2 diff_stat
+=head2 commit_stat
 
-  my @lines = $git->diff_stat($from, $to);
-  my @lines = $git->diff_stat($from, $to, @pathspecs);
+  my @lines = $git->commit_stat($commit);
+  my @lines = $git->commit_stat($commit, @pathspecs);
 
-The C<git diff --stat> lines between two refs, optionally scoped to a
-pathspec, as a list with the blank lines dropped.
+The C<git diff --stat> lines for what one commit changed, optionally scoped
+to a pathspec, as a list with the blank lines dropped.
 
 This is what each entry of a pull request aggregate's body carries, so a
 reviewer reads the same summary of a control commit they would read on
 control itself. The lines come back in the shape git prints them, the
 per-file lines and the count that closes them alike.
+
+It takes the commit rather than a pair of endpoints, and it reads through
+C<git diff-tree --root>, because a commit with no parent is a commit like any
+other. An environment introduced on control's own first commit has that
+commit due on its first run, and a summary asked for against a parent it does
+not have is one git refuses outright.
+C<Genesis::CI::Walk::changed_set> reads a commit's paths the same way and for
+the same reason.
 
 The width of the graph column is fixed rather than left to git, which would
 otherwise size it against the terminal it thinks it is writing to. The answer
@@ -1180,9 +1188,9 @@ B<Parameters:>
 
 =over 4
 
-=item C<$from>, C<$to>
+=item C<$commit>
 
-The refs to compare.
+The commit to summarise.
 
 =item C<@pathspecs>
 
@@ -1191,8 +1199,8 @@ whole change is summarised.
 
 =back
 
-B<Returns:> The list of summary lines. Empty where nothing within the
-pathspec differs.
+B<Returns:> The list of summary lines. Empty where the commit changed nothing
+within the pathspec.
 
 B<Errors:>
 
@@ -1200,8 +1208,8 @@ B<Errors:>
 
 =item *
 
-C<< "Cannot summarise <from> against <to> in <root>" >> - raised with the
-C<Genesis::Exit::DATAERR> exit code when git cannot take the diff. The
+C<< "Cannot summarise <commit> in <root>" >> - raised with the
+C<Genesis::Exit::DATAERR> exit code when git cannot take the summary. The
 standard error is kept apart from the answer for the reason C<diff_names>
 keeps its own apart: a git that refuses the command writes its reason where
 the summary would be, and those lines would otherwise be printed into a
@@ -1211,8 +1219,11 @@ commit message as though they were a summary.
 
 B<Examples:>
 
-  my @lines = $git->diff_stat('HEAD~1', 'HEAD', 'prod.yml');
+  my @lines = $git->commit_stat('HEAD', 'prod.yml');
   # returns (' prod.yml | 2 ++', ' 1 file changed, 2 insertions(+)')
+
+  my @lines = $git->commit_stat($root_commit, 'prod.yml');
+  # returns (' prod.yml | 3 +++', ' 1 file changed, 3 insertions(+)')
 
 =head2 ls_files
 

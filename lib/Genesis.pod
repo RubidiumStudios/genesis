@@ -3102,6 +3102,47 @@ B<Examples:>
     sentence_join('a', 'b', 'c');     # Returns: 'a, b and c'
     sentence_join();                  # Returns: ''
 
+=head2 bail_text
+
+    my $said = bail_text($@);
+
+What a C<bail> said inside an C<eval>, with the banner and the wrap it put on
+taken off, so a caller quoting it formats once.
+
+Inside an C<eval>, C<bail> dies with its message already coloured, already
+wrapped to the terminal, and already prefixed C<[FATAL]> on every line it
+folded. A caller that catches one and interpolates it whole into a refusal of
+its own hands the operator a banner in the middle of a paragraph and two wrap
+widths in one message. The colour and the prefix come off here, and the hard
+wrap inside each paragraph is undone, which leaves the outer refusal one
+paragraph per paragraph to wrap once for itself.
+
+The blank lines stay, because they are the caught message's own structure
+rather than the wrap's, and a refusal that ran its paragraphs together would
+lose the shape its author gave it. A caller that wants one line instead wants
+L</without_backtrace>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$text>
+
+The caught text, normally C<$@>. An undefined value answers an empty string.
+
+=back
+
+B<Returns:> The paragraphs of the message, each on one line, joined by blank
+lines. Empty where nothing was said.
+
+B<Examples:>
+
+    my $said = bail_text(
+        "\n[FATAL] The pull request branch for qa would be\n".
+        "[FATAL] pr-lab/bosh, which is the deployment branch.\n\n".
+        "[FATAL] Change pipeline.source_control.pr_prefix.\n");
+    # Returns two paragraphs, each on one line and neither bannered
+
 =head2 without_backtrace
 
     my $message = without_backtrace($@);
