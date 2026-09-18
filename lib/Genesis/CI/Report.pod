@@ -221,6 +221,53 @@ B<Examples:>
   # returns "1 commit is blocked for a reason of its own, and stays blocked
   #          while this hold stands"
 
+=head2 note_detail
+
+    Genesis::CI::Report::note_detail($record, $line);
+
+Appends one qualifier to the environment's C<outcome_detail>, so a run with
+more than one thing to say there says all of them.
+
+I8 puts the bare enum word in C<outcome> and everything qualifying it in
+C<outcome_detail>, and L</render_run> joins the two with a comma. More than
+one writer has something to say there on one run: the pull request arm writes
+what the rebuild discarded, and L<Genesis::CI::Publish/publish_run> writes
+what the remote made of the push, and both land on the same record. A writer
+that assigned the field would drop whichever line was written first, which on
+a refused push is the sentence naming the work the rebuild threw away. A line
+that is undefined or empty is ignored, and the qualifiers already standing
+are kept in the order they were written, separated by a semicolon.
+
+It lives here rather than beside either writer, because L</render_run> is what
+reads the field and a rule about how the field is filled belongs beside the
+thing that prints it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The walk's per-environment record, whose C<outcome_detail> is appended to in
+place.
+
+=item C<$line>
+
+The qualifier to add. An undefined or empty line leaves the record alone.
+
+=back
+
+B<Returns:> the record, so a caller may chain.
+
+B<Examples:>
+
+    note_detail($record, 'and something else');
+    # $record->{outcome_detail} reads 'what it already said; and something
+    # else'
+
+    note_detail($record, undef);
+    # the record is left exactly as it stands
+
 =head2 render_run
 
     Genesis::CI::Report::render_run($record, git => $git, dry_run => 0);
@@ -443,6 +490,13 @@ beside it in C<outcome_detail>, and an environment with nothing standing at
 all writes C<idempotent>.  A record that already carries an outcome is left
 exactly as whoever knew wrote it, which is the walk for a failure and the run
 for a delivery.
+
+The qualifier is assigned rather than appended through L</note_detail>, and
+that is right here: nothing an environment reaching this sub can be carrying
+was written into the field already.  The one writer that appends before the
+report runs is the pull request arm's discard region, and an environment that
+reaches that region has an outcome by the time the arm returns, while a freeze
+returns above it and writes nothing there at all.
 
 B<Parameters:>
 

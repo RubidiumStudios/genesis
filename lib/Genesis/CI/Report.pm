@@ -17,7 +17,8 @@ use Exporter qw/import/;
 use Genesis qw/info warning bug/;
 
 our @EXPORT_OK = qw/
-	held_qualifier hold_reason hold_detail render_run render_preview
+	held_qualifier hold_reason hold_detail note_detail
+	render_run render_preview
 	ENV_OUTCOMES COMMIT_OUTCOMES FILE_OUTCOME AWAITING_APPLY
 /;
 
@@ -236,6 +237,27 @@ sub hold_detail {
 }
 
 # }}}
+# note_detail - add one qualifier to an environment's outcome_detail {{{
+#
+# I8 puts the bare enum word in outcome and everything qualifying it in
+# outcome_detail, and more than one writer has something to say there on one
+# run.  The delivery writes what the rebuild discarded, and the publish writes
+# what the remote made of the push, and both land on one record.  The
+# qualifiers are appended rather than assigned, so a run with two of them says
+# both rather than dropping whichever was written first.
+#
+# It lives here rather than beside either writer, because render_run is what
+# reads the field and a rule about how the field is filled belongs next to the
+# thing that prints it.
+sub note_detail {
+	my ($record, $line) = @_;
+	return $record unless defined $line && length $line;
+	$record->{outcome_detail} = join('; ',
+		grep {defined && length} $record->{outcome_detail}, $line);
+	return $record;
+}
+
+# }}}
 # }}}
 ### The report {{{
 
@@ -436,6 +458,13 @@ sub preview_warnings {
 # held with its qualifier beside it, and an environment with nothing at all
 # to show writes idempotent.  Everything else was decided by whoever knew,
 # which is the walk for a failure and the run for a delivery.
+#
+# The qualifier is assigned here rather than appended through note_detail,
+# and that is right: nothing an environment reaching this sub can be carrying
+# was written into the field already.  The one writer that appends before the
+# report runs is the pull request arm's discard region, and an environment
+# that reaches it has an outcome by the time the arm returns, while a freeze
+# returns above the discard region and writes nothing there at all.
 sub _settle {
 	my ($env) = @_;
 

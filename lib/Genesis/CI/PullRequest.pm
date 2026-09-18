@@ -14,6 +14,7 @@ use warnings;
 use Genesis qw/bail bail_text bug info warning/;
 use Genesis::Exit;
 use Genesis::CI::Marker;
+use Genesis::CI::Report qw/note_detail/;
 
 use Exporter qw/import/;
 our @EXPORT_OK = qw/client_for_run pr_state sync_pull_request/;
@@ -269,12 +270,20 @@ sub discard_report {
 	my ($git, $branch, $base) = @_;
 	return undef unless $git->branch_exists($branch);
 
+	# One walk answers all three fields.  log_subjects splits a record into
+	# the sha and everything after the first unit separator, so a format
+	# carrying the author between the sha and the body leaves the author at
+	# the head of what comes back and the message behind it.  A call per
+	# commit would read the same range once for the subjects and once more
+	# for every markerless commit in it.
 	my (%authors, $count);
-	for my $entry ($git->log_subjects("$base..$branch", body => 1)) {
-		next if Genesis::CI::Marker::in_text($entry->{message});
-		my ($author) = $git->log_subjects($entry->{sha},
-			limit => 1, format => '%an');
-		$authors{$author}++ if defined $author && length $author;
+	for my $entry ($git->log_subjects("$base..$branch",
+			body => 1, format => '%H%x1f%an%x1f%B')) {
+		my ($author, $message) = split /\x1f/, $entry->{message}, 2;
+		next if Genesis::CI::Marker::in_text($message // '');
+		# A set rather than a tally, because nothing reads a count per
+		# author and a tally implies one is available.
+		$authors{$author} = 1 if defined $author && length $author;
 		$count++;
 	}
 	return undef unless $count;
@@ -284,29 +293,20 @@ sub discard_report {
 
 # }}}
 # discard_line - the qualifier the report prints beside the outcome {{{
+#
+# The by clause is rendered only where there is a name to put in it.  git
+# refuses an empty author, so the nameless case is not one an operator will
+# meet, but the reader above counts a commit whose author it could not read
+# and a clause composed unconditionally would render "by ," on it.
 sub discard_line {
 	my ($branch, $report) = @_;
+	my @authors = @{$report->{authors} || []};
 	return sprintf(
-		"%d commit%s on %s that this run did not write, by %s, discarded by ".
+		"%d commit%s on %s that this run did not write,%s discarded by ".
 		"the rebuild",
 		$report->{count}, $report->{count} == 1 ? '' : 's', $branch,
-		join(', ', @{$report->{authors}})
+		@authors ? sprintf(' by %s,', join(', ', @authors)) : ''
 	);
-}
-
-# }}}
-# note_detail - add one qualifier to the environment's outcome_detail {{{
-#
-# I8 puts the bare enum word in outcome and everything qualifying it in
-# outcome_detail, and this arm has more than one thing to say there.  The
-# qualifiers are appended rather than assigned, so a run with two of them says
-# both rather than dropping whichever was written first.
-sub note_detail {
-	my ($record, $line) = @_;
-	return $record unless defined $line && length $line;
-	$record->{outcome_detail} = join('; ',
-		grep {defined && length} $record->{outcome_detail}, $line);
-	return $record;
 }
 
 # }}}
