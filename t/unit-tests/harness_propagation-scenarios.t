@@ -107,7 +107,7 @@ subtest 'the two scenarios that carry commits answer in both contexts' => sub {
 };
 
 subtest 'the three shapes whose arguments the step files fixed' => sub {
-	plan tests => 11;
+	plan tests => 15;
 
 	my $unseeded = staged(envs => ['lab']);
 	ok(remote_sha($unseeded, $unseeded->slug('lab')),
@@ -123,6 +123,29 @@ subtest 'the three shapes whose arguments the step files fixed' => sub {
 	ok(remote_sha($prod, $prod->slug('prod')), 'and cuts prod');
 	is(record_at($prod, $prod->env_path('prod') . '/hold'), undef,
 		'and writes no hold of its own, which the rows write themselves');
+
+	# held_prod_delivered's whole promise is the delivery and the
+	# certification held_prod leaves out, so the two are read side by side.
+	# The marker is what a delivery leaves on the branch and the state is
+	# what a certification writes, and held_prod carries neither.
+	my $delivered = held_prod_delivered();
+	ok(harness_marker($delivered, $delivered->slug('prod')),
+		'held_prod_delivered delivers to prod');
+	is(record_at($delivered, $delivered->env_path('prod'))->{state}, 'success',
+		'and certifies it');
+	is(harness_marker($prod, $prod->slug('prod')), undef,
+		'while held_prod is left delivering to nowhere');
+
+	# The coupling deployable_prod exists to keep in one place is that the
+	# director record names the port its own listener took.  A record built
+	# from a number written twice passes every row that dials nothing and
+	# fails the first deploy it is handed, so the two are read against each
+	# other here rather than left to a deploy to discover.
+	my $deployable = deployable_prod(pipeline => 0, applied => 0);
+	my $port = $deployable->{director}->port;
+	like(record_at($deployable, $deployable->env_path('prod'))->{url},
+		qr/:\Q$port\E$/,
+		"deployable_prod's director record names the port its listener took");
 
 	my ($pr_h, $gh, $pr, $control) = with_open_pr();
 	ok($pr, 'with_open_pr answers the pull request number');
@@ -164,6 +187,22 @@ subtest 'the second deployment root is delivered under its own prefix' => sub {
 		"and not the first root's");
 	ok(exists files_at($h, $h->slug('lab'))->{'lab.yml'},
 		"while the first root's branch holds its own");
+};
+
+subtest 'the environment body a row commits for itself' => sub {
+	# env_body is exported so that a row laying its own commits on control
+	# writes the body these shapes write, rather than a copy of it that can
+	# fall out of step.  Its two promises are what the rows read: the file
+	# loads as an environment, which takes a kit declared as a block and a
+	# genesis.env key, and it carries the counter that gives a second commit
+	# something to change.
+	plan tests => 2;
+
+	my $body = env_body('prod', 2);
+	like($body, qr/^genesis:\n  env: prod$/m,
+		'env_body names the environment Genesis loads the file as');
+	like($body, qr/^n: 2$/m,
+		'and carries the counter that gives two commits a delta');
 };
 
 subtest 'the scenarios that write on control publish it' => sub {

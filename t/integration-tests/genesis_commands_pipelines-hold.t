@@ -23,8 +23,9 @@ $ENV{NOCOLOR} = 1;
 subtest 'pipeline-hold writes the record with its four fields' => sub {
 	# Ten rows, the first of which is the restoration this row asserts in
 	# its own words, which is why the run is given restore => 0, and one
-	# more for the refused run, which asserts its restoration for itself.
-	plan tests => 10;
+	# more for each of the two refused runs, which assert their restoration
+	# for themselves.
+	plan tests => 12;
 
 	my $h = held_prod_delivered();
 
@@ -42,15 +43,15 @@ subtest 'pipeline-hold writes the record with its four fields' => sub {
 	have_secret "$path:at";
 
 	# A reason of several words left unquoted arrives as several arguments,
-	# which is the likeliest mistake this command invites.  These three rows
-	# are guards over what the operator meets, and they do not separate the
-	# refusal of more than two arguments from the refusal of a missing
-	# reason: a call carrying four arguments matches neither reading, so it
-	# reaches the missing-reason refusal anyway, and the two answer with the
-	# same code and the same usage block.  What tells them apart is the
-	# sentence command_usage is given, and that sentence is printed only
-	# outside a test run.  What the rows do hold is that the call is turned
-	# away and that nothing it said reached the record.
+	# which is the likeliest mistake this command invites.  It matches
+	# neither of the two readings, so both names stay undefined and it meets
+	# the one refusal this command has, the one that asks for a reason, whose
+	# sentence names the quoting for exactly this caller.
+	#
+	# These three rows are guards over what the operator meets, and none of
+	# them can fail while any refusal stands in that position: the exit code
+	# and the usage block are command_usage's whatever sentence it was given.
+	# The row below them is the one that reads the sentence itself.
 	my ($said, $why, $refused) = run_genesis($h,
 		'pipeline-hold', 'prod', 'waiting', 'on', 'capacity');
 	is($refused, 2, 'an unquoted reason is refused with the usage code');
@@ -59,6 +60,19 @@ subtest 'pipeline-hold writes the record with its four fields' => sub {
 		'and answered with this command\'s own usage');
 	is(secret("$path:reason"), 'waiting on the capacity report',
 		'and left the standing record as it was');
+
+	# command_usage prints the sentence it was given only outside a test
+	# run, taking the whole branch at Genesis::Commands:994 when
+	# GENESIS_TESTING is set, so the one run in this file that reads a
+	# refusal's own words is made with the variable taken away.  Everything
+	# else about the run is unchanged, and it is the only reading under
+	# which an operator ever meets the sentence.
+	my ($told, $how) = do {
+		delete local $ENV{GENESIS_TESTING};
+		run_genesis($h, 'pipeline-hold', 'prod', 'waiting', 'on', 'capacity');
+	};
+	like(unfolded($told, $how), qr/reason of more than one word has to be quoted/,
+		'and told to quote a reason of several words');
 };
 
 subtest 'the reason is required' => sub {
@@ -78,6 +92,39 @@ subtest 'the reason is required' => sub {
 	like(unfolded($out, $err), qr/reason/i,
 		'the refusal names the reason as required');
 	no_secret $h->env_path('prod').'/hold';
+};
+
+subtest 'a file of the root named alone is a mistyped environment' => sub {
+	# Four rows, and one more for the run's own restoration assertion.
+	#
+	# Genesis reads an environment out of `<env>.yml` alone, so a root that
+	# also holds a `prod.yaml` gives an operator two spellings and only one
+	# of them resolves.  Named on its own the other one used to be read as a
+	# reason, which held every environment in the root and wrote the
+	# filename in as why, so all four rows below fail without the refusal.
+	#
+	# The run is made with GENESIS_TESTING taken away, for the reason the
+	# first subtest gives: the sentence that names the file is the point of
+	# this refusal, and command_usage prints it only outside a test run.
+	plan tests => 5;
+
+	my $h = held_prod_delivered(envs => ['lab', 'prod']);
+	$h->commit_on_control(
+		files   => {'prod.yaml' => "---\nstray: true\n"},
+		message => 'Leave a stray file beside prod',
+		push    => 1,
+	);
+
+	my ($out, $err, $exit) = do {
+		delete local $ENV{GENESIS_TESTING};
+		run_genesis($h, 'pipeline-hold', 'prod.yaml');
+	};
+	is($exit, 2, 'the call is refused with the usage code');
+	like(unfolded($out, $err), qr/prod\.yaml.*is a file in this deployment root/,
+		'and the refusal names the file rather than reading it as a reason');
+
+	no_secret $h->env_path('prod').'/hold';
+	no_secret $h->env_path('lab').'/hold';
 };
 
 subtest 'a hold stops delivery in direct mode' => sub {

@@ -15,19 +15,25 @@ use Harness::Propagation;
 use Test::More;
 
 use Genesis;
+use Sys::Hostname ();
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'the release deletes the record and keeps no fields' => sub {
-	# Five rows, one of which is this row's own restoration assertion, and
+	# Six rows, one of which is this row's own restoration assertion, and
 	# one more for the hold run, which asserts its restoration for itself.
-	plan tests => 6;
+	plan tests => 7;
 
 	my $h    = held_prod_delivered();
 	run_genesis($h, 'prod', 'pipeline-hold', 'waiting on the capacity report');
 	my $path = $h->env_path('prod').'/hold';
 	have_secret "$path:reason";
+
+	# The time is read off the record before the release deletes it, so the
+	# row below compares the two halves of one contract rather than matching
+	# a phrase the sentence happens to carry.
+	my $at = secret("$path:at");
 
 	my $w = snapshot_w($h);
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
@@ -36,31 +42,61 @@ subtest 'the release deletes the record and keeps no fields' => sub {
 	is($exit, 0, 'the command succeeded');
 
 	no_secret $path;
-	# The record is gone by the row above, so what is left to watch for is a
-	# released-by field spoken rather than written.  The line the release
-	# prints names who ran it, and a field of that name in it would be the
-	# first sign that the record had grown one.
+
+	# The second sentence is the half of the release's output that carries
+	# the record, and it is written as its own info call, guarded on the
+	# record having come back.  This row is what keeps a later reader from
+	# folding the two calls back into one and printing two uninitialised
+	# values where clear_hold answers an unreadable path as cleared.
+	like(unfolded($out, $err),
+		qr/held since \Q$at\E: waiting on the capacity report/,
+		'and says when the hold had been set and what for');
+
+	# The record is gone by the no_secret row above, so what is left to
+	# watch for is a released-by field spoken rather than written.  The line
+	# the release prints names who ran it, and a field of that name in it
+	# would be the first sign that the record had grown one.
+	#
+	# This row was green before the command existed, since the run then
+	# printed "Unrecognized command" and nothing else, so it is a guard over
+	# what the output must go on not saying rather than a driver.  It is
+	# weaker than it reads, too: a released-by field written to vault would
+	# be caught by the no_secret row above, so what this one adds is the
+	# watch on the output alone.
 	unlike(unfolded($out, $err), qr/released.by|released_by/i,
 		'no released-by field was written anywhere');
 };
 
 subtest 'the release is logged with the identity that ran it' => sub {
-	# Two rows, and one more for each of the two runs' own restoration
-	# assertions.
-	plan tests => 4;
+	# Four rows, and one more for the run's own restoration assertion.
+	#
+	# T299 asks for the identity of whoever ran the release, and a record
+	# written by the same process on the same host cannot tell that from the
+	# identity of whoever took the hold.  So the hold is planted through the
+	# fixture under an identity no run here can compose, and the two rows
+	# below pull the readings apart: an implementation that read the record
+	# back at the operator would name the planter and fail both of them.
+	plan tests => 5;
 
 	my $h = held_prod_delivered();
-	run_genesis($h, 'prod', 'pipeline-hold', 'waiting on the capacity report');
+	$h->fixture_hold('prod',
+		reason   => 'waiting on the capacity report',
+		user     => 'quartermaine',
+		hostname => 'another.example.com');
 
-	# The identity is read back out of the record the hold wrote, because
-	# that is the contract's other half.  A hostname composed here from the
-	# shell can answer a fully qualified name where the module answers a
-	# short one, and the row would then fail on the host and not the code.
-	my $path = $h->env_path('prod').'/hold';
-	my $who  = sprintf('%s@%s', secret("$path:user"), secret("$path:hostname"));
+	# The identity the release should print is composed here the way the
+	# command composes it, through the same Sys::Hostname call rather than
+	# through the shell, which can answer a fully qualified name where the
+	# module answers a short one and fail the row on the host and not the
+	# code.
+	my $who = sprintf('%s@%s', $ENV{USER}, Sys::Hostname::hostname());
 
 	my ($out, $err, $exit) = run_genesis($h, 'prod', 'pipeline-release');
-	like(unfolded($out, $err), qr/\Q$who\E/, 'the log line names who released it');
+	is($exit, 0, 'the command succeeded');
+	like(unfolded($out, $err), qr/\Q$who\E/,
+		'the log line names who released it');
+	unlike(unfolded($out, $err), qr/quartermaine|another\.example\.com/,
+		'and not who had held it, which the record still carried');
 	like(unfolded($out, $err), qr/prod/, 'and names the environment it released');
 };
 
