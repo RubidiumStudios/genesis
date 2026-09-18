@@ -1158,6 +1158,62 @@ B<Examples:>
   my @files = $git->diff_names('HEAD~1', 'HEAD');
   # returns ('ops/thing.yml')
 
+=head2 diff_stat
+
+  my @lines = $git->diff_stat($from, $to);
+  my @lines = $git->diff_stat($from, $to, @pathspecs);
+
+The C<git diff --stat> lines between two refs, optionally scoped to a
+pathspec, as a list with the blank lines dropped.
+
+This is what each entry of a pull request aggregate's body carries, so a
+reviewer reads the same summary of a control commit they would read on
+control itself. The lines come back in the shape git prints them, the
+per-file lines and the count that closes them alike.
+
+The width of the graph column is fixed rather than left to git, which would
+otherwise size it against the terminal it thinks it is writing to. The answer
+is going into a commit message, where the width of the author's terminal is
+nobody's business.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$from>, C<$to>
+
+The refs to compare.
+
+=item C<@pathspecs>
+
+Optional git-root-relative paths to scope the summary to. With none, the
+whole change is summarised.
+
+=back
+
+B<Returns:> The list of summary lines. Empty where nothing within the
+pathspec differs.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Cannot summarise <from> against <to> in <root>" >> - raised with the
+C<Genesis::Exit::DATAERR> exit code when git cannot take the diff. The
+standard error is kept apart from the answer for the reason C<diff_names>
+keeps its own apart: a git that refuses the command writes its reason where
+the summary would be, and those lines would otherwise be printed into a
+commit message as though they were a summary.
+
+=back
+
+B<Examples:>
+
+  my @lines = $git->diff_stat('HEAD~1', 'HEAD', 'prod.yml');
+  # returns (' prod.yml | 2 ++', ' 1 file changed, 2 insertions(+)')
+
 =head2 ls_files
 
   my @paths = $git->ls_files;

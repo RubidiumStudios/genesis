@@ -776,6 +776,35 @@ sub diff_names {
 }
 
 # }}}
+# diff_stat - the diff --stat lines for one change, scoped to a pathspec {{{
+#
+# Each entry of D49's aggregate body carries the files one control commit
+# changed within this environment's propagation set, in the shape git prints,
+# so a reviewer reads the same summary they would read on control.
+#
+# The width is fixed rather than left to git, because git sizes the graph
+# column against the terminal it thinks it is writing to and the answer here
+# is going into a commit message, where the width the author's terminal
+# happened to have is nobody's business.
+#
+# The status is read and the standard error kept apart, the way diff_names
+# reads its own, because a git that refuses the command writes its reason
+# where the file names would be and those lines would be printed into a commit
+# message as though they were a summary.
+sub diff_stat {
+	my ($self, $from, $to, @pathspecs) = @_;
+	my @cmd = ('git', 'diff', '--stat', '--stat-width=72', $from, $to);
+	push @cmd, '--', @pathspecs if @pathspecs;
+	my ($out, $rc, $err) = run({dir => $self->{root}, stderr => 0}, @cmd);
+	bail(
+		{exitcode => DATAERR},
+		"Cannot summarise #C{%s} against #C{%s} in #C{%s}:\n%s",
+		$from, $to, $self->{root}, ($err // $out // 'git gave no reason')
+	) if $rc;
+	return grep { /\S/ } split /\n/, ($out || '');
+}
+
+# }}}
 # mirror_tree - the tree a mirror of these paths at this commit makes {{{
 #
 # A delivery is a mirror, so the tree it produces is entirely decided by the
