@@ -5483,7 +5483,18 @@ sub update_deployment_exodus {
 			# could only predict.
 			my $tracking = $self->top->pipeline_enabled;
 			if ($tracking) {
-				my ($resolved) = $self->dependency_set;
+				my ($resolved, $whole) = $self->dependency_set;
+				# A resolve that could not render answers the declared set
+				# alone and says so in its second value.  Writing that as
+				# though it were whole records a fact smaller than the
+				# prediction it is compared against, so the staleness query
+				# reports a change on every run and no apply can clear it,
+				# which is the failure this record exists to prevent reached
+				# from the other side.  The set already recorded is carried
+				# forward instead, and it is read here because the write
+				# below replaces it, since the last answer known to be whole
+				# is a better fact than one known to be short.
+				$resolved = $self->last_read_dependencies unless $whole;
 				$self->note_dependency_read($_) for @$resolved;
 			}
 
