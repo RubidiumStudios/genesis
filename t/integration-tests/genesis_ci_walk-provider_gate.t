@@ -47,8 +47,8 @@ subtest 'the applied record with the pipeline disabled refuses' => sub {
 };
 
 subtest 'a bare run under an automated provider refuses' => sub {
-	# Four rows, and one more for the run's own restoration assertion.
-	plan tests => 5;
+	# Five rows, and one more for the run's own restoration assertion.
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['lab', 'qa'], provider => 'concourse');
 	fixture_applied($h,
@@ -61,14 +61,22 @@ subtest 'a bare run under an automated provider refuses' => sub {
 	is($exit, Genesis::Exit::NOPERM, 'it exits NOPERM');
 	like($said, qr/pipeline/, 'it names the pipeline that owns the work');
 	like($said, qr/--force/, 'it names the one way past');
+	# The refusal is raised ahead of the walk and ahead of any write, so it
+	# closes the way the abort closes, and all three of the run's exits now
+	# say the same thing.  The words are shared with the deploy through the
+	# gate's outcome option, and nothing else reads them, so without this
+	# row an edit could drop them from one caller and leave the two texts
+	# out of step.
+	like($said, qr/Nothing was written\./,
+		'and it closes by saying nothing was written');
 	unlike($out, qr/control\@/, 'it refused before it walked');
 };
 
 subtest 'what a spawned run can show of the gate' => sub {
-	# Five rows, and one more for each of the three runs' own restoration
+	# Six rows, and one more for each of the three runs' own restoration
 	# assertions.  No run here has a controlling terminal, because nothing
 	# the suite spawns does, so --force alone can only be refused.
-	plan tests => 8;
+	plan tests => 9;
 
 	my $h = make_harness(envs => ['lab', 'qa'], provider => 'concourse');
 	fixture_applied($h,
@@ -76,9 +84,11 @@ subtest 'what a spawned run can show of the gate' => sub {
 		provider => 'concourse');
 	certify($h, 'lab', control_commit => $h->git('a')->sha($h->control));
 
-	my (undef, undef, $force_exit) = run_genesis($h, 'propagate', '--force');
+	my (undef, $force_err, $force_exit) = run_genesis($h, 'propagate', '--force');
 	is($force_exit, Genesis::Exit::NOPERM,
 		'force alone keeps the refusal with no terminal');
+	like(unfolded($force_err), qr/Nothing was written\./,
+		'and that refusal closes with the same words as the bare one');
 
 	my (undef, undef, $task_exit) =
 		run_genesis($h, {pipeline_task => 'propagate'}, 'propagate');

@@ -118,7 +118,7 @@ subtest 'anything but the acknowledgement aborts' => sub {
 };
 
 subtest '--yes never answers the acknowledgement' => sub {
-	plan tests => 2;
+	plan tests => 4;
 
 	no warnings 'redefine';
 	local *Genesis::CI::Preflight::in_controlling_terminal = sub {1};
@@ -134,6 +134,25 @@ subtest '--yes never answers the acknowledgement' => sub {
 
 	like($out.$err, qr/I accept the risk/, '-y never answers the gate');
 	ok($result, 'and the answer that was typed is the one that carries it');
+
+	# The row above catches only a gate that returns before it asks.  A gate
+	# that asked and then let -y supply the answer would pass it unchanged,
+	# so this one asks with -y set and types the wrong thing: the refusal is
+	# what proves the answer came off the keyboard and not off the flag.
+	set_stdin("yes\n");
+	my ($declined, $code);
+	output_from {
+		($declined, $code) = refusal_from(sub {
+			Genesis::CI::Preflight::assert_provider_gate(
+				$top, {force => 1, yes => 1}, %how
+			)
+		})
+	};
+	reset_stdin();
+
+	is($code, ABORTED, 'a wrong answer with -y set still aborts');
+	like($declined, qr/Nothing was deployed\./,
+		"in the caller's own closing words");
 };
 
 subtest 'outside a terminal the refusal stands even with --force' => sub {
