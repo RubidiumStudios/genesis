@@ -248,6 +248,68 @@ sub expected_tip {
 }
 
 # }}}
+# discard_report - the commits on the branch this run did not write {{{
+#
+# The branch is derived state, reproducible from the deployment branch and the
+# due commits, so the rebuild is right.  I4 still forbids resolving a
+# divergence silently, so what the rebuild is about to destroy is counted and
+# its authors named first (D51).
+#
+# A commit this run's own kind wrote carries a marker naming a control commit,
+# so anything above the deployment branch without one was pushed by hand.  The
+# marker is asked for without naming an environment, because a commit carrying
+# any marker at all was written by a propagate run and none of them is a hand
+# push.
+#
+# Both refs are local, which is right: the caller has just brought the local
+# pull request branch level with R, and the deployment branch's local ref is
+# the one the delivery is about to be made from.  Reading origin/ on one side
+# and the working ref on the other would compare two different moments.
+sub discard_report {
+	my ($git, $branch, $base) = @_;
+	return undef unless $git->branch_exists($branch);
+
+	my (%authors, $count);
+	for my $entry ($git->log_subjects("$base..$branch", body => 1)) {
+		next if Genesis::CI::Marker::in_text($entry->{message});
+		my ($author) = $git->log_subjects($entry->{sha},
+			limit => 1, format => '%an');
+		$authors{$author}++ if defined $author && length $author;
+		$count++;
+	}
+	return undef unless $count;
+
+	return {count => $count, authors => [sort keys %authors]};
+}
+
+# }}}
+# discard_line - the qualifier the report prints beside the outcome {{{
+sub discard_line {
+	my ($branch, $report) = @_;
+	return sprintf(
+		"%d commit%s on %s that this run did not write, by %s, discarded by ".
+		"the rebuild",
+		$report->{count}, $report->{count} == 1 ? '' : 's', $branch,
+		join(', ', @{$report->{authors}})
+	);
+}
+
+# }}}
+# note_detail - add one qualifier to the environment's outcome_detail {{{
+#
+# I8 puts the bare enum word in outcome and everything qualifying it in
+# outcome_detail, and this arm has more than one thing to say there.  The
+# qualifiers are appended rather than assigned, so a run with two of them says
+# both rather than dropping whichever was written first.
+sub note_detail {
+	my ($record, $line) = @_;
+	return $record unless defined $line && length $line;
+	$record->{outcome_detail} = join('; ',
+		grep {defined && length} $record->{outcome_detail}, $line);
+	return $record;
+}
+
+# }}}
 # deliver - the pull request arm for one environment {{{
 #
 # The branch carries exactly one commit above the deployment branch, so the
@@ -299,6 +361,14 @@ sub deliver {
 	# the session records the absence so the reset can take it off again.
 	$session->switch($pr->{branch}, create_from => $record->{branch});
 	align_with_remote($git, $pr->{branch});
+
+	# Read what we are about to destroy before we destroy it, because the
+	# rebuild is right and silence about it is not (I4, D51).
+	if (my $discarded = discard_report($git, $pr->{branch}, $record->{branch})) {
+		$pr->{discarded} = $discarded;
+		note_detail($record, discard_line($pr->{branch}, $discarded));
+	}
+
 	$git->reset_hard($record->{branch});
 
 	# The newest due commit's own control sha, under the name the walk gives
