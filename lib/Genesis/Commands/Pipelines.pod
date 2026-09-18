@@ -426,10 +426,20 @@ commands can never disagree about what is held and why.
 A repository with a second deployment root is read by running the command in
 that root, as every other pipeline command reads one.
 
-The command refreshes the remote-tracking refs first and writes nothing.  It
-asks the pre-flight for its branch records read-only, so a branch a run would
-have fast-forwarded stands where it stood and the report reads the ref that
-run would have left it on.
+The command moves no branch and writes nothing to vault.  It asks the
+pre-flight for its branch records read-only, so a branch a run would have
+fast-forwarded stands where it stood and the report reads the ref that run
+would have left it on.  The refresh it does first does write: it materialises
+a local ref for every pipeline branch the remote already holds and this clone
+lacks, and it says so on standard error as it goes.
+
+A reachable vault is required.  The reading comes from the same walk
+C<genesis propagate> uses, and that walk reads the applied record and every
+environment's certified commit out of exodus, so a repository whose vault
+cannot be reached is reported as a row of unreadable environments rather than
+as a row of blank deploy columns.  That is the point: a status that guessed at
+a certified commit would be the disagreement between the report and the run
+this read model exists to end.
 
 B<Options (via C<get_options>):>
 

@@ -66,12 +66,11 @@ subtest 'pipeline-status resolves the configured branch head' => sub {
 	init_branch($hv, 'qa');
 	refresh($hv, 'a');
 
-	# There is no branch called `control` in this repository, so reading
-	# the constant asks git for a revision that does not exist and the
-	# header carries git's complaint instead of a sha.
+	# There is no branch called `control` in this repository, so the header
+	# says outright which of the two the reader took.
 	my ($out) = $hv->run_genesis({restore => 0}, 'pipeline-status');
-	unlike $out, qr/Needed a single revision/,
-		'the header resolves a real branch rather than failing to';
+	like $out, qr/control:\s*trunk\@/,
+		'the header names the branch the repository declared';
 	my ($head) = Harness::Propagation::run(
 		{dir => $hv->a}, 'git', 'rev-parse', '--short', 'trunk');
 	chomp $head;

@@ -34,16 +34,32 @@ sub ghost_env_file {
 		'    track_additional_files:', '    - ops/shared.yml', '');
 }
 
+# A valid environment file with a note under params, which is where a row puts
+# the delta a commit needs to make.  The kit block is the one write_env_file
+# lays down, because the harness installs that kit at the root's dev directory
+# and a file naming another one cannot be loaded.
+sub env_file_with {
+	my ($env, $note) = @_;
+	return join("\n", '---', 'kit:', '  name:    dev', '  version: latest',
+		'  features: []', 'genesis:', "  env: $env", 'params:',
+		"  note: $note", '');
+}
+
 sub env_row {
 	my ($record, $name) = @_;
 	my ($row) = grep { $_->{env} eq $name } @{$record->{environments}};
 	return $row;
 }
 
+# The moment the first row's deployment is certified at, pinned rather than
+# taken from the clock, so the row can compare what --json emits against the
+# exact string vault was given.
+our $CERTIFIED_AT = '2026-09-18 03:48:52 +0000';
+
 subtest 'one record carries the reading, the marker, and the routing' => sub {
-	# Five assertions, and one more for the restoration run_genesis asserts
+	# Six assertions, and one more for the restoration run_genesis asserts
 	# on the single command this row runs.
-	plan tests => 6;
+	plan tests => 7;
 
 	my $h = make_harness(envs => ['lab'], provider => 'manual',
 		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
@@ -52,7 +68,7 @@ subtest 'one record carries the reading, the marker, and the routing' => sub {
 
 	my $c1 = commit_on_control($h, files => {'ops/shared.yml' => "---\none\n"}, push => 1);
 	deliver($h, 'lab', control => $c1);
-	certify($h, 'lab', control_commit => $c1);
+	certify($h, 'lab', control_commit => $c1, at => $CERTIFIED_AT);
 	my $c2 = commit_on_control($h, files => {'ops/shared.yml' => "---\ntwo\n"}, push => 1);
 	deliver($h, 'lab', control => $c2);
 	my $c3 = commit_on_control($h, files => {'ops/shared.yml' => "---\nthree\n"}, push => 1);
@@ -72,6 +88,8 @@ subtest 'one record carries the reading, the marker, and the routing' => sub {
 		'the deploy column holds the certified control commit');
 	is(scalar @{$row->{pending}}, 1,
 		'the routing the walk decided stands beside the reading');
+	is($row->{deployed}{at}, $CERTIFIED_AT,
+		'the timestamp is emitted in the form vault holds it, timezone and all');
 };
 
 subtest 'the reading enum is the four, and error sits outside it' => sub {
@@ -116,11 +134,28 @@ subtest 'the reading enum is the four, and error sits outside it' => sub {
 };
 
 subtest 'the tree renders the record in DAG order' => sub {
-	# Six assertions and one restoration.
-	plan tests => 7;
+	# Seven assertions and one restoration.
+	#
+	# Six of the seven are guards over what the old renderer already did, and
+	# they are here to hold it rather than to prove the change: the exit code,
+	# the three indentation depths, the column heads, and the absence of the
+	# word certified all passed against the topology walk this read model
+	# replaced, which printed the same heads from the same format and kept its
+	# own depth map.  The one assertion that could not pass against it is the
+	# combined phrase below, because that renderer chose one of six mutually
+	# exclusive strings and so could never say both halves of a row at once.
+	plan tests => 8;
 
 	my $h = ready_harness(envs => ['lab', 'qa', 'prod'], chained => 1,
 		kit => 'omega-v2.7.0');
+
+	# One commit due to lab and to nothing else, since an environment's own
+	# file is in its own propagation set and in no other's.  lab is already
+	# certified at the commit its branch carries, so its row has a settled
+	# certification reading and a routing summary at the same time.
+	commit_on_control($h, files => {'lab.yml' => env_file_with('lab', 'due')},
+		push => 1);
+	refresh($h, 'a');
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
 	is($exit, 0, 'the command exits zero');
@@ -129,6 +164,8 @@ subtest 'the tree renders the record in DAG order' => sub {
 	like($rows[0], qr/^\s{2}lab\b/,    'lab sits at the root of the tree');
 	like($rows[1], qr/^\s{4}qa\b/,     'qa is indented one level under lab');
 	like($rows[2], qr/^\s{6}prod\b/,   'prod is indented two levels under qa');
+	like($rows[0], qr/deployed; 1 pending/,
+		'a row that is deployed and has a commit due says both, not one of six');
 	like($out, qr/branch\s+deploy\s+status/,
 		'the branch and deploy columns stand beside the status phrase');
 	unlike($out, qr/certified/,
@@ -162,6 +199,26 @@ subtest 'the status reads the same walk the run reads' => sub {
 	my (undef, $dry) = run_genesis($h, 'propagate', '--dry-run', '-y');
 	like($dry, qr/held by lab/,
 		'the dry run withholds the same commit for the same reason');
+};
+
+subtest 'a repository with no pipeline still shows the header whole' => sub {
+	# Three assertions and one restoration.
+	plan tests => 4;
+
+	# The provider accessor answers undef wherever the pipeline is switched
+	# off, and the refusal that used to stand in front of this command is
+	# gone, so the header has to name a provider of its own accord.
+	my $h = make_harness(envs => ['lab'], pipeline => 0,
+		kit => 'omega-v2.7.0');
+	init_branch($h, 'lab');
+	refresh($h, 'a');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
+	is($exit, 0, 'the command reports rather than refusing');
+	like($out, qr/provider:\s*manual/,
+		'no configured provider reads as manual, which is what it means');
+	unlike($err, qr/uninitialized/,
+		'and the header is built without a warning about an empty cell');
 };
 
 done_testing;
