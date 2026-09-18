@@ -196,11 +196,17 @@ subtest 'the environment body a row commits for itself' => sub {
 	# loads as an environment, which takes a kit declared as a block and a
 	# genesis.env key, and it carries the counter that gives a second commit
 	# something to change.
-	plan tests => 2;
+	plan tests => 3;
 
 	my $body = env_body('prod', 2);
+	# The kit has to arrive as a block mapping.  is_valid_env_file reads the
+	# kit's name and version out of one, so a flow mapping of the same two
+	# keys leaves the repository with no environments at all, which is the
+	# worse of the two ways this body can stop loading.
+	like($body, qr/^kit:\n  name:\s+dev\n  version:\s+latest$/m,
+		'env_body declares the kit as a block mapping');
 	like($body, qr/^genesis:\n  env: prod$/m,
-		'env_body names the environment Genesis loads the file as');
+		'and names the environment Genesis loads the file as');
 	like($body, qr/^n: 2$/m,
 		'and carries the counter that gives two commits a delta');
 };

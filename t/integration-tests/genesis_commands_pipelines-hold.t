@@ -69,6 +69,11 @@ subtest 'pipeline-hold writes the record with its four fields' => sub {
 	# which an operator ever meets the sentence.
 	my ($told, $how) = do {
 		delete local $ENV{GENESIS_TESTING};
+		# Taking GENESIS_TESTING away also takes away the vault's reason not
+		# to prompt.  Stdout is a pipe here, so the vault finds no
+		# controlling terminal and asks for nothing either way, and this
+		# line says so rather than leaving it to how the run is plumbed.
+		local $ENV{GENESIS_NONINTERACTIVE} = 1;
 		run_genesis($h, 'pipeline-hold', 'prod', 'waiting', 'on', 'capacity');
 	};
 	like(unfolded($told, $how), qr/reason of more than one word has to be quoted/,
@@ -117,6 +122,11 @@ subtest 'a file of the root named alone is a mistyped environment' => sub {
 
 	my ($out, $err, $exit) = do {
 		delete local $ENV{GENESIS_TESTING};
+		# Taking GENESIS_TESTING away also takes away the vault's reason not
+		# to prompt.  Stdout is a pipe here, so the vault finds no
+		# controlling terminal and asks for nothing either way, and this
+		# line says so rather than leaving it to how the run is plumbed.
+		local $ENV{GENESIS_NONINTERACTIVE} = 1;
 		run_genesis($h, 'pipeline-hold', 'prod.yaml');
 	};
 	is($exit, 2, 'the call is refused with the usage code');

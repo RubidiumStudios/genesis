@@ -76,6 +76,11 @@ subtest 'the release is logged with the identity that ran it' => sub {
 	# fixture under an identity no run here can compose, and the two rows
 	# below pull the readings apart: an implementation that read the record
 	# back at the operator would name the planter and fail both of them.
+	# The exit row is neither of those, and it is green on arrival, because
+	# a release of a standing hold succeeds whichever identity it prints.
+	# It is a guard, and what it guards is the reading of the three rows
+	# under it, which say nothing about a run that never got as far as a
+	# log line.
 	plan tests => 5;
 
 	my $h = held_prod_delivered();
@@ -89,7 +94,11 @@ subtest 'the release is logged with the identity that ran it' => sub {
 	# through the shell, which can answer a fully qualified name where the
 	# module answers a short one and fail the row on the host and not the
 	# code.
-	my $who = sprintf('%s@%s', $ENV{USER}, Sys::Hostname::hostname());
+	# USER carries the same fallback the command gives it, so a worker that
+	# runs with the variable unset fails this row on the code rather than on
+	# its environment, and the sprintf has no undefined value to warn about.
+	my $who = sprintf('%s@%s',
+		($ENV{USER} // 'unknown'), Sys::Hostname::hostname());
 
 	my ($out, $err, $exit) = run_genesis($h, 'prod', 'pipeline-release');
 	is($exit, 0, 'the command succeeded');
