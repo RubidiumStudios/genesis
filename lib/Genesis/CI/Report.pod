@@ -383,6 +383,9 @@ B<Examples:>
   #   lab: propagated
   #     control@1a2b3c4 Tune lab  delivered
   #       M lab.yml
+  #   dev: publish rejected, dev/bosh moved on R
+  #     control@1a2b3c4 Tune lab
+  #       M lab.yml
   #   qa: held, awaiting deployment (lab at control@1a2b3c4)
   #     control@1a2b3c4 Tune lab  held
   #       H held by lab (lab.yml), lab awaiting deployment
@@ -567,16 +570,24 @@ one of them.  A word from outside it is a defect in whoever wrote the record,
 and the guard names it rather than printing it.  Under a preview C<delivered>
 reads C<would deliver>, and C<held> reads as it stands.
 
+A commit carrying no word at all is answered without the guard, because the
+publish writes a word only onto the commits it published.  Under a preview
+that is every routed commit, and each reads C<would deliver>, since a preview
+publishes nothing and the verb is the one thing it has to say.  Under a run it
+is a commit that went nowhere, and the answer is the empty string, so the line
+carries the commit and no word about it.
+
 B<Parameters:>
 
 =over 4
 
 =item C<$outcome>
 
-The word for this commit.  The record may carry one, and where it carries none
-the renderer reads the default its axis carries, which is C<delivered> for a
-commit under C<pending> and C<held> for one under C<held>.  Both defaults go
-once the publish stage writes a word per commit.
+The word for this commit, or undef where nothing wrote one.  A commit under
+C<pending> is handed the record's own value, which the publish fills in for
+what it published and leaves undef for what it did not.  A commit under
+C<held> is handed the default C<held>, because every commit on that axis is
+held by definition and no stage writes the word per commit.
 
 =item C<$preview>
 
@@ -584,9 +595,11 @@ True where the caller is previewing.
 
 =back
 
-B<Returns:> The word to print.
+B<Returns:> The word to print, or the empty string for a commit a run wrote
+no word onto.
 
-B<Errors:> Raises a bug where the word is not one of C<COMMIT_OUTCOMES>.
+B<Errors:> Raises a bug where the word is not one of C<COMMIT_OUTCOMES>.  A
+commit with no word at all is not one of those cases.
 
 B<Examples:>
 

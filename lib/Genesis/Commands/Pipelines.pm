@@ -962,17 +962,21 @@ sub propagate {
 	# them said the run had delivered work the remote never took, directly
 	# under a report saying it had not.
 	#
-	# A preview settles no outcome at all, because it publishes nothing and
-	# routes into a record it then throws away, so what it counts is what it
-	# routed, which is every environment the walk left an outcome off.
+	# A preview publishes nothing, so there is no publish to settle an
+	# outcome and the word the count reads is the one the preview itself
+	# wrote.  Genesis::CI::Report::render_preview puts would propagate on
+	# every environment it routed commits to, and it has already run by the
+	# time the count is taken, so the count asks that sub's own constant for
+	# the word rather than spelling it here or reading the null the walk
+	# left, which is no longer null by now.
 	my $delivered = 0;
 	my $due       = 0;
 	for my $env (@{$record->{environments} || []}) {
 		my $routed = scalar @{$env->{pending} || []};
 		$due += $routed;
-		$delivered += $routed if $dry_run
-			? !defined $env->{outcome}
-			: ($env->{outcome} // '') eq 'propagated';
+		$delivered += $routed if ($env->{outcome} // '') eq ($dry_run
+			? Genesis::CI::Report::WOULD_PROPAGATE()
+			: 'propagated');
 	}
 
 	if ($publish && $publish->{declined}) {

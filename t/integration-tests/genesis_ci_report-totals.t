@@ -2,9 +2,10 @@
 # A run whose one branch the remote refused published nothing, so the totals
 # line counts none of its commits and says nothing about changes to
 # propagate, while the same run with nothing in its way counts the one commit
-# it published.  An environment the run could not read keeps the outcome that
-# says so, whether or not a branch was ever cut for it, and contributes
-# nothing to the count either.
+# it published.  A preview counts what it would have delivered, off the word
+# its own report wrote.  An environment the run could not read keeps the
+# outcome that says so, whether or not a branch was ever cut for it, and
+# contributes nothing to the count either.
 use strict;
 use warnings;
 use utf8;
@@ -34,8 +35,8 @@ sub ghost_env_file {
 }
 
 subtest 'a refused branch contributes none of its commits' => sub {
-	# Three assertions and one restoration.
-	plan tests => 4;
+	# Four assertions and one restoration.
+	plan tests => 5;
 
 	my ($h) = due_harness(envs => ['lab'], count => 1, kit => 'omega-v2.7.0');
 	move_on_r_at($h, 'lab/bosh', at => 'push', nth => 1);
@@ -48,6 +49,14 @@ subtest 'a refused branch contributes none of its commits' => sub {
 		'the totals line counts no commit the remote refused');
 	unlike($said, qr/No changes to propagate/,
 		'and it does not read as a quiet run either');
+	# The commit axis under a refused environment, read off the report's own
+	# lines rather than the unfolded text, because the word sits at the end
+	# of one line and the unfolded form runs the lines together.  The publish
+	# writes delivered onto the commits of an environment the remote took and
+	# leaves a refused environment's alone, so a commit line here calling one
+	# delivered is the totals line's own contradiction one axis down.
+	unlike($err, qr/^\s*control\@[0-9a-f]{7}.*\bdelivered\b/m,
+		'and no commit line under it calls a refused commit delivered');
 };
 
 subtest 'a run that published its commit counts it' => sub {
@@ -59,6 +68,21 @@ subtest 'a run that published its commit counts it' => sub {
 	my ($out, $err) = run_genesis($h, 'propagate', '-y');
 	like(unfolded($out, $err), qr/Delivered 1 commit/,
 		'the one published commit is the one the totals line counts');
+};
+
+subtest 'a preview counts the commits it would deliver' => sub {
+	# One assertion and one restoration.
+	plan tests => 2;
+
+	# A preview publishes nothing and settles no environment's outcome the
+	# way a run does, so the count it ends on cannot be read off the word the
+	# publish writes.  The report writes its own word first, and this is the
+	# row that says the count and the report read the same record.
+	my ($h) = due_harness(envs => ['lab'], count => 1, kit => 'omega-v2.7.0');
+
+	my ($out, $err) = run_genesis($h, 'propagate', '--dry-run', '-y');
+	like(unfolded($out, $err), qr/Would deliver 1 commit/,
+		'the preview ends on the count of what it would have delivered');
 };
 
 subtest 'a branchless environment that fails to load stays failed' => sub {
