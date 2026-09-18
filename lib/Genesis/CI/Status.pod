@@ -1,0 +1,264 @@
+=head1 NAME
+
+Genesis::CI::Status - The pipeline-status read model
+
+=head1 SYNOPSIS
+
+  use Genesis::CI::Status;
+
+  my $record = Genesis::CI::Status::status_records($top, git => $git);
+  print Genesis::CI::Status::render_json($record);
+  print Genesis::CI::Status::render_tree($record);
+
+=head1 DESCRIPTION
+
+Builds the canonical status record for one deployment root and renders it
+either as the indented tree or as JSON.  The module computes nothing about
+routing itself; it calls the propagation walk and reads the walk's own
+per-environment record.  It writes nothing, to git or to vault, and it asks
+the pre-flight for its branch records read-only, so a branch a run would have
+fast-forwarded stands exactly where it stood.
+
+A command runs in one deployment root, so there is one record and one
+rendering of it.  A repository with a second deployment root is read by
+running the command in that root, as every other pipeline command reads one.
+
+The module also declares C<UNVERIFIABLE>, which is the word every cell resting
+on a refresh carries where the operator asked for none, and C<%CLASS_MARKUP>
+and C<%CLASS_GLYPH>, which map the five classes C<settled>, C<in_flight>,
+C<on_ice>, C<wrong>, and C<inert> onto the markup letters and the glyphs
+L<Genesis::Term> already has, so the renderer writes no escape sequence of its
+own.  C<@CLASS_ORDER> is those classes worst first, which is the order
+C<worst_class> reads them in.
+
+=head1 FUNCTIONS
+
+=head2 status_records($top, %opts)
+
+  my $record = Genesis::CI::Status::status_records($top, git => $git);
+
+Returns the canonical record for the deployment root it is handed.  It
+refreshes the remote-tracking refs unless told not to, asks the pre-flight for
+control and for the branch records, and hands both to the propagation walk, so
+this command and C<genesis propagate> read one answer rather than two.  The
+event lines the refresh raised are reported on standard error as it goes, and
+the record itself is the return value.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The L<Genesis::Top> for the deployment root the command is running in.
+
+=item C<git>
+
+The L<Service::Git> to read through.  One is built on the current directory
+where the caller names none.
+
+=item C<refresh>
+
+False to read the refs as they stand, which is what C<--no-refresh> asks for.
+It defaults to true.
+
+=item C<scope>
+
+The environments to read, passed through to the walk.  Undefined reads every
+environment the deployment root has.
+
+=back
+
+B<Returns:> the record, as a hash reference, in the shape
+L<Genesis::CI::Walk/plan> answers with.
+
+B<Examples:>
+
+  # The report as the operator asked for it, without a fetch.
+  my $record = Genesis::CI::Status::status_records($top,
+      git => $git, refresh => 0);
+  # $record->{environments}[0]{reading} eq 'deployed'
+
+=head2 render_json($record)
+
+  print Genesis::CI::Status::render_json($record);
+
+Encodes one root's record as JSON in canonical key order, as one object.  A
+command runs in one deployment root, so there is one object and never an
+array.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The record C<status_records> answered with.
+
+=back
+
+B<Returns:> the encoded record as a string, ending in a newline.
+
+B<Examples:>
+
+  my $json = Genesis::CI::Status::render_json($record);
+  # {"applied":{...},"control":{...},"environments":[...],...}
+
+=head2 render_tree($record, %opts)
+
+  print Genesis::CI::Status::render_tree($record);
+
+Renders one root's record as the header, the column heads, and one line per
+environment in DAG order, each indented to its depth and carrying its branch
+column, its deploy column, and its composed phrase.  The header names the
+pipeline by the label the configuration gives it, and by the deployment type
+where a repository names no label.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The record C<status_records> answered with.
+
+=item C<stale>
+
+True where nobody refreshed, which marks the cells that rest on a refresh.
+
+=back
+
+B<Returns:> the rendered tree as a string, ending in a newline.
+
+B<Examples:>
+
+  print Genesis::CI::Status::render_tree($record, stale => 1);
+  #   lab   6084166  6084166  + deployed
+  #     qa  82f6746  6084166  ! awaiting deployment; 1 pending
+
+=head2 compose_phrase($row, %opts)
+
+  my @phrase = Genesis::CI::Status::compose_phrase($row);
+
+Returns one environment's status phrase as a list of class and text pairs, in
+the fixed order the design gives, which is the certification word first and
+the routing summary after it.  An environment that failed to load carries its
+error alone, because nothing else the row holds was read.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$row>
+
+One entry of the record's C<environments> list.
+
+=item C<stale>
+
+True where nobody refreshed, which marks a component resting on a refresh.
+
+=back
+
+B<Returns:> the components, as a list of array references of a class and its
+text.
+
+B<Examples:>
+
+  my @phrase = Genesis::CI::Status::compose_phrase($row);
+  # ([in_flight => 'awaiting deployment'], [in_flight => '1 pending'])
+
+=head2 worst_class(@components)
+
+  my $class = Genesis::CI::Status::worst_class(@phrase);
+
+Returns the worst class present among a phrase's components, in the order
+wrong, on ice, in flight, settled, inert, which is the class the row's glyph
+and environment name take.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@components>
+
+The components C<compose_phrase> answered with.
+
+=back
+
+B<Returns:> the class name, and C<inert> where the phrase is empty.
+
+B<Examples:>
+
+  my $class = Genesis::CI::Status::worst_class(
+      [settled => 'deployed'], [in_flight => '1 pending']);
+  # 'in_flight'
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _jsonable($value)
+
+  my $plain = Genesis::CI::Status::_jsonable($record);
+
+Copies a structure with every object in it written out as the text it prints
+as.  A deployment's timestamp reaches the record as a L<Time::Piece>, and an
+encoder handed an object of any kind raises rather than guessing at one, so
+each is written as its own string and the encoder's booleans alone go through
+untouched.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+Any structure of hashes, arrays, and scalars.
+
+=back
+
+B<Returns:> a copy of the structure with no blessed reference left in it.
+
+B<Examples:>
+
+  my $plain = Genesis::CI::Status::_jsonable({at => Time::Piece->new});
+  # {at => 'Fri Sep 18 03:48:52 2026'}
+
+=head2 _short($sha)
+
+  my $short = Genesis::CI::Status::_short($sha);
+
+Abbreviates one commit sha to the seven characters every column of this report
+prints, so the run's report and this one print one sha at one width.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$sha>
+
+A commit sha, or undefined.
+
+=back
+
+B<Returns:> the first seven characters, or undefined where there was no sha.
+
+B<Examples:>
+
+  my $short = Genesis::CI::Status::_short('6084166abc123');
+  # '6084166'
+
+=head1 SEE ALSO
+
+L<Genesis::CI::Walk>, which builds the record this renders.
+L<Genesis::CI::Report>, which owns the words the run says about an outcome.
+
+=head1 AUTHOR
+
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
+
+=cut

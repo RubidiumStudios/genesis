@@ -394,6 +394,15 @@ sub initial_state {
 	my $action  = $opts{action}  // sprintf('run #C{genesis %s}', $opts{command} // 'propagate');
 	my $outcome = $opts{outcome} // 'Nothing was written.';
 
+	# Two callers want the stage to move nothing, and they want it for two
+	# different reasons.  A preview holds its writes back because the operator
+	# asked to be shown a run rather than given one, and it says so in the
+	# caveats D44 fixes.  A report holds them back because reporting is all it
+	# ever does, and a caveat about a run nobody is about to make would be a
+	# sentence it has no business printing.  So the assumption is one flag and
+	# the preview's wording stays on the other.
+	my $assume = $opts{dry_run} || $opts{read_only};
+
 	my (@local_only, @unrelated);
 	for my $env (@{$opts{envs} // []}) {
 		my $branch = $top->branch_for($env);
@@ -503,7 +512,7 @@ sub initial_state {
 		# above that banner is one the operator meets before they have been
 		# told they are reading a preview.  The event line below is printed
 		# either way, so nothing about the reset goes unsaid.
-		if ($opts{dry_run}) {
+		if ($assume) {
 			# Nothing moved, so the record keeps the state the
 			# classification gave it and names the ref a real run would
 			# have moved the branch to.  A reader that wants the diff base
@@ -562,10 +571,10 @@ sub initial_state {
 		# fast-forward is neither.  It takes their sentence shape all the
 		# same, so an operator who meets all three reads one kind of
 		# sentence rather than two.
-		if ($opts{dry_run}) {
+		if ($assume) {
 			warning(
 				"#Y{This preview assumes }#C{%s}#Y{ is fast-forwarded first.}",
-				$branch);
+				$branch) if $opts{dry_run};
 			$record->{assumed}      = $tracking;
 			$record->{assumed_move} = 'fast-forward';
 		} else {

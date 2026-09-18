@@ -410,6 +410,53 @@ B<Examples:>
   # Describe a specific pipeline layout
   genesis describe sandbox
 
+=head2 pipeline_status()
+
+    genesis pipeline-status
+    genesis pipeline-status --json
+    genesis pipeline-status --no-refresh
+
+Reports where every environment of this deployment root stands, on the
+two-axis read model.  The certification axis holds exactly one reading per
+environment, which is C<deployed>, C<pending-deploy>, C<unseeded>, or
+C<not-propagated>, and the routing the walk decided stands beside it.  The
+reading is computed from the same walk C<genesis propagate> uses, so the two
+commands can never disagree about what is held and why.
+
+A repository with a second deployment root is read by running the command in
+that root, as every other pipeline command reads one.
+
+The command refreshes the remote-tracking refs first and writes nothing.  It
+asks the pre-flight for its branch records read-only, so a branch a run would
+have fast-forwarded stands where it stood and the report reads the ref that
+run would have left it on.
+
+B<Options (via C<get_options>):>
+
+=over 4
+
+=item C<--json>
+
+Emit the canonical record rather than the tree.  The tree renders the same
+record, so nothing is computed twice.
+
+=item C<--no-refresh>
+
+Read the refs as they stand, without fetching first.
+
+=back
+
+B<Returns:> Exits 0 after printing.  See L<Genesis::CI::Status> for the
+record's shape and its two renderings.
+
+B<Examples:>
+
+  # The tree, refreshed first
+  genesis pipeline-status
+
+  # The record the tree renders, for a script to read
+  genesis pipeline-status --json
+
 =head2 propagate
 
     genesis propagate

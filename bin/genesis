@@ -2154,9 +2154,11 @@ define_command("pipeline-status", {
 	summary => "Show propagation status for all pipeline environments.",
 	usage   => "pipeline-status",
 	description =>
-		"Displays the propagation state of each environment in the pipeline ".
-		"DAG: last sync point, number of pending changes, and whether the ".
-		"environment is blocked by an ancestor that needs propagation first.",
+		"Reports where every environment of this deployment root stands.  ".
+		"Each environment carries one reading of whether what its branch ".
+		"holds has been deployed, and the routing the walk decided stands ".
+		"beside it, so this command and `genesis propagate` can never ".
+		"disagree about what is held and why.  The command writes nothing.",
 	function_group => Genesis::Commands::PIPELINE,
 	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	scope          => 'repo',
@@ -2168,6 +2170,10 @@ define_command("pipeline-status", {
 			"remote is marked unverifiable and the header says the report is ".
 			"stale.  This is the only command that takes the option, and it ".
 			"writes nothing either way.",
+
+		'json' =>
+			"Emit the canonical status record instead of the tree.  The tree ".
+			"renders the same record, so the two never disagree.",
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_status');
 # }}}

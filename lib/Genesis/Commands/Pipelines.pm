@@ -20,6 +20,7 @@ use Genesis::CI::Publish;
 use Genesis::CI::PullRequest;
 use Genesis::CI::Report;
 use Genesis::CI::RunFailure qw/one_line/;
+use Genesis::CI::Status;
 use Genesis::CI::Walk;
 use Service::Git;
 use Service::Github;
@@ -291,257 +292,31 @@ sub apply {
 }
 
 # }}}
-# pipeline_status - show propagation state across all environments {{{
+# pipeline_status - report where every environment stands {{{
+#
+# D91's read model.  The command refreshes unless --no-refresh under D40,
+# computes the deployment root's record from the walk, and renders it as JSON
+# or as the tree.  It writes nothing.  The D64 refusal goes in above this, in
+# a later step, where the record it reads is already being read.
 sub pipeline_status {
 
 	my $top = Genesis::Top->new('.');
-	bail("CI is not configured for this repository.")
-		unless $top->pipeline_enabled;
 
 	my $git     = Service::Git->new('.');
-	my $control = $top->control_branch;
+	my $refresh = get_options->{'no-refresh'} ? 0 : 1;
 
-	my $topo = $top->pipeline_topology;
-	bail("No environments with pipeline metadata found.")
-		unless %{$topo->{nodes}};
+	my $record = Genesis::CI::Status::status_records($top,
+		git     => $git,
+		refresh => $refresh,
+	);
 
-	my $nodes     = $topo->{nodes};
-	my $edges     = $topo->{edges};
-	my %children  = %{$topo->{children}};
-	my %parent_of = %{$topo->{parent_of}};
-	my @dag_order = @{$topo->{order}};
+	# The rendered text goes through a '%s' format, because output reads its
+	# first argument as one and both a commit subject and a JSON string can
+	# carry a percent sign.
+	output({raw => 1}, '%s', get_options->{json}
+		? Genesis::CI::Status::render_json($record)
+		: Genesis::CI::Status::render_tree($record, stale => !$refresh));
 
-	# pipeline_status is the one command that reads without refreshing, and
-	# --no-refresh is what says so.  Every T-dependent answer it then gives
-	# carries the unverifiable flag, which M17 renders.
-	my $unverifiable = get_options->{'no-refresh'} ? 1 : 0;
-	my $refreshed = $unverifiable
-		? undef
-		: $top->fetch_pipeline_envs($git, command => 'pipeline-status');
-
-	# pipeline-status reports every state and resolves none, so it asks the
-	# same question and refuses on the one answer that leaves it nothing to
-	# read, which is a control branch that exists nowhere.
-	my $control_state = Genesis::CI::Preflight::require_control($top, $git,
-		refreshed     => $refreshed,
-		command       => 'pipeline-status',
-		unverifiable  => $unverifiable,
-		on_divergence => 'report');
-	info("  #Gi{%s}", $_) for @{$control_state->{events}};
-
-	my $head       = $git->sha($control);
-	my $head_short = $git->sha($head, short => 1);
-
-	# Gather state for each env
-	my %env_state;   # env => { branch_sha, deployed_sha, changed, ... }
-	my %env_changed; # for propagation target computation
-	for my $env_name (@dag_order) {
-		my %state = ( name => $env_name );
-
-		unless ($git->branch_exists($env_name)) {
-			$state{status} = 'no-branch';
-			$env_state{$env_name} = \%state;
-			next;
-		}
-
-		# Branch column: the CONTROL sha that was most recently propagated
-		# to this env (read from the `[pipeline] control@<sha>` marker on
-		# the env branch) — not the env-branch's own HEAD sha.
-		my ($branch_ctl) = _resolve_propagation_base($env_name, $git, $control);
-		$state{branch_sha} = $branch_ctl
-			? $git->sha($branch_ctl, short => 1)
-			: undef;
-
-		my $env = eval { $top->load_env($env_name) };
-		unless ($env) {
-			$state{status} = 'error';
-			# The one caller with a column to print into.  The row below
-			# puts the reason at the end of a fixed table, so a reason
-			# longer than a terminal line wraps the table apart and the
-			# wrapped half reads as a row of its own.
-			$state{error}  = one_line($@, width => 80);
-			$env_state{$env_name} = \%state;
-			next;
-		}
-
-		# Deploy column: the CONTROL sha certified by the last successful
-		# deployment (exodus git.control_commit).  Also used below to
-		# determine deployed-vs-pending status.
-		my $dep_ctl = '';
-		my $env_v = eval { $env->with_vault };
-		if ($env_v) {
-			my $dep = eval { $env_v->deployments->latest_successful };
-			$dep_ctl = $dep ? ($dep->lookup('git.control_commit') || '') : '';
-		}
-		$state{deployed_sha} = $dep_ctl
-			? $git->sha($dep_ctl, short => 1)
-			: undef;
-
-		my @dep_files = $env->propagation_files;
-		my $diff = $git->diff_files($env_name, $head, @dep_files);
-
-		if (@{$diff->{all}}) {
-			$state{changed} = $diff->{all};
-			$state{count}   = scalar @{$diff->{all}};
-			$env_changed{$env_name} = $diff->{all};
-		} else {
-			# Synced — check if branch's control sha matches deploy's
-			my $deployed = ($dep_ctl && $branch_ctl && $dep_ctl eq $branch_ctl) ? 1 : 0;
-			$state{status} = $deployed ? 'deployed' : 'awaiting-deploy';
-		}
-
-		$env_state{$env_name} = \%state;
-	}
-
-	# Who is held, and by whom.  An environment is held where an ancestor is
-	# still sitting on a file the environment's own change touches, and the
-	# ancestor named is the nearest one that shares a file, because that is
-	# the deploy the operator is waiting on.  The walk answers the same
-	# question per commit, and this display answers it over the whole diff.
-	for my $env_name (@dag_order) {
-		my $state = $env_state{$env_name};
-		next if $state->{status};  # already resolved (synced, no-branch, error)
-
-		my ($blocker, %seen);
-		my $ancestor = $parent_of{$env_name};
-		while (defined $ancestor && !$seen{$ancestor}++) {
-			# The same rule the walk holds a commit by, asked here of the
-			# whole diff rather than of one commit, so the two can never
-			# disagree about what counts as an overlap.
-			if (Genesis::CI::Walk::overlap($env_changed{$ancestor} || [],
-					$env_changed{$env_name} || [])) {
-				$blocker = $ancestor;
-				last;
-			}
-			$ancestor = $parent_of{$ancestor};
-		}
-
-		$state->{status}  = defined $blocker ? 'blocked' : 'pending';
-		$state->{blocker} = $blocker if defined $blocker;
-	}
-
-	# Pre-fetch open propagation PRs from GitHub if any env uses require_pr.
-	# One paginated API call covers all envs; non-fatal if credentials are
-	# absent or the call fails — display degrades to [PR required] for all.
-	my %gh_open_prs;  # env_name => PR object for the most-recent open propagation PR
-	{
-		my $has_require_pr = grep { ($nodes->{$_}{require_pr} // 0) } keys %$nodes;
-		if ($has_require_pr && $ENV{GITHUB_AUTH_TOKEN}) {
-			# The pair the API targets is the one the source-control block
-			# resolves, so an override is honoured and the remote read is
-			# the one the pipeline uses rather than whichever remote git
-			# happens to list first.  A pair it cannot resolve was refused
-			# by name at configuration load, so there is nothing to guard.
-			my $repository = $top->source_control_repository;
-			my ($gh_owner) = split m{/}, $repository, 2;
-			my $github = Service::Github->new(org => $gh_owner);
-			# The head is matched against the branch each environment
-			# would be given, so the name this column reads and the
-			# name propagation opens come from the same accessor and
-			# cannot disagree.  The names are composed outside the
-			# eval below, because that eval is there to let missing
-			# credentials and a failed API call degrade quietly, and
-			# a prefix that collides with a branch name is neither.
-			# The names go in with each ask for the reason propagate's own
-			# two checks pass them: naming a pull request branch compares it
-			# against every deployment branch in the pipeline, and this map
-			# would otherwise build one whole topology per environment.
-			my @names = keys %$nodes;
-			my %pr_branch_env = map {
-				($top->pr_branch_for($_, envs => \@names) => $_)
-			} @names;
-			eval {
-				my $prs = $github->list_prs($repository, state => 'open');
-				for my $pr (@$prs) {
-					my $env = $pr_branch_env{$pr->{head}{ref} // ''};
-					$gh_open_prs{$env} //= $pr if defined $env;
-				}
-			};
-			# Silently degrade on error — status output continues without PR info
-		}
-	}
-
-	# Display
-	my $pipeline_name = $top->config->get('pipeline.name') || $top->type;
-	my $provider_type = $top->pipeline_provider_type // 'manual';
-
-	output "\n#G{Pipeline}: #C{%s}  #Yi{provider}: %s  #Yi{control}: %s",
-		$pipeline_name, $provider_type, $head_short;
-	output "";
-
-	# Compute column width: widest (indent + name) across all envs
-	my $col_width = 0;
-	my %depth_of;
-	for my $env_name (@dag_order) {
-		my $depth = 0;
-		my $p = $parent_of{$env_name};
-		while ($p) { $depth++; $p = $parent_of{$p}; }
-		$depth_of{$env_name} = $depth;
-		my $w = ($depth * 2) + length($env_name);
-		$col_width = $w if $w > $col_width;
-	}
-
-	# SHA columns: fixed-width (7-char short SHA + padding).  Displays
-	# the env branch's HEAD and the last successfully deployed commit
-	# side by side so drift is visually obvious.
-	my $sha_col = sub {
-		my ($sha) = @_;
-		return sprintf("%-7s", defined($sha) ? $sha : '-');
-	};
-
-	output "  %s  #u{%-7s}  #u{%-7s}  #u{%s}",
-		' ' x $col_width, 'branch', 'deploy', 'status';
-
-	for my $env_name (@dag_order) {
-		my $state  = $env_state{$env_name};
-		my $status = $state->{status};
-		my $depth  = $depth_of{$env_name};
-		my $indent = '  ' x $depth;
-		my $pad    = $col_width - ($depth * 2) - length($env_name);
-		$pad = 0 if $pad < 0;
-		my $name_col = sprintf("%s%s%s", $indent, $env_name, ' ' x $pad);
-		my $branch   = $sha_col->($state->{branch_sha});
-		my $deployed = $sha_col->($state->{deployed_sha});
-
-		if ($status eq 'deployed') {
-			output "  #G{%s}  %s  %s  #G\@{+}#G{deployed}",
-				$name_col, $branch, $deployed;
-		} elsif ($status eq 'awaiting-deploy') {
-			output "  #C{%s}  %s  %s  #Y\@{O}#Y{synced, pending deploy}",
-				$name_col, $branch, $deployed;
-		} elsif ($status eq 'pending') {
-			my $req_pr  = ($nodes->{$env_name} || {})->{require_pr} // 0;
-			if ($req_pr) {
-				my $open_pr = $gh_open_prs{$env_name};
-				if ($open_pr) {
-					output "  #C{%s}  %s  %s  #Y\@{!}#Y{%d pending} #Yi{[PR #%d open: %s]}",
-						$name_col, $branch, $deployed, $state->{count},
-						$open_pr->{number}, $open_pr->{html_url};
-				} else {
-					output "  #C{%s}  %s  %s  #Y\@{!}#Y{%d pending} #Yi{[PR required]}",
-						$name_col, $branch, $deployed, $state->{count};
-				}
-			} else {
-				output "  #C{%s}  %s  %s  #Y\@{!}#Y{%d pending}",
-					$name_col, $branch, $deployed, $state->{count};
-			}
-		} elsif ($status eq 'blocked') {
-			output "  #C{%s}  %s  %s  #Y\@{!}#Yi{blocked by %s} (%d files)",
-				$name_col, $branch, $deployed, $state->{blocker}, $state->{count};
-		} elsif ($status eq 'no-branch') {
-			output "  #K{%s}  %-7s  %-7s  #K\@{*}#K{not propagated}",
-				$name_col, '-', '-';
-		} elsif ($status eq 'error') {
-			# Branch SHA is git-only — we already have it even if the env
-			# itself couldn't be loaded.  Surface what we know plus the
-			# reason instead of pretending the row is blank.
-			my $reason = $state->{error} || 'unknown reason';
-			output "  #R{%s}  %s  %-7s  #R\@{-}#R{load error}: #Ri{%s}",
-				$name_col, $branch, '-', $reason;
-		}
-	}
-
-	output "";
 	exit 0;
 }
 

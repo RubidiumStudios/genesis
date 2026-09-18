@@ -57,14 +57,23 @@ subtest 'propagate switches to the configured name and comes back' => sub {
 subtest 'pipeline-status resolves the configured branch head' => sub {
 	plan tests => 2;
 
+	# A repository of its own, because the read model reads the applied
+	# record and every environment's certified commit, and the harness above
+	# has no vault for either.  Its control branch is named the same way, so
+	# the row still catches a reader that fell back to the constant.
+	my $hv = make_harness(envs => ['qa'], control => 'trunk',
+		kit => 'omega-v2.7.0');
+	init_branch($hv, 'qa');
+	refresh($hv, 'a');
+
 	# There is no branch called `control` in this repository, so reading
 	# the constant asks git for a revision that does not exist and the
 	# header carries git's complaint instead of a sha.
-	my ($out) = $h->run_genesis({restore => 0}, 'pipeline-status');
+	my ($out) = $hv->run_genesis({restore => 0}, 'pipeline-status');
 	unlike $out, qr/Needed a single revision/,
 		'the header resolves a real branch rather than failing to';
 	my ($head) = Harness::Propagation::run(
-		{dir => $h->a}, 'git', 'rev-parse', '--short', 'trunk');
+		{dir => $hv->a}, 'git', 'rev-parse', '--short', 'trunk');
 	chomp $head;
 	like $out, qr/\Q$head\E/,
 		"the header shows trunk's head";
