@@ -422,15 +422,19 @@ sub sync_pull_request {
 	my $pr = $record->{pr} or return undef;
 	return undef unless ($pr->{action} // '') eq 'rebuild';
 
-	$pr->{title} = title_for($pr->{title}, $pr->{superseded});
+	# The composed title goes into a local rather than back onto the record,
+	# because the record's own title is what the aggregate's subject said and a
+	# second call that read it back would append the supersedes list to a title
+	# that already carried it.
+	my $title = title_for($pr->{title}, $pr->{superseded});
 
 	my $answer = $pr->{number}
 		? $github->update_pr($owner_repo, $pr->{number},
-			title => $pr->{title}, body => $pr->{body})
+			title => $title, body => $pr->{body})
 		: $github->create_pr($owner_repo,
 			head  => $pr->{branch},
 			base  => $record->{branch},
-			title => $pr->{title},
+			title => $title,
 			body  => $pr->{body},
 		);
 

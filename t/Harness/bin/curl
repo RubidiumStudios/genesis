@@ -119,8 +119,15 @@ if (!defined $url) {
 	# reaches the branch above rather than reading as a listing.
 	my $owner_repo = $1;
 	if ($method eq 'GET' || $method eq 'HEAD') {
+		# Newest first, which is the order GitHub answers a listing in and
+		# the order the run depends on, because it acts on the first entry as
+		# the most recent attempt.  Answered in the order they were declared,
+		# the listing agreed with that rule only by accident, and a row saying
+		# which pull request was acted on could not tell a newest-first rule
+		# from an oldest-first one.
 		my $want = $url =~ /state=(\w+)/ ? $1 : 'open';
-		$answer = [grep {$want eq 'all' || $_->{state} eq $want} @{$state->{prs} || []}];
+		$answer = [reverse
+			grep {$want eq 'all' || $_->{state} eq $want} @{$state->{prs} || []}];
 	} else {
 		# A create lands in the state, so the listing after it sees what was
 		# made rather than an empty set.

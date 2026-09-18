@@ -623,6 +623,11 @@ The title goes through C<title_for> on the update as well as on the open, so a
 pull request that is already open is retitled to the marker the branch now
 carries rather than keeping the one it was opened with.
 
+That composed title is a local and never goes back onto the record. The
+record's own title is the aggregate's subject, and a second call that read the
+composed one back would append the supersedes list to a title already carrying
+it.
+
 B<Parameters:>
 
 =over 4

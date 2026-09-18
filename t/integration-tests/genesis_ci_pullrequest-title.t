@@ -7,8 +7,9 @@
 # requests open on it warns and is acted on by what a reviewer decided about
 # the first.
 #
-# Neither row is green on arrival, and both of them run against a pull request
-# that is already open, so both meet the same three things in the same order.
+# Neither of the first two rows is green on arrival, and both of them run
+# against a pull request that is already open, so both meet the same three
+# things in the same order.
 # Genesis::curl refuses PATCH outright, so an update of one pull request has
 # never left the process and the run dies there.  The double then serves no
 # PATCH either, so the request falls through every route it has, is answered an
@@ -44,11 +45,11 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# Every body a run sent on a PATCH, decoded, oldest first.
-sub patches {
+# Every PATCH a run sent, oldest first, as the call log recorded it, so a row
+# can read the url it named as well as the body it carried.
+sub patch_calls {
 	my ($gh) = @_;
-	return map {JSON::PP->new->decode($_->{body} // '{}')}
-		grep {($_->{method} // '') eq 'PATCH'} gh_calls($gh);
+	return grep {($_->{method} // '') eq 'PATCH'} gh_calls($gh);
 }
 
 # One due control commit, written through the harness and committed by hand,
@@ -67,7 +68,7 @@ sub due_commit {
 }
 
 subtest 'an unreviewed pull request is rebuilt and retitled' => sub {
-	plan tests => 9;
+	plan tests => 10;
 
 	my $h   = ready(kit => 'omega-v2.7.0');
 	my $gh  = $h->{gh};
@@ -102,7 +103,11 @@ subtest 'an unreviewed pull request is rebuilt and retitled' => sub {
 	is(harness_marker($h, "origin/$pr"), $second,
 		'the branch was rebuilt at the newest due commit');
 
-	my ($patch) = patches($gh);
+	my ($call) = patch_calls($gh);
+	like($call->{url}, qr{/pulls/$number$},
+		'the update named the pull request that was open');
+
+	my $patch = JSON::PP->new->decode($call->{body} // '{}');
 	is($patch->{title},
 		sprintf('[pipeline] control@%s -> prod', $git->sha($second, short => 1)),
 		'the title is the aggregate subject, moved with the marker');
@@ -130,9 +135,13 @@ subtest 'several open pull requests warn and the first decides' => sub {
 	my $gh = $h->{gh};
 	my $pr = $h->pr_branch('prod');
 
-	my $first  = gh_pull_request($gh, env => 'prod', head => $pr,
+	# Declared oldest first and answered newest first, the way GitHub answers
+	# a listing, so the pull request the run acts on is the newer of the two
+	# and a row that read position zero of a declaration order would not say
+	# the same thing.
+	my $older = gh_pull_request($gh, env => 'prod', head => $pr,
 		base => $h->slug('prod'), review => 'none');
-	my $second = gh_pull_request($gh, env => 'prod', head => $pr,
+	my $newer = gh_pull_request($gh, env => 'prod', head => $pr,
 		base => $h->slug('prod'), review => 'none');
 
 	due_commit($h, params => {instances => 2},
@@ -141,15 +150,19 @@ subtest 'several open pull requests warn and the first decides' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
 	is($exit, 0, 'the run succeeded');
 
+	# The next two are guards rather than rows that start red.  The warning and
+	# the numbers beside it are the state reader's own work, which landed with
+	# it, and they are read here because this is the one row that stands two
+	# pull requests up for the reader to warn about.
 	my $said = unfolded($out, $err);
 	like($said, qr/several pull requests are open/i, 'it warns');
-	like($said, qr/#$first, #$second/, 'and reports the rest by number');
+	like($said, qr/#$newer, #$older/, 'and reports the rest by number');
 
-	my @patched = grep {($_->{method} // '') eq 'PATCH'} gh_calls($gh);
-	is(scalar(grep {($_->{url} // '') =~ m{/pulls/$first$}} @patched), 1,
-		'and acts on the first, leaving the second alone');
-	is(scalar(grep {($_->{url} // '') =~ m{/pulls/$second$}} @patched), 0,
-		'which is the one it never touched');
+	my @patched = patch_calls($gh);
+	is(scalar(grep {($_->{url} // '') =~ m{/pulls/$newer$}} @patched), 1,
+		'and acts on the one the listing answers first');
+	is(scalar(grep {($_->{url} // '') =~ m{/pulls/$older$}} @patched), 0,
+		'leaving the other one it never touched');
 };
 
 # Proves T262: a third pull request names the two closed attempts, carries

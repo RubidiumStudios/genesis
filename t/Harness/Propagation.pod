@@ -1206,6 +1206,12 @@ A pull request created through the double lands in that state file, so a
 listing taken after the create sees what was made, and a request for one
 pull request's reviews answers its reviews rather than the collection.
 
+A listing answers newest first, which is the order GitHub answers one in and
+the order the run depends on, because it acts on the first entry as the most
+recent attempt.  A row that declares two pull requests and then asks which
+one the run acted on is asking about that rule, so the double has to hold to
+it rather than answer in the order the row declared them.
+
 An update of one pull request lands there too.  A C<PATCH> on a single pull
 request writes the title, the body, and the state it was sent, and answers
 that pull request whole, so a row can read back what the run left the pull
