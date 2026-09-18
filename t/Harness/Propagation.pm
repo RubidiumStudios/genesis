@@ -32,7 +32,7 @@ our @EXPORT = qw/
 	newest_record trailers_of unfolded
 
 	commit_on_control commit_from_b publish_from_b push_from refresh
-	init_branch deliver propagation_set harness_marker
+	init_branch deliver propagation_set edited_file harness_marker
 	add_deployment_root write_env_file
 	hand_commit local_only_commit squash_merge unrelated_branch
 	diverge move_on_r delete_on_r delete_local
@@ -1472,6 +1472,29 @@ sub propagation_set {
 
 	my @set = grep {my $p = $_; grep {$p =~ $_} @kinds} @all;
 	return sort @set;
+}
+
+# }}}
+# edited_file - the one file in an environment's set a row may safely edit {{{
+#
+# Two files stand a dirty tree up and read what the deploy says about it, and
+# both want the same file: the environment's own, asked of the set rather
+# than spelled out, so a row cannot come to be editing a file the deploy
+# never looks at.  The other members are passed over on purpose, because an
+# edit to .genesis/config takes the deployment root with it and an edit to an
+# ops file may leave the manifest unbuildable.
+#
+# The last segment is what is matched, since propagation_set prefixes every
+# path with the deployment root where the harness has one, and a match on the
+# whole path would answer nothing there and leave a row writing to a name
+# that is half empty.  Where the set carries no such file it dies naming the
+# environment, rather than handing back undef for a row to write through.
+sub edited_file {
+	my ($self, $env, %opts) = @_;
+	my ($file) = grep {m{(?:^|/)\Q$env\E\.yml$}} $self->propagation_set($env, %opts);
+	die "the propagation set for $env carries no $env.yml to edit\n"
+		unless defined $file;
+	return $file;
 }
 
 # }}}

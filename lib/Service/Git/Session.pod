@@ -991,6 +991,41 @@ B<Examples:>
   my $paths = $session->modified_paths;
   # returns [] on a clean tree, whatever untracked files are lying about
 
+=head2 modified_paths_of($git)
+
+  my $paths = Service::Git::Session::modified_paths_of($git);
+
+The same list, for a caller that holds a git handle and has no session to ask.
+C<modified_paths> is this function over the session's own handle, so the two
+answers cannot drift apart.
+
+C<genesis E<lt>envE<gt> deploy> is the caller it exists for. Two arms of the
+branch-class gate open no session at all, and on those the deploy asserts
+D84's precondition itself; the files it names an operator have to be the files
+the session would have named, because one state described twice is a state an
+operator fixes twice.
+
+It is a plain function rather than a method, and callers name it in full,
+since there is no session for it to be a method on.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> handle on the repository to read.
+
+=back
+
+B<Returns:> An arrayref of paths, empty where nothing tracked is modified, in
+the porcelain spellings C<modified_paths> describes.
+
+B<Examples:>
+
+  my $paths = Service::Git::Session::modified_paths_of($git);
+  # returns ['qa.yml'] where that tracked file is edited and uncommitted
+
 =head2 committed_branches
 
   my @moved = $session->committed_branches;

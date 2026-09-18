@@ -486,6 +486,24 @@ environment the suite writes without saying otherwise.  The list is read from
 the tree at C<at> and never from the working tree, because a delivery made
 under a wider list leaves behind paths the next delivery has to remove.
 
+=head2 edited_file($h, $env, %opts)
+
+Returns the one path in an environment's propagation set that a row may
+safely edit, which is the environment's own file.  It takes the same options
+C<propagation_set> takes and asks that reader for the set, so a row cannot
+come to be editing a file the deploy never looks at.
+
+The other members are passed over deliberately.  An edit to
+C<.genesis/config> takes the deployment root with it, and an edit to an ops
+file may leave the manifest unbuildable, so neither leaves a row proving what
+it came to prove about a dirty tree.
+
+The match is on the last path segment, because C<propagation_set> prefixes
+every path with the deployment root where the harness has one, and a match on
+the whole path would answer nothing there.  Where the set carries no such
+file this dies naming the environment, rather than handing back undef for a
+row to write a half-empty name through.
+
 =head2 harness_marker($h, $ref, %opts)
 
 Returns the control commit the newest marker at C<$ref> names, walking
@@ -887,9 +905,11 @@ stand between them.  Where no such parent is found it says so on stderr and
 fails, rather than falling through to a plain failure a row would read as a
 refusal from the director.  A row that brings its own C<blueprint> brings no
 interrupt with it.
-It then holds itself open with its own output closed, so the deploy is
-interrupted rather than told the director refused and nothing waits on a
-process genesis has already left behind.
+
+Having raised the signal, the hook closes its own output and holds itself
+open, so genesis reads the end of the hook and acts on the interrupt rather
+than being handed a hook that merely failed, and so nothing is left waiting
+on a process genesis has already gone past.
 
 The second is a listener.  C<Service::BOSH::Director::status> dials the host
 and the port of the C<url> in the exodus record before it runs any C<bosh> at
