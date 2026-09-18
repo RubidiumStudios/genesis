@@ -156,9 +156,38 @@ sub status_records {
 	# other column of the row was read from.
 	for my $row (@{$record->{environments}}) {
 		next if $row->{error};
-		my $settled = $initial->{branches}{$row->{env}} or next;
-		$row->{drifted} = drift_for($git,
-			$settled->{assumed} // $settled->{branch});
+		my $settled = $initial->{branches}{$row->{env}};
+
+		# D43: an environment with no deployment branch on either side is
+		# one genesis pipeline-apply has not cut a branch for, and what it
+		# waits for is that command.  The walk leaves the row bare, because
+		# there is nothing to route a commit onto and no ref to read a
+		# marker off, so the reading is put here, where the record is
+		# filled, and it is put under the certification cell rather than
+		# worded beside it, because that is where Genesis::CI::Report looks
+		# for it and the run and this command then say the wait in one
+		# wording.
+		unless ($settled) {
+			$row->{certified} = {state => 'never-applied'};
+			next;
+		}
+
+		# The ref the walk routed this environment from, which under this
+		# command is the ref a real run would have moved the branch to
+		# wherever the stage held its move back.  Both fills read it, so the
+		# snapshot the drift is measured against and the history the seed is
+		# counted over are the ones every other column of the row was read
+		# from.
+		my $ref = $settled->{assumed} // $settled->{branch};
+		$row->{drifted} = drift_for($git, $ref);
+
+		# D91 keeps seeded an annotation on the pending reading rather than
+		# a fifth reading of its own, so only a pending row is asked and
+		# every other row costs nothing.  It is written as the encoder's own
+		# boolean, as the walk's manual marker is, so --json emits one shape
+		# for the field whatever the row reads.
+		$row->{seeded} = (($row->{reading} // '') eq 'pending-deploy'
+			&& _seeded($git, $ref)) ? JSON::PP::true : JSON::PP::false;
 	}
 
 	$record->{breaches} = [unfetchable_markers($record, $git)];
@@ -244,6 +273,29 @@ sub unfetchable_markers {
 		push @breaches, {env => $row->{env}, control_commit => $sha};
 	}
 	return @breaches;
+}
+
+# }}}
+# _seeded - is the branch's delivered history its first delivery alone {{{
+#
+# D61 makes the seed the branch's first delivery, and nothing about the
+# reading tells it apart from the tenth, so the annotation is answered off the
+# branch's own history, which carries one marked commit and no more.  The walk
+# stops as soon as it has seen a second marked commit, so a long branch costs
+# no more than a short one.
+#
+# Genesis::CI::Marker owns the marker's vocabulary here as it does in
+# _newest_unmarked, so nothing spells the prefix a second time.
+sub _seeded {
+	my ($git, $branch) = @_;
+	return 0 unless defined $branch && length $branch;
+
+	my $marked = 0;
+	for my $commit ($git->log_subjects($branch, body => 1, limit => 50)) {
+		next unless Genesis::CI::Marker::in_text($commit->{message});
+		return 0 if ++$marked > 1;
+	}
+	return $marked == 1 ? 1 : 0;
 }
 
 # }}}
@@ -435,6 +487,11 @@ sub compose_phrase {
 	);
 
 	my @phrase = ($word{$row->{reading}} || [wrong => 'unknown reading']);
+	# D61's seed, directly after the certification word, because the
+	# annotation qualifies that word rather than standing beside it.  It
+	# takes the in-flight class the pending word beside it takes, since a
+	# seeded environment is one waiting on its first deploy.
+	push @phrase, [in_flight => 'seeded'] if $row->{seeded};
 	my @pending = @{$row->{pending} || []};
 	# The routing summary is the component that rests on the refresh, so it
 	# is the component the stale form marks.  The word rides in brackets
