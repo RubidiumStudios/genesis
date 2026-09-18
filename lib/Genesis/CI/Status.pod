@@ -17,7 +17,11 @@ either as the indented tree or as JSON.  The module computes nothing about
 routing itself; it calls the propagation walk and reads the walk's own
 per-environment record.  It writes nothing, to git or to vault, and it asks
 the pre-flight for its branch records read-only, so a branch a run would have
-fast-forwarded stands exactly where it stood.
+fast-forwarded stands exactly where it stood and a branch in a state a run
+would refuse is described here rather than refused.
+
+The one axis the walk leaves to this module is the snapshot, which is what a
+deployment branch holds beyond the commit propagation last wrote on it.
 
 A command runs in one deployment root, so there is one record and one
 rendering of it.  A repository with a second deployment root is read by
@@ -43,6 +47,12 @@ control and for the branch records, and hands both to the propagation walk, so
 this command and C<genesis propagate> read one answer rather than two.  The
 event lines the refresh raised are reported on standard error as it goes, and
 the record itself is the return value.
+
+The walk leaves each environment's C<drifted> cell null for this function to
+fill, and it is filled from C<drift_for> off the ref the walk routed that
+environment from, so the snapshot the drift is measured against is the one
+every other column of the row was read from.  A row that failed to load is
+left alone, since there is nothing to compare.
 
 B<Parameters:>
 
@@ -78,6 +88,46 @@ B<Examples:>
   my $record = Genesis::CI::Status::status_records($top,
       git => $git, refresh => 0);
   # $record->{environments}[0]{reading} eq 'deployed'
+
+=head2 drift_for($git, $branch)
+
+  my $drift = Genesis::CI::Status::drift_for($git, 'lab/bosh');
+
+Returns a hash reference of C<files>, every path that differs between the
+branch's newest marked commit and its tip, and C<commit>, the hand edit that
+changed them.  Propagation writes a marker on every commit it makes, so the
+newest marked commit is the snapshot the branch is certified to hold and
+everything above it was put there by a person.  That edit is legal and
+temporary, so this is a report rather than a refusal, and it names every file
+so the operator sees the whole of it.
+
+The comparison reads git alone and asks nothing of vault.  Asking the
+environment for its propagation set would load the kit through a vault this
+caller has not connected to, and the branch's own history answers the same
+question without one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The L<Service::Git> to read the branch's history and its diff through.
+
+=item C<$branch>
+
+The ref to read, which is the deployment branch or, where the pre-flight held
+a move back, the ref a real run would have moved that branch to.
+
+=back
+
+B<Returns:> the drift, as a hash reference, or undef where the branch carries
+no marker anywhere, where nothing differs, or where no ref was named.
+
+B<Examples:>
+
+  my $drift = Genesis::CI::Status::drift_for($git, 'lab/bosh');
+  # {files => ['ops/shared.yml'], commit => 'e91c0aa...'}
 
 =head2 render_json($record)
 
@@ -141,9 +191,13 @@ B<Examples:>
   my @phrase = Genesis::CI::Status::compose_phrase($row);
 
 Returns one environment's status phrase as a list of class and text pairs, in
-the fixed order the design gives, which is the certification word first and
-the routing summary after it.  An environment that failed to load carries its
-error alone, because nothing else the row holds was read.
+the fixed order the design gives, which is the certification word, the routing
+summary, the snapshot flag, and C<[manual]>.  Detail belongs in square
+brackets after the word it qualifies, so a branch carrying a hand edit reads
+C<drifted [ops/shared.yml differs]>, and the trailing C<[manual]> is a marker
+rather than detail, which its own dim class tells apart.  An environment that
+failed to load carries its error alone, because nothing else the row holds was
+read.
 
 B<Parameters:>
 
@@ -194,6 +248,41 @@ B<Examples:>
   # 'in_flight'
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _newest_unmarked($git, $branch)
+
+  my ($hand, $snapshot) = Genesis::CI::Status::_newest_unmarked($git, $ref);
+
+Walks a ref newest first and answers the newest commit carrying no propagation
+marker together with the first commit below it that carries one.  One walk
+answers both, because the pair is what the snapshot comparison needs and two
+walks over one history could disagree.  L<Genesis::CI::Marker> owns the
+marker's vocabulary and says which control commits a message names, so nothing
+here spells the prefix.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The L<Service::Git> to walk through.
+
+=item C<$branch>
+
+The ref to walk.  The fifty newest commits are read, which is further back
+than any branch a run has left unmarked.
+
+=back
+
+B<Returns:> in list context the hand commit and the snapshot, either of which
+may be undef; in scalar context the hand commit alone.
+
+B<Examples:>
+
+  my ($hand, $snapshot) =
+      Genesis::CI::Status::_newest_unmarked($git, 'lab/bosh');
+  # ('e91c0aa...', '7b2d431...')
 
 =head2 _jsonable($value)
 
@@ -250,6 +339,7 @@ B<Examples:>
 
 L<Genesis::CI::Walk>, which builds the record this renders.
 L<Genesis::CI::Report>, which owns the words the run says about an outcome.
+L<Genesis::CI::Marker>, which owns the marker the snapshot comparison reads.
 
 =head1 AUTHOR
 

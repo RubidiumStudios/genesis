@@ -573,6 +573,10 @@ its answer assumes a fast-forward nobody has made.
 True where the caller only ever reports, as C<genesis pipeline-status> does.
 The stage moves no branch, exactly as under C<dry_run>, and says nothing about
 a preview, because nobody is about to make the run those caveats are about.
+It also raises none of the illegal-state refusals below, since those stand in
+front of the first write and this caller makes none.  The branches are still
+classified, so a caller reading the records back sees each of those states
+rather than being refused over it.
 
 =back
 
@@ -612,7 +616,8 @@ caller prints the whole stage's events once and in order.
 
 B<Errors:> Bails once at C<DATAERR> for every illegal initial state the stage
 found, in one refusal that names each offending branch under the class it
-belongs to.  A local deployment branch the remote has never had and one that
+belongs to, unless C<read_only> is set, which reports every one of them
+instead.  A local deployment branch the remote has never had and one that
 shares no ancestor with the remote's are each given the remedy in order, which
 is to inspect the branch, move anything wanted to control, delete the branch,
 and then run the command the case calls for.  Genesis deletes nothing itself.

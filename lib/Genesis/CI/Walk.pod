@@ -214,6 +214,12 @@ because this is where the environment is loaded.  A marker this walk took from
 a merged pull request rather than from the branch is reported beside the
 environment's outcome and nowhere else, so the record gains no field for it.
 
+C<manual> is 1 where the environment declares
+C<genesis.pipeline.manual> under an automated provider, which says a person
+rather than a trigger starts its deploy, and 0 where it does not or where the
+provider is manual and the declaration is inert.  It stays null for an
+environment this walk never loaded.
+
 B<Errors:> Raises a bug where no git handle is given, since every reading
 below is made through one and a walk without it can answer nothing.
 

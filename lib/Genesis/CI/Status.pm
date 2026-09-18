@@ -17,6 +17,10 @@ use Genesis::CI::Preflight ();
 # the phrase the never-applied reading carries is read from the constant
 # rather than spelled a second time here.
 use Genesis::CI::Report qw/AWAITING_APPLY/;
+# Genesis::CI::Marker owns the marker's vocabulary, so the snapshot reader
+# below asks it which control commits a message names rather than spelling the
+# prefix a second time.
+use Genesis::CI::Marker ();
 use Service::Git;
 
 our @EXPORT_OK = qw/status_records render_tree render_json/;
@@ -95,12 +99,73 @@ sub status_records {
 		control   => $control,
 		read_only => 1);
 
-	return Genesis::CI::Walk::plan($top,
+	my $record = Genesis::CI::Walk::plan($top,
 		git       => $git,
 		branches  => $initial->{branches},
 		scope     => $opts{scope},
 		refreshed => $refresh ? 1 : 0,
 	);
+
+	# The walk leaves drifted null for this command to fill, and the fill
+	# reads git off the branch the walk already named.  The ref is the one
+	# the walk routed from, which under this command is the ref a real run
+	# would have moved the branch to wherever the stage held its move back,
+	# so the snapshot the drift is measured against is the snapshot every
+	# other column of the row was read from.
+	for my $row (@{$record->{environments}}) {
+		next if $row->{error};
+		my $settled = $initial->{branches}{$row->{env}} or next;
+		$row->{drifted} = drift_for($git,
+			$settled->{assumed} // $settled->{branch});
+	}
+
+	return $record;
+}
+
+# }}}
+# drift_for - the snapshot axis of D33 {{{
+#
+# A deployment branch carries a marker on every commit propagation wrote, so
+# the newest marked commit is the snapshot the branch is certified to hold and
+# everything above it is a hand edit.  D33 makes that edit legal and
+# temporary, so the reading is never a refusal; it is a report, and it names
+# every file so the operator sees the whole edit.
+#
+# The comparison is git alone.  Asking the environment for its propagation set
+# would load the kit through vault, which a read-only caller that has not
+# connected meets as a refusal, and the branch's own history answers the same
+# question without one.
+sub drift_for {
+	my ($git, $branch) = @_;
+	return undef unless defined $branch && length $branch;
+
+	my ($hand, $marked) = _newest_unmarked($git, $branch);
+	return undef unless $marked;
+
+	my $diff  = $git->diff_files($marked, $branch);
+	my @files = sort @{$diff->{all} || []};
+	return undef unless @files;
+
+	return {files => \@files, commit => $hand};
+}
+
+# }}}
+# _newest_unmarked - the hand commit above the snapshot, and the snapshot {{{
+#
+# One walk answers both, newest first.  The hand commit is the newest commit
+# carrying no marker, and the snapshot is the first commit below it that
+# carries one.  Genesis::CI::Marker owns the marker's vocabulary and answers
+# which control commits a message names, so nothing here spells the prefix.
+sub _newest_unmarked {
+	my ($git, $branch) = @_;
+
+	my $unmarked;
+	for my $commit ($git->log_subjects($branch, body => 1, limit => 50)) {
+		return wantarray ? ($unmarked, $commit->{sha}) : $unmarked
+			if Genesis::CI::Marker::in_text($commit->{message});
+		$unmarked //= $commit->{sha};
+	}
+	return wantarray ? ($unmarked, undef) : $unmarked;
 }
 
 # }}}
@@ -202,6 +267,10 @@ sub compose_phrase {
 	my @pending = @{$row->{pending} || []};
 	push @phrase, [in_flight => sprintf('%d pending', scalar @pending)]
 		if @pending;
+	if (my $drift = $row->{drifted}) {
+		push @phrase, [wrong => sprintf('drifted [%s differs]',
+			join(', ', @{$drift->{files}}))];
+	}
 	push @phrase, [inert => '[manual]'] if $row->{manual};
 	return @phrase;
 }

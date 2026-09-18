@@ -357,7 +357,10 @@ sub assert_provider_gate {
 # deployment branch in scope is classified, every refusal is collected before
 # anything is written, and only after that does the run touch a ref.  A
 # violation is an illegal initial state under D96, so the run stops before it
-# writes and the refusal states the corrective measure beside the branch.
+# writes and the refusal states the corrective measure beside the branch.  A
+# caller that passes read_only is reporting rather than running, and it is
+# given the classification without the refusal, because there is no write in
+# front of it for the gate to stand before.
 #
 # The whole DAG is classified rather than the cascade's scope, because the
 # initial state is a property of the repository rather than of the run: a
@@ -495,10 +498,21 @@ sub initial_state {
 	# The composed text goes through a '%s' format, because bail reads its
 	# argument as a format and a branch name or a commit subject can carry a
 	# percent sign.
+	#
+	# A caller that only ever reports is not refused.  D96 makes an illegal
+	# initial state a gate in front of the first write, and the refusal's own
+	# closing sentence says what was not written, so a command that was never
+	# going to write anything has nothing for the gate to stop.  The states
+	# it names are the states such a command was written to describe: a hand
+	# commit above the newest marker is D33's hatch, which is legal and
+	# temporary, and refusing it would leave the snapshot axis unreachable in
+	# the one command that reports it.  A preview is refused all the same,
+	# because a preview stands for a run that would be refused and showing
+	# that run would be a lie about what happens next.
 	bail({exitcode => DATAERR}, '%s',
 		_illegal_state_refusal($action, $outcome, $remote,
 			\@local_only, \@unrelated, \@hand))
-		if @local_only || @unrelated || @hand;
+		if (@local_only || @unrelated || @hand) && !$opts{read_only};
 
 	# The first write of the run, and the one forced write onto a deployment
 	# branch that rule 3 of the class table admits beside the session's abort.
