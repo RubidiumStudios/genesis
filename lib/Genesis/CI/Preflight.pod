@@ -11,6 +11,8 @@ Genesis::CI::Preflight - the initial state a propagation run may find
   my $initial = Genesis::CI::Preflight::initial_state($top, $git,
       envs => \@dag_order, refreshed => $result, control => $control_state);
 
+  Genesis::CI::Preflight::assert_not_disowned($top, command => 'propagate');
+
 =head1 DESCRIPTION
 
 The first stage of a propagation run settles what the repository holds before
@@ -20,6 +22,12 @@ legitimate origin, it resets a branch whose only local commits are ones a
 re-run reproduces, and it fast-forwards a branch that is merely behind.  A
 violation is an illegal initial state, so the run stops before it writes and
 the refusal names the branch and the way out.
+
+The module also holds the refusals that more than one command makes about the
+pipeline itself, because a state described in two places is a state an
+operator ends up fixing twice.  C<assert_not_disowned> is the first of them,
+and both the propagate run and C<genesis E<lt>envE<gt> deploy> ask it the
+same question and are answered in their own words.
 
 Each refusal spends a named exit code rather than a number.  Control that
 exists nowhere is a configuration fault and exits C<CONFIG>, an initial state
@@ -220,6 +228,89 @@ B<Examples:>
       permit_ahead => 1);
   # returns where control is ahead, for the preview to warn about, and
   # refuses behind and diverged as it does for a run that writes
+
+=head2 assert_not_disowned($top, %opts)
+
+  my $applied = Genesis::CI::Preflight::assert_not_disowned($top,
+      command => 'propagate');
+
+Reads the applied record beside C<pipeline.enabled>.  Where a record stands
+while the pipeline is disabled, the configuration disowns a pipeline that is
+still live, still watching its branches, and still deploying, and this
+refuses at C<Genesis::Exit/CONFIG>.
+
+The check reads the record and not only the key, because a repository that
+never had a pipeline has neither and is disowning nothing.  Such a repository
+passes and meets the pre-flight, which has its own words for it.
+
+Two commands ask about this one state and want two answers, which is why the
+check lives here rather than beside either of them.  The propagate run is
+about to write, so it refuses.  A deploy is about to read what is already
+there, and an operator part way through tearing a pipeline down has a reason
+to be running one, so it warns and carries on.  Inside a pipeline job, which
+Genesis recognises by C<GENESIS_PIPELINE_TASK> in the environment, the answer
+is a refusal whatever the caller asked for, because nobody there reads a
+warning and a job never deploys what its own configuration disowns.
+
+Every message names the control commit the pipeline was applied from, the
+time it was applied, and both remedies, which are to set
+C<pipeline.enabled: true> again or to tear the pipeline down by hand.
+Tearing it down has no command yet, and the message says so rather than
+naming one that does not exist.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+A C<Genesis::Top> on the repository, which is asked for C<pipeline.enabled>
+and for the applied record.
+
+=item C<command>
+
+The command's name, which the refusal spells back so the operator reads the
+command they ran, as in "Refusing to run C<genesis qa deploy>".  It is
+C<propagate> unless the caller says otherwise.
+
+=item C<outcome>
+
+The refusal's closing sentence, which says what did not happen.  It is
+"Nothing was written." unless the caller says otherwise.
+
+=item C<locally>
+
+C<warn> makes a disowned pipeline a warning rather than a refusal outside a
+pipeline job, which is what C<genesis E<lt>envE<gt> deploy> asks for.  It is
+C<refuse> unless the caller says otherwise, and it changes nothing inside a
+job.
+
+=back
+
+B<Returns:> the applied record, where the state was warned about; 1, where
+the pipeline is enabled or no applied record stands.  It does not return
+where it refuses.
+
+B<Errors:>
+
+Calls C<bail()> at C<Genesis::Exit/CONFIG> where an applied record stands
+while C<pipeline.enabled> reads false, unless C<locally> is C<warn> and
+C<GENESIS_PIPELINE_TASK> is unset.
+
+B<Examples:>
+
+  Genesis::CI::Preflight::assert_not_disowned($top, command => 'propagate');
+  # [FATAL] Refusing to run genesis propagate.  The pipeline is disabled
+  #         in .genesis/config, but the applied record says pipeline-apply
+  #         applied it from control@a1b2c3d at 2026-09-15 11:04:22 +0000
+
+  Genesis::CI::Preflight::assert_not_disowned($top,
+      command => 'qa deploy',
+      outcome => 'Nothing was deployed.',
+      locally => 'warn');
+  # [WARNING] Warning: the pipeline is disabled in .genesis/config, but the
+  #           applied record says pipeline-apply applied it from
+  #           control@a1b2c3d at 2026-09-15 11:04:22 +0000.
 
 =head2 initial_state($top, $git, %opts)
 

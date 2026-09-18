@@ -690,8 +690,8 @@ Four of the five methods above guard on the `config` key, and `generate_descript
 - `run_status($record)`
   the exit status D97 gives the run's second stage.
 
-- `assert_not_disowned($top, $command)`
-  refuses a pipeline the configuration has disowned.
+- `Genesis::CI::Preflight::assert_not_disowned($top, %opts)`
+  refuses a pipeline the configuration has disowned, and `propagate()` calls it. It lives in `Genesis::CI::Preflight` because `genesis <env> deploy` asks the same question and is answered with a warning instead.
 
 - `assert_provider_gate($top, $opts)`
   the propagate run's break-glass past the pipeline.

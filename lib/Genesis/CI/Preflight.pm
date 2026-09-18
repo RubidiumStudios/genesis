@@ -185,6 +185,73 @@ sub require_control {
 }
 
 # }}}
+# assert_not_disowned - refuse, or warn about, a disowned pipeline {{{
+#
+#   my $applied = Genesis::CI::Preflight::assert_not_disowned($top,
+#       command => "$env_name deploy", outcome => 'Nothing was deployed.',
+#       locally => 'warn');
+#
+# D64: where pipeline-apply has left an applied record while pipeline.enabled
+# reads false, the configuration disowns a pipeline that is still live, still
+# watching its branches, and still deploying.  The check needs the record and
+# not just the key, because a repository that never had a pipeline has
+# neither and is not disowning anything: it falls through to the pre-flight,
+# which has its own words for a repository with no pipeline at all.
+#
+# Two callers want the same state answered two ways, so the check lives here
+# rather than beside either of them.  The propagate run is about to write, so
+# it refuses.  A deploy is about to read what is already there, and an
+# operator mid-teardown has a reason to be here, so it warns and carries on.
+# Inside the pipeline's own job the answer is a refusal whatever the caller
+# asked for, because nobody there reads a warning and a job never deploys
+# what its own configuration disowns (D27).
+#
+# command and outcome give the refusal the caller's own words, so one state
+# is described in one sentence however the operator arrived at it.
+sub assert_not_disowned {
+	my ($top, %opts) = @_;
+
+	return 1 if $top->pipeline_enabled;
+	my $applied = $top->applied_record or return 1;
+
+	my $command = $opts{command} // 'propagate';
+	my $outcome = $opts{outcome} // 'Nothing was written.';
+	my $sha     = $applied->{control_commit} // '<unknown>';
+	my $at      = $applied->{at} // '<unknown>';
+
+	bail({exitcode => CONFIG},
+		"Refusing to run #C{genesis %s}.  #C{GENESIS_PIPELINE_TASK} is set, so ".
+		"this runs inside the pipeline's own job, and the pipeline is disabled ".
+		"in #C{.genesis/config} while the applied record says ".
+		"#C{pipeline-apply} applied it from control\@%s at %s.  A job never ".
+		"deploys what its own configuration disowns.  Set ".
+		"#C{pipeline.enabled: true} again, or tear the pipeline down by hand, ".
+		"which has no command yet.  %s",
+		$command, $sha, $at, $outcome
+	) if $ENV{GENESIS_PIPELINE_TASK};
+
+	bail({exitcode => CONFIG},
+		"Refusing to run #C{genesis %s}.  The pipeline is disabled in ".
+		"#C{.genesis/config}, but the applied record says ".
+		"#C{pipeline-apply} applied it from control\@%s at %s, so the ".
+		"configuration disowns a pipeline that is still live, still ".
+		"watching its branches, and still deploying.  Set ".
+		"#C{pipeline.enabled: true} again, or tear the pipeline down by ".
+		"hand, which has no command yet.  %s",
+		$command, $sha, $at, $outcome
+	) unless ($opts{locally} // 'refuse') eq 'warn';
+
+	warning(
+		"Warning: the pipeline is disabled in #C{.genesis/config}, but the ".
+		"applied record says #C{pipeline-apply} applied it from control\@%s at ".
+		"%s.  Set #C{pipeline.enabled: true} again, or tear the pipeline down ".
+		"by hand, which has no command yet.",
+		$sha, $at
+	);
+	return $applied;
+}
+
+# }}}
 # initial_state - the whole first stage of a propagation run {{{
 #
 #   my $state = Genesis::CI::Preflight::initial_state($top, $git,

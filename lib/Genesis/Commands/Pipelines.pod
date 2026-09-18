@@ -658,61 +658,6 @@ B<Examples:>
   run_status({environments => [{env => 'qa', outcome => 'not attempted'}]});
   # 75, which is Genesis::Exit::TEMPFAIL
 
-=head2 assert_not_disowned
-
-    assert_not_disowned($top, $command);
-
-Refuses a pipeline the configuration has disowned, under D64.
-
-A repository disowns its pipeline when C<pipeline-apply> has left an applied
-record while C<pipeline.enabled> reads false. The pipeline is still live,
-still watching its branches, and still deploying, and the configuration no
-longer admits that it exists, so every command that would act on it stops
-here rather than acting beside it.
-
-The check reads the record and not only the key, because a repository that
-never had a pipeline has neither and is disowning nothing. Such a repository
-falls through and meets the pre-flight, which has its own words for it.
-
-The refusal names the applied record, the control commit it was applied
-from, the time it was applied, and both remedies, which are to set
-C<pipeline.enabled: true> again or to tear the pipeline down by hand.
-Tearing it down has no command yet, and the message says so rather than
-naming one that does not exist.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$top>
-
-The repository, as a C<Genesis::Top>.
-
-=item C<$command>
-
-The command's own name, which the refusal spells back so the operator reads
-the command they ran.
-
-=back
-
-B<Returns:> 1, where the pipeline is enabled or where no applied record
-stands. It does not return otherwise.
-
-B<Errors:>
-
-Calls C<bail()> at C<Genesis::Exit/CONFIG> where an applied record stands
-while C<pipeline.enabled> reads false.
-
-B<Examples:>
-
-  assert_not_disowned($top, 'propagate');
-  # returns 1 where pipeline.enabled is true
-
-  assert_not_disowned($top, 'propagate');
-  # [FATAL] Refusing to run genesis propagate.  The pipeline is disabled
-  #         in .genesis/config, but the applied record says pipeline-apply
-  #         applied it from control@a1b2c3d at 2026-09-15 11:04:22 +0000
-
 =head2 assert_provider_gate
 
     assert_provider_gate($top, $opts);

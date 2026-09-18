@@ -1000,6 +1000,27 @@ sub deploy {
 	# the checkout had moved out from under came to report a repository that
 	# is not there rather than the problem in front of it (H10).
 	my $top = Genesis::Top->new('.');
+
+	# D64.  A pipeline the configuration has disowned is one that is still
+	# live, still watching its branches, and still deploying, and the
+	# propagate run has always refused it.  A deploy is about to read what
+	# is already there rather than write to it, and an operator mid-teardown
+	# has a reason to be here, so it warns and carries on; inside the
+	# pipeline's own job it refuses, because nobody there reads a warning.
+	#
+	# It sits ahead of the block below rather than inside it, because the
+	# state it answers for is a repository whose pipeline.enabled reads
+	# false.  Every pipeline read below is guarded on that key being true,
+	# so a check made there could never see the one state it exists to see.
+	#
+	# The record it answers is not bound here.  It is read again beside the
+	# provider type, in the pre-flight that owns the order, and a lexical
+	# nothing reads is a lexical a reader has to go looking for.
+	Genesis::CI::Preflight::assert_not_disowned($top,
+		command => "$env_name deploy",
+		outcome => 'Nothing was deployed.',
+		locally => 'warn');
+
 	my $pipeline_git;
 	my $pipeline_branch;
 	if ($top->pipeline_enabled) {
