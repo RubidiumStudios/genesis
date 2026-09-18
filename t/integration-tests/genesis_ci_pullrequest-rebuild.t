@@ -181,10 +181,10 @@ subtest 'the three subject-match shapes give the right answer now' => sub {
 	plan tests => 10;
 
 	# A rewritten subject on the aggregate itself, which is what a squash
-	# merge does to a message: the subject a reader would walk is the
-	# merger's and the marker is pushed down into the body.  The subject
-	# match re-propagated on it, and this is the shape that reaches settled
-	# to say the walk does not.
+	# merge does to a message, because the subject a reader would walk is
+	# the merger's and the marker is pushed down into the body.  The
+	# subject match re-propagated on it, and this is the shape that reaches
+	# settled to say the walk does not.
 	#
 	# The rewrite is made on the pull request branch rather than by merging
 	# onto the deployment branch, and that matters.  A squash merge copies
