@@ -1822,12 +1822,31 @@ sub _prior_env_record {
 	# writes, so the record answered is the predecessor's latest deployment
 	# that reached the director rather than whichever one a hash happened to
 	# hand back first.
+	#
+	# Each entry is read through the same constructor
+	# Genesis::Env::DeploymentManager::_all reads them through, with
+	# from_storage, because a record may predate the current schema by years
+	# and the two readers must not disagree about what it says.  A record
+	# read raw here and normalised there is a predecessor that has deployed
+	# by one reader's reckoning and never deployed by the other's.  The
+	# environment handed to the constructor is the deploying one rather than
+	# the predecessor, which the constructor only stores; the predecessor is
+	# not loaded as an environment at all, because D79 forbids that read.
+	require Genesis::Env::Deployment;
 	for my $at (sort {$b cmp $a} keys %$deploys) {
 		my $entry = $deploys->{$at};
 		next unless ref($entry) eq 'HASH';
-		my $result = $entry->{result} // '';
-		next unless $result eq 'success' || $result eq 'post-failed';
-		return {at => $at, result => $result, git => $entry->{git} || {}};
+		my $record = Genesis::Env::Deployment->new(
+			{from_storage => 1}, $env, timestamp => $at, %$entry
+		);
+		# succeeded is true of success and of post-failed, which are the two
+		# results that mean the BOSH deploy reached the director.
+		next unless $record->succeeded;
+		return {
+			at     => $record->timestamp,
+			result => $record->result,
+			git    => $record->lookup('git') || {},
+		};
 	}
 	return undef;
 }
