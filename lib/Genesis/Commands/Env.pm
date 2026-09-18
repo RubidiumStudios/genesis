@@ -1858,9 +1858,12 @@ sub deploy {
 
 	# The session goes to _post_deploy, which finishes it when the tree is
 	# clean and aborts naming the files when it is not.  Nothing else on this
-	# path finishes it, so the assertion cannot be skipped by an early
-	# return, and the gate's own exit hook finds a session that is already
-	# closed, on which finish is a no-op.
+	# path finishes it, so no early return in this sub can skip the
+	# assertion, and the gate's own exit hook then finds a session that is
+	# already closed, on which finish is a no-op.  One path inside
+	# _post_deploy does leave ahead of the assertion, which is the dry run's
+	# exit before any deployment has been made, and the gate's exit hook
+	# finishes the session on that path as it would for any command.
 	$ok = $env->deploy(%options, network_map => $network_map, reason => $reason,
 		session => $preflight && $preflight->{session});
 

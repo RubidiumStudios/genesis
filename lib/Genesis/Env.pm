@@ -4822,23 +4822,14 @@ sub _pre_deploy {
 	my ($self, %opts) = @_;
 	my $noprompt = delete($opts{noprompt});
 
-	# Snapshot the working tree (modified + untracked) before the
-	# deploy runs, scoped to our deployment prefix.  _post_deploy
-	# diffs against this to know which files this deploy actually
-	# produced.  Branch checkout + pull happens earlier (in
-	# Genesis::Commands::Env::deploy) so the preflight checks above
-	# this method run on the env-branch view.
-	if ($self->top->pipeline_enabled) {
-		require Service::Git;
-		my $git    = Service::Git->new('.');
-		my $branch = $self->name;
-		my $prefix = $git->prefix // '';
-		my $pre    = $git->status($prefix || '.');
-
-		$self->{deployment_state}{pipeline_git}       = $git;
-		$self->{deployment_state}{pipeline_branch}    = $branch;
-		$self->{deployment_state}{pre_deploy_unclean} = $pre;
-	}
+	# A pipeline deploy does nothing of its own here any more.  This method
+	# used to snapshot the working tree so that _post_deploy could diff
+	# against it and name what the deploy had written, and _post_deploy now
+	# asks the session whether the tree is clean instead, which needs no
+	# snapshot.  The switch onto the deployment branch happens earlier still,
+	# in the session Genesis::Commands::Env::deploy opens, so everything
+	# below runs on the env-branch view whether the repository has a pipeline
+	# or not.
 
 	# Generate and store the deployment manifest (pruned and unpruned versions)
 	my $pruned_deploy_manifest = $self->manifest_provider->deployment(subset=>'pruned',notify=>1);
@@ -5288,9 +5279,10 @@ sub _post_deploy {
 	# It sits after the kit's post-deploy hook rather than before it, because
 	# the assertion is about what the whole deploy left behind and that hook
 	# is the last thing the deploy runs.  The cascade moves with it, and it
-	# has to: the assertion is the child's precondition, so the finish comes
-	# first, and the hook now runs on the environment's branch instead of on
-	# the control branch the cascade's one-way checkout used to leave it.
+	# has to, because the assertion is the child's precondition and the
+	# finish therefore comes first.  The hook now runs on the environment's
+	# branch instead of on the control branch the cascade's one-way checkout
+	# used to leave it.
 	if ($self->top->pipeline_enabled) {
 
 		# D84.  Clean means no tracked modification and nothing staged;
@@ -5312,8 +5304,8 @@ sub _post_deploy {
 					"The deploy left %s modified in the repository, which ".
 					"Genesis does not write and has now discarded:\n%s\n\n".
 					"That is the kit's doing.  Report it against %s.  ".
-					"Downstream propagation was withheld; run ".
-					"`genesis propagate` when the tree is sound.",
+					"Downstream propagation was withheld.  Run ".
+					"#C{genesis propagate} when the tree is sound.",
 					$self->name, count_nouns(scalar(@modified), 'file'),
 					join("\n", map {"  - $_"} @modified), $self->kit->id
 				), named => 1, exitcode => Genesis::Exit::SOFTWARE);
