@@ -134,6 +134,55 @@ sub gate_line {
 }
 
 # }}}
+# review_paragraph - the one renderer that quotes a reviewer {{{
+#
+# D49 has a superseding body carry the rejection text where the API gave one,
+# and D56 has a changes-requested rebuild name the review it answers.  The two
+# are the same paragraph with a different opening sentence, so one renderer
+# writes both and the quoting cannot drift apart between them.
+sub review_paragraph {
+	my ($number, $review, %opts) = @_;
+	return undef unless $review && length($review->{body} // '');
+
+	my $quoted = join("\n", map {"> $_"} split /\n/, $review->{body});
+	my ($date) = ($review->{at} // '') =~ /^(\d{4}-\d{2}-\d{2})/;
+
+	return sprintf("%s%s on #%d by %s%s:\n%s",
+		$opts{prefix} // '',
+		$opts{opening} // 'Changes were requested',
+		$number, $review->{reviewer},
+		$date ? " on $date" : '', $quoted);
+}
+
+# }}}
+# supersedes_paragraph - the closing paragraph a superseding body carries {{{
+#
+# D49 has the body carry the rejection text where the API gives one, which is
+# the body of a changes-requested review, and a link to the closed pull request
+# where it does not.  A merged pull request is never a prior attempt, so
+# pr_state never puts one in the rejected list.
+sub supersedes_paragraph {
+	my ($rejected) = @_;
+	return undef unless $rejected && @$rejected;
+
+	my ($reviewed) = grep {$_->{review} && length($_->{review}{body} // '')}
+		@$rejected;
+	my @bare = grep {!($_->{review} && length($_->{review}{body} // ''))}
+		@$rejected;
+
+	my @parts;
+	push @parts, review_paragraph($reviewed->{number}, $reviewed->{review},
+		prefix => sprintf('Supersedes #%d. ', $reviewed->{number}))
+		if $reviewed;
+	push @parts, sprintf('Supersedes %s.',
+		join(', ', map {sprintf('#%d, closed without merging: %s',
+			$_->{number}, $_->{html_url} // '')} @bare))
+		if @bare;
+
+	return join("\n\n", @parts);
+}
+
+# }}}
 # deliver - the pull request arm for one environment {{{
 #
 # The branch carries exactly one commit above the deployment branch, so the
@@ -211,6 +260,16 @@ sub deliver {
 		count => scalar @gated,
 		env   => $record->{env},
 	}) if $gate;
+
+	# When every pull request for this environment was closed without merging,
+	# the next one supersedes them, and D51 has the old branch rebuilt in
+	# place rather than left standing, because it is derived state.
+	#
+	# The state is read off the record rather than off the answer itself,
+	# because the answer is undef for a run given no token at all and the
+	# record already carries the one copy every reader here takes.
+	$body{supersedes} = supersedes_paragraph($state->{rejected})
+		if ($pr->{state} // '') eq 'closed unmerged';
 
 	my $message = aggregate_message($git, $env, $commits, %body);
 	my $written = $session->apply_files($source,
