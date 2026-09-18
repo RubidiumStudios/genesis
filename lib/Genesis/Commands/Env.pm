@@ -975,6 +975,225 @@ sub _format_pipeline_reason {
 }
 
 # }}}
+# _deploy_branch_action - classify <env>/<type> and act by the class table {{{
+#
+# The one ref move D35's span allows is the fast-forward of a behind branch,
+# which moves L toward T and neither creates nor discards a commit (D5).  An
+# ahead or diverged branch is refused, because the marker-only reset and the
+# hand-commit refusal are the propagate run's and a deploy never discards a
+# commit.  A branch R lacks, or one sharing no ancestor with R's, is refused
+# under D48, because it has no legitimate origin and a deploy from it would
+# certify a commit that is not on R.  A branch with nothing delivered to it is
+# D56's, awaiting pipeline-apply and the propagation that fills what the apply
+# cut.  Genesis deletes nothing on any of them.
+sub _deploy_branch_action {
+	my ($top, $env_name, $git) = @_;
+
+	my $branch = $top->branch_for($env_name);
+	my $remote = $git->default_remote // 'origin';
+	my $d      = $git->resolve_branch($branch, remote => $remote);
+
+	# resolve_branch answers undef when neither ref exists, which is the one
+	# case that has no state, so it is read before anything reads a state.
+	bail({exitcode => DATAERR},
+		"Refusing to deploy.  The environment #C{%s} has no branch on ".
+		"#C{%s} or locally, so it is awaiting #C{pipeline-apply}.  A deploy ".
+		"certifies the commit of the branch it stands on, and with no branch ".
+		"it would deploy from control, certifying a commit no propagation ".
+		"routed there.  Run #C{genesis pipeline-apply} to create the branch, ".
+		"then #C{genesis propagate}.  Nothing was deployed.",
+		$env_name, $remote
+	) unless defined $d;
+
+	if ($d->{state} eq 'no-remote') {
+		bail({exitcode => DATAERR},
+			"Refusing to deploy.  The local branch #C{%s} has no counterpart on ".
+			"#C{%s}.  A deployment branch is derived from control and never ".
+			"originates locally, so this branch is a legacy checkout or was ".
+			"created by hand.  Genesis deletes nothing.  Inspect the branch for ".
+			"anything that should live on control and move it there through a ".
+			"commit or a pull request, then delete the branch with #C{git branch ".
+			"-D %s}, then run #C{genesis pipeline-apply} if the environment ".
+			"#C{%s} is meant to exist.  Nothing was deployed.",
+			$branch, $remote, $branch, $env_name
+		);
+	}
+
+	# The three states that would deploy, and the one question left to ask of
+	# them.  A branch the apply cut and no propagation has filled carries its
+	# init file and nothing else, and it reads as in-sync where nothing has
+	# been delivered anywhere and as behind where this clone has not pulled
+	# what was.  The state alone would deploy it, and a deploy of a branch
+	# with no repository on it runs from wherever the operator happens to be
+	# standing, because the gate declines to switch onto such a branch.  That
+	# is a deploy certifying a commit no propagation routed anywhere, so it is
+	# refused here, where the last read before the deploy runs is made.
+	#
+	# no-local sits with them for the reason the propagate run's own initial
+	# state gives: the refresh above creates the local ref from the tracking
+	# ref, so nothing reaches here in that state, and the gate's switch would
+	# have created it in any case.
+	if ($d->{state} eq 'in-sync' || $d->{state} eq 'behind'
+			|| $d->{state} eq 'no-local') {
+		bail({exitcode => DATAERR},
+			"Refusing to deploy.  The branch #C{%s} carries no repository ".
+			"where this clone reads it, so nothing has been delivered to the ".
+			"environment #C{%s} that a deploy could read.  A deploy certifies ".
+			"the commit of the branch it stands on, and from a branch carrying ".
+			"only what #C{pipeline-apply} cut it would deploy from control, ".
+			"certifying a commit no propagation routed there.  The branch is ".
+			"#C{genesis pipeline-apply}'s to create and #C{genesis propagate}'s ".
+			"to fill, so run #C{genesis propagate} to deliver control to it.  ".
+			"Nothing was deployed.",
+			$branch, $env_name
+		) unless Genesis::Commands::branch_carries_repository($top, $git, $branch);
+
+		return {action => 'fast-forward', divergence => $d}
+			if $d->{state} eq 'behind';
+		return {action => 'proceed', divergence => $d};
+	}
+
+	# resolve_branch has no unrelated state: a branch sharing no ancestor
+	# with the remote's counts two ways and reads as diverged.  The ancestry
+	# question is asked separately, through the one test the propagate run's
+	# initial state uses, so the two commands mean the same thing by it.  It
+	# is asked here rather than above, because both refs have to exist for
+	# git to answer it and only these two states promise that.
+	if (!Genesis::CI::Preflight::_shares_history($git, $branch, $remote)) {
+		bail({exitcode => DATAERR},
+			"Refusing to deploy.  The local branch #C{%s} shares no ancestor ".
+			"with #C{%s/%s}, which #C{pipeline-apply} created.  The marker-only ".
+			"reset never applies across unrelated histories, whatever the local ".
+			"commits carry, and Genesis deletes nothing.  Inspect the local ".
+			"branch for anything that should live on control and move it there ".
+			"through a commit or a pull request, then delete the local branch ".
+			"with #C{git branch -D %s}, then run #C{genesis propagate} again.  ".
+			"Nothing was deployed.",
+			$branch, $remote, $branch, $branch
+		);
+	}
+
+	bail({exitcode => DATAERR},
+		"Refusing to deploy.  The branch #C{%s} is %s of #C{%s/%s} by %d ".
+		"commit%s%s.  A deploy never discards a commit, so run #C{genesis ".
+		"propagate}, which resets a marker-only commit and refuses a hand ".
+		"commit by name.  Nothing was deployed.",
+		$branch, $d->{state}, $remote, $branch,
+		$d->{ahead}, $d->{ahead} == 1 ? '' : 's',
+		$d->{state} eq 'diverged'
+			? sprintf(" and behind by %d", $d->{behind}) : ''
+	);
+}
+
+# }}}
+# _deploy_preflight - the deploy's pre-flight, in order {{{
+#
+# The order is the design's, and it is one sub because the order is what the
+# rows assert.  Every gate runs before every warning, so an operator sees a
+# refusal before a warning about a deploy that will not happen, and the
+# divergence refusal of the branch classification prints where the prior-env
+# refusal would otherwise also apply.
+#
+# The handle comes from Service::Git->new('.'), which memoises one handle per
+# repository root, so this is the same handle the branch-class gate used and
+# not a second one.  The session is the gate's, read through
+# Genesis::Commands::branch_session, and it is undef where the gate switched
+# nothing (D80).
+sub _deploy_preflight {
+	# The options come down whole rather than by the keys read here, because
+	# the steps that follow this one ask about --yes for the prompt they put
+	# beside their warnings, and a sub whose caller has to know which keys it
+	# reads is a sub whose caller goes stale.
+	my ($top, $env_name, $options) = @_;
+
+	require Service::Git;
+	my $git = Service::Git->new('.');
+
+	# An operator may name the environment by a path or by its file, and the
+	# gate takes the same two things off the same argument before it derives
+	# the branch.  Two derivations of one name are two chances to disagree,
+	# so this one is written to match the gate's and the branch is derived
+	# once, here, for everything below.
+	(my $name = $env_name) =~ s{^.*/}{};
+	$name =~ s/\.ya?ml$//;
+	my $branch = $top->branch_for($name);
+
+	# 1.  The one refresh, control included, which M7 already freed of
+	# --no-fetch on this command under D40.  The deploy's own reads are
+	# worthless against a stale tracking ref.
+	my $refreshed = $top->fetch_pipeline_envs($git,
+		command => "$env_name deploy",
+		action  => 'deploy',
+		outcome => 'Nothing was deployed.');
+
+	# 2.  The deploy asks the same first question the run asks, and refuses
+	# on the one answer that leaves it nothing to read.  It reports every
+	# other state rather than refusing on it, because a deploy resolves
+	# nothing about control.
+	my $control_state = Genesis::CI::Preflight::require_control($top, $git,
+		refreshed     => $refreshed,
+		action        => 'deploy',
+		outcome       => 'Nothing was deployed.',
+		on_divergence => 'report');
+	info("  #Gi{%s}", $_) for @{$control_state->{events}};
+
+	# 3.  The session the gate opened asserts the tree clean in begin, and
+	# for a deploy that switches that is the whole of the check.  Three arms
+	# of the gate open no session at all, though, and two of them have
+	# nothing to do with cleanliness: an environment with no deployment
+	# branch, and a branch pipeline-apply cut that carries no repository.  A
+	# deploy from a dirty tree there deploys uncommitted content and records
+	# a commit that does not hold it, which is the audit trail describing
+	# something other than what shipped, so D84's precondition is asserted
+	# here for those two.  It is asserted before the classification refuses
+	# either of them, because a dirty tree is the operator's to settle
+	# whatever the branch turns out to be.
+	#
+	# The third arm is exempt on purpose.  A command already standing on the
+	# branch it would switch to is leaving nothing behind, and D80 lets an
+	# operator deploy an edit in place, which is how a change is tested
+	# before it is committed.  That is the same branch the retired switch
+	# asked about, and it is asked the same way.
+	my $session = Genesis::Commands::branch_session();
+	if (!$session && ($git->current_branch // '') ne $branch) {
+		unless ($git->is_clean) {
+			# The list comes from the session's own reader, so an operator
+			# refused here and an operator refused by the session are shown
+			# one list rather than two that have to be kept in step by hand.
+			# The module is required here because the arm with no deployment
+			# branch returns before the gate has loaded it.
+			require Service::Git::Session;
+			my $modified = Service::Git::Session::modified_paths_of($git);
+			bail(
+				"Working tree has uncommitted changes.  Commit or stash them\n".
+				"before deploying:\n%s",
+				join("", map {"  - $_\n"} @$modified)
+			);
+		}
+	}
+
+	# 4.  What the branch is, and the one move its class allows.  The pull is
+	# made where the deploy stands, which the gate has stood on the branch,
+	# and it is the fast-forward D5 named as its precedent rather than the
+	# unconditional pull the deploy used to make of every branch alike.
+	my $action = _deploy_branch_action($top, $name, $git);
+	if ($action->{action} eq 'fast-forward') {
+		# The remote is named the way the classification named it, so the
+		# move is made against the ref the class was read from.
+		my $remote = $git->default_remote // 'origin';
+		info "Fast-forwarding #C{%s} to #C{%s/%s}...", $branch, $remote, $branch;
+		$git->pull_ff_only($branch, $remote);
+	}
+
+	return {
+		git     => $git,
+		branch  => $branch,
+		session => $session,
+		action  => $action,
+	};
+}
+
+# }}}
 sub deploy {
 	option_defaults(
 		redact   => ! -t STDOUT,
@@ -1022,74 +1241,16 @@ sub deploy {
 		in_job  => 'A job never deploys what its own configuration disowns.',
 		locally => 'warn');
 
+	# Everything a pipeline deploy asks before it deploys, in the one place
+	# that owns the order.  What it settled is held here rather than unpacked,
+	# because the session in it is what the post-deploy commit is made inside
+	# and the steps after this one read what the classification decided.
+	my $preflight;
 	my $pipeline_git;
 	my $pipeline_branch;
 	if ($top->pipeline_enabled) {
-		require Service::Git;
-		$pipeline_git = Service::Git->new('.');
-		(my $name = $env_name) =~ s{^.*/}{};
-		$name =~ s/\.ya?ml$//;
-		my $branch_name = $top->branch_for($name);
-		$pipeline_branch = $branch_name;
-
-		# The deploy refreshes on the same terms as the run, because its
-		# due-commit and drift reads are worthless against a stale
-		# tracking ref (D40).
-		my $refreshed = $top->fetch_pipeline_envs($pipeline_git,
-			command => "$env_name deploy",
-			action  => 'deploy',
-			outcome => 'Nothing was deployed.');
-
-		# The deploy asks the same first question the run asks, and refuses on
-		# the one answer that leaves it nothing to read.  It reports every
-		# other state rather than refusing on it, because a deploy resolves
-		# nothing about control.
-		my $control_state = Genesis::CI::Preflight::require_control($top, $pipeline_git,
-			refreshed     => $refreshed,
-			action        => 'deploy',
-			outcome       => 'Nothing was deployed.',
-			on_divergence => 'report');
-		info("  #Gi{%s}", $_) for @{$control_state->{events}};
-
-		# The session the gate opened asserts the tree clean in begin, and
-		# for a deploy that switches that is the whole of the check.  Three
-		# arms of the gate open no session at all, though, and two of them
-		# have nothing to do with cleanliness: an environment with no
-		# deployment branch, and a branch pipeline-apply cut that carries no
-		# repository.  A deploy from a dirty tree there deploys uncommitted
-		# content and records a commit that does not hold it, which is the
-		# audit trail describing something other than what shipped, so D84's
-		# precondition is asserted here for those two.
-		#
-		# The third arm is exempt on purpose.  A command already standing on
-		# the branch it would switch to is leaving nothing behind, and D80
-		# lets an operator deploy an edit in place, which is how a change is
-		# tested before it is committed.  That is the same branch the
-		# retired switch asked about, and it is asked the same way.
-		if (!Genesis::Commands::branch_session()
-				&& ($pipeline_git->current_branch // '') ne $branch_name) {
-			unless ($pipeline_git->is_clean) {
-				# The list comes from the session's own reader, so an
-				# operator refused here and an operator refused by the
-				# session are shown one list rather than two that have to be
-				# kept in step by hand.  The module is required here because
-				# the arm with no deployment branch returns before the gate
-				# has loaded it.
-				require Service::Git::Session;
-				my $modified =
-					Service::Git::Session::modified_paths_of($pipeline_git);
-				bail(
-					"Working tree has uncommitted changes.  Commit or stash them\n".
-					"before deploying:\n%s",
-					join("", map {"  - $_\n"} @$modified)
-				);
-			}
-		}
-
-		if (my $remote = $pipeline_git->default_remote) {
-			info "Pulling latest #C{%s} from #C{%s}...", $branch_name, $remote;
-			$pipeline_git->pull_ff_only($branch_name, $remote);
-		}
+		$preflight = _deploy_preflight($top, $env_name, \%options);
+		($pipeline_git, $pipeline_branch) = @{$preflight}{qw/git branch/};
 	}
 
 	$options{'disable-reactions'} = ! delete($options{reactions});

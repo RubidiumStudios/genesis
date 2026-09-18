@@ -358,6 +358,56 @@ our $BRANCH_SESSION;
 sub branch_session { $BRANCH_SESSION }
 
 # }}}
+# branch_carries_repository - does this branch hold the deployment root {{{
+#
+# The repository configuration is what is asked about, because every delivery
+# mirrors it and nothing else on the branch is guaranteed.  A branch that
+# answers no is one pipeline-apply cut and no propagate run has delivered to,
+# so there is nothing on it to read.
+#
+# The gate asks before it switches, so that a command is not left looking at a
+# tree with no configuration in it, and the deploy asks again as it classifies
+# the branch, so that a deploy the gate left standing on control refuses rather
+# than certifying a commit no propagation routed there.  One answer for both,
+# because two readings of one question are two chances to disagree about which
+# branches are deployable.
+#
+# What the branch holds is read off the local ref where there is one, for the
+# reason the checkout prefers it, and the deployment root is named as a path
+# under the git root, which is empty where the two are the same directory.
+#
+# Both paths are resolved the same way before they are compared.  A deployment
+# root reached through a symlink, or named as /var where git answers
+# /private/var, is the same directory under two spellings, and a comparison
+# made on the spellings would ask the branch for a .genesis/config at the
+# repository root instead.  That answers "this branch carries no repository"
+# for a branch that carries it perfectly well, and the command then runs
+# unswitched without anybody being able to see why.  A root that really is
+# outside the repository is a defect rather than something an operator did, so
+# it is said outright.
+sub branch_carries_repository {
+	my ($top, $git, $branch) = @_;
+
+	my $remote = $git->default_remote;
+	my $root   = Cwd::realpath($git->root) // $git->root;
+	my $read   = $git->branch_exists($branch) ? $branch : "$remote/$branch";
+	my $path   = Cwd::realpath($top->path) // $top->path;
+
+	my $under_root = '';
+	if ($path ne $root) {
+		bail(
+			"The deployment root #C{%s} is not inside the repository at ".
+			"#C{%s},\nso there is no path on #C{%s} to read it from.",
+			$top->path, $git->root, $branch
+		) unless index($path, "$root/") == 0;
+		$under_root = substr($path, length($root) + 1);
+	}
+
+	return $git->ls_tree($read,
+		join('/', grep {length} $under_root, '.genesis/config')) ? 1 : 0;
+}
+
+# }}}
 # _gate_context - the Top and the git handle the two gates read {{{
 #
 # Both gates ask the same two questions of the same directory, and loading a
@@ -608,44 +658,14 @@ sub _gate_deployed_state {
 	# no configuration in it.  That is the same state as having no branch at
 	# all, and it is answered the same way: the session closes without having
 	# moved anything and the command runs where it stands, where it says in
-	# its own words that there is nothing deployed.  The repository
-	# configuration is what is asked about, because every delivery mirrors it
-	# and nothing else on the branch is guaranteed.
+	# its own words that there is nothing deployed.
 	#
 	# The question is asked after begin rather than before it, because it
 	# runs a git command of its own and begin is where the pre-flight
 	# classifies the failures a git command otherwise hides (D80).  Asked
 	# first, a repository git declines to trust would answer with the
 	# listing's complaint instead of the pre-flight's sentence.
-	#
-	# What the branch holds is read off the local ref where there is one,
-	# for the reason the checkout prefers it, and the deployment root is
-	# named as a path under the git root, which is empty where the two are
-	# the same directory.
-	#
-	# Both paths are resolved the same way before they are compared.  A
-	# deployment root reached through a symlink, or named as /var where git
-	# answers /private/var, is the same directory under two spellings, and a
-	# comparison made on the spellings would ask the branch for a
-	# .genesis/config at the repository root instead.  That answers "this
-	# branch carries no repository" for a branch that carries it perfectly
-	# well, and the command then runs unswitched without anybody being able
-	# to see why.  A root that really is outside the repository is a defect
-	# rather than something an operator did, so it is said outright.
-	my $root = Cwd::realpath($git->root) // $git->root;
-	my $read = $git->branch_exists($branch) ? $branch : "$remote/$branch";
-	my $path = Cwd::realpath($top->path) // $top->path;
-	my $under_root = '';
-	if ($path ne $root) {
-		bail(
-			"The deployment root #C{%s} is not inside the repository at ".
-			"#C{%s},\nso there is no path on #C{%s} to read it from.",
-			$top->path, $git->root, $branch
-		) unless index($path, "$root/") == 0;
-		$under_root = substr($path, length($root) + 1);
-	}
-	unless ($git->ls_tree($read,
-			join('/', grep {length} $under_root, '.genesis/config'))) {
+	unless (branch_carries_repository($top, $git, $branch)) {
 		info(
 			"Not reading the deployment branch #C{%s}: it carries no ".
 			"repository yet, so this runs on #C{%s}.",

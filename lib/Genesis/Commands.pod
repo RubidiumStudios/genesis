@@ -271,7 +271,11 @@ onto it would be looking at a tree with no configuration in it and would say
 so rather than saying what was really wrong. The question asked is whether
 the branch carries the deployment root's own C<.genesis/config>, because
 every delivery mirrors that file and nothing else on the branch is
-guaranteed.
+guaranteed. C<branch_carries_repository> is where that question is asked,
+and the command asks it again where it classifies the branch for itself: the
+gate only declines to switch, and a command that went on to read whatever
+the operator was standing on would deploy or report from the wrong place
+entirely.
 
 C<branch_session> answers the session the gate opened for this command, or
 C<undef> where it opened none. A command reads it rather than asking the git
@@ -771,6 +775,72 @@ B<Examples:>
 
   my $session = Genesis::Commands::branch_session();
   # Returns: undef, in `genesis version`
+
+=head2 branch_carries_repository
+
+  my $yes = Genesis::Commands::branch_carries_repository($top, $git, $branch);
+
+Answers whether a deployment branch holds the deployment root, which is
+asked by looking for the root's own C<.genesis/config> on the branch. Every
+delivery mirrors that file and nothing else on the branch is guaranteed, so
+a branch that answers false is one C<genesis pipeline-apply> cut and no
+C<genesis propagate> run has delivered to.
+
+The gate asks before it switches, so a command is not left looking at a tree
+with no configuration in it. C<genesis deploy> asks again as it classifies
+the branch, because a deploy the gate left standing on control would
+otherwise deploy from wherever the operator happened to be and certify a
+commit no propagation routed anywhere. One function answers both, since two
+readings of one question are two chances to disagree about which branches
+are deployable.
+
+What the branch holds is read off the local ref where there is one, and off
+the remote-tracking ref otherwise, which is how the switch chooses too. The
+deployment root is named as a path under the git root, and both paths are
+resolved through C<Cwd::realpath> before they are compared, so a root
+reached through a symlink is not mistaken for one outside the repository.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> for the deployment root being asked about.
+
+=item C<$git>
+
+A C<Service::Git> for the repository holding that root.
+
+=item C<$branch>
+
+The deployment branch to read, as C<< <env>/<type> >>.
+
+=back
+
+B<Returns:> 1 when the branch carries the deployment root's
+C<.genesis/config>, and 0 when it does not.
+
+B<Errors:>
+
+=over 4
+
+=item C<"The deployment root ... is not inside the repository at ...">
+
+Raised when the deployment root resolves to a directory outside the git
+root, so there is no path on the branch to read it from. That is a defect
+rather than something an operator did, so it is said outright rather than
+answered as a branch carrying nothing.
+
+=back
+
+B<Examples:>
+
+  Genesis::Commands::branch_carries_repository($top, $git, 'qa/bosh');
+  # Returns: 1 for a branch a propagate run has delivered to
+
+  Genesis::Commands::branch_carries_repository($top, $git, 'qa/bosh');
+  # Returns: 0 for a branch still holding the init commit alone
 
 =head2 get_options
 
