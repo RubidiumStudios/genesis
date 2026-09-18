@@ -247,6 +247,7 @@ unit-tests/service_bosh-director_cpis.t                    # Director CPI invent
 unit-tests/service_git-checkout_cwd.t                      # checkout survives losing the cwd
 unit-tests/service_git-cherry_pick.t                       # cherry-pick helper
 unit-tests/service_git-divergence.t                        # the six divergence states and their counts
+unit-tests/service_git-diff_files.t                        # the structured diff classifies, and refuses a diff git cannot take
 unit-tests/service_git-fetch_branches.t                    # fetch_branches helper
 unit-tests/service_git-fetch_preserves_local.t             # fetch must not discard unpushed local commits
 unit-tests/service_git-index_reads.t                       # the three index reads the two assertions stand on
