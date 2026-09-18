@@ -152,13 +152,17 @@ subtest 'no branch anywhere is awaiting pipeline-apply' => sub {
 subtest 'a branch carrying no repository is awaiting its first delivery' => sub {
 	plan tests => 5;
 
-	# Ruling 26.  The apply cut the branch and no propagation has delivered
-	# to it, so the operator's copy holds the init commit alone.  That is the
-	# arm of the gate that declines to switch, and a classification that read
-	# the state alone would call it in-sync or behind and deploy from control.
+	# The apply cut the branch and no propagation has delivered to it on
+	# either side, which is the staged shape: the branch holds the init
+	# commit and so does its counterpart.  That is the arm of the gate that
+	# declines to switch, and a classification that read the state alone
+	# would call it in-sync and deploy from control.  A clone merely behind a
+	# delivery is the subtest below, and it deploys; what is refused here is
+	# an environment nothing has been routed to yet.
+	#
 	# There is no fixture_bosh here, because the branch carrying nothing is
 	# the whole of the state and the deploy never reaches a director.
-	my $h    = seeded_harness();
+	my $h    = staged(envs => ['qa']);
 	my $slug = $h->slug('qa');
 
 	my (undef, $err, $exit) = run_genesis($h,
@@ -174,6 +178,48 @@ subtest 'a branch carrying no repository is awaiting its first delivery' => sub 
 	like(unfolded($err), qr/genesis pipeline-apply.*genesis propagate/,
 		'and naming the two commands in order');
 	like(unfolded($err), qr/Nothing was deployed\./, 'and nothing was deployed');
+};
+
+subtest 'a stale clone deploys the branch, not control' => sub {
+	plan tests => 4;
+
+	# The operator's own copy of the branch sits where pipeline-apply cut it
+	# while the remote carries a delivery, which is a clone that has not
+	# pulled rather than an environment awaiting one.  The fast-forward is
+	# therefore made before anything asks what the branch carries, in the
+	# gate ahead of its switch and here ahead of the classification, so this
+	# deploy reads the branch instead of being sent to genesis propagate,
+	# which could not have helped.
+	#
+	# catch_up => 0 leaves the clone stale, and the environment file is the
+	# discriminator: control and the branch disagree about it, and the
+	# blueprint prints whichever of the two the deploy read.
+	my $h = seeded_harness();
+	write_env_file($h, 'qa', params => {marker => 'control'}, commit => 0);
+	# The file is written uncommitted and commit_on_control makes the commit
+	# out of the set it is handed, so the body is read back and handed to it.
+	my $on_control = helper::get_file($h->a . '/qa.yml');
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => $on_control},
+		message => 'mark qa on control',
+		push    => 1);
+	(my $delivered = $on_control) =~ s/marker: control/marker: delivered/;
+	deliver($h, 'qa', control => $control, files => {'qa.yml' => $delivered});
+	refresh($h, 'a', $h->control, $h->slug('qa'));
+	fixture_bosh($h, catch_up => 0, hooks => {blueprint =>
+		"grep '^  marker:' \"\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml\" >&2\n"
+		. "cat > manifest.yml <<'MANIFEST'\n---\nharness: deployed\nMANIFEST\n"
+		. "echo manifest.yml\n"});
+	stand_on($h, $h->control);
+
+	my ($out, $err, $exit) = run_genesis($h,
+		'qa', 'deploy', '--no-propagate', '-y', 'r');
+
+	is($exit, 0, 'the stale clone deploys');
+	like("$out$err", qr/marker:\s*delivered/,
+		'reading the environment file the deployment branch carries');
+	unlike("$out$err", qr/marker:\s*control/,
+		'and not the one control carries');
 };
 
 subtest 'the divergence refusal prints before the prior-env one' => sub {

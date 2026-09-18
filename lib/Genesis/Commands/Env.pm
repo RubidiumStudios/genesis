@@ -1019,22 +1019,37 @@ sub _deploy_branch_action {
 		);
 	}
 
-	# The three states that would deploy, and the one question left to ask of
-	# them.  A branch the apply cut and no propagation has filled carries its
-	# init file and nothing else, and it reads as in-sync where nothing has
-	# been delivered anywhere and as behind where this clone has not pulled
-	# what was.  The state alone would deploy it, and a deploy of a branch
-	# with no repository on it runs from wherever the operator happens to be
-	# standing, because the gate declines to switch onto such a branch.  That
-	# is a deploy certifying a commit no propagation routed anywhere, so it is
-	# refused here, where the last read before the deploy runs is made.
-	#
-	# no-local sits with them for the reason the propagate run's own initial
-	# state gives: the refresh above creates the local ref from the tracking
-	# ref, so nothing reaches here in that state, and the gate's switch would
-	# have created it in any case.
+	# The three states that would deploy, and the one move and one question
+	# left for them.  no-local sits with them for the reason the propagate
+	# run's own initial state gives: the refresh two steps above materialises
+	# the local ref from the tracking ref, so nothing reaches here in that
+	# state, and the gate's switch would have created the ref in any case.
 	if ($d->{state} eq 'in-sync' || $d->{state} eq 'behind'
 			|| $d->{state} eq 'no-local') {
+		# The fast-forward comes before the question, because a branch this
+		# clone holds behind a delivery is a clone nobody pulled rather than
+		# an environment awaiting one.  The move is ordered only where the
+		# deploy is standing on the branch: pull_ff_only merges into the
+		# branch the working tree holds, so ordered anywhere else it would
+		# pull the deployment branch into control.  The gate makes the same
+		# move with a ref write ahead of its own switch, which is how a stale
+		# clone comes to be standing here at all.
+		my $on_branch = ($git->current_branch // '') eq $branch;
+		return {action => 'fast-forward', divergence => $d}
+			if $on_branch && $d->{state} eq 'behind';
+
+		# Standing on the branch is also what answers the question below: the
+		# gate switched onto it, and it only switches onto a branch carrying
+		# the repository the deploy then read its root from.
+		return {action => 'proceed', divergence => $d} if $on_branch;
+
+		# Not standing on it means the gate declined to switch, and for a
+		# branch in one of these three states the one reason it declines is a
+		# branch with nothing on it: the apply cut it and no propagation has
+		# filled it, on either side.  A deploy would then run from wherever
+		# the operator happens to be standing and certify a commit no
+		# propagation routed anywhere, so it is refused here, at the last
+		# read before the deploy runs.
 		bail({exitcode => DATAERR},
 			"Refusing to deploy.  The branch #C{%s} carries no repository ".
 			"where this clone reads it, so nothing has been delivered to the ".
@@ -1046,11 +1061,7 @@ sub _deploy_branch_action {
 			"to fill, so run #C{genesis propagate} to deliver control to it.  ".
 			"Nothing was deployed.",
 			$branch, $env_name
-		) unless Genesis::Commands::branch_carries_repository($top, $git, $branch);
-
-		return {action => 'fast-forward', divergence => $d}
-			if $d->{state} eq 'behind';
-		return {action => 'proceed', divergence => $d};
+		);
 	}
 
 	# resolve_branch has no unrelated state: a branch sharing no ancestor

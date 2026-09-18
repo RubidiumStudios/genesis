@@ -264,6 +264,15 @@ since standing on a deployment branch is an easy state to arrive at and a
 deploy of the working tree as it stands reads no differently from any other
 until something in it was not meant to ship.
 
+Before that question is asked, a branch this clone holds behind its
+remote-tracking ref is fast-forwarded to it. That is a clone nobody has
+pulled rather than an environment awaiting a delivery, and the two look alike
+from here: both carry the init file and nothing else. The move is made with a
+ref write, since the working tree is standing somewhere else by now, and only
+on the one state that promises it is a fast-forward, so it creates and
+discards nothing. Nothing is fetched, because the refresh is its own step
+under D40 and the tracking ref is read as the last one left it.
+
 A branch that C<genesis pipeline-apply> cut and no C<genesis propagate> run
 has delivered to is not switched onto either. It carries its init file and
 nothing else, so there is no repository on it to read, and a command switched
