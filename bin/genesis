@@ -539,6 +539,15 @@ define_command("deploy", {
 			"flag to skip that propagation.  Non-manual providers (concourse, ".
 			"github-actions) own their own propagation and are unaffected by ".
 			"this flag.",
+
+		'force' =>
+			"Deploy even though a pipeline owns this environment.  Without this ".
+			"flag, an environment whose pipeline runs under an automated ".
+			"provider refuses a deploy from the command line, because such a ".
+			"deploy takes none of the locks the pipeline's own jobs take.  With ".
+			"it, at a terminal, you are asked to acknowledge the risk; that ".
+			"question is not suppressed by #y{--yes}, and outside a terminal ".
+			"the refusal stands even with this flag.",
 	],
 	args => {
 		'reason' =>

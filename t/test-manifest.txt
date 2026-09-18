@@ -182,6 +182,7 @@ unit-tests/genesis_ci_publish-recheck_control.t     # every refusal the pre-publ
 unit-tests/genesis_ci_publish-declined.t            # a no at the ask resets every branch and publishes nothing
 unit-tests/genesis_ci_propagation-pr_idempotency.t  # PR idempotency
 unit-tests/genesis_ci_preflight-disowned.t          # the disowned pipeline's arms, each caller wording its own refusal
+unit-tests/genesis_ci_preflight-deploy_gate.t       # the typed acknowledgement --yes cannot answer, and the terminal rule
 unit-tests/genesis_ci_compiler-override_file.t      # the override file beside .genesis/config, and its name
 unit-tests/helper-tree_readers.t                    # the shared readers and guards in t/helper.pm
 unit-tests/genesis_ci_compiler-provider_contract.t   # the registry entry, the declared keys, and the visibility fallback
@@ -388,6 +389,7 @@ integration-tests/genesis_commands_env-deploy_session_faults.t  # the cleanlines
 integration-tests/genesis_commands_env-deploy_control_and_disowned.t  # control nowhere refuses, and a disowned pipeline warns locally and refuses in a job
 integration-tests/genesis_commands_env-deploy_branch_classes.t  # the deployment branch is classified before the deploy, and four states refuse
 integration-tests/genesis_commands_env-deploy_prior_env.t  # the predecessor's record is read once, through the merged hierarchy
+integration-tests/genesis_commands_env-deploy_provider_gate.t  # an automated provider's pipeline owns the deploy, and --force is the only way past
 integration-tests/genesis_commands_repo-init.t   # repo-init validate + execute against real workdirs (fs, git, tarball, symlink)
 #integration-tests/genesis_env-terminate.t   # Replaced by genesis_env-terminate_workflow.t
 # Genesis::Env workflow integration tests

@@ -13,6 +13,11 @@ Genesis::CI::Preflight - the initial state a propagation run may find
 
   Genesis::CI::Preflight::assert_not_disowned($top, command => 'propagate');
 
+  Genesis::CI::Preflight::assert_provider_gate($top, $options,
+      owns        => 'deploys of this environment',
+      outcome     => 'Nothing was deployed.',
+      acknowledge => 'I accept the risk');
+
 =head1 DESCRIPTION
 
 The first stage of a propagation run settles what the repository holds before
@@ -25,15 +30,18 @@ the refusal names the branch and the way out.
 
 The module also holds the refusals that more than one command makes about the
 pipeline itself, because a state described in two places is a state an
-operator ends up fixing twice.  C<assert_not_disowned> is the first of them,
-and both the propagate run and C<genesis E<lt>envE<gt> deploy> ask it the
-same question and are answered in their own words.
+operator ends up fixing twice.  There are two of them, and both the propagate
+run and C<genesis E<lt>envE<gt> deploy> ask each the same question and are
+answered in their own words.  C<assert_not_disowned> answers for a pipeline
+the configuration has disowned, and C<assert_provider_gate> answers for a
+pipeline that owns the work the operator is about to do by hand.
 
 Each refusal spends a named exit code rather than a number.  Control that
 exists nowhere is a configuration fault and exits C<CONFIG>, an initial state
 the design calls illegal exits C<DATAERR>, and a remote this clone cannot
 reach exits C<TEMPFAIL>, which is the one of the three a pipeline job may
-retry.
+retry.  The provider gate spends two more, refusing at C<NOPERM> and exiting
+C<ABORTED> where the operator declines it.
 
 =head2 The order the first stage runs in
 
@@ -321,6 +329,102 @@ B<Examples:>
   # [WARNING] Warning: the pipeline is disabled in .genesis/config, but the
   #           applied record says pipeline-apply applied it from
   #           control@a1b2c3d at 2026-09-15 11:04:22 +0000.
+
+=head2 assert_provider_gate($top, $opts, %how)
+
+  Genesis::CI::Preflight::assert_provider_gate($top, $options,
+      owns        => 'deploys of this environment',
+      outcome     => 'Nothing was deployed.',
+      acknowledge => 'I accept the risk');
+
+Refuses a command-line run of work an automated provider's pipeline owns,
+because such a run takes none of the locks the pipeline's own jobs take.
+C<--force> at a terminal turns the refusal into an acknowledgement, which
+C<--yes> does not suppress, and outside a terminal the refusal stands even
+with the flag.
+
+C<owns> and C<outcome> give the refusal the caller's own words. C<acknowledge>
+names a phrase the operator types, which C<genesis E<lt>envE<gt> deploy> asks
+for and the propagate run does not, the run being asked a yes-or-no question
+instead. C<dry_run> warns and passes, which a preview that writes nothing uses.
+
+A pipeline job, which Genesis recognises by C<GENESIS_PIPELINE_TASK> in the
+environment, skips the gate, and a repository under the manual provider never
+meets it, the operator there being the pipeline.
+
+The typed acknowledgement says what the deploy does not do as well as what to
+do before it. It recommends pausing the pipeline and waiting for quiescence
+on the target environment, on its director, and on every pipeline that
+deploys to that director, and it says that no shuttle event is written for
+this command, so nothing fans out to the deployments that read this one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+A C<Genesis::Top> on the repository, which is asked for the provider type.
+
+=item C<$opts>
+
+The command's options, as C<get_options> answered them. C<force> is the only
+one the gate reads, since C<--yes> answers no part of this.
+
+=item C<owns>
+
+The sentence about what the pipeline owns, as in "deploys of this
+environment". It is "propagation for this repository" unless the caller says
+otherwise.
+
+=item C<outcome>
+
+The refusal's closing sentence, which says what did not happen. It is
+"Nothing was written." unless the caller says otherwise.
+
+=item C<acknowledge>
+
+The phrase the operator types to pass the gate. A caller that names none is
+asked "Proceed anyway? [y|n]" instead.
+
+=item C<dry_run>
+
+True where the command writes nothing, in which case the gate warns and
+passes rather than refusing.
+
+=back
+
+B<Returns:> 1, where the gate is passed or does not apply. It does not return
+otherwise.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Calls C<bail()> at C<Genesis::Exit/NOPERM> for a bare run under an automated
+provider, and again for a C<--force> run with no controlling terminal.
+
+=item *
+
+Calls C<bail()> at C<Genesis::Exit/ABORTED> where the operator declines at the
+terminal, by answering no or by typing anything but the phrase.
+
+=back
+
+B<Examples:>
+
+  Genesis::CI::Preflight::assert_provider_gate($top, {});
+  # returns 1 under the manual provider
+
+  Genesis::CI::Preflight::assert_provider_gate($top, {}, dry_run => 1);
+  # warns that this is the pipeline's work, asks nothing, returns 1
+
+  Genesis::CI::Preflight::assert_provider_gate($top, {});
+  # [FATAL] The concourse pipeline owns propagation for this repository.
+  #         Run it with --force at a terminal if you mean to.  Nothing was
+  #         written.
 
 =head2 initial_state($top, $git, %opts)
 

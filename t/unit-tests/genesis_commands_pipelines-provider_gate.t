@@ -3,7 +3,12 @@ use strict;
 use warnings;
 
 # Proves T170 and T171: the three behaviours of the propagate provider gate
-# that only appear at a controlling terminal.  With --force the gate warns
+# that only appear at a controlling terminal.  The file keeps the propagate
+# run's name because these are the propagate run's rows; the gate itself is
+# Genesis::CI::Preflight::assert_provider_gate, which genesis <env> deploy
+# meets as well and which each command words in its own sentences.
+#
+# With --force the gate warns
 # and asks, a yes carries the run past it, a no exits ABORTED, and -y never
 # answers the question, because -y answers the publish confirmation alone.
 #
@@ -25,7 +30,7 @@ use Test::Output;
 use Genesis;
 use Genesis::Exit qw/ABORTED/;
 
-use_ok 'Genesis::Commands::Pipelines';
+use_ok 'Genesis::CI::Preflight';
 
 $ENV{NOCOLOR} = 1;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
@@ -52,7 +57,7 @@ sub refusal_from {
 		# once as well as redefine, because the refusal is the only mention
 		# of the glob in this file and Perl reads a single mention as a typo.
 		no warnings qw/once redefine/;
-		local *Genesis::Commands::Pipelines::bail =
+		local *Genesis::CI::Preflight::bail =
 			sub {push @raised, [@_]; die "refused\n"};
 		eval {$code->(); 1} or $died = $@;
 	}
@@ -73,12 +78,12 @@ subtest 'force at a terminal warns and asks' => sub {
 	plan tests => 3;
 
 	no warnings 'redefine';
-	local *Genesis::Commands::Pipelines::in_controlling_terminal = sub {1};
+	local *Genesis::CI::Preflight::in_controlling_terminal = sub {1};
 
 	my $result;
 	set_stdin("y\n");
 	my ($out, $err) = output_from {
-		$result = Genesis::Commands::Pipelines::assert_provider_gate(
+		$result = Genesis::CI::Preflight::assert_provider_gate(
 			$top, {force => 1}
 		)
 	};
@@ -94,13 +99,13 @@ subtest 'a no at the terminal aborts' => sub {
 	plan tests => 2;
 
 	no warnings 'redefine';
-	local *Genesis::Commands::Pipelines::in_controlling_terminal = sub {1};
+	local *Genesis::CI::Preflight::in_controlling_terminal = sub {1};
 
 	set_stdin("n\n");
 	my ($said, $code);
 	output_from {
 		($said, $code) = refusal_from(sub {
-			Genesis::Commands::Pipelines::assert_provider_gate(
+			Genesis::CI::Preflight::assert_provider_gate(
 				$top, {force => 1}
 			)
 		})
@@ -116,12 +121,12 @@ subtest '-y never answers the gate' => sub {
 	plan tests => 2;
 
 	no warnings 'redefine';
-	local *Genesis::Commands::Pipelines::in_controlling_terminal = sub {1};
+	local *Genesis::CI::Preflight::in_controlling_terminal = sub {1};
 
 	my $result;
 	set_stdin("y\n");
 	my ($out, $err) = output_from {
-		$result = Genesis::Commands::Pipelines::assert_provider_gate(
+		$result = Genesis::CI::Preflight::assert_provider_gate(
 			$top, {force => 1, yes => 1}
 		)
 	};
