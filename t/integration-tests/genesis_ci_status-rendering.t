@@ -194,6 +194,11 @@ subtest 'a branch the remote has never had reads as local only' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status', '--json');
 	is($exit, 0, 'the report describes the state rather than refusing it');
 
+	# A guard.  The pre-flight classified this state before anything here
+	# read it, and the walk copied it into the divergence cell, so the
+	# assertion passed on arrival.  It is here because the line below reads
+	# that cell, and a renderer given the wrong state would otherwise fail
+	# for a reason nothing named.
 	my $row = env_row(decode_json($out), 'lab');
 	is($row->{divergence}{state}, 'no-remote',
 		'the record carries the state the pre-flight classified');
@@ -227,9 +232,9 @@ subtest 'a branch sharing no ancestor with the remote reads as unrelated' => sub
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status', '--json');
 	is($exit, 0, 'the report describes the state rather than refusing it');
 
-	my $row = env_row(decode_json($out), 'lab');
-	is($row->{divergence}{unrelated}, 1,
-		'the record says the two histories share nothing');
+	like($out, qr/"unrelated"\s*:\s*true/,
+		"the record says the two histories share nothing, in the encoder's ".
+		"own boolean");
 
 	my ($tree) = run_genesis($h, 'pipeline-status');
 	my ($line) = grep { plain($_) =~ /^\s+lab\b/ } split(/\n/, $tree);

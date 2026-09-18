@@ -222,6 +222,7 @@ for an environment this walk never loaded.  C<divergence> carries C<state>,
 C<ahead>, and C<behind> from the pre-flight's branch record, with C<unrelated>
 beside them, which the three states cannot say on their own, because an orphan
 branch and an ordinary divergence both hold the name on both sides.
+C<unrelated> is the encoder's own boolean, as C<manual> is.
 
 B<Errors:> Raises a bug where no git handle is given, since every reading
 below is made through one and a walk without it can answer nothing.
