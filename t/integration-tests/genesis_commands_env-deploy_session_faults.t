@@ -40,9 +40,15 @@ $ENV{NOCOLOR} = 1;
 # propagation set rather than spelled out, so a row cannot come to be editing
 # a file the deploy never looks at, and .genesis/config is passed over because
 # the set holds it too and an edit there takes the deployment root with it.
+# The last segment is what is matched, because propagation_set prefixes every
+# path with the deployment root where the harness has one, and a match on the
+# whole path would answer nothing there and leave both rows writing to a name
+# that is half empty.
 sub edited_file {
 	my ($h, $env) = @_;
-	my ($file) = grep {$_ eq "$env.yml"} propagation_set($h, $env);
+	my ($file) = grep {m{(?:^|/)\Q$env\E\.yml$}} propagation_set($h, $env);
+	die "the propagation set for $env carries no $env.yml to edit\n"
+		unless defined $file;
 	return $file;
 }
 
@@ -66,7 +72,16 @@ subtest 'a switching deploy refuses on a tracked modification' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'qa', 'deploy', '-y', 'a reason');
 
 	isnt($exit, 0, 'the deploy refused');
-	like($err, qr{\Q$edited\E}, 'and named the modified file');
+	# The session's own wording carries the name, rather than the name alone.
+	# A deploy has many ordinary reasons to print the environment's file name
+	# on stderr, and the guard's whole subject is a refusal that named no
+	# file, so the name has to be read where the refusal put it.  The words
+	# are matched across whitespace, because the message is wrapped to the
+	# terminal width before an operator sees it.
+	my $refusal =
+		qr/uncommitted\s+changes,\s+and\s+this\s+command\s+switches/;
+	like($err, qr/$refusal.*\Q$edited\E/s,
+		'naming the modified file in the session\'s own refusal');
 	my @writes = grep {$_->[0] =~ /^(checkout|commit|push)$/} step_log($h->git('a'));
 	is_deeply(\@writes, [], 'it refused before its first write');
 };
@@ -124,9 +139,14 @@ subtest 'a restore that cannot run dies naming what it could not restore' => sub
 };
 
 subtest 'an interrupt between the switch and BOSH restores what it can' => sub {
-	# Green on arrival.  It catches a session whose signal handler was never
-	# installed, which would leave the operator on the deployment branch.
-	plan tests => 2;
+	# The restoration was green on arrival, and it catches a session whose
+	# signal handler was never installed, which would leave the operator on
+	# the deployment branch.  The sentence below it is what tells the
+	# interrupt from an ordinary failed deploy: bin/genesis routes SIGINT to
+	# a bail that says "Genesis halted due to user interrupt", and no other
+	# path says it, so a run that reached the same two answers by failing
+	# rather than by being interrupted proves nothing and is caught here.
+	plan tests => 3;
 
 	my $h = seeded_harness();
 	fixture_bosh($h);
@@ -135,10 +155,19 @@ subtest 'an interrupt between the switch and BOSH restores what it can' => sub {
 	# signal armed for a later row in this file.
 	local $ENV{GENESIS_HARNESS_SIGINT_BEFORE_BOSH} = 1;
 
+	# bin/genesis installs its interrupt handler only where GENESIS_TESTING
+	# is unset, and the suite sets that for every run, so a row whose whole
+	# subject is the handler has to hand the command an environment without
+	# it.  Nothing else about the run changes, and the command is interrupted
+	# before it reaches the director either way.
+	delete local $ENV{GENESIS_TESTING};
+
 	my $w = snapshot_w($h);
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '--no-propagate', '-y', 'a reason');
 	isnt($exit, 0, 'the failure is reported');
+	like($err, qr/Genesis halted due to user interrupt/,
+		'genesis acted on the interrupt and not on a failed deploy');
 
 	assert_w_restored($w, 'the signal path');
 };

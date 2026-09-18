@@ -868,13 +868,25 @@ five lines of task output and exit non-zero, which is what the deploy's own
 failure path reads to tell a refusal from a cancellation, so a row can watch
 the bail path without breaking anything else the deploy asks for.
 
-Setting C<GENESIS_HARNESS_SIGINT_BEFORE_BOSH> in the parent makes that same
-C<deploy> call raise C<SIGINT> in the genesis process instead, which is how a
-row watches the signal path.  The moment is the one T232 is about, after the
-gate has switched and before the director has been asked to do anything.  The
-signal goes to the genesis process rather than to the script, because the
-session and its handler live there, and the script walks its parents until it
-finds the one running C<bin/genesis>, since a shell may stand between them.
+Setting C<GENESIS_HARNESS_SIGINT_BEFORE_BOSH> makes the C<blueprint> hook
+raise C<SIGINT> in the genesis process, which is how a row watches the signal
+path.  The moment is the one T232 is about, after the gate has switched and
+before any deployment has begun.
+
+It rides on the hook and not on the C<deploy> arm of the script because Perl
+ignores C<SIGINT> in the parent for the length of a C<system()> call, and the
+BOSH deployment is run that way, so a signal raised from inside it is
+discarded and the deploy goes on to report an ordinary failure.  A hook is run
+through a pipe, where the handler F<bin/genesis> installs does fire.
+
+The signal goes to the genesis process rather than to the hook, because the
+session and its handler live there, and the hook walks its parents until it
+finds the one running F<bin/genesis>, stepping over the embedded
+F<.genesis/bin/genesis> that the propagation set carries, since a shell may
+stand between them.  Where no such parent is found it says so on stderr and
+fails, rather than falling through to a plain failure a row would read as a
+refusal from the director.  A row that brings its own C<blueprint> brings no
+interrupt with it.
 It then holds itself open with its own output closed, so the deploy is
 interrupted rather than told the director refused and nothing waits on a
 process genesis has already left behind.
