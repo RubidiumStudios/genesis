@@ -335,6 +335,73 @@ sub pipeline_status {
 }
 
 # }}}
+# pipeline_hold - set the propagation hold on one environment or the root {{{
+#
+# D50 gives the hold two forms, one environment or every environment in the
+# deployment root, and the reason is required in both.  The environment is the
+# CLI's own <env> prefix, which set_top_path has already resolved by the time
+# we are called, so two arguments mean an environment and a reason, and one
+# argument is read against the deployment root to find out which of the two it
+# is.  The two forms differ in what fills the list and in nothing else, so the
+# body is written once.
+#
+# D64's refusal of a disowned pipeline is the group's and not ours, and the
+# legacy gate runs before we are reached, so there is no third refusal here on
+# pipeline.enabled saying what those two already say.
+sub pipeline_hold {
+	my @args = @_;
+	my $opts = get_options();
+	my $top  = _get_top($opts);
+
+	assert_not_disowned($top, 'pipeline-hold');
+
+	command_usage(1,
+		"A propagation hold takes an environment and a reason, and a reason ".
+		"of more than one word has to be quoted."
+	) if @args > 2;
+
+	# Both `genesis <env> pipeline-hold` and `genesis pipeline-hold
+	# "<reason>"` arrive here carrying one argument, and only the repository
+	# can tell the two apart.  The CLI read the prefix as an environment
+	# because a file of that name sits in the deployment root, so the same
+	# question is asked here and the two never disagree about what the
+	# operator named.  An environment with nothing after it is the missing
+	# reason the refusal below names.
+	my ($env_name, $reason);
+	if (@args == 2) {
+		($env_name, $reason) = @args;
+	} elsif (@args == 1) {
+		(my $named = $args[0]) =~ s/\.ya?ml$//;
+		if (length($named) && -f $top->path("$named.yml")) {
+			$env_name = $args[0];
+		} else {
+			$reason = $args[0];
+		}
+	}
+
+	# set_top_path hands the prefix on as the basename of the file it
+	# resolved, suffix and all, and an operator may have written the suffix
+	# themselves in either form.  It comes off once here, so the record's
+	# address and the sentence the operator reads name one environment
+	# however the environment was written on the command line.
+	$env_name =~ s/\.ya?ml$// if defined $env_name;
+
+	command_usage(1, "A propagation hold needs a reason.")
+		unless defined($reason) && $reason =~ /\S/;
+
+	for my $name (defined($env_name) ? ($env_name) : _root_environments($top)) {
+		my $env = Genesis::Env->bare($name, $top)->with_vault;
+		$env->set_hold(reason => $reason);
+		info(
+			"Propagation to #C{%s} is held: %s\n".
+			"Release it with #C{genesis %s pipeline-release}.",
+			$name, $reason, $name
+		);
+	}
+	return 0;
+}
+
+# }}}
 # propagate - deliver each due control commit to the branches that want it {{{
 #
 # The run stands itself on control, refreshes, settles every deployment
@@ -1979,6 +2046,30 @@ sub _refuse_disabled_pipeline {
 		"Set #C{pipeline.enabled: true} on control, commit it, then run ".
 		"#C{genesis pipeline-apply} again.  Nothing was written."
 	);
+}
+
+# }}}
+# _root_environments - the deployment root's environments, in DAG order {{{
+#
+# D50 gives both hold commands a form with no environment argument, over the
+# deployment root and not the repository, because under D66 two roots can share
+# an environment name and holding the wrong `prod` would be worse than holding
+# nothing.  The topology is the same enumeration the walk reads, so the run and
+# the two commands never disagree about what the root holds.
+#
+# pipeline_topology answers every field empty where the pipeline is disabled or
+# where no environment file declares one, so an empty order is the one state
+# worth a sentence: a command that silently held nothing would read as success.
+sub _root_environments {
+	my ($top) = @_;
+
+	my @envs = @{$top->pipeline_topology->{order} || []};
+	bail(
+		{exitcode => CONFIG},
+		"No environments with pipeline metadata were found in this ".
+		"deployment root."
+	) unless @envs;
+	return @envs;
 }
 
 # }}}
