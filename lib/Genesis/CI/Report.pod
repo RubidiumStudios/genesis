@@ -81,7 +81,10 @@ already held reads C<< held behind control@<sha> >>, naming that commit in
 the marker's short form.  A commit stopped by the environment's own
 propagation hold reads C<< held (<reason>) >> carrying the reason somebody
 wrote on the hold record, rather than the word C<on-hold>, because what an
-operator has to clear is that reason and not the state's own name.
+operator has to clear is that reason and not the state's own name.  A commit
+held because the environment's pull request has been approved and frozen
+reads C<< awaiting merge (#<number>) >>, naming the pull request an operator
+merges to release it.
 
 B<Parameters:>
 
@@ -100,6 +103,9 @@ B<Examples:>
   my $words = Genesis::CI::Report::hold_reason($held);
   # returns "held by lab (ops/shared.yml), lab awaiting deployment"
 
+  # and, for a commit an approved pull request froze:
+  # returns "awaiting merge (#42)"
+
 =head2 held_qualifier
 
     my $words = Genesis::CI::Report::held_qualifier($env_record);
@@ -111,7 +117,10 @@ held.  An environment the pipeline was never applied to waits for that
 command, one holding commits behind an ancestor waits for that ancestor to
 certify the commit it has not deployed, and one holding commits behind a gate
 waits on its own deployment of the gate, which is the commit the phrase then
-names.
+names.  An environment whose pull request a reviewer has approved reads C<<
+awaiting merge (#<number>) >> and waits for that merge rather than for
+anybody to certify anything, so that wording is read ahead of the ancestor
+one.
 
 An environment with a propagation hold standing against it reads C<< needs
 clearing (<reason>) >> ahead of any of those, because a hold is a decision
@@ -140,6 +149,9 @@ B<Examples:>
 
   my $words = Genesis::CI::Report::held_qualifier($env_record);
   # returns "awaiting deployment (lab at control@1a2b3c4)"
+
+  # and, for an environment whose pull request is approved:
+  # returns "awaiting merge (#42)"
 
 =head2 hold_detail
 
