@@ -3555,6 +3555,41 @@ sub deployed_record {
 }
 
 # }}}
+# warn_uncertified_secrets_target - say which version the secrets served {{{
+#
+# H36: one vault holds the secrets for both the version running and the
+# version coming, so a rotation against the tip can hand the running version a
+# value it cannot consume the next time it is redeployed.  The closure is a
+# hold, which D59 places after the MVP, so until then we say what happened and
+# name the risk.  This blocks nothing.
+#
+# Two control commits are compared and never a deployed commit against a
+# certified one, which D87 exists to keep apart.  The version served is a
+# deployment-branch commit, and the control commit it carries is the one its
+# own marker names.
+sub warn_uncertified_secrets_target {
+	my ($self, $served, $git) = @_;
+	my $record = $self->deployed_record or return 0;
+	my $certified = $record->{git}{control_commit} or return 0;
+
+	require Genesis::CI::Marker;
+	my $ref = $served // $self->top->branch_for($self->name);
+	my $served_control = Genesis::CI::Marker::newest($git, $ref) or return 0;
+	return 0 if $served_control eq $certified;
+
+	$self->notify(warning =>
+		"The secrets just written are for control@#C{%s}, which is not the ".
+		"certified commit control@#C{%s} that #C{%s} is running.\n\n".
+		"If #C{%s} is redeployed before it deploys the newer commit, it will ".
+		"run the version it is running now against these values.  Deploy ".
+		"#C{%s} to close the gap, or rerun with #C{--as-deployed} to serve ".
+		"the version it is running.",
+		$served_control, $certified, $self->name, $self->name, $self->name
+	);
+	return 1;
+}
+
+# }}}
 # _decode_path_list - read a vault field holding a list of deployment slugs {{{
 #
 # A vault field is a string, so a list reaches it in one of two forms.  An

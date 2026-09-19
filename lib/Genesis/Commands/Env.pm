@@ -616,6 +616,36 @@ sub list_secrets {
 	$env->notify(success => "found ".scalar($plan->secrets)." secrets.\n");
 
 }
+# _warn_about_the_version_served - the secrets family's one warning {{{
+#
+# H36's answer belongs to the secrets family rather than to the deploy, so it
+# has a caller of its own beside _warn_about_the_tip and is not folded into
+# it.  All four commands need it and each of them holds a loaded environment
+# by the time it has done its work, so the two values the warning wants are
+# worked out here rather than four times over.
+#
+# The commit the run served is the one the resolver answered, which is the
+# same value the gate switched the tree onto, and undef there means the run
+# served the branch tip.  It is asked again rather than carried down from the
+# gate, because the gate hands the command nothing and the answer is a
+# reading of the same record either way.
+#
+# The handle comes from Service::Git->new('.'), which memoises one handle per
+# repository root, so this is the handle the gate used and not a second one.
+# The gate's session is not asked for it: the secrets family opens one only
+# where --as-deployed opted in, so a run that named no flag has none and
+# reaching through it would die on the run this warning is mostly for.
+sub _warn_about_the_version_served {
+	my ($env) = @_;
+
+	require Service::Git;
+	return $env->warn_uncertified_secrets_target(
+		scalar Genesis::Commands::deployed_target($env->name, $env->top),
+		Service::Git->new('.')
+	);
+}
+
+# }}}
 sub check_secrets {
 	command_usage(1) if @_ < 1;
 	my ($name,@paths) = @_;
@@ -635,6 +665,8 @@ sub check_secrets {
 		%{get_options()}
 		, validate => $validation_level
 	);
+
+	_warn_about_the_version_served($env);
 
 	if ($results->{empty}) {
 		if ($msg) {
@@ -669,6 +701,9 @@ sub add_secrets {
 		->with_vault();
 
 	my ($results) = $env->add_secrets(paths=>\@paths,%{get_options()});
+
+	_warn_about_the_version_served($env);
+
 	if ($results->{error}) {
 		$env->notify(fatal => "- errors encountered while adding secrets");
 		exit 1
@@ -715,6 +750,8 @@ sub rotate_secrets {
 	my ($results, $msg) = $env->rotate_secrets(paths => \@paths,%{get_options()});
 
 	bail($msg||"User aborted secrets rotation") if $results->{abort};
+
+	_warn_about_the_version_served($env);
 
 	if ($results->{empty}) {
 		$env->notify($msg);
@@ -775,6 +812,8 @@ sub remove_secrets {
 			bail($msg||"User aborted secrets removal");
 		}
 	}
+
+	_warn_about_the_version_served($env);
 
 	if ($results->{empty} && keys %$results == 1) {
 		$env->notify($msg||"No secrets were found to remove");
