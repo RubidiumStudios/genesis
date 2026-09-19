@@ -218,9 +218,10 @@ subtest 'the namespace holds modules and nothing at its root' => sub {
 	is_deeply([sort map {s{^lib/Genesis/CI/}{}r} glob('lib/Genesis/CI/*.pm')],
 		[sort qw/Compiler.pm Layout.pm Legacy.pm Marker.pm Preflight.pm
 		         Propagation.pm Provider.pm ProviderCompiler.pm
-		         ProviderRegistry.pm Publish.pm Report.pm RunFailure.pm
+		         ProviderRegistry.pm Publish.pm PullRequest.pm
+		         Report.pm RunFailure.pm
 		         Shuttle.pm Walk.pm/],
-		'and the namespace holds the fourteen modules the step leaves it');
+		'and the namespace holds the fifteen modules the step leaves it');
 };
 
 subtest 'the pages name no class the namespace no longer holds' => sub {
