@@ -1126,6 +1126,13 @@ sub _deploy_preflight {
 	# disagree with the commit the tree is standing on.  It is asked in
 	# scalar context, because the record path beside it is the gate's to
 	# name in its own refusal and nothing here has a use for it.
+	#
+	# This is the second call of the run, and unlike the gate's it reads the
+	# root the deploy itself opened, which is the tree the gate switched onto.
+	# The resolver refuses a named flag where that root's pipeline is off, and
+	# that refusal cannot fire here: the caller asks this whole pre-flight
+	# only of a root whose pipeline_enabled answered true, so the condition is
+	# already known false before the resolver is asked.
 	my $target = Genesis::Commands::deployed_target($name, $top);
 
 	# 1.  The one refresh, control included, which M7 already freed of
