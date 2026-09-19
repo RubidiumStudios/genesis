@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # The post-deploy propagate child, and whether it runs, where it runs,
-# and what neither process writes.  Proves T248, T249, T254, T255, T257, and
-# T258 of the test matrix.
+# and what neither process writes.  Proves T248, T249, T250, T254, T255, T257,
+# and T258 of the test matrix.
 #
 # The fixture is the named shape rather than the step file's bare
 # make_harness, for the reason Task 14.6 recorded against the same rows.  A
@@ -51,7 +51,7 @@ use Cwd ();
 
 use Genesis;
 
-plan tests => 5;
+plan tests => 6;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -254,6 +254,61 @@ subtest 'the move carries the two properties across' => sub {
 		or diag("what the deploy said:\n$warned");
 	like(unfolded($warned), qr/Propagation failed \(rc=3\)/,
 		'and the operator was told the child failed, with its status');
+};
+
+# Proves T250 of the test matrix.
+#
+# The fixture is this file's own chained shape rather than the bare harness,
+# for the reason the header records, which is that the row below reads the
+# deploy's own success and a harness with no director, no bosh, and no kit
+# never gets one.  What the row is about is the window and not the deploy, so
+# the deploy has to be the ordinary one.
+subtest 'a lock taken in the window is reported, not swallowed' => sub {
+	plan tests => 9;
+
+	my $h = chained_harness();
+	due_on_control($h);
+	my $before = $h->git('a')->sha('refs/remotes/origin/'.$h->slug('prod'));
+
+	# The recorder takes the switch lock from a separate process once the
+	# deploy's session has finished and before the child is run, which is
+	# the window D46 leaves open on purpose.  It writes its own pid and the
+	# command it was given into the lock file, which is what lock_at_start
+	# reads back.
+	child_recorder($h, probe => 1, hold_lock => 'genesis prod deploy');
+	stand_on($h, $h->control);
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'deploy', '-y');
+
+	is($exit, 0, 'the deploy command still reports success')
+		or diag("what the deploy said:\n$err");
+	my ($child) = child_runs($h);
+	isnt($child->{exit}, 0, 'the child failed rather than waiting');
+
+	# The recorder passes the child's stderr through to us, so what the
+	# child said is in the run's own $err and not in a field of the record.
+	my $holder = $child->{lock_at_start};
+	like($err, qr/\b\Q$holder->{pid}\E\b/, "the child named the holder's pid");
+	like($err, qr/genesis prod deploy/, "the child named the holder's command");
+
+	# Unfolded, because the warning is one paragraph the terminal breaks
+	# where the width runs out and no row here is about where the break
+	# fell.
+	my $report = unfolded($out, $err);
+	like($report, qr/Propagation failed/, 'the deploy said propagation failed');
+	like($report, qr/Deploy itself succeeded/,
+		'the deploy said it is complete itself');
+	# The retry sentence is read rather than the hand-off notice above it,
+	# which names an environment on purpose, and what the row refuses is the
+	# argument D36 retired standing after the command.  The deploy's own
+	# name is the one that was there, so it is the one asked about; a bare
+	# "no word after" test cannot be used, because this file runs without
+	# colour and the sentence goes on in plain words.
+	like($report, qr/[Rr]un genesis propagate\b(?!\s+qa\b)/,
+		'the deploy named the retry, with no environment after it');
+
+	refresh($h, 'a', $h->slug('prod'));
+	is($h->git('a')->sha('refs/remotes/origin/'.$h->slug('prod')), $before,
+		'nothing on R moved, so the retry has everything left to do');
 };
 
 # vim: ts=2 sw=2 sts=2 noet
