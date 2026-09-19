@@ -1886,7 +1886,10 @@ EOF
 	# both sides; they're per-invocation derivations whose values legitimately
 	# differ (separate temp dirs, hash-ordered JSON) and aren't part of the
 	# round-trip contract.  `is_from_envvars` only exists on the new side.
+	# `__dependencies_read` is the set of deployments this process read, and a
+	# hook's process starts its own.
 	my $skip = qr/^(?:__actual_files|__signature|__manifest_provider
+	                 |__dependencies_read
 	                 |__get_call_path(?:_with_env)?
 	                 |__get_environment_variables
 	                 |__env_vars_for_)$/x;
