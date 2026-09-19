@@ -6,6 +6,11 @@ Genesis::CI::PullRequest - the pull request arm of the propagate run
 
     use Genesis::CI::PullRequest;
 
+    # Once, at the top of the run, and only where an environment in scope
+    # needs the API at all.
+    my $github = Genesis::CI::PullRequest::client_for_run($top,
+        records => \@in_scope, refuse => $refuse);
+
     # Before the run writes anything, for every environment that delivers
     # into a pull request.  A run that cannot read this refuses.
     my $state = Genesis::CI::PullRequest::pr_state($github,
@@ -861,6 +866,75 @@ B<Examples:>
     retire_branch($session, $record, env => $env, dry_run => 1);
     # returns 'idempotent', having listed the same branches and deleted
     # nothing at all
+
+=head2 client_for_run($top [, %opts])
+
+    my $github = Genesis::CI::PullRequest::client_for_run($top,
+        records => $record->{environments},
+        refuse  => $refuse);
+
+Returns one C<Service::Github> client for the whole run, built against the
+owner half of the pair the source-control block resolves, or C<undef> where
+no environment in scope has a proposed record and none would deliver into a
+pull request, and also where no token is set. A run that needs no client
+makes no call at all, not even to authenticate.
+
+An environment needs the API when it has a proposed record or would deliver
+into a pull request, whatever its hold state, because a hold set while a pull
+request was open leaves that pull request to be read for the report. Both
+facts are read off the records the caller hands in, so nothing here asks the
+topology a second time.
+
+The client authenticates once as it is built, which is what makes one client
+serve the whole run rather than one per environment, and it asks the one
+question no reader below can check for itself: who the token belongs to. An
+endpoint that answers and names nobody is answering for somebody else, and the
+readers cannot tell that from a repository with no pull request open, so the
+run stops rather than propose again what it has already proposed.
+
+An API that will not answer at all is left to the readers. C<pr_state> gives
+every failure to read GitHub one refusal, at C<UNAVAILABLE> and in the
+reader's own words, and a token the API rejects arrives there with the rest,
+so only an answered call is refused here.
+
+A run given no token carries on and says so. Its branches are still written
+and published, and the next run with a token opens the pull requests they are
+waiting for.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The run's L<Genesis::Top>, which the C<owner/repo> pair is resolved through.
+
+=item C<%opts>
+
+C<records> is an arrayref of per-environment records, each read for C<pr> and
+C<proposed> and for nothing else, defaulting to an empty list and so to no
+client. C<refuse> is the caller's own refusal closure, which a caller inside
+an open session passes so the operator is put back on their branch before they
+are told why the run stopped.
+
+=back
+
+B<Returns:> A C<Service::Github> client, or C<undef> where the run needs none
+and where no token is set.
+
+B<Errors:> Refuses with C<CONFIG> where an environment would deliver into a
+pull request and C<pipeline.source_control.repository> is neither set nor
+derivable from a git remote, naming the key to write. Refuses where the
+authentication call is answered and the answer names no user. An
+authentication call that is not answered raises nothing here.
+
+B<Examples:>
+
+    client_for_run($top, records => [{pr => {branch => 'pr/prod/bosh'}}]);
+    # returns a Service::Github built against the owner of the pair
+
+    client_for_run($top, records => [{pr => undef, proposed => undef}]);
+    # returns undef, and the run makes no call to the API
 
 =head2 pr_state($github, $owner_repo, $record, %opts)
 

@@ -44,7 +44,7 @@ our @EXPORT = qw/
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed fixture_director fixture_bosh
 	break_vault break_vault_writes restore_vault
-	record_at record_keys vault_read_log fixture_preflight fixture_kit
+	record_at record_keys proposed_for vault_read_log fixture_preflight fixture_kit
 	fixture_command install_compiled_kit shimmed_git real_tool
 	fixture_fly
 
@@ -3090,6 +3090,19 @@ sub record_keys {
 	my $exported = $self->_exported($path) or return [];
 	my $key = _export_key($path);
 	return [sort map {m{^\Q$key\E/([^/]+)$} ? $1 : ()} keys %$exported];
+}
+
+# }}}
+# proposed_for - the proposed record one environment is waiting on {{{
+#
+# The pull request a run opened is pointed at from one path, and the rows that
+# watch that pointer through its life ask for it by the environment's name
+# rather than composing the path themselves.  The path is the environment's
+# own with proposed under it, which is where Genesis::Env writes it, so a row
+# reading it back cannot name a path the product does not write.
+sub proposed_for {
+	my ($self, $env, %opts) = @_;
+	return $self->record_at($self->env_path($env, %opts).'/proposed');
 }
 
 # }}}

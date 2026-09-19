@@ -1109,6 +1109,18 @@ sub plan {
 			my $certified = $durable_for_env->($name);
 			my $hold      = $certified->{hold};
 			$env_record->{certified} = $certified;
+
+			# The pull request this environment is already waiting on, which
+			# is durable state like the certified commit beside it and is
+			# read in the same place for that reason.  The field already
+			# stood on the record and already read null.  Nothing the walk
+			# decides turns on it; it is what a reader of the record is told
+			# about the proposal the environment has open, and it is the
+			# second of the two facts client_for_run reads when it is asked
+			# whether the run needs the API at all (D57).  Asking for it
+			# anywhere else would mean loading every environment again.
+			$env_record->{proposed} = $env->proposed_record;
+
 			if ($certified->{state} eq 'unreadable') {
 				$env_record->{error}   = $certified->{error};
 				$env_record->{outcome} = 'failed';

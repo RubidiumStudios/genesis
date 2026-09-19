@@ -1350,6 +1350,19 @@ The names come back without the path above them, and a path with no entries
 under it answers an empty arrayref rather than undef, because a set with
 nothing in it is still a set.
 
+=head2 proposed_for($h, $env)
+
+Reads back the proposed record one environment is waiting on, or undef where
+the environment has none, which is what a row watching the pointer through its
+life asks at each turn.  The record is the four fields C<control_commit>,
+C<number>, C<url>, and C<at>, and it reads undef again once a run has found the
+pull request merged and cleared it.
+
+The path is composed from the environment's own, so a row never spells
+C<proposed> beside a test and cannot name a path the product does not write.
+It reads through C<record_at>, so it is made on the parent's own C<safe> and is
+never counted among the reads the run under test made.
+
 =head2 vault_read_log($h)
 
 Every vault path the last run read, in order, as an arrayref.  The reads are
