@@ -31,8 +31,8 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'a spawned child is recorded with its arguments' => sub {
-	# One of the four is the restoration the run asserts for itself.
-	plan tests => 4;
+	# One of the six is the restoration the run asserts for itself.
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['qa']);
 
@@ -56,6 +56,21 @@ EOS
 		'its argument list was recorded exactly as the hook passed it');
 	ok(exists $runs[0]{lock_at_start},
 		'and what the lock was doing when it started');
+
+	# The recorder's own answer about descriptor zero, asked of the script
+	# directly rather than through a product spawn, so neither row reads
+	# what the runner above this process did with its own standard input.
+	# The shell gives each run the descriptor the row is about, one on the
+	# null device and one on an ordinary file, which is what the field has
+	# to tell apart.
+	my $recorder = $ENV{GENESIS_CALLBACK_BIN};
+	run({}, "$recorder on-the-null-device </dev/null");
+	run({}, "$recorder on-a-file <'$recorder'");
+	my (undef, $null, $file) = child_runs($h);
+	ok($null->{stdin_is_null},
+		'a child reading the null device is recorded as reading it');
+	ok(!$file->{stdin_is_null},
+		'and a child reading anything else is not');
 };
 
 subtest 'the lock probe answers for a free and a held lock' => sub {

@@ -61,6 +61,13 @@ if (defined $plan->{exit}) {
 		die "the recorder could not fork the real genesis: $!\n"
 			unless defined $pid;
 		unless ($pid) {
+			# The exit under the exec is the fallback for an exec that
+			# could not happen, and perl cannot see that, so it warns
+			# about a statement it thinks is unreachable on every run
+			# this fixture takes part in.  The warning goes to the
+			# stderr rows in other files read, so it is turned off for
+			# the two lines it is about and nowhere wider.
+			no warnings 'exec';
 			exec {$plan->{real}} $plan->{real}, @ARGV;
 			POSIX::_exit(127);
 		}
