@@ -1364,16 +1364,18 @@ sub _deploy_preflight {
 		);
 	}
 
-	# 9, 10, and 11.  The pre-flight's three warnings, through the one caller
-	# that decides which of them this run skips.  Their order is the design's:
-	# the stale pipeline first, because what is stale decides which
-	# environments and which branches the warning after it is talking about;
-	# what control carries that has not reached this branch second; and the
-	# branch's own drift from its marker's snapshot last, because a drifted
-	# branch is a smaller thing to know than a pipeline that no longer matches
-	# control (D33).  A run that resolved a target skips the two that describe
-	# the tip and keeps the one that does not, and that is decided inside
-	# _warn_about_the_tip rather than at each of the three call sites.
+	# 9, 10, 11, and 12.  The pre-flight's four warnings, through the one
+	# caller that decides which of them this run skips.  Their order is the
+	# design's: the stale pipeline first, because what is stale decides which
+	# environments and which branches the warnings after it are talking about;
+	# the standing hold second, because it is what an operator acts on before
+	# anything else the pre-flight has to say; what control carries that has
+	# not reached this branch third; and the branch's own drift from its
+	# marker's snapshot last, because a drifted branch is a smaller thing to
+	# know than a pipeline that no longer matches control (D33).  A run that
+	# resolved a target skips the two that describe the tip and keeps the two
+	# that do not, and that is decided inside _warn_about_the_tip rather than
+	# at each of the four call sites.
 	#
 	# The walk the due-commits warning reads is made here rather than inside
 	# that caller, because it is the deploy's own read of durable state and
@@ -2217,6 +2219,44 @@ sub _warn_commits_due {
 }
 
 # }}}
+# _warn_hold - say what propagation hold stands on this environment {{{
+#
+# D50 and D57: the deploy reads the hold record itself, with no GitHub client,
+# and says what it found.  It is its own sub beside _warn_commits_due rather
+# than a clause inside it, because the two warn about unrelated things and a
+# warning that says two things at once is a warning nobody finishes reading.
+#
+# It has to read the record for itself rather than take the hold off the
+# walk's own record, because a hold moves everything due behind it into the
+# held list, which empties the pending list _warn_commits_due reads and
+# leaves that warning silent on exactly the environments this one is about.
+#
+# The sentence comes from Genesis::CI::Report::hold_detail, which the run's
+# report and pipeline-status both read, so the three name one reason, one
+# person, one time, and one command.  The record the sub is handed is built
+# from the hold alone where the walk's record is not at hand, which is the
+# shape hold_detail reads.
+sub _warn_hold {
+	my ($env, $record) = @_;
+
+	my $hold = $env->hold_record or return undef;
+	my $for  = $record && $record->{hold} ? $record
+	         : {env => $env->name, hold => $hold, held => []};
+
+	# The sentence opens in this command's own words rather than in the ones
+	# pipeline-hold says as it writes the record, because an operator who
+	# reads one line in two commands' output cannot tell which of the two
+	# just wrote something.
+	require Genesis::CI::Report;
+	warning(
+		"\nA propagation hold stands on #C{%s}: %s\n%s",
+		$env->name, $hold->{reason},
+		Genesis::CI::Report::hold_detail($for)
+	);
+	return $hold;
+}
+
+# }}}
 # _confirm_commits_due - the one prompt -y answers on this path {{{
 #
 # Outside a controlling terminal we warn and proceed, because a deploy must
@@ -2281,7 +2321,7 @@ sub _warn_drifted {
 }
 
 # }}}
-# _warn_about_the_tip - the deploy's three warnings, and what they found {{{
+# _warn_about_the_tip - the deploy's four warnings, and what they found {{{
 #
 # D87: a run that resolved a deployed commit is not trying to ship the tip, so
 # what is due to the branch and how the branch differs from its marker's
@@ -2289,11 +2329,13 @@ sub _warn_drifted {
 # run cannot deliver is noise.  The stale pipeline is not about the tip at
 # all, so it is warned about on every deploy, redeploy included: a repository
 # and a running pipeline that disagree about which environments exist disagree
-# whichever commit is being deployed.  The provider gate is kept for the same
-# reason and is nowhere near here, being a refusal and sitting two steps up.
+# whichever commit is being deployed.  The standing hold is kept for the same
+# reason, being a decision against the environment rather than a fact about
+# the tip.  The provider gate is kept for the same reason again and is nowhere
+# near here, being a refusal and sitting two steps up.
 #
-# The three warnings have one caller so that what a redeploy skips is decided
-# in one place rather than at each of the three call sites.
+# The four warnings have one caller so that what a redeploy skips is decided
+# in one place rather than at each of the four call sites.
 #
 # What is asked is the resolved target rather than the flag, because the
 # target is what the step above this one told the operator the run is about,
@@ -2324,11 +2366,26 @@ sub _warn_drifted {
 # would take the prompt's input away.  The stale-pipeline warning is asked in
 # void context instead, because nothing reads its count here.  It answers one
 # anyway, for the propagate pre-flight and pipeline-status, which ask the same
-# query, and its POD says so.
+# query, and its POD says so.  The hold warning is asked in void context for
+# the same reason: a hold stops no deploy, so nothing here acts on it, and it
+# answers the record it printed for a caller that wants to.
 sub _warn_about_the_tip {
 	my ($top, $name, $git, %what) = @_;
 
 	_warn_stale_pipeline($top, $git);
+
+	# The hold is warned about above the early return rather than below it,
+	# so a redeploy hears it as a plain deploy does.  It belongs with the
+	# stale pipeline for the same reason the stale pipeline is kept: a hold
+	# is a decision standing against the environment rather than a fact
+	# about the tip, and it holds whichever commit this run is deploying.
+	#
+	# It is said after the stale pipeline and before what is due, because
+	# what is stale decides which environments the warnings after it are
+	# talking about, and because a hold is what an operator acts on first
+	# where both stand.
+	_warn_hold($what{bare}, $what{record});
+
 	return {due => [], drifted => []} if defined $what{target};
 
 	return {

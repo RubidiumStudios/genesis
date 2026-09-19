@@ -351,6 +351,7 @@ integration-tests/genesis_commands_pipelines-hold.t          # pipeline-hold rec
 integration-tests/genesis_commands_pipelines-release.t       # pipeline-release deletes the record, and nothing else clears a hold
 integration-tests/genesis_commands_pipelines-hold_root.t     # the no-argument hold and release cover one deployment root and leave a second one alone
 integration-tests/genesis_commands_pipelines-hold_trailer.t  # a delivered hold trailer writes the hold record, and a rejected push takes none
+integration-tests/genesis_commands_pipelines-hold_readers.t  # the status table, the run's report, and the deploy name one hold in one sentence
 integration-tests/genesis_ci_preflight-control.t             # control exists, and it stands in step with the remote
 integration-tests/genesis_ci_preflight-branch_origin.t        # the two refusals for a branch with no legitimate origin
 integration-tests/genesis_ci_preflight-local_commits.t       # the marker-only reset, and the hand-commit refusal

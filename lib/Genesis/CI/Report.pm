@@ -245,30 +245,59 @@ sub held_qualifier {
 # environment whose commits a gate is holding would otherwise read that
 # nothing is due and then read the commits that are, which is the one thing
 # the line exists to stop.
+#
+# Every one of the three ends with the release command and with who set the
+# hold and when, so the run's report, genesis pipeline-status, and the deploy
+# name one reason, one person, one time, and one command.  That is what makes
+# this the one composer of a hold's detail line and the reason no caller
+# spells any part of the sentence for itself.
 sub hold_detail {
 	my ($record) = @_;
 
-	return undef unless $record->{hold};
+	my $hold = $record->{hold} or return undef;
+
+	# D50 has every reader of a hold name the one command that clears it,
+	# and name who set it and when.  The clause is composed here rather than
+	# beside each of the three callers, because a sentence spelled in three
+	# places is a sentence the three spellings drift apart on.  T302 quotes
+	# the first of the wordings with this clause on the end of it.
+	#
+	# The three identity fields are the record's own, and a record written
+	# by something older than D53's four fields can be missing any of them,
+	# so each is named as unrecorded rather than left to print as an empty
+	# gap the reader has to guess at.
+	my $release = sprintf("`genesis %s pipeline-release`",
+		$record->{env} // '<env>');
+	my $by = sprintf('held by %s@%s at %s',
+		$hold->{user}     // 'an unrecorded user',
+		$hold->{hostname} // 'an unrecorded host',
+		$hold->{at}       // 'an unrecorded time');
 
 	my @held = @{$record->{held} || []};
 	my $blocked = grep {($_->{reason} // '') eq 'on-hold'} @held;
 
-	return sprintf('%d commit%s %s blocked until this hold is released',
-		$blocked, $blocked == 1 ? '' : 's', $blocked == 1 ? 'is' : 'are')
+	return sprintf(
+		'%d commit%s %s blocked until this hold is released with %s, %s',
+		$blocked, $blocked == 1 ? '' : 's', $blocked == 1 ? 'is' : 'are',
+		$release, $by)
 		if $blocked;
 
-	return 'nothing is due now, and anything that becomes due stays blocked'
+	return sprintf(
+		'nothing is due now, and anything that becomes due stays blocked '.
+		'until this hold is released with %s, %s', $release, $by)
 		unless @held;
 
 	# Everything held here is held for a reason of its own, and the hold
 	# stands over all of it, so the line says both: clearing what those
 	# commits wait for releases nothing while the hold is still standing.
 	return sprintf(
-		'%d commit%s %s blocked for %s own, and %s blocked while this hold stands',
+		'%d commit%s %s blocked for %s own, and %s blocked while this hold '.
+		'stands, which %s clears, %s',
 		scalar(@held), @held == 1 ? '' : 's',
 		@held == 1 ? 'is' : 'are',
 		@held == 1 ? 'a reason of its' : 'reasons of their',
-		@held == 1 ? 'stays' : 'stay');
+		@held == 1 ? 'stays' : 'stay',
+		$release, $by);
 }
 
 # }}}
@@ -348,15 +377,34 @@ sub render_run {
 		info "    #R{error}: %s", $env->{error} if $env->{error};
 		next if $opts{outcomes_only};
 
-		_hold_lines(hold_detail($env), $env->{env});
+		# The sentence carries the release command itself now, so no second
+		# line beside it says the same thing in the report's own words.
+		#
+		# The identity in it is text somebody else wrote, and csprintf
+		# tolerates one level of balanced braces inside a colour span, so an
+		# unbalanced brace in a username would end the span early and move
+		# the characters after it.  It is passed as an argument rather than
+		# interpolated into the format for that reason, which is the rule
+		# the error line above follows.
+		my $detail = hold_detail($env);
+		info "    #Y{%s}", $detail if defined $detail && length $detail;
 
 		# D53 puts a trailer's hold after the delivery, so an environment
 		# that took one on this run reads as delivered with one line saying
 		# so beneath it.  It is not held_qualifier's held, needs clearing,
 		# which is what the next run reads off the record this one wrote:
 		# a report says what this run did, and this run delivered.
-		_hold_lines('a hold was set by the commit just delivered',
-			$env->{env}, $env->{hold_set}) if $env->{hold_set};
+		#
+		# This one keeps a release line of its own, because the sentence
+		# above it is about a hold the run found standing and this is about
+		# a hold the run has just set, and an operator meeting the second
+		# has been told nothing yet about the command that clears it.
+		if ($env->{hold_set}) {
+			info "    #Y{a hold was set by the commit just delivered}: %s",
+				$env->{hold_set};
+			info "    Release it with #C{genesis %s pipeline-release}",
+				$env->{env};
+		}
 
 		# The commit axis, in control order: what the environment received
 		# first, and then what it is holding behind it.
@@ -570,31 +618,6 @@ sub _commits {
 	my ($n) = @_;
 
 	return sprintf('%d commit%s', $n, $n == 1 ? '' : 's');
-}
-
-# }}}
-# _hold_lines - a hold's own line and the sentence that always follows it {{{
-#
-# Two hold lines are printed for an environment, one for a hold that was
-# already standing and one for a hold this run's delivery set, and they end
-# with the same sentence.  Two copies of one sentence are two that drift
-# apart, so the sentence is written here and nowhere else.
-#
-# The message is printed outside the colour span for the reason the error
-# line gives: csprintf tolerates one level of balanced braces inside a span,
-# and an unbalanced brace in text somebody else wrote ends the span early and
-# moves the characters after it.  A hold's reason is text somebody else
-# wrote, where the phrases above it are the report's own.
-sub _hold_lines {
-	my ($phrase, $env_name, $message) = @_;
-
-	return unless defined $phrase && length $phrase;
-
-	defined $message && length $message
-		? info("    #Y{%s}: %s", $phrase, $message)
-		: info("    #Y{%s}", $phrase);
-	info "    Release it with #C{genesis %s pipeline-release}", $env_name;
-	return;
 }
 
 # }}}

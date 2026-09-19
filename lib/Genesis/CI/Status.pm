@@ -20,11 +20,11 @@ use Genesis::Exit qw/UNAVAILABLE/;
 use Genesis::CI::Walk ();
 use Genesis::CI::Preflight ();
 # Genesis::CI::Report owns every word an operator reads about an outcome, so
-# the held qualifier and the per-commit hold reason are rendered by the same
-# two subs the propagation run's own report calls rather than by a second pair
-# here, which is the one thing that could make the two commands disagree about
-# a phrase.
-use Genesis::CI::Report qw/held_qualifier hold_reason/;
+# the held qualifier, the per-commit hold reason, and the standing hold's own
+# detail are rendered by the same three subs the propagation run's own report
+# calls rather than by a second set here, which is the one thing that could
+# make the two commands disagree about a phrase.
+use Genesis::CI::Report qw/held_qualifier hold_reason hold_detail/;
 # Genesis::CI::PullRequest owns every decision the run makes about a pull
 # request, so the client, the state read, the copy onto the record, and the
 # approved arm are asked of it here rather than written a second time.
@@ -780,6 +780,18 @@ sub compose_phrase {
 		push @phrase, [on_ice => sprintf('held, %s%s', $qualifier,
 			($row->{certified} || {})->{unverifiable}
 				? sprintf(' [%s]', UNVERIFIABLE) : '')];
+		# D50 has this command name who set the hold and when, and the one
+		# command that clears it, and hold_detail is where that sentence is
+		# composed for the run's report and for the deploy as well.  It is
+		# read rather than spelled here, because three commands spelling one
+		# sentence is three spellings that drift apart, which is H23.
+		#
+		# It is answered only for a hold somebody set, which is what
+		# hold_detail returns undef for the absence of, so a row held by an
+		# ancestor or by a gate keeps the qualifier alone.
+		if (my $detail = hold_detail($row)) {
+			push @phrase, [on_ice => $detail];
+		}
 		# Why this one commit is held, which is a different question from
 		# what the environment waits for, and the answer carries the
 		# ancestor's own state so an operator is not left to infer it from

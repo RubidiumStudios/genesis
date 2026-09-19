@@ -429,6 +429,16 @@ C<held, needs clearing (vsphere maintenance)> and stops there.  The walk
 stamps every commit the hold takes with the hold's own text, so the reason
 would otherwise print what somebody wrote on the record twice in one line.
 
+A hold somebody set carries one component more, which is
+C<Genesis::CI::Report::hold_detail>'s sentence.  It names what the hold is
+blocking, who set it as C<< E<lt>userE<gt>@E<lt>hostnameE<gt> >>, when they
+set it, and C<genesis E<lt>envE<gt> pipeline-release>, which is what D50 asks
+this command to show.  It is read from that module rather than spelled here,
+because the run's report and C<genesis E<lt>envE<gt> deploy> print the same
+sentence and three commands spelling one sentence are three spellings that
+drift apart.  A row held by an ancestor or by a gate carries no such
+component, that sub answering nothing where no hold record stands.
+
 An environment whose approved pull request is waiting to be merged carries
 both components on one row, and each answers a different question.  The held
 qualifier says what the environment is waiting for, which is the merge, and

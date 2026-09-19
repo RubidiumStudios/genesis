@@ -110,7 +110,14 @@ subtest 'the hold outranks idempotent, with two detail wordings' => sub {
 	my (undef, $loud) = run_genesis($busy, {answers => ['y']}, 'propagate');
 	like($loud, qr/2 commits are blocked until this hold is released/,
 		'the count is named');
-	like($loud, qr/genesis qa pipeline-release/, 'the command is named');
+	# The command is named inside the detail line rather than on a line of
+	# its own, and that sentence is longer than the eighty columns these rows
+	# run at, so the report wraps it and a literal match would miss on
+	# wherever the break fell.  Every run of spaces in the expected words is
+	# matched as any whitespace instead, which is the idiom the third subtest
+	# below reads its own wrapped line with.
+	(my $command = quotemeta 'genesis qa pipeline-release') =~ s/(?:\\ )+/\\s+/g;
+	like($loud, qr/$command/, 'the command is named');
 };
 
 subtest 'a hold over commits another reason holds says so' => sub {
