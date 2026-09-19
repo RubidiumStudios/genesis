@@ -81,10 +81,10 @@
 # the operator back on control.
 #
 # The fifth subtest is T246's, and it says the same thing about itself.  Three
-# of its nineteen rows were red and sixteen were green.  The red ones are the
-# three that ask for a flag: redeploy-only on a redeploy, and always on each
-# of its two runs.  Reading the repository's setting and folding it into the
-# options the deploy forwards is what turns all three green.
+# of its first nineteen rows were red and sixteen were green.  The red ones
+# are the three that ask for a flag: redeploy-only on a redeploy, and always
+# on each of its two runs.  Reading the repository's setting and folding it
+# into the options the deploy forwards is what turns all three green.
 #
 # The sixteen that arrived green are guards.  The three rows that ask for no
 # flag were green because no deploy passed --recreate at all, and they now say
@@ -97,6 +97,11 @@
 # and they are what keep the flag rows honest: each flag row reads the last
 # call the harness director was given, and a run that died before reaching
 # BOSH would leave the run before it standing as the last.
+#
+# Three rows joined that subtest afterwards, which are the --fix run's own
+# three.  The flag row among them was red when it was written, red having
+# been produced by letting the operator's --fix suppress the repository's
+# recreate, and the narrowing was undone afterwards.
 use strict;
 use warnings;
 use utf8;
@@ -499,19 +504,22 @@ subtest 'a successful redeploy propagates nothing' => sub {
 # the key and read the command line alone, which the always pair catches; one
 # that passed --recreate whatever the key said, which the never pair catches;
 # and one that folded the answer into the options above the guard that refuses
-# more than one of fix, recreate, and dry-run, which the last row catches by
-# running a dry run in a repository set to always.
+# more than one of fix, recreate, and dry-run, which the dry-run row catches by
+# running a dry run in a repository set to always.  The --fix row beside it
+# catches the narrower defect of an implementation that let the operator's
+# --fix suppress the repository's own recreate, which is the same guard being
+# enforced against a value the operator never typed.
 #
 # Each run has an exit row of its own beside it, and those rows are what keep
-# the six flag rows honest.  Each flag row reads the last call the harness
+# the seven flag rows honest.  Each flag row reads the last call the harness
 # director was given, and a run that died before it reached BOSH would leave
 # the run before it standing as the last, so a flag row with no exit row
 # beside it could read another run's argument list and pass on it.
 subtest 'recreate_on_deploy reaches every deploy as declared' => sub {
-	# Seven rows, six exit rows, and one more for each of the six runs that
-	# assert a restoration.  The dry run asserts none, for the reason given
-	# beside it.
-	plan tests => 19;
+	# Eight rows, seven exit rows, and one more for each of the seven runs
+	# that assert a restoration.  The dry run asserts none, for the reason
+	# given beside it.
+	plan tests => 22;
 
 	my %flags;
 	for my $setting (qw/redeploy-only always never/) {
@@ -590,6 +598,27 @@ subtest 'recreate_on_deploy reaches every deploy as declared' => sub {
 		'qa', 'deploy', '--dry-run', '--no-propagate', '-y');
 	is($dry_exit, 0, 'a repository set to always still allows a dry run')
 		or diag("what the dry run said:\n$gerr");
+
+	# The setting rides beside --fix exactly as it rides beside --dry-run,
+	# because BOSH accepts both combinations and the guard is about what the
+	# operator asked for.  What this row catches that the dry run does not is
+	# an implementation that let the operator's --fix suppress the
+	# repository's own recreate, which would read as the guard being enforced
+	# against a value the operator never typed.  Its own repository, because
+	# the dry run above leaves a deployment cache directory behind and this
+	# run asserts the restoration the dry run cannot.
+	my $f = ready_harness(envs => ['qa'], bosh => 1,
+		pipeline => {recreate_on_deploy => 'always'});
+	stand_on($f, $f->control);
+
+	my (undef, $ferr, $fix_exit) = run_genesis($f,
+		'qa', 'deploy', '--fix', '--no-propagate', '-y');
+	is($fix_exit, 0, 'a repository set to always still allows --fix')
+		or diag("what the --fix deploy said:\n$ferr");
+
+	my @fix_deploys = bosh_runs($f, command => 'deploy');
+	like(join(' ', @{$fix_deploys[-1]{argv}}), qr/--fix\b.*--recreate\b|--recreate\b.*--fix\b/,
+		'always passes --recreate beside the operator\'s --fix');
 };
 
 
