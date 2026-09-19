@@ -229,6 +229,62 @@ sub freeze {
 }
 
 # }}}
+# preview - what a dry run would do with this environment's pull request {{{
+#
+# D44 makes --dry-run the only preview, and a preview that could not say what
+# it would do with the branch would be worth little, so it reads.  Writing
+# nothing does not forbid reading, and only a writing run refuses on a state it
+# cannot read, under D55.  The asymmetry is the point: a run that guesses wrong
+# leaves a proposal standing that nobody asked for, and a preview that guesses
+# wrong is read and forgotten.
+#
+# The title is composed the way the aggregate's own subject is, off the newest
+# due commit's abbreviated control sha, so the line the operator reads here is
+# the line the pull request would carry.  The supersedes list is read off the
+# record rather than off the answer, for the reason every guard in the arm
+# above carries: the answer is undef for a run given no token, and the record
+# already holds the one copy every reader takes.
+#
+# It answers undef, because nothing propagated.  The renderer settles an
+# environment with commits due as one that would propagate, and a word written
+# here would put a fact about a run that never happened onto the record.
+sub preview {
+	my ($git, $record, %opts) = @_;
+
+	my $env    = $opts{env};
+	my $pr     = $record->{pr};
+	my $newest = $opts{commits}[-1];
+
+	# The rebuild is the one action left to predict.  The retirement and the
+	# freeze each took their own above this, and every other exit from the arm
+	# names what it would do with the branch, so a preview that named nothing
+	# would leave a reader of the record unable to tell an unset field from an
+	# arm that never ran.
+	$pr->{action} = 'rebuild';
+	$pr->{title}  = title_for(
+		Genesis::CI::Marker::build(
+			$git->sha($newest->{control_commit}, short => 1), $env->name),
+		$pr->{superseded});
+
+	info "  #C{%s}: would title the pull request #G{%s}",
+		$env->name, $pr->{title};
+
+	return undef if $opts{state};
+
+	# No token, so there was nothing to read and nothing to check the branch
+	# this prediction rests on.  A writing run has something to lose by
+	# guessing and refuses; this one says plainly what went unread and carries
+	# on, because a preview that refused would tell the operator less than a
+	# preview that answered with its own caveat attached.
+	$pr->{unverified} = 1;
+	info "  #C{%s}: the review state is unread, because no GitHub token is ".
+		"set, so this prediction of #C{%s} is unverified",
+		$env->name, $pr->{branch};
+
+	return undef;
+}
+
+# }}}
 # forget_lost_branch - the refs left over from a branch R no longer has {{{
 #
 # R is authoritative for whether the pull request branch exists, because the
@@ -463,7 +519,14 @@ sub deliver {
 	# A word written here would put a fact about a run that never happened onto
 	# the record, and every reader of that field would then have to know which
 	# kind of run had filled it.
-	return undef if $opts{dry_run};
+	#
+	# What it owes the operator before it stops is what it would have titled
+	# the pull request, and what it could not read, which preview says.
+	return preview($git, $record,
+		env     => $env,
+		commits => $commits,
+		state   => $state,
+	) if $opts{dry_run};
 
 	# The switch cuts the branch where neither side holds it, because it is
 	# derived state and the deployment branch is what it is derived from, and

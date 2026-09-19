@@ -490,6 +490,72 @@ B<Examples:>
     # carrying {reason => 'awaiting-merge', number => 42}, which the report
     # renders as "awaiting merge (#42)"
 
+=head2 preview($git, $record [, %opts])
+
+    my $word = Genesis::CI::PullRequest::preview($git, $env_record,
+        env     => $env,
+        commits => \@pending,
+        state   => $state);
+
+Reports what a run would do with this environment's pull request without
+writing anything, which is what C<deliver> takes in place of its rebuild when
+it is given C<dry_run>. With a token it reports the title it would use, the
+supersedes list included. Without one it still reports the title, says the
+review state is unread because the token is missing, and marks the prediction
+of the pull request branch unverified.
+
+D44 leaves C<--dry-run> as the only preview, and a preview that could not say
+what it would do with the branch would be worth little, so it reads. Writing
+nothing does not forbid reading, and only a writing run refuses on a state it
+cannot read under D55. The asymmetry is deliberate: a writing run that guessed
+wrong would leave a proposal standing that nobody asked for, where a preview
+that guessed wrong is read and forgotten.
+
+The title is composed the way the aggregate's own subject is composed, off the
+newest due commit's abbreviated control sha, so the line the operator reads
+here is the line the pull request would carry. The supersedes list is read off
+the record rather than off the answer, because the answer is C<undef> for a run
+given no token and the record already holds the one copy every reader takes.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The session's git handle, which is what abbreviates the control sha the marker
+names.
+
+=item C<$record>
+
+The walk's per-environment record. Its C<pr> is the pull request object, whose
+C<superseded> is read, and whose C<action>, C<title>, and C<unverified> this
+writes.
+
+=item C<%opts>
+
+C<env> is the loaded environment, whose name the marker carries. C<commits> is
+the arrayref of due control commits, oldest first, and the last of them is the
+one the title names. C<state> is what C<pr_state> answered for this
+environment, or C<undef> where the run was given no token and read nothing.
+
+=back
+
+B<Returns:> C<undef>, always, because nothing propagated. The report settles an
+environment with commits due as one that would propagate, and a word written
+here would put a fact about a run that never happened onto the record.
+
+B<Examples:>
+
+    preview($git, $record, env => $env, commits => \@pending,
+        state => {state => 'closed unmerged', superseded => [7, 4]});
+    # says: prod: would title the pull request
+    #       [pipeline] control@1a2b3c4 -> prod (supersedes #7, #4)
+
+    preview($git, $record, env => $env, commits => \@pending);
+    # says the same title without a supersedes list, and adds that the review
+    # state is unread and the prediction of prod/pr/bosh is unverified
+
 =head2 discard_report($git, $branch, $base)
 
     my $report = Genesis::CI::PullRequest::discard_report(
@@ -698,11 +764,13 @@ instead, ahead of everything below, so nothing is built and nothing is
 pushed. That state is read off C<< $record->{pr} >> for the reason the
 supersedes paragraph's is.
 
-A run given C<dry_run> stops above the switch and answers C<undef>, because
-everything below that line writes and a preview writes nothing. The report
-then settles the environment as one that would propagate, which is the answer
-the direct arm's preview gives, and no word about a run that never happened
-reaches the record.
+A run given C<dry_run> stops above the switch and takes C<preview> instead,
+because everything below that line writes and a preview writes nothing. The
+preview says what the pull request would be titled, and what it could not read
+where the run was given no token, and answers C<undef> as the freeze does. The
+report then settles the environment as one that would propagate, which is the
+answer the direct arm's preview gives, and no word about a run that never
+happened reaches the record.
 
 The single writer is called once, at the newest due commit's source. D69
 makes a delivery a mirror, so the mirror of the newest commit is the whole
