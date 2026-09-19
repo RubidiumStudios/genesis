@@ -43,10 +43,11 @@
 # of the three warnings is what turns them green.  Everything else there was
 # green on arrival: the row that reads the notice back, which keeps the two
 # silence rows honest about what the run resolved; the two rows asserting that
-# an ordinary deploy of the same tree still prints both warnings; the five
-# rows of the second subtest, which are the provider gate and the
-# stale-pipeline warning a redeploy keeps; and the exit-code row beside each
-# run.  Each of those stands as a guard, holding still the behaviour a
+# an ordinary deploy of the same tree still prints both warnings; the
+# exit-code row beside each of that subtest's two runs; and all five rows of
+# the third subtest, which are the provider gate and the stale-pipeline
+# warning a redeploy keeps, the exit-code row of each of its own two runs
+# among them.  Each of those stands as a guard, holding still the behaviour a
 # narrower redeploy must not have taken out with it.
 #
 # The fourth subtest is T242's, and it says the same thing about itself.
@@ -309,7 +310,7 @@ subtest 'the redeploy skips the two warnings about the tip' => sub {
 # records.  The gate is step 7 of the pre-flight and the warning is step 9,
 # so a run the gate refuses never reaches the warning to be read for it.
 subtest 'the redeploy keeps the provider gate and the stale warning' => sub {
-	# Four rows, and one more for each of the two runs' own restoration
+	# Five rows, and one more for each of the two runs' own restoration
 	# assertions.
 	plan tests => 7;
 
@@ -330,7 +331,10 @@ subtest 'the redeploy keeps the provider gate and the stale warning' => sub {
 	is($gexit, Genesis::Exit::NOPERM,
 		'the provider gate still refuses the redeploy')
 		or diag("what the redeploy said:\n$gerr");
-	like(unfolded($gerr), qr/pipeline/,
+	# The gate's own sentence, rather than the bare word, which the deploy
+	# says in a dozen other places and which a refusal for some other reason
+	# would match just as well.
+	like(unfolded($gerr), qr/The concourse pipeline owns deploys of this environment/,
 		'naming the pipeline that owns the deploy')
 		or diag("what the redeploy said:\n$gerr");
 
