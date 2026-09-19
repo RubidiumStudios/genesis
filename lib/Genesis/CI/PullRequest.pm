@@ -786,6 +786,12 @@ sub client_for_run {
 		'pipeline.source_control.repository'
 	) unless defined $owner_repo && length $owner_repo;
 
+	# A caller whose closure records the refusal and returns instead of
+	# exiting gets no client, because there is nothing to point one at.  A
+	# read-only report is the one such caller, and it renders every
+	# environment as the no-token case rather than ending on it.
+	return undef unless defined $owner_repo && length $owner_repo;
+
 	# The run carries on without a token and says so, and everything the API
 	# would have decided is left to the next run that has one (D44).  A
 	# writing run still publishes each branch; what it cannot do is open or
@@ -824,13 +830,20 @@ sub client_for_run {
 	# the operator has to change is the token they set and not the state of
 	# the API.
 	my $who = eval {$github->get_authorized_user};
+	my $nameless = !$@ && !$who;
 	($opts{refuse} || \&bail)->(
 		{exitcode => Genesis::Exit::CONFIG},
 		"GitHub answered for #C{GITHUB_AUTH_TOKEN} without naming the user ".
 		"it belongs to, so verify that it is a valid personal access token ".
 		"and that #C{%s} is GitHub itself.",
 		$github->base_url
-	) if !$@ && !$who;
+	) if $nameless;
+
+	# As above, a caller that records the refusal and returns gets no client.
+	# A token the endpoint will not name an owner for is one no reader here
+	# can trust, so handing it back would answer with a state the refusal has
+	# just said nothing can be concluded from.
+	return undef if $nameless;
 
 	return $github;
 }
@@ -861,6 +874,12 @@ sub pr_state {
 			$record->{branch}, $record->{pr}{branch});
 		1;
 	} or refuse_unreadable($record->{env}, $@, %opts);
+
+	# A caller whose refusal closure records what happened and returns rather
+	# than exiting is answered nothing, because there are no listings here to
+	# read a state out of.  The read-only report is that caller, and it
+	# renders the environment as the no-token case rather than ending on it.
+	return undef unless $open && $closed;
 
 	# The one the listing puts first, which GitHub orders newest first, so the
 	# run acts on the most recent attempt.  The order is the API's rather than

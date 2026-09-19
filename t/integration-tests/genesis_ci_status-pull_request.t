@@ -9,6 +9,12 @@
 # Genesis::Top::pr_branch_for composes, so the name the column reads and the
 # name propagation opens come from one accessor.
 #
+# Two more things this command does with the API are proved here.  An API it
+# cannot read degrades the column and warns rather than ending the report,
+# which is M17 ruling 49, and the client the report hands the walk lets a
+# squash-merged marker come back, which both says where the marker came from
+# and says aloud where a merged pull request names another environment.
+#
 # Which assertions discriminate and which guard is said beside each.
 use strict;
 use warnings;
@@ -20,6 +26,7 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
+use JSON::PP qw/decode_json/;
 
 use Genesis;
 
@@ -52,11 +59,10 @@ subtest 'the column composes the branch the run opens' => sub {
 	plan tests => 3;
 
 	# with_open_pr builds the pull request tree, opens the pull request on
-	# the double, and writes the proposed record naming it, so this row
-	# builds none of that itself.  The kit is named because this command
-	# loads every environment it reports on, and an environment whose kit
-	# nothing installed reads as a load error and says nothing else.
-	my ($h, $gh, $pr) = with_open_pr(kit => 'omega-v2.7.0');
+	# the double, writes the proposed record naming it, and installs the kit
+	# this command needs to load the environment at all, so this row builds
+	# none of that itself.
+	my ($h, $gh, $pr) = with_open_pr();
 
 	# A guard.  The head the run opens is pr/qa/bosh, which pr_branch_for
 	# composes, and it is green today.  It goes red against a column that
@@ -74,7 +80,7 @@ subtest 'the record is read without a token and validated with one' => sub {
 	# Six assertions and one restoration for each of the two commands.
 	plan tests => 8;
 
-	my ($h, $gh, $pr) = with_open_pr(kit => 'omega-v2.7.0');
+	my ($h, $gh, $pr) = with_open_pr();
 
 	gh_no_token($h);
 	my ($no_token, $err, $exit) = run_genesis($h, 'pipeline-status');
@@ -93,21 +99,52 @@ subtest 'the record is read without a token and validated with one' => sub {
 };
 
 subtest 'the held qualifier and the pull request stand on one row' => sub {
-	# One assertion and one restoration.
-	plan tests => 2;
+	# Two assertions and one restoration.
+	plan tests => 3;
 
-	my ($h, $gh, $pr) = with_open_pr(kit => 'omega-v2.7.0',
-		review => 'approved');
+	my ($h, $gh, $pr) = with_open_pr(review => 'approved');
 
 	my ($out) = run_genesis($h, 'pipeline-status');
-	like(env_line($out, 'qa'),
+	my $line = env_line($out, 'qa');
+	like($line,
 		qr/\[PR #$pr open: approved\].*held, awaiting merge \(#$pr\)/,
 		'the component says which one and the qualifier says what it waits for');
+
+	# The pattern above is unanchored at its tail, so the doubled phrase
+	# 'held, awaiting merge (#1); awaiting merge (#1)' satisfies it exactly
+	# as the single one does.  This is the row that says the wait is printed
+	# once, and it goes red against a compose_phrase that prints the frozen
+	# commit's reason after a qualifier that has just said the same words.
+	my $said = () = $line =~ /awaiting merge/g;
+	is($said, 1, 'and the wait is said once on the row rather than twice');
+};
+
+subtest 'an API that will not answer degrades rather than refusing' => sub {
+	# Four assertions and one restoration.
+	plan tests => 5;
+
+	my ($h, $gh) = with_open_pr(review => 'approved');
+
+	# The double answers every call with a resolver failure from here on,
+	# which is what the reader raises its own refusal out of, so the run
+	# meets an unreachable API rather than an empty one.
+	gh_unreachable($gh);
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
+	is($exit, 0, 'the report is produced rather than refused');
+	like($err, qr/GitHub did not answer/,
+		'and standard error says why the API was not consulted');
+	like(env_line($out, 'qa'), qr/review state unread, possibly outdated/,
+		'every environment the client would have served reads unread');
+	# The refusal this command used to end on is a writing run's sentence,
+	# and this command writes nothing and has no branch to decide about.
+	unlike($err, qr/refuses rather than guess/,
+		'and no refusal about a pull request branch is printed');
 };
 
 subtest 'a squash-merged branch reads the same in both commands' => sub {
-	# Three assertions and one restoration for each of the two commands.
-	plan tests => 5;
+	# Four assertions and one restoration for each of the three commands.
+	plan tests => 7;
 
 	# The site could not be given the rebase-only merge method, so the
 	# aggregate went in as a squash, which means the subject on the deployment
@@ -135,9 +172,50 @@ subtest 'a squash-merged branch reads the same in both commands' => sub {
 	unlike(env_line($status, 'prod'), qr/\d+ pending/,
 		'and nothing is due, the marker having come back from the merge');
 
+	# The recovery writes its own line onto the record through note_detail,
+	# so what --json carries is the account of where that marker came from.
+	# The row goes red against a report that hands the walk no client, which
+	# recovers nothing and leaves the field null.
+	my ($json) = run_genesis($h, 'pipeline-status', '--json');
+	my ($row) = grep {$_->{env} eq 'prod'}
+		@{decode_json($json)->{environments}};
+	is($row->{outcome_detail},
+		"recovered the marker for prod from #$number",
+		'and --json says which pull request the marker came back from');
+
 	my ($out, $err) = run_genesis($h, 'propagate', '-y');
 	like(unfolded($out, $err), qr/prod.*idempotent/,
 		'and the run reads that same branch the same way');
+};
+
+subtest 'a merged marker naming another environment is said aloud' => sub {
+	# Two assertions and one restoration.
+	plan tests => 3;
+
+	# The same squash, with the pull request Genesis wrote naming qa where
+	# this branch is prod's.  A marker for another environment is not this
+	# one's, and saying so is the difference between a branch that lost its
+	# marker in a squash and a branch somebody merged the wrong pull request
+	# into.  The report reads it through the client it now hands the walk,
+	# so the warning reaches an operator who asked only for a report.
+	my $h  = ready(kit => 'omega-v2.7.0', admin => 0, delivered => []);
+	my $gh = $h->{gh};
+
+	my $due = due_commit($h, 'prod', params => {instances => 2},
+		message => 'Raise the prod instance count');
+	my $number = gh_pull_request($gh, env => 'prod',
+		head   => $h->pr_branch('prod'),
+		base   => $h->slug('prod'),
+		review => 'none',
+		title  => sprintf('[pipeline] control@%s -> qa', substr($due, 0, 12)));
+	gh_merge_pr($gh, $number, method => 'squash');
+	squash_merge($h, 'prod', keep_marker => 0,
+		subject => sprintf('Raise the prod instance count (#%d)', $number));
+
+	my (undef, $err, $exit) = run_genesis($h, 'pipeline-status');
+	is($exit, 0, 'the report is still produced');
+	like($err, qr/names.*qa.*rather than.*prod/s,
+		'and says the merged marker names another environment');
 };
 
 done_testing;

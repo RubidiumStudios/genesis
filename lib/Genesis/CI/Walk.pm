@@ -1011,7 +1011,21 @@ sub plan {
 	# own deployment slug names and the place it sits in the DAG.  One sub
 	# builds the list and narrows it, so a run that was handed a scope and a
 	# run that was not read the same answer over the environments they share.
-	my ($scope, $topo) = scope_for($top, scope => $opts{scope});
+	#
+	# A caller that has already composed it hands the pair in, because
+	# composing it walks the environment files for the whole topology and
+	# Genesis::Top::pipeline_topology memoises none of that work.  The
+	# narrowing is refused beside it for the reason the durable state's own
+	# two options are, since the pair handed in is already narrowed and a
+	# name given here would be dropped without a word.
+	bug("Genesis::CI::Walk::plan was handed a composed scope and a scope to ".
+		"narrow by, and the composed one is already narrowed, so the ".
+		"narrowing would be dropped")
+		if $opts{composed} && defined $opts{scope};
+
+	my ($scope, $topo) = $opts{composed}
+		? @{$opts{composed}}
+		: scope_for($top, scope => $opts{scope});
 
 	my $branches = $opts{branches} || {};
 

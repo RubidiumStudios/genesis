@@ -1836,11 +1836,18 @@ control commit the pull request proposes.  C<env> names the environment, which
 is C<qa> by default and which the default C<envs> follows, and C<review> is the
 review state the pull request opens with.
 
+The C<omega-v2.7.0> kit is installed unless C<kit> names another one, because
+a command that reports on an environment loads it, and an environment whose
+kit nothing installed reads as a load error and says nothing else about
+itself.  A row therefore gets the whole shape this helper promises without
+naming a kit for it.
+
 The due commit is written through C<due_commit>, so the environment's own file
 at the deployment root is rewritten with its metadata left standing, and
 C<params> and C<message> steer it.  C<due> is C<ready>'s option for a control
-commit of some other shape, and this scenario writes its own, so C<due> never
-reaches C<ready>.  The rest of the options do.
+commit of some other shape, and this scenario writes its own, so C<due> is
+refused by name with a die rather than dropped without a word.  The rest of
+the options reach C<ready>.
 
 =head2 two_roots(%opts)
 
