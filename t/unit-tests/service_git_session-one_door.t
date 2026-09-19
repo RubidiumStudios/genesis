@@ -113,7 +113,8 @@ subtest 'nothing outside the session checks a branch out' => sub {
 	is_deeply(\@callers, [],
 		'no caller under lib/ or bin/ reaches the checkout directly');
 
-	# The allowance is empty.  Three sites once stayed on the branch they
+	# The allowance is empty, and the method that held it open has been
+	# retired along with it.  Three sites once stayed on the branch they
 	# moved to, and every one of them has gone.  The deploy's own switch
 	# went when it declared a branch class and began switching inside the
 	# session the gate opens, the one before that was the deploy's --pull,
@@ -123,9 +124,11 @@ subtest 'nothing outside the session checks a branch out' => sub {
 	# and the child takes the switch lock and moves the tree itself, so
 	# there is nothing left for a one-way checkout to mean.
 	#
-	# The count is pinned per file and not just the set of files, because a
-	# second one-way checkout added inside a file that already held one
-	# would otherwise join the allowance without turning anything red.
+	# The row therefore guards two things at once, a call coming back and
+	# the method coming back to be called.  The count is pinned per file and
+	# not just the set of files, because a second one-way checkout added
+	# inside a file that already held one would otherwise join the allowance
+	# without turning anything red.
 	my %allowed;
 	for my $file (sources()) {
 		my $calls = () = get_file($file) =~ /->checkout_one_way\(/g;

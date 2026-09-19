@@ -476,9 +476,10 @@ subtest 'a successful redeploy propagates nothing' => sub {
 	# because the harness kit is called genesis-propagation-harness and the
 	# secrets check names it on every run.  Both are matched with their case,
 	# since each of them opens a line of Genesis' own.  The first of the two
-	# was "Propagating to downstream", and it reads as the hand-off's notice
-	# now does, which is the shorter sentence the retired argument left behind.
-	unlike("$out$err", qr/Propagating from|Propagation failed/,
+	# names the hand-off rather than the propagation, because the child's own
+	# first line opens "Propagating from" as well and a row matching that
+	# would read the child's word as the parent's.
+	unlike("$out$err", qr/Handing off to genesis propagate|Propagation failed/,
 		'the run printed no propagation report');
 	is(scalar(shuttle_requests($shuttle)), 0,
 		'no run_propagate request was made');

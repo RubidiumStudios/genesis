@@ -87,12 +87,15 @@ happened to ask first. C<DESTROY> restores nothing either: the last-resort net
 for a command that exits partway through belongs to the session, which
 registers it through C<at_exit>.
 
-C<checkout_one_way> was the one exception, and it has no call site left. The
-deploy declares a branch class and switches inside the session the gate opens,
-and the post-deploy hand-off, which used to move onto control so that the
-child it spawned would find it there, now runs after the deploy's session has
-finished, where the child takes the switch lock and moves the tree itself. The
-guard on the one door therefore stands with nothing outside it.
+There was one exception, a one-way checkout that lifted the guard for the
+length of a call, and it is gone. Three call sites once moved onto a branch
+and meant to stay there, and every one of them has since gone its own way.
+The deploy declares a branch class and switches inside the session the gate
+opens, and the post-deploy hand-off, which used to move onto control so that
+the child it spawned would find it there, now runs after the deploy's session
+has finished, where the child takes the switch lock and moves the tree itself.
+The guard on the one door therefore stands with nothing outside it, and a test
+asserts that nothing comes back.
 
 =head1 METHODS
 
@@ -501,55 +504,6 @@ B<Examples:>
 
   $git->checkout_detached('0000000000000000000000000000000000000000');
   # raises, naming the commit, where the repository does not have it
-
-=head2 checkout_one_way
-
-  $git->checkout_one_way($branch);
-
-Checks a branch out and leaves you there. It is C<checkout> with the guard
-lifted for the length of the call, and it was always temporary.
-
-It has no call site. Three of them once moved onto a branch and meant to stay
-on it, and a session would have put all three back, which is the opposite of
-what they meant, so each came through here until the step that owned it
-decided what returning should mean. The deploy switched to the environment
-branch and deployed from there, and it now declares a branch class and
-switches inside the session the gate opens. The one before that was the
-deploy's C<--pull> path, and it went with the flag when the refresh became
-unconditional. The last was the post-deploy hand-off, which moved onto control
-so that the child it spawned would find it there; that hand-off now runs after
-the deploy's own session has finished, and the child takes the switch lock and
-moves the tree itself, so there is nothing for a one-way checkout to mean.
-
-Nothing may use it, and a test asserts that nothing does.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$branch>
-
-The branch to switch to and stay on.
-
-=back
-
-B<Returns:> C<$self>.
-
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"Failed to checkout '%s'"> -- raised via C<run>'s C<onfailure>. C<%s> is
-the branch name.
-
-=back
-
-B<Examples:>
-
-  $git->checkout_one_way('staging');
-  # returns $self, standing on staging, with nothing arranged to come back
 
 =head2 create_branch
 

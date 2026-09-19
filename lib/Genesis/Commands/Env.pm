@@ -1442,8 +1442,9 @@ sub _deploy_preflight {
 # question.  The deploy writes the commit its pre-flight resolved into that
 # key before anything downstream reads it, so the hash arm answers whether
 # this run resolved a deployed commit, and a --redeploy that resolved none is
-# answered no by it.  That is the fact the hand-off turns on, and here it is
-# _recreate_wanted that reads it, for the repository's redeploy-only setting.
+# answered no by it.  That is the fact the hand-off turns on, and two callers
+# in this module read it, _recreate_wanted for the repository's redeploy-only
+# setting and _propagate_after_deploy for whether to spawn the child at all.
 #
 # The root is taken and not read.  It comes first so that this reads like the
 # other questions the deploy asks of a run, and so that a later step can let a
@@ -1512,7 +1513,14 @@ sub _propagate_after_deploy {
 sub _spawn_propagate_child {
 	my ($env) = @_;
 
-	$env->notify("Propagating from #C{%s}...", $env->name);
+	# The notice names the hand-off rather than the propagation, because the
+	# child's own first line opens "Propagating from" as well, with a branch
+	# after it where this one has an environment.  Said the same way, the two
+	# read as one sentence repeated about two different things, and nothing
+	# on either line told the operator that the second process is this one's
+	# child.
+	$env->notify("Handing off to #C{genesis propagate} after #C{%s}...",
+		$env->name);
 
 	my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
 	my @cmd = ($bin, 'propagate');
