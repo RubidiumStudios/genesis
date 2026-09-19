@@ -15,6 +15,15 @@
 # certifies a commit no propagation routed anywhere; without the second, an
 # operator one fetch away from a deploy is sent to a command that cannot help.
 #
+# Between those two sits the pair to the first, which is the run that reaches
+# the same question from the other side.  A run standing on a resolved
+# deployed commit is standing detached rather than on the branch by name, and
+# it is exempt: asking for the name alone refused every one of them as a
+# branch carrying no repository.  That row is a guard rather than a proof of
+# anything this file wrote, the exemption having landed with the flag, and it
+# holds the exemption still while the steps after it change the deploy around
+# it.
+#
 # Every row calls fixture_bosh where the branch has to carry a repository,
 # because a seeded harness leaves the operator's own copy of the deployment
 # branch at the commit the apply cut and every delivery is published from the
@@ -204,6 +213,40 @@ subtest 'a branch carrying no repository is awaiting its first delivery' => sub 
 	like(unfolded($err), qr/genesis pipeline-apply.*genesis propagate/,
 		'and naming the two commands in order');
 	like(unfolded($err), qr/Nothing was deployed\./, 'and nothing was deployed');
+};
+
+subtest 'a resolved commit answers what the branch name answers' => sub {
+	# Two rows, and one more for the run's own restoration assertion.
+	plan tests => 3;
+
+	# The pair to the subtest above, and the one run that reaches the same
+	# question from the other side.  The gate stands a redeploy detached on
+	# the recorded commit, so such a run is not standing on the branch by
+	# name; asking for the name alone would refuse every redeploy with the
+	# refusal above, which this branch has not earned.  It carries a
+	# delivery, and the commit the run stands on is one of that branch's own,
+	# so the root the run reads is the branch's and the commit it records is
+	# the commit it deploys.
+	#
+	# The seeding certifies the environment without naming a deployed
+	# commit, and a redeploy of an environment that names none resolves
+	# nothing and deploys the tip, which is not the run this row is about.
+	# So the record is written again over the delivery the seeding made,
+	# naming the commit that delivery put on the branch and the control
+	# commit that commit's own marker names.
+	my $h = ready_harness(envs => ['qa'], bosh => 1);
+	certify($h, 'qa',
+		commit         => tip_of($h, $h->slug('qa')),
+		control_commit => harness_marker($h, $h->slug('qa')));
+
+	my (undef, $err, $exit) = run_genesis($h,
+		'qa', 'deploy', '--redeploy', '--no-propagate', '-y', 'r');
+
+	is($exit, 0, 'a run standing on a resolved commit is not refused')
+		or diag("what the redeploy said:\n$err");
+	unlike(unfolded($err), qr/carries no repository/,
+		'and hears nothing about a branch carrying no repository')
+		or diag("what the redeploy said:\n$err");
 };
 
 subtest 'a stale clone deploys the branch, and a read moves no ref' => sub {

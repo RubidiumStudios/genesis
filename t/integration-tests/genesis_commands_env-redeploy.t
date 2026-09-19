@@ -12,15 +12,31 @@
 # and one that never told the operator it was redeploying something other than
 # what they have on their branch.
 #
-# Most of this file was green when it was written, because the gate that
-# switches the deploy onto the recorded commit landed a step above it, and it
-# says so row by row rather than reading as a proof of what this step wrote.
-# The exit row, the two marker rows, the two record rows, the count row, and
-# the restoration row were all green on arrival, and each stands as a guard
-# holding that behaviour still while the steps after this one change the
-# deploy around it.  The one row that was red is the sentence row, which asks
-# the run to say which commit it is redeploying, and the notice in the
-# deploy's pre-flight is what turns it green.
+# Four of the first subtest's eight rows were red when it was written and four
+# were green, and it says which were which rather than reading as a proof of
+# everything below it.  The exit row, the sentence row, the row asking what
+# BOSH received, and the record-count row were red, and all four were red for
+# one reason: the pre-flight asked whether it was standing on the deployment
+# branch by name, a redeploy stands detached on a commit of that branch, and
+# so every redeploy was refused as a branch carrying no repository.  Widening
+# that question to accept a resolved commit is what lets the run reach BOSH,
+# and the notice in the deploy's pre-flight is what turns the sentence row
+# green.
+#
+# The four that arrived green are guards, each holding still a behaviour the
+# steps after this one must not change.  The row that the undeployed content
+# never reached BOSH was green because nothing reached BOSH at all, and it now
+# says the tip's content stays out of the manifest.  The two record rows were
+# green because the refusal wrote no record and the seeded one already named
+# both hashes, and they now say a redeploy records the same deployed commit
+# and moves no certified commit.  The restoration row was green because a
+# refusal restores the working state as a success does, and it now says finish
+# puts the operator back on the branch they started on.
+#
+# The kit is the one fixture_bosh builds rather than a named kit of this
+# file's own, which is what the deployed-commit file does for the same reason:
+# the two manifest rows read a marker the blueprint hook prints, and that hook
+# is given to the builder's kit.
 #
 # The two subtests below it are T241's, and they say the same thing about
 # themselves.  The two silence rows of the first were red, and the one caller

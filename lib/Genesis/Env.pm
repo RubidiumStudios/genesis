@@ -3538,13 +3538,19 @@ sub deployed_record {
 	my $deployment = eval { $self->with_vault->deployments->latest_successful }
 		or return undef;
 
+	# The two timestamps are the record's own, read through the deployment's
+	# named readers.  They were state and dated, and both were dead: the
+	# deployment deletes state as it is constructed, turning it into the
+	# result, and no record carries a dated field at all.  A reader asking for
+	# either was answered undef every time and nothing noticed, because the
+	# one caller reads the commit and nothing else.
 	return {
 		git => {
 			commit         => $deployment->lookup('git.commit'),
 			control_commit => $deployment->lookup('git.control_commit'),
 		},
-		state => $deployment->lookup('state'),
-		dated => $deployment->lookup('dated'),
+		started   => $deployment->started,
+		completed => $deployment->completed,
 	};
 }
 
