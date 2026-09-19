@@ -21,6 +21,17 @@
 # deploy around it.  The one row that was red is the sentence row, which asks
 # the run to say which commit it is redeploying, and the notice in the
 # deploy's pre-flight is what turns it green.
+#
+# The two subtests below it are T241's, and they say the same thing about
+# themselves.  The two silence rows of the first were red, and the one caller
+# of the three warnings is what turns them green.  Everything else there was
+# green on arrival: the row that reads the notice back, which keeps the two
+# silence rows honest about what the run resolved; the two rows asserting that
+# an ordinary deploy of the same tree still prints both warnings; the five
+# rows of the second subtest, which are the provider gate and the
+# stale-pipeline warning a redeploy keeps; and the exit-code row beside each
+# run.  Each of those stands as a guard, holding still the behaviour a
+# narrower redeploy must not have taken out with it.
 use strict;
 use warnings;
 use utf8;
@@ -136,6 +147,170 @@ YAML
 
 	assert_w_restored($before, 'finish restored the branch the operator started on');
 };
+
+# Proves T241: a redeploy prints neither the due-commits warning nor the
+# drifted warning, both of which describe the branch tip that a redeploy is
+# not shipping, while an ordinary deploy of the same tree prints both.
+#
+# What the rows catch: an implementation that skipped no warning, which the
+# two silence rows catch; and one that skipped them for every deploy rather
+# than for a run that resolved a deployed commit, which the ordinary deploy
+# in the same tree catches.
+#
+# Both silence rows are backed by two rows beside them, so a run that said
+# nothing for a reason of its own cannot pass them.  The exit code says the
+# run reached its end rather than dying before the warnings, and the notice
+# the step above the warnings prints says the run resolved a deployed commit
+# rather than falling back to the tip.
+subtest 'the redeploy skips the two warnings about the tip' => sub {
+	# Seven rows, and one more for each of the two runs' own restoration
+	# assertions.
+	plan tests => 9;
+
+	# due_harness seeds the environment, delivers it, certifies it, and then
+	# lays two control commits that write the environment's own file, so both
+	# route to qa and neither has reached its branch.  bosh => 1 stands the
+	# director, the fake bosh, and the kit up before the seeding, which is
+	# what lets each run below reach its end.
+	my ($h) = due_harness(bosh => 1);
+
+	# The seeding certifies the environment without naming a deployed
+	# commit, and a redeploy of an environment that names none resolves
+	# nothing and deploys the tip, which is the one run this subtest cannot
+	# be made of.  So the record is written again over the delivery the
+	# seeding made, naming the commit that delivery put on the branch and the
+	# control commit that commit's own marker names.
+	my $deployed = tip_of($h, $h->slug('qa'));
+	certify($h, 'qa',
+		commit         => $deployed,
+		control_commit => harness_marker($h, $h->slug('qa')));
+
+	# And the branch has drifted as well, so one tree holds both of the
+	# states this subtest is about.  The hand commit edits the one member of
+	# the propagation set a row may safely edit, which is the environment's
+	# own file, and it keeps what that file already said, because an
+	# environment replaced wholesale is one no deploy can read.
+	#
+	# It is made in the operator's own copy rather than in the teammate's,
+	# which is where the hatch is usually opened, because the redeploy below
+	# stands detached and makes no fast-forward.  A hand commit this clone
+	# had not pulled would leave the drifted warning reading the branch as
+	# the delivery left it, and the silence row would then pass over a branch
+	# that had not drifted at all.
+	my $drifted = edited_file($h, 'qa');
+	my $was     = blob_at($h->a, $h->slug('qa'), $drifted)
+		// die "the branch carries no $drifted to edit\n";
+	hand_commit($h, $h->slug('qa'), copy => 'a',
+		files   => {$drifted => $was."\n# opened by hand during the incident\n"},
+		message => 'open the hatch');
+	stand_on($h, $h->control);
+	refresh($h, 'a', $h->control, $h->slug('qa'));
+
+	# The director's record stands at the environment's own exodus path, and
+	# a deploy that reaches its end writes the environment's exodus data over
+	# it, so the second run below would find no director at all.  The url is
+	# read off the record the builder wrote, because it names the port the
+	# harness listener took and no row can know that port in advance.
+	my $url = record_at($h, $h->env_path('qa'))->{url};
+
+	# Every run passes --no-propagate, for the reason the file above gives:
+	# the auto-cascade hands off to a child genesis propagate that M15 owns
+	# and that fails today, and a row about what the deploy said should not
+	# be reading the child's failure as the deploy's.
+	my (undef, $err, $exit) = run_genesis($h,
+		'qa', 'deploy', '--redeploy', '--no-propagate', '-y', 'r');
+
+	is($exit, 0, 'the redeploy proceeded')
+		or diag("what the redeploy said:\n$err");
+	# The notice the step above the warnings prints, and the guard that
+	# keeps the two silence rows honest.  It prints only where a deployed
+	# commit was resolved, so a fixture whose record named none would deploy
+	# the tip, both warnings would be right to print, and this row rather
+	# than those two would say so.
+	like(unfolded($err), qr/at its deployed commit/,
+		'the redeploy resolved the recorded commit and says so')
+		or diag("what the redeploy said:\n$err");
+	unlike(unfolded($err), qr/commits? due to/,
+		'the due-commits warning is skipped')
+		or diag("what the redeploy said:\n$err");
+	unlike(unfolded($err), qr/differs from/,
+		'and so is the drifted warning')
+		or diag("what the redeploy said:\n$err");
+
+	# The same tree, the same two states, and no flag.  The phrase read for
+	# the due warning is the warning's own opening rather than the bare word
+	# due, because the commit subjects this harness lays carry that word too.
+	fixture_director($h, 'qa', url => $url);
+	my (undef, $plain, $plain_exit) = run_genesis($h,
+		'qa', 'deploy', '--no-propagate', '-y', 'r');
+
+	is($plain_exit, 0, 'the ordinary deploy proceeded')
+		or diag("what the deploy said:\n$plain");
+	like(unfolded($plain), qr/commits? due to/,
+		'an ordinary deploy still warns about the commits due')
+		or diag("what the deploy said:\n$plain");
+	like(unfolded($plain), qr/differs from/,
+		'and still warns that the branch drifted')
+		or diag("what the deploy said:\n$plain");
+};
+
+# Proves the other half of T241: the two checks a redeploy keeps.  The
+# provider gate still refuses it, because a redeploy under an automated
+# provider still does the pipeline's work without taking the pipeline's
+# locks; and the stale-pipeline warning still prints, because a pipeline
+# whose definition has moved is stale whichever commit is being deployed.
+#
+# Both rows were green on arrival, and they are stated as such.  Nothing in
+# this task touches the gate, and the wrong implementation nearest to hand is
+# one that reads "a redeploy is narrower" as licence to skip everything the
+# pre-flight would otherwise say, which is what these hold still.
+#
+# The second run carries GENESIS_PIPELINE_TASK, which is the one way a
+# spawned command gets past an automated provider's gate: --force needs a
+# terminal to take the acknowledgement from, and
+# Genesis::Term::in_controlling_terminal answers false for every run this
+# suite makes, as t/integration-tests/genesis_commands_env-deploy_provider_gate.t
+# records.  The gate is step 7 of the pre-flight and the warning is step 9,
+# so a run the gate refuses never reaches the warning to be read for it.
+subtest 'the redeploy keeps the provider gate and the stale warning' => sub {
+	# Four rows, and one more for each of the two runs' own restoration
+	# assertions.
+	plan tests => 7;
+
+	my $g = ready_harness(envs => ['qa'], bosh => 1, provider => 'concourse');
+
+	# The one thing that moves the repository out of step with its own
+	# applied record.  The environment's own file is a pipeline-defining
+	# path, and this writes it on control alone, so the change is one only a
+	# reader of control can see.  It is written through the harness, so what
+	# lands is a file Genesis can still read.
+	write_env_file($g, 'qa', pipeline => {require_pr => 'true'});
+	push_from($g, 'a', $g->control);
+	refresh($g, 'a', $g->control);
+
+	my (undef, $gerr, $gexit) = run_genesis($g,
+		'qa', 'deploy', '--redeploy', '--no-propagate', '-y', 'r');
+
+	is($gexit, Genesis::Exit::NOPERM,
+		'the provider gate still refuses the redeploy')
+		or diag("what the redeploy said:\n$gerr");
+	like(unfolded($gerr), qr/pipeline/,
+		'naming the pipeline that owns the deploy')
+		or diag("what the redeploy said:\n$gerr");
+
+	my (undef, $jerr, $jexit) = run_genesis($g, {pipeline_task => 'deploy-qa'},
+		'qa', 'deploy', '--redeploy', '--no-propagate', '-y', 'r');
+
+	is($jexit, 0, 'the redeploy proceeded past the gate inside a pipeline job')
+		or diag("what the redeploy said:\n$jerr");
+	like(unfolded($jerr), qr/genesis pipeline-apply/,
+		'and the stale-pipeline warning still names the remedy')
+		or diag("what the redeploy said:\n$jerr");
+	like(unfolded($jerr), qr/\bqa: configuration-changed\b/,
+		'naming the environment whose shape changed and why it changed')
+		or diag("what the redeploy said:\n$jerr");
+};
+
 
 done_testing;
 

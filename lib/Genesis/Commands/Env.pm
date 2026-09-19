@@ -15,6 +15,12 @@ use Genesis::CI::Preflight;
 use Genesis::Exit qw/ABORTED DATAERR/;
 use Encode qw(decode_utf8);
 
+# The one name this module offers another.  Everything else here is a command
+# that bin/genesis calls by its full name, so nothing is exported by default
+# and a caller outside this file asks for the one question it may need.
+use base 'Exporter';
+our @EXPORT_OK = qw/redeploy_wanted/;
+
 sub create {
 
 	# WARNING: Do not default create-env option to 0, because its absence is used
@@ -1299,27 +1305,25 @@ sub _deploy_preflight {
 		);
 	}
 
-	# 9.  The warnings, in the order the design fixes, and this is the first
-	# of them.  It runs ahead of the due-commits warning below because what
-	# is stale decides which environments and which branches that warning is
-	# talking about: an operator told that commits are due to a branch wants
-	# to know first that the pipeline watching it no longer matches control.
+	# 9, 10, and 11.  The pre-flight's three warnings, through the one caller
+	# that decides which of them this run skips.  Their order is the design's:
+	# the stale pipeline first, because what is stale decides which
+	# environments and which branches the warning after it is talking about;
+	# what control carries that has not reached this branch second; and the
+	# branch's own drift from its marker's snapshot last, because a drifted
+	# branch is a smaller thing to know than a pipeline that no longer matches
+	# control (D33).  A run that resolved a target skips the two that describe
+	# the tip and keeps the one that does not, and that is decided inside
+	# _warn_about_the_tip rather than at each of the three call sites.
 	#
-	# It is asked in void context because nothing below reads the count.  The
-	# sub answers one anyway, for the propagate pre-flight and
-	# pipeline-status, which ask the same query, and its POD says so.
-	_warn_stale_pipeline($top, $git);
-
-	# 10.  What control carries that has not reached this branch, and the one
-	# prompt --yes answers.  The deploy computes none of it: the walk is the
-	# propagate run's own computation, run read-only and narrowed to this
-	# environment through the option it already has, so the two commands
-	# cannot disagree about what is due.  The deploy calls no read-only sub
-	# of its own here, because a second such sub would be a second thing to
-	# keep in step with the first.
-	#
-	# It prints after the staleness warning, because what is stale decides
-	# which branches the due set is talking about.
+	# The walk the due-commits warning reads is made here rather than inside
+	# that caller, because it is the deploy's own read of durable state and
+	# the warning is handed what it found.  The deploy computes none of it:
+	# the walk is the propagate run's own computation, run read-only and
+	# narrowed to this environment through the option it already has, so the
+	# two commands cannot disagree about what is due.  The deploy calls no
+	# read-only sub of its own here, because a second such sub would be a
+	# second thing to keep in step with the first.
 	#
 	# The branch record is composed here rather than taken from
 	# Genesis::CI::Preflight::initial_state, which resets and fast-forwards
@@ -1341,35 +1345,14 @@ sub _deploy_preflight {
 	bug("The walk answered no environment for #C{%s}.", $name)
 		unless $due_record;
 
-	my $due = _warn_commits_due($bare, $due_record);
-
-	# 11.  The last of the warnings, and the only one about the branch itself
-	# rather than about what has not reached it.  It runs after the other two
-	# because a branch that has drifted is a smaller thing to know than a
-	# pipeline that no longer matches control, and it runs before the prompt
-	# below because that prompt is the last place a deploy can be stopped and
-	# an operator answering it should have heard everything the pre-flight
-	# had to say (D33).
-	#
-	# It is the one read of the pre-flight made through a loaded environment
-	# rather than through the bare one above.  The propagation set is built
-	# from the kit as much as from the environment file, since the kit source
-	# is a kind of the set and the blueprint names the fragments the merge
-	# consumes, and a bare environment has no kit to ask.  The load reads the
-	# kit off the branch and connects to nothing, and the deploy loads the
-	# same environment a step later, so a repository whose kit cannot be
-	# loaded fails here rather than there and says the same thing either way.
-	#
-	# That second load is the same work done twice, and the cost is named
-	# rather than hidden, because load_env memoises nothing and the deploy
-	# proper pays for a full merge of the environment hierarchy and a full
-	# kit resolution again a step below.  Carrying the loaded environment out in
-	# the answer would spare it, and the keys of that answer are fixed, so
-	# sparing it belongs to whichever step may widen them.
-	my $drifted = _warn_drifted($top->load_env($name), $git);
+	my $tip = _warn_about_the_tip($top, $name, $git,
+		bare   => $bare,
+		record => $due_record,
+		target => $target,
+	);
 
 	# The one prompt --yes answers, asked once every warning has printed.
-	_confirm_commits_due($name, $due, $options);
+	_confirm_commits_due($name, $tip->{due}, $options);
 
 	return {
 		git     => $git,
@@ -1378,9 +1361,31 @@ sub _deploy_preflight {
 		action  => $action,
 		bare    => $bare,
 		prior   => $prior_record,
-		due     => $due,
-		drifted => $drifted,
+		due     => $tip->{due},
+		drifted => $tip->{drifted},
 	};
+}
+
+# }}}
+# redeploy_wanted - is this run a redeploy {{{
+#
+# D87 gives the deployed commit one selection on the deploy, so the question
+# "is this a redeploy" has one answer and wants one reader.  Four spellings of
+# one question are four chances for them to drift apart.
+#
+# A caller holding the deploy's own options hash passes it and the answer is
+# read from there, which is how the answer reaches code with no command line
+# to ask: Genesis::Env imports current_command and known_commands from
+# Genesis::Commands and cannot call has_option at all.  A caller with no
+# options hash omits the second argument, and the command line is asked.
+#
+# The root is taken and not read.  It comes first so that this reads like the
+# other questions the deploy asks of a run, and so that a later step can let a
+# repository setting answer the question without rewriting every call site.
+sub redeploy_wanted {
+	my ($top, $options) = @_;
+	return $options->{redeploy} ? 1 : 0 if ref($options) eq 'HASH';
+	return has_option('redeploy') ? 1 : 0;
 }
 
 # }}}
@@ -2175,6 +2180,63 @@ sub _warn_drifted {
 		join("\n", map {"  - $_"} @files), substr($certified, 0, 8)
 	);
 	return \@files;
+}
+
+# }}}
+# _warn_about_the_tip - the deploy's three warnings, and what they found {{{
+#
+# D87: a run that resolved a deployed commit is not trying to ship the tip, so
+# what is due to the branch and how the branch differs from its marker's
+# snapshot are both beside the point, and telling an operator about work this
+# run cannot deliver is noise.  The stale pipeline is not about the tip at
+# all, so it is warned about on every deploy, redeploy included: a repository
+# and a running pipeline that disagree about which environments exist disagree
+# whichever commit is being deployed.  The provider gate is kept for the same
+# reason and is nowhere near here, being a refusal and sitting two steps up.
+#
+# The three warnings have one caller so that what a redeploy skips is decided
+# in one place rather than at each of the three call sites.
+#
+# What is asked is the resolved target rather than the flag, because the
+# target is what the step above this one told the operator the run is about,
+# and the two must not be able to disagree.  A --redeploy of an environment
+# that has never deployed successfully resolves no commit and deploys the tip,
+# as every deploy did before the flag existed, and a run deploying the tip has
+# to hear what the tip carries.  The flag has its own reader in
+# redeploy_wanted, which is what a caller with no resolved target to hand
+# asks.
+#
+# The loaded environment the drifted warning reads is built here rather than
+# by the caller, so a redeploy pays for neither the load nor the warning.  It
+# is the one read of the pre-flight made through a loaded environment rather
+# than through the bare one: the propagation set is built from the kit as much
+# as from the environment file, since the kit source is a kind of the set and
+# the blueprint names the fragments the merge consumes, and a bare environment
+# has no kit to ask.  The load reads the kit off the branch and connects to
+# nothing, and the deploy loads the same environment a step later, so a
+# repository whose kit cannot be loaded fails here rather than there and says
+# the same thing either way.  That second load is the same work done twice,
+# and the cost is named rather than hidden, because load_env memoises nothing
+# and the deploy proper pays for a full merge of the environment hierarchy and
+# a full kit resolution again a step below.
+#
+# The two lists come back rather than being swallowed, because the prompt
+# beside the due-commits warning reads the due list and _deploy_preflight
+# carries both lists in the hash it returns.  A wrapper that returned nothing
+# would take the prompt's input away.  The stale-pipeline warning is asked in
+# void context instead, because nothing reads its count here.  It answers one
+# anyway, for the propagate pre-flight and pipeline-status, which ask the same
+# query, and its POD says so.
+sub _warn_about_the_tip {
+	my ($top, $name, $git, %what) = @_;
+
+	_warn_stale_pipeline($top, $git);
+	return {due => [], drifted => []} if defined $what{target};
+
+	return {
+		due     => _warn_commits_due($what{bare}, $what{record}),
+		drifted => _warn_drifted($top->load_env($name), $git),
+	};
 }
 
 # }}}
