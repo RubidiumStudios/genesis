@@ -877,16 +877,12 @@ sub propagate {
 			$at = $env_name;
 
 			# D43's awaiting outcome.  genesis pipeline-apply is the one
-			# command that cuts a deployment branch, so the run names that
-			# command and carries on past the environment without writing.
-			# It is held rather than failed, because nothing is wrong with
-			# the environment and one command releases it.
-			unless ($initial->{branches}{$env_name}) {
-				$env_record->{outcome}        = 'held';
-				$env_record->{outcome_detail} =
-					Genesis::CI::Report::AWAITING_APPLY;
-				next;
-			}
+			# command that cuts a deployment branch, so the run carries on
+			# past the environment without writing, and the report says what
+			# it is waiting for.  Nothing is decided here, because a run and
+			# a preview that decided it separately are two outputs that can
+			# disagree about a word.
+			next unless $initial->{branches}{$env_name};
 
 			# D96's second stage as the walk already resolved it.  An error
 			# the walk confined to this environment is this environment's

@@ -135,10 +135,12 @@ sub hold_reason {
 #
 # D54's qualifier, which says what the environment waits for rather than why
 # any one commit is held.  An environment the pipeline was never applied to
-# waits for that command, one whose environment the run could not read has
-# failed instead, and one holding commits behind an ancestor waits for that
-# ancestor to certify the commit it has not deployed.  One whose pull request
-# a reviewer approved waits for that merge and for nothing else.
+# waits for that command, and so does one with no deployment branch on either
+# side, which is the same wait read off a different absence.  One whose
+# environment the run could not read has failed instead, and one holding
+# commits behind an ancestor waits for that ancestor to certify the commit it
+# has not deployed.  One whose pull request a reviewer approved waits for that
+# merge and for nothing else.
 #
 # It answers the qualifier alone and not the whole phrase, because ruling 22
 # puts the bare enum word in the record's outcome and the qualifier beside it
@@ -147,7 +149,15 @@ sub hold_reason {
 sub held_qualifier {
 	my ($record) = @_;
 
-	my $certified = $record->{certified} // {};
+	# D43: an environment the pre-flight found no branch for on either side is
+	# waiting for the one command that cuts one.  The walk reads nothing else
+	# about it, so its certified state is never filled in, and that absence is
+	# what says which environment this is.  It is composed here rather than by
+	# the command that meets it, so the run, the preview, and pipeline-status
+	# read one phrase from one place.
+	return AWAITING_APPLY unless defined $record->{certified};
+
+	my $certified = $record->{certified};
 	return AWAITING_APPLY
 		if ($certified->{state} // '') eq 'never-applied';
 

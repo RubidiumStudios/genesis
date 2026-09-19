@@ -381,6 +381,7 @@ integration-tests/genesis_ci_pullrequest-rebuild.t            # what the rebuild
 integration-tests/genesis_ci_pullrequest-recovery.t           # a merged pull request gives back the marker a squash took off the branch
 integration-tests/genesis_ci_pullrequest-review_arms.t        # an approved pull request is frozen and its new commits held
 integration-tests/genesis_ci_pullrequest-review_state.t       # what a reviewer decided, and the refusal when it cannot be read
+integration-tests/genesis_ci_pullrequest-seed.t               # the first pull request is the whole aggregate from E, and a branchless environment waits
 integration-tests/genesis_ci_pullrequest-title.t              # the marker in the pull request title, and which one a run acts on
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
 integration-tests/branch_class-pre_deploy_refusal.t           # a pre-deploy command refuses off a deployment, pull request, or artifacts branch
