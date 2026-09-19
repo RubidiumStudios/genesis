@@ -840,10 +840,18 @@ sub propagate {
 		# The walk reads durable state and writes nothing at all.  Everything
 		# it decides stands in the record, and the delivery below is the only
 		# thing here that touches a branch.
+		#
+		# The client and the state read above go in with it, because a
+		# deployment branch whose merge dropped the marker takes it back
+		# from the pull request that merged, and that pull request is in
+		# the answer this run already has (D52).
 		$record = Genesis::CI::Walk::plan($top,
-			git       => $git,
-			state     => $state,
-			branches  => $initial->{branches},
+			git        => $git,
+			state      => $state,
+			branches   => $initial->{branches},
+			github     => $github,
+			owner_repo => $owner_repo,
+			state_of   => \%pr_state_of,
 		);
 
 		# Every environment the run delivers to is loaded here, before the

@@ -16,6 +16,7 @@ use Exporter qw/import/;
 use Scalar::Util ();
 use Genesis qw/run bug bail info/;
 use Genesis::CI::Marker qw/STAGE RELEASE_STAGE/;
+use Genesis::CI::PullRequest;
 use Genesis::CI::Report;
 use Genesis::CI::RunFailure;
 use Genesis::Exit qw/UNAVAILABLE/;
@@ -1162,6 +1163,21 @@ sub plan {
 				env_file => ($git->prefixed($env->file))[0],
 			);
 			my $marker = $seeding eq 'seeded' ? $base : undef;
+
+			# D52's recovery, which only an environment in pull request mode
+			# can want: a deployment branch takes a commit it did not write
+			# by merge alone, and a merge is the one thing that can drop the
+			# marker on its way in.  The base moves with the marker, because
+			# a run that reported the recovery and then walked from before
+			# the environment existed would propose the whole of control
+			# again with the marker in its hand.
+			if (!$marker && $env_record->{pr}) {
+				$marker = Genesis::CI::PullRequest::certified_marker(
+					$git, $opts{github}, $opts{owner_repo}, $env_record,
+					($opts{state_of} || {})->{$name}, ref => $ref);
+				$base = $marker if $marker;
+			}
+
 			$env_record->{merged}  = $marker;
 			# A repository with no applied record keeps the not-propagated
 			# reading D94 gives it, whatever this branch happens to carry,
