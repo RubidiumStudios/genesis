@@ -252,10 +252,13 @@ command returns, so an ordinary run is back on the operator's own branch
 before the process exits. A command that refuses exits with its own code,
 and the session's own last-resort net puts the working tree back.
 
-The branch the session stands on is the deployment branch's tip. D87 has a
-deployed-state command default to the commit the environment last deployed,
-and M14 supplies that commit through C<deployed_target>; until it does, the
-tip is what is read.
+The branch the session stands on is the deployment branch's tip, unless the
+run resolved a commit of its own. D87 has a deployed-state command default to
+the commit the environment last deployed, and C<deployed_target> resolves
+that commit before the gate switches. Where it answers one, the session
+checks that commit out detached and the tip is not read at all. Where it
+answers C<undef>, which is every run that named neither flag under a
+registration declaring no C<deployed> default, the tip is what is read.
 
 A command already standing on the branch it would switch to opens no session
 and takes no switch lock, because a session exists to leave a branch and come
@@ -293,6 +296,16 @@ and the command asks it again where it classifies the branch for itself. The
 gate only declines to switch, and a command that went on to read whatever the
 operator was standing on would deploy or report from the wrong place
 entirely.
+
+That arm yields to a resolved target, the way the standing-on-the-branch arm
+above it does. The question it asks is what the branch carries now, and a run
+that resolved a target is not switching onto what the branch carries now. It
+switches onto the commit its record names, and that commit carried the
+repository when it was deployed, whatever a rewrite has since done to the
+branch. A commit the repository no longer holds is refused by the session's
+own C<switch> at C<Genesis::Exit::DATAERR>, naming the commit and the record,
+and that is the refusal such an operator needs rather than a sentence about a
+branch still waiting for a delivery.
 
 Two states answer that question the same way and are not alike at all. An
 environment nothing has been delivered to waits for a propagation. A clone
@@ -947,12 +960,30 @@ would refuse that run over a missing file that is missing exactly as
 intended, so the reader of the deployed record builds its own below the
 question instead.
 
-The record is in the vault, and the root the gate keeps carries none: it is
-loaded with C<< no_vault => 1 >> so that reading a command's class announces
-no vault target. The read therefore loads the same root again with the vault
-the repository configures, which is the root the command is about to load
-for itself a moment later, and only a run that named the deployed commit
-pays for it.
+A file test above those builds is what keeps that promise.
+C<Genesis::Env-E<gt>bare> runs the name and file-existence checks, so a name
+whose file is not here dies there, and an operator standing on one
+environment's deployment branch and naming another is in exactly that state,
+since a deployment branch carries its own environment file and no other. A
+run whose target came from its registration's default yields there and
+answers C<undef>, so the gate switches to the branch and the command reads
+the file that was delivered to it. A run that named C<--redeploy> or
+C<--as-deployed> asked outright, and bails at C<Genesis::Exit::CONFIG> naming
+the branch to stand on.
+
+That guard is a file test and not an C<eval> around the builds. An C<eval>
+catches every way a build can fail, and a vault the repository cannot reach
+is one of them, so a run whose vault is down would quietly take the tip
+instead of saying so. The one state that has to be told apart is a file that
+is not in this tree, and a file test asks that and nothing else, which leaves
+every other failure loud.
+
+The record is in the vault, and the root the gate keeps carries none,
+because it is loaded with C<< no_vault => 1 >> so that reading a command's
+class announces no vault target. The read therefore loads the same root
+again with the vault the repository configures, which is the root the
+command is about to load for itself a moment later, and only a run that
+named the deployed commit pays for it.
 
 In list context the path that record was read from comes back beside the
 commit, which is the environment's exodus base with C</deployments> on the
@@ -985,7 +1016,11 @@ B<Returns:> the commit the run targets, or C<undef> where it targets the tip
 of the deployment branch, which is every run that named neither flag and
 every command whose registration declares no C<deployed> default.  In list
 context, that commit and the vault path of the record it was read from, as a
-two-element list.
+two-element list.  A run that targets the tip answers C<undef> in list context
+too, as a list of one element, because every path that declines to resolve a
+commit returns C<undef> and has no record to name beside it.  A caller asking
+in list context therefore reads the record path as C<undef> as well, and the
+gate does exactly that.
 
 B<Errors:>
 
@@ -998,6 +1033,13 @@ a repository whose pipeline is not enabled. Without a pipeline there is no
 branch session to assert the tree clean, to hold the switch lock, or to put
 the operator back on the branch they started from, so the run is refused
 rather than left detached in a tree nobody asserted.
+
+Raised again at the same code, with its own wording, when either flag is
+given for an environment whose file is not in the tree the operator is
+standing on. The refusal names that file, the environment's deployment
+branch, and the control branch, because those are the two branches the file
+travels on. A run that resolved its target from its registration's default
+meets no refusal here and takes the tip instead.
 
 =back
 
@@ -2129,7 +2171,7 @@ rather than refusing anything.
 
 A run that resolved a deployed commit is handed to C<_gate_deployed_state>
 as well, whatever class its registration declares, and the resolved commit
-goes down with it.  That is how the secrets family opts in: it is
+goes down with it.  That is how the secrets family opts in.  It is
 C<pre-deploy> by class, and C<--as-deployed> is the operator saying which of
 the two questions they are asking, so the flag is read before the class and
 the class is only the default answer.
@@ -2137,10 +2179,9 @@ the class is only the default answer.
 The record that commit was read from goes down beside it, because the session
 refuses a commit the repository cannot reach and names the record in the
 refusal.  C<deployed_target> answers both in list context, and the gate asks
-in list context for that reason: it is the one caller that knows which record
-answered this run, and an environment built here merely to work the path out
-again would announce a vault target on behalf of a command the gate never
-gates.
+in list context because it is the one caller that knows which record answered
+this run.  An environment built here merely to work the path out again would
+announce a vault target on behalf of a command the gate never gates.
 
 The refresh is passed along as C<< refresh => 0 >> for the two commands that
 make no network call of their own.  C<pipeline-status> says so with
@@ -2385,9 +2426,9 @@ the switch lock, and at C<Genesis::Exit::DATAERR> where the target is a
 commit this repository does not hold, naming the commit and the record it
 came from before anything has moved.  C<ls_tree>, which is what asks the
 branch whether it carries a repository, refuses at C<Genesis::Exit::DATAERR>
-where git cannot resolve the ref.  This function itself bails in one case, which is a
-deployment root that resolves to somewhere outside the repository, because
-there is then no path on the branch to read it from.
+where git cannot resolve the ref.  This function itself bails in one case,
+which is a deployment root that resolves to somewhere outside the repository,
+because there is then no path on the branch to read it from.
 
 B<Examples:>
 

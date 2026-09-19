@@ -70,7 +70,7 @@ subtest 'both flags refuse where the pipeline is not enabled' => sub {
 	# refusals above are about the pipeline being off and not about a flag
 	# the parser never heard of.  Green before the flags existed, when an
 	# unknown option exited at the usage error rather than at CONFIG, and a
-	# guard rather than a proof: what it catches is a refusal written to
+	# guard rather than a proof.  What it catches is a refusal written to
 	# meet every use of the flags rather than the ones outside a pipeline.
 	my $g = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
 	my $gc = commit_on_control($g,
@@ -106,7 +106,7 @@ subtest 'the two flags share one help sentence' => sub {
 
 	# Green on arrival, because both captures were undefined before the
 	# flags existed and two undefined captures squash to one empty string.
-	# It stands as a guard on the one constant: what it catches is a step
+	# It stands as a guard on the one constant.  What it catches is a step
 	# that gives each flag a wording of its own.
 	my $squash = sub { my $t = shift // ''; $t =~ s/\s+/ /g; $t =~ s/^\s|\s$//g; $t };
 	is($squash->($info_sentence), $squash->($deploy_sentence),
@@ -267,18 +267,19 @@ YAML
 # What the rows catch: an implementation that switched first and discovered
 # the missing commit afterwards, which leaves the tree detached and fails the
 # restoration row; one that refused without the record path, which names the
-# commit and leaves the operator no record to go and look at; and one that
-# checked reachability before the refresh, which would refuse a commit that is
-# merely unfetched and so would refuse the ordinary case too.
+# commit and leaves the operator no record to go and look at; and one that let
+# the branch decide, which answers a branch carrying nothing with the deploy's
+# own complaint rather than with the refusal about the recorded commit.
 subtest 'an unreachable deployed commit refuses by name' => sub {
-	plan tests => 5;
+	plan tests => 8;
 
 	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
 
 	# Two deliveries, because the rewrite below takes the second one out and
-	# the branch has to be left carrying a repository: a branch holding its
-	# init commit alone is the arm that never switches at all, and a row
-	# standing on it would read that arm's refusal instead of this one.
+	# the branch has to be left carrying a repository.  A branch holding its
+	# init commit alone is the shape the second half of this subtest builds,
+	# and reading the two shapes off one fixture would leave neither of them
+	# saying which arm answered it.
 	my $earlier = commit_on_control($h,
 		files   => {'ops/base.yml' => "---\nversion: zero\n"},
 		message => 'the content delivered before it',
@@ -311,6 +312,37 @@ subtest 'an unreachable deployed commit refuses by name' => sub {
 		'the refusal names the record the commit came from');
 	unlike($out, qr/bosh deploy/i, 'nothing was deployed');
 	assert_w_restored($before, 'the refusal left working state alone');
+
+	# The same refusal from a branch carrying nothing but what the apply cut,
+	# which is the arm the gate answers by running where the operator stands.
+	# One delivery here, and the rewrite takes it out, so the branch falls
+	# back to its init commit while the record still names the commit that was
+	# deployed off it.  A resolved target does not ask the branch what it
+	# carries now, because the commit it switches onto carried the repository
+	# when it was deployed, so the refusal an operator meets is the one about
+	# the commit their record names and not the deploy's own complaint about
+	# a branch nothing has been delivered to.
+	my $g = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	my $gc = commit_on_control($g,
+		files   => {'ops/base.yml' => "---\nversion: one\n"},
+		message => 'the content that was deployed',
+		push    => 1,
+	);
+	init_branch($g, 'qa');
+	my $gd = deliver($g, 'qa', control => $gc);
+	certify($g, 'qa', commit => $gd, control_commit => $gc);
+
+	rewrite_branch($g, 'qa/bosh', drop => $gd);
+	refresh($g, 'a');
+	stand_on($g, $g->control);
+
+	my (undef, $gerr, $gexit) = run_genesis($g, {restore => 0},
+		'qa', 'deploy', '--redeploy');
+	is($gexit, Genesis::Exit::DATAERR,
+		'a branch left carrying no repository refuses the same way');
+	like($gerr, qr/\Q$gd\E/, 'that refusal names the commit too');
+	like($gerr, qr{/secret/exodus/qa/bosh/deployments},
+		'and the record the commit came from');
 };
 
 # Proves T243's remaining half, which is that the branch the operator is
@@ -324,7 +356,7 @@ subtest 'an unreachable deployed commit refuses by name' => sub {
 # working tree and so reads whatever the operator happened to have checked
 # out, while saying in its own line that it made no branch change at all.
 subtest 'a branch the operator stands on does not decide the target' => sub {
-	plan tests => 4;
+	plan tests => 7;
 
 	# The marker line is the discriminator, as it is above: each hook prints
 	# the one the tree it ran in carries, so the output says which version of
@@ -373,10 +405,16 @@ YAML
 	deliver($h, 'qa', control => $later);
 	refresh($h, 'a');
 
+	# The blueprint hook is here as well as the info hook, because the last
+	# rows deploy and the deploy reads its version on the way to a manifest.
 	fixture_bosh($h,
 		envs  => ['qa', 'deployed-director', 'coming-director'],
 		hooks => {
-			info => qq{grep '^  marker:' "\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml"\n},
+			info      => qq{grep '^  marker:' "\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml"\n},
+			blueprint =>
+				qq{grep '^  marker:' "\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml" >&2\n}.
+				qq{cat > manifest.yml <<'MANIFEST'\n---\nharness: deployed\nMANIFEST\n}.
+				qq{echo manifest.yml\n},
 		},
 	);
 
@@ -390,6 +428,102 @@ YAML
 		'the flag is answered from the deployed commit, not the tree stood on');
 	unlike("$out$err", qr/marker:\s*the-coming-version/,
 		'so the branch tip the operator was standing on is not what it read');
+
+	# The rows above read through info, whose registration already declares
+	# the deployed commit, so they show the arm yielding without separating
+	# the flag from the default.  The deploy's registration declares the tip,
+	# so this run reaches the deployed commit only because the flag asked for
+	# it, from the branch whose tip carries the other version.
+	my ($dep_out, $dep_err, $dep_exit) = run_genesis($h,
+		'qa', 'deploy', '--redeploy', '--no-propagate', '-y');
+	is($dep_exit, 0, 'the flagged deploy succeeds from the deployment branch')
+		or diag("what the deploy said:\n$dep_err");
+	like("$dep_out$dep_err", qr/marker:\s*the-deployed-version/,
+		'a command whose default is the tip still reaches the deployed commit');
+};
+
+# Proves ruling 22: an environment whose file is not on the branch the
+# operator is standing on is never read through a bare environment built on
+# that tree.  A run that resolved its target from its registration's default
+# yields, so the gate switches to the deployment branch and the command reads
+# what was delivered there, and a run that named a flag is refused by name at
+# Genesis::Exit::CONFIG.
+#
+# What the rows catch: a resolver that built the bare environment above the
+# file test, which dies over a file that is missing exactly as intended and
+# answers a question about flags with a complaint about a missing file; and
+# one that wrapped the build in an eval instead, which swallows a vault the
+# repository cannot reach and quietly takes the tip on a run that should have
+# said so out loud.
+subtest 'an environment file off the branch is not read through it' => sub {
+	plan tests => 6;
+
+	# Two environments, each with its own marker, because the whole question
+	# is what happens when the operator stands on one of them and names the
+	# other.
+	my $qa_env = <<'YAML';
+---
+kit:
+  name:     dev
+  version:  latest
+  features: []
+genesis:
+  env:      qa
+params:
+  marker: the-qa-version
+YAML
+	my $prod_env = <<'YAML';
+---
+kit:
+  name:     dev
+  version:  latest
+  features: []
+genesis:
+  env:      prod
+params:
+  marker: the-prod-version
+YAML
+
+	my $h = make_harness(envs => ['qa', 'prod'], type => 'bosh');
+
+	my $control = commit_on_control($h,
+		files   => {'qa.yml' => $qa_env, 'prod.yml' => $prod_env},
+		message => 'the certified content',
+		push    => 1,
+	);
+	init_branch($h, $_) for qw/qa prod/;
+	for my $env (qw/qa prod/) {
+		my $delivered = deliver($h, $env, control => $control);
+		certify($h, $env, commit => $delivered, control_commit => $control);
+	}
+	refresh($h, 'a');
+
+	fixture_bosh($h,
+		hooks => {
+			info => qq{grep '^  marker:' "\$GENESIS_ROOT/\$GENESIS_ENVIRONMENT.yml"\n},
+		},
+	);
+
+	# The operator is standing on one environment's deployment branch, which
+	# carries that environment's file and no other.
+	stand_on($h, 'qa/bosh');
+
+	my ($out, $err, $exit) = run_genesis($h, 'info', 'prod');
+	is($exit, 0, 'a default target yields where the file is not on this branch');
+	like("$out$err", qr/marker:\s*the-prod-version/,
+		'so the gate switches and the command reads what that branch carries');
+
+	# Both runs name the environment after the command rather than before it.
+	# The prefix form asks the CLI to recognise the name as an environment,
+	# which it does by looking for the file in the tree it was started in, so
+	# from this branch it would answer with a usage error about an
+	# unrecognised command before any gate had run at all.
+	my $before = snapshot_w($h);
+	(undef, $err, $exit) = run_genesis($h, {restore => 0},
+		'info', 'prod', '--as-deployed');
+	is($exit, Genesis::Exit::CONFIG, 'a flagged run is refused instead');
+	like($err, qr{prod/bosh}, 'and the refusal names the branch to stand on');
+	assert_w_restored($before, 'the refusal left working state alone');
 };
 
 done_testing;
