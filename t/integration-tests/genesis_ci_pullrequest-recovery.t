@@ -136,11 +136,11 @@ subtest 'the newest merge answers, and its marker may be in the body' => sub {
 	is($exit, 0, 'the run succeeded');
 	like($said, qr/recovered the marker for prod from #$newer/,
 		'the newest merged pull request is the one the marker comes from');
-	# This one passes at base on silence rather than on the right answer: a
-	# run that aborts prints "not published, run aborted" in place of the
-	# detail line, so no number is named at all and every unlike over that
-	# line holds.  It tells the older merge from the newer only once the run
-	# above it has succeeded, which is what the exit assertion fences.
+	# This one passes at base on silence rather than on the right answer,
+	# because a run that aborts prints "not published, run aborted" in place
+	# of the detail line, so no number is named at all and every unlike over
+	# that line holds.  It tells the older merge from the newer only once the
+	# run above it has succeeded, which is what the exit assertion fences.
 	unlike($said, qr/recovered the marker for prod from #$older/,
 		'and not the oldest, which would re-propose what the branch has');
 	like($said, qr/prod.*idempotent/,

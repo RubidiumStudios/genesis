@@ -234,16 +234,18 @@ sub freeze {
 # D44 makes --dry-run the only preview, and a preview that could not say what
 # it would do with the branch would be worth little, so it reads.  Writing
 # nothing does not forbid reading, and only a writing run refuses on a state it
-# cannot read, under D55.  The asymmetry is the point: a run that guesses wrong
-# leaves a proposal standing that nobody asked for, and a preview that guesses
-# wrong is read and forgotten.
+# cannot read, under D55.  The asymmetry is the point, because a run that
+# guesses wrong leaves a proposal standing that nobody asked for, where a
+# preview that guesses wrong is read and forgotten.
 #
 # The title is composed the way the aggregate's own subject is, off the newest
 # due commit's abbreviated control sha, so the line the operator reads here is
-# the line the pull request would carry.  The supersedes list is read off the
-# record rather than off the answer, for the reason every guard in the arm
-# above carries: the answer is undef for a run given no token, and the record
-# already holds the one copy every reader takes.
+# the line the pull request would carry.  It is composed into a local and never
+# goes back onto the record, because the record's own title is the aggregate's
+# bare subject and this run writes no aggregate.  The supersedes list is read
+# off the record rather than off the answer, for the reason every guard in the
+# arm above carries, which is that the answer is undef for a run given no token
+# and the record already holds the one copy every reader takes.
 #
 # It answers undef, because nothing propagated.  The renderer settles an
 # environment with commits due as one that would propagate, and a word written
@@ -251,9 +253,14 @@ sub freeze {
 sub preview {
 	my ($git, $record, %opts) = @_;
 
-	my $env    = $opts{env};
-	my $pr     = $record->{pr};
-	my $newest = $opts{commits}[-1];
+	my $env     = $opts{env};
+	my $commits = $opts{commits} || [];
+	my $pr      = $record->{pr}
+		or bug("Genesis::CI::PullRequest::preview was handed %s, which the ".
+		       "walk composed no pull request branch for", $record->{env});
+	my $newest  = $commits->[-1]
+		or bug("Genesis::CI::PullRequest::preview was handed no due commit ".
+		       "to title %s's pull request from", $record->{env});
 
 	# The rebuild is the one action left to predict.  The retirement and the
 	# freeze each took their own above this, and every other exit from the arm
@@ -261,13 +268,17 @@ sub preview {
 	# would leave a reader of the record unable to tell an unset field from an
 	# arm that never ran.
 	$pr->{action} = 'rebuild';
-	$pr->{title}  = title_for(
+
+	# The composed title goes into a local rather than onto the record, as the
+	# sync's does, because the record's own title is the aggregate's bare
+	# subject and a reader that met both forms would have to know which kind of
+	# run had filled the field.
+	my $title = title_for(
 		Genesis::CI::Marker::build(
 			$git->sha($newest->{control_commit}, short => 1), $env->name),
 		$pr->{superseded});
 
-	info "  #C{%s}: would title the pull request #G{%s}",
-		$env->name, $pr->{title};
+	info "  #C{%s}: would title the pull request #G{%s}", $env->name, $title;
 
 	return undef if $opts{state};
 
@@ -276,7 +287,6 @@ sub preview {
 	# guessing and refuses; this one says plainly what went unread and carries
 	# on, because a preview that refused would tell the operator less than a
 	# preview that answered with its own caveat attached.
-	$pr->{unverified} = 1;
 	info "  #C{%s}: the review state is unread, because no GitHub token is ".
 		"set, so this prediction of #C{%s} is unverified",
 		$env->name, $pr->{branch};
@@ -787,8 +797,9 @@ sub client_for_run {
 	# The refusal goes through the caller's closure like the pair's above it,
 	# because this build stands inside an open session and a bare bail there
 	# exits 1 with the operator left on whatever branch the run had switched
-	# them to.  It is CONFIG for the same reason the pair's is: what the
-	# operator has to change is the token they set, not the state of the API.
+	# them to.  It is CONFIG for the same reason the pair's is, because what
+	# the operator has to change is the token they set and not the state of
+	# the API.
 	my $who = eval {$github->get_authorized_user};
 	($opts{refuse} || \&bail)->(
 		{exitcode => Genesis::Exit::CONFIG},

@@ -11,6 +11,13 @@
 # than the clause itself, which is asserted in
 # genesis_ci_pullrequest-title.t, so no row here reads a marker, a title, or a
 # supersedes list.
+#
+# T273's first half rides with T183 in the leases the second row reads off the
+# publish, because a lease is what forces a push and _push_one refuses one on
+# every class but the pull request branch.  Its other half, that control and
+# the deployment branches take no forced refspec, is struck, because that same
+# refusal makes such a row green on arrival against any implementation it
+# could name.
 use strict;
 use warnings;
 use utf8;
