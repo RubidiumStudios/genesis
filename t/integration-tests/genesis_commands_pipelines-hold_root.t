@@ -88,7 +88,7 @@ subtest 'the no-argument release clears the root and stops there' => sub {
 	no_secret $h->env_path('prod').'/hold';
 
 	my @named = sort(unfolded($out, $err)
-		=~ /Released the propagation hold on (\w+),/g);
+		=~ /Released the propagation hold on (\S+),/g);
 	is_deeply(\@named, ['lab', 'prod'],
 		'the run named the two environments of its own root and no others');
 

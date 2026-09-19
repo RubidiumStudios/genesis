@@ -124,9 +124,9 @@ subtest 'clear_hold deletes the path and keeps no fields' => sub {
 };
 
 subtest 'the hold survives the deploy rewrite of the deployment data' => sub {
-	# Five rows, one of which is this row's own restoration assertion, since
+	# Seven rows, one of which is this row's own restoration assertion, since
 	# the deploy is given restore => 0 and deployable_prod's own secrets run
-	# contributes none.
+	# contributes none, and two more for the deliveries either side of it.
 	#
 	# This row guards a property that already held before the writers landed.
 	# The rewrite update_deployment_exodus makes removes the base blob with a
@@ -134,15 +134,20 @@ subtest 'the hold survives the deploy rewrite of the deployment data' => sub {
 	# always out of its reach, and the strategy calls T306 a gap in the
 	# coverage rather than a defect in the code.  The row says what the
 	# sibling path must go on meaning now that something writes to it.
-	plan tests => 5;
+	plan tests => 7;
 
 	# The deploy is the real one, taken to success, because the rewrite this
 	# row is about is the one update_deployment_exodus makes and only a
 	# successful deploy makes it.  deployable_prod owns the five things that
-	# takes.  The pipeline is off, because a pipeline-managed deploy first
-	# switches to the environment's own branch and the branch it looks for is
-	# not the slug the harness stands up.
-	my $h = deployable_prod(pipeline => 0);
+	# takes.  The pipeline is on, so the rewrite happens under the whole
+	# command an operator runs rather than under the half of it a repository
+	# with the pipeline off reaches.
+	my $h = deployable_prod(delivered => ['prod'], certified => ['prod']);
+
+	# deployable_prod writes prod's parameters onto control after the seeding
+	# delivery has been made, so the branch the deploy stands on is one
+	# delivery behind them, and this run puts them on it.
+	run_genesis($h, 'propagate', '-y');
 
 	my $top  = Genesis::Top->new($h->a);
 	my $env  = Genesis::Env->bare('prod', $top)->with_vault;
@@ -160,13 +165,17 @@ subtest 'the hold survives the deploy rewrite of the deployment data' => sub {
 	is(secret("$path:reason"), 'waiting on the capacity report',
 		'the sibling record survived the rewrite of the deployment data');
 
-	# Read back through the reader the walk itself uses, which is the half of
-	# T306 that says the record still holds the next run.  A record left
-	# readable to safe but broken for the module would pass the row above
-	# and fail this one.
-	ok(Genesis::Env->bare('prod', Genesis::Top->new($h->a))
-		->with_vault->hold_record,
-		'and the reader still answers a hold for the next run');
+	# Read back through a run rather than through the reader alone, which is
+	# the half of T306 that says the record still holds the next run.  A
+	# record left readable to safe but broken for the walk would pass the row
+	# above and fail this one.
+	due_commit($h, 'prod',
+		params  => {base_domain => 'example.net'},
+		message => 'move prod to the new base domain');
+	my ($out, $rerr) = run_genesis($h, 'propagate', '-y');
+	like(unfolded($out, $rerr),
+		qr/1 commit is blocked until this hold is released/,
+		'and the run after the deploy is still held by it');
 };
 
 done_testing;

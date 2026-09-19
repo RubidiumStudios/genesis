@@ -19,30 +19,38 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'a delivered hold trailer writes the record' => sub {
-	# Five rows, one of which is this row's own restoration assertion, and
-	# one more for the deploy run, which asserts its restoration for itself.
+	# Ten rows, one of which is this row's own restoration assertion, and one
+	# more for each of the three other runs' assertions.
 	#
-	# The third row is the one that discriminates.  Nothing before this task
-	# writes a hold out of a trailer, so a run that delivered the gated
-	# commit and wrote no record reads the reason back as the empty string.
+	# The reason row is the one that discriminates the write.  Nothing before
+	# this task writes a hold out of a trailer, so a run that delivered the
+	# gated commit and wrote no record reads the reason back as the empty
+	# string.
 	#
-	# The last row is weaker than D53's claim, and it says so in its own
-	# name.  A pipeline-enabled deploy cannot succeed against the harness
-	# here, because the deploy looks its branch up by the environment's
-	# basename where the harness names every branch by its slug, so the two
-	# never meet.  The pipeline-enabled form of this row is re-armed once
-	# that lookup reads the slug.  What the row can say until then is that
-	# the record the delivery wrote survives the deploy command, rather
-	# than that a deploy of the gated commit met it.
-	plan tests => 6;
+	# The last two rows are D53's own claim, which is that a deploy of the
+	# gated commit leaves the record standing and the record goes on holding
+	# the run after it.  The deploy is the real one, pipeline-enabled and
+	# taken to success, which deployable_prod owns the five things for.  What
+	# the hold is read back through is a run rather than the record itself,
+	# because what the record has to go on meaning is that the next run
+	# delivers nothing, and a record left readable to safe but broken for the
+	# walk would pass a bare read and fail these.
+	plan tests => 10;
 
-	my $h = held_prod_delivered();
+	my $h = deployable_prod(delivered => ['prod'], certified => ['prod']);
 
-	commit_on_control($h,
-		files    => {'prod.yml' => env_body('prod', 1)},
-		message  => 'raise the instance count',
-		trailers => {'Genesis-Stage' => 'hold: run the capacity report'},
-		push     => 1);
+	# deployable_prod writes prod's parameters onto control after the seeding
+	# delivery has been made, so the branch the deploy below stands on is one
+	# delivery behind them, and this run puts them on it.
+	run_genesis($h, 'propagate', '-y');
+
+	# The gate moves a parameter rather than rewriting the file, so what the
+	# delivery lands on prod's branch is still an environment the deploy can
+	# take to success.
+	my $gate = due_commit($h, 'prod',
+		params   => {base_domain => 'example.net'},
+		message  => 'move prod to the new base domain',
+		trailers => {'Genesis-Stage' => 'hold: run the capacity report'});
 
 	my $w = snapshot_w($h);
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0}, 'propagate', '-y');
@@ -55,10 +63,22 @@ subtest 'a delivered hold trailer writes the record' => sub {
 		'the trailer set the hold with its own reason');
 	assert_snapshot_invariant($h, 'prod');
 
-	fake_bosh();
-	run_genesis($h, 'prod', 'deploy', '-y');
-	is(secret("$path:reason"), 'run the capacity report',
-		'the record the delivery wrote survives the deploy command');
+	my ($deploy, $derr, $deployed) = run_genesis($h, 'prod', 'deploy', '-y');
+	is($deployed, 0, 'the deploy of the gated commit succeeded')
+		or diag(unfolded($deploy, $derr));
+
+	# One commit due behind the standing hold, so the run after the deploy
+	# has something it could deliver and does not.
+	due_commit($h, 'prod',
+		params  => {base_domain => 'example.org'},
+		message => 'move prod again');
+
+	my ($again, $aerr) = run_genesis($h, 'propagate', '-y');
+	like(unfolded($again, $aerr),
+		qr/1 commit is blocked until this hold is released/,
+		'the record the delivery wrote still holds the run after the deploy');
+	is(harness_marker($h, $h->slug('prod')), $gate,
+		'and nothing new reached the branch');
 };
 
 subtest 'a rejected push takes no hold' => sub {

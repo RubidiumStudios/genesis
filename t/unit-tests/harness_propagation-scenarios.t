@@ -203,7 +203,7 @@ subtest 'the environment body a row commits for itself' => sub {
 	# kit's name and version out of one, so a flow mapping of the same two
 	# keys leaves the repository with no environments at all, which is the
 	# worse of the two ways this body can stop loading.
-	like($body, qr/^kit:\n  name:\s+dev\n  version:\s+latest$/m,
+	like($body, qr/^kit:\n  name:\s+\S+\n  version:\s+\S+$/m,
 		'env_body declares the kit as a block mapping');
 	like($body, qr/^genesis:\n  env: prod$/m,
 		'and names the environment Genesis loads the file as');
