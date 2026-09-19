@@ -177,11 +177,6 @@ pull request that merged into it.  A call that leaves it out walks such a
 branch from before the environment was introduced, exactly as this walk
 always did.
 
-=item C<owner_repo>
-
-Optional.  The C<owner/repo> pair the pull requests were opened against,
-which goes with C<github> and is read only beside it.
-
 =item C<state_of>
 
 Optional.  What C<Genesis::CI::PullRequest::pr_state> answered for each

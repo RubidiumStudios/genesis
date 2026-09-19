@@ -42,8 +42,11 @@ subtest 'no environment needs the API, so no client is built' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
 	is($exit, 0, 'the run succeeded');
 	# The report is written to standard error, which is where every other row
-	# in the suite reads a run's own words from.
-	like(unfolded($out, $err), qr/qa.*propagated/,
+	# in the suite reads a run's own words from.  The environment and its
+	# outcome are pinned to one line: unfolded collapses the whole stream to
+	# a single string, so a pattern spanning the two would match qa's name on
+	# one report line and another environment's word several lines below it.
+	like($err, qr/^\s*qa: propagated\b/m,
 		'and delivered in direct mode');
 	is(scalar(gh_calls($h->{gh})), 0,
 		'while making no call to the API at all, not even to authenticate');

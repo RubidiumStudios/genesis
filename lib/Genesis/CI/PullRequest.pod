@@ -992,9 +992,11 @@ and where no token is set.
 
 B<Errors:> Refuses with C<CONFIG> where an environment would deliver into a
 pull request and C<pipeline.source_control.repository> is neither set nor
-derivable from a git remote, naming the key to write. Refuses where the
-authentication call is answered and the answer names no user. An
-authentication call that is not answered raises nothing here.
+derivable from a git remote, naming the key to write. Refuses with C<CONFIG>
+again where the authentication call is answered and the answer names no user,
+because what the operator has to change is the token they set. Both refusals
+go through C<refuse> where the caller gave one. An authentication call that is
+not answered raises nothing here.
 
 B<Examples:>
 
@@ -1194,10 +1196,10 @@ B<Examples:>
     recover_marker($merged, env => 'prod', git => $git, ref => 'prod/bosh');
     # returns ('9f1c...', undef) for a title naming prod
 
-=head2 certified_marker($git, $github, $owner_repo, $record, $state [, %opts])
+=head2 certified_marker($git, $github, $record, $state [, %opts])
 
     my $marker = Genesis::CI::PullRequest::certified_marker(
-        $git, $github, $owner_repo, $env_record, $state, ref => $ref);
+        $git, $github, $env_record, $state, ref => $ref);
 
 Returns the control commit the environment's deployment branch last received,
 taking it from the branch's own newest marker and falling back to the merged
@@ -1231,10 +1233,6 @@ The run's git handle, standing on the repository the branch lives in.
 The run's C<Service::Github> client, or C<undef> where the run has none. A run
 without one gets the branch's own answer and no recovery.
 
-=item C<$owner_repo>
-
-The C<owner/repo> pair the pull requests were opened against.
-
 =item C<$record>
 
 The environment's record, which is read for C<env> and written to under
@@ -1258,7 +1256,7 @@ carries no marker and no merged pull request names one for this environment.
 
 B<Examples:>
 
-    certified_marker($git, $gh, 'acme/ops', $record, $state, ref => $ref);
+    certified_marker($git, $gh, $record, $state, ref => $ref);
     # returns '9f1c...' and notes 'recovered the marker for prod from #7'
 
 =head2 title_for($subject, $superseded)
