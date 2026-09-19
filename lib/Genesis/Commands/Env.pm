@@ -635,13 +635,26 @@ sub list_secrets {
 # The gate's session is not asked for it: the secrets family opens one only
 # where --as-deployed opted in, so a run that named no flag has none and
 # reaching through it would die on the run this warning is mostly for.
+#
+# A deployments directory is not always a repository, and all four commands
+# ran in a plain one long before this warning existed.  The warning compares
+# two control commits and a directory with no repository holds neither of
+# them, so the handle is asked for inside an eval that answers undef there
+# and the warning says nothing, which is the guard the gate puts around this
+# same call.  It is taken before the commit the run served is resolved, so
+# such a run reaches for neither of the two values.  deployed_target needs no
+# guard of its own, because it reads a record in the vault rather than
+# anything in a repository, and it answers undef before it reads even that
+# to every run that named neither of the two deployed-commit flags.
 sub _warn_about_the_version_served {
 	my ($env) = @_;
 
 	require Service::Git;
+	my $git = eval { Service::Git->new('.') } or return 0;
+
 	return $env->warn_uncertified_secrets_target(
 		scalar Genesis::Commands::deployed_target($env->name, $env->top),
-		Service::Git->new('.')
+		$git
 	);
 }
 
