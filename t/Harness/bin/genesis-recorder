@@ -41,6 +41,7 @@ my %record = (
 	started       => time,
 	cwd           => Cwd::getcwd(),
 	stdin_is_tty  => (-t STDIN ? 1 : 0),
+	stdin_is_null => (points_at_null() ? 1 : 0),
 	lock_at_start => probe($plan->{lock}),
 	lock_seen     => [],
 	status_lost   => JSON::PP::false,
@@ -111,6 +112,28 @@ sub read_json {
 	my $body = do {local $/; <$fh>};
 	close $fh;
 	return eval {JSON::PP->new->decode($body)};
+}
+
+# }}}
+# points_at_null - is this process reading from /dev/null {{{
+#
+# Whether standard input is a terminal says only that it is not one, and no
+# command this suite spawns has a terminal whichever way it was started, so a
+# row reading that field alone cannot tell a closed standard input from the
+# pipe prove hands every run.  This asks the narrower question, which is
+# whether descriptor zero is the null device itself, and a row can then read
+# the redirect rather than the absence of a terminal.
+#
+# The two are compared on device and inode rather than by name, because the
+# name a descriptor was opened under is not something the descriptor carries.
+# Either stat can fail, on a handle already closed or on a platform without
+# the device, and a failure answers no rather than dying, since the recorder
+# stands in for a genesis child and must not refuse a run over a question
+# nobody asked it.
+sub points_at_null {
+	my @fd   = stat(STDIN)     or return 0;
+	my @null = stat('/dev/null') or return 0;
+	return ($fd[0] == $null[0] && $fd[1] == $null[1]) ? 1 : 0;
 }
 
 # }}}

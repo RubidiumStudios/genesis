@@ -1510,6 +1510,17 @@ sub _propagate_after_deploy {
 # deploy would stop on a question about a branch the operator never
 # asked about.  Closing it covers every prompt the run may grow later
 # without each one having to test a flag.
+#
+# The redirect is made by reopening STDIN in place, with the handle it
+# replaces saved aside and put back afterwards, and not by localising
+# the glob first.  A local *STDIN gives the open a fresh glob, so the
+# open takes the lowest free descriptor rather than descriptor zero,
+# which is still held by the handle the local put out of the way.  The
+# parent then reads /dev/null and the child, which inherits descriptors
+# and not globs, is handed the very terminal this is here to keep from
+# it.  Reopening in place moves descriptor zero itself, which is what
+# the child inherits, and the saved dup puts the operator's own
+# standard input back for whatever the deploy does after this returns.
 sub _spawn_propagate_child {
 	my ($env) = @_;
 
@@ -1526,11 +1537,16 @@ sub _spawn_propagate_child {
 	my @cmd = ($bin, 'propagate');
 
 	my $rc = do {
-		local *STDIN;
+		open(my $inherited, '<&', \*STDIN)
+			or die "Cannot save standard input for the propagate child: $!\n";
 		open(STDIN, '<', '/dev/null')
 			or die "Cannot open /dev/null for the propagate child: $!\n";
 		system(@cmd);
-		$? >> 8;
+		my $status = $? >> 8;
+		open(STDIN, '<&', $inherited)
+			or die "Cannot restore standard input after the propagate child: $!\n";
+		close $inherited;
+		$status;
 	};
 
 	warning(
