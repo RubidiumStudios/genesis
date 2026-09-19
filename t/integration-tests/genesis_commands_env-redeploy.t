@@ -48,6 +48,26 @@
 # stale-pipeline warning a redeploy keeps; and the exit-code row beside each
 # run.  Each of those stands as a guard, holding still the behaviour a
 # narrower redeploy must not have taken out with it.
+#
+# The fourth subtest is T242's, and it says the same thing about itself.
+# Three of its seven rows were red and four were green.  The red ones are the
+# child count after the redeploy, the row that reads the run's own output for
+# a propagation report, and the count after the ordinary deploy, which found
+# two children rather than one because the redeploy had spawned one of its
+# own.  Withholding the child from a redeploy is what turns all three green.
+#
+# The four that arrived green are guards.  The exit row and the restoration
+# row say the redeploy reached its end and put the operator back on the
+# branch they started on, and they are what keep the two absence rows beside
+# them honest, since a run that died early would say nothing about
+# propagation either.  The shuttle row was green because no Genesis command
+# has ever written the propagate request queue, and it holds that still
+# against an implementation that withheld the child and made a request
+# instead.  The marker row was green because the child the hand-off spawns
+# today is `genesis propagate <env>`, which the propagate command's usage
+# takes no argument for, so it exits 2 without delivering anything; the row
+# stands as the guard that catches a hand-off after a redeploy once M15 gives
+# that child an argument list the command accepts.
 use strict;
 use warnings;
 use utf8;
@@ -325,6 +345,99 @@ subtest 'the redeploy keeps the provider gate and the stale warning' => sub {
 	like(unfolded($jerr), qr/\bqa: configuration-changed\b/,
 		'naming the environment whose shape changed and why it changed')
 		or diag("what the redeploy said:\n$jerr");
+};
+
+
+# Proves T242: a successful --redeploy under the manual provider spawns no
+# propagate child, which the rows assert by finding no second genesis process
+# and no propagation report, and it makes no run_propagate request either.
+#
+# What the rows catch: an implementation that handed off after every deploy,
+# which the child-count row catches and which the ordinary deploy at the end
+# shows is still the behaviour a deploy without the flag gets; one that
+# withheld the child but wrote a request to the queue instead, which the
+# shuttle row catches; and one that withheld neither, which would leave the
+# downstream environment holding content the redeploy never certified, which
+# the marker row catches.
+#
+# The downstream environment is delivered nothing by the seeding and carries
+# its init commit alone, so the marker row reads a branch a hand-off really
+# would have written to rather than one that was already full.
+subtest 'a successful redeploy propagates nothing' => sub {
+	# Six rows, and one more for the redeploy's own restoration assertion.
+	# The ordinary deploy at the end asserts no restoration, for the reason
+	# given beside it.
+	plan tests => 7;
+
+	# Both environments are stood up and only qa is delivered to and
+	# certified, so prod's branch carries the init commit alone and a
+	# delivery made to it is one this subtest can see.  chained names qa as
+	# prod's predecessor, which is the edge a cascade walks.
+	my $h = ready_harness(
+		envs      => ['qa', 'prod'],
+		chained   => 1,
+		bosh      => 1,
+		delivered => ['qa'],
+		certified => ['qa'],
+	);
+	child_recorder($h);
+	my $shuttle = shuttle_spy($h);
+
+	# The seeding certifies without naming a deployed commit, and a redeploy
+	# of an environment that names none resolves nothing and deploys the tip,
+	# which is the one run this subtest cannot be made of.  So the record is
+	# written again over the delivery the seeding made, naming the commit
+	# that delivery put on the branch and the control commit its own marker
+	# names.
+	my $deployed = tip_of($h, $h->slug('qa'));
+	certify($h, 'qa',
+		commit         => $deployed,
+		control_commit => harness_marker($h, $h->slug('qa')));
+
+	# The director's record stands at the environment's own exodus path, and
+	# a deploy that reaches its end writes the environment's exodus data over
+	# it, so the second run below would find no director.  The url is read
+	# off the record the builder wrote, because it names the port the harness
+	# listener took and no row can know that port in advance.
+	my $url = record_at($h, $h->env_path('qa'))->{url};
+
+	stand_on($h, $h->control);
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'deploy', '--redeploy', '-y');
+
+	is($exit, 0, 'the redeploy succeeded')
+		or diag("what the redeploy said:\n$err");
+
+	is(scalar(grep {($_->{argv}[0] // '') eq 'propagate'} child_runs($h)), 0,
+		'no second genesis process ran propagate')
+		or diag("what the redeploy said:\n$err");
+	# The two sentences the hand-off itself prints, rather than the bare word,
+	# because the harness kit is called genesis-propagation-harness and the
+	# secrets check names it on every run.  Both are matched with their case,
+	# since each of them opens a line of Genesis' own.
+	unlike("$out$err", qr/Propagating to downstream|Propagation failed/,
+		'the run printed no propagation report');
+	is(scalar(shuttle_requests($shuttle)), 0,
+		'no run_propagate request was made');
+
+	# prod is downstream and stays where it was, since nothing was delivered.
+	# The row is true of the tree this subtest starts from, because the child
+	# the hand-off spawns is `genesis propagate <env>` and the propagate
+	# command's usage takes no argument, so today's child refuses before it
+	# delivers anything.  It is here as the guard that catches a hand-off after
+	# a redeploy once that child is given an argument list the command accepts,
+	# because the marker on prod's branch would then name the control commit
+	# the delivery was written from rather than nothing at all.
+	is(harness_marker($h, $h->slug('prod')), undef,
+		'the downstream environment received nothing');
+
+	# An ordinary deploy in the same fixture does spawn the child, so the row
+	# above is about the flag and not about a hand-off nobody ever makes.
+	# The child checks control out one way and does not come back, so the
+	# runner is told not to assert a restoration this run cannot make.
+	fixture_director($h, 'qa', url => $url);
+	run_genesis($h, {restore => 0}, 'qa', 'deploy', '-y');
+	is(scalar(grep {($_->{argv}[0] // '') eq 'propagate'} child_runs($h)), 1,
+		'an ordinary manual deploy still spawns one propagate child');
 };
 
 

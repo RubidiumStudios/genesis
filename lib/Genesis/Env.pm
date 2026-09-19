@@ -5376,45 +5376,68 @@ sub _post_deploy {
 			}
 		}
 
-		# Auto-cascade propagation (manual-provider only).
-		if ($self->top->manual_pipeline && !$opts{'no-propagate'}) {
-
-			require Service::Git;
-			require Genesis::Top;
-			my $cgit    = Service::Git->new('.');
-			my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-			my $current = $cgit->current_branch // '';
-			# One way, like the deploy's own switch: the child command this
-			# hands off to runs on control and is meant to find us there.
-			# M15 decides what putting us back should mean and moves it.
-			$cgit->checkout_one_way($control) if $current && $current ne $control;
-
-			$self->notify("Propagating to downstream environments from #C{%s}...", $self->name);
-			my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
-			my @cmd = ($bin, 'propagate', $self->name);
-
-			# Stdin from /dev/null: propagation must never stop a deploy
-			# to ask something, and the child inherits this terminal.
-			my $rc = do {
-				local *STDIN;
-				open(STDIN, '<', '/dev/null')
-					or die "Cannot open /dev/null for propagation: $!\n";
-				system(@cmd);
-				$? >> 8;
-			};
-
-			warning(
-				"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
-				"run #C{genesis propagate %s} manually to retry.",
-				$rc, $self->name
-			) if $rc != 0;
-		}
+		# Auto-cascade propagation (manual-provider only).  The two facts
+		# it branches on travel as arguments, because the answers are the
+		# command line's and this module cannot ask for them.
+		$self->_spawn_propagate_child(
+			map {($_ => $opts{$_})} 'no-propagate', 'redeploy'
+		);
 	}
 
 	# Clean up deployment state
 	delete $self->{deployment_state};
 
 	return $deployment_ok;
+}
+
+# }}}
+# _spawn_propagate_child - hand off to genesis propagate after a deploy {{{
+#
+# Lifted whole out of _post_deploy, where it stood inline.  D21 and D87: a
+# redeploy certifies nothing new, so there is nothing for the child to deliver
+# and no reason to walk the pipeline to discover that.  D94 names the
+# pipeline's own deploy job as the only writer of the run_propagate queue, so
+# a CLI deploy makes no request either, whichever flag it carried.
+#
+# M15 narrows the arguments and gives this a return value when it moves to
+# Genesis::Commands::Env.
+sub _spawn_propagate_child {
+	my ($self, %opts) = @_;
+	return unless $self->top->manual_pipeline;
+	return if $opts{'no-propagate'};
+	return if $opts{redeploy};
+
+	require Service::Git;
+	require Genesis::Top;
+	my $cgit    = Service::Git->new('.');
+	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+	my $current = $cgit->current_branch // '';
+	# One way, like the deploy's own switch: the child command this
+	# hands off to runs on control and is meant to find us there.
+	# M15 decides what putting us back should mean and moves it.
+	$cgit->checkout_one_way($control) if $current && $current ne $control;
+
+	$self->notify("Propagating to downstream environments from #C{%s}...", $self->name);
+	my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
+	my @cmd = ($bin, 'propagate', $self->name);
+
+	# Stdin from /dev/null: propagation must never stop a deploy
+	# to ask something, and the child inherits this terminal.
+	my $rc = do {
+		local *STDIN;
+		open(STDIN, '<', '/dev/null')
+			or die "Cannot open /dev/null for propagation: $!\n";
+		system(@cmd);
+		$? >> 8;
+	};
+
+	warning(
+		"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
+		"run #C{genesis propagate %s} manually to retry.",
+		$rc, $self->name
+	) if $rc != 0;
+
+	return;
 }
 
 # }}}
