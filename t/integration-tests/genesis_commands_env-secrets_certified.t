@@ -108,4 +108,60 @@ subtest 'rotating against the tip says which version it served' => sub {
 		or diag("what the check said:\n$check_out$check_err");
 };
 
+# Proves that the warning keeps out of the way where there is no repository to
+# read a control commit from.  The four secrets commands ran in a plain
+# deployments directory long before the warning existed, and that is what an
+# operator has who keeps their environments in a directory git never touched,
+# as well as what the end-to-end fixture builds with genesis init.  The
+# warning compares two control commits, so a directory with no repository has
+# nothing to compare and says nothing at all.
+#
+# The rows catch an implementation that opens a git handle before it has asked
+# whether there is a repository here, which is how the warning arrived.  Such a
+# run does the command's real work and then dies on the way out, so the exit
+# rows are what fail and the message rows say why.
+subtest 'a deployments directory with no repository is served in silence' => sub {
+	plan tests => 4;
+
+	# The repository carries no pipeline section at all, because the plain
+	# deployments directory this row is about is one an operator made with
+	# genesis init and never wired to a pipeline, and that is the shape the
+	# end-to-end fixture builds as well.
+	my $h = make_harness(
+		envs => ['qa'], kit => 'omega-v2.7.0', pipeline => 'none');
+
+	# Copy A's working tree taken as it stands, with its repository left
+	# behind, so the directory holds the same deployment root, the same kit,
+	# and the same environment file, and differs from copy A in nothing but
+	# the repository.  The copy is named to the harness the way the two
+	# repositories are, because that is how a run picks up the fixture vault
+	# and the path the harness assembles.
+	my $plain = workdir() . '/no-repo-deployments';
+	system('cp', '-R', $h->a, $plain) == 0
+		or die "cannot copy the deployments directory: $?\n";
+	system('rm', '-rf', "$plain/.git") == 0
+		or die "cannot take the repository off the copy: $?\n";
+	$h->{plain} = $plain;
+
+	# The restoration assertion reads a branch and a HEAD, and this directory
+	# has neither, so these two runs are not asked for it.
+	my ($add_out, $add_err, $add_exit) =
+		run_genesis($h, {copy => 'plain', restore => 0}, 'qa', 'add-secrets');
+	is($add_exit, 0, 'add-secrets succeeds outside a repository')
+		or diag("what add-secrets said:\n$add_out$add_err");
+	unlike($add_out.$add_err, qr/not a git repository/i,
+		'add-secrets says nothing about a repository it does not need')
+		or diag("what add-secrets said:\n$add_out$add_err");
+
+	# check-secrets reads back what the run above wrote, so it finds its
+	# secrets and reports on them rather than bailing over what is missing.
+	my ($check_out, $check_err, $check_exit) =
+		run_genesis($h, {copy => 'plain', restore => 0}, 'qa', 'check-secrets');
+	is($check_exit, 0, 'check-secrets succeeds outside a repository')
+		or diag("what check-secrets said:\n$check_out$check_err");
+	unlike($check_out.$check_err, qr/not a git repository/i,
+		'check-secrets says nothing about a repository it does not need')
+		or diag("what check-secrets said:\n$check_out$check_err");
+};
+
 done_testing;
