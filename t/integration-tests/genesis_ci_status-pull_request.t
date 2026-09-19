@@ -105,4 +105,39 @@ subtest 'the held qualifier and the pull request stand on one row' => sub {
 		'the component says which one and the qualifier says what it waits for');
 };
 
+subtest 'a squash-merged branch reads the same in both commands' => sub {
+	# Three assertions and one restoration for each of the two commands.
+	plan tests => 5;
+
+	# The site could not be given the rebase-only merge method, so the
+	# aggregate went in as a squash, which means the subject on the deployment
+	# branch is the merger's own and the marker the aggregate carried is
+	# nowhere on the branch.  The pull request Genesis opened still says which
+	# control commit went in, and that is what both commands read it back out
+	# of, so a report that was handed no client would read the whole of
+	# control as still due while the run read the branch as caught up.
+	my $h  = ready(kit => 'omega-v2.7.0', admin => 0, delivered => []);
+	my $gh = $h->{gh};
+
+	my $due = due_commit($h, 'prod', params => {instances => 2},
+		message => 'Raise the prod instance count');
+	my $number = gh_pull_request($gh, env => 'prod',
+		head   => $h->pr_branch('prod'),
+		base   => $h->slug('prod'),
+		review => 'none',
+		title  => sprintf('[pipeline] control@%s -> prod', substr($due, 0, 12)));
+	gh_merge_pr($gh, $number, method => 'squash');
+	squash_merge($h, 'prod', keep_marker => 0,
+		subject => sprintf('Raise the prod instance count (#%d)', $number));
+
+	my ($status, undef, $exit) = run_genesis($h, 'pipeline-status');
+	is($exit, 0, 'the report reads the repository');
+	unlike(env_line($status, 'prod'), qr/\d+ pending/,
+		'and nothing is due, the marker having come back from the merge');
+
+	my ($out, $err) = run_genesis($h, 'propagate', '-y');
+	like(unfolded($out, $err), qr/prod.*idempotent/,
+		'and the run reads that same branch the same way');
+};
+
 done_testing;

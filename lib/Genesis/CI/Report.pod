@@ -159,8 +159,10 @@ at once, since both are read for every environment the run and C<genesis
 pipeline-status> read, and the ranking is settled here so that the two
 commands cannot rank them apart.  The hold wins because the apply is a command
 the operator may run at once while the hold is a decision standing in front of
-it, and clearing the hold leaves the apply as what the environment waits for.
-L</hold_detail> says meanwhile what the hold is holding.
+it, and an environment that read as awaiting the apply while a hold stood
+would send the operator to a command that would change nothing.  Clearing the
+hold leaves the apply as what the environment waits for, and L</hold_detail>
+says meanwhile what the hold is holding.
 
 A record carrying no certified state at all is read ahead of even that, and
 so outranks the standing hold.  The walk fills the certified state for every

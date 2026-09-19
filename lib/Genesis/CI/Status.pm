@@ -117,13 +117,22 @@ sub status_records {
 	# so no second composition of the name exists for the two to disagree
 	# over.
 	my ($scope) = Genesis::CI::Walk::scope_for($top, scope => $opts{scope});
-	my $pr_state_of = _pull_request_state($top, $scope);
+	my ($github, $pr_state_of) = _pull_request_state($top, $scope);
 
 	my $record = Genesis::CI::Walk::plan($top,
 		git       => $git,
 		branches  => $initial->{branches},
 		scope     => $opts{scope},
 		refreshed => $refresh ? 1 : 0,
+		# D52's recovery, which the walk makes for itself out of these two.
+		# A deployment branch whose pull request went in as a squash carries
+		# no marker of its own, and the merged pull request in the answer
+		# read above is the only thing that still says which control commit
+		# it received.  The propagate run hands the walk the same pair, so a
+		# branch like that reads caught up in both commands rather than
+		# reading as though the whole of control were due in this one.
+		github    => $github,
+		state_of  => $pr_state_of,
 		# The walk's own refusals close by saying what was written, which is
 		# the account a run owes and no account at all to somebody who asked
 		# for a report.  This caller writes nothing and has nothing to
@@ -501,21 +510,27 @@ sub _pull_request_state {
 	my ($top, $scope) = @_;
 
 	my @wanted = grep {$_->{pr_branch}} @$scope;
-	return {} unless @wanted && $ENV{GITHUB_AUTH_TOKEN};
+	return (undef, {}) unless @wanted && $ENV{GITHUB_AUTH_TOKEN};
 
 	my $github = Genesis::CI::PullRequest::client_for_run($top,
 		records => [map {{pr => {branch => $_->{pr_branch}}}} @wanted])
-		or return {};
+		or return (undef, {});
 	my $owner_repo = $top->source_control_repository;
 
+	# The client goes back with the answer, because the walk reads a marker a
+	# squash merge dropped out of the merged pull request itself and wants
+	# both.  It takes the client alone and never the pair, exactly as the
+	# propagate run hands it, because the merged pull requests are already in
+	# the answer read here.
+	#
 	# The three fields pr_state reads and no more, which is what lets the
 	# state be read before the walk has composed a record of its own.
-	return {map {($_->{env} => Genesis::CI::PullRequest::pr_state(
+	return ($github, {map {($_->{env} => Genesis::CI::PullRequest::pr_state(
 		$github, $owner_repo, {
 			env    => $_->{env},
 			branch => $_->{branch},
 			pr     => {branch => $_->{pr_branch}},
-		}))} @wanted};
+		}))} @wanted});
 }
 
 # }}}
