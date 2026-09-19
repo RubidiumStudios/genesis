@@ -18,7 +18,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
 
 subtest 'the three readers print one story' => sub {
-	# Fifteen rows.  Eleven are this subtest's own, one of which is the
+	# Sixteen rows.  Twelve are this subtest's own, one of which is the
 	# status command's restoration assertion made in the row's own words
 	# under restore => 0, and four more are the restoration assertions
 	# run_genesis makes for the delivery, the hold, the preview, and the
@@ -28,7 +28,7 @@ subtest 'the three readers print one story' => sub {
 	# phrase and the blocked-commits count are both printed by the tree as it
 	# stands, so a reader that named neither who set the hold nor when would
 	# pass every other row in this file.
-	plan tests => 15;
+	plan tests => 16;
 
 	# The deploy is the real one, taken to success, because the hold line
 	# this row is about is printed by the deploy's pre-flight and only a
@@ -61,6 +61,12 @@ subtest 'the three readers print one story' => sub {
 		'the status shows the needs-clearing phrase with the reason');
 	like($said, qr/\Q$who\E/, 'and who set it as user@hostname');
 	like($said, qr/\Q$at\E/, 'and when it was set');
+	# The environment's own name in the command, because the sentence falls
+	# back to a placeholder for a record that carries none, and a row that
+	# read the identity alone would pass on a table printing `genesis <env>
+	# pipeline-release` at every held row.
+	like($said, qr/genesis prod pipeline-release/,
+		'and the one command that clears it');
 
 	my ($report, $rerr, undef) = run_genesis($h, 'propagate', '--dry-run');
 	my $printed = unfolded($report, $rerr);

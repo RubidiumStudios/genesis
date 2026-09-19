@@ -2238,6 +2238,7 @@ sub _warn_commits_due {
 # shape hold_detail reads.
 sub _warn_hold {
 	my ($env, $record) = @_;
+	require Genesis::CI::Report;
 
 	my $hold = $env->hold_record or return undef;
 	my $for  = $record && $record->{hold} ? $record
@@ -2247,10 +2248,14 @@ sub _warn_hold {
 	# pipeline-hold says as it writes the record, because an operator who
 	# reads one line in two commands' output cannot tell which of the two
 	# just wrote something.
-	require Genesis::CI::Report;
+	#
+	# The reason is defended the way hold_detail defends the record's other
+	# three fields, and for the reason it gives: a record written before D53
+	# fixed the four can be missing any of them, and an undefined argument
+	# ends this warning inside csprintf rather than printing what it found.
 	warning(
 		"\nA propagation hold stands on #C{%s}: %s\n%s",
-		$env->name, $hold->{reason},
+		$env->name, $hold->{reason} // 'an unrecorded reason',
 		Genesis::CI::Report::hold_detail($for)
 	);
 	return $hold;

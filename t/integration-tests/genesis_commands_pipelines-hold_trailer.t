@@ -22,9 +22,9 @@ subtest 'a delivered hold trailer writes the record' => sub {
 	# Ten rows, one of which is this row's own restoration assertion, and one
 	# more for each of the three other runs' assertions.
 	#
-	# The reason row is the one that discriminates the write.  Nothing before
-	# this task writes a hold out of a trailer, so a run that delivered the
-	# gated commit and wrote no record reads the reason back as the empty
+	# The reason row is the one that discriminates the write.  Nothing writes
+	# a hold out of a trailer but the delivery below, so a run that delivered
+	# the gated commit and wrote no record reads the reason back as the empty
 	# string.
 	#
 	# The last two rows are D53's own claim, which is that a deploy of the
