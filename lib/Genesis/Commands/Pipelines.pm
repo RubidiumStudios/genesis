@@ -354,7 +354,8 @@ sub pipeline_hold {
 	my $opts = get_options();
 	my $top  = _get_top($opts);
 
-	assert_not_disowned($top, 'pipeline-hold');
+	Genesis::CI::Preflight::assert_not_disowned($top,
+		command => 'pipeline-hold');
 
 	# Both `genesis <env> pipeline-hold` and `genesis pipeline-hold
 	# "<reason>"` arrive here carrying one argument, and only the repository
@@ -444,7 +445,8 @@ sub pipeline_release {
 	my $opts = get_options();
 	my $top  = _get_top($opts);
 
-	assert_not_disowned($top, 'pipeline-release');
+	Genesis::CI::Preflight::assert_not_disowned($top,
+		command => 'pipeline-release');
 
 	command_usage(1,
 		"A propagation release takes one environment at most.  Run ".
