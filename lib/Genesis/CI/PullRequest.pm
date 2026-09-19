@@ -759,13 +759,19 @@ sub refuse_unreadable {
 # branch, so the aggregate lands unchanged and its marker lands with it.  Where
 # the site could not grant the setting, a squash rewrites the subject and the
 # body, and the marker is taken back from a pull request Genesis itself wrote,
-# so nothing is invented.  The text was already fetched for the review state,
-# so the recovery costs the run no second call.
+# so nothing is invented.
 #
-# The text is read twice, once naming the environment and once not.  A text
-# carrying a marker for another environment is a different thing from a text
-# carrying none, and only the second read tells them apart, so the caller can
-# say which of the two it met rather than silently taking the wrong one.
+# The pull request is handed in rather than fetched.  The state query fetched
+# every closed one already, so a reader that went back to the API for the text
+# would spend a call on an answer the run is holding.
+#
+# The text is read twice, once for this environment's marker and once for
+# whatever environment the markers in it do name.  A text carrying a marker
+# for another environment is a different thing from a text carrying none, and
+# only the second read tells them apart, so the caller can say which of the
+# two it met rather than silently taking the wrong one.  The second read asks
+# for names rather than for shas, so a text nothing can be said about is never
+# handed back as a drift the caller cannot word.
 #
 # Both reads go through Genesis::CI::Marker, which is the one reader of the
 # marker, and the first goes through its recovery arm so that the sha comes
@@ -774,14 +780,11 @@ sub refuse_unreadable {
 # that is up to date.  The walk of the ref is capped at nothing, because the
 # ref was walked already by the caller and what is wanted here is the text.
 sub recover_marker {
-	my ($github, $owner_repo, $number, %opts) = @_;
+	my ($pr, %opts) = @_;
 
-	my $pr = $opts{pr};
-	unless ($pr) {
-		my $all = $github->closed_prs($owner_repo, $opts{base}, $opts{head});
-		($pr) = grep {$_->{number} == $number} @$all;
-	}
-	return (undef, undef) unless $pr;
+	bug("Genesis::CI::PullRequest::recover_marker was handed no pull request ".
+	    "to read %s's marker out of", $opts{env} // 'an environment')
+		unless $pr;
 
 	my @texts = grep {defined && length} ($pr->{title}, $pr->{body});
 	for my $text (@texts) {
@@ -790,8 +793,8 @@ sub recover_marker {
 		return ($mine, undef) if $mine;
 	}
 	for my $text (@texts) {
-		my $any = Genesis::CI::Marker::in_text($text);
-		return (undef, $text) if defined $any;
+		my @named = Genesis::CI::Marker::envs_in_text($text);
+		return (undef, $text) if @named;
 	}
 	return (undef, undef);
 }
@@ -806,12 +809,16 @@ sub recover_marker {
 # and the run says so out loud when it happens.
 #
 # The branch is asked first and answers alone where it can, which is why the
-# ref the walk settled is passed in rather than composed here: a dry run reads
-# the ref a real run would have moved the branch to, and a reader that spelled
-# the remote ref itself would answer about a different commit than the walk.
+# ref the walk settled is passed in rather than composed here.  A dry run
+# reads the ref a real run would have moved the branch to, and a reader that
+# spelled the remote ref itself would answer about a different commit than the
+# walk.
 #
-# The merged pull requests are taken newest last, as the API lists them, so the
-# most recent merge is asked before an older one.
+# The merged pull requests are walked in the order pr_state hands them over,
+# which is the order the API lists them in and so is newest first.  The newest
+# merge is the one that says where the branch stands now, and an older one
+# taken ahead of it would name a commit the branch has already received and
+# send the run to propose everything above it a second time.
 sub certified_marker {
 	my ($git, $github, $owner_repo, $record, $state, %opts) = @_;
 
@@ -821,12 +828,10 @@ sub certified_marker {
 	return $marker if $marker;
 	return undef unless $github && $state;
 
-	for my $merged (reverse @{$state->{merged} || []}) {
-		my ($sha, $drifted) = recover_marker($github, $owner_repo,
-			$merged->{number}, pr => $merged, env => $record->{env},
-			git => $git, ref => $ref);
+	for my $merged (@{$state->{merged} || []}) {
+		my ($sha, $drifted) = recover_marker($merged,
+			env => $record->{env}, git => $git, ref => $ref);
 		if ($sha) {
-			$record->{pr}{recovered} = $merged->{number};
 			note_detail($record, sprintf(
 				'recovered the marker for %s from #%d',
 				$record->{env}, $merged->{number}));
@@ -842,27 +847,11 @@ sub certified_marker {
 			"names #C{%s} rather than #C{%s}, so it is not taken as this ".
 			"environment's marker.",
 			$merged->{number}, $record->{env},
-			join(', ', _envs_named($drifted)), $record->{env}
+			join(', ', Genesis::CI::Marker::envs_in_text($drifted)),
+			$record->{env}
 		);
 	}
 	return undef;
-}
-
-# }}}
-# _envs_named - the environments a drifted marker names {{{
-#
-# The prefix comes from Genesis::CI::Marker rather than being spelled again
-# here, because that module owns the string and two spellings of it are how the
-# two come to disagree.  The names come back sorted and deduplicated, since a
-# squash can leave several markers in one text and the operator is being told
-# which environments they name rather than how many times each was written.
-sub _envs_named {
-	my ($text) = @_;
-	my $prefix = $Genesis::CI::Marker::PREFIX;
-
-	my %named;
-	$named{$1}++ while $text =~ /\Q$prefix\E[0-9a-f]{4,40}[ \t]+->[ \t]+(\S+)/g;
-	return sort keys %named;
 }
 
 # }}}
