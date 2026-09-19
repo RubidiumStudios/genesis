@@ -121,7 +121,9 @@ What one held environment waits for, or undefined where nothing holds it.
 
 It says what the environment waits for rather than why any one commit is
 held.  An environment the pipeline was never applied to waits for that
-command, one holding commits behind an ancestor waits for that ancestor to
+command, and so does one with no deployment branch on either side, which the
+walk leaves with no certified state at all because it reads nothing else
+about it.  One holding commits behind an ancestor waits for that ancestor to
 certify the commit it has not deployed, and one holding commits behind a gate
 waits on its own deployment of the gate, which is the commit the phrase then
 names.  An environment whose pull request a reviewer has approved reads C<<
@@ -166,6 +168,9 @@ B<Examples:>
 
   my $words = Genesis::CI::Report::held_qualifier($env_record);
   # returns "awaiting deployment (lab at control@1a2b3c4)"
+
+  held_qualifier({env => 'prod'});
+  # returns "awaiting pipeline-apply", there being no branch to read
 
   held_qualifier({env => 'prod', held => [
       {reason => 'gate-ahead', gate => '9fc836c0...'},

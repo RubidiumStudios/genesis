@@ -56,11 +56,13 @@ onto that branch and it is what gets pushed.  The environment's own name
 stays what the marker records and what the operator reads.
 
 Nothing stands between the two stages.  An environment the pre-flight has no
-record for has no branch on either side, and the walk reports it as awaiting
-C<genesis pipeline-apply> and carries on, writing nothing for it.  C<propagate>
-used to offer to cut that branch itself, and the branch it cut carried the
-environment's own name rather than the deployment slug, so the offer satisfied
-nothing and left a ref standing exactly where the real branch has to go.
+record for has no branch on either side, so the run carries on past it without
+writing anything, and the report composes the phrase that says it is awaiting
+C<genesis pipeline-apply> through the same sub every other held environment
+reads its own wait from.  C<propagate> used to offer to cut that branch itself,
+and the branch it cut carried the environment's own name rather than the
+deployment slug, so the offer satisfied nothing and left a ref standing exactly
+where the real branch has to go.
 C<genesis pipeline-apply> is the command the design gives the job of cutting a
 deployment branch, and it is the only one that does it.
 
