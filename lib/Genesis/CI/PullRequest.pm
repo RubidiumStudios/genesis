@@ -426,10 +426,19 @@ sub deliver {
 	# merge and a rejection both end here and both leave the same three things
 	# standing.  R's copy is asked for through the expected tip, which is the
 	# value expected_tip has just read off that very ref.
+	#
+	# An environment holding commits is the one shape where nothing due does
+	# not mean nothing left to say.  The walk sends every held commit to held
+	# and leaves nothing pending, so a guard reading the due list alone would
+	# retire a branch whose pull request is still open and is what the hold is
+	# waiting on, and the operator would watch the branch, the pull request,
+	# and the proposed record go while the report settled the environment as
+	# held.  The held list is read off the record, which the walk filled
+	# before this arm was called.
 	return retire_branch($session, $record, env => $env,
 		dry_run  => $opts{dry_run},
 		rejected => ($state ? $state->{rejected} : []))
-		if !@$commits && (
+		if !@$commits && !@{$record->{held} || []} && (
 			$git->branch_exists($pr->{branch})
 			|| defined $pr->{expected}
 			|| $env->proposed_record);

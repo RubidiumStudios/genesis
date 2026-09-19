@@ -681,6 +681,13 @@ everything below, where the branch still stands on either side or a proposed
 record still points at a proposal. R's copy is asked for through the expected
 tip, which is the value this arm has just read off that very ref.
 
+An environment holding commits is never retired, whatever stands on either
+side. The walk sends every held commit to C<held> and leaves nothing pending,
+so an environment waiting on the merge of its own open pull request arrives
+here with nothing due, and a retirement would take the branch, the pull
+request, and the proposed record away while the report settled the
+environment as held and named the merge it was waiting for.
+
 An environment whose pull request a reviewer has approved takes C<freeze>
 instead, ahead of everything below, so nothing is built and nothing is
 pushed. That state is read off C<< $record->{pr} >> for the reason the
