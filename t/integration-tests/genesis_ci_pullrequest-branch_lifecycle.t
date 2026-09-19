@@ -4,6 +4,10 @@
 # with the tip it leases against, and a local branch R no longer carries is
 # deleted rather than pushed from, so the next cycle opens cleanly.
 #
+# An environment holding every due commit is the shape that looks like nothing
+# due and is not, so it has a row of its own here: it keeps its branch, its
+# pull request, and its proposed record, because the hold is what it waits on.
+#
 # The last two rows are the preview's half of the same lifecycle.  A run given
 # --dry-run reads everything a run reads and writes none of it, so an
 # environment with nothing due keeps its branch on both sides and keeps its
@@ -152,6 +156,44 @@ subtest 'a preview retires nothing' => sub {
 
 	my @pushes = grep {$_->[0] eq 'push'} step_log($git_faulted);
 	is(scalar @pushes, 0, 'and the preview pushed nothing at all');
+};
+
+subtest 'an environment holding every due commit keeps what it has' => sub {
+	plan tests => 9;
+
+	my $h   = ready(envs => ['qa'], kit => 'omega-v2.7.0');
+	my $git = $h->git('a');
+	my $pr  = $h->pr_branch('qa');
+
+	due_commit($h, 'qa', params => {instances => 2},
+		message => 'Raise the cf instance count');
+	run_genesis($h, 'propagate', '-y');
+
+	my $proposed = record_at($h, $h->env_path('qa').'/proposed');
+	ok($proposed && $proposed->{number}, 'the first run opened a pull request');
+	ok(remote_sha($h, $pr), 'and published the branch it proposed from');
+
+	# The hold sends every due commit to held and leaves nothing pending, so
+	# the second run reaches the retirement with a published branch, an open
+	# pull request, and a proposed record all standing.  None of the three is
+	# finished with: the hold is what the environment waits on, and clearing
+	# it is what lets the proposal go on.
+	fixture_hold($h, 'qa', reason => 'waiting on the capacity plan');
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	my $said = unfolded($out, $err);
+	is($exit, 0, 'the run succeeded');
+	like($said, qr/qa: held/, 'and the environment reads as held');
+
+	refresh($h, 'a');
+	ok(remote_sha($h, $pr), 'the branch is still on R');
+	ok($git->branch_exists($pr), 'and still in the clone');
+	# Read into a variable first, because a record this run deleted comes back
+	# undefined and a row that dereferenced it would take the file down rather
+	# than fail the one assertion that is wrong.
+	my $after = record_at($h, $h->env_path('qa').'/proposed');
+	is($after ? $after->{number} : undef, $proposed->{number},
+		'and the proposed record still names the pull request it opened');
 };
 
 subtest 'a preview builds no branch at all' => sub {
