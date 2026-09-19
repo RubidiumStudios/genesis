@@ -113,25 +113,26 @@ subtest 'nothing outside the session checks a branch out' => sub {
 	is_deeply(\@callers, [],
 		'no caller under lib/ or bin/ reaches the checkout directly');
 
-	# The post-deploy block moves onto control and hands off to a child
-	# command that expects to find it there, and a session would put it
-	# back, so that one site comes through the allowance until M15 decides
-	# what returning should mean.  The deploy's own site is gone: it
-	# declares a branch class and switches inside the session the gate
-	# opens.  The site before that was the deploy's --pull, which went with
-	# the flag.
+	# The allowance is empty.  Three sites once stayed on the branch they
+	# moved to, and every one of them has gone.  The deploy's own switch
+	# went when it declared a branch class and began switching inside the
+	# session the gate opens, the one before that was the deploy's --pull,
+	# which went with the flag, and the last was the post-deploy hand-off,
+	# which moved onto control so that the child it spawned would find it
+	# there.  The hand-off now runs after the deploy's session has finished
+	# and the child takes the switch lock and moves the tree itself, so
+	# there is nothing left for a one-way checkout to mean.
 	#
-	# The count is pinned and not just the file, because a second one-way
-	# checkout added inside a file that already holds one would otherwise
-	# join the allowance without turning anything red.
+	# The count is pinned per file and not just the set of files, because a
+	# second one-way checkout added inside a file that already held one
+	# would otherwise join the allowance without turning anything red.
 	my %allowed;
 	for my $file (sources()) {
 		my $calls = () = get_file($file) =~ /->checkout_one_way\(/g;
 		$allowed{$file} = $calls if $calls;
 	}
-	is_deeply(\%allowed,
-		{'lib/Genesis/Env.pm' => 1},
-		'and the one-way allowance carries the one site M15 still moves');
+	is_deeply(\%allowed, {},
+		'and the one-way allowance has no member left in the tree');
 };
 
 subtest 'the propagate run drives a session end to end' => sub {

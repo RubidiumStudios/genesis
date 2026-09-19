@@ -65,20 +65,24 @@
 # propagation either.  The shuttle row was green because no Genesis command
 # has ever written the propagate request queue, and it holds that still
 # against an implementation that withheld the child and made a request
-# instead.  The marker row was green because the child the hand-off spawns
-# today is `genesis propagate <env>`, which the propagate command's usage
-# takes no argument for, so it exits 2 without delivering anything; the row
-# stands as the guard that catches a hand-off after a redeploy once M15 gives
-# that child an argument list the command accepts.
+# instead.  The marker row was green because the child the hand-off spawned
+# then was `genesis propagate <env>`, which the propagate command's usage
+# takes no argument for, so it exited 2 without delivering anything, and the
+# row could not have failed.  The hand-off now runs `genesis propagate` with
+# nothing after it, which the command accepts, so a child spawned after a
+# redeploy would deliver and the row would name the control commit the
+# delivery was written from.  It is a proof rather than a guard from here on.
 #
 # Three rows joined that subtest later, against a tree in which the
 # withholding already stood.  The row asking that a --redeploy which resolved
 # no commit spawns a child was red there, because the withholding keyed on the
 # flag and such a run carries it; keying it on the commit the run resolved is
 # what turns it green.  The two restoration rows, beside the ordinary deploy
-# and beside that run, arrived green, and they say that the child's one-way
-# checkout of control costs a run nothing where the session has already put
-# the operator back on control.
+# and beside that run, arrived green, and they said that the child's one-way
+# checkout of control cost a run nothing where the session had already put the
+# operator back on control.  That checkout is gone with the move of the
+# hand-off, and the rows now say what they always meant, which is that a run
+# which hands off still leaves the operator where it found them.
 #
 # A fourth joined them afterwards, the exit row beside that same run, and it
 # arrived green.  It is what keeps the child-count row beside it honest, in
@@ -471,20 +475,21 @@ subtest 'a successful redeploy propagates nothing' => sub {
 	# The two sentences the hand-off itself prints, rather than the bare word,
 	# because the harness kit is called genesis-propagation-harness and the
 	# secrets check names it on every run.  Both are matched with their case,
-	# since each of them opens a line of Genesis' own.
-	unlike("$out$err", qr/Propagating to downstream|Propagation failed/,
+	# since each of them opens a line of Genesis' own.  The first of the two
+	# was "Propagating to downstream", and it reads as the hand-off's notice
+	# now does, which is the shorter sentence the retired argument left behind.
+	unlike("$out$err", qr/Propagating from|Propagation failed/,
 		'the run printed no propagation report');
 	is(scalar(shuttle_requests($shuttle)), 0,
 		'no run_propagate request was made');
 
 	# prod is downstream and stays where it was, since nothing was delivered.
-	# The row is true of the tree this subtest starts from, because the child
-	# the hand-off spawns is `genesis propagate <env>` and the propagate
-	# command's usage takes no argument, so today's child refuses before it
-	# delivers anything.  It is here as the guard that catches a hand-off after
-	# a redeploy once that child is given an argument list the command accepts,
-	# because the marker on prod's branch would then name the control commit
-	# the delivery was written from rather than nothing at all.
+	# The row is a proof of the withholding now.  The child the hand-off
+	# spawns is `genesis propagate` with nothing after it, which is an
+	# argument list the command accepts, so a hand-off made after a redeploy
+	# would walk control and deliver, and the marker on prod's branch would
+	# name the control commit the delivery was written from rather than
+	# nothing at all.
 	is(harness_marker($h, $h->slug('prod')), undef,
 		'the downstream environment received nothing');
 
