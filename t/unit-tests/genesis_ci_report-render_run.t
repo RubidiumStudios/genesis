@@ -44,6 +44,13 @@ sub rendered {
 # row that means to reach the qualifier has to hand the renderer a null
 # outcome, since that is the only thing _settle fills in, and a defined-or
 # would have turned the null back into propagated and settled nothing.
+#
+# The certified key is always written, to undef where the row passed none,
+# because the qualifier's head guard asks whether the record defines it at
+# all.  A builder that left the key out where it had no value would hand that
+# guard a record it could not tell from one carrying an explicit undef, and
+# the branchless row below would then pass against a guard weakened from a
+# defined check to an exists one.
 sub a_record {
 	my (%opts) = @_;
 	return {environments => [{

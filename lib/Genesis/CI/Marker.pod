@@ -172,7 +172,8 @@ B<Examples:>
   # returns ('qa')
 
   Genesis::CI::Marker::envs_in_text(
-      "* [pipeline] control\@a1b2c3d -> qa\n* [pipeline] control\@9f1c2d3 -> qa\n");
+      "* [pipeline] control\@a1b2c3d -> qa\n" .
+      "* [pipeline] control\@9f1c2d3 -> qa\n");
   # returns ('qa'), one name however many markers carried it
 
   Genesis::CI::Marker::envs_in_text('note that a1b2c3d broke the build');

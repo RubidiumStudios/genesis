@@ -780,9 +780,11 @@ sub propagate {
 		refuse  => $refuse);
 
 	# The pair the client was built against, read back for the state query
-	# and the walk.  The block resolves once and keeps its answer, so this
-	# costs nothing, and it is undefined exactly where there is no client to
-	# use it with.
+	# and for the pull request sync at the end of the run.  The walk takes
+	# the client alone and never the pair, because the recovery reads the
+	# merged pull requests out of the answer this run already has.  The block
+	# resolves once and keeps its answer, so this costs nothing, and it is
+	# undefined exactly where there is no client to use it with.
 	my $owner_repo = $github ? $top->source_control_repository : undef;
 
 	# D55's refusal, read once for the whole run and ahead of it.  What a
@@ -850,7 +852,6 @@ sub propagate {
 			state      => $state,
 			branches   => $initial->{branches},
 			github     => $github,
-			owner_repo => $owner_repo,
 			state_of   => \%pr_state_of,
 		);
 

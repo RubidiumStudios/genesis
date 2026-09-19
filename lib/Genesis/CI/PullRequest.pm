@@ -784,8 +784,14 @@ sub client_for_run {
 	# it with a bare 1 and name a call the operator never made.  A rejected
 	# token arrives there too, which is why only the answered case is refused
 	# here.
+	# The refusal goes through the caller's closure like the pair's above it,
+	# because this build stands inside an open session and a bare bail there
+	# exits 1 with the operator left on whatever branch the run had switched
+	# them to.  It is CONFIG for the same reason the pair's is: what the
+	# operator has to change is the token they set, not the state of the API.
 	my $who = eval {$github->get_authorized_user};
-	bail(
+	($opts{refuse} || \&bail)->(
+		{exitcode => Genesis::Exit::CONFIG},
 		"GitHub answered for #C{GITHUB_AUTH_TOKEN} without naming the user ".
 		"it belongs to, so verify that it is a valid personal access token ".
 		"and that #C{%s} is GitHub itself.",
@@ -963,7 +969,7 @@ sub recover_marker {
 # taken ahead of it would name a commit the branch has already received and
 # send the run to propose everything above it a second time.
 sub certified_marker {
-	my ($git, $github, $owner_repo, $record, $state, %opts) = @_;
+	my ($git, $github, $record, $state, %opts) = @_;
 
 	my $ref = $opts{ref} // $record->{branch};
 

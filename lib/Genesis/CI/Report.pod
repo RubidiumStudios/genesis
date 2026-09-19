@@ -178,8 +178,13 @@ B<Examples:>
   my $words = Genesis::CI::Report::held_qualifier($env_record);
   # returns "awaiting deployment (lab at control@1a2b3c4)"
 
+  held_qualifier({env => 'prod'});
+  # returns "awaiting pipeline-apply" off the head guard alone, the walk
+  # having read nothing about an environment with no branch on either side
+
   held_qualifier({env => 'prod', certified => {state => 'never-applied'}});
-  # returns "awaiting pipeline-apply", nothing having been applied to it
+  # returns the same phrase for the other reason, nothing having been
+  # applied to the repository at all
 
   held_qualifier({env => 'prod', certified => {state => 'certified'}, held => [
       {reason => 'gate-ahead', gate => '9fc836c0...'},

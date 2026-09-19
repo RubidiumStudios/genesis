@@ -1119,6 +1119,10 @@ sub plan {
 			# second of the two facts client_for_run reads when it is asked
 			# whether the run needs the API at all (D57).  Asking for it
 			# anywhere else would mean loading every environment again.
+			#
+			# It costs one vault read per environment in the walk, because the
+			# record lives at its own path and nothing above has already
+			# fetched it.
 			$env_record->{proposed} = $env->proposed_record;
 
 			if ($certified->{state} eq 'unreadable') {
@@ -1185,7 +1189,7 @@ sub plan {
 			# again with the marker in its hand.
 			if (!$marker && $env_record->{pr}) {
 				$marker = Genesis::CI::PullRequest::certified_marker(
-					$git, $opts{github}, $opts{owner_repo}, $env_record,
+					$git, $opts{github}, $env_record,
 					($opts{state_of} || {})->{$name}, ref => $ref);
 				$base = $marker if $marker;
 			}
