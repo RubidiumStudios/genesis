@@ -66,6 +66,18 @@ this command and C<genesis propagate> read one answer rather than two.  The
 event lines the refresh raised are reported on standard error as it goes, and
 the record itself is the return value.
 
+It reads GitHub for one thing alone, which is the pull request each
+environment whose policy asks for one has open. The client is built by
+C<Genesis::CI::PullRequest::client_for_run>, and only where C<GITHUB_AUTH_TOKEN>
+is set, because a client built without one warns that the run's branches are
+still written and published and this command writes nothing. What the read
+answers is carried onto the walk's own records by
+C<Genesis::CI::PullRequest::carry_state>, and an environment whose pull request
+a reviewer has approved is frozen by C<Genesis::CI::PullRequest::freeze>, so the
+report and the propagation run take that decision from one place. With no token
+nothing is read, no call is made, and the pull request column falls back to the
+environment's proposed record.
+
 The record is one deployment root's, and it is the root the command runs in.
 Each root composes its branches from its own deployment slug, so two roots
 that share an environment name hold two separate branches, and one root's
@@ -363,6 +375,19 @@ remedy in the brackets, because a report that only refused to describe them
 would leave the repository unexplained.  An environment that failed to load
 carries its error alone, because nothing else the row holds was read.
 
+The pull request component stands between the snapshot flag and the hold, and
+it comes from the walk's C<pr> field, which carries the branch
+C<Genesis::Top::pr_branch_for> composes, so the branch this column reads and
+the branch propagation opens come from one accessor. Where the state has been
+read the phrase names the open pull request and what a reviewer made of it, so
+it reads C<[PR #42 open: unreviewed]>; a number is only ever taken off the open
+listing, so a number on the record is an open pull request. Where the read
+found nothing open the component is left out, the rest of the row already
+saying what the environment is doing. Where no token was set nothing was read
+at all, and the phrase falls back to the environment's proposed record, names
+the pull request Genesis itself opened and the control commit it proposed, and
+says the review state is unread and possibly outdated.
+
 A held environment carries the word C<held> and then the qualifier the
 propagation run records for it, which is one of C<needs clearing> with the
 reason, C<awaiting pipeline-apply>, and C<awaiting deployment> with the
@@ -381,6 +406,13 @@ carries the qualifier alone and no commit reason after it, so the row reads
 C<held, needs clearing (vsphere maintenance)> and stops there.  The walk
 stamps every commit the hold takes with the hold's own text, so the reason
 would otherwise print what somebody wrote on the record twice in one line.
+
+A frozen commit is the other shape where the two questions have one answer.
+One approved pull request is both what the environment waits for and what
+holds every commit standing behind it, so C<Genesis::CI::Report::hold_reason>
+answers the merge in the words the qualifier has just used, and the row says
+it once.  The two are compared on their words rather than on a second list of
+reasons kept in step with that module.
 
 A row whose certification cell is marked carries C<[unverifiable]> after the
 wait, so C<held, awaiting pipeline-apply [unverifiable]> is what an
@@ -446,6 +478,49 @@ B<Examples:>
   # 'in_flight'
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _pull_request_state($top, $scope)
+
+  my $state_of = Genesis::CI::Status::_pull_request_state($top, $scope);
+
+Reads what GitHub says about the pull request of every environment in the
+scope whose policy asks for one, and answers it keyed by environment name. An
+environment the hash holds no key for is one nothing was read about.
+
+The client is built by C<Genesis::CI::PullRequest::client_for_run> and the
+state by C<Genesis::CI::PullRequest::pr_state>, so the decision about when a
+client is needed at all and the one refusal a failed read raises are the run's
+own rather than a second pair here.
+
+It asks for a client only where C<GITHUB_AUTH_TOKEN> is set. A client built
+without one warns that the run's branches are still written and published,
+which is false of a command that writes nothing, and a missing token is the
+fallback the pull request column is built for rather than something to warn an
+operator about.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment root the command runs in.
+
+=item C<$scope>
+
+The scope C<Genesis::CI::Walk::scope_for> composed, whose C<pr_branch> names
+the branch the pull request is opened from.
+
+=back
+
+B<Returns:> a hashref of environment name to the state C<pr_state> answered,
+empty where there is no token, no client, or no environment wanting one.
+
+B<Examples:>
+
+  my $state_of = Genesis::CI::Status::_pull_request_state($top, $scope);
+  # {qa => {state => 'approved', number => 42, url => '...', superseded => []}}
+
 
 =head2 _mark_unverifiable($record)
 
@@ -638,6 +713,58 @@ B<Examples:>
 
   my $line = Genesis::CI::Status::_applied_line($record);
   # '  applied at 6084166  [stale: dev configuration-changed]  run genesis pipeline-apply'
+
+=head2 _pull_request_component($row)
+
+  my @component = Genesis::CI::Status::_pull_request_component($row);
+
+Answers the phrase's pull request component for one row, or the empty list
+where the row has nothing to say about one.
+
+An environment whose policy asks for no pull request has no such column. The
+walk seeds the branch onto every environment that would deliver into one and
+leaves the field null for the rest, so that field is the whole of the question,
+and the proposed record is read only for an environment the walk says would
+have one. A proposed record naming no pull request is one no run has proposed
+anything through, and it answers the empty list as well.
+
+The branch it reads is the walk's C<pr> field, which
+C<Genesis::Top::pr_branch_for> composes, so the branch this column reads and
+the branch propagation opens come from one accessor. The baseline matched a
+literal C<propagate/E<lt>envE<gt>/> prefix that propagation has never opened,
+which is why an operator was told nothing waited while a pull request sat open
+for review.
+
+Where the state has been read the component names the open pull request and
+what a reviewer made of it. A number is only ever taken off the open listing,
+so a number on the record is an open pull request and C<open> is the truth
+about it rather than a second reading. Where the read found nothing open the
+component is left out, the rest of the row already saying what the environment
+is doing.
+
+Where no token was set nothing was read at all and the environment's proposed
+record answers. That record is a pointer to a pull request Genesis itself
+opened rather than a cache of somebody else's state, so the component names it
+and the control commit it proposed, and says plainly that the review state is
+unread and possibly outdated.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$row>
+
+One environment's record, whose C<pr> is the walk's pull request object and
+whose C<proposed> is the proposed record the walk read.
+
+=back
+
+B<Returns:> one array reference of a class and its text, or the empty list.
+
+B<Examples:>
+
+  my @component = Genesis::CI::Status::_pull_request_component($row);
+  # ([in_flight => '[PR #42 open: approved]'])
 
 =head2 _short($sha)
 

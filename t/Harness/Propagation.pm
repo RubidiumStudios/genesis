@@ -4883,13 +4883,26 @@ sub ready {
 # double, and a proposed record naming it, which is the whole shape a pull
 # request column reads.  The record takes the number under pr, because that
 # is what the double and every row that opens one call it.
+#
+# The due commit is written through due_commit, which rewrites the
+# environment's own file at the deployment root and leaves that file's
+# metadata standing.  A body composed here instead dropped genesis.env and
+# genesis.pipeline.require_pr with it, which takes the environment out of the
+# topology altogether, so a command that reads the topology was handed a
+# repository with no environments in it at all and reported on none.  params
+# and message steer that commit; due is ready's own option for a commit of a
+# different shape and this scenario writes its own, so it never reaches ready.
 sub with_open_pr {
 	my (%opts) = @_;
 	my $env = $opts{env} // 'qa';
-	my $h = ready(%opts, envs => $opts{envs} // [$env],
-		due => $opts{due} // {"$env.yml" => "---\nkit: dev\nn: 2\n"});
+	delete $opts{due};
+	my $h = ready(%opts, envs => $opts{envs} // [$env]);
 	my $gh = $h->{gh};
-	my $control = $h->git('a')->sha($h->control);
+
+	my $control = due_commit($h, $env,
+		params  => $opts{params}  // {instances => 2},
+		message => $opts{message} // 'A change due to propagate');
+	$h->refresh('a');
 
 	my $number = gh_pull_request($gh,
 		env    => $env,

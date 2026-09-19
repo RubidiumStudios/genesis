@@ -18,7 +18,7 @@ use Genesis::CI::Report qw/note_detail/;
 use Service::Github;
 
 use Exporter qw/import/;
-our @EXPORT_OK = qw/client_for_run pr_state sync_pull_request/;
+our @EXPORT_OK = qw/client_for_run pr_state carry_state sync_pull_request/;
 
 # align_with_remote - bring the local pull request branch level with R {{{
 #
@@ -449,6 +449,32 @@ sub settled {
 }
 
 # }}}
+# carry_state - what the reader answered, put onto the record's own pull request {{{
+#
+# The four fields the record keeps from pr_state, written in one place.  The
+# arm below carries them so that the publish, the sync, and the run's report
+# read one answer rather than asking the API again, and genesis pipeline-status
+# carries the same four onto the same record for its own column.  Two copies of
+# this assignment are how the two commands would come to hold different keys.
+#
+# A state of undef is a run that had no client to read one with, and it clears
+# the fields rather than leaving whatever a caller had put there, because a
+# reader that met a stale number would report a pull request nobody had looked
+# for.  The superseded list is emptied rather than undefined, since every
+# reader of it walks it.
+sub carry_state {
+	my ($record, $state) = @_;
+
+	my $pr = $record->{pr} or return $record;
+	$pr->{state}      = $state ? $state->{state}      : undef;
+	$pr->{number}     = $state ? $state->{number}     : undef;
+	$pr->{url}        = $state ? $state->{url}        : undef;
+	$pr->{superseded} = $state ? $state->{superseded} : [];
+
+	return $record;
+}
+
+# }}}
 # deliver - the pull request arm for one environment {{{
 #
 # The branch carries exactly one commit above the deployment branch, so the
@@ -473,10 +499,7 @@ sub deliver {
 	# What the reader answered about the pull request, carried onto the
 	# record before any arm is taken, so the publish, the sync, and the
 	# report all read one answer rather than asking the API again.
-	$pr->{state}      = $state ? $state->{state}      : undef;
-	$pr->{number}     = $state ? $state->{number}     : undef;
-	$pr->{url}        = $state ? $state->{url}        : undef;
-	$pr->{superseded} = $state ? $state->{superseded} : [];
+	carry_state($record, $state);
 
 	# R is asked about the branch before its tip is read, because a branch R
 	# has lost leaves refs behind that would otherwise be read as R's own.

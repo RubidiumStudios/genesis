@@ -370,6 +370,7 @@ integration-tests/genesis_ci_status-breach.t                  # a marker naming 
 integration-tests/genesis_ci_status-drift.t                   # both axes reported at once, and every drifted file named beside the hand commit
 integration-tests/genesis_ci_status-held.t                    # the held qualifier and the routing reason in the words the propagation run prints
 integration-tests/genesis_ci_status-no_refresh.t              # the stale form, its marking, and the registration attribute the branch-class gate reads
+integration-tests/genesis_ci_status-pull_request.t            # the pull request column read with a token and without one, and the held qualifier beside it
 integration-tests/genesis_ci_status-record.t                  # one canonical record per environment, emitted as JSON and rendered as the tree
 integration-tests/genesis_ci_status-rendering.t               # detail in brackets, each component in its own colour, and the row in the worst one
 integration-tests/genesis_ci_status-roots_and_mapping.t       # each root reports its own branch and reading, and every line of the mapping table has a fixture
