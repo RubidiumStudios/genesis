@@ -212,9 +212,12 @@ C<divergence>, C<discovery>, C<error>, C<outcome>, and C<outcome_detail>.
 C<pr> is a hashref carrying the pull request branch under C<branch> for an
 environment whose policy asks for a pull request, and C<undef> for every
 other, so a reader can tell which environments deliver that way without
-asking the topology again.  A marker this walk took from a merged pull
-request rather than from the branch is reported beside the environment's
-outcome and nowhere else, so the record gains no field for it.
+asking the topology again.  C<proposed> is the environment's own proposed
+record, which names the pull request it is already waiting on, and C<undef>
+where it is waiting on none; the walk decides nothing by it and reads it here
+because this is where the environment is loaded.  A marker this walk took from
+a merged pull request rather than from the branch is reported beside the
+environment's outcome and nowhere else, so the record gains no field for it.
 
 B<Errors:> Raises a bug where no git handle is given, since every reading
 below is made through one and a walk without it can answer nothing.

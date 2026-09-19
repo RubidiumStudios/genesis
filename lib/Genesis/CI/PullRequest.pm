@@ -15,6 +15,7 @@ use Genesis qw/bail bail_text bug info warning/;
 use Genesis::Exit;
 use Genesis::CI::Marker;
 use Genesis::CI::Report qw/note_detail/;
+use Service::Github;
 
 use Exporter qw/import/;
 our @EXPORT_OK = qw/client_for_run pr_state sync_pull_request/;
@@ -650,6 +651,85 @@ sub _nothing_due_specs {
 		}
 	}
 	return @specs;
+}
+
+# }}}
+# client_for_run - one GitHub client for the whole run, or none at all {{{
+#
+# D57 has the run build a client when any environment in scope needs the API
+# and not at all when none does, which matters for a job that runs on every
+# control change.  An environment needs it when it has a proposed record or
+# would deliver into a pull request, whatever its hold state, because a hold
+# set while a pull request was open leaves that pull request to be read.
+#
+# Both facts are read off the records the caller hands in.  pr is set for every
+# environment whose repository policy asks for a pull request, and proposed is
+# the environment's own pointer at an open pull request, so nothing here asks
+# the topology a second time.
+#
+# The pair the client targets is the one the source-control block resolves, so
+# an override is honoured rather than whichever remote git happens to list
+# first, and a repository that asks for pull requests and resolves no pair is
+# refused by the key to write.  Splitting a pair that is not there would say so
+# as an uninitialized-value warning in the middle of a run instead.  A caller
+# inside an open session hands its own refusal closure in, as it does to
+# pr_state, so the operator is put back on the branch they started from before
+# they are told why the run stopped.
+sub client_for_run {
+	my ($top, %opts) = @_;
+
+	my $records = $opts{records} || [];
+	return undef unless grep {$_->{pr} || $_->{proposed}} @$records;
+
+	my $owner_repo = $top->source_control_repository;
+	($opts{refuse} || \&bail)->(
+		{exitcode => Genesis::Exit::CONFIG},
+		"This repository delivers into pull requests, and #C{%s} is not set ".
+		"and could not be derived from any git remote.\n\nSet it to the ".
+		"#C{owner/repo} pair the pull requests are opened against.",
+		'pipeline.source_control.repository'
+	) unless defined $owner_repo && length $owner_repo;
+
+	# The run carries on without a token and says so, and everything the API
+	# would have decided is left to the next run that has one (D44).  A
+	# writing run still publishes each branch; what it cannot do is open or
+	# update the pull request that names it.
+	unless ($ENV{GITHUB_AUTH_TOKEN}) {
+		warning(
+			"#C{GITHUB_AUTH_TOKEN} is not set, so no pull request is opened ".
+			"for the environments whose policy asks for one.  Their branches ".
+			"are still written and published, and the next run with a token ".
+			"opens the pull requests."
+		);
+		return undef;
+	}
+
+	my ($owner) = split m{/}, $owner_repo, 2;
+	my $github = Service::Github->new(org => $owner);
+
+	# The client authenticates once as it is built, which is what makes one
+	# client serve the whole run rather than one per environment, and it asks
+	# the one question no reader below can check for itself: who the token
+	# belongs to.  An endpoint that answers and names nobody is answering for
+	# somebody else, and the readers cannot tell that from a repository with
+	# no pull request open, so a run that took it would propose again what it
+	# has already proposed.
+	#
+	# An API that will not answer at all is not this build's to refuse.  D55
+	# gives every failure to read GitHub one refusal, at UNAVAILABLE and in
+	# the reader's own words, and a bail raised here would stand in front of
+	# it with a bare 1 and name a call the operator never made.  A rejected
+	# token arrives there too, which is why only the answered case is refused
+	# here.
+	my $who = eval {$github->get_authorized_user};
+	bail(
+		"GitHub answered for #C{GITHUB_AUTH_TOKEN} without naming the user ".
+		"it belongs to, so verify that it is a valid personal access token ".
+		"and that #C{%s} is GitHub itself.",
+		$github->base_url
+	) if !$@ && !$who;
+
+	return $github;
 }
 
 # }}}

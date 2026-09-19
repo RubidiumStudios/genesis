@@ -467,6 +467,13 @@ re-raised with a second banner on top of it.  What it composes is kept for
 the state read below, since naming a pull request branch compares it against
 every deployment branch in the pipeline.
 
+One GitHub client serves the whole run, and it is built only where an
+environment in scope needs the API, so a repository that delivers to nobody by
+pull request makes no call at all on a job that runs on every control change.
+The client authenticates once as it is built, and a repository that asks for
+pull requests and resolves no C<owner/repo> pair is refused at C<CONFIG> by
+the key to write.  See L<Genesis::CI::PullRequest/client_for_run>.
+
 A run with no C<GITHUB_AUTH_TOKEN> still writes and publishes those branches
 and says so, because the branches are the delivery and the pull request is
 what the next run with a token opens on top of it.

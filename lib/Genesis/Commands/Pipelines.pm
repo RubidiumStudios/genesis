@@ -752,38 +752,38 @@ sub propagate {
 	info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}",
 		$control, $control_short;
 
-	# The run's one GitHub client, built where any environment in the
-	# pipeline would deliver into a pull request and left undefined
-	# otherwise, so a repository that has no such environment makes no API
-	# call and needs no token.  The pair the client targets is the one the
-	# source-control block resolves, so an override is honoured rather than
-	# whichever remote git happens to list first, and a pair it cannot
-	# resolve was refused by name at configuration load.
-	my ($github, $owner_repo);
-	if (grep {$topo->{nodes}{$_}{require_pr}} @dag_order) {
-		$owner_repo = $top->source_control_repository;
-		# Named rather than split.  A pair that never resolved is an
-		# owner and a repository this run has no way to guess, and
-		# splitting undef says so as an uninitialized-value warning in
-		# the middle of a run instead of as the key to write.
-		$refuse->(
-			{exitcode => CONFIG},
-			"This repository delivers into pull requests, and #C{%s} is ".
-			"not set and could not be derived from any git remote.\n\n".
-			"Set it to the #C{owner/repo} pair the pull requests are ".
-			"opened against.",
-			'pipeline.source_control.repository'
-		) unless defined $owner_repo && length $owner_repo;
-		my ($gh_owner) = split m{/}, $owner_repo, 2;
-		$github = Service::Github->new(org => $gh_owner)
-			if $ENV{GITHUB_AUTH_TOKEN};
-		warning(
-			"#C{GITHUB_AUTH_TOKEN} is not set, so no pull request is opened ".
-			"for the environments whose policy asks for one.  Their branches ".
-			"are still written and published, and the next run with a token ".
-			"opens the pull requests."
-		) unless $github;
-	}
+	# The run's one GitHub client, and the only one this command builds.
+	# D57 has it built where an environment in scope needs the API and not
+	# at all where none does, so a repository that delivers to nobody by
+	# pull request makes no call on a job that runs on every control change.
+	# Everything the build decides, refuses, and warns about lives in
+	# client_for_run, and the refusal goes through the run's own closure so
+	# the operator is back on their branch before they are told why it
+	# stopped.
+	#
+	# The records the decision reads are composed here rather than taken from
+	# the walk, because the walk is below this and wants the client itself:
+	# an environment whose merge dropped the marker takes it back from the
+	# pull request that merged (D52).  Each one carries the pull request
+	# branch this environment's own policy asked for, seeded from the names
+	# composed above, which is what the walk seeds its own record's pr from,
+	# so the two readings cannot disagree about which environments would
+	# deliver into a pull request.  The proposed record is the walk's to
+	# read, and an environment that would not deliver into a pull request has
+	# no use for the client that a stale proposal of its own could give it.
+	my @in_scope = map {{
+		pr => $pr_branch_of{$_} ? {branch => $pr_branch_of{$_}} : undef,
+	}} @dag_order;
+
+	my $github = Genesis::CI::PullRequest::client_for_run($top,
+		records => \@in_scope,
+		refuse  => $refuse);
+
+	# The pair the client was built against, read back for the state query
+	# and the walk.  The block resolves once and keeps its answer, so this
+	# costs nothing, and it is undefined exactly where there is no client to
+	# use it with.
+	my $owner_repo = $github ? $top->source_control_repository : undef;
 
 	# D55's refusal, read once for the whole run and ahead of it.  What a
 	# reviewer decided is what decides whether an environment's pull request
