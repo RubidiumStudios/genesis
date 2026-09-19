@@ -266,8 +266,9 @@ sub hold_detail {
 	# by something older than D53's four fields can be missing any of them,
 	# so each is named as unrecorded rather than left to print as an empty
 	# gap the reader has to guess at.
-	my $release = sprintf("`genesis %s pipeline-release`",
-		$record->{env} // '<env>');
+	# In backticks, because it stands mid-sentence and the report has no
+	# colour to spare inside a span it is already printing in.
+	my $release = sprintf('`%s`', _release_command($record->{env}));
 	my $by = sprintf('held by %s@%s at %s',
 		$hold->{user}     // 'an unrecorded user',
 		$hold->{hostname} // 'an unrecorded host',
@@ -380,12 +381,15 @@ sub render_run {
 		# The sentence carries the release command itself now, so no second
 		# line beside it says the same thing in the report's own words.
 		#
-		# The identity in it is text somebody else wrote, and csprintf
-		# tolerates one level of balanced braces inside a colour span, so an
-		# unbalanced brace in a username would end the span early and move
-		# the characters after it.  It is passed as an argument rather than
-		# interpolated into the format for that reason, which is the rule
-		# the error line above follows.
+		# It goes inside the colour span, where the error line above keeps
+		# its message outside one.  csprintf formats first and colours the
+		# result, so an argument substituted into a span is inside that span
+		# however the call is written, and the span is safe here only
+		# because nothing in the sentence is text an operator typed.  The
+		# reason somebody wrote stands in the qualifier above; what this
+		# composes is a count, a command, a username, and a host, and none
+		# of those carries the unbalanced brace that would end the span
+		# early and move the characters after it.
 		my $detail = hold_detail($env);
 		info "    #Y{%s}", $detail if defined $detail && length $detail;
 
@@ -402,8 +406,7 @@ sub render_run {
 		if ($env->{hold_set}) {
 			info "    #Y{a hold was set by the commit just delivered}: %s",
 				$env->{hold_set};
-			info "    Release it with #C{genesis %s pipeline-release}",
-				$env->{env};
+			info "    Release it with #C{%s}", _release_command($env->{env});
 		}
 
 		# The commit axis, in control order: what the environment received
@@ -618,6 +621,25 @@ sub _commits {
 	my ($n) = @_;
 
 	return sprintf('%d commit%s', $n, $n == 1 ? '' : 's');
+}
+
+# }}}
+# _release_command - the one command that clears a hold on an environment {{{
+#
+# Ruling 32: the command is composed here and nowhere else, because a command
+# spelled in two places is a command the two spellings drift apart on.  The
+# two callers dress it differently, hold_detail in backticks because it sits
+# inside a sentence and render_run in the colour every command this report
+# names takes, and what they share is the words.
+#
+# The placeholder answers a record with no environment on it, which is a
+# record nothing in the tree builds: the walk keys every record it makes on
+# the environment's name.  It is here so that such a record prints something
+# an operator can see is wrong rather than a command with a gap in it.
+sub _release_command {
+	my ($env_name) = @_;
+
+	return sprintf('genesis %s pipeline-release', $env_name // '<env>');
 }
 
 # }}}

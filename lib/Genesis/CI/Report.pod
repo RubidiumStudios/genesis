@@ -669,6 +669,43 @@ B<Examples:>
   _commits(1);   # '1 commit'
   _commits(3);   # '3 commits'
 
+=head2 _release_command
+
+  _release_command('prod');
+
+The one command that clears a hold on an environment, as its words alone.
+
+It is composed here and nowhere else, because a command spelled in two places
+is a command the two spellings drift apart on.  Its two callers dress it
+differently and share the words: L</hold_detail> puts it in backticks, that
+sentence being printed inside a colour span already, and L</render_run> puts
+it in the colour every command this report names takes, on the line beneath a
+hold the run has just set.
+
+An environment name that is undefined answers the placeholder C<< <env> >>,
+which nothing in the tree produces, the walk keying every record it builds on
+the environment's name.  It is there so that such a record prints something an
+operator can see is wrong rather than a command with a gap in it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env_name>
+
+The environment the command is named for.  Undefined answers the placeholder.
+
+=back
+
+B<Returns:> The command, as one string, with no markup of any kind on it.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _release_command('prod');   # 'genesis prod pipeline-release'
+  _release_command(undef);    # 'genesis <env> pipeline-release'
+
 =head2 _paths
 
     my @paths = Genesis::CI::Report::_paths($git, $pending->{delivered});
