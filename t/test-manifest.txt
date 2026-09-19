@@ -432,6 +432,7 @@ integration-tests/genesis_commands_env-deploy_finish.t  # a kit hook that dirtie
 integration-tests/genesis_commands_env-deploy_journey.t  # new, pipeline-apply, propagate, and deploy walked as one journey
 integration-tests/genesis_commands_env-post_deploy_child.t  # the propagate child after a manual deploy
 integration-tests/genesis_commands_env-child_non_interactive.t  # the child has no terminal, so nothing asks it
+integration-tests/genesis_commands_env-child_withheld.t  # what withholds the propagate child, and what catches up
 integration-tests/genesis_commands_env-deployed_commit.t  # both deployed-commit flags share one sentence and refuse where no pipeline is enabled
 integration-tests/genesis_commands_env-redeploy.t  # --redeploy deploys the recorded commit, not the tip, and records the same pair again
 integration-tests/genesis_commands_env-secrets_certified.t  # a rotation against the tip says the version it served is not the certified one
