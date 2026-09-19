@@ -119,7 +119,8 @@ order the text lists them, and an empty list where there is none.
 
 B<Examples:>
 
-  Genesis::CI::Marker::in_text("Merge pull request #7\n\n[pipeline] control\@a1b2c3d -> qa\n");
+  Genesis::CI::Marker::in_text(
+      "Merge pull request #7\n\n[pipeline] control\@a1b2c3d -> qa\n");
   # returns 'a1b2c3d'
 
   Genesis::CI::Marker::in_text("* [pipeline] control\@a1b2c3d -> qa\n");

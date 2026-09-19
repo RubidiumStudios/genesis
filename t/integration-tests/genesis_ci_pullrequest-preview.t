@@ -15,6 +15,13 @@
 # A run says what it did through the logger, which writes to standard error, so
 # every assertion on the run's own words reads unfolded($out, $err), as every
 # other row in this area does.
+#
+# Four of the six assertions in the first row are green on arrival, and every
+# one of them is a guard.  The two call assertions and the two branch-absence
+# assertions hold at the baseline as well, whose dry run also read the state
+# and wrote nothing, and what they redden is a preview that bought its title
+# with a write, whether by a call that is not a GET or by a branch it created
+# to read a tip off.
 use strict;
 use warnings;
 use utf8;

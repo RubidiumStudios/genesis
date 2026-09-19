@@ -507,15 +507,19 @@ of the pull request branch unverified.
 D44 leaves C<--dry-run> as the only preview, and a preview that could not say
 what it would do with the branch would be worth little, so it reads. Writing
 nothing does not forbid reading, and only a writing run refuses on a state it
-cannot read under D55. The asymmetry is deliberate: a writing run that guessed
-wrong would leave a proposal standing that nobody asked for, where a preview
-that guessed wrong is read and forgotten.
+cannot read under D55. The asymmetry is deliberate, because a writing run that
+guessed wrong would leave a proposal standing that nobody asked for, where a
+preview that guessed wrong is read and forgotten.
 
 The title is composed the way the aggregate's own subject is composed, off the
 newest due commit's abbreviated control sha, so the line the operator reads
-here is the line the pull request would carry. The supersedes list is read off
-the record rather than off the answer, because the answer is C<undef> for a run
-given no token and the record already holds the one copy every reader takes.
+here is the line the pull request would carry. That composed title is a local
+and never goes onto the record, as C<sync_pull_request>'s is, because the
+record's own C<title> is the aggregate's bare subject and a reader that met the
+composed form there would have to know which kind of run had filled the field.
+The supersedes list is read off the record rather than off the answer, because
+the answer is C<undef> for a run given no token and the record already holds
+the one copy every reader takes.
 
 B<Parameters:>
 
@@ -529,8 +533,8 @@ names.
 =item C<$record>
 
 The walk's per-environment record. Its C<pr> is the pull request object, whose
-C<superseded> is read, and whose C<action>, C<title>, and C<unverified> this
-writes.
+C<superseded> and C<branch> are read and whose C<action> alone this writes. Its
+C<env> names the environment a raised bug reports.
 
 =item C<%opts>
 
@@ -545,10 +549,34 @@ B<Returns:> C<undef>, always, because nothing propagated. The report settles an
 environment with commits due as one that would propagate, and a word written
 here would put a fact about a run that never happened onto the record.
 
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Genesis::CI::PullRequest::preview was handed %s, which the walk composed
+no pull request branch for" >> -- raised via C<bug()> where the record has no
+C<pr>, as C<deliver>'s own guard is, because an environment previewed without
+one is a walk that disagrees with the dispatch about which environments
+deliver this way.
+
+=item *
+
+C<< "Genesis::CI::PullRequest::preview was handed no due commit to title %s's
+pull request from" >> -- raised via C<bug()> where the due list is empty,
+because the title names the newest due commit and a caller with none has
+nothing to preview. C<deliver> answers C<idempotent> above this, so no run in
+the tree reaches it.
+
+=back
+
 B<Examples:>
 
+    # $record->{pr}{superseded} is [7, 4], which deliver copied off the state
+    # before it took this arm
     preview($git, $record, env => $env, commits => \@pending,
-        state => {state => 'closed unmerged', superseded => [7, 4]});
+        state => {state => 'closed unmerged'});
     # says: prod: would title the pull request
     #       [pipeline] control@1a2b3c4 -> prod (supersedes #7, #4)
 

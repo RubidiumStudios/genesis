@@ -43,9 +43,10 @@ subtest 'no environment needs the API, so no client is built' => sub {
 	is($exit, 0, 'the run succeeded');
 	# The report is written to standard error, which is where every other row
 	# in the suite reads a run's own words from.  The environment and its
-	# outcome are pinned to one line: unfolded collapses the whole stream to
-	# a single string, so a pattern spanning the two would match qa's name on
-	# one report line and another environment's word several lines below it.
+	# outcome are pinned to one line, because unfolded collapses the whole
+	# stream to a single string and a pattern spanning the two would match
+	# qa's name on one report line and another environment's word several
+	# lines below it.
 	like($err, qr/^\s*qa: propagated\b/m,
 		'and delivered in direct mode');
 	is(scalar(gh_calls($h->{gh})), 0,
