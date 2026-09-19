@@ -992,11 +992,10 @@ B<Examples:>
     refuse_unreadable('prod', "HTTP 599 - curl failed\n");
     # exits 69, having said what it could not read and what fixes it
 
-=head2 recover_marker($github, $owner_repo, $number [, %opts])
+=head2 recover_marker($pr, %opts)
 
     my ($sha, $drifted) = Genesis::CI::PullRequest::recover_marker(
-        $github, 'acme/ops', $number,
-        pr => $merged, env => 'prod', git => $git, ref => 'prod/bosh');
+        $merged, env => 'prod', git => $git, ref => 'prod/bosh');
 
 Returns the control commit a merged pull request's title or body names for the
 environment in C<env>, and, where the text carries a marker for some other
@@ -1011,50 +1010,46 @@ so and the run carries on, and a squash then rewrites the aggregate's subject
 and body and takes the marker off the branch with them. This is where the run
 gets it back.
 
-The text is read twice, once naming the environment and once not, because a
-text carrying a marker for another environment is a different thing from a
-text carrying none and only the second read tells them apart. Both reads go
-through L<Genesis::CI::Marker>, and the first goes through its recovery arm so
-that the sha comes back resolved against this repository rather than at the
-width the marker was written.
+The text is read twice, once for this environment's marker and once for
+whatever environment the markers in it do name, because a text carrying a
+marker for another environment is a different thing from a text carrying none
+and only the second read tells them apart. Both reads go through
+L<Genesis::CI::Marker>, and the first goes through its recovery arm so that
+the sha comes back resolved against this repository rather than at the width
+the marker was written.
+
+The pull request itself is handed in rather than fetched. The state query
+fetched every closed one before the walk began, so a reader that went back to
+the API for the text would spend a call on an answer the run is already
+holding.
 
 B<Parameters:>
 
 =over 4
 
-=item C<$github>
+=item C<$pr>
 
-The run's C<Service::Github> client, asked only where C<pr> is not given.
-
-=item C<$owner_repo>
-
-The C<owner/repo> pair, asked only where C<pr> is not given.
-
-=item C<$number>
-
-The merged pull request's number, which is how it is found among the closed
-ones where C<pr> is not given.
+The merged pull request as the state query fetched it, read for its C<title>
+and its C<body>.
 
 =item C<%opts>
 
-C<pr> is the pull request the state query already fetched, and handing it in
-is what makes the recovery cost no second call. C<env> is the environment the
-marker has to name. C<git> is the handle the sha is resolved through, and
-C<ref> is the environment's deployment branch, which is named for the reader's
-sake and never walked here. C<base> and C<head> name the branches a fetch
-would filter on, and are read only where C<pr> is absent.
+C<env> is the environment the marker has to name. C<git> is the handle the sha
+is resolved through, and C<ref> is the environment's deployment branch, which
+is named for the reader's sake and never walked here.
 
 =back
 
 B<Returns:> Two values. The control commit and C<undef> where the text carries
-a marker for this environment; C<undef> and the text where it carries one for
-some other environment; and C<undef> twice where it carries none at all or
-where no such pull request could be found.
+a marker for this environment; C<undef> and the text where it carries one
+naming some other environment; and C<undef> twice where it names none at all.
+
+B<Errors:> Raises a bug where no pull request is given, there being nothing
+else the marker could be read out of.
 
 B<Examples:>
 
-    recover_marker($gh, 'acme/ops', 7, pr => $merged, env => 'prod',
-        git => $git, ref => 'prod/bosh');
+    recover_marker($merged, env => 'prod', git => $git, ref => 'prod/bosh');
     # returns ('9f1c...', undef) for a title naming prod
 
 =head2 certified_marker($git, $github, $owner_repo, $record, $state [, %opts])
@@ -1063,15 +1058,20 @@ B<Examples:>
         $git, $github, $owner_repo, $env_record, $state, ref => $ref);
 
 Returns the control commit the environment's deployment branch last received,
-taking it from the branch's own newest marker and falling back to the most
-recently merged pull request's text where the branch carries none. A recovery
-is reported beside the environment's outcome through
-L<Genesis::CI::Report/note_detail> and the pull request it came from is
-recorded under the record's C<pr> as C<recovered>. A marker naming another
-environment is warned about by name and never taken.
+taking it from the branch's own newest marker and falling back to the merged
+pull requests' text where the branch carries none. A recovery is reported
+beside the environment's outcome through L<Genesis::CI::Report/note_detail>
+and nowhere else. A marker naming another environment is warned about by name
+and never taken.
+
+The merged pull requests are asked in the order C<pr_state> hands them over,
+which is the order the API lists them in and so is newest first. The newest
+merge is the one that says where the branch stands now, and an older one taken
+ahead of it would name a commit the branch has already received and send the
+run to propose everything above it a second time.
 
 The branch always answers first, and answers alone where it can, which is why
-the ref the pre-flight settled is passed in rather than composed here: a dry
+the ref the pre-flight settled is passed in rather than composed here. A dry
 run reads the ref a real run would have moved the branch to, and a reader that
 spelled the remote ref itself would answer about a different commit than the
 walk around it.
@@ -1095,8 +1095,8 @@ The C<owner/repo> pair the pull requests were opened against.
 
 =item C<$record>
 
-The environment's record, which is read for C<env> and written to under C<pr>
-and C<outcome_detail> where a recovery happens.
+The environment's record, which is read for C<env> and written to under
+C<outcome_detail> where a recovery happens.
 
 =item C<$state>
 
@@ -1227,35 +1227,6 @@ B<Examples:>
     # returns undef, where nothing was rebuilt and there is nothing to open
 
 =head1 INTERNAL FUNCTIONS
-
-=head2 _envs_named($text)
-
-    my @envs = Genesis::CI::PullRequest::_envs_named($text);
-
-Returns the environments the markers in one text name, sorted and without
-repeats, which is what the warning beside a refused marker reads.
-
-The prefix comes from L<Genesis::CI::Marker> rather than being spelled again
-here, because that module owns the string and two spellings of it are how the
-two come to disagree.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$text>
-
-A pull request's title or body, as the state query fetched it.
-
-=back
-
-B<Returns:> A list of environment names, empty where the text carries no
-marker at all.
-
-B<Examples:>
-
-    _envs_named('[pipeline] control@9f1c2d3 -> qa');
-    # returns ('qa')
 
 =head2 _nothing_due_specs(%args)
 

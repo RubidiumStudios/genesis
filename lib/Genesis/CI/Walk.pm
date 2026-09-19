@@ -1165,9 +1165,9 @@ sub plan {
 			my $marker = $seeding eq 'seeded' ? $base : undef;
 
 			# D52's recovery, which only an environment in pull request mode
-			# can want: a deployment branch takes a commit it did not write
-			# by merge alone, and a merge is the one thing that can drop the
-			# marker on its way in.  The base moves with the marker, because
+			# can want, because a deployment branch takes a commit it did not
+			# write by merge alone and a merge is the one thing that can drop
+			# the marker on its way in.  The base moves with the marker, because
 			# a run that reported the recovery and then walked from before
 			# the environment existed would propose the whole of control
 			# again with the marker in its hand.

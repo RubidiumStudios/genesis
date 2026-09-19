@@ -1,8 +1,14 @@
 #!/usr/bin/env perl
 # Proves T271: a rebase merge lands the aggregate with its marker intact, and
 # where the site could not apply the setting a squash-merged tip takes its
-# marker from the pull request's title and the run reports the recovery.  The
-# third subtest is the drifted marker, which is why the marker is read twice.
+# marker from the pull request's title or body and the run reports the
+# recovery.  The last subtest is the drifted marker, which is why the marker
+# is read twice.
+#
+# The first subtest is green before the recovery exists, and it is here as a
+# guard rather than as a proof.  A rebase merge must go on answering off the
+# branch, so nothing in the recovery may reach an environment that never lost
+# its marker, and the row would go red if it did.
 #
 # Every row stands its environment up with nothing delivered on its branch, so
 # the branch carries no marker of its own and the merge is the only thing that
@@ -70,9 +76,9 @@ subtest 'a squash-merged tip recovers its marker from the pull request' => sub {
 		message => 'Raise the cf instance count');
 
 	# The site could not be given the rebase-only merge method, so the
-	# aggregate went in as a squash: the subject is the merger's own and the
-	# marker the aggregate carried is nowhere on the branch.  The pull request
-	# Genesis opened still says which control commit went in.
+	# aggregate went in as a squash, which means the subject is the merger's
+	# own and the marker the aggregate carried is nowhere on the branch.  The
+	# pull request Genesis opened still says which control commit went in.
 	my $number = gh_pull_request($gh, env => 'prod', head => $pr,
 		base => $h->slug('prod'), review => 'none',
 		title => sprintf('[pipeline] control@%s -> prod', substr($due, 0, 12)));
@@ -91,6 +97,49 @@ subtest 'a squash-merged tip recovers its marker from the pull request' => sub {
 	is(scalar(grep {($_->{method} // '') eq 'POST'} gh_calls($gh)), 0,
 		'no second pull request was opened for it');
 	ok(!remote_sha($h, $pr), 'and no branch was cut for one');
+};
+
+subtest 'the newest merge answers, and its marker may be in the body' => sub {
+	plan tests => 5;
+
+	my $h  = ready(kit => 'omega-v2.7.0', admin => 0, delivered => []);
+	my $gh = $h->{gh};
+	my $pr = $h->pr_branch('prod');
+
+	# The first delivery went in as a squash under its own marker, and the
+	# environment then fell behind again, so the branch has two merged pull
+	# requests behind it and only the newer one says where it stands now.
+	my $first = due_commit($h, 'prod', params => {instances => 2},
+		message => 'Raise the cf instance count');
+	my $older = gh_pull_request($gh, env => 'prod', head => $pr,
+		base => $h->slug('prod'), review => 'none',
+		title => sprintf('[pipeline] control@%s -> prod', substr($first, 0, 12)));
+	gh_merge_pr($gh, $older, method => 'squash');
+
+	# The second went in through the squash form, which offers the merger a
+	# title of its own and collects the aggregate's subject into the body as
+	# a bulleted line, so the marker is in the body and the title carries
+	# none at all.
+	my $second = due_commit($h, 'prod', params => {instances => 3},
+		message => 'Raise it again');
+	my $newer = gh_pull_request($gh, env => 'prod', head => $pr,
+		base => $h->slug('prod'), review => 'none',
+		title => 'Raise it again',
+		body  => sprintf("* [pipeline] control@%s -> prod\n",
+			substr($second, 0, 12)));
+	gh_merge_pr($gh, $newer, method => 'squash');
+	squash_merge($h, 'prod', keep_marker => 0,
+		subject => sprintf('Raise it again (#%d)', $newer));
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	my $said = unfolded($out, $err);
+	is($exit, 0, 'the run succeeded');
+	like($said, qr/recovered the marker for prod from #$newer/,
+		'the newest merged pull request is the one the marker comes from');
+	unlike($said, qr/recovered the marker for prod from #$older/,
+		'and not the oldest, which would re-propose what the branch has');
+	like($said, qr/prod.*idempotent/,
+		'so the environment is caught up rather than delivered again');
 };
 
 subtest 'a marker naming another environment is not taken' => sub {

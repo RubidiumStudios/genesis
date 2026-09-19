@@ -131,6 +131,53 @@ B<Examples:>
   Genesis::CI::Marker::in_text("[pipeline] control\@a1b2c3d -> prod\n", 'qa');
   # returns undef, because the marker is addressed to another environment
 
+=head2 envs_in_text
+
+    my @envs = Genesis::CI::Marker::envs_in_text($body);
+
+The environments the markers in one text name, sorted and without repeats.
+
+This is the other half of what L</in_text> reads, for a caller that has to
+say which environment a marker it refused was addressed to.  It splices the
+same head of the pattern, so the two agree about what counts as a marker, and
+it reads the name off the marker's own second half rather than parsing the
+string a second way.
+
+The names come back sorted and deduplicated, because a squash can collect
+several markers into one body and a caller naming them is telling an operator
+which environments they name rather than how many times each was written.
+
+A marker with no environment on it answers nothing here, where L</in_text>
+called without an environment still counts it.  That difference is the point
+of this reader, because a caller cannot say a marker drifted to somebody
+unless the marker says who.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$text>
+
+A pull request's title or body, a commit message, or any other text.
+C<undef> answers an empty list.
+
+=back
+
+B<Returns:> The environment names as a list, sorted, empty where the text
+names none.  In scalar context, how many there are.
+
+B<Examples:>
+
+  Genesis::CI::Marker::envs_in_text("[pipeline] control\@a1b2c3d -> qa\n");
+  # returns ('qa')
+
+  Genesis::CI::Marker::envs_in_text(
+      "* [pipeline] control\@a1b2c3d -> qa\n* [pipeline] control\@9f1c2d3 -> qa\n");
+  # returns ('qa'), one name however many markers carried it
+
+  Genesis::CI::Marker::envs_in_text('note that a1b2c3d broke the build');
+  # returns ()
+
 =head2 newest
 
     my $sha = Genesis::CI::Marker::newest($git, $ref);

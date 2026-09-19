@@ -16,6 +16,14 @@ our @EXPORT_OK = qw/STAGE RELEASE_STAGE/;
 # goes through this module.
 our $PREFIX = '[pipeline] control@';
 
+# The head of the one regex, which is everything up to and including the
+# control sha.  Both readers of a text splice it rather than writing it again,
+# because a second spelling of the anchor, the bullet, or the sha's width is
+# how two readers of one string come to disagree about what is a marker.  The
+# sha is what it captures, so a reader that wants what follows captures into
+# the group after it.
+our $HEAD = qr/^[ \t]*(?:[-*][ \t]+)?\Q$PREFIX\E([0-9a-f]{4,40})/m;
+
 # The two trailers D49 gives a control commit, and the keys we answer them
 # under.  Genesis-Stage makes the commit a gate and carries the reason, whose
 # hold form reads "hold: <reason>", and Genesis-Release-Stage releases a gate
@@ -93,10 +101,38 @@ sub in_text {
 	my $tail = defined $env ? qr/[ \t]+->[ \t]+\Q$env\E[ \t\r]*$/m : qr/\b/;
 
 	my @written;
-	while ($text =~ /^[ \t]*(?:[-*][ \t]+)?\Q$PREFIX\E([0-9a-f]{4,40})$tail/mg) {
+	while ($text =~ /$HEAD$tail/mg) {
 		push @written, $1;
 	}
 	return wantarray ? @written : $written[0];
+}
+
+# }}}
+# envs_in_text - the environments the markers in one text name {{{
+#
+# The other half of what in_text reads, for a caller that has to say which
+# environment a marker it refused was addressed to.  It shares the head of the
+# pattern with in_text, so the two agree about what a marker is, and it reads
+# the name off the marker's own second half rather than parsing the string a
+# second way.
+#
+# The names come back sorted and deduplicated, because a squash can collect
+# several markers into one body and the operator is being told which
+# environments they name rather than how many times each was written.  A text
+# whose markers name nothing at all answers empty, which is the one reading
+# in_text's environment-free form accepts and this one cannot.
+sub envs_in_text {
+	my ($text) = @_;
+	return () unless defined $text;
+
+	my %named;
+	$named{$2}++ while $text =~ /$HEAD[ \t]+->[ \t]+(\S+)[ \t\r]*$/mg;
+
+	# Sorted into a list first, so a caller asking in scalar context is
+	# answered how many environments were named rather than by whatever sort
+	# happens to hand back where nobody wanted a list.
+	my @named = sort keys %named;
+	return @named;
 }
 
 # }}}
