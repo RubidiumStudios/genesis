@@ -78,6 +78,13 @@ report and the propagation run take that decision from one place. With no token
 nothing is read, no call is made, and the pull request column falls back to the
 environment's proposed record.
 
+The client and that state go into the walk as well, because a deployment
+branch whose pull request went in as a squash carries no marker of its own and
+the merged pull request is the only thing that still says which control commit
+it received. C<genesis propagate> hands the walk the same pair, so a branch
+like that reads caught up in both commands rather than reading in this one as
+though the whole of control were still due.
+
 The record is one deployment root's, and it is the root the command runs in.
 Each root composes its branches from its own deployment slug, so two roots
 that share an environment name hold two separate branches, and one root's
@@ -390,7 +397,8 @@ says the review state is unread and possibly outdated.
 
 A held environment carries the word C<held> and then the qualifier the
 propagation run records for it, which is one of C<needs clearing> with the
-reason, C<awaiting pipeline-apply>, and C<awaiting deployment> with the
+reason, C<awaiting pipeline-apply>, C<awaiting merge> with the number of the
+pull request a reviewer has approved, and C<awaiting deployment> with the
 environment and the commit, followed by the reason the walk gave the held
 commit.  Where an ancestor's undeployed set is what holds that commit, the
 reason carries the ancestor's own state as a clause, so the phrase reads the
@@ -481,11 +489,13 @@ B<Examples:>
 
 =head2 _pull_request_state($top, $scope)
 
-  my $state_of = Genesis::CI::Status::_pull_request_state($top, $scope);
+  my ($github, $state_of) =
+      Genesis::CI::Status::_pull_request_state($top, $scope);
 
 Reads what GitHub says about the pull request of every environment in the
-scope whose policy asks for one, and answers it keyed by environment name. An
-environment the hash holds no key for is one nothing was read about.
+scope whose policy asks for one, and answers the client it built beside that
+state keyed by environment name. An environment the hash holds no key for is
+one nothing was read about.
 
 The client is built by C<Genesis::CI::PullRequest::client_for_run> and the
 state by C<Genesis::CI::PullRequest::pr_state>, so the decision about when a
@@ -513,12 +523,14 @@ the branch the pull request is opened from.
 
 =back
 
-B<Returns:> a hashref of environment name to the state C<pr_state> answered,
-empty where there is no token, no client, or no environment wanting one.
+B<Returns:> the client it built and a hashref of environment name to the state
+C<pr_state> answered. The client is undefined and the hashref empty where there
+is no token, no client, or no environment wanting one.
 
 B<Examples:>
 
-  my $state_of = Genesis::CI::Status::_pull_request_state($top, $scope);
+  my ($github, $state_of) =
+      Genesis::CI::Status::_pull_request_state($top, $scope);
   # {qa => {state => 'approved', number => 42, url => '...', superseded => []}}
 
 
