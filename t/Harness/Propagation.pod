@@ -1403,10 +1403,26 @@ that file's content as C<manifest>.  The content is copied aside as the call
 is made rather than read when a row asks, because the manifest a deploy hands
 BOSH is a temporary file that the deploy has already taken away by then.
 
+The copy is taken from the last argument of every subcommand and not of
+C<deploy> alone.  The double does not know which subcommands carry a manifest,
+so it asks the one question it can answer of any call, which is whether the
+last argument names a file it can read, and copies that file where it does.  A
+row reading C<manifest> off a call therefore reads whatever file that call
+ended with, and every other call carries no C<manifest> key at all.
+
 The log is written by the double and not by the harness, because only the
 double can see a call a spawned genesis made, and it is kept for the life of
 the harness rather than emptied per run, the way C<vault_read_log> is.  A row
 that deploys twice therefore reads both calls and asks for the last of them.
+
+A second C<fixture_bosh> on the same harness empties the log and keeps the
+directory the copies live in.  Each copy is filed under the ordinal the log's
+line count gave the call it came from, so emptying the log restarts the
+ordinals, and a copy from before the second builder stands until a call of the
+same ordinal is made and takes its place.  A row that stands the builder up
+twice and then reads a C<manifest> is reading the newer call's file wherever
+one has been made, which is why a row asserting what an earlier run handed
+BOSH reads it before the second builder rather than after.
 
 =head2 fixture_preflight($h, $kind, %opts)
 
