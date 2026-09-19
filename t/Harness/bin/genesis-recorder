@@ -65,8 +65,8 @@ if (defined $plan->{exit}) {
 			# could not happen, and perl cannot see that, so it warns
 			# about a statement it thinks is unreachable on every run
 			# this fixture takes part in.  The warning goes to the
-			# stderr rows in other files read, so it is turned off for
-			# the two lines it is about and nowhere wider.
+			# stderr that rows in other files read, so it is turned
+			# off for the two lines it is about and nowhere wider.
 			no warnings 'exec';
 			exec {$plan->{real}} $plan->{real}, @ARGV;
 			POSIX::_exit(127);
