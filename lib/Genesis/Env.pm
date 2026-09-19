@@ -3530,9 +3530,12 @@ sub dependencies_read {
 # README's table fixes and not a second read of the set.
 #
 # An environment with no record at all, and one whose vault cannot be reached,
-# both answer undef here rather than raising, because the one caller is the
-# branch-class gate and a gate that bailed would refuse a command over a
-# question the command itself is about to answer better.
+# both answer undef here rather than raising, because neither of the two
+# callers wants a raise.  One is the branch-class gate, and a gate that bailed
+# would refuse a command over a question the command itself is about to answer
+# better.  The other is warn_uncertified_secrets_target below, which has
+# nothing to say about an environment it cannot read a record for and says
+# nothing rather than taking a command down at the end of its work.
 sub deployed_record {
 	my ($self) = @_;
 	my $deployment = eval { $self->with_vault->deployments->latest_successful }
@@ -3542,8 +3545,9 @@ sub deployed_record {
 	# named readers.  They were state and dated, and both were dead: the
 	# deployment deletes state as it is constructed, turning it into the
 	# result, and no record carries a dated field at all.  A reader asking for
-	# either was answered undef every time and nothing noticed, because the
-	# one caller reads the commit and nothing else.
+	# either was answered undef every time and nothing noticed, because no
+	# caller reads a timestamp.  The gate reads git.commit, the secrets
+	# warning reads git.control_commit, and neither has ever asked for a date.
 	return {
 		git => {
 			commit         => $deployment->lookup('git.commit'),
@@ -3578,7 +3582,7 @@ sub warn_uncertified_secrets_target {
 	return 0 if $served_control eq $certified;
 
 	$self->notify(warning =>
-		"The secrets just written are for control@#C{%s}, which is not the ".
+		"The secrets this run served are for control@#C{%s}, which is not the ".
 		"certified commit control@#C{%s} that #C{%s} is running.\n\n".
 		"If #C{%s} is redeployed before it deploys the newer commit, it will ".
 		"run the version it is running now against these values.  Deploy ".
