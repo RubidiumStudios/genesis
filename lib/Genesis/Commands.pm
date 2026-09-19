@@ -538,7 +538,7 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	);
 } # }}}
 
-# deployed_target - resolve the commit this run targets, or undef for the tip {{{
+# deployed_target - the commit this run targets, or undef for the tip {{{
 #
 # Under D87 a deployed-state command declares its default target at its
 # registration, and the two flags select the deployed commit where the default
@@ -575,6 +575,40 @@ sub deployed_target {
 		);
 	}
 
+	# The environment's file has to be in the tree before an environment can
+	# be built on it.  Genesis::Env->bare runs the name and file-existence
+	# checks, so a name whose file is not here dies there, and an operator
+	# standing on one environment's deployment branch and naming another is
+	# in exactly that state, because a deployment branch carries its own
+	# environment file and no other.  A run that resolved its target from its
+	# registration's default is not asking for the deployed commit in so many
+	# words, so it yields and the gate switches to the branch, where the file
+	# it wants is the one that was delivered.  A run that named a flag asked
+	# outright, and is told why the answer cannot be given here.
+	#
+	# The guard is a file test rather than an eval around the builds below.
+	# An eval catches every way a build can fail, and a vault the repository
+	# cannot reach is one of them, so a run whose vault is down would quietly
+	# take the tip instead of saying so.  The one state that has to be told
+	# apart here is a file that is not in this tree, and a file test asks
+	# that and nothing else, which leaves every other failure loud.
+	unless (-f $top->path("$name.yml")) {
+		return undef unless $flagged;
+
+		my $branch = $top->branch_for($name);
+		bail(
+			{exitcode => CONFIG},
+			"Refusing to target the deployed commit for #C{%s}.\n\n".
+			"There is no #C{%s.yml} in the tree you are standing on, so there ".
+			"is no environment here to read a deployed commit for.  That file ".
+			"travels on control and on the environment's own deployment ".
+			"branch, #C{%s}, and the branch you are on carries neither.\n\n".
+			"Stand on #C{%s}, or on #C{%s}, and run the command again.  ".
+			"Nothing was changed.",
+			$name, $name, $branch, $top->control_branch, $branch
+		);
+	}
+
 	# Reading the record and answering the commit is D87's other half.  The
 	# bare environment that reader needs is built here, below the question
 	# and below the refusal, so that a run which named no flag never builds
@@ -583,8 +617,8 @@ sub deployed_target {
 	#
 	# The root the gate keeps carries no vault, because it is loaded with
 	# no_vault so that reading a command's class announces no vault target,
-	# which is a side effect a gate has no business having.  The record is in the
-	# vault, so it is read through a root loaded again with the vault the
+	# which is a side effect a gate has no business having.  The record is in
+	# the vault, so it is read through a root loaded again with the vault the
 	# repository configures, which is the root the command itself is about
 	# to load a moment later and is paid for only by a run that named the
 	# deployed commit.
@@ -783,10 +817,10 @@ sub _gate_deployed_state {
 	# registration means the deployed commit, asked for one commit and not
 	# for another, and the branch the operator happens to be standing on is
 	# no answer to that, because the tip of the branch is where they are
-	# standing while the deployed commit is what they asked for.  So the arm is for the
-	# runs that mean the tip, which is every run that resolved no target, and
-	# a plain deploy is one of them, which is what leaves I3's edit in place
-	# deployable from the branch itself.
+	# standing while the deployed commit is what they asked for.  So the arm
+	# is for the runs that mean the tip, which is every run that resolved no
+	# target, and a plain deploy is one of them, which is what leaves I3's
+	# edit in place deployable from the branch itself.
 	if (!defined($opts{target}) && ($git->current_branch // '') eq $branch) {
 		info(
 			"Already standing on #C{%s}, so no branch change is made and this ".
@@ -868,7 +902,19 @@ sub _gate_deployed_state {
 	# classifies the failures a git command otherwise hides (D80).  Asked
 	# first, a repository git declines to trust would answer with the
 	# listing's complaint instead of the pre-flight's sentence.
-	unless (branch_carries_repository($top, $git, $branch)) {
+	#
+	# It yields to a resolved target, the way the standing-on-the-branch arm
+	# above it does, and for the same reason.  The question here is what the
+	# branch carries now, and a run that resolved a target is not switching
+	# onto what the branch carries now.  It switches onto the commit its
+	# record names, and that commit carried the repository when it was
+	# deployed whatever a rewrite has since done to the branch.  A commit
+	# this repository no longer holds is refused by switch under D94, which
+	# names the commit and the record, and that is the refusal such an
+	# operator needs rather than a sentence about a branch waiting for a
+	# delivery.
+	if (!defined($opts{target})
+			&& !branch_carries_repository($top, $git, $branch)) {
 		# Where no move was made, the distance goes into the line instead, so
 		# an operator reads whether they are waiting for a propagation or for
 		# a pull of their own.
@@ -897,8 +943,8 @@ sub _gate_deployed_state {
 	# asks whether a commit is here before it moves anything and refuses at
 	# DATAERR where it is not, and D94 has that refusal name the record as
 	# well as the commit.  A run standing on the branch tip carries none,
-	# which is right: a branch is not read out of a record, and switch asks
-	# the question of a commit alone.
+	# which is right, because a branch is not read out of a record and switch
+	# asks the question of a commit alone.
 	$session->switch($opts{target} // $branch, record => $opts{record});
 
 	# The directory now holds another branch's files, so the root the gate
