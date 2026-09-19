@@ -1549,10 +1549,15 @@ sub _spawn_propagate_child {
 		$status;
 	};
 
+	# The deploy stands whatever the child did, so the warning says both
+	# things, and the retry it names is the bare run of D36, because one
+	# propagate run walks control for every environment and an argument
+	# naming this one would say something the command no longer takes.
 	warning(
-		"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
-		"run #C{genesis propagate %s} manually to retry.",
-		$rc, $env->name
+		"Propagation failed (rc=%d).  Deploy itself succeeded and is\n".
+		"complete, and nothing downstream of it has moved.\n\n".
+		"Run #C{genesis propagate} to retry it.",
+		$rc
 	) if $rc != 0;
 
 	return $rc;
