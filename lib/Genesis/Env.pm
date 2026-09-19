@@ -5369,8 +5369,24 @@ sub _post_deploy {
 		);
 	}
 
+	# The exit stays, because it is the only thing withholding the propagate
+	# child from a dry run.  _propagate_after_deploy asks nothing about a dry
+	# run, so a return here would hand one a child that carried a downstream
+	# branch forward on the strength of a deployment nobody made.
+	#
+	# The session is finished first, though, because this exit never reaches
+	# the finish the tail of this method makes and never returns to the
+	# branch class either.  Left open, the session's last-resort net aborts
+	# it on the way out and says so on stderr, since the status a dry run
+	# leaves behind is zero and on a zero status nothing else has explained
+	# why the branch moved.  An operator who asked what a deploy would do was
+	# then told about a session they never opened.  A dry run writes nothing,
+	# so the tree is clean and the finish is the whole of what is owed; a
+	# deploy that was given no session asserts nothing here, as everywhere
+	# else on this path.
 	if ($opts{"dry-run"}) {
 		$self->notify("dry-run deployment complete; post-deployment activities will be skipped.");
+		$opts{session}->finish_if_clean if $opts{session};
 		exit 0;
 	}
 

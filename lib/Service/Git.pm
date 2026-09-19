@@ -397,27 +397,6 @@ sub checkout_detached {
 }
 
 # }}}
-# checkout_one_way - the branch change that means to stay there {{{
-#
-# The allowance, and it was always temporary.  Three call sites once moved
-# onto a branch and deliberately stayed on it, and a session would have put
-# all three back, which is the opposite of what they meant, so each came
-# through here rather than through checkout while it waited for the step that
-# decided what returning should mean.  The deploy's two went when it began
-# switching inside the session the gate opens, and the last, the post-deploy
-# hand-off onto control, went when the hand-off moved after that session's
-# finish and the child started taking the switch lock for itself.
-#
-# Nothing calls this now, and t/unit-tests/service_git_session-one_door.t
-# asserts that the allowance is empty, so the guard on the one door stands
-# with nothing outside it.
-sub checkout_one_way {
-	my ($self, $branch) = @_;
-	local $self->{_in_session} = 1;
-	return $self->checkout($branch);
-}
-
-# }}}
 # create_branch - create a new branch at the given ref (default HEAD) {{{
 sub create_branch {
 	my ($self, $name, $ref) = @_;

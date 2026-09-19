@@ -21,9 +21,10 @@
 #
 # The commit the child carries downstream is due_on_control's, which touches
 # both environment files and is delivered to qa alone before the deploy runs.
-# That is the cascade in miniature: the deploy certifies it for qa, and the
-# hold on prod, whose predecessor was waiting to deploy the files that commit
-# touches, is released by the certification the deploy has just written.
+# That is the cascade in miniature, where the deploy certifies it for qa, and
+# the hold on prod, whose predecessor was waiting to deploy the files that
+# commit touches, is released by the certification the deploy has just
+# written.
 #
 # The lock-probe hook is installed after that shape rather than through it,
 # because the probe's path is the harness's own and cannot be named before
@@ -32,10 +33,11 @@
 # a tracked modification that aborts the finish it is watching.
 #
 # The second subtest runs from a branch of the operator's own rather than
-# from control, which is the step file's own placement.  M13 ruling 49 is
-# the reason: the hand-off we inherit checks control out after the session
-# has already restored the operator, and an operator who started on control
-# cannot tell that apart from having been put back.
+# from control, which is the step file's own placement.  The reason is that
+# the hand-off we inherit checks control out after the session has already
+# restored the operator, so an operator who started on control is standing
+# where that checkout leaves them and cannot tell it apart from having been
+# put back.
 use strict;
 use warnings;
 use utf8;
@@ -217,13 +219,19 @@ subtest 'neither process asks the request queue for anything' => sub {
 		'neither the deploy nor its child put a request to the queue');
 };
 
-# The three properties the sub already had and the move carries across, each
-# guarded here rather than dropped and put back later.  What is genuinely new
-# about each of the three belongs to a later task: the terminal a run has to be
-# given before the closed standard input discriminates anything, the wording of
-# the retry sentence, and the hand run that catches the withheld propagation up.
-subtest 'the move carries the three properties across' => sub {
-	plan tests => 5;
+# Two of the properties the sub already had, guarded here rather than dropped
+# and put back later.  What is genuinely new about each belongs to a later
+# step, which is the wording of the retry sentence and the hand run that
+# catches the withheld propagation up.
+#
+# The third property, the child's closed standard input, is guarded in
+# t/integration-tests/genesis_commands_env-child_non_interactive.t instead,
+# together with the publish question that redirect is there to keep from
+# being asked.  A row here would have said only that the child was handed no
+# terminal, which is true of every command this suite spawns whether the
+# redirect is there or not.
+subtest 'the move carries the two properties across' => sub {
+	plan tests => 4;
 
 	my $flagged = chained_harness();
 	child_recorder($flagged, probe => 1);
@@ -246,13 +254,6 @@ subtest 'the move carries the three properties across' => sub {
 		or diag("what the deploy said:\n$warned");
 	like(unfolded($warned), qr/Propagation failed \(rc=3\)/,
 		'and the operator was told the child failed, with its status');
-
-	# A guard that cannot fail while the suite runs with its own standard
-	# input already closed, which is what Task 15.2 gives a terminal so that
-	# it can.  It is here so that a move which dropped the redirection has
-	# something of this shape to answer to.
-	my ($child) = child_runs($failing);
-	ok(!$child->{stdin_is_tty}, 'the child was handed no terminal');
 };
 
 # vim: ts=2 sw=2 sts=2 noet

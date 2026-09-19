@@ -201,6 +201,36 @@ subtest 'a deploy that opens no session still refuses a dirty tree' => sub {
 	is_deeply(\@writes, [], 'and refusing before its first write');
 };
 
+subtest 'a dry run under a pipeline leaves no session behind' => sub {
+	plan tests => 2;
+
+	# A dry run leaves the post-deploy work through an exit of its own,
+	# ahead of the finish that every other path reaches, so the session was
+	# still open when the process went and the session's last-resort net
+	# aborted it on the way out.  The net speaks whenever the status is
+	# zero, because on a zero status nothing else has explained why the
+	# branch moved, and an operator who asked what a deploy would do was
+	# told instead about a session they never opened.
+	my $h = seeded_harness();
+	fixture_bosh($h);
+	run({dir => $h->a}, 'git', 'checkout', '-b', 'wip/a-change');
+	stand_on($h, 'wip/a-change');
+
+	# The restoration is left to the rows above, which is why this one passes
+	# restore => 0.  The same early exit skips the deploy's own cleanup of
+	# its cache directory, so a dry run ends with .genesis/deploy-cache and
+	# the dev kit standing in the tree untracked.  Neither the session nor
+	# D84 answers for an untracked file, and this row is about the session,
+	# so reading those two directories here would be reading a second
+	# question through the first.
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
+		'qa', 'deploy', '--dry-run', '-y', 'a reason');
+	is($exit, 0, 'the dry run succeeded')
+		or diag("what the dry run said:\n$err");
+	unlike($err, qr/exited with a branch session still open/,
+		'and said nothing about a session it had left open');
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet
