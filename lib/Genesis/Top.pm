@@ -1126,6 +1126,19 @@ sub manual_pipeline {
 }
 
 # }}}
+# recreate_on_deploy - when this repository recreates VMs on a deploy {{{
+#
+# D101: never, redeploy-only, or always, repository-wide rather than per
+# environment, because a key that changes how a deployment progresses has to
+# be uniform or the earlier environments stop rehearsing the later ones.  It
+# has no capability behind it, since --recreate is a BOSH flag and not a
+# provider feature.
+sub recreate_on_deploy {
+	my ($self) = @_;
+	return $self->config->get('pipeline.recreate_on_deploy') // 'never';
+}
+
+# }}}
 # control_branch - the name of the branch that is control {{{
 #
 # The one reader of pipeline.source_control.control_branch, under D19.

@@ -914,6 +914,13 @@ Stands up the three things a deploy has to reach before it finishes, so a row
 can assert what a deploy did rather than only what it refused, and returns the
 harness.
 
+Every call the double answers is written down as it is made, and C<bosh_runs>
+reads those calls back, so a row can assert the argument list a deploy handed
+BOSH rather than only what the deploy said about it.  The log and the
+manifests it points at sit under the harness's own scratch directory and are
+kept for the life of the harness, so a row that deploys twice reads the second
+call against the first.
+
 The first is a C<bosh> on C<GENESIS_BOSH_COMMAND>.  It answers C<env>,
 C<configs>, and C<config> with the tables C<Service::BOSH::Director> reads,
 answers C<deploy> with a success line, hands C<interpolate> to the real
@@ -1380,6 +1387,26 @@ appears as the record's path while a read of a single field appears as
 C<path:key>, which is how C<Service::Vault::get> asks for one field.  A row
 counting reads of a whole record matches the path, and a row counting keyed
 reads matches the longer form.
+
+=head2 bosh_runs($h, %opts)
+
+Every call the harness director answered, in order, each a hashref, and an
+empty list where no C<fixture_bosh> was stood up or the log is not there yet.
+C<command> narrows the answer to one subcommand, so a row asking what a deploy
+was given passes C<command =E<gt> 'deploy'>, and a row that names none is
+handed every call.
+
+Each call holds the subcommand as C<command> and the whole argument list as
+C<argv>, which is what the double was invoked with rather than what it made of
+it.  A call whose last argument named a file the double could read also holds
+that file's content as C<manifest>.  The content is copied aside as the call
+is made rather than read when a row asks, because the manifest a deploy hands
+BOSH is a temporary file that the deploy has already taken away by then.
+
+The log is written by the double and not by the harness, because only the
+double can see a call a spawned genesis made, and it is kept for the life of
+the harness rather than emptied per run, the way C<vault_read_log> is.  A row
+that deploys twice therefore reads both calls and asks for the last of them.
 
 =head2 fixture_preflight($h, $kind, %opts)
 
