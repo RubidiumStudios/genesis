@@ -74,6 +74,12 @@ other.  Nothing here writes, so C<genesis propagate --dry-run> and
 C<genesis pipeline-status> render one record and can never disagree about
 what a repository is holding.
 
+An environment in pull request mode whose branch carries no marker is asked
+once more, through L<Genesis::CI::PullRequest/certified_marker>, because a
+squashed merge can take the marker off a branch that did receive the commit.
+Where the merged pull request names one, the walk starts there and the run
+says beside that environment's outcome which pull request it came from.
+
 An environment with no settled branch is recorded and passed over, since only
 C<genesis pipeline-apply> cuts a deployment branch.  An environment that will
 not load, or whose vault this run cannot read, is recorded with its reason in
@@ -162,6 +168,27 @@ out reads the state here.  It may not be given beside C<provider> or
 C<refreshed>, which are the two options that shape a read this call would not
 then make.
 
+=item C<github>
+
+Optional.  The run's C<Service::Github> client, where it built one.  It is
+read for one thing alone, which is D52's recovery: an environment in pull
+request mode whose deployment branch carries no marker takes one from the
+pull request that merged into it.  A call that leaves it out walks such a
+branch from before the environment was introduced, exactly as this walk
+always did.
+
+=item C<owner_repo>
+
+Optional.  The C<owner/repo> pair the pull requests were opened against,
+which goes with C<github> and is read only beside it.
+
+=item C<state_of>
+
+Optional.  What C<Genesis::CI::PullRequest::pr_state> answered for each
+environment in pull request mode, keyed by environment name.  The recovery
+reads the merged pull requests out of it, so the run asks the API once for
+the whole run rather than once more here.
+
 =item C<refreshed>
 
 Optional, default 1.  Whether the remote-tracking refs this walk reads were
@@ -185,7 +212,9 @@ C<divergence>, C<discovery>, C<error>, C<outcome>, and C<outcome_detail>.
 C<pr> is a hashref carrying the pull request branch under C<branch> for an
 environment whose policy asks for a pull request, and C<undef> for every
 other, so a reader can tell which environments deliver that way without
-asking the topology again.
+asking the topology again.  It also carries C<recovered>, the number of the
+merged pull request this walk took the environment's marker from, where it
+took one from anywhere but the branch.
 
 B<Errors:> Raises a bug where no git handle is given, since every reading
 below is made through one and a walk without it can answer nothing.

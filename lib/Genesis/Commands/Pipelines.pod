@@ -425,6 +425,12 @@ is, so a new environment receives its own history rather than one baseline
 taken from control's tip.  There is no separate seeding step, and the run
 cuts no branches: C<genesis pipeline-apply> is the one command that does.
 
+A branch in pull request mode that carries no marker is asked once more
+before the walk starts from the beginning, because a squashed merge takes
+the marker off a branch that did receive the commit.  The run reads it back
+out of the pull request that merged, which Genesis wrote itself, and says
+beside that environment's outcome which pull request it came from.
+
 The run takes no argument.  A run that is handed one is a usage error,
 because the C<E<lt>envE<gt>> argument went with the cascade it scoped under
 D36, and a commit held behind an ancestor is released by the next bare run

@@ -744,6 +744,119 @@ sub refuse_unreadable {
 }
 
 # }}}
+# recover_marker - the marker a merged pull request's title or body carries {{{
+#
+# D52 makes rebase the only merge method for a pull request into a deployment
+# branch, so the aggregate lands unchanged and its marker lands with it.  Where
+# the site could not grant the setting, a squash rewrites the subject and the
+# body, and the marker is taken back from a pull request Genesis itself wrote,
+# so nothing is invented.  The text was already fetched for the review state,
+# so the recovery costs the run no second call.
+#
+# The text is read twice, once naming the environment and once not.  A text
+# carrying a marker for another environment is a different thing from a text
+# carrying none, and only the second read tells them apart, so the caller can
+# say which of the two it met rather than silently taking the wrong one.
+#
+# Both reads go through Genesis::CI::Marker, which is the one reader of the
+# marker, and the first goes through its recovery arm so that the sha comes
+# back resolved against this repository.  An abbreviated sha would compare
+# false against the certified commit and read as pending-deploy on a branch
+# that is up to date.  The walk of the ref is capped at nothing, because the
+# ref was walked already by the caller and what is wanted here is the text.
+sub recover_marker {
+	my ($github, $owner_repo, $number, %opts) = @_;
+
+	my $pr = $opts{pr};
+	unless ($pr) {
+		my $all = $github->closed_prs($owner_repo, $opts{base}, $opts{head});
+		($pr) = grep {$_->{number} == $number} @$all;
+	}
+	return (undef, undef) unless $pr;
+
+	my @texts = grep {defined && length} ($pr->{title}, $pr->{body});
+	for my $text (@texts) {
+		my $mine = Genesis::CI::Marker::newest($opts{git}, $opts{ref},
+			limit => 0, recover_from => $text, env => $opts{env});
+		return ($mine, undef) if $mine;
+	}
+	for my $text (@texts) {
+		my $any = Genesis::CI::Marker::in_text($text);
+		return (undef, $text) if defined $any;
+	}
+	return (undef, undef);
+}
+
+# }}}
+# certified_marker - the branch's marker, or the one a merge recovered {{{
+#
+# The walk starts an environment from the newest marker its deployment branch
+# carries, so a tip that merged a known pull request without one would start
+# again from before the environment existed and propose everything a second
+# time.  This is the only place a marker comes from anywhere but the branch,
+# and the run says so out loud when it happens.
+#
+# The branch is asked first and answers alone where it can, which is why the
+# ref the walk settled is passed in rather than composed here: a dry run reads
+# the ref a real run would have moved the branch to, and a reader that spelled
+# the remote ref itself would answer about a different commit than the walk.
+#
+# The merged pull requests are taken newest last, as the API lists them, so the
+# most recent merge is asked before an older one.
+sub certified_marker {
+	my ($git, $github, $owner_repo, $record, $state, %opts) = @_;
+
+	my $ref = $opts{ref} // $record->{branch};
+
+	my $marker = Genesis::CI::Marker::newest($git, $ref);
+	return $marker if $marker;
+	return undef unless $github && $state;
+
+	for my $merged (reverse @{$state->{merged} || []}) {
+		my ($sha, $drifted) = recover_marker($github, $owner_repo,
+			$merged->{number}, pr => $merged, env => $record->{env},
+			git => $git, ref => $ref);
+		if ($sha) {
+			$record->{pr}{recovered} = $merged->{number};
+			note_detail($record, sprintf(
+				'recovered the marker for %s from #%d',
+				$record->{env}, $merged->{number}));
+			return $sha;
+		}
+		next unless defined $drifted;
+
+		# A marker for another environment is not this one's, and saying so is
+		# the difference between a branch that lost its marker in a squash and
+		# a branch somebody merged the wrong pull request into.
+		warning(
+			"The merged pull request #%d for #C{%s} carries a marker, but it ".
+			"names #C{%s} rather than #C{%s}, so it is not taken as this ".
+			"environment's marker.",
+			$merged->{number}, $record->{env},
+			join(', ', _envs_named($drifted)), $record->{env}
+		);
+	}
+	return undef;
+}
+
+# }}}
+# _envs_named - the environments a drifted marker names {{{
+#
+# The prefix comes from Genesis::CI::Marker rather than being spelled again
+# here, because that module owns the string and two spellings of it are how the
+# two come to disagree.  The names come back sorted and deduplicated, since a
+# squash can leave several markers in one text and the operator is being told
+# which environments they name rather than how many times each was written.
+sub _envs_named {
+	my ($text) = @_;
+	my $prefix = $Genesis::CI::Marker::PREFIX;
+
+	my %named;
+	$named{$1}++ while $text =~ /\Q$prefix\E[0-9a-f]{4,40}[ \t]+->[ \t]+(\S+)/g;
+	return sort keys %named;
+}
+
+# }}}
 # title_for - the aggregate's subject, with the supersedes list where there is one {{{
 #
 # D49 puts the marker in the title as well as in the subject, so a squash merge
