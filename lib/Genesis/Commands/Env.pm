@@ -1456,6 +1456,13 @@ sub deploy {
 	}
 
 	$options{'disable-reactions'} = ! delete($options{reactions});
+
+	# The one reader of the redeploy question answers here, where the command
+	# line is in scope, and the answer travels down with the rest of the
+	# options as a fact.  Genesis::Env imports current_command and
+	# known_commands from Genesis::Commands and cannot ask has_option itself,
+	# so what it gets is an answer rather than a second place to ask.
+	$options{redeploy} = redeploy_wanted($top, \%options);
 	my $env = $top->load_env($env_name)->with_vault()->with_bosh();
 
 	# Everything a pipeline deploy asks, it asks in the pre-flight above.
