@@ -115,13 +115,14 @@ sub status_records {
 		control   => $control,
 		read_only => 1);
 
-	# The scope, composed once here through the walk's own reader and handed
-	# to the walk below, so the pull request branch this report asks GitHub
+	# The scope, composed here through the walk's own reader and handed to
+	# the walk below, so the pull request branch this report asks GitHub
 	# about is the branch the walk matches and the branch a run would open.
-	# One composition answers both, which is what keeps the two from
-	# disagreeing about a name and keeps the topology from being built twice,
-	# since composing the scope reads every environment file and
-	# Genesis::Top::pipeline_topology memoises none of that work.
+	# One composition answers both, so the two cannot disagree about a name
+	# and the walk composes no scope of its own.  The topology behind it is
+	# still built more than once a run, since pipeline_env_names above asks
+	# for it too and Genesis::Top::pipeline_topology memoises none of that
+	# work, and that is a cost for whoever takes the reader on next.
 	my @composed = Genesis::CI::Walk::scope_for($top, scope => $opts{scope});
 	my ($github, $pr_state_of) = _pull_request_state($top, $composed[0]);
 
@@ -521,12 +522,14 @@ sub render_tree {
 # This command never refuses on any of it.  Ruling 49 leaves pipeline-status
 # one refusal, which is the disowned pipeline, and D57 already has the column
 # report a proposed record flagged as possibly outdated where no token was
-# there to validate it with.  An API that will not answer and a repository
-# that resolves no owner and repository pair are therefore rendered the same
-# way, and the run says once why nobody asked GitHub anything.  A writing run
-# still refuses on both, because a run about to open a pull request branch
-# cannot guess what a reviewer decided, which is why the refusal closures are
-# handed in from here rather than softened where they live.
+# there to validate it with.  All three refusals the two subs below raise are
+# therefore rendered that same way, which are an API that will not answer, a
+# repository that resolves no owner and repository pair, and a token GitHub
+# will not name an owner for, and the run says once which of them it met.  A
+# writing run still refuses on all three, because a run about to open a pull
+# request branch cannot guess what a reviewer decided, which is why the
+# refusal closure is handed in from here rather than softened where the
+# refusals live.
 sub _pull_request_state {
 	my ($top, $scope) = @_;
 
@@ -535,15 +538,31 @@ sub _pull_request_state {
 
 	# What the run would have refused on, in this command's own words rather
 	# than the refusal's, because those are written for somebody who was
-	# about to write a branch.  The first one is kept and the rest are the
-	# same story about the same API, and the exit code is what says which of
-	# the two it was.
+	# about to write a branch.  The first one is kept, since a second refusal
+	# is the same story about the same API told again.
+	#
+	# Three refusals arrive here and each gets its own clause, because what
+	# an operator does about an API that went quiet, about a repository that
+	# names no pair, and about a token GitHub will not name an owner for are
+	# three different things.  The exit code tells the unreadable API from
+	# the other two, and the pair itself tells those two apart, which costs
+	# nothing because the source control block resolves once and keeps its
+	# answer.
+	#
+	# Every refusal inside Genesis::CI::PullRequest hands a hashref of
+	# options first, which is the contract this closure is written to, and
+	# anything else is read as the configuration case rather than taken
+	# apart as a hashref and died on.
 	my $unconsulted;
 	my $refuse = sub {
 		my ($spec) = @_;
-		$unconsulted //= (($spec->{exitcode} // 0) == UNAVAILABLE)
+		my $code = ref $spec eq 'HASH' ? ($spec->{exitcode} // 0) : 0;
+		$unconsulted //= $code == UNAVAILABLE
 			? 'GitHub did not answer'
-			: 'The GitHub settings this repository needs are not in place';
+			: $top->source_control_repository
+				? 'GitHub named no owner for the token this run carries'
+				: 'This repository delivers into pull requests and resolves '.
+				  'no owner and repository pair';
 		return;
 	};
 

@@ -87,8 +87,10 @@ would with no token at all.
 
 The scope goes to the walk as the pair C<Genesis::CI::Walk::scope_for>
 answered, because this command composes it first to learn which pull request
-branch to ask about, and composing it a second time inside the walk would
-build the whole topology twice on every run.
+branch to ask about, so the walk composes none of its own and the two cannot
+disagree about a branch name. The topology under it is still built more than
+once a run, since the pre-flight's environment list asks for it as well, and
+nothing memoises it.
 
 The client and that state go into the walk as well, because a deployment
 branch whose pull request went in as a squash carries no marker of its own and
@@ -535,13 +537,14 @@ which is false of a command that writes nothing, and a missing token is the
 fallback the pull request column is built for rather than something to warn an
 operator about.
 
-Neither refusal the two subs raise ends this command. Both take a closure that
-records why the API went unasked and returns, so an API that will not answer
-and a repository that resolves no C<owner/repo> pair each leave the report
-standing. The run then says once, on standard error, why nobody asked GitHub
-anything, and every environment the client would have served renders as the
+No refusal the two subs raise ends this command. Both take a closure that
+records why the API went unasked and returns, so an API that will not answer,
+a repository that resolves no C<owner/repo> pair, and a token GitHub will not
+name an owner for each leave the report standing. The run then says once, on
+standard error, which of the three it met and what the column is reading
+instead, and every environment the client would have served renders as the
 no-token case does, reading its proposed record and flagged as possibly
-outdated. C<genesis propagate> still refuses on both paths, because a run that
+outdated. C<genesis propagate> still refuses on all three, because a run that
 is about to write a pull request branch cannot guess what a reviewer decided.
 
 B<Parameters:>
