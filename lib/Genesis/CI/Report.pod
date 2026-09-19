@@ -54,10 +54,12 @@ run did not happen, and the commit's is composed as the line is printed,
 because nothing writes a per-commit outcome until the publish does.
 
 The module also declares C<AWAITING_APPLY>, which is the qualifier an
-environment the pipeline has never been applied to carries.  It is a constant
-rather than a phrase each caller spells, because C<genesis propagate> meets
-that state before the walk has anything to say about the environment and
-writes the record's detail through this name.
+environment the pipeline has never been applied to carries, and one with no
+deployment branch on either side carries with it.  It is a constant rather
+than a phrase each caller spells, because L</held_qualifier> is the one thing
+that answers it: C<genesis propagate> meets the branchless environment before
+the walk has anything to say about it and carries on past it without writing
+a word.
 
 =head1 FUNCTIONS
 
@@ -147,6 +149,13 @@ somebody made for a reason the pipeline cannot see and only a person clears
 it, so it outranks whatever the commits underneath it happen to be waiting
 for.
 
+A record carrying no certified state at all is read ahead of even that, and
+so outranks the standing hold.  The walk fills the certified state for every
+environment it reads and applies a hold only once it has, so no record the
+walk builds carries a hold and no certified state together; the reading order
+is what keeps the branchless environment's own phrase answerable at all,
+since that absence is the only thing the record has to say about it.
+
 It answers the qualifier alone rather than the whole phrase.  The bare word
 C<held> is the record's outcome and the qualifier is what stands beside it in
 C<outcome_detail>, and L</render_run> reads the two back into one line, so
@@ -169,10 +178,10 @@ B<Examples:>
   my $words = Genesis::CI::Report::held_qualifier($env_record);
   # returns "awaiting deployment (lab at control@1a2b3c4)"
 
-  held_qualifier({env => 'prod'});
-  # returns "awaiting pipeline-apply", there being no branch to read
+  held_qualifier({env => 'prod', certified => {state => 'never-applied'}});
+  # returns "awaiting pipeline-apply", nothing having been applied to it
 
-  held_qualifier({env => 'prod', held => [
+  held_qualifier({env => 'prod', certified => {state => 'certified'}, held => [
       {reason => 'gate-ahead', gate => '9fc836c0...'},
       {reason => 'awaiting-merge', number => 42},
   ]});

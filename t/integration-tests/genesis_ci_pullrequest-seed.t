@@ -28,7 +28,7 @@ use Harness::Propagation;
 use Test::More;
 
 use Genesis;
-use Genesis::CI::Report;
+use Genesis::CI::Report ();
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
