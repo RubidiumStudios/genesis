@@ -1539,8 +1539,16 @@ sub _spawn_propagate_child {
 	my $rc = do {
 		open(my $inherited, '<&', \*STDIN)
 			or die "Cannot save standard input for the propagate child: $!\n";
-		open(STDIN, '<', '/dev/null')
-			or die "Cannot open /dev/null for the propagate child: $!\n";
+		unless (open(STDIN, '<', '/dev/null')) {
+			# Perl closed descriptor zero before the reopen it could not
+			# make, so the saved handle goes back before we say anything.
+			# Where nothing catches this the process is ending anyway, but
+			# where something does, a deploy carrying on with no standard
+			# input at all is worse than the failure being reported.
+			my $why = $!;
+			open(STDIN, '<&', $inherited);
+			die "Cannot open /dev/null for the propagate child: $why\n";
+		}
 		system(@cmd);
 		my $status = $? >> 8;
 		open(STDIN, '<&', $inherited)

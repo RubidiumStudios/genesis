@@ -62,8 +62,17 @@ subtest 'the child asks nothing and finishes' => sub {
 
 	child_recorder($h);
 	stand_on($h, $h->control);
+	# The row on the redirect below reads descriptor zero, so this process
+	# must not already be reading the null device itself.  The wrapper the
+	# suite runs under opens its own standard input there, and a spawn that
+	# stopped redirecting would then hand the child that same null device by
+	# accident and the row would pass on it.  A pipe with nothing in it
+	# reaches the deploy as the empty input /dev/null would have been, and
+	# under -y nothing asks for any.
+	set_stdin('');
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '-y');
+	reset_stdin;
 	is($exit, 0, 'the deploy command succeeded');
 
 	my ($child) = child_runs($h);
