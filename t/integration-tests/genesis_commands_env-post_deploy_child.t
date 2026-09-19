@@ -297,13 +297,11 @@ subtest 'a lock taken in the window is reported, not swallowed' => sub {
 	like($report, qr/Propagation failed/, 'the deploy said propagation failed');
 	like($report, qr/Deploy itself succeeded/,
 		'the deploy said it is complete itself');
-	# The retry sentence is read rather than the hand-off notice above it,
-	# which names an environment on purpose, and what the row refuses is the
-	# argument D36 retired standing after the command.  The deploy's own
-	# name is the one that was there, so it is the one asked about; a bare
-	# "no word after" test cannot be used, because this file runs without
-	# colour and the sentence goes on in plain words.
-	like($report, qr/[Rr]un genesis propagate\b(?!\s+qa\b)/,
+	# The retry sentence is matched whole rather than the command alone, so
+	# anything standing where the argument D36 retired used to stand breaks
+	# the row, whichever environment it names.  The hand-off notice above
+	# names an environment on purpose and is not what this reads.
+	like($report, qr/Run genesis propagate to retry it/,
 		'the deploy named the retry, with no environment after it');
 
 	refresh($h, 'a', $h->slug('prod'));
