@@ -3599,8 +3599,8 @@ sub deployed_record {
 		or return undef;
 
 	# The two timestamps are the record's own, read through the deployment's
-	# named readers.  They were state and dated, and both were dead: the
-	# deployment deletes state as it is constructed, turning it into the
+	# named readers.  They were state and dated, and both were dead, because
+	# the deployment deletes state as it is constructed, turning it into the
 	# result, and no record carries a dated field at all.  A reader asking for
 	# either was answered undef every time and nothing noticed, because no
 	# caller reads a timestamp.  The gate reads git.commit, the secrets
@@ -5432,111 +5432,57 @@ sub _post_deploy {
 	) if $self->has_hook('post-deploy');
 
 	# CI-configured branch finalization: assert the working tree the deploy
-	# leaves behind on the env branch, then run the auto-cascade
-	# (manual-provider only).  Non-manual providers (concourse, gha) own
-	# their own cascade, so we skip the cascade in those cases.
+	# leaves behind on the env branch, and put the operator back where they
+	# started.
 	#
 	# It sits after the kit's post-deploy hook rather than before it, because
 	# the assertion is about what the whole deploy left behind and that hook
-	# is the last thing the deploy runs.  The cascade moves with it, and it
-	# has to, because the assertion is the child's precondition and the
-	# finish therefore comes first.  The hook now runs on the environment's
-	# branch instead of on the control branch the cascade's one-way checkout
-	# used to leave it.
-	if ($self->top->pipeline_enabled) {
-
-		# D84.  Clean means no tracked modification and nothing staged;
-		# untracked files are ignored, so an operator's scratch file blocks
-		# nothing and no session deletes it.  A tracked modification here is
-		# a defect, a kit hook that wrote into the repository or a deploy
-		# that died before its cleanup, so abort names the files before it
-		# discards them and restores the branch.  The deploy itself
-		# succeeded, BOSH deployed and the record is written, and the
-		# command still exits non-zero, because a kit that writes into the
-		# repository should be loud and nobody should redeploy believing
-		# this failed.
-		if (my $session = $opts{session}) {
-			unless ($session->finish_if_clean) {
-				my @modified = @{$session->modified_paths};
-				$session->abort(sprintf(
-					"%s deployed and its deployment record is written, so the ".
-					"environment is running and nothing needs redeploying.\n\n".
-					"The deploy left %s modified in the repository, which ".
-					"Genesis does not write and has now discarded:\n%s\n\n".
-					"That is the kit's doing.  Report it against %s.  ".
-					"Downstream propagation was withheld.  Run ".
-					"#C{genesis propagate} when the tree is sound.",
-					$self->name, count_nouns(scalar(@modified), 'file'),
-					join("\n", map {"  - $_"} @modified), $self->kit->id
-				), named => 1, exitcode => Genesis::Exit::SOFTWARE);
-			}
+	# is the last thing the deploy runs.  The hook runs on the environment's
+	# branch rather than on control.
+	#
+	# The hand-off to the propagate child is not here.  It waits on this
+	# finish, and a child spawned from inside this method would run while the
+	# session still held the switch lock and the working tree, so it belongs
+	# to the command that called us, where the session is already closed, the
+	# operator is back on their own branch, and the lock is free for the
+	# child to take for itself.
+	#
+	# The session is the only guard over this block now.  The
+	# pipeline_enabled test that used to wrap it asked the same question one
+	# step further away, since a session reaches us from a pre-flight that
+	# runs on an enabled pipeline and from nowhere else.
+	#
+	# D84.  Clean means no tracked modification and nothing staged;
+	# untracked files are ignored, so an operator's scratch file blocks
+	# nothing and no session deletes it.  A tracked modification here is
+	# a defect, a kit hook that wrote into the repository or a deploy
+	# that died before its cleanup, so abort names the files before it
+	# discards them and restores the branch.  The deploy itself
+	# succeeded, BOSH deployed and the record is written, and the
+	# command still exits non-zero, because a kit that writes into the
+	# repository should be loud and nobody should redeploy believing
+	# this failed.
+	if (my $session = $opts{session}) {
+		unless ($session->finish_if_clean) {
+			my @modified = @{$session->modified_paths};
+			$session->abort(sprintf(
+				"%s deployed and its deployment record is written, so the ".
+				"environment is running and nothing needs redeploying.\n\n".
+				"The deploy left %s modified in the repository, which ".
+				"Genesis does not write and has now discarded:\n%s\n\n".
+				"That is the kit's doing.  Report it against %s.  ".
+				"Downstream propagation was withheld.  Run ".
+				"#C{genesis propagate} when the tree is sound.",
+				$self->name, count_nouns(scalar(@modified), 'file'),
+				join("\n", map {"  - $_"} @modified), $self->kit->id
+			), named => 1, exitcode => Genesis::Exit::SOFTWARE);
 		}
-
-		# Auto-cascade propagation (manual-provider only).  The two facts
-		# it branches on travel as arguments, because the command that owns
-		# the command line settles both and this module can ask for neither.
-		$self->_spawn_propagate_child(
-			map {($_ => $opts{$_})} 'no-propagate', 'redeploy'
-		);
 	}
 
 	# Clean up deployment state
 	delete $self->{deployment_state};
 
 	return $deployment_ok;
-}
-
-# }}}
-# _spawn_propagate_child - hand off to genesis propagate after a deploy {{{
-#
-# Lifted whole out of _post_deploy, where it stood inline.  Under D21 and D87
-# a run that resolved a deployed commit certifies nothing new, so there is
-# nothing for the child to deliver and no reason to walk the pipeline to
-# discover that.  The redeploy fact arrives already settled from that resolved
-# commit rather than from the flag, so a --redeploy that resolved none hands
-# off like the ordinary deploy it is.  D94 names the pipeline's own deploy job
-# as the only writer of the run_propagate queue, so a CLI deploy makes no
-# request either, whichever flag it carried.
-#
-# M15 narrows the arguments and gives this a return value when it moves to
-# Genesis::Commands::Env.
-sub _spawn_propagate_child {
-	my ($self, %opts) = @_;
-	return unless $self->top->manual_pipeline;
-	return if $opts{'no-propagate'};
-	return if $opts{redeploy};
-
-	require Service::Git;
-	require Genesis::Top;
-	my $cgit    = Service::Git->new('.');
-	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
-	my $current = $cgit->current_branch // '';
-	# One way, like the deploy's own switch: the child command this
-	# hands off to runs on control and is meant to find us there.
-	# M15 decides what putting us back should mean and moves it.
-	$cgit->checkout_one_way($control) if $current && $current ne $control;
-
-	$self->notify("Propagating to downstream environments from #C{%s}...", $self->name);
-	my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
-	my @cmd = ($bin, 'propagate', $self->name);
-
-	# Stdin from /dev/null: propagation must never stop a deploy
-	# to ask something, and the child inherits this terminal.
-	my $rc = do {
-		local *STDIN;
-		open(STDIN, '<', '/dev/null')
-			or die "Cannot open /dev/null for propagation: $!\n";
-		system(@cmd);
-		$? >> 8;
-	};
-
-	warning(
-		"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
-		"run #C{genesis propagate %s} manually to retry.",
-		$rc, $self->name
-	) if $rc != 0;
-
-	return;
 }
 
 # }}}

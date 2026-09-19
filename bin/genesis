@@ -536,7 +536,7 @@ define_command("deploy", {
 
 		'no-propagate' =>
 			"On manual-provider pipelines, `genesis deploy` automatically runs ".
-			"`genesis propagate <env>` after a successful deploy to push the ".
+			"`genesis propagate` after a successful deploy to push the ".
 			"freshly certified state to downstream environments.  Use this ".
 			"flag to skip that propagation.  Non-manual providers (concourse, ".
 			"github-actions) own their own propagation and are unaffected by ".

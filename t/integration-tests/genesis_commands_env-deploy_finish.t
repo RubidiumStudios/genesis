@@ -102,7 +102,7 @@ subtest 'the exodus record stands and the child is withheld' => sub {
 	ok(newest_record($h, $h->env_path('qa').'/deployments'),
 		'the record was written before finish ran')
 		or diag("what the deploy said:\n$err");
-	unlike($err // '', qr/Propagating to downstream/,
+	unlike($err // '', qr/Propagating from/,
 		'and the propagate child was withheld')
 		or diag("what the deploy said:\n$err");
 };

@@ -399,16 +399,18 @@ sub checkout_detached {
 # }}}
 # checkout_one_way - the branch change that means to stay there {{{
 #
-# The allowance, and it is temporary.  Three call sites move onto a branch
-# and deliberately stay on it: the deploy switches to the environment branch
-# and deploys from there, and the post-deploy block moves to control and
-# hands off to a child command.  A session would put all three back, which
-# is the opposite of what they mean, and what they should mean instead is
-# decided at M13 and M15, where they move.
+# The allowance, and it was always temporary.  Three call sites once moved
+# onto a branch and deliberately stayed on it, and a session would have put
+# all three back, which is the opposite of what they meant, so each came
+# through here rather than through checkout while it waited for the step that
+# decided what returning should mean.  The deploy's two went when it began
+# switching inside the session the gate opens, and the last, the post-deploy
+# hand-off onto control, went when the hand-off moved after that session's
+# finish and the child started taking the switch lock for itself.
 #
-# Until then they come through here rather than through checkout, so the
-# guard on the one door stays a refusal rather than an exception with three
-# unnamed instances, and a sweep can read off exactly who is still outside.
+# Nothing calls this now, and t/unit-tests/service_git_session-one_door.t
+# asserts that the allowance is empty, so the guard on the one door stands
+# with nothing outside it.
 sub checkout_one_way {
 	my ($self, $branch) = @_;
 	local $self->{_in_session} = 1;

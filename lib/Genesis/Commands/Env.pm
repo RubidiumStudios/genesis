@@ -1471,6 +1471,70 @@ sub _recreate_wanted {
 }
 
 # }}}
+# _propagate_after_deploy - does this deploy hand off to the child? {{{
+#
+# D36 spawns the child under the manual provider alone, and it asks
+# $top->manual_pipeline rather than reading a key, so an absent provider
+# key is the manual default D15 gives it.  D21 and D87 withhold it from
+# a redeploy, which deploys the deployed commit and certifies nothing,
+# and the question is asked through redeploy_wanted so that the tree
+# carries one reader of it.  D35 makes --no-propagate the one flag that
+# withholds the child and nothing else.
+#
+# The options hash it is handed is the deploy's own, whose redeploy key the
+# deploy wrote from the commit its pre-flight resolved, so the fact read here
+# is the resolved target and not the flag the operator typed.  That is the
+# same fact M14 keyed the pre-flight's warnings and the hand-off's condition
+# on, and a --redeploy that resolved no commit is a plain deploy to all three.
+sub _propagate_after_deploy {
+	my ($env, $options) = @_;
+	return 0 unless $env->top->manual_pipeline;
+	return 0 if redeploy_wanted($env->top, $options);
+	return 0 if $options->{'no-propagate'};
+	return 1;
+}
+
+# }}}
+# _spawn_propagate_child - run genesis propagate after the deploy {{{
+#
+# D7 makes the propagation a separate process and D36 gives it the one
+# run with no argument and no option.  The deploy's session has already
+# finished when we get here, so there is nothing to check out and the
+# child's own first switch takes the switch lock, and under D46 nothing
+# is passed to it.
+#
+# Standard input comes from /dev/null rather than being inherited,
+# because the child would otherwise hold this terminal and D83's
+# confirmation is asked wherever one is present, so an interactive
+# deploy would stop on a question about a branch the operator never
+# asked about.  Closing it covers every prompt the run may grow later
+# without each one having to test a flag.
+sub _spawn_propagate_child {
+	my ($env) = @_;
+
+	$env->notify("Propagating from #C{%s}...", $env->name);
+
+	my $bin = $ENV{GENESIS_CALLBACK_BIN} || 'genesis';
+	my @cmd = ($bin, 'propagate');
+
+	my $rc = do {
+		local *STDIN;
+		open(STDIN, '<', '/dev/null')
+			or die "Cannot open /dev/null for the propagate child: $!\n";
+		system(@cmd);
+		$? >> 8;
+	};
+
+	warning(
+		"Propagation failed (rc=%d).  Deploy itself succeeded;\n".
+		"run #C{genesis propagate %s} manually to retry.",
+		$rc, $env->name
+	) if $rc != 0;
+
+	return $rc;
+}
+
+# }}}
 sub deploy {
 	option_defaults(
 		redact   => ! -t STDOUT,
@@ -2017,6 +2081,21 @@ sub deploy {
 
 	if ($ok) {
 		success "#M{%s}/#c{%s} deployed successfully.\n", $env->name, $env->type;
+
+		# The hand-off, under D35 and D36.  It stands here, at the tail of
+		# the command, because _post_deploy finished the deploy's session
+		# before it returned, which released the switch lock, put the
+		# operator back on the branch they started on, and handed the
+		# working tree back.  A child spawned any earlier would open a
+		# second session inside the first one's scope, in the one working
+		# tree (H19).
+		#
+		# Everything above this line wrote W and the exodus record, so any
+		# git write this command ends with is the child's and not the
+		# deploy's.
+		_spawn_propagate_child($env)
+			if _propagate_after_deploy($env, \%options);
+
 		# The status is handed back rather than exited with, because the
 		# deploy declares DEPLOYED_STATE and the gate holds a branch session
 		# open around this call.  An exit here would leave that session for
