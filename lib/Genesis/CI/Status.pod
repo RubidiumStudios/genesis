@@ -68,15 +68,27 @@ the record itself is the return value.
 
 It reads GitHub for one thing alone, which is the pull request each
 environment whose policy asks for one has open. The client is built by
-C<Genesis::CI::PullRequest::client_for_run>, and only where C<GITHUB_AUTH_TOKEN>
-is set, because a client built without one warns that the run's branches are
-still written and published and this command writes nothing. What the read
-answers is carried onto the walk's own records by
-C<Genesis::CI::PullRequest::carry_state>, and an environment whose pull request
-a reviewer has approved is frozen by C<Genesis::CI::PullRequest::freeze>, so the
-report and the propagation run take that decision from one place. With no token
-nothing is read, no call is made, and the pull request column falls back to the
-environment's proposed record.
+C<Genesis::CI::PullRequest::client_for_run>, and only where
+C<GITHUB_AUTH_TOKEN> is set, because a client built without one warns that the
+run's branches are still written and published and this command writes
+nothing. What the read answers is carried onto the walk's own records by
+C<Genesis::CI::PullRequest::carry_state>, and an environment whose pull
+request a reviewer has approved is frozen by
+C<Genesis::CI::PullRequest::freeze>, so the report and the propagation run
+take that decision from one place. With no token nothing is read, no call is
+made, and the pull request column falls back to the environment's proposed
+record.
+
+An API that will not answer is reported rather than refused. The read is asked
+for through refusal closures that record what happened and return, so the run
+warns once on standard error and every environment the client would have
+served reads its proposed record flagged as possibly outdated, exactly as it
+would with no token at all.
+
+The scope goes to the walk as the pair C<Genesis::CI::Walk::scope_for>
+answered, because this command composes it first to learn which pull request
+branch to ask about, and composing it a second time inside the walk would
+build the whole topology twice on every run.
 
 The client and that state go into the walk as well, because a deployment
 branch whose pull request went in as a squash carries no marker of its own and
@@ -415,12 +427,22 @@ C<held, needs clearing (vsphere maintenance)> and stops there.  The walk
 stamps every commit the hold takes with the hold's own text, so the reason
 would otherwise print what somebody wrote on the record twice in one line.
 
+An environment whose approved pull request is waiting to be merged carries
+both components on one row, and each answers a different question.  The held
+qualifier says what the environment is waiting for, which is the merge, and
+the pull request component says which pull request that is, so the row reads
+C<[PR #42 open: approved]  held, awaiting merge (#42)>.  An operator who saw
+only the first would not know the wait had begun, and one who saw only the
+second would have to go looking for the number.
+
 A frozen commit is the other shape where the two questions have one answer.
 One approved pull request is both what the environment waits for and what
 holds every commit standing behind it, so C<Genesis::CI::Report::hold_reason>
 answers the merge in the words the qualifier has just used, and the row says
 it once.  The two are compared on their words rather than on a second list of
-reasons kept in step with that module.
+reasons kept in step with that module.  The standing hold above is suppressed
+by its reason name instead, because there the two strings differ, so neither
+comparison would catch the other's case.
 
 A row whose certification cell is marked carries C<[unverifiable]> after the
 wait, so C<held, awaiting pipeline-apply [unverifiable]> is what an
@@ -499,14 +521,28 @@ one nothing was read about.
 
 The client is built by C<Genesis::CI::PullRequest::client_for_run> and the
 state by C<Genesis::CI::PullRequest::pr_state>, so the decision about when a
-client is needed at all and the one refusal a failed read raises are the run's
-own rather than a second pair here.
+client is needed at all is the run's own rather than a second one here. The
+client is asked for where an environment in scope would deliver into a pull
+request and not at all where none would, which is narrower than the rule D57
+states, since that rule counts an environment holding a proposed record as
+one that needs the API too. C<genesis propagate> narrows it the same way, so
+an environment whose policy no longer asks for a pull request reads its
+proposed record unvalidated in both commands.
 
 It asks for a client only where C<GITHUB_AUTH_TOKEN> is set. A client built
 without one warns that the run's branches are still written and published,
 which is false of a command that writes nothing, and a missing token is the
 fallback the pull request column is built for rather than something to warn an
 operator about.
+
+Neither refusal the two subs raise ends this command. Both take a closure that
+records why the API went unasked and returns, so an API that will not answer
+and a repository that resolves no C<owner/repo> pair each leave the report
+standing. The run then says once, on standard error, why nobody asked GitHub
+anything, and every environment the client would have served renders as the
+no-token case does, reading its proposed record and flagged as possibly
+outdated. C<genesis propagate> still refuses on both paths, because a run that
+is about to write a pull request branch cannot guess what a reviewer decided.
 
 B<Parameters:>
 
@@ -525,14 +561,47 @@ the branch the pull request is opened from.
 
 B<Returns:> the client it built and a hashref of environment name to the state
 C<pr_state> answered. The client is undefined and the hashref empty where there
-is no token, no client, or no environment wanting one.
+is no token, no client, no environment wanting one, or no answer the API would
+give.
 
 B<Examples:>
 
   my ($github, $state_of) =
       Genesis::CI::Status::_pull_request_state($top, $scope);
+  # $github is the client the walk recovers a squashed marker with,
+  # and $state_of is what the API said about each environment:
   # {qa => {state => 'approved', number => 42, url => '...', superseded => []}}
 
+=head2 _unconsulted($why)
+
+  return Genesis::CI::Status::_unconsulted('GitHub did not answer');
+
+Says on standard error, in one sentence, why the API went unasked and what the
+pull request column is therefore reading, and answers what
+C<_pull_request_state> answers with no token at all, which is no client and no
+state for any environment.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$why>
+
+The clause that opens the sentence, which names what stopped the read. It is
+this command's own wording rather than the refusal's, because a refusal is
+written for somebody who was about to write a branch.
+
+=back
+
+B<Returns:> the undefined client and the empty hashref, so a caller returns it
+as its own answer.
+
+B<Examples:>
+
+  my ($github, $state_of) =
+      Genesis::CI::Status::_unconsulted('GitHub did not answer');
+  # says on standard error that the column is read from each proposed
+  # record, and answers (undef, {})
 
 =head2 _mark_unverifiable($record)
 

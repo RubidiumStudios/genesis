@@ -4884,6 +4884,12 @@ sub ready {
 # request column reads.  The record takes the number under pr, because that
 # is what the double and every row that opens one call it.
 #
+# A kit is installed by default, because every command that reports on an
+# environment loads it, and an environment whose kit nothing installed reads
+# as a load error and says nothing else about itself.  A row wanting another
+# one names it under kit, so the promise this helper makes is true without a
+# caller having to remember the kit for it.
+#
 # The due commit is written through due_commit, which rewrites the
 # environment's own file at the deployment root and leaves that file's
 # metadata standing.  A body composed here instead dropped genesis.env and
@@ -4891,12 +4897,16 @@ sub ready {
 # topology altogether, so a command that reads the topology was handed a
 # repository with no environments in it at all and reported on none.  params
 # and message steer that commit; due is ready's own option for a commit of a
-# different shape and this scenario writes its own, so it never reaches ready.
+# different shape and this scenario writes its own, so it is refused by name
+# rather than dropped on the way to ready.
 sub with_open_pr {
 	my (%opts) = @_;
 	my $env = $opts{env} // 'qa';
-	delete $opts{due};
-	my $h = ready(%opts, envs => $opts{envs} // [$env]);
+	die "with_open_pr writes its own due commit, so it takes no due option; ".
+	    "steer that commit with params and message instead\n"
+		if exists $opts{due};
+	my $h = ready(%opts, kit => $opts{kit} // 'omega-v2.7.0',
+		envs => $opts{envs} // [$env]);
 	my $gh = $h->{gh};
 
 	my $control = due_commit($h, $env,

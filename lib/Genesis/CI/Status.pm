@@ -13,6 +13,10 @@ use JSON::PP ();
 
 use Genesis;
 use Genesis::Term qw/csprintf/;
+# The one refusal code this module has to tell apart, which is what says
+# whether GitHub itself went quiet or the settings for reaching it are
+# missing, and the two get different words.
+use Genesis::Exit qw/UNAVAILABLE/;
 use Genesis::CI::Walk ();
 use Genesis::CI::Preflight ();
 # Genesis::CI::Report owns every word an operator reads about an outcome, so
@@ -111,18 +115,20 @@ sub status_records {
 		control   => $control,
 		read_only => 1);
 
-	# The scope the walk composes for itself, read here so that the pull
-	# request branch this report asks GitHub about is the branch the walk
-	# matches and the branch a run would open.  It is the walk's own reader,
-	# so no second composition of the name exists for the two to disagree
-	# over.
-	my ($scope) = Genesis::CI::Walk::scope_for($top, scope => $opts{scope});
-	my ($github, $pr_state_of) = _pull_request_state($top, $scope);
+	# The scope, composed once here through the walk's own reader and handed
+	# to the walk below, so the pull request branch this report asks GitHub
+	# about is the branch the walk matches and the branch a run would open.
+	# One composition answers both, which is what keeps the two from
+	# disagreeing about a name and keeps the topology from being built twice,
+	# since composing the scope reads every environment file and
+	# Genesis::Top::pipeline_topology memoises none of that work.
+	my @composed = Genesis::CI::Walk::scope_for($top, scope => $opts{scope});
+	my ($github, $pr_state_of) = _pull_request_state($top, $composed[0]);
 
 	my $record = Genesis::CI::Walk::plan($top,
 		git       => $git,
 		branches  => $initial->{branches},
-		scope     => $opts{scope},
+		composed  => \@composed,
 		refreshed => $refresh ? 1 : 0,
 		# D52's recovery, which the walk makes for itself out of these two.
 		# A deployment branch whose pull request went in as a squash carries
@@ -495,42 +501,105 @@ sub render_tree {
 # }}}
 # _pull_request_state - what GitHub says about each environment's pull request {{{
 #
-# D57 builds the client where an environment in scope needs the API and not at
-# all where none does, and D55 gives every failure to read it one refusal, so
-# both are asked of Genesis::CI::PullRequest rather than settled here.  The
-# answer is keyed by environment, and an environment it holds no key for is one
-# nothing was read about.
+# The client is built where an environment in scope would deliver into a pull
+# request, which is the branch the walk seeded, and not at all where none
+# would.  D57 draws the rule wider than that, since it counts an environment
+# holding a proposed record as one that needs the API too, and the propagate
+# run narrows it the same way this does, so an environment whose policy no
+# longer asks for a pull request reads its proposed record unvalidated in both
+# commands.
+#
+# The answer is keyed by environment, and an environment it holds no key for
+# is one nothing was read about.
 #
 # The client is asked for only where a token exists to build it with.  Built
 # without one it warns that the run's branches are still written and published,
 # which is false of a command that writes nothing at all, and a missing token
 # is the fallback the pull request column is built for rather than something to
 # warn an operator about.
+#
+# This command never refuses on any of it.  Ruling 49 leaves pipeline-status
+# one refusal, which is the disowned pipeline, and D57 already has the column
+# report a proposed record flagged as possibly outdated where no token was
+# there to validate it with.  An API that will not answer and a repository
+# that resolves no owner and repository pair are therefore rendered the same
+# way, and the run says once why nobody asked GitHub anything.  A writing run
+# still refuses on both, because a run about to open a pull request branch
+# cannot guess what a reviewer decided, which is why the refusal closures are
+# handed in from here rather than softened where they live.
 sub _pull_request_state {
 	my ($top, $scope) = @_;
 
 	my @wanted = grep {$_->{pr_branch}} @$scope;
 	return (undef, {}) unless @wanted && $ENV{GITHUB_AUTH_TOKEN};
 
+	# What the run would have refused on, in this command's own words rather
+	# than the refusal's, because those are written for somebody who was
+	# about to write a branch.  The first one is kept and the rest are the
+	# same story about the same API, and the exit code is what says which of
+	# the two it was.
+	my $unconsulted;
+	my $refuse = sub {
+		my ($spec) = @_;
+		$unconsulted //= (($spec->{exitcode} // 0) == UNAVAILABLE)
+			? 'GitHub did not answer'
+			: 'The GitHub settings this repository needs are not in place';
+		return;
+	};
+
 	my $github = Genesis::CI::PullRequest::client_for_run($top,
-		records => [map {{pr => {branch => $_->{pr_branch}}}} @wanted])
-		or return (undef, {});
+		records => [map {{pr => {branch => $_->{pr_branch}}}} @wanted],
+		refuse  => $refuse);
+	return _unconsulted($unconsulted) if $unconsulted;
+	return (undef, {}) unless $github;
+
 	my $owner_repo = $top->source_control_repository;
 
 	# The client goes back with the answer, because the walk reads a marker a
 	# squash merge dropped out of the merged pull request itself and wants
-	# both.  It takes the client alone and never the pair, exactly as the
-	# propagate run hands it, because the merged pull requests are already in
-	# the answer read here.
+	# both.  What it takes and why is beside propagate's own pair, in
+	# Genesis::Commands::Pipelines::propagate, and the two callers hand the
+	# walk the same thing.
 	#
 	# The three fields pr_state reads and no more, which is what lets the
 	# state be read before the walk has composed a record of its own.
-	return ($github, {map {($_->{env} => Genesis::CI::PullRequest::pr_state(
-		$github, $owner_repo, {
-			env    => $_->{env},
-			branch => $_->{branch},
-			pr     => {branch => $_->{pr_branch}},
-		}))} @wanted});
+	my %state_of;
+	for my $env (@wanted) {
+		my $state = Genesis::CI::PullRequest::pr_state($github, $owner_repo, {
+			env    => $env->{env},
+			branch => $env->{branch},
+			pr     => {branch => $env->{pr_branch}},
+		}, refuse => $refuse);
+
+		# One environment the API would not answer about says nothing about
+		# how it would answer about the next, but a client that could not be
+		# read once is not one this report should keep asking, and every
+		# environment it would have served reads alike.
+		return _unconsulted($unconsulted) if $unconsulted;
+		$state_of{$env->{env}} = $state;
+	}
+
+	return ($github, \%state_of);
+}
+
+# }}}
+# _unconsulted - the one line a report says where GitHub went unread {{{
+#
+# One sentence on standard error, once a run, saying why nobody asked and what
+# the column is therefore reading.  It answers what _pull_request_state answers
+# with no token at all, so every environment the client would have served
+# renders as the no-token case does.
+sub _unconsulted {
+	my ($why) = @_;
+
+	warning(
+		"%s, so the pull request column below is read from each ".
+		"environment's proposed record and says nothing about what a ".
+		"reviewer has since decided.",
+		$why
+	);
+
+	return (undef, {});
 }
 
 # }}}
@@ -697,21 +766,25 @@ sub compose_phrase {
 		# ancestor's own state so an operator is not left to infer it from
 		# another row.
 		#
-		# Where the standing hold is what took the commit, the two questions
-		# have one answer.  apply_hold stamps every commit it takes with the
-		# hold's own text, so this component would print what somebody wrote
-		# on the record a second time, in the same brackets, on the same
-		# line.  The environment waits for one thing and the row says it
-		# once.
+		# Two rules keep the row from saying one wait twice, and each one
+		# sees a case the other is blind to.
+		#
+		# The first compares reason names.  Where the standing hold is what
+		# took the commit, apply_hold stamps that commit with the hold's own
+		# text while the qualifier says the same fact in the words a hold is
+		# announced in, so the two strings differ and no comparison of the
+		# rendered words could ever suppress the repeat.  The name on-hold is
+		# the only thing the two have in common.
 		my ($first) = @{$row->{held} || []};
 		if ($first && ($first->{reason} // '') ne 'on-hold') {
-			# The frozen commit's reason is the merge the qualifier has just
-			# named, word for word, because one approved pull request is both
-			# what the environment waits for and what holds every commit
-			# standing behind it.  The row says it once, for the reason the
-			# standing hold above is said once, and the comparison is on the
-			# words rather than on a second list of reasons to keep in step
-			# with Genesis::CI::Report.
+			# The second compares the rendered words.  An approved pull
+			# request is both what the environment waits for and what holds
+			# every commit standing behind it, and the qualifier and the
+			# frozen commit's reason both come out of Genesis::CI::Report
+			# identical, so here the names differ where the words do not and
+			# only the words say the row is about to repeat itself.  It is
+			# compared on the words for that reason and to save a second list
+			# of reason names kept in step with that module.
 			my $reason = hold_reason($first);
 			push @phrase, [on_ice => $reason] unless $reason eq $qualifier;
 		}

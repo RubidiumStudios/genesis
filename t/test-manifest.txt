@@ -177,6 +177,7 @@ unit-tests/genesis_ci_walk-base.t                   # where a walk starts, seede
 unit-tests/genesis_ci_walk-run_ending.t             # which errors end the run and which end one environment
 unit-tests/genesis_ci_runfailure-one_line.t         # one line out of a failure, and the width a caller may ask it to fit
 unit-tests/genesis_ci_report-render_run.t           # an error prints whole, and the commit axis reads the enum
+unit-tests/genesis_ci_status-pull_request_state.t   # the report degrades where no owner and repository pair resolves
 unit-tests/genesis_ci_publish-confirm.t             # the delta is shown three ways, and -y answers the ask alone
 unit-tests/genesis_ci_publish-recheck_control.t     # every refusal the pre-publish control check raises
 unit-tests/genesis_ci_publish-declined.t            # a no at the ask resets every branch and publishes nothing

@@ -1053,12 +1053,16 @@ C<records> is an arrayref of per-environment records, each read for C<pr> and
 C<proposed> and for nothing else, defaulting to an empty list and so to no
 client. C<refuse> is the caller's own refusal closure, which a caller inside
 an open session passes so the operator is put back on their branch before they
-are told why the run stopped.
+are told why the run stopped. A closure that records the refusal and returns
+rather than exiting is answered C<undef>, because there is then no pair to
+point a client at and no token an owner could be named for; C<genesis
+pipeline-status> hands one in for exactly that reason.
 
 =back
 
-B<Returns:> A C<Service::Github> client, or C<undef> where the run needs none
-and where no token is set.
+B<Returns:> A C<Service::Github> client, or C<undef> where the run needs none,
+where no token is set, and where a refusal closure that returns has been
+given one of the two refusals below.
 
 B<Errors:> Refuses with C<CONFIG> where an environment would deliver into a
 pull request and C<pipeline.source_control.repository> is neither set nor
@@ -1098,10 +1102,12 @@ aggregate's title names. Where more than one pull request is open from the
 same branch, the one the API lists first is acted on and a warning names the
 rest. GitHub's listing answers newest first, so that is the newest of them.
 
-When either reader fails, this is not a fifth state but a refusal. The whole
-run stops, naming the review state as the input it could not read, and exits
-C<UNAVAILABLE>, because a run that cannot read what a reviewer decided cannot
-know what it would do with any pull request branch.
+When either reader fails, this is not a fifth state but a refusal. A run that
+would write stops, naming the review state as the input it could not read, and
+exits C<UNAVAILABLE>, because a run that cannot read what a reviewer decided
+cannot know what it would do with any pull request branch. A read-only report
+hands in a closure that records the reason and returns, and is answered
+C<undef> so that it can render the environment unread instead.
 
 Every failure of the two readers refuses that way, and none of them is passed
 through. A token the API rejects, a repository that has been renamed, a rate
@@ -1135,11 +1141,16 @@ environment's state before the walk has composed anything.
 
 C<refuse> is the caller's own refusal closure, which a caller inside an open
 session passes so the operator is put back on their branch before they are
-told why the run stopped. A caller with no session leaves it out.
+told why the run stopped. A caller with no session leaves it out. A closure
+that records the refusal and returns rather than exiting is answered C<undef>,
+since there are no listings here to read a state out of, and C<genesis
+pipeline-status> hands one in because a report degrades where a run that would
+write a pull request branch has to refuse.
 
 =back
 
-B<Returns:> A hashref of the nine fields above.
+B<Returns:> A hashref of the nine fields above, or C<undef> where a refusal
+closure that returns has been given the refusal below.
 
 B<Errors:> The refusal described above, which is what every failure of the
 two GitHub readers becomes. Nothing they raise is passed through.

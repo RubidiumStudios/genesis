@@ -144,6 +144,19 @@ what C<genesis propagate> asks for under D36.  The empty arrayref once meant
 no environment at all, so a caller that narrows by building a list says what
 it means when the list comes out empty rather than handing one in.
 
+=item C<composed>
+
+Optional.  The pair L</scope_for> answered, in the order it answers them,
+where the caller has already composed it.  C<genesis pipeline-status> composes
+the scope first so that it knows which pull request branch to ask GitHub
+about, and composing it again here would walk every environment file a second
+time, since C<Genesis::Top::pipeline_topology> memoises none of that work.  A
+call that leaves it out composes the pair for itself, which is what
+C<genesis propagate> does.
+
+It may not be given beside C<scope>, because the pair handed in is already
+narrowed and a name given here would be dropped without a word.
+
 =item C<branches>
 
 Optional.  C<Genesis::CI::Preflight::initial_state>'s own C<branches> record,
@@ -256,6 +269,10 @@ below is made through one and a walk without it can answer nothing.
 Raises a bug where C<state> arrives beside C<provider> or C<refreshed>.  The
 state already carries both, so this walk would drop whichever of them the
 caller named without a word, and a caller that set one meant it to be read.
+
+Raises a bug where C<composed> arrives beside C<scope>, for the same reason.
+The composed pair is already narrowed, so the names would be dropped without
+a word.
 
 B<Examples:>
 
