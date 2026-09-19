@@ -33,11 +33,14 @@ use constant ENV_OUTCOMES => (
 use constant COMMIT_OUTCOMES => ('delivered', 'held');
 use constant FILE_OUTCOME    => 'overwrote-hand-edit';
 
-# D54's qualifier for an environment the pipeline has never been applied to.
-# It is declared here because this module owns every word an operator reads
-# about an outcome, and the command that meets the same state before the walk
-# has anything to say writes the record's detail through this name rather than
-# spelling the phrase a second time.
+# D54's qualifier for an environment the pipeline has never been applied to,
+# and for one with no deployment branch on either side, which is the same wait
+# read off a different absence.  It is declared here because this module owns
+# every word an operator reads about an outcome, and held_qualifier is the one
+# thing that answers it.  The command that meets the branchless environment
+# before the walk has anything to say about it carries on past it without
+# writing a word, so the phrase is composed where every other qualifier is and
+# is spelled in one place.
 use constant AWAITING_APPLY => 'awaiting pipeline-apply';
 
 # The two verbs a preview changes, which are the only words that differ
@@ -155,6 +158,11 @@ sub held_qualifier {
 	# what says which environment this is.  It is composed here rather than by
 	# the command that meets it, so the run, the preview, and pipeline-status
 	# read one phrase from one place.
+	#
+	# It stands ahead of the hold below safely, because the walk fills the
+	# certified state for every environment it reads at all and applies a hold
+	# only after it has, so no record arrives here with a hold standing and no
+	# certified state for this to answer over.
 	return AWAITING_APPLY unless defined $record->{certified};
 
 	my $certified = $record->{certified};
