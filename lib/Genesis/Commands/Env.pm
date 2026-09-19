@@ -18,7 +18,7 @@ use Encode qw(decode_utf8);
 # The one name this module offers another.  Everything else here is a command
 # that bin/genesis calls by its full name, so nothing is exported by default
 # and a caller outside this file asks for the one question it may need.
-use base 'Exporter';
+use Exporter qw/import/;
 our @EXPORT_OK = qw/redeploy_wanted/;
 
 sub create {
