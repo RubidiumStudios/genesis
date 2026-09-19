@@ -1561,9 +1561,15 @@ sub _spawn_propagate_child {
 	# things, and the retry it names is the bare run of D36, because one
 	# propagate run walks control for every environment and an argument
 	# naming this one would say something the command no longer takes.
+	#
+	# What it does not say is that nothing downstream moved.  The publish
+	# takes one branch at a time and a run refused on the third of three
+	# exits non-zero with two already delivered, so the promise the
+	# operator is given is the level-triggered one, which holds either way.
 	warning(
 		"Propagation failed (rc=%d).  Deploy itself succeeded and is\n".
-		"complete, and nothing downstream of it has moved.\n\n".
+		"complete, and the next propagate run carries whatever this one\n".
+		"did not.\n\n".
 		"Run #C{genesis propagate} to retry it.",
 		$rc
 	) if $rc != 0;
