@@ -232,6 +232,16 @@ report prints this line directly above the commit lines, so an environment
 whose commits a gate is holding would otherwise read that nothing is due and
 then read the commits that are.
 
+Every wording names the one command that clears the hold,
+C<genesis E<lt>envE<gt> pipeline-release>, and ends by naming who set the hold
+as C<< E<lt>userE<gt>@E<lt>hostnameE<gt> >> and when they set it, from the
+record's own C<user>, C<hostname>, and C<at>.  Those three facts are composed
+here and not beside each caller, because the run's report, C<pipeline-status>,
+and C<genesis E<lt>envE<gt> deploy> all print this sentence and a sentence
+spelled three times is one the three spellings drift apart on.  A field the
+record is missing is named as unrecorded rather than left to print as a gap,
+since a record older than the four fields D53 fixes can lack any of them.
+
 B<Parameters:>
 
 =over 4
@@ -239,7 +249,10 @@ B<Parameters:>
 =item C<$record>
 
 One environment's record, as C<Genesis::CI::Walk::plan> builds it, after
-C<Genesis::CI::Walk::apply_hold> has run over it.
+C<Genesis::CI::Walk::apply_hold> has run over it.  The environment's name is
+read from C<env> for the release command, and the identity from the C<hold>
+the walk carried onto it.  A caller with no walk record at hand, as the
+deploy's own hold warning has none, builds one from the hold alone.
 
 =back
 
@@ -249,11 +262,14 @@ carries no C<hold>.
 B<Examples:>
 
   my $words = Genesis::CI::Report::hold_detail($env_record);
-  # returns "2 commits are blocked until this hold is released"
+  # returns "2 commits are blocked until this hold is released with
+  #          `genesis prod pipeline-release`, held by ana@ops.example.com
+  #          at 2026-09-18 11:02:00 +0000"
 
   my $words = Genesis::CI::Report::hold_detail($gated_record);
   # returns "1 commit is blocked for a reason of its own, and stays blocked
-  #          while this hold stands"
+  #          while this hold stands, which `genesis prod pipeline-release`
+  #          clears, held by ana@ops.example.com at 2026-09-18 11:02:00 +0000"
 
 =head2 note_detail
 
@@ -327,12 +343,19 @@ C<idempotent>.  The walk computes its record from durable state alone and so
 cannot know either, and settling both here is what lets the run and the
 preview compose the held phrase from one line of code.
 
+An environment with a hold already standing gets L</hold_detail>'s sentence
+beneath its outcome, and that sentence carries the release command itself, so
+no second line beside it says the same thing in the report's own words.
+
 An environment whose delivery in this run carried a commit with a hold trailer
 gets one added line beneath its outcome, saying that a hold was set and giving
 the reason, since the environment was delivered to on this run and is held
 from the next one.  The line is read off the record's C<hold_set> field, which
 the run writes as it writes the hold, and it is not L</held_qualifier>'s
-C<held, needs clearing>, which is what the next run reads.
+C<held, needs clearing>, which is what the next run reads.  This one keeps a
+release line of its own beneath it, because it is about a hold the run has
+just set and an operator meeting it has been told nothing yet about the
+command that clears it.
 
 The paths beneath a delivered commit are printed as the operator wrote them,
 which needs the C<git> handle to strip whatever deployment root the
@@ -645,62 +668,6 @@ B<Examples:>
 
   _commits(1);   # '1 commit'
   _commits(3);   # '3 commits'
-
-=head2 _hold_lines
-
-    Genesis::CI::Report::_hold_lines($phrase, $env_name, $message);
-
-A hold's own line and the sentence that always follows it.
-
-Two hold lines are printed for an environment, one for a hold that was already
-standing and one for a hold this run's delivery set, and they end with the same
-sentence telling the operator which command releases it.  Two copies of one
-sentence are two that can drift apart, so it is written here and nowhere else.
-
-The message, where there is one, is printed outside the colour span, for the
-reason the error line gives.  C<csprintf> tolerates one level of balanced
-braces inside a span, and an unbalanced brace in text somebody else wrote ends
-the span early and moves the characters after it.  A hold's reason is text
-somebody else wrote, where the phrases in front of it are the report's own.
-
-A phrase that is undefined or empty prints nothing at all, which is how the
-standing hold's line is skipped for an environment that has no hold.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$phrase>
-
-The line's own words, printed in the held colour.  Undefined or empty prints
-nothing.
-
-=item C<$env_name>
-
-The environment C<genesis E<lt>envE<gt> pipeline-release> is named for.
-
-=item C<$message>
-
-Optional.  Text somebody else wrote, printed after the phrase and outside the
-colour span.
-
-=back
-
-B<Returns:> Nothing.
-
-B<Errors:> None.
-
-B<Examples:>
-
-  Genesis::CI::Report::_hold_lines(hold_detail($env), $env->{env});
-  #     nothing is due now, and anything that becomes due stays blocked
-  #     Release it with genesis prod pipeline-release
-
-  Genesis::CI::Report::_hold_lines(
-    'a hold was set by the commit just delivered', 'prod',
-    'run the capacity report');
-  #     a hold was set by the commit just delivered: run the capacity report
-  #     Release it with genesis prod pipeline-release
 
 =head2 _paths
 
