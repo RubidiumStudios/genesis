@@ -1396,6 +1396,22 @@ sub redeploy_wanted {
 }
 
 # }}}
+# _recreate_wanted - true when this run should pass --recreate to BOSH {{{
+#
+# The operator's own --recreate always wins; this only adds the flag where the
+# repository asked for it.  D101 applies the key to the CLI's --redeploy as
+# well as to the pipeline's own redeploy job, since D94 made them one path.
+sub _recreate_wanted {
+	my ($top, $options) = @_;
+	return 1 if $options->{recreate};
+
+	my $setting = $top->recreate_on_deploy;
+	return 1 if $setting eq 'always';
+	return 1 if $setting eq 'redeploy-only' && redeploy_wanted($top, $options);
+	return 0;
+}
+
+# }}}
 sub deploy {
 	option_defaults(
 		redact   => ! -t STDOUT,
@@ -1549,6 +1565,13 @@ sub deploy {
 	if (scalar(grep {$_} ($options{fix}, $options{recreate}, $options{'dry-run'})) > 1) {
 		command_usage(1,"Can only specify one of --dry-run, --fix or --recreate");
 	}
+
+	# The repository's own answer is folded in below that guard rather than
+	# above it.  The guard is about what the operator asked for, and a
+	# repository setting is not that, so a value folded in above it would
+	# refuse every dry run in a repository set to always.
+	$options{recreate} = _recreate_wanted($top, \%options);
+
 	my $noprompt = $options{yes} // 0;
 	$ENV{BOSH_NON_INTERACTIVE} = 'true' if $noprompt;
 	my $dryrun = $options{'dry-run'} // 0;

@@ -1549,6 +1549,33 @@ B<Examples:>
     my $bool = $top->manual_pipeline();
     # returns false both for concourse and for no pipeline at all
 
+=head2 recreate_on_deploy
+
+    my $setting = $top->recreate_on_deploy();
+
+On which runs this repository passes C<--recreate> to the BOSH deploy.
+
+The setting is C<never>, C<redeploy-only>, or C<always>, and it applies to the
+CLI's C<--redeploy> as well as to the pipeline's own redeploy job, since both
+are the same code path. It is repository-wide, so every environment
+progresses the same way and the earlier ones keep rehearsing the later ones,
+and it has no capability behind it, C<--recreate> being a BOSH flag rather
+than a provider feature.
+
+The deploy reads it after it has checked the options against one another, so
+the answer is never mistaken for a second thing the operator asked for and a
+repository that always recreates can still be asked for a dry run.
+
+B<Parameters:> None.
+
+B<Returns:> The configured C<pipeline.recreate_on_deploy>, or C<never> where
+the key is unset.
+
+B<Examples:>
+
+    my $setting = $top->recreate_on_deploy();
+    # returns 'never' in a repository that has not set the key
+
 =head2 control_branch
 
     my $branch = $top->control_branch();

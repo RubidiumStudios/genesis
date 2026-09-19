@@ -44,7 +44,7 @@ our @EXPORT = qw/
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed fixture_director fixture_bosh
 	break_vault break_vault_writes restore_vault
-	record_at record_keys proposed_for vault_read_log fixture_preflight fixture_kit
+	record_at record_keys proposed_for vault_read_log bosh_runs fixture_preflight fixture_kit
 	fixture_command install_compiled_kit shimmed_git real_tool
 	fixture_fly
 
@@ -2791,19 +2791,29 @@ sub fixture_bosh {
 
 	my $dir = "$self->{tmp}/bosh";
 	helper::mkdir_or_fail($dir) unless -d $dir;
+
+	# What a deploy handed BOSH is a fact no answer of the double carries and
+	# no marker line in a manifest can show, so every call is written down as
+	# it is made and bosh_runs reads the log back.  Both the log and the
+	# manifests it points at outlive each run, because a row that runs twice
+	# reads the second run's call against the first's.
+	my $log  = $self->{bosh}{log}  = "$self->{tmp}/bosh-runs.log";
+	my $runs = $self->{bosh}{runs} = "$self->{tmp}/bosh-runs";
+	helper::mkdir_or_fail($runs) unless -d $runs;
+	helper::put_file($log, '');
+
 	my $command = "$dir/bosh";
 	helper::put_file($command, 0755, <<"EOS");
 #!/usr/bin/env bash
 # The harness director.  It answers the four subcommands a deploy asks of a
 # director and nothing else, and every other call is a plain success, so a
 # reader can tell what this stands in for from the script alone.
-if [ "\$1" = "interpolate" ]; then
-  exec "@{[_real_tool('bosh')]}" "\$@"
-fi
 
 # The subcommand is the first word that is not a flag, because the target and
 # the credentials reach bosh through the environment rather than the command
-# line.
+# line.  It is worked out ahead of everything else because the recording below
+# writes it down, and interpolate is still recognised by its own first word so
+# that a call carrying a flag before it is handed on exactly as it was.
 subcommand=
 for arg in "\$@"; do
   case "\$arg" in
@@ -2811,6 +2821,28 @@ for arg in "\$@"; do
     *) subcommand="\$arg"; break ;;
   esac
 done
+
+# One line per call, the subcommand and then every argument, separated by tabs
+# because nothing on a bosh command line here holds one.  The ordinal of the
+# line is read before the line is written, and a last argument naming a file
+# is copied aside under that ordinal, because the manifest a deploy hands BOSH
+# is a temporary file that is gone by the time a row asks what was in it.
+bosh_run_ordinal=\$(wc -l < "$log" 2>/dev/null || echo 0)
+bosh_run_ordinal=\$((bosh_run_ordinal + 0))
+{
+  printf '%s' "\$subcommand"
+  for arg in "\$@"; do printf '\\t%s' "\$arg"; done
+  printf '\\n'
+} >> "$log"
+bosh_run_last=
+for arg in "\$@"; do bosh_run_last="\$arg"; done
+if [ -n "\$bosh_run_last" ] && [ -f "\$bosh_run_last" ]; then
+  cp "\$bosh_run_last" "$runs/\$bosh_run_ordinal.manifest" 2>/dev/null || true
+fi
+
+if [ "\$1" = "interpolate" ]; then
+  exec "@{[_real_tool('bosh')]}" "\$@"
+fi
 
 case "\$subcommand" in
 deploy)
@@ -3118,6 +3150,47 @@ sub vault_read_log {
 	my $file = $self->{vault_log} or return [];
 	return [] unless -f $file;
 	return [grep {length} split /\n/, (helper::get_file($file) // '')];
+}
+
+# }}}
+# bosh_runs - every call the harness director answered, in order {{{
+#
+# T246 asserts the argument list `bosh deploy` was given, which no answer of
+# the double carries and no marker line can show, so fixture_bosh's double
+# writes each call down and this reads them back.  command names the
+# subcommand a row is asking about, and a row that names none is handed every
+# call the director answered.
+#
+# Each answer holds the subcommand as command, the whole argument list as
+# argv, and, where the call's last argument named a file the double could
+# read, that file's content as manifest.  The content is copied aside as the
+# call is made rather than read here, because the manifest a deploy hands BOSH
+# is a temporary file that is gone by the time a row asks what was in it.
+#
+# The log is not emptied between runs, the way the vault log is, because a row
+# that deploys twice asks what the second call was given and reads it against
+# the first.
+sub bosh_runs {
+	my ($self, %opts) = @_;
+	my $log = $self->{bosh} && $self->{bosh}{log} or return ();
+	return () unless -f $log;
+
+	my @runs;
+	my $ordinal = -1;
+	for my $line (split /\n/, (helper::get_file($log) // '')) {
+		$ordinal++;
+		my ($command, @argv) = split /\t/, $line, -1;
+		next if defined $opts{command}
+			&& (!defined $command || $command ne $opts{command});
+
+		my $manifest = "$self->{bosh}{runs}/$ordinal.manifest";
+		push @runs, {
+			command => $command,
+			argv    => \@argv,
+			(-f $manifest ? (manifest => helper::get_file($manifest)) : ()),
+		};
+	}
+	return @runs;
 }
 
 # }}}

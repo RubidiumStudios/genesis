@@ -69,6 +69,24 @@
 # takes no argument for, so it exits 2 without delivering anything; the row
 # stands as the guard that catches a hand-off after a redeploy once M15 gives
 # that child an argument list the command accepts.
+#
+# The fifth subtest is T246's, and it says the same thing about itself.  Three
+# of its nineteen rows were red and sixteen were green.  The red ones are the
+# three that ask for a flag: redeploy-only on a redeploy, and always on each
+# of its two runs.  Reading the repository's setting and folding it into the
+# options the deploy forwards is what turns all three green.
+#
+# The sixteen that arrived green are guards.  The three rows that ask for no
+# flag were green because no deploy passed --recreate at all, and they now say
+# that a repository which did not ask for one is still not given one.  The
+# dry-run row was green because no repository setting reached the options, and
+# it now says that the setting is read below the guard which refuses more than
+# one of fix, recreate, and dry-run, so a repository set to always can still
+# be asked what a deploy would do.  The exit row beside each of the six full
+# deploys and the restoration row each of them asserts were green throughout,
+# and they are what keep the flag rows honest: each flag row reads the last
+# call the harness director was given, and a run that died before reaching
+# BOSH would leave the run before it standing as the last.
 use strict;
 use warnings;
 use utf8;
@@ -442,6 +460,110 @@ subtest 'a successful redeploy propagates nothing' => sub {
 	run_genesis($h, {restore => 0}, 'qa', 'deploy', '-y');
 	is(scalar(grep {($_->{argv}[0] // '') eq 'propagate'} child_runs($h)), 1,
 		'an ordinary manual deploy still spawns one propagate child');
+};
+
+
+# Proves T246: three repositories differing only in
+# pipeline.recreate_on_deploy, where redeploy-only passes --recreate on a
+# redeploy and not on an ordinary deploy, always passes it on both, and the
+# default passes it on neither.
+#
+# What the rows catch: an implementation that read the key on the wrong run,
+# which the redeploy-only pair catches in either direction; one that ignored
+# the key and read the command line alone, which the always pair catches; one
+# that passed --recreate whatever the key said, which the never pair catches;
+# and one that folded the answer into the options above the guard that refuses
+# more than one of fix, recreate, and dry-run, which the last row catches by
+# running a dry run in a repository set to always.
+#
+# Each run has an exit row of its own beside it, and those rows are what keep
+# the six flag rows honest.  Each flag row reads the last call the harness
+# director was given, and a run that died before it reached BOSH would leave
+# the run before it standing as the last, so a flag row with no exit row
+# beside it could read another run's argument list and pass on it.
+subtest 'recreate_on_deploy reaches every deploy as declared' => sub {
+	# Seven rows, six exit rows, and one more for each of the six runs that
+	# assert a restoration.  The dry run asserts none, for the reason given
+	# beside it.
+	plan tests => 19;
+
+	my %flags;
+	for my $setting (qw/redeploy-only always never/) {
+		# The three repositories differ in this key and in nothing else.  The
+		# director, the fake bosh, and the kit go up with the seeding, which
+		# is what lets both runs below reach BOSH at all.
+		my $h = ready_harness(envs => ['qa'], bosh => 1,
+			pipeline => {recreate_on_deploy => $setting});
+
+		# The seeding certifies without naming a deployed commit, and a
+		# redeploy of an environment that names none resolves nothing and
+		# deploys the tip.  The record is written again over the delivery the
+		# seeding made, naming the commit that delivery put on the branch and
+		# the control commit its own marker names, so the second run below is
+		# a redeploy of something.
+		certify($h, 'qa',
+			commit         => tip_of($h, $h->slug('qa')),
+			control_commit => harness_marker($h, $h->slug('qa')));
+
+		# The director's record stands at the environment's own exodus path,
+		# and a deploy that reaches its end writes the environment's exodus
+		# data over it, so the second run would find no director.  The url is
+		# read off the record the builder wrote, because it names the port the
+		# harness listener took and no row can know that port in advance.
+		my $url = record_at($h, $h->env_path('qa'))->{url};
+
+		stand_on($h, $h->control);
+
+		# Both runs pass --no-propagate, for the reason the file above gives:
+		# the auto-cascade hands off to a child genesis propagate that M15
+		# owns and that fails today, and a row about what BOSH was given
+		# should not be reading that child's failure as the deploy's.
+		my (undef, $err, $exit) = run_genesis($h,
+			'qa', 'deploy', '--no-propagate', '-y');
+		is($exit, 0, "the ordinary deploy proceeded under $setting")
+			or diag("what the deploy said:\n$err");
+		my @deploys = bosh_runs($h, command => 'deploy');
+		$flags{$setting}{deploy} = join(' ', @{$deploys[-1]{argv}});
+
+		fixture_director($h, 'qa', url => $url);
+		my (undef, $rerr, $rexit) = run_genesis($h,
+			'qa', 'deploy', '--redeploy', '--no-propagate', '-y');
+		is($rexit, 0, "the redeploy proceeded under $setting")
+			or diag("what the redeploy said:\n$rerr");
+		@deploys = bosh_runs($h, command => 'deploy');
+		$flags{$setting}{redeploy} = join(' ', @{$deploys[-1]{argv}});
+	}
+
+	unlike($flags{'redeploy-only'}{deploy}, qr/--recreate/,
+		'redeploy-only passes nothing on an ordinary deploy');
+	like($flags{'redeploy-only'}{redeploy}, qr/--recreate/,
+		'redeploy-only passes --recreate on a redeploy');
+
+	like($flags{always}{deploy}, qr/--recreate/,
+		'always passes --recreate on an ordinary deploy');
+	like($flags{always}{redeploy}, qr/--recreate/,
+		'always passes --recreate on a redeploy');
+
+	unlike($flags{never}{deploy}, qr/--recreate/,
+		'never passes nothing on an ordinary deploy');
+	unlike($flags{never}{redeploy}, qr/--recreate/,
+		'never passes nothing on a redeploy');
+
+	# A repository that always recreates still gets to ask what a deploy
+	# would do, because the setting is not something the operator typed.
+	my $g = ready_harness(envs => ['qa'], bosh => 1,
+		pipeline => {recreate_on_deploy => 'always'});
+	stand_on($g, $g->control);
+
+	# A dry run leaves the deployment cache directory behind, because
+	# _post_deploy says the post-deployment activities are skipped and exits
+	# there, above the cleanup that would have taken it away.  The run is
+	# therefore told not to assert a restoration it cannot make, and the tree
+	# it leaves is nothing this task changed.
+	my (undef, $gerr, $dry_exit) = run_genesis($g, {restore => 0},
+		'qa', 'deploy', '--dry-run', '--no-propagate', '-y');
+	is($dry_exit, 0, 'a repository set to always still allows a dry run')
+		or diag("what the dry run said:\n$gerr");
 };
 
 
