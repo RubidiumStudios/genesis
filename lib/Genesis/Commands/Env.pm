@@ -1367,6 +1367,7 @@ sub _deploy_preflight {
 		session => $session,
 		action  => $action,
 		bare    => $bare,
+		target  => $target,
 		prior   => $prior_record,
 		due     => $tip->{due},
 		drifted => $tip->{drifted},
@@ -1473,12 +1474,16 @@ sub deploy {
 
 	$options{'disable-reactions'} = ! delete($options{reactions});
 
-	# The one reader of the redeploy question answers here, where the command
-	# line is in scope, and the answer travels down with the rest of the
-	# options as a fact.  Genesis::Env imports current_command and
-	# known_commands from Genesis::Commands and cannot ask has_option itself,
-	# so what it gets is an answer rather than a second place to ask.
-	$options{redeploy} = redeploy_wanted($top, \%options);
+	# What the hand-off reads is the commit this run resolved, not the flag.
+	# A --redeploy of an environment that has never deployed successfully
+	# resolves nothing, deploys the tip, and hears both warnings about it, so
+	# it is an ordinary deploy in every way that matters and it hands off to a
+	# child like one.  The pre-flight resolved the target once and carries it
+	# here, and the answer travels down with the rest of the options as a
+	# fact: Genesis::Env imports current_command and known_commands from
+	# Genesis::Commands and cannot ask for an option itself, so what it gets
+	# is an answer rather than a second place to ask.
+	$options{redeploy} = ($preflight && defined $preflight->{target}) ? 1 : 0;
 	my $env = $top->load_env($env_name)->with_vault()->with_bosh();
 
 	# Everything a pipeline deploy asks, it asks in the pre-flight above.

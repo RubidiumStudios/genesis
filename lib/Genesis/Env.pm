@@ -5377,8 +5377,8 @@ sub _post_deploy {
 		}
 
 		# Auto-cascade propagation (manual-provider only).  The two facts
-		# it branches on travel as arguments, because the answers are the
-		# command line's and this module cannot ask for them.
+		# it branches on travel as arguments, because the command that owns
+		# the command line settles both and this module can ask for neither.
 		$self->_spawn_propagate_child(
 			map {($_ => $opts{$_})} 'no-propagate', 'redeploy'
 		);
@@ -5393,11 +5393,14 @@ sub _post_deploy {
 # }}}
 # _spawn_propagate_child - hand off to genesis propagate after a deploy {{{
 #
-# Lifted whole out of _post_deploy, where it stood inline.  D21 and D87: a
-# redeploy certifies nothing new, so there is nothing for the child to deliver
-# and no reason to walk the pipeline to discover that.  D94 names the
-# pipeline's own deploy job as the only writer of the run_propagate queue, so
-# a CLI deploy makes no request either, whichever flag it carried.
+# Lifted whole out of _post_deploy, where it stood inline.  Under D21 and D87
+# a run that resolved a deployed commit certifies nothing new, so there is
+# nothing for the child to deliver and no reason to walk the pipeline to
+# discover that.  The redeploy fact arrives already settled from that resolved
+# commit rather than from the flag, so a --redeploy that resolved none hands
+# off like the ordinary deploy it is.  D94 names the pipeline's own deploy job
+# as the only writer of the run_propagate queue, so a CLI deploy makes no
+# request either, whichever flag it carried.
 #
 # M15 narrows the arguments and gives this a return value when it moves to
 # Genesis::Commands::Env.

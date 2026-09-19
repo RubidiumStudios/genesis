@@ -51,11 +51,12 @@
 # narrower redeploy must not have taken out with it.
 #
 # The fourth subtest is T242's, and it says the same thing about itself.
-# Three of its seven rows were red and four were green.  The red ones are the
-# child count after the redeploy, the row that reads the run's own output for
-# a propagation report, and the count after the ordinary deploy, which found
-# two children rather than one because the redeploy had spawned one of its
-# own.  Withholding the child from a redeploy is what turns all three green.
+# Three of the seven rows it was written with were red and four were green.
+# The red ones are the child count after the redeploy, the row that reads the
+# run's own output for a propagation report, and the count after the ordinary
+# deploy, which found two children rather than one because the redeploy had
+# spawned one of its own.  Withholding the child from a redeploy is what turns
+# all three green.
 #
 # The four that arrived green are guards.  The exit row and the restoration
 # row say the redeploy reached its end and put the operator back on the
@@ -69,6 +70,15 @@
 # takes no argument for, so it exits 2 without delivering anything; the row
 # stands as the guard that catches a hand-off after a redeploy once M15 gives
 # that child an argument list the command accepts.
+#
+# Three rows joined that subtest later, against a tree in which the
+# withholding already stood.  The row asking that a --redeploy which resolved
+# no commit spawns a child was red there, because the withholding keyed on the
+# flag and such a run carries it; keying it on the commit the run resolved is
+# what turns it green.  The two restoration rows, beside the ordinary deploy
+# and beside that run, arrived green, and they say that the child's one-way
+# checkout of control costs a run nothing where the session has already put
+# the operator back on control.
 #
 # The fifth subtest is T246's, and it says the same thing about itself.  Three
 # of its nineteen rows were red and sixteen were green.  The red ones are the
@@ -386,10 +396,9 @@ subtest 'the redeploy keeps the provider gate and the stale warning' => sub {
 # its init commit alone, so the marker row reads a branch a hand-off really
 # would have written to rather than one that was already full.
 subtest 'a successful redeploy propagates nothing' => sub {
-	# Six rows, and one more for the redeploy's own restoration assertion.
-	# The ordinary deploy at the end asserts no restoration, for the reason
-	# given beside it.
-	plan tests => 7;
+	# Seven rows, and one more for each of the three runs' own restoration
+	# assertions.
+	plan tests => 10;
 
 	# Both environments are stood up and only qa is delivered to and
 	# certified, so prod's branch carries the init commit alone and a
@@ -453,13 +462,30 @@ subtest 'a successful redeploy propagates nothing' => sub {
 		'the downstream environment received nothing');
 
 	# An ordinary deploy in the same fixture does spawn the child, so the row
-	# above is about the flag and not about a hand-off nobody ever makes.
-	# The child checks control out one way and does not come back, so the
-	# runner is told not to assert a restoration this run cannot make.
+	# above is about what this run resolved and not about a hand-off nobody
+	# ever makes.  The child does check control out one way, but the session
+	# has already put the operator back on control by the time it runs and
+	# this subtest started there, so the checkout is a no-op and the run
+	# restores like any other.  That row is a guard rather than a discovery.
 	fixture_director($h, 'qa', url => $url);
-	run_genesis($h, {restore => 0}, 'qa', 'deploy', '-y');
+	run_genesis($h, 'qa', 'deploy', '-y');
 	is(scalar(grep {($_->{argv}[0] // '') eq 'propagate'} child_runs($h)), 1,
 		'an ordinary manual deploy still spawns one propagate child');
+
+	# And a --redeploy of an environment that has never deployed successfully
+	# resolves no commit, deploys the tip, and hears both warnings about it,
+	# so it hands off to a child like the ordinary deploy it is.  The row is
+	# what holds the two rows above to the commit this run resolved rather
+	# than to the flag it was given.  A fresh harness, because the seeding
+	# certifies without naming a deployed commit and the runs above have
+	# since written records that name one.
+	my $n = ready_harness(envs => ['qa'], bosh => 1);
+	child_recorder($n);
+	stand_on($n, $n->control);
+	my (undef, $nerr) = run_genesis($n, 'qa', 'deploy', '--redeploy', '-y');
+	is(scalar(grep {($_->{argv}[0] // '') eq 'propagate'} child_runs($n)), 1,
+		'a redeploy that resolved no commit spawns one too')
+		or diag("what the redeploy said:\n$nerr");
 };
 
 
