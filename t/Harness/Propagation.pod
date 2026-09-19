@@ -1833,9 +1833,14 @@ C<ready> with one commit due, a pull request open on the GitHub double, and
 the proposed record naming it, which is the whole shape a pull request column
 reads.  It answers the harness, the double, the pull request number, and the
 control commit the pull request proposes.  C<env> names the environment, which
-is C<qa> by default and which the default C<envs> and the default C<due> file
-both follow, and C<review> is the review state the pull request opens with.
-The rest of the options go on to C<ready>.
+is C<qa> by default and which the default C<envs> follows, and C<review> is the
+review state the pull request opens with.
+
+The due commit is written through C<due_commit>, so the environment's own file
+at the deployment root is rewritten with its metadata left standing, and
+C<params> and C<message> steer it.  C<due> is C<ready>'s option for a control
+commit of some other shape, and this scenario writes its own, so C<due> never
+reaches C<ready>.  The rest of the options do.
 
 =head2 two_roots(%opts)
 

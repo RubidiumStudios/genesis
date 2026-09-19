@@ -107,7 +107,7 @@ subtest 'the two scenarios that carry commits answer in both contexts' => sub {
 };
 
 subtest 'the three shapes whose arguments the step files fixed' => sub {
-	plan tests => 10;
+	plan tests => 11;
 
 	my $unseeded = staged(envs => ['lab']);
 	ok(remote_sha($unseeded, $unseeded->slug('lab')),
@@ -128,8 +128,10 @@ subtest 'the three shapes whose arguments the step files fixed' => sub {
 	ok($pr, 'with_open_pr answers the pull request number');
 	is(record_at($pr_h, $pr_h->env_path('qa') . '/proposed')->{number}, $pr,
 		'and the proposed record names it');
-	like(files_at($pr_h, $control)->{'qa.yml'}, qr/^n: 2$/m,
+	like(files_at($pr_h, $control)->{'qa.yml'}, qr/^  instances: 2$/m,
 		'the control commit it answers is the one the due file landed on');
+	like(files_at($pr_h, $control)->{'qa.yml'}, qr/^    require_pr: true$/m,
+		'and that file still carries the metadata the topology reads');
 
 	# The double is read through the client the product uses, because a row
 	# that read the state file would prove the fixture rather than what an

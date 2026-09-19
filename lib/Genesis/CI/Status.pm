@@ -21,6 +21,10 @@ use Genesis::CI::Preflight ();
 # here, which is the one thing that could make the two commands disagree about
 # a phrase.
 use Genesis::CI::Report qw/held_qualifier hold_reason/;
+# Genesis::CI::PullRequest owns every decision the run makes about a pull
+# request, so the client, the state read, the copy onto the record, and the
+# approved arm are asked of it here rather than written a second time.
+use Genesis::CI::PullRequest ();
 # Genesis::CI::Marker owns the marker's vocabulary, so the snapshot reader
 # below asks it which control commits a message names rather than spelling the
 # prefix a second time.
@@ -107,6 +111,14 @@ sub status_records {
 		control   => $control,
 		read_only => 1);
 
+	# The scope the walk composes for itself, read here so that the pull
+	# request branch this report asks GitHub about is the branch the walk
+	# matches and the branch a run would open.  It is the walk's own reader,
+	# so no second composition of the name exists for the two to disagree
+	# over.
+	my ($scope) = Genesis::CI::Walk::scope_for($top, scope => $opts{scope});
+	my $pr_state_of = _pull_request_state($top, $scope);
+
 	my $record = Genesis::CI::Walk::plan($top,
 		git       => $git,
 		branches  => $initial->{branches},
@@ -124,6 +136,27 @@ sub status_records {
 	# emits one shape for the field whichever form of the command wrote the
 	# record, which is what D91 asks of every field it fixes.
 	$record->{refreshed} = $record->{refreshed} ? JSON::PP::true : JSON::PP::false;
+
+	# What the API answered, carried onto the walk's own records through the
+	# arm's own writer, so the column below and the run's report read one
+	# answer about one pull request.  An environment the read said nothing
+	# about keeps the branch the walk seeded and nothing else, and the column
+	# falls back to the proposed record for it.
+	for my $row (@{$record->{environments}}) {
+		next unless $row->{pr};
+		my $state = $pr_state_of->{$row->{env}} or next;
+		Genesis::CI::PullRequest::carry_state($row, $state);
+
+		# D51's approved arm, taken from the sub the run takes it from rather
+		# than decided again here, so the report and the run cannot disagree
+		# about what an approved pull request does to an environment.  It
+		# touches nothing outside the record: the due commits move to held
+		# under the awaiting-merge reason held_qualifier reads, which is the
+		# wait the operator acts on and the one this row has to show.
+		Genesis::CI::PullRequest::freeze($row, $row->{pending})
+			if ($row->{pr}{state} // '') eq 'approved'
+			&& @{$row->{pending} || []};
+	}
 
 	# D43's staleness, asked through the one query Genesis::Top gives it, so
 	# the deploy pre-flight, the propagate pre-flight, and this command
@@ -451,6 +484,41 @@ sub render_tree {
 }
 
 # }}}
+# _pull_request_state - what GitHub says about each environment's pull request {{{
+#
+# D57 builds the client where an environment in scope needs the API and not at
+# all where none does, and D55 gives every failure to read it one refusal, so
+# both are asked of Genesis::CI::PullRequest rather than settled here.  The
+# answer is keyed by environment, and an environment it holds no key for is one
+# nothing was read about.
+#
+# The client is asked for only where a token exists to build it with.  Built
+# without one it warns that the run's branches are still written and published,
+# which is false of a command that writes nothing at all, and a missing token
+# is the fallback the pull request column is built for rather than something to
+# warn an operator about.
+sub _pull_request_state {
+	my ($top, $scope) = @_;
+
+	my @wanted = grep {$_->{pr_branch}} @$scope;
+	return {} unless @wanted && $ENV{GITHUB_AUTH_TOKEN};
+
+	my $github = Genesis::CI::PullRequest::client_for_run($top,
+		records => [map {{pr => {branch => $_->{pr_branch}}}} @wanted])
+		or return {};
+	my $owner_repo = $top->source_control_repository;
+
+	# The three fields pr_state reads and no more, which is what lets the
+	# state be read before the walk has composed a record of its own.
+	return {map {($_->{env} => Genesis::CI::PullRequest::pr_state(
+		$github, $owner_repo, {
+			env    => $_->{env},
+			branch => $_->{branch},
+			pr     => {branch => $_->{pr_branch}},
+		}))} @wanted};
+}
+
+# }}}
 # _applied_line - the header that says the pipeline is stale {{{
 #
 # D43 detects staleness by a path comparison that needs no fly, and
@@ -477,6 +545,52 @@ sub _applied_line {
 	my @reasons = @{$applied->{stale_because} || []};
 	return $line.csprintf("  #R{[stale: %s]}  run #C{genesis pipeline-apply}",
 		join(', ', map {sprintf('%s %s', $changed[$_], $reasons[$_])} 0 .. $#changed));
+}
+
+# }}}
+# _pull_request_component - the column the pull request mode needs {{{
+#
+# The walk's pr field is the branch the pull request mode delivers onto, which
+# Genesis::Top::pr_branch_for composes, so the name this column reads and the
+# name propagation opens come from one accessor and cannot disagree.  The
+# baseline matched a literal propagate/<env>/ prefix that propagation has never
+# opened, which is why an operator was told nothing waited while a pull request
+# sat open for review.
+#
+# With a token the state has been read, so the answer is what the API gave.  A
+# number is only ever taken off the open listing, so a number on the record is
+# an open pull request and the word open is the truth about it rather than a
+# second reading.  Where the read found nothing open the column says nothing,
+# because the rest of the row already says what the environment is doing.
+#
+# Without a token the proposed record answers.  It is a pointer to a pull
+# request Genesis itself opened rather than a cache of somebody else's state,
+# and reading it costs no API call at all, so the column says which pull
+# request was proposed and for which control commit, and says plainly that
+# nobody has read what a reviewer since decided.
+sub _pull_request_component {
+	my ($row) = @_;
+
+	# An environment whose policy asks for no pull request has no pull request
+	# column at all.  The walk seeds the branch onto every environment that
+	# would deliver into one and leaves the field null for the rest, so that
+	# field is the whole of the question, and the proposed record below is
+	# read only for an environment the walk says would have one.
+	my $pr = $row->{pr} or return ();
+
+	if (defined $pr->{state}) {
+		return () unless defined $pr->{number};
+		return [in_flight => sprintf('[PR #%d open: %s]',
+			$pr->{number}, $pr->{state})];
+	}
+
+	# A record naming no pull request is one no run has proposed anything
+	# through, and a number is the whole of what this component is built on.
+	my $proposed = $row->{proposed};
+	return () unless $proposed && defined $proposed->{number};
+	return [in_flight => sprintf(
+		'[PR #%d proposes control@%s: review state unread, possibly outdated]',
+		$proposed->{number}, _short($proposed->{control_commit}))];
 }
 
 # }}}
@@ -540,6 +654,11 @@ sub compose_phrase {
 		push @phrase, [wrong => sprintf('drifted [%s differs: hand commit]',
 			join(', ', @{$drift->{files}}))];
 	}
+	# D91 puts the pull request between the snapshot flag and the hold.  The
+	# flag says what the branch itself holds, this says which pull request is
+	# carrying the change and what a reviewer made of it, and the hold below
+	# says what the environment is waiting for.
+	push @phrase, _pull_request_component($row);
 	# The hold sits where the design's order puts it, after the snapshot flag
 	# and before the marker, because a marker says how the environment is
 	# driven and a hold says what it is waiting for, and an operator reads
@@ -570,8 +689,17 @@ sub compose_phrase {
 		# line.  The environment waits for one thing and the row says it
 		# once.
 		my ($first) = @{$row->{held} || []};
-		push @phrase, [on_ice => hold_reason($first)]
-			if $first && ($first->{reason} // '') ne 'on-hold';
+		if ($first && ($first->{reason} // '') ne 'on-hold') {
+			# The frozen commit's reason is the merge the qualifier has just
+			# named, word for word, because one approved pull request is both
+			# what the environment waits for and what holds every commit
+			# standing behind it.  The row says it once, for the reason the
+			# standing hold above is said once, and the comparison is on the
+			# words rather than on a second list of reasons to keep in step
+			# with Genesis::CI::Report.
+			my $reason = hold_reason($first);
+			push @phrase, [on_ice => $reason] unless $reason eq $qualifier;
+		}
 	}
 
 	push @phrase, [inert => '[manual]'] if $row->{manual};

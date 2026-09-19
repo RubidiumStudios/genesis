@@ -758,6 +758,48 @@ B<Examples:>
     settled($git, 'pr/qa/bosh', $newest, $tree);
     # returns 1 when R's pr/qa/bosh names $newest and holds $tree
 
+=head2 carry_state($record, $state)
+
+    Genesis::CI::PullRequest::carry_state($record, $state);
+
+Puts what C<pr_state> answered onto the record's own pull request object, which
+is its C<state>, its C<number>, its C<url>, and its C<superseded> list.
+
+It is the one writer of those four fields. C<deliver> carries them so that the
+publish, the sync, and the run's report read one answer rather than asking the
+API a second time, and C<genesis pipeline-status> carries the same four onto
+the same record for its pull request column. Two copies of this assignment are
+how the two commands would come to hold different keys under one name.
+
+A C<$state> of C<undef> is a caller that had no client to read one with, and it
+clears the four rather than leaving whatever stood there, because a reader that
+met a stale number would report a pull request nobody had looked for. The
+C<superseded> list is emptied rather than undefined, since every reader of it
+walks it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The walk's per-environment record. A record the walk composed no pull request
+branch for is left exactly as it is.
+
+=item C<$state>
+
+What C<pr_state> answered for this environment, or C<undef>.
+
+=back
+
+B<Returns:> the record it was handed.
+
+B<Examples:>
+
+    carry_state($record, {state => 'approved', number => 42,
+        url => 'https://github.test/owner/repo/pull/42', superseded => []});
+    # $record->{pr}{number} is now 42 and its state is approved
+
 =head2 deliver($session, $record, %opts)
 
     my $word = Genesis::CI::PullRequest::deliver($session, $record,
