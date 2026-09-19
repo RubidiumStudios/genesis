@@ -982,6 +982,14 @@ sub plan {
 	my $git = $opts{git}
 		or bug("Genesis::CI::Walk::plan needs a git handle to read through");
 
+	# The composed scope is dereferenced far below, where a caller that
+	# handed in the wrong shape would be told about it by a line in this
+	# file rather than by the name of the option they got wrong.
+	bug("Genesis::CI::Walk::plan takes composed as the two values scope_for ".
+		"answers, which is an arrayref of the scope and the topology")
+		if exists $opts{composed}
+		&& !(ref $opts{composed} eq 'ARRAY' && @{$opts{composed}} == 2);
+
 	# Everything I11 lets the run read, read once.  A caller that has already
 	# read it hands the answer in, because the command prints control's own
 	# sha above the walk and a second read there would be a second reader of

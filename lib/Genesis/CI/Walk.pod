@@ -149,10 +149,13 @@ it means when the list comes out empty rather than handing one in.
 Optional.  The pair L</scope_for> answered, in the order it answers them,
 where the caller has already composed it.  C<genesis pipeline-status> composes
 the scope first so that it knows which pull request branch to ask GitHub
-about, and composing it again here would walk every environment file a second
-time, since C<Genesis::Top::pipeline_topology> memoises none of that work.  A
-call that leaves it out composes the pair for itself, which is what
-C<genesis propagate> does.
+about, and composing it again here would build the topology once more, since
+C<Genesis::Top::pipeline_topology> memoises none of that work.  A call that
+leaves it out composes the pair for itself, which is what C<genesis propagate>
+does.
+
+It must be the two values C<scope_for> answers, in that order, and a bug is
+raised where it is anything else.
 
 It may not be given beside C<scope>, because the pair handed in is already
 narrowed and a name given here would be dropped without a word.
@@ -273,6 +276,10 @@ caller named without a word, and a caller that set one meant it to be read.
 Raises a bug where C<composed> arrives beside C<scope>, for the same reason.
 The composed pair is already narrowed, so the names would be dropped without
 a word.
+
+Raises a bug where C<composed> is anything but a two-element arrayref, since
+it is read apart far below and a caller that handed in the wrong shape would
+otherwise learn of it from a line that does not name the option.
 
 B<Examples:>
 

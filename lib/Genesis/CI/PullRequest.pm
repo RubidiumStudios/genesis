@@ -777,20 +777,23 @@ sub client_for_run {
 	my $records = $opts{records} || [];
 	return undef unless grep {$_->{pr} || $_->{proposed}} @$records;
 
-	my $owner_repo = $top->source_control_repository;
-	($opts{refuse} || \&bail)->(
-		{exitcode => Genesis::Exit::CONFIG},
-		"This repository delivers into pull requests, and #C{%s} is not set ".
-		"and could not be derived from any git remote.\n\nSet it to the ".
-		"#C{owner/repo} pair the pull requests are opened against.",
-		'pipeline.source_control.repository'
-	) unless defined $owner_repo && length $owner_repo;
-
 	# A caller whose closure records the refusal and returns instead of
 	# exiting gets no client, because there is nothing to point one at.  A
 	# read-only report is the one such caller, and it renders every
-	# environment as the no-token case rather than ending on it.
-	return undef unless defined $owner_repo && length $owner_repo;
+	# environment as the no-token case rather than ending on it.  The
+	# refusal and that answer stand in one block, so a later edit cannot
+	# move one of them and leave the other behind.
+	my $owner_repo = $top->source_control_repository;
+	unless (defined $owner_repo && length $owner_repo) {
+		($opts{refuse} || \&bail)->(
+			{exitcode => Genesis::Exit::CONFIG},
+			"This repository delivers into pull requests, and #C{%s} is not ".
+			"set and could not be derived from any git remote.\n\nSet it to ".
+			"the #C{owner/repo} pair the pull requests are opened against.",
+			'pipeline.source_control.repository'
+		);
+		return undef;
+	}
 
 	# The run carries on without a token and says so, and everything the API
 	# would have decided is left to the next run that has one (D44).  A
@@ -829,21 +832,22 @@ sub client_for_run {
 	# them to.  It is CONFIG for the same reason the pair's is, because what
 	# the operator has to change is the token they set and not the state of
 	# the API.
+	# As above, a caller that records the refusal and returns gets no client,
+	# and the refusal and that answer stand in one block.  A token the
+	# endpoint will not name an owner for is one no reader here can trust, so
+	# handing it back would answer with a state the refusal has just said
+	# nothing can be concluded from.
 	my $who = eval {$github->get_authorized_user};
-	my $nameless = !$@ && !$who;
-	($opts{refuse} || \&bail)->(
-		{exitcode => Genesis::Exit::CONFIG},
-		"GitHub answered for #C{GITHUB_AUTH_TOKEN} without naming the user ".
-		"it belongs to, so verify that it is a valid personal access token ".
-		"and that #C{%s} is GitHub itself.",
-		$github->base_url
-	) if $nameless;
-
-	# As above, a caller that records the refusal and returns gets no client.
-	# A token the endpoint will not name an owner for is one no reader here
-	# can trust, so handing it back would answer with a state the refusal has
-	# just said nothing can be concluded from.
-	return undef if $nameless;
+	unless ($@ || $who) {
+		($opts{refuse} || \&bail)->(
+			{exitcode => Genesis::Exit::CONFIG},
+			"GitHub answered for #C{GITHUB_AUTH_TOKEN} without naming the ".
+			"user it belongs to, so verify that it is a valid personal ".
+			"access token and that #C{%s} is GitHub itself.",
+			$github->base_url
+		);
+		return undef;
+	}
 
 	return $github;
 }
