@@ -9,6 +9,24 @@
 # message rows catch; and one that warned by comparing the deployed commit
 # against the certified commit, which D87 keeps apart and which would warn on
 # every environment ever deployed, including the --as-deployed run.
+#
+# Two rows joined the subtest later, which are the check-secrets run's own.
+# The message row among them was red when it was written, red having been
+# produced by taking the warning's call out of check_secrets and putting it
+# back afterwards.  The exit row beside it arrived green, and it is what keeps
+# the message row honest, since a run that died before it finished its work
+# would reach no warning either.  Together they hold a second of the four call
+# sites, so an edit that dropped the warning from one command alone is caught
+# by something.
+#
+# The warning the rows read says "the secrets this run served" where the brief
+# it was written from says "the secrets just written".  The brief's wording is
+# wrong for two of the four commands that raise it, check-secrets validating
+# and remove-secrets removing, and it is wrong again for any run that errored
+# before it wrote anything, because the call sits above each command's own
+# error bail.  The rows match on the sentence's later words, so they would
+# pass under either wording; the departure is recorded here because the code
+# no longer says what the brief said.
 use strict;
 use warnings;
 use utf8;
@@ -20,14 +38,13 @@ use Harness::Propagation;
 
 use Test::More;
 
-use Genesis;
-use Genesis::Exit;
-
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'rotating against the tip says which version it served' => sub {
-	plan tests => 7;
+	# Seven rows, and one more for each of the three runs' own restoration
+	# assertions.
+	plan tests => 10;
 
 	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
 
@@ -76,6 +93,19 @@ subtest 'rotating against the tip says which version it served' => sub {
 	is($clean_exit, 0, 'the as-deployed rotation succeeded');
 	unlike($clean_out.$clean_err, qr/not\s+the\s+certified/i,
 		'serving the running version raises nothing');
+
+	# The warning belongs to the whole secrets family and not to the rotation
+	# alone, so a second command of the four says it too.  check-secrets is
+	# the one worth naming, because it writes no value at all and is
+	# therefore the command the wording has to be true of.  It reads what the
+	# two rotations above left in the vault, so it finds its secrets and
+	# reports on them rather than bailing over what is missing.
+	my ($check_out, $check_err, $check_exit) =
+		run_genesis($h, 'qa', 'check-secrets');
+	is($check_exit, 0, 'the check succeeded');
+	like($check_out.$check_err, qr/not\s+the\s+certified/i,
+		'check-secrets says which version it served as well')
+		or diag("what the check said:\n$check_out$check_err");
 };
 
 done_testing;

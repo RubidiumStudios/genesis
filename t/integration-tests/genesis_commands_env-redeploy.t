@@ -80,6 +80,12 @@
 # checkout of control costs a run nothing where the session has already put
 # the operator back on control.
 #
+# A fourth joined them afterwards, the exit row beside that same run, and it
+# arrived green.  It is what keeps the child-count row beside it honest, in
+# the way every other exit row in this file is, since a run that died before
+# it reached the hand-off would spawn no child either and the row would then
+# be reading a death as a withholding.
+#
 # The fifth subtest is T246's, and it says the same thing about itself.  Three
 # of its first nineteen rows were red and sixteen were green.  The red ones
 # are the three that ask for a flag: redeploy-only on a redeploy, and always
@@ -101,7 +107,23 @@
 # Three rows joined that subtest afterwards, which are the --fix run's own
 # three.  The flag row among them was red when it was written, red having
 # been produced by letting the operator's --fix suppress the repository's
-# recreate, and the narrowing was undone afterwards.
+# recreate, and the narrowing was undone afterwards.  The exit row and the
+# restoration row beside that run arrived green, and they are guards of the
+# same kind as the six deploys' own, since a run that died before it reached
+# BOSH would leave the run before it standing as the last call the flag row
+# reads.
+#
+# Three more joined it later still.  The row reading --recreate off the dry
+# run's own argument list arrived green, because the setting already reached
+# the options above the guard, and red was produced for it by making
+# _recreate_wanted answer 0 on a dry run and undone afterwards; it says that a
+# dry run is given the flag as well as the exit, which is what the exit row
+# beside it cannot say on its own.  The row asking that redeploy-only gives
+# nothing to a --redeploy which resolved no commit was red when it was
+# written, red having been produced by keying that setting on the flag the
+# operator typed rather than on the commit the run resolved, and that
+# narrowing was undone afterwards too.  The exit row beside its own run
+# arrived green, as every other exit row here did.
 use strict;
 use warnings;
 use utf8;
@@ -401,9 +423,9 @@ subtest 'the redeploy keeps the provider gate and the stale warning' => sub {
 # its init commit alone, so the marker row reads a branch a hand-off really
 # would have written to rather than one that was already full.
 subtest 'a successful redeploy propagates nothing' => sub {
-	# Seven rows, and one more for each of the three runs' own restoration
+	# Eight rows, and one more for each of the three runs' own restoration
 	# assertions.
-	plan tests => 10;
+	plan tests => 11;
 
 	# Both environments are stood up and only qa is delivered to and
 	# certified, so prod's branch carries the init commit alone and a
@@ -477,17 +499,19 @@ subtest 'a successful redeploy propagates nothing' => sub {
 	is(scalar(grep {($_->{argv}[0] // '') eq 'propagate'} child_runs($h)), 1,
 		'an ordinary manual deploy still spawns one propagate child');
 
-	# And a --redeploy of an environment that has never deployed successfully
-	# resolves no commit, deploys the tip, and hears both warnings about it,
-	# so it hands off to a child like the ordinary deploy it is.  The row is
-	# what holds the two rows above to the commit this run resolved rather
-	# than to the flag it was given.  A fresh harness, because the seeding
-	# certifies without naming a deployed commit and the runs above have
-	# since written records that name one.
+	# And a --redeploy that resolves no commit deploys the tip, hears both
+	# warnings about it, and hands off to a child like the ordinary deploy it
+	# is.  The row is what holds the two rows above to the commit this run
+	# resolved rather than to the flag it was given.  A fresh harness, whose
+	# seeding certifies without naming a deployed commit, because the runs
+	# above have since written records that name one.
 	my $n = ready_harness(envs => ['qa'], bosh => 1);
 	child_recorder($n);
 	stand_on($n, $n->control);
-	my (undef, $nerr) = run_genesis($n, 'qa', 'deploy', '--redeploy', '-y');
+	my (undef, $nerr, $nexit) =
+		run_genesis($n, 'qa', 'deploy', '--redeploy', '-y');
+	is($nexit, 0, 'the redeploy that resolved no commit succeeded')
+		or diag("what the redeploy said:\n$nerr");
 	is(scalar(grep {($_->{argv}[0] // '') eq 'propagate'} child_runs($n)), 1,
 		'a redeploy that resolved no commit spawns one too')
 		or diag("what the redeploy said:\n$nerr");
@@ -504,22 +528,29 @@ subtest 'a successful redeploy propagates nothing' => sub {
 # the key and read the command line alone, which the always pair catches; one
 # that passed --recreate whatever the key said, which the never pair catches;
 # and one that folded the answer into the options above the guard that refuses
-# more than one of fix, recreate, and dry-run, which the dry-run row catches by
-# running a dry run in a repository set to always.  The --fix row beside it
+# more than one of fix, recreate, and dry-run, which the dry run's two rows
+# catch in a repository set to always.  The --fix row beside them
 # catches the narrower defect of an implementation that let the operator's
 # --fix suppress the repository's own recreate, which is the same guard being
 # enforced against a value the operator never typed.
 #
 # Each run has an exit row of its own beside it, and those rows are what keep
-# the seven flag rows honest.  Each flag row reads the last call the harness
+# the nine flag rows honest.  Each flag row reads the last call the harness
 # director was given, and a run that died before it reached BOSH would leave
 # the run before it standing as the last, so a flag row with no exit row
 # beside it could read another run's argument list and pass on it.
+#
+# The last pair of rows is about the one run that carries the flag without the
+# operator having asked for it and without being a redeploy either.  A
+# --redeploy of an environment whose record names no commit resolves nothing
+# and deploys the tip, so redeploy-only owes it nothing, and the row says that
+# the setting turns on the commit the run resolved rather than on the flag it
+# was given.
 subtest 'recreate_on_deploy reaches every deploy as declared' => sub {
-	# Eight rows, seven exit rows, and one more for each of the seven runs
+	# Nine flag rows, nine exit rows, and one more for each of the eight runs
 	# that assert a restoration.  The dry run asserts none, for the reason
 	# given beside it.
-	plan tests => 22;
+	plan tests => 26;
 
 	my %flags;
 	for my $setting (qw/redeploy-only always never/) {
@@ -599,6 +630,16 @@ subtest 'recreate_on_deploy reaches every deploy as declared' => sub {
 	is($dry_exit, 0, 'a repository set to always still allows a dry run')
 		or diag("what the dry run said:\n$gerr");
 
+	# The exit row above says the guard let the run through; this one says
+	# what the run then asked BOSH for.  A dry run reaches bosh deploy like
+	# any other, only a create-env deployment skipping that call, so the
+	# setting rides in the dry run's own argument list and the operator sees
+	# what a real deploy would be given.
+	my @dry_deploys = bosh_runs($g, command => 'deploy');
+	like(join(' ', @{$dry_deploys[-1]{argv}}), qr/--recreate\b/,
+		'always passes --recreate to a dry run as well')
+		or diag("what the dry run said:\n$gerr");
+
 	# The setting rides beside --fix exactly as it rides beside --dry-run,
 	# because BOSH accepts both combinations and the guard is about what the
 	# operator asked for.  What this row catches that the dry run does not is
@@ -619,6 +660,28 @@ subtest 'recreate_on_deploy reaches every deploy as declared' => sub {
 	my @fix_deploys = bosh_runs($f, command => 'deploy');
 	like(join(' ', @{$fix_deploys[-1]{argv}}), qr/--fix\b.*--recreate\b|--recreate\b.*--fix\b/,
 		'always passes --recreate beside the operator\'s --fix');
+
+	# The three repositories above are each re-certified with the commit
+	# their delivery put on the branch, so every redeploy in them resolves
+	# one.  This repository is left as the seeding made it, certified without
+	# a deployed commit named, so the --redeploy below resolves nothing and
+	# deploys the tip.  Such a run is an ordinary deploy in every way that
+	# matters, and redeploy-only is what the design gives to a redeploy, so
+	# the row asks for no flag.  It is what holds the setting to the commit
+	# the run resolved rather than to the flag the operator typed.
+	my $s = ready_harness(envs => ['qa'], bosh => 1,
+		pipeline => {recreate_on_deploy => 'redeploy-only'});
+	stand_on($s, $s->control);
+
+	my (undef, $serr, $sexit) = run_genesis($s,
+		'qa', 'deploy', '--redeploy', '--no-propagate', '-y');
+	is($sexit, 0, 'a redeploy that resolved no commit proceeded')
+		or diag("what the redeploy said:\n$serr");
+
+	my @tip_deploys = bosh_runs($s, command => 'deploy');
+	unlike(join(' ', @{$tip_deploys[-1]{argv}}), qr/--recreate\b/,
+		'redeploy-only passes nothing where the redeploy resolved no commit')
+		or diag("what the redeploy said:\n$serr");
 };
 
 

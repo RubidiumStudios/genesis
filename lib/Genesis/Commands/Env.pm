@@ -1420,11 +1420,15 @@ sub _deploy_preflight {
 # "is this a redeploy" has one answer and wants one reader.  Four spellings of
 # one question are four chances for them to drift apart.
 #
-# A caller holding the deploy's own options hash passes it and the answer is
-# read from there, which is how the answer reaches code with no command line
-# to ask: Genesis::Env imports current_command and known_commands from
-# Genesis::Commands and cannot call has_option at all.  A caller with no
-# options hash omits the second argument, and the command line is asked.
+# A caller with no options hash omits the second argument and the command line
+# is asked, which answers the flag as the operator typed it.  A caller holding
+# the deploy's own options hash passes it and the answer is read from that
+# hash's redeploy key instead.  The two arms no longer answer quite the same
+# question.  The deploy writes the commit its pre-flight resolved into that
+# key before anything downstream reads it, so the hash arm answers whether
+# this run resolved a deployed commit, and a --redeploy that resolved none is
+# answered no by it.  That is the fact the hand-off turns on, and here it is
+# _recreate_wanted that reads it, for the repository's redeploy-only setting.
 #
 # The root is taken and not read.  It comes first so that this reads like the
 # other questions the deploy asks of a run, and so that a later step can let a
@@ -1519,7 +1523,7 @@ sub deploy {
 	# it is an ordinary deploy in every way that matters and it hands off to a
 	# child like one.  The pre-flight resolved the target once and carries it
 	# here, and the answer travels down with the rest of the options as a
-	# fact: Genesis::Env imports current_command and known_commands from
+	# fact.  Genesis::Env imports current_command and known_commands from
 	# Genesis::Commands and cannot ask for an option itself, so what it gets
 	# is an answer rather than a second place to ask.
 	$options{redeploy} = ($preflight && defined $preflight->{target}) ? 1 : 0;
