@@ -27,10 +27,8 @@ use Test::More;
 
 plan tests => 2;
 
-fake_bosh;
-
 subtest 'the child asks nothing and finishes' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['qa', 'prod'], provider => 'manual');
 	fixture_vault($h);
@@ -62,7 +60,7 @@ subtest 'the child asks nothing and finishes' => sub {
 	deliver($h, 'qa', control => $control);
 	refresh($h, 'a', $h->control, map {$h->slug($_)} qw/qa prod/);
 
-	child_recorder($h, probe => 1);
+	child_recorder($h);
 	stand_on($h, $h->control);
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '-y');
@@ -70,6 +68,11 @@ subtest 'the child asks nothing and finishes' => sub {
 
 	my ($child) = child_runs($h);
 	ok(!$child->{stdin_is_tty}, 'the child had no terminal on standard input');
+	# The row that reads the redirect rather than the absence of a terminal.
+	# No command this suite spawns has a terminal whichever way it was
+	# started, so the row above would stay green if the spawn handed its own
+	# standard input down; this one would not.
+	ok($child->{stdin_is_null}, 'the child read from /dev/null');
 	is($child->{exit}, 0, 'the child proceeded and ran to completion');
 	# The product's own wording, from lib/Genesis/CI/Publish.pm.
 	unlike($out.$err, qr/Publish these branches\?/,
@@ -110,7 +113,7 @@ subtest 'the child publishes one branch at a time' => sub {
 	deliver($h, 'qa', control => $control);
 	refresh($h, 'a', $h->control, map {$h->slug($_)} qw/qa prod stage/);
 
-	child_recorder($h, probe => 1);
+	child_recorder($h);
 	stand_on($h, $h->control);
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '-y');

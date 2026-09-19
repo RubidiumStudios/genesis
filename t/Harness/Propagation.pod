@@ -1462,8 +1462,17 @@ Puts a recording wrapper first on the path of the run under test and points
 C<GENESIS_CALLBACK_BIN> at it, so every genesis child a command spawns is
 logged.  Each run is logged with its arguments, its pid, when it started and
 ended, its exit, its working directory, whether its standard input was a
-terminal, and what the switch lock was doing at its start, at its end, and
-while it ran.
+terminal, whether that standard input was the null device, and what the switch
+lock was doing at its start, at its end, and while it ran.
+
+The two standard input fields answer different questions, and a row that means
+to read a redirect wants the second.  C<stdin_is_tty> is C<-t STDIN>, and it is
+false for every command this suite spawns whether anything redirected that
+handle or not, because the runner gives no child a terminal in the first place.
+C<stdin_is_null> compares descriptor zero against F</dev/null> on device and
+inode, so it is true only where the child really is reading from the null
+device, and a row asserting it fails where a spawn stopped redirecting and
+handed its own standard input down instead.
 
 =head2 child_runs($h)
 

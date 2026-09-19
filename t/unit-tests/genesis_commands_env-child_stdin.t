@@ -36,7 +36,16 @@ my @specs = ({branch => $h->slug('prod'), kind => 'deployment', env => 'prod'});
 subtest 'the redirect is what keeps the publish from asking' => sub {
 	plan tests => 6;
 
-	# The same block _spawn_propagate_child opens around its system call.
+	# Standard input on /dev/null, which is the state _spawn_propagate_child
+	# puts the child in.  The redirect is made here with a localised glob
+	# rather than the spawn's save and restore, because this row calls the
+	# confirmation in process and in_controlling_terminal reads the Perl
+	# handle, where a child inherits the descriptor instead.
+	#
+	# The first row is the one that carries the discrimination, because
+	# in_controlling_terminal asks about standard output as well and
+	# output_from has made that a capture, so the three rows under it stay
+	# green whatever standard input is doing.
 	my ($go, $said);
 	{
 		local *STDIN;
