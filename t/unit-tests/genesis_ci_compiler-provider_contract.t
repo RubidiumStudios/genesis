@@ -26,6 +26,7 @@ use_ok 'Genesis::CI::ProviderRegistry';
 # The Concourse compiler loads by the name it declares, because the
 # package it declares and the path it sits at agree now.
 use_ok 'Genesis::CI::ProviderCompiler::Concourse';
+use_ok 'Genesis::CI::Compiler';
 
 subtest 'a registry lookup answers a copy of the entry' => sub {
 	plan tests => 2;
@@ -149,6 +150,27 @@ subtest 'the provider block is not checked a second time' => sub {
 	} @swept;
 	is_deeply [@found], [],
 		'and no file on the compiler side reads the fragment';
+};
+
+subtest 'the compile normalizes through the provider its own compiler' => sub {
+	plan tests => 2;
+
+	# A deploy normalizes through the compiler it holds, so the Concourse
+	# remap of the CLI's pause onto the schema's pause_after_set applies
+	# there.  A compile that asked the base instead would leave the CLI
+	# spelling standing, and the two paths would answer differently about
+	# the same flag an operator wrote once.
+	my $cli = {'ci-pause' => 1, 'ci-target' => 'prod'};
+
+	my $deploy = Genesis::CI::ProviderRegistry->compiler_class('concourse')
+		->normalize_provider_opts($cli);
+	my $compile = Genesis::CI::Compiler->_normalized_provider_opts(
+		'concourse', $cli);
+
+	is_deeply $compile, $deploy,
+		'the compile and the deploy normalize a flag the same way';
+	is $compile->{pause_after_set}, 1,
+		"and the provider's own remap is what both of them ran";
 };
 
 done_testing;

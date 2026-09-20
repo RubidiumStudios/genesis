@@ -115,11 +115,10 @@ sub compile {
 	# (ci-* prefixed, hyphenated) to config form (unprefixed,
 	# underscored) so that provider_option() and provider_config() see
 	# consistent keys.
-	require Genesis::CI::ProviderCompiler;
 	my $provider_opts = {
 		%{ $parsed->{provider} || {} },
-		%{ Genesis::CI::ProviderCompiler->normalize_provider_opts(
-			$opts{provider_opts} || {}
+		%{ $self->_normalized_provider_opts(
+			$provider_type, $opts{provider_opts}
 		) },
 	};
 
@@ -234,6 +233,25 @@ sub validate_config_section {
 		unless ref($data) eq 'HASH';
 
 	return 1;
+}
+
+# }}}
+# _normalized_provider_opts - a provider's CLI options in config form {{{
+#
+# The CLI spelling of an option is hyphenated and prefixed, and the
+# configuration spelling is neither, so the two have to be reconciled
+# before provider_option and provider_config see the keys.  A provider
+# may also remap one of its own on the way through, as Concourse maps
+# the CLI's pause onto the schema's pause_after_set, so the question
+# goes to that provider's compiling class rather than to the base.  A
+# deploy already asks the compiler it holds, and this is what keeps the
+# two paths answering the same way about the same flag.
+sub _normalized_provider_opts {
+	my ($class, $provider_type, $opts) = @_;
+
+	require Genesis::CI::ProviderRegistry;
+	return Genesis::CI::ProviderRegistry->compiler_class($provider_type)
+		->normalize_provider_opts($opts || {});
 }
 
 # }}}
