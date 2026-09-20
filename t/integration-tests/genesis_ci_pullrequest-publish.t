@@ -65,7 +65,7 @@ subtest 'a branch moved on R has its own push rejected' => sub {
 	my $already = scalar(() = gh_calls($h->{gh}));
 
 	# Copy B moves the pull request branch on R behind this clone's back,
-	# which is the window D51's expected tip exists to close.  Copy A's own
+	# which is the window the expected tip exists to close.  Copy A's own
 	# remote-tracking ref still names the first run's commit, and that is the
 	# value the arm reads and the publish leases against.
 	my $moved = move_on_r($h, $pr);

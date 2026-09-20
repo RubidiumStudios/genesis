@@ -159,8 +159,8 @@ subtest 'a gate ends the aggregate and holds what follows' => sub {
 	is(harness_marker($h, "origin/$pr"), $gate, 'the aggregate ends at the gate');
 
 	# The message says where the aggregate ends and the tree says what it
-	# delivered, and D69 makes a delivery a mirror, so the branch carries the
-	# set as it stood at the gate and not at the commit held behind it.
+	# delivered, and a delivery is a mirror, so the branch carries the set as
+	# it stood at the gate and not at the commit held behind it.
 	is_deeply(tree_of($h->a, "origin/$pr"),
 		[sort($h->propagation_set('prod', at => $gate))],
 		"and its tree is this environment's set at the gate");

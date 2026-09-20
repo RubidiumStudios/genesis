@@ -5,8 +5,8 @@
 # unverified rather than refusing.
 #
 # The asymmetry is the point.  Only a writing run refuses on a state it cannot
-# read under D55, and writing nothing does not forbid reading, so the preview
-# reads everything it can and says plainly what it could not.
+# read, and writing nothing does not forbid reading, so the preview reads
+# everything it can and says plainly what it could not.
 #
 # Each row's due commit is laid through due_commit, because the only file that
 # routes to an environment is that environment's own file at the deployment

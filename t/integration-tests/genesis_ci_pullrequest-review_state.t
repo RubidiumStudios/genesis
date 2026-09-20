@@ -3,7 +3,7 @@
 # could not read, quotes the reader in the reader's own words, writes nothing,
 # and exits Genesis::Exit::UNAVAILABLE.  The second subtest proves the double
 # answers the reviews route, without which every state below collapses to
-# unreviewed and three arms of D51 cannot be driven at all.
+# unreviewed and three of the review states cannot be driven at all.
 use strict;
 use warnings;
 use utf8;
