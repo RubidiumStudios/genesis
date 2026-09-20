@@ -2556,10 +2556,10 @@ sub _source_control {
 # https URL at all carries two path segments, so without a host test every
 # forge on earth would parse and the D102 refusal would never fire.
 #
-# The host test is a substring rather than a label boundary, so it is
-# deliberately loose: it has to admit every Enterprise hostname an operator
-# might run, and those are named freely.  A host that merely contains the
-# word therefore parses too, and the pair it yields then fails against the
+# The host test is a substring rather than a label boundary, and it is
+# deliberately loose, because it has to admit every Enterprise hostname an
+# operator might run and those are named freely.  A host that merely contains
+# the word therefore parses too, and the pair it yields then fails against the
 # configured API base, which is a later refusal rather than a wrong answer.
 sub _github_owner_repo {
 	my ($uri) = @_;

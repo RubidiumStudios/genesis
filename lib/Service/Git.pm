@@ -240,10 +240,9 @@ sub create {
 # DESTROY - evict the flyweight entry {{{
 #
 # The branch restore that used to live here has moved to the session, which
-# registers its last-resort abort through at_exit.  Bail exits
-# when it is not inside an eval, Perl runs END before global destruction,
-# and the order after that is undefined, so a net here fires too late or
-# not at all.
+# registers its last-resort abort through at_exit.  bail exits when it is not
+# inside an eval, Perl runs END before global destruction, and the order after
+# that is undefined, so a net here fires too late or not at all.
 sub DESTROY {
 	my ($self) = @_;
 	delete $self->{_session};
@@ -299,7 +298,7 @@ sub session {
 
 ### Branch Operations {{{
 
-# current_branch - name of HEAD branch (cached, invalidated on checkout) {{{
+# current_branch - name of the branch at HEAD {{{
 #
 # A name or nothing.  On an unborn HEAD git prints the literal string HEAD,
 # writes a three-line fatal to standard error, and exits non-zero, so a

@@ -601,7 +601,7 @@ sub pr_reviews {
 # nobody merged.  The pull request branch is reused for every delivery, so this
 # list is every pull request ever opened on that branch, and a review request
 # apiece would make one propagate run cost as much as the repository's whole
-# history: ten environments with fifty closed pull requests each would spend
+# history.  Ten environments with fifty closed pull requests each would spend
 # five hundred of an authenticated five thousand an hour.  A merged entry is
 # read for its marker, its body, and its merged_at, and never for its review.
 sub closed_prs {

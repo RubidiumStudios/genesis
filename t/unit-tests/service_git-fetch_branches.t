@@ -88,10 +88,10 @@ sub queue_after {
 sub run_argv { my ($n) = @_; my @a = @{$run_calls[$n]}; shift @a; return \@a; }
 
 # Also stub the checked-out branch and the default remote on this instance,
-# because both normally consult git via run and these rows want
-# deterministic values.  The refresh reads the branch it is standing on through the
-# private reader rather than through current_branch, because current_branch
-# cannot name an unborn branch.
+# because both normally consult git via run and these rows want deterministic
+# values.  The refresh reads the branch it is standing on through the private
+# reader rather than through current_branch, because current_branch cannot
+# name an unborn branch.
 sub override_inspections {
 	my (%opts) = @_;
 	no warnings qw(redefine once);
