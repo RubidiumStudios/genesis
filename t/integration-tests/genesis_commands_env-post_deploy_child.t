@@ -302,8 +302,9 @@ subtest 'a lock taken in the window is reported, not swallowed' => sub {
 };
 
 # No T row of its own, because the matrix carries none for a constant
-# that nothing raises and nothing reads.  The row is a guard: it cannot
-# go red today, and it catches a change that brings the constant back.
+# that nothing raises and nothing reads.  The row is a guard, and it
+# cannot go red today, so what it catches is a change that brings the
+# constant back.
 subtest 'the no-branch refusal code stays gone from the tree' => sub {
 	plan tests => 3;
 

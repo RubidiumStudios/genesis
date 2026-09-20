@@ -127,7 +127,10 @@ subtest 'the provider block is not checked a second time' => sub {
 	# already met the provider's own rules and cannot fail them here.  The
 	# base used to read the CLI class's declaration through a forwarder of
 	# its own, and under D108 a compiler asks the provider it holds, so no
-	# file on the compiler side names the declaration at all.
+	# file of the compiler family itself names the declaration.  The sweep
+	# reads that family and not the provider compilers under it, where
+	# Concourse reads the declaration through the provider it holds, which
+	# is the reading D108 asks for.
 	# Comment lines are skipped, because the base says in prose where the
 	# forwarder went and why, and saying so is not reading anything.
 	my @swept = glob('lib/Genesis/CI/Compiler/*.pm lib/Genesis/CI/ProviderCompiler.pm');
