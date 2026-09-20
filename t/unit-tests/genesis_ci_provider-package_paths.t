@@ -100,6 +100,10 @@ subtest 'every package under lib derives its own path' => sub {
 	my @files;
 	find(sub {push @files, $File::Find::name if -f && /\.pm$/}, 'lib');
 
+	# The file's first package and no other.  No module under lib declares
+	# a second one, and one that did would have it passed over here rather
+	# than checked, so a module growing a second package wants this loop
+	# widened at the same time.
 	my @askew;
 	for my $file (sort @files) {
 		open my $fh, '<', $file or die "cannot read $file: $!\n";

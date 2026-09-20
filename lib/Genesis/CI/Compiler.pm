@@ -223,7 +223,7 @@ sub can_compile_from_genesis_config {
 # Under D86 the declarative half runs in Top, which merges this provider's
 # fragment into the schema before Genesis::Config::validate sees it, so
 # there is no per-key loop here any more.  What is left is the shape check
-# the schema cannot state, which the next task fills in.
+# the schema cannot state, which is that the section is a hash at all.
 sub validate_config_section {
 	my ($class, $data, $top) = @_;
 
