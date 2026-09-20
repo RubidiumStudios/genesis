@@ -58,7 +58,7 @@ subtest 'a tracked modification at finish is reported and not finished' => sub {
 	$session->switch($h->slug('qa'));
 
 	# The init blob is the one file the deployment branch carries, so a hand
-	# edit of it is the tracked modification that makes the tree unclean.
+	# edit of it is the tracked modification the clean check calls a defect.
 	put_file($h->a . '/init', "edited by hand\n");
 
 	is_deeply($session->modified_paths, ['init'],
