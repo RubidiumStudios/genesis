@@ -202,7 +202,8 @@ subtest 'a deploy that opens no session still refuses a dirty tree' => sub {
 };
 
 subtest 'a dry run under a pipeline leaves no session behind' => sub {
-	plan tests => 2;
+	# Three: two rows about the session and one about the cache it left.
+	plan tests => 3;
 
 	# A dry run leaves the post-deploy work through an exit of its own,
 	# ahead of the finish that every other path reaches, so the session was
@@ -216,19 +217,22 @@ subtest 'a dry run under a pipeline leaves no session behind' => sub {
 	run({dir => $h->a}, 'git', 'checkout', '-b', 'wip/a-change');
 	stand_on($h, 'wip/a-change');
 
-	# The restoration is left to the rows above, which is why this one passes
-	# restore => 0.  The same early exit skips the deploy's own cleanup of
-	# its cache directory, so a dry run ends with .genesis/deploy-cache and
-	# the dev kit standing in the tree untracked.  Neither the session nor
-	# D84 answers for an untracked file, and this row is about the session,
-	# so reading those two directories here would be reading a second
-	# question through the first.
+	# The restoration is left to the rows above, which is why this one
+	# passes restore => 0.  The same early exit used to skip the deploy's
+	# own cleanup of its cache directory, so a dry run ended with
+	# .genesis/deploy-cache standing untracked in the tree and an operator
+	# met it at their next git status.  The cache is read here by name
+	# rather than through the restoration, because the expanded dev kit
+	# stands untracked beside it for a reason of its own and reading the
+	# two together would read a second question through the first.
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '--dry-run', '-y', 'a reason');
 	is($exit, 0, 'the dry run succeeded')
 		or diag("what the dry run said:\n$err");
 	unlike($err, qr/exited with a branch session still open/,
 		'and said nothing about a session it had left open');
+	ok(!-d $h->a . '/.genesis/deploy-cache',
+		'and took its deployment cache away behind it');
 };
 
 done_testing;

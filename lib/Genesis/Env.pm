@@ -5427,6 +5427,11 @@ sub _post_deploy {
 	# else on this path.
 	if ($opts{"dry-run"}) {
 		$self->notify("dry-run deployment complete; post-deployment activities will be skipped.");
+		# The cache goes before the exit, because a run that wrote nothing
+		# should leave nothing, and an operator who asked what a deploy would
+		# do met .genesis/deploy-cache standing untracked at their next git
+		# status.
+		$self->deployment_cache_cleanup;
 		$opts{session}->finish_if_clean if $opts{session};
 		exit 0;
 	}
