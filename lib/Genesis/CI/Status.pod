@@ -285,13 +285,13 @@ B<Parameters:>
 
 =over 4
 
-=item C<$record>
-
-The record the walk answered with, whose C<environments> carry the markers.
-
 =item C<$git>
 
 The L<Service::Git> to ask about reachability.
+
+=item C<$record>
+
+The record the walk answered with, whose C<environments> carry the markers.
 
 =back
 
