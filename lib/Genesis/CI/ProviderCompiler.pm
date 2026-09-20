@@ -471,6 +471,40 @@ sub matches_pattern {
 # }}}
 ### Internal Helpers {{{
 
+# _is_yaml_leaf - a value the scalar writer can take {{{
+#
+# A plain scalar or a boolean.  A boolean is a blessed reference, so a
+# plain-scalar test alone answers false for one and the value falls
+# through to a branch that either stringifies it into 1 or 0 or drops it
+# without a word.  Every position that writes a value asks this rather
+# than asking for a reference of its own, so the three cannot drift
+# apart about what a leaf is.
+sub _is_yaml_leaf {
+	my ($val) = @_;
+	return !ref($val) || ref($val) eq 'JSON::PP::Boolean';
+}
+
+# }}}
+# _yaml_pair - write one key and its value under a list item {{{
+#
+# The lead is what the key sits behind, which is the dash for a list
+# item's first key and plain spaces for the rest of them, and the indent
+# is the level the value's own lines take.  An empty list or hash is
+# written on the key's own line, because a key followed by nothing reads
+# back as null rather than as the empty thing it was.
+sub _yaml_pair {
+	my ($lead, $key, $val, $indent) = @_;
+
+	return "${lead}${key}: ~"  if !defined $val;
+	return "${lead}${key}: " . _yaml_scalar($val, $indent)
+		if _is_yaml_leaf($val);
+	return "${lead}${key}: []" if ref($val) eq 'ARRAY' && !@$val;
+	return "${lead}${key}: {}" if ref($val) eq 'HASH'  && !%$val;
+
+	return ("${lead}${key}:", _to_yaml($val, $indent));
+}
+
+# }}}
 # _to_yaml - simple YAML serializer (no external dependency) {{{
 sub _to_yaml {
 	my ($data, $indent) = @_;
@@ -485,8 +519,8 @@ sub _to_yaml {
 			my $val = $data->{$key};
 			if (!defined $val) {
 				push @lines, "${prefix}${key}: ~";
-			} elsif (!ref($val)) {
-				push @lines, "${prefix}${key}: " . _yaml_scalar($val);
+			} elsif (_is_yaml_leaf($val)) {
+				push @lines, "${prefix}${key}: " . _yaml_scalar($val, $indent + 1);
 			} elsif (ref($val) eq 'ARRAY' && !@$val) {
 				push @lines, "${prefix}${key}: []";
 			} elsif (ref($val) eq 'HASH' && !%$val) {
@@ -498,14 +532,14 @@ sub _to_yaml {
 				push @lines, "${prefix}${key}:";
 				push @lines, _to_yaml($val, $indent + 1);
 			} else {
-				push @lines, "${prefix}${key}: " . _yaml_scalar("$val");
+				push @lines, "${prefix}${key}: " . _yaml_scalar("$val", $indent + 1);
 			}
 		}
 		return join("\n", @lines);
 	} elsif (ref($data) eq 'ARRAY') {
 		return _to_yaml_array($data, $indent);
 	} else {
-		return "${prefix}" . _yaml_scalar($data);
+		return "${prefix}" . _yaml_scalar($data, $indent + 1);
 	}
 }
 
@@ -519,34 +553,30 @@ sub _to_yaml_array {
 	for my $item (@$data) {
 		if (!defined $item) {
 			push @lines, "${prefix}- ~";
-		} elsif (!ref($item)) {
-			push @lines, "${prefix}- " . _yaml_scalar($item);
+		} elsif (_is_yaml_leaf($item)) {
+			push @lines, "${prefix}- " . _yaml_scalar($item, $indent + 1);
 		} elsif (ref($item) eq 'HASH') {
 			my @keys = sort keys %$item;
 			if (@keys) {
+				# The first key wears the dash and the rest stand under it,
+				# which is the only thing that separates them, so both take
+				# the same writer.
 				my $first = shift @keys;
-				my $val = $item->{$first};
-				if (!ref($val)) {
-					push @lines, "${prefix}- ${first}: " . _yaml_scalar($val);
-				} else {
-					push @lines, "${prefix}- ${first}:";
-					push @lines, _to_yaml($val, $indent + 2);
-				}
-				for my $key (@keys) {
-					$val = $item->{$key};
-					if (!ref($val)) {
-						push @lines, "${prefix}  ${key}: " . _yaml_scalar($val);
-					} else {
-						push @lines, "${prefix}  ${key}:";
-						push @lines, _to_yaml($val, $indent + 2);
-					}
-				}
+				push @lines, _yaml_pair(
+					"${prefix}- ", $first, $item->{$first}, $indent + 2);
+				push @lines, _yaml_pair(
+					"${prefix}  ", $_, $item->{$_}, $indent + 2) for @keys;
 			} else {
 				push @lines, "${prefix}- {}";
 			}
 		} elsif (ref($item) eq 'ARRAY') {
 			push @lines, "${prefix}-";
 			push @lines, _to_yaml_array($item, $indent + 1);
+		} else {
+			# Anything else is written as the string it prints as, rather
+			# than passed over, so that a value this writer does not know
+			# reaches the document and can be seen there.
+			push @lines, "${prefix}- " . _yaml_scalar("$item", $indent + 1);
 		}
 	}
 
@@ -555,33 +585,56 @@ sub _to_yaml_array {
 
 # }}}
 # _yaml_scalar - format a scalar value for YAML output {{{
+#
+# The indent is the level the value's own lines sit at, which is one step
+# in from the key or the dash that opens it.  Only a block scalar needs
+# it, and it needs it absolutely, because a body written a fixed two
+# spaces in produces a document no reader accepts anywhere below the top
+# level.  A caller that names nothing gets the step a top-level value
+# takes.
 sub _yaml_scalar {
-	my ($val) = @_;
+	my ($val, $indent) = @_;
+	$indent //= 1;
 
 	# Booleans
 	if (ref($val) eq 'JSON::PP::Boolean') {
 		return $val ? 'true' : 'false';
 	}
 
-	# Numbers
-	if ($val =~ /^-?\d+(\.\d+)?$/ && $val !~ /^0\d/) {
+	# Numbers.  One written with a leading zero is left to the quoted form
+	# below, because a reader takes 0755 for an octal number and answers
+	# 493 to anyone who asks for it back.
+	if ($val =~ /^-?\d+(\.\d+)?$/ && $val !~ /^-?0\d/) {
 		return $val;
 	}
 
 	# Simple strings that don't need quoting
-	if ($val =~ /^[a-zA-Z0-9_.\/-]+$/ && $val !~ /^(true|false|null|yes|no|on|off)$/i) {
+	if ($val =~ /^[a-zA-Z0-9_.\/-]+$/
+		&& $val !~ /^(true|false|null|yes|no|on|off)$/i
+		&& $val !~ /^-?0\d/) {
 		return $val;
 	}
 
-	# Multi-line strings
-	if ($val =~ /\n/) {
-		my @lines = split /\n/, $val;
-		return "|\n" . join("\n", map { "  $_" } @lines);
+	# Multi-line strings.  The body stands at the indent the caller named,
+	# and a value ending in one newline takes the clipping form while one
+	# ending in none takes the stripping form, so that reading the document
+	# back answers the string that was written.  A value opening on
+	# whitespace or ending in more than one newline needs an indicator this
+	# writer does not spell, and takes the quoted form instead.
+	if ($val =~ /\n/ && $val =~ /^[^ \t\n]/ && $val !~ /\n\n\z/) {
+		my $body  = $val;
+		my $chomp = ($body =~ s/\n\z//) ? '' : '-';
+		my $pad   = '  ' x $indent;
+		return "|$chomp\n" . join("\n",
+			map {length($_) ? "$pad$_" : ''} split(/\n/, $body, -1));
 	}
 
-	# Strings that need quoting
+	# Strings that need quoting.  A newline is written as its escape rather
+	# than left where it stands, because a quoted value spread over several
+	# lines has them folded into spaces when it is read back.
 	$val =~ s/\\/\\\\/g;
 	$val =~ s/"/\\"/g;
+	$val =~ s/\n/\\n/g;
 	return "\"$val\"";
 }
 
