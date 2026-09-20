@@ -485,7 +485,7 @@ sub render_preview {
 }
 
 # }}}
-# preview_warnings - the two cases a preview's answer rests on {{{
+# preview_warnings - the three cases a preview's answer rests on {{{
 #
 # D44 gives the preview two loud warnings, because in each case its answer
 # rests on something the preview deliberately did not do.  A control branch
@@ -494,10 +494,11 @@ sub render_preview {
 # is reset to the remote by the pre-flight under D32 before the walk begins.
 #
 # A third stands beside them, which is a deployment branch merely behind its
-# remote, fast-forwarded by the pre-flight under D5 before the walk begins.
-# D44 does not name it, and it is said here all the same, because it rests on
-# the same kind of move the other two rest on and an operator who met it
-# above the banner had not yet been told they were reading a preview.
+# remote, fast-forwarded by the pre-flight before the walk begins.  The rule
+# that gives the preview its warnings names the first two and not this one,
+# and it is said here all the same, because it rests on the same kind of move
+# the other two rest on and an operator who met it above the banner had not
+# yet been told they were reading a preview.
 #
 # The warnings are read off the record rather than worked out here, counts
 # and all.  The run has already asked git both questions, once to decide
@@ -509,7 +510,7 @@ sub render_preview {
 # pre-flight's event line, which stands above the banner where an operator has
 # not yet been told they are reading a preview.
 #
-# Neither warning says anything about the files the report goes on to name.
+# No warning says anything about the files the report goes on to name.
 # A preview threads each delivery's tree forward into the next, so the file
 # lists are true of the branch as the reset would leave it, and a caveat over
 # them would teach an operator to distrust a correct answer.
@@ -539,9 +540,9 @@ sub preview_warnings {
 			my $n = $caveat->{commits} // 1;
 			warning(
 				"#Y{This preview assumes }#C{%s}#Y{ is fast-forwarded first.}\n".
-				"It is behind #C{%s/%s} by %s, and a real run moves it up to ".
-				"them before it walks, so what follows is what would happen ".
-				"once that move has been made.",
+				"It is behind #C{%s/%s} by %s, and a real run moves it up ".
+				"to that branch before it walks, so what follows is what ".
+				"would happen once that move has been made.",
 				$caveat->{branch},
 				$caveat->{remote}, $caveat->{branch},
 				$n == 1 ? 'a commit' : sprintf('%d commits', $n)
@@ -562,7 +563,8 @@ sub preview_warnings {
 		}
 
 		bug("Genesis::CI::Report::preview_warnings was handed the warning ".
-			"'%s', which is neither of the two D44 names", $kind);
+			"'%s', which is none of the three kinds a record may carry",
+			$kind);
 	}
 
 	return 1;

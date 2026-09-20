@@ -537,8 +537,8 @@ nothing, which is every run that is not a preview.
 
 B<Returns:> True.
 
-B<Errors:> Raises a bug where a caveat carries a C<kind> that is neither of
-the two, because a caveat nobody can print is a defect in whoever wrote the
+B<Errors:> Raises a bug where a caveat carries a C<kind> that is none of the
+three, because a caveat nobody can print is a defect in whoever wrote the
 record rather than something to pass over in silence.
 
 B<Examples:>

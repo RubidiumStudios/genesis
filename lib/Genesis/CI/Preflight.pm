@@ -551,10 +551,10 @@ sub initial_state {
 			# have moved the branch to.  A reader that wants the diff base
 			# takes that ref, and the report then says what a real run
 			# would say rather than what this un-moved branch would.  The
-			# move's name goes with it, because the caveat the report says
-			# is about the reset and the fast-forward below sets assumed
-			# without discarding anything, and the count goes with both,
-			# because the caveat names it.
+			# move's name goes with it, because the reset and the
+			# fast-forward below each earn a caveat of their own and the
+			# report tells them apart by that name, and the count goes with
+			# both, because each caveat names it.
 			$state->{branches}{$r->{env}}{assumed}         = $tracking;
 			$state->{branches}{$r->{env}}{assumed_move}    = 'reset';
 			$state->{branches}{$r->{env}}{assumed_commits} =
