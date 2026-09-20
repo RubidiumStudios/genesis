@@ -1166,9 +1166,9 @@ sub control_requires_pr {
 # }}}
 # pr_prefix - the prefix every pull request branch carries {{{
 #
-# The one reader of pipeline.source_control.pr_prefix, defaulting to
-# 'pr/'.  It is joined onto the deployment slug to name the pull
-# request branch.
+# The one reader of pipeline.source_control.pr_prefix, which falls back
+# to the DEFAULT_PR_PREFIX constant above.  The prefix it answers is
+# joined onto the deployment slug to name the pull request branch.
 sub pr_prefix {
 	my ($self) = @_;
 	return $self->config->get(
