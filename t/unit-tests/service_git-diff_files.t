@@ -4,7 +4,7 @@
 # no line of that reason matches any of the three statuses the reader parses,
 # so an unchecked read would answer an empty changed list and an empty
 # deleted list.  Every caller reads that as nothing having changed, which on
-# the drift warning of D33 is a hatch that has gone silent.
+# the drift warning is a hatch that has gone silent.
 #
 # The first subtest was green when it was written, the classification it
 # reads having been there all along.  It earns its place by pinning that
