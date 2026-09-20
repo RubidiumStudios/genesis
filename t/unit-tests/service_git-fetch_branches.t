@@ -87,9 +87,9 @@ sub queue_after {
 # Command line of the Nth captured run() call, minus the opts hashref.
 sub run_argv { my ($n) = @_; my @a = @{$run_calls[$n]}; shift @a; return \@a; }
 
-# Also stub the checked-out branch and the default remote on this instance
-# — both normally consult git via run, but we want deterministic test
-# values.  The refresh reads the branch it is standing on through the
+# Also stub the checked-out branch and the default remote on this instance,
+# because both normally consult git via run and these rows want
+# deterministic values.  The refresh reads the branch it is standing on through the
 # private reader rather than through current_branch, because current_branch
 # cannot name an unborn branch.
 sub override_inspections {
@@ -172,7 +172,7 @@ subtest 'fetch_branches - fetches only the branches the remote has' => sub {
 	my $git = make_git();
 	my (undef, $result) = $git->fetch_branches([qw(qa lab prod)], 'origin');
 
-	is $result->{ok}, 1, 'ok=1 — an absent branch is not an error';
+	is $result->{ok}, 1, 'ok is 1, because an absent branch is not an error';
 	# Neither branch exists locally here, so both are materialised as local
 	# heads; the split refspec is covered in its own subtest below.
 	cmp_deeply run_argv(2), [
