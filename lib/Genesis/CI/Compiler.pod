@@ -31,8 +31,8 @@ descriptor resolves the generic pipeline out of that tree, the provider's
 compiler emits the platform-specific artefact, and any override file the
 operator wrote is merged over the top of it.
 
-Under D108 a provider is one class, and the compiler that emits its
-artefact is a component that class owns. So the sixth stage builds a
+A provider is one class, and the compiler that emits its artefact is a
+component that class owns. So the sixth stage builds a
 L<Genesis::CI::Provider> out of the parsed C<pipeline.provider> block and
 asks that provider for its compiler, rather than resolving a compiling
 class out of the registry and building it alone. Both objects come back
@@ -158,10 +158,10 @@ B<Examples:>
 
     Genesis::CI::Compiler->can_compile('ci');   # 1 or 0
 
-Whether a named directory holds a F<pipeline.yml>. D27 took the
-conventional directory name away, so there is no name to fall back on and
-the caller says which directory it means. A caller that names none is
-asking about nowhere, and the answer is no.
+Whether a named directory holds a F<pipeline.yml>. There is no
+conventional directory name to fall back on, so the caller says which
+directory it means. A caller that names none is asking about nowhere, and
+the answer is no.
 
 B<Parameters:>
 
@@ -213,8 +213,8 @@ B<Examples:>
 
 Whether the repository carries its pipeline configuration inline, in the
 C<pipeline> section of F<.genesis/config>, rather than in files beside it.
-The section is named C<pipeline> under D18, so the read is by that name
-and there is no alias for its old spelling.
+The section is named C<pipeline>, so the read is by that name and there is
+no alias for its old spelling.
 
 B<Parameters:>
 
@@ -239,8 +239,8 @@ B<Examples:>
     Genesis::CI::Compiler->validate_config_section($data, $top);
 
 The owner check for the C<pipeline> section, which L<Genesis::Top> calls
-while it validates F<.genesis/config>. Under D86 the declarative half of
-the validation runs in Top, which merges this provider's fragment into the
+while it validates F<.genesis/config>. The declarative half of the
+validation runs in Top, which merges this provider's fragment into the
 schema before L<Genesis::Config> sees it, so there is no per-key loop
 here. What is left is the shape check the schema cannot state.
 
@@ -281,14 +281,13 @@ B<Examples:>
     # ('.genesis/pipeline-overrides-concourse.yml')
 
 The override files a run may merge, named for the provider and for the
-output layout in force. D27 put the override beside F<.genesis/config> and
-took the old CI subdirectory away, because a file whose name says what it
-is needs no subdirectory to say it again. D67 generalised the name for a
-provider that emits more than one file, which takes one override per
-emitted file named after that file's base name, because it would have
-nothing to merge a single override onto. Under D101 the form follows the
-effective output layout rather than the capability, so a multi-file
-provider set to C<single> takes the single form.
+output layout in force. The override sits beside F<.genesis/config> rather
+than in a CI subdirectory of its own, because a file whose name says what
+it is needs no subdirectory to say it again. A provider that emits more
+than one file takes one override per emitted file, named after that file's
+base name, because it would have nothing to merge a single override onto.
+The form follows the effective output layout rather than the capability,
+so a multi-file provider set to C<single> takes the single form.
 
 The whole output name goes into the override name, directory and all, with
 the separators flattened to dashes so the result is still one path
