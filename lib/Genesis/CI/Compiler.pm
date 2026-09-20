@@ -74,8 +74,13 @@ sub compile {
 
 	# Stage 3: Discover scripts
 	info("Discovering scripts...");
+	# The repository's own root, and not the process's working directory.
+	# Every command that compiles opens its deployment root on the directory
+	# it was run in, so the two are the same wherever a command reaches
+	# here, but a caller holding a root of its own would otherwise have its
+	# scripts looked for wherever the process happened to be standing.
 	my $script_discovery = Genesis::CI::Compiler::ScriptDiscovery->new(
-		repo_path => '.',
+		repo_path => $self->{top}->path,
 	);
 	my $scripts = $script_discovery->discover($parsed);
 
@@ -280,8 +285,11 @@ sub _apply_provider_overrides {
 	my @names  = $self->override_file_names($provider_type, \@files, $layout);
 
 	# One override per emitted file under the multi-file form, and one
-	# override for everything under the single form.
-	my $single = (@names == 1);
+	# override for everything under the single form.  The layout says which
+	# of the two this is, and not the number of names it produced, because a
+	# provider under the multi-file form that emits one file produces one
+	# name and is still under the multi-file form.
+	my $single = ($layout // 'single') ne 'multiple';
 	my %override_for;
 	if ($single) {
 		my $path = $top->path($names[0]);

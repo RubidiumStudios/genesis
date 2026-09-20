@@ -337,7 +337,10 @@ are on disk.
 
 Under the single layout one override covers every emitted file, so the
 notice that names it belongs to the run rather than to each file in it.
-Under the multiple layout each file gets its own notice.
+Under the multiple layout each file gets its own notice. Which of the two
+this is comes from the layout itself, and not from the number of override
+names it produced, because a provider under the multiple layout that emits
+one file produces one name and is still under the multiple layout.
 
 B<Parameters:>
 
