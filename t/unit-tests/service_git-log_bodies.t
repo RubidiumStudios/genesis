@@ -12,6 +12,7 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
+use Test::Exception;
 
 use Genesis;
 use Service::Git;
@@ -95,6 +96,31 @@ subtest 'the pathspec scopes both walks' => sub {
 	# the walk must return rather than what it must not.
 	is(scalar(grep {ref $_ eq 'HASH' && $_->{message} =~ /\Achange qa\n/} @records), 1,
 		'and it keeps the commit that did touch the pathspec');
+};
+
+subtest 'a range git cannot resolve is refused, not returned' => sub {
+	plan tests => 3;
+
+	# Under the default that folds standard error into the answer, a range
+	# git rejects comes back as the lines of its fatal message, and the
+	# caller reads them as commits.  One caller builds its range from a
+	# commit read out of the exodus record, so a clone that no longer holds
+	# that commit would write git's complaint into a deploy's audit reason.
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	my $git = $h->git('a');
+
+	throws_ok {$git->log_subjects('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef..HEAD')}
+		qr/deadbeefdeadbeefdeadbeefdeadbeefdeadbeef/,
+		'the refusal names the ref that could not be walked';
+	throws_ok {$git->log_subjects('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef..HEAD')}
+		qr/Cannot\s+read\s+the\s+history/i,
+		'and says what it was trying to do';
+
+	# The body walk splits on a different separator and returns records
+	# rather than lines, so it reaches the same refusal by its own path.
+	throws_ok {$git->log_subjects('no-such-branch-here', body => 1)}
+		qr/no-such-branch-here/,
+		'and the body walk refuses the same way';
 };
 
 done_testing;

@@ -1077,7 +1077,18 @@ sub log_subjects {
 		push @cmd, '--', @{$opts{paths}};
 	}
 
-	my ($out) = run({ dir => $self->{root} }, @cmd);
+	# Standard error is kept apart and the return code is read, because the
+	# default folds git's complaint into the answer and a range git cannot
+	# resolve would come back as the lines of its fatal message for the
+	# caller to read as commits.
+	my ($out, $rc, $err) = run({ dir => $self->{root}, stderr => 0 }, @cmd);
+	bail(
+		{exitcode => DATAERR},
+		"Cannot read the history of #C{%s} in #C{%s}:\n%s\n".
+		"Fetch the missing commit or branch, then try again.",
+		$branch, $self->{root}, ($err // $out // 'git gave no reason')
+	) if $rc;
+
 	return split /\n/, ($out || '') unless $body;
 
 	my @records;

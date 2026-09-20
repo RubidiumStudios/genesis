@@ -1585,6 +1585,23 @@ B<Returns:> Without C<body>, the formatted lines, newest first.  With
 C<body>, a list of hashrefs of C<sha> and C<message>, newest first.  Empty
 when nothing matches, either way.
 
+B<Errors:>
+
+=over 4
+
+=item C<"Cannot read the history of %s in %s">
+
+Bails at C<Genesis::Exit::DATAERR>, naming the ref and the repository,
+where git cannot walk what it was handed.  Standard error is kept apart
+from the answer and the return code is read, because the default folds
+git's complaint into the output and a range git cannot resolve would
+otherwise come back as the lines of its fatal message for the caller to
+read as commits.  One caller builds its range from a commit read out of
+the exodus record, so a clone that no longer holds that commit would
+write git's complaint into a deploy's audit reason.
+
+=back
+
 B<Examples:>
 
   my @lines = $git->log_subjects('staging', limit => 5);
