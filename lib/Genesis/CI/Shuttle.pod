@@ -21,8 +21,10 @@ cannot trigger a run in another pipeline. Two backends carry that store,
 S3 and GCS, and they do not read the same keys: S3 takes a region and may
 take a non-default endpoint, and the GCS resource takes neither.
 
-So the block is declared on its backend rather than flat, which is what
-a block whose shape is a function of one of its own values calls for.
+So the block is declared on its backend rather than flat, as a
+C<custom_struct>, which is the schema type that names the field a block's
+shape depends on and maps each of that field's values to the module
+owning that shape.
 Each backend is a class of its own, it declares the keys it reads through
 C<options_schema>, and this base validates a block against whichever
 declaration the written backend selected. A GCS configuration then has
