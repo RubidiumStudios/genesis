@@ -392,11 +392,11 @@ subtest 'check_prereqs: Concourse min_fly_version not satisfied' => sub {
 ### validate_config, the provider's rules for its own block
 ### ============================================================ ###
 
-# Under D105 a provider validates the block where the operator wrote it,
-# so each row below stands a configuration up holding that block and asks
-# the class about it, rather than assembling an object out of the block
-# and asking the object.  The errors come back carrying Genesis's own
-# colour markup, so anything read out of them is rendered first.
+# A provider validates the block where the operator wrote it, so each row
+# below stands a configuration up holding that block and asks the class
+# about it, rather than assembling an object out of the block and asking
+# the object.  The errors come back carrying Genesis's own colour markup,
+# so anything read out of them is rendered first.
 # The section the block sits in is switched on, because a provider asks
 # for the key its pipeline cannot run without once there is a pipeline to
 # run, and a block under a section nobody has turned on is a block an
@@ -469,9 +469,9 @@ subtest 'validate_config: GithubActions admits no provider key' => sub {
 	is scalar @errors, 0, 'an empty fragment asks for nothing';
 };
 
-# Under D102 the repository the pipeline acts on lives in the
-# source-control block, so this provider declares no repo key and an
-# operator who writes one is told so by name.
+# The repository the pipeline acts on lives in the source-control block,
+# so this provider declares no repo key and an operator who writes one is
+# told so by name.
 subtest 'validate_config: GithubActions refuses a repo key' => sub {
 	my @errors = refusals_for('Genesis::CI::Provider::GithubActions',
 		type => 'github-actions', repo => 'acme/deploy');
@@ -481,9 +481,9 @@ subtest 'validate_config: GithubActions refuses a repo key' => sub {
 };
 
 subtest 'Provider->new builds without checking the block' => sub {
-	# Concourse with no target builds, because under D105 what the block
-	# says is asked of the class against the configuration and not of an
-	# object assembled out of it.
+	# Concourse with no target builds, because what the block says is
+	# asked of the class against the configuration and not of an object
+	# assembled out of it.
 	my $p = Genesis::CI::Provider->new(type => 'concourse');
 	isa_ok $p, 'Genesis::CI::Provider::Concourse',
 		'the factory builds what it was asked for';
