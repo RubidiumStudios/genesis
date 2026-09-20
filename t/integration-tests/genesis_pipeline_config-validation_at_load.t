@@ -29,11 +29,12 @@ subtest 'one invalid key, three commands, one refusal' => sub {
 	# the row may as well say so.
 	plan tests => 12;
 
-	# Every version 3 configuration this file writes declares a floor, for
-	# the reason the harness's own builders default one: Genesis::Top::create
-	# writes minimum_version for every released build, and a repository that
-	# declares none with an environment that declares none of its own is
-	# refused before the row's own refusal is ever reached.
+	# Every version 3 configuration this file writes declares a floor,
+	# for the reason the harness's own builders default one.
+	# Genesis::Top::create writes minimum_version for every released build,
+	# and a repository that declares none with an environment that declares
+	# none of its own is refused before the row's own refusal is ever
+	# reached.
 	commit_on_control($h, files => {
 		'.genesis/config' => join("\n",
 			'---', 'deployment_type: bosh', 'version: "3"',
