@@ -1073,7 +1073,7 @@ sub _embed_genesis {
 }
 
 # }}}
-# # Accessors - the paths, the names, and the two vault addresses {{{
+# Accessors - the paths, the names, and the two vault addresses {{{
 sub r { $_[0]->{r} }
 sub a { $_[0]->{a} }
 sub b { $_[0]->{b} }
