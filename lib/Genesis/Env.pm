@@ -584,7 +584,7 @@ sub exists {
 # }}}
 # bare - build an environment with no deployment behind it {{{
 #
-# The named constructor D79 extracts from is_valid_env_file.  It performs
+# The named constructor extracted from is_valid_env_file.  It performs
 # the name check and the file-existence check that sub already performs
 # and nothing else, and the object it returns resolves its ancestral
 # hierarchy through lookup, with no kit loaded and nothing connected, so
@@ -676,8 +676,8 @@ sub is_valid_env_file {
 
 	while (1) {
 		# The name and the file, through the one constructor every pipeline
-		# reader uses, so the pattern exists once (D79).  Appended rather
-		# than assigned, so a check added above this line keeps its errors.
+		# reader uses, so the pattern exists once.  Appended rather than
+		# assigned, so a check added above this line keeps its errors.
 		my ($bare, @bare_errors) = $class->_bare_with_errors($name, $top);
 		$env = $bare;
 		push @errors, @bare_errors;
@@ -963,7 +963,7 @@ sub signature {
 # deployment_slug - this environment's deployment slug {{{
 #
 # The thin object form of Top::deployment_slug_for, so the slug is
-# composed in one place (D71).
+# composed in one place.
 sub deployment_slug {
 	my ($self) = @_;
 	return $self->top->deployment_slug_for($self->name);
@@ -1422,9 +1422,9 @@ sub actual_environment_files {
 # }}}
 # _propagation_file_kinds - the propagation set with each path marked {{{
 #
-# The one place the triggering split is decided (D68).  A triggering path is
-# one whose change means deploy me.  A non-triggering path must be current on
-# the deployment branch without its change meaning deploy me, and those are
+# The one place the triggering split is decided.  A triggering path is one
+# whose change means deploy me.  A non-triggering path must be current on the
+# deployment branch without its change meaning deploy me, and those are
 # .genesis/config, since nothing in it reaches the manifest, and the reaction
 # scripts under bin/, since a changed script takes effect at the next deploy
 # whenever that comes.
@@ -1462,10 +1462,10 @@ sub _propagation_file_kinds {
 
 	# Manifest fragments the kit's blueprint draws from the repository -- ops
 	# files and the like -- triggering.  The enumeration sits in
-	# _blueprint_fragments, so the at-commit reader of D69 names the same
-	# files this one does rather than keeping a second list beside it that
-	# can drift from it.  The handle is handed on rather than built there,
-	# so the prefix below is applied exactly once.
+	# _blueprint_fragments, so the at-commit reader names the same files this
+	# one does rather than keeping a second list beside it that can drift
+	# from it.  The handle is handed on rather than built there, so the
+	# prefix below is applied exactly once.
 	$files{$_} = 1 for $self->_blueprint_fragments($git);
 
 	# Config — non-triggering
@@ -1503,7 +1503,7 @@ sub _propagation_file_kinds {
 
 	# The tracked extra paths are already git-root-relative and validated,
 	# and they default to triggering, because an operator declares them
-	# precisely because the deployment needs them (D68).
+	# precisely because the deployment needs them.
 	$out{$_} = 1 for $self->track_additional_files;
 
 	return \%out;
@@ -1513,7 +1513,7 @@ sub _propagation_file_kinds {
 # propagation_files - git-root-relative paths this env depends on for pipeline propagation {{{
 #
 # The whole set with no option, the triggering subset with triggering => 1,
-# and the non-triggering subset with triggering => 0 (D68).
+# and the non-triggering subset with triggering => 0.
 sub propagation_files {
 	my ($self, %opts) = @_;
 	my $kinds = $self->_propagation_file_kinds;
@@ -1533,10 +1533,10 @@ sub propagation_files {
 # }}}
 # propagation_files_at - the propagation set as it stood at a control commit {{{
 #
-# The at-commit reader of D69, sliced the way propagation_files slices the
-# working-tree one, so a caller that wants the triggering half of D68 at a
-# commit asks for it in the same word at both readers.  The guard is on
-# defined rather than on exists for the reason propagation_files gives.
+# The at-commit reader, sliced the way propagation_files slices the
+# working-tree one, so a caller that wants the triggering half at a commit
+# asks for it in the same word at both readers.  The guard is on defined
+# rather than on exists for the reason propagation_files gives.
 sub propagation_files_at {
 	my ($self, $commit, %opts) = @_;
 	my $kinds = $self->_propagation_file_kinds_at($commit, %opts);
@@ -1550,17 +1550,17 @@ sub propagation_files_at {
 # }}}
 # _propagation_file_kinds_at - the set at a commit, with each path marked {{{
 #
-# D69 reads the set from the tree at the commit being delivered and never from
+# The set is read from the tree at the commit being delivered and never from
 # the working tree, because a restructure moves the prefix that defines the
 # set, and a walk reading today's configuration for every commit would look
 # for bosh/** at commits where nothing lives there.  We materialise the
 # deployment root's config and environment files as they stand at the commit
 # and answer through the ordinary readers over that tree, so the merged
-# hierarchy of D79 decides the reactions and the tracked files as it always
-# does.  The blueprint's repository-side fragments are the one kind read on
-# control instead, under D78, because that is where the kit is.
+# hierarchy decides the reactions and the tracked files as it always does.
+# The blueprint's repository-side fragments are the one kind read on control
+# instead, because that is where the kit is.
 #
-# Every path carries the mark D68 gives its kind, exactly as the working-tree
+# Every path carries the mark its kind gives it, exactly as the working-tree
 # builder marks them, so the walk can read the set and its triggering half out
 # of one scratch tree rather than writing a second one for the second reading.
 sub _propagation_file_kinds_at {
@@ -1683,8 +1683,8 @@ sub _propagation_file_kinds_at {
 	) unless defined $source;
 	$files{$source} = 1;
 
-	# The reaction scripts, which are non-triggering paths under D68 and which
-	# still have to be current on the branch.
+	# The reaction scripts, which are non-triggering paths and which still
+	# have to be current on the branch.
 	my $reactions = $env->lookup('genesis.reactions', {});
 	if (ref($reactions) eq 'HASH') {
 		for my $phase (values %$reactions) {
@@ -1792,8 +1792,8 @@ sub _deployment_root_at {
 # The kit's blueprint hook is the authority on which repository-side files the
 # merge consumes, and it is run against the tree the environment this is
 # called on stands over, so the working-tree reader names what control holds
-# and the at-commit reader names what the commit held (D78).  Running the hook
-# needs no BOSH configs, but it does need a reachable vault, which propagation
+# and the at-commit reader names what the commit held.  Running the hook needs
+# no BOSH configs, but it does need a reachable vault, which propagation
 # establishes before it gets here.  Factored out of _propagation_file_kinds so
 # the two readers enumerate the same way.
 #
@@ -1842,11 +1842,11 @@ sub _blueprint_fragments {
 # }}}
 # track_additional_files - extra paths that travel with this env's branch {{{
 #
-# D24 renamed genesis.pipeline.required_files to
-# genesis.pipeline.track_additional_files and changed nothing else: the
-# paths stay deployment-root-relative, <env> substitutes the
-# environment's name and never the deployment slug, and a glob expands as
-# it did.  Under D79 the key is read from the merged environment.
+# This key was once called genesis.pipeline.required_files, and the
+# rename changed nothing else.  The paths stay deployment-root-relative,
+# <env> substitutes the environment's name and never the deployment slug,
+# and a glob expands as it did.  The key is read from the merged
+# environment.
 sub track_additional_files {
 	my ($self) = @_;
 
@@ -2227,7 +2227,7 @@ sub exodus_lookup {
 	my ($self, $key, $default,$for) = @_;
 	$key //= '.';
 	$for ||= $self->exodus_slug;
-	# D77: the fact half of the staleness comparison.  A read of this
+	# The fact half of the staleness comparison.  A read of this
 	# environment's own record is not a dependency, so it is not counted.
 	$self->note_dependency_read($for) unless $for eq $self->exodus_slug;
 	my $path =  $self->exodus_mount().$for;
@@ -3279,7 +3279,7 @@ sub exodus_mount {
 # exodus_slug - returns the component of the Vault path under the Exodus mount for this environment's Exodus data {{{
 #
 # Redefined through deployment_slug rather than composed separately, so
-# the vault path and the deployment branch cannot drift apart (D66).
+# the vault path and the deployment branch cannot drift apart.
 sub exodus_slug {
 	my ($self) = @_;
 	return $self->deployment_slug;
@@ -3296,18 +3296,18 @@ sub exodus_base {
 # }}}
 # dependency_set - the environment's dependencies, and whether they are whole {{{
 #
-# D26 gives dependency tracking two sources, and the set is the union of
-# them.  The declared source is genesis.pipeline.track_dependencies, which
-# kits need because a hook that calls exodus_lookup never appears in the
+# Dependency tracking has two sources, and the set is the union of them.
+# The declared source is genesis.pipeline.track_dependencies, which kits
+# need because a hook that calls exodus_lookup never appears in the
 # manifest.  The discovered source is every exodus path in the unevaluated
 # manifest, which vault_paths already returns.  The deployment's own path
 # is excluded, and a member that both sources name counts once.
 #
-# D77 makes this a compile-time read that never refuses.  An environment
-# whose blueprint will not render takes the declared set alone, the warning
-# names what the render could not reach, and the caller marks that
-# environment's discovery incomplete, because a job that cannot render
-# cannot deploy and its missing triggers are moot until it can.
+# This is a compile-time read that never refuses.  An environment whose
+# blueprint will not render takes the declared set alone, the warning names
+# what the render could not reach, and the caller marks that environment's
+# discovery incomplete, because a job that cannot render cannot deploy and
+# its missing triggers are moot until it can.
 sub dependency_set {
 	my ($self) = @_;
 
@@ -3347,7 +3347,7 @@ sub dependency_set {
 #
 # Beside the environment's own exodus record, under a pipeline subpath,
 # so the deploy's rewrite of its record cannot clobber what the apply
-# left (D103).
+# left.
 sub pipeline_record_path {
 	my ($self) = @_;
 	return $self->exodus_base . '/pipeline';
@@ -3357,10 +3357,10 @@ sub pipeline_record_path {
 # pipeline_record - this environment's compiled dependency set and discovery mark {{{
 #
 # Returns the two fields the apply writes, or undef when the subpath is
-# absent, and that undef is the membership test D43 and D103 put in place
-# of a roster, because an environment the applied record does not know is
-# one with no pipeline subpath, and the walk asks about its own
-# environment rather than searching a list.
+# absent, and that undef is the membership test that stands in place of a
+# roster, because an environment the applied record does not know is one
+# with no pipeline subpath, and the walk asks about its own environment
+# rather than searching a list.
 #
 # The read goes through this environment's own vault, which is where
 # exodus_base addresses and where every other exodus read and write in
@@ -3400,9 +3400,9 @@ sub pipeline_record {
 # }}}
 # hold_record - the propagation hold standing against this environment {{{
 #
-# D50 and D53: a per-environment record beside the deployments, carrying a
-# reason, who set it, where, and when, and nothing else.  Undef when the
-# path is absent.  set_hold below writes it and clear_hold deletes it, and
+# A per-environment record beside the deployments, carrying a reason, who
+# set it, where, and when, and nothing else.  Undef when the path is
+# absent.  set_hold below writes it and clear_hold deletes it, and
 # pipeline-hold and pipeline-release are the two commands that call them,
 # while the walk has to honour the record from the day it can exist.
 #
@@ -3437,14 +3437,14 @@ sub hold_record {
 # }}}
 # set_hold - write the propagation hold record {{{
 #
-# D50 makes the hold a per-environment record carrying a reason, who set it,
-# and when, and D53 fixes those four fields and nothing else.  The user and the
-# hostname take the shape the director's network claim lock writes, so the two
-# identity fields read the same way wherever Genesis records who did something.
-# Under D58 a time held as a value is EXODUS_TIME_FORMAT, and the short numeric
-# form belongs to a time that is part of a path, which this record has none of.
-# The path is cleared before the write so a replacing hold cannot leave a key
-# of the hold it replaced standing beside it.
+# The hold is a per-environment record carrying a reason, who set it, and when,
+# and those four fields are all of it.  The user and the hostname take the
+# shape the director's network claim lock writes, so the two identity fields
+# read the same way wherever Genesis records who did something.  A time held as
+# a value is EXODUS_TIME_FORMAT, and the short numeric form belongs to a time
+# that is part of a path, which this record has none of.  The path is cleared
+# before the write so a replacing hold cannot leave a key of the hold it
+# replaced standing beside it.
 sub set_hold {
 	my ($self, %rec) = @_;
 
@@ -3469,8 +3469,8 @@ sub set_hold {
 # }}}
 # clear_hold - delete the propagation hold record {{{
 #
-# D53 has the release delete the record and keep no released-by fields, because
-# a cleared hold has no audit value once the next hold replaces it, and the
+# The release deletes the record and keeps no released-by fields, because a
+# cleared hold has no audit value once the next hold replaces it, and the
 # release's identity is its own log line.  It returns 1 where a record stood
 # and 0 where none did, so `pipeline-release` can say which it did rather than
 # claiming to have released a hold nobody set.
@@ -3516,7 +3516,7 @@ sub proposed_record_path {
 # proposed_record - the open pull request this environment is waiting on {{{
 #
 # Four fields and no more, which are the control commit the pull request
-# proposes, its number, its url, and when it was written (D57).  The deploy's
+# proposes, its number, its url, and when it was written.  The deploy's
 # due-commits warning reads this rather than asking GitHub, so a warning
 # costs no API call and works with no token at all.
 sub proposed_record {
@@ -3530,7 +3530,7 @@ sub proposed_record {
 # set_proposed - write the proposed record for the pull request we opened {{{
 #
 # The caller gives the control commit the aggregate's marker names, the pull
-# request's number, and its URL.  D58 fixes at as a value in
+# request's number, and its URL.  The at field is a value in
 # EXODUS_TIME_FORMAT, and the path carries no timestamp of its own, because
 # one proposal stands at a time and a path that grew an entry per proposal
 # would be a set nobody reads the newest of.
@@ -3571,8 +3571,8 @@ sub clear_proposed {
 #
 # The fact half of the staleness comparison.  Every deploy records the
 # exodus paths it actually read into its own exodus record, where the
-# apply's compiled set is a prediction (D77).  An environment that has
-# not deployed since the recording landed reads an empty set, which
+# apply's compiled set is a prediction.  An environment that has not
+# deployed since the recording landed reads an empty set, which
 # matches an empty compiled set and so is not stale on this input.
 #
 # The read goes through this environment's own vault, for the reason
@@ -3590,7 +3590,7 @@ sub last_read_dependencies {
 # }}}
 # note_dependency_read, dependencies_read - the set this run read {{{
 #
-# D77 records the set the deploy read rather than the set the compile
+# The set the deploy read is recorded rather than the set the compile
 # predicted, because an environment whose blueprint could not render at apply
 # time takes its declared set alone and is marked incomplete, and its first
 # real deploy is what tells the truth.  The staleness query compares the
@@ -3613,8 +3613,8 @@ sub dependencies_read {
 # }}}
 # deployed_record - the newest successful deployment record, or undef {{{
 #
-# D87 names the deployed commit as exodus git.commit and the certified commit
-# as git.control_commit, both in the last successful record.  The manager
+# The deployed commit is exodus git.commit and the certified commit is
+# git.control_commit, both in the last successful record.  The manager
 # already answers that record and already counts post-failed as successful,
 # through is_a_successful_result, because a post-failed deploy landed on BOSH
 # and the environment is running.  So this is a name for the four fields the
@@ -3655,11 +3655,11 @@ sub deployed_record {
 # H36: one vault holds the secrets for both the version running and the
 # version coming, so a rotation against the tip can hand the running version a
 # value it cannot consume the next time it is redeployed.  The closure is a
-# hold, which D59 places after the MVP, so until then we say what happened and
-# name the risk.  This blocks nothing.
+# hold, which comes after the MVP, so until then we say what happened and name
+# the risk.  This blocks nothing.
 #
 # Two control commits are compared and never a deployed commit against a
-# certified one, which D87 exists to keep apart.  The version served is a
+# certified one, since the two are kept apart.  The version served is a
 # deployment-branch commit, and the control commit it carries is the one its
 # own marker names.
 sub warn_uncertified_secrets_target {
@@ -3712,11 +3712,11 @@ sub _decode_path_list {
 # }}}
 # _declared_dependencies - the declared half, normalised to deployment slugs {{{
 #
-# D26 lets an entry be a deployment type at this environment or an
-# <env>/<type> pair somewhere else, so a bare type takes this
-# environment's name and a pair is taken as it was written.  A key holding
-# a single scalar is read as a list of one, because a list of one is what
-# an operator who wrote a scalar meant.
+# An entry may be a deployment type at this environment or an <env>/<type>
+# pair somewhere else, so a bare type takes this environment's name and a
+# pair is taken as it was written.  A key holding a single scalar is read
+# as a list of one, because a list of one is what an operator who wrote a
+# scalar meant.
 #
 # The list comes back sorted, with duplicates dropped and the deployment's
 # own path removed, so it is the finished declared set rather than a
@@ -5543,11 +5543,11 @@ sub _post_deploy {
 	# step further away, since a session reaches us from a pre-flight that
 	# runs on an enabled pipeline and from nowhere else.
 	#
-	# D84.  Clean means no tracked modification and nothing staged;
-	# untracked files are ignored, so an operator's scratch file blocks
-	# nothing and no session deletes it.  A tracked modification here is
-	# a defect, a kit hook that wrote into the repository or a deploy
-	# that died before its cleanup, so abort names the files before it
+	# Clean means no tracked modification and nothing staged; untracked
+	# files are ignored, so an operator's scratch file blocks nothing
+	# and no session deletes it.  A tracked modification here is a
+	# defect, a kit hook that wrote into the repository or a deploy that
+	# died before its cleanup, so abort names the files before it
 	# discards them and restores the branch.  The deploy itself
 	# succeeded, BOSH deployed and the record is written, and the
 	# command still exits non-zero, because a kit that writes into the
@@ -5686,7 +5686,7 @@ sub update_deployment_exodus {
 	my $info_msg = '';
 	if ($action eq 'deploy') {
 		if (Genesis::Env::Deployment::is_a_successful_result($result)) {
-			# D77 records the set this run read, and the reads exodus_lookup
+			# The set this run read is recorded, and the reads exodus_lookup
 			# made are already noted, because they are the reads no manifest
 			# shows.  The rest of the set is asked for here, because this run
 			# rendered the blueprint that the compile may not have been able
@@ -5714,11 +5714,11 @@ sub update_deployment_exodus {
 			# data
 			$exodus = {
 				$self->extract_manifest_exodus->%*,
-				# D58 keeps the two time forms apart, and every time written
+				# The two time forms are kept apart, and every time written
 				# here is a value, so EXODUS_TIME_FORMAT and never the short
 				# form, which belongs to a path.
 				completed => $timestamp,
-				# D77.  One comma-joined value, which is the one form a flat
+				# One comma-joined value, which is the one form a flat
 				# record carries.
 				($tracking ? (
 					dependencies_read => join(',', @{$self->dependencies_read}),
@@ -5827,10 +5827,10 @@ sub update_deployment_exodus {
 		if defined $deploy_sequence && !@errors;
 
 	if (@errors) {
-		# D98: BOSH has already deployed by the time we get here, so a vault
-		# that has gone away leaves an environment that is running and a
-		# record that does not say so, and the operator needs both facts in
-		# one message.  That is H37, and UNAVAILABLE is what it costs.
+		# BOSH has already deployed by the time we get here, so a vault that
+		# has gone away leaves an environment that is running and a record
+		# that does not say so, and the operator needs both facts in one
+		# message.  That is H37, and UNAVAILABLE is what it costs.
 		bail({exitcode => UNAVAILABLE},
 			"#C{%s} %s, but its deployment record was not written:%s\n\n".
 			"The environment is running.  Restore write access to #C{%s} at ".
