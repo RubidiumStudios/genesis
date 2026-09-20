@@ -50,31 +50,31 @@ sub apply {
 
 	my $opts = get_options;
 
-	# D64 refuses first, because the command applies a configured pipeline
-	# and never enables one.  The refusal reads .genesis/config raw and
-	# builds no Genesis::Top of its own, so it lands ahead of the vault
-	# connection _get_top makes.  The dispatch gate already holds a handle
-	# built without a vault, so this is only the first read that could ask
-	# for one.  A repository with no pipeline has no reason to hold a
-	# vault, and bailing on the vault first would name the wrong thing.
+	# A pipeline nobody declared is refused first, because the command applies
+	# a configured pipeline and never enables one.  The refusal reads
+	# .genesis/config raw and builds no Genesis::Top of its own, so it lands
+	# ahead of the vault connection _get_top makes.  The dispatch gate already
+	# holds a handle built without a vault, so this is only the first read
+	# that could ask for one.  A repository with no pipeline has no reason to
+	# hold a vault, and bailing on the vault first would name the wrong thing.
 	_refuse_disabled_pipeline();
 
 	my $top = _get_top($opts);
 
-	# D27 took --platform away, so the provider is the one the repository
-	# is configured for and nothing else, and under D15 an absent type is
-	# the manual provider.  The refusal above has already turned away the
-	# repository that declares no pipeline at all, so what reaches here is
-	# a pipeline the operator enabled and chose a provider for.
+	# --platform is gone, so the provider is the one the repository is
+	# configured for and nothing else, and an absent type is the manual
+	# provider.  The refusal above has already turned away the repository that
+	# declares no pipeline at all, so what reaches here is a pipeline the
+	# operator enabled and chose a provider for.
 	my $platform = $top->pipeline_provider_type // 'manual';
 
 	my $git = Service::Git->new('.');
 
-	# D44 gives the propagate run a preview that writes nothing of its own,
-	# and a preview worth reading follows the same rule everywhere.  The flag
-	# is read once here and handed to every stage below, so no stage has to
-	# reach into the options for itself and none of them can disagree about
-	# what a dry run is.
+	# The propagate run has a preview that writes nothing of its own, and a
+	# preview worth reading follows the same rule everywhere.  The flag is
+	# read once here and handed to every stage below, so no stage has to reach
+	# into the options for itself and none of them can disagree about what a
+	# dry run is.
 	#
 	# What a dry run withholds is the repository, the remote, and the vault,
 	# which are the three stores an operator cannot simply throw away again.
@@ -124,10 +124,10 @@ sub apply {
 		$top->control_branch
 	) unless $git->branch_exists($top->control_branch);
 
-	# D43 gives the branch work to every provider and the pipeline work to
-	# the automated ones alone, so the branches are made before the provider
-	# is asked for anything.  A manual repository still delivers through
-	# these branches, and the operator deploys from their own terminal.
+	# The branch work belongs to every provider and the pipeline work to the
+	# automated ones alone, so the branches are made before the provider is
+	# asked for anything.  A manual repository still delivers through these
+	# branches, and the operator deploys from their own terminal.
 	#
 	# This sits ahead of every exit the compile and the provider stages
 	# make, --output-dir included, so a run that only means to write the
@@ -136,9 +136,9 @@ sub apply {
 	# writes none of them.  The POD says so where each option is described.
 	_apply_init_branches($top, $git, dry_run => $dry_run);
 
-	# D45 asks the repository to enforce what D31 has Genesis observe on its
-	# own side, because Genesis cannot prevent a rewrite it does not perform
-	# and a rewrite that drops a commit leaves every marker naming it
+	# The repository is asked to enforce the append-only rule Genesis observes
+	# on its own side, because Genesis cannot prevent a rewrite it does not
+	# perform and a rewrite that drops a commit leaves every marker naming it
 	# unfetchable.  The stage lands after the branches, since a rule applied
 	# to a branch that does not exist protects nothing.
 	#
@@ -189,7 +189,7 @@ sub apply {
 		);
 	}
 
-	# D103 records the pipeline's own facts once the branches are in place,
+	# The pipeline's own facts are recorded once the branches are in place,
 	# because a record written ahead of them would claim a shape the
 	# repository does not have yet.  The record is what every reader below
 	# uses to tell an applied pipeline from one nobody has applied, so the
@@ -246,9 +246,9 @@ sub apply {
 	}
 
 	if ($platform eq 'concourse') {
-		# The prerequisites check is the provider's, under D108, and the
-		# emitting is the compiler's.  They were one object and one of
-		# them was answering for the other.
+		# The prerequisites check is the provider's and the emitting is the
+		# compiler's.  They were one object and one of them was answering for
+		# the other.
 		my $provider = $result->{provider};
 		my $compiler = $result->{compiler};
 
@@ -299,16 +299,16 @@ sub apply {
 # }}}
 # pipeline_status - report where every environment stands {{{
 #
-# D91's read model.  The command refreshes unless --no-refresh under D40,
-# computes the deployment root's record from the walk, and renders it as JSON
-# or as the tree.  It writes nothing.
+# The read model for the pipeline.  The command refreshes unless --no-refresh
+# says otherwise, computes the deployment root's record from the walk, and
+# renders it as JSON or as the tree.  It writes nothing.
 sub pipeline_status {
 
 	my $top = Genesis::Top->new('.');
 
-	# D64: an applied record standing while pipeline.enabled is false means
-	# the configuration disowns a pipeline that is still live, still watching
-	# its branches, and still deploying.  Every pipeline command refuses that
+	# An applied record standing while pipeline.enabled is false means the
+	# configuration disowns a pipeline that is still live, still watching its
+	# branches, and still deploying.  Every pipeline command refuses that
 	# repository, this one included, and it refuses above everything else, so
 	# nothing of the report reaches standard output ahead of the refusal.
 	Genesis::CI::Preflight::assert_not_disowned($top,
@@ -342,7 +342,7 @@ sub pipeline_status {
 # }}}
 # pipeline_hold - set the propagation hold on one environment or the root {{{
 #
-# D50 gives the hold two forms, one environment or every environment in the
+# The hold has two forms, one environment or every environment in the
 # deployment root, and the reason is required in both.  The environment is the
 # CLI's own <env> prefix, which set_top_path has already resolved by the time
 # we are called, so two arguments mean an environment and a reason, and one
@@ -350,7 +350,7 @@ sub pipeline_status {
 # is.  The two forms differ in what fills the list and in nothing else, so the
 # body is written once.
 #
-# D64's refusal of a disowned pipeline is the group's and not ours, and the
+# The refusal of a disowned pipeline is the group's and not ours, and the
 # legacy gate runs before we are reached, so there is no third refusal here on
 # pipeline.enabled saying what those two already say.
 sub pipeline_hold {
@@ -429,10 +429,10 @@ sub pipeline_hold {
 # }}}
 # pipeline_release - clear the propagation hold on one environment or the root {{{
 #
-# D53 has the release delete the record and keep no released-by fields, because
-# the release's identity is its own log line, so we say who ran it here and
-# write nothing about them to vault.  D50 makes this the only way a hold is
-# cleared, which is why no deploy and no flag reaches this sub.
+# The release deletes the record and keeps no released-by fields, because the
+# release's identity is its own log line, so we say who ran it here and write
+# nothing about them to vault.  This is the only way a hold is cleared, which
+# is why no deploy and no flag reaches this sub.
 #
 # The argument is read the way pipeline_hold reads its own, and there is
 # nothing to tell apart here, because the only argument this command takes is
@@ -441,9 +441,9 @@ sub pipeline_hold {
 # there, since set_top_path hands the prefix on as the basename of the file it
 # resolved and an operator may have written the suffix themselves.
 #
-# D64's refusal of a disowned pipeline belongs to the group and not to us, as
-# it does for the hold, and the legacy gate runs before we are reached, so
-# there is no third refusal here on pipeline.enabled.
+# The refusal of a disowned pipeline belongs to the group and not to us, as it
+# does for the hold, and the legacy gate runs before we are reached, so there
+# is no third refusal here on pipeline.enabled.
 sub pipeline_release {
 	my @args = @_;
 	my $opts = get_options();
@@ -497,22 +497,20 @@ sub pipeline_release {
 #
 # The run stands itself on control, refreshes, settles every deployment
 # branch, and then walks control once per environment, from the marker that
-# environment's branch carries to control's own tip.  A branch that carries
-# no marker has never been delivered to, and it is walked from the commit
-# that introduced the environment instead (D61), which is routed and held
-# like any other.  Each commit that touches the environment's set is
-# delivered on its own, in control order, as one commit on the deployment
-# branch (D34).
+# environment's branch carries to control's own tip.  A branch that carries no
+# marker has never been delivered to, and it is walked from the commit that
+# introduced the environment instead, which is routed and held like any other.
+# Each commit that touches the environment's set is delivered on its own, in
+# control order, as one commit on the deployment branch.
 #
 # The run takes no argument and sources control's tip, always.
 sub propagate {
-	# D36 retired the <env> argument together with the cascade it scoped,
-	# because one run walks every environment and a commit held behind an
-	# ancestor is released by the next bare run rather than by a run aimed
-	# at it.  A caller that still passes one is told so, rather than having
-	# it quietly ignored.  Nothing below can see an argument from here on,
-	# so the cascade the variable feeds is unreachable until the walk
-	# replaces it.
+	# The <env> argument retired together with the cascade it scoped, because
+	# one run walks every environment and a commit held behind an ancestor is
+	# released by the next bare run rather than by a run aimed at it.  A
+	# caller that still passes one is told so, rather than having it quietly
+	# ignored.  Nothing below can see an argument from here on, so the cascade
+	# the variable feeds is unreachable until the walk replaces it.
 	command_usage(1) if @_;
 
 	my $opts    = get_options;
@@ -538,14 +536,14 @@ sub propagate {
 	my $git     = Service::Git->new('.');
 	my $control = $top->control_branch;
 
-	# D96's first stage begins here, and control is its first question,
-	# because the topology is read from control and a control nobody
-	# refreshed makes every later answer worthless (D65, D30).  It stands
-	# ahead of the branch check, since a branch that exists nowhere is not
-	# one the operator can be asked to stand on.
+	# The run's first stage begins here, and control is its first question,
+	# because the topology is read from control and a control nobody refreshed
+	# makes every later answer worthless.  It stands ahead of the branch
+	# check, since a branch that exists nowhere is not one the operator can be
+	# asked to stand on.
 	#
 	# The refresh brings R into T for every branch in scope, control included,
-	# before the first read of any of them (D40).  There is no flag, because a
+	# before the first read of any of them.  There is no flag, because a
 	# report that quietly rested on a stale tracking ref is the thing this
 	# removes.
 	my $refreshed = $top->fetch_pipeline_envs($git, command => 'propagate');
@@ -553,28 +551,28 @@ sub propagate {
 	# once, where the deployment branches are settled, and a line printed
 	# twice is worse than a line printed late.
 	#
-	# A preview is let past a control branch that is ahead of its remote,
-	# and warns under its own banner that its answer assumes the push, which
-	# is D44's first caveat.  Every other divergence is refused here for a
-	# preview as it is for a run, because a stale control makes the topology
+	# A preview is let past a control branch that is ahead of its remote, and
+	# warns under its own banner that its answer assumes the push, which is
+	# the preview's first caveat.  Every other divergence is refused here for
+	# a preview as it is for a run, because a stale control makes the topology
 	# the preview reports on the wrong one.
 	my $control_state = Genesis::CI::Preflight::require_control($top, $git,
 		refreshed    => $refreshed,
 		command      => 'propagate',
 		permit_ahead => $dry_run ? 1 : 0);
 
-	# The run stands itself on control rather than asking the operator to,
-	# which is D65.  Everything below reads the environment files off the
-	# working tree, so the switch is what makes a run from a feature branch
-	# read the same topology as a run from control, and finish puts the
-	# operator back on the branch they started from.
+	# The run stands itself on control rather than asking the operator to.
+	# Everything below reads the environment files off the working tree, so
+	# the switch is what makes a run from a feature branch read the same
+	# topology as a run from control, and finish puts the operator back on the
+	# branch they started from.
 	#
 	# The clean-tree refusal that stood beside the branch refusal has moved
-	# rather than gone.  It now lives in the session's own begin, which
-	# names the files it found, and it is the same guard stated where D84
-	# puts it.  It applies to a dry run as it does to a writing one, because
-	# a dry run switches to control like any other run and D65 puts the
-	# clean assertion on the switch.
+	# rather than gone.  It now lives in the session's own begin, which names
+	# the files it found, and it is the same guard stated in one place.  It
+	# applies to a dry run as it does to a writing one, because a dry run
+	# switches to control like any other run and the clean assertion sits on
+	# the switch.
 
 	# The pull request branch of every environment is named once, before the
 	# session opens, because pr_branch_for refuses a prefix that collides
@@ -646,14 +644,14 @@ sub propagate {
 		$pr_branch_of{$env_name} = $pr_branch;
 	}
 
-	# The rest of D96's first stage, now that the topology is known.  Every
+	# The rest of the first stage, now that the topology is known.  Every
 	# refusal below is collected before anything is written, so a run that
-	# stops here has left nothing partial behind.  It classifies the whole
-	# DAG rather than the cascade's scope, because the initial state is a
-	# property of the repository and not of the run, and it stands ahead of
-	# the creation guard further down, which makes a deployment branch the
-	# remote has never had and never publishes it, and so builds the very
-	# shape the first of the two refusals below exists to refuse.
+	# stops here has left nothing partial behind.  It classifies the whole DAG
+	# rather than the cascade's scope, because the initial state is a property
+	# of the repository and not of the run, and it stands ahead of the
+	# creation guard further down, which makes a deployment branch the remote
+	# has never had and never publishes it, and so builds the very shape the
+	# first of the two refusals below exists to refuse.
 	my $initial = Genesis::CI::Preflight::initial_state($top, $git,
 		envs      => \@dag_order,
 		refreshed => $refreshed,
@@ -662,12 +660,13 @@ sub propagate {
 		dry_run   => $dry_run);
 	info("  #Gi{%s}", $_) for @{$initial->{events}};
 
-	# D36 retired the cascade, so the run always sources control's own tip.
-	# What each environment receives is decided commit by commit by the
-	# walk, from the marker its own branch carries, rather than by one diff
-	# taken against that tip.  Collapsing everything outstanding into one
-	# diff made an urgent change to one environment wait behind an
-	# unrelated earlier change to a shared file (D34).
+	# The cascade is retired, so the run always sources control's own tip.
+	# What each environment receives is decided commit by commit by the walk,
+	# from the marker its own branch carries, rather than by one diff taken
+	# against that tip.  Collapsing everything outstanding into one diff made
+	# an urgent change to one environment wait behind an unrelated earlier
+	# change to a shared file.
+	#
 	# Everything I11 lets the run read, read once and handed to the walk.
 	# The banner names control's own commit, and reading it here rather than
 	# off HEAD is what keeps the sha the operator reads and the sha the walk
@@ -685,11 +684,11 @@ sub propagate {
 	my $control_sha   = $state->{control}{commit};
 	my $control_short = $git->sha($control_sha, short => 1);
 
-	# D94's fourth reading, said once for the repository.  An applied record
+	# The fourth reading, said once for the repository.  An applied record
 	# that is absent is legitimately absent until genesis pipeline-apply has
-	# run, so the run reads it rather than refusing over it, and it says
-	# which reading it took, because a reading nobody prints is one the
-	# operator cannot act on.
+	# run, so the run reads it rather than refusing over it, and it says which
+	# reading it took, because a reading nobody prints is one the operator
+	# cannot act on.
 	warning(
 		"The pipeline has never been applied to this repository, so every ".
 		"environment reads #C{not-propagated}.  Run #C{genesis ".
@@ -699,42 +698,43 @@ sub propagate {
 	info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}",
 		$control, $control_short;
 
-	# The run's one GitHub client, and the only one this command builds.
-	# D57 has it built where an environment in scope needs the API and not
-	# at all where none does, so a repository that delivers to nobody by
-	# pull request makes no call on a job that runs on every control change.
+	# The run's one GitHub client, and the only one this command builds.  It
+	# is built where an environment in scope needs the API and not at all
+	# where none does, so a repository that delivers to nobody by pull request
+	# makes no call on a job that runs on every control change.
+	#
 	# Everything the build decides, refuses, and warns about lives in
 	# client_for_run, and the refusal goes through the run's own closure so
 	# the operator is back on their branch before they are told why it
 	# stopped.
 	#
 	# The records the decision reads are composed here rather than taken from
-	# the walk, because the walk is below this and wants the client itself:
-	# an environment whose merge dropped the marker takes it back from the
-	# pull request that merged (D52).  Each one carries the pull request
-	# branch this environment's own policy asked for, seeded from the names
-	# composed above, which is what the walk seeds its own record's pr from,
-	# so the two readings cannot disagree about which environments would
-	# deliver into a pull request.  The proposed record is the walk's to
-	# read, and an environment that would not deliver into a pull request has
-	# no use for the client that a stale proposal of its own could give it.
+	# the walk, because the walk is below this and wants the client itself,
+	# since an environment whose merge dropped the marker takes it back from
+	# the pull request that merged.  Each one carries the pull request branch
+	# this environment's own policy asked for, seeded from the names composed
+	# above, which is what the walk seeds its own record's pr from, so the two
+	# readings cannot disagree about which environments would deliver into a
+	# pull request.  The proposed record is the walk's to read, and an
+	# environment that would not deliver into a pull request has no use for
+	# the client that a stale proposal of its own could give it.
 	my @in_scope = map {{
 		env       => $_,
 		branch    => $top->branch_for($_),
 		pr_branch => $pr_branch_of{$_},
 	}} grep {$topo->{nodes}{$_}{require_pr}} @dag_order;
 
-	# D55's refusal, read once for the whole run and ahead of it.  What a
+	# The review refusal, read once for the whole run and ahead of it.  What a
 	# reviewer decided is what decides whether an environment's pull request
 	# branch is rebuilt or frozen, so a run that cannot read it cannot know
 	# what it would do with any of them, and it refuses rather than guess.
 	#
 	# The read stands here rather than beside the arm for two reasons.  The
 	# refusal is whole-run, so it has to happen before the first environment
-	# is written; and a refusal raised inside the eval below comes back out
-	# of the abort as a bare 1, where D98 gives this one UNAVAILABLE.  It
-	# goes through the run's own refusal closure, so the operator is put back
-	# on the branch they started from before they are told why it stopped.
+	# is written; and a refusal raised inside the eval below comes back out of
+	# the abort as a bare 1, where this one earns UNAVAILABLE.  It goes
+	# through the run's own refusal closure, so the operator is put back on
+	# the branch they started from before they are told why it stopped.
 	#
 	# The two branch names are composed from the same accessors the walk
 	# composes its record from, so the state read here and the record the arm
@@ -764,24 +764,23 @@ sub propagate {
 
 	# One eval around the walk, the whole delivery, and the push, because a
 	# die that no guard caught is the run as a whole failing, and abort is
-	# what answers it (D32): the partial write is named and discarded, every
-	# branch this session committed to goes back to where the remote has it,
-	# and the operator is put back on the branch they started from.
+	# what answers it.  The partial write is named and discarded, every branch
+	# this session committed to goes back to where the remote has it, and the
+	# operator is put back on the branch they started from.
 	#
 	# The walk is inside it rather than in an eval of its own.  A walk that
-	# cannot read what it needs ends the run exactly as a delivery that
-	# cannot write does, under the same two classes of D82, and two evals
-	# reading the same error two ways is how the two come to disagree about
-	# a status.
+	# cannot read what it needs ends the run exactly as a delivery that cannot
+	# write does, under the same two failure classes, and two evals reading
+	# the same error two ways is how the two come to disagree about a status.
 	my $ran = eval {
 		# The walk reads durable state and writes nothing at all.  Everything
 		# it decides stands in the record, and the delivery below is the only
 		# thing here that touches a branch.
 		#
 		# The client and the state read above go in with it, because a
-		# deployment branch whose merge dropped the marker takes it back
-		# from the pull request that merged, and that pull request is in
-		# the answer this run already has (D52).
+		# deployment branch whose merge dropped the marker takes it back from
+		# the pull request that merged, and that pull request is in the answer
+		# this run already has.
 		$record = Genesis::CI::Walk::plan($top,
 			git        => $git,
 			state      => $state,
@@ -812,13 +811,13 @@ sub propagate {
 			my $env_name = $env_record->{env};
 			$at = $env_name;
 
-			# D96's second stage as the walk already resolved it.  An error
-			# the walk confined to this environment is this environment's
-			# outcome, and it is named as one rather than as a warning
-			# standing beside the report, because I8 asks that every
-			# environment in scope end with an outcome and a warning is not
-			# one.  The walk wrote failed on the record as it caught the
-			# error, and the report carries the error beneath it.
+			# The second stage as the walk already resolved it.  An error the
+			# walk confined to this environment is this environment's outcome,
+			# and it is named as one rather than as a warning standing beside
+			# the report, because I8 asks that every environment in scope end
+			# with an outcome and a warning is not one.  The walk wrote failed
+			# on the record as it caught the error, and the report carries the
+			# error beneath it.
 			#
 			# It is read ahead of the branchless check below, because an
 			# environment can be in both states at once and only one of the
@@ -830,18 +829,18 @@ sub propagate {
 			# and fails on it again.
 			next if $env_record->{error};
 
-			# D43's awaiting outcome.  genesis pipeline-apply is the one
-			# command that cuts a deployment branch, so the run carries on
-			# past the environment without writing, and the report says what
-			# it is waiting for.  Nothing is decided here, because a run and
-			# a preview that decided it separately are two outputs that can
+			# The awaiting outcome.  genesis pipeline-apply is the one command
+			# that cuts a deployment branch, so the run carries on past the
+			# environment without writing, and the report says what it is
+			# waiting for.  Nothing is decided here, because a run and a
+			# preview that decided it separately are two outputs that can
 			# disagree about a word.
 			next unless $initial->{branches}{$env_name};
 
-			# D51's arm.  An environment whose repository policy says its
-			# branch may only receive a proposal takes its delivery on the
-			# pull request branch, and the commits it is given are the same
-			# ones the direct arm would have delivered.
+			# The pull request arm.  An environment whose repository policy
+			# says its branch may only receive a proposal takes its delivery
+			# on the pull request branch, and the commits it is given are the
+			# same ones the direct arm would have delivered.
 			if ($topo->{nodes}{$env_name}{require_pr}) {
 				my @pending = @{$env_record->{pending}};
 
@@ -884,12 +883,12 @@ sub propagate {
 				);
 				next if ($env_record->{outcome} // '') eq 'failed';
 
-				# D51's lease.  The expected tip is the one the arm read
+				# The arm's lease.  The expected tip is the one the arm read
 				# before it rewrote anything, and the key is carried even
 				# where it is undef, because _push_one reads it with exists
-				# and a spec that dropped it would be pushed with no lease
-				# at all.  An undef there is a branch the remote has never
-				# had, which leases the empty object name.
+				# and a spec that dropped it would be pushed with no lease at
+				# all.  An undef there is a branch the remote has never had,
+				# which leases the empty object name.
 				push @publish_specs, {
 					branch => $env_record->{pr}{branch},
 					kind   => 'pr',
@@ -911,12 +910,12 @@ sub propagate {
 			my $env    = $env_of{$env_name};
 			my $branch = $env_record->{branch};
 
-			# D96's second stage.  A delivery that dies halfway ends this
-			# environment and nothing else: the branch goes back to T so
-			# that no part of the delivery survives, the environment records
+			# The second stage.  A delivery that dies halfway ends this
+			# environment and nothing else, so the branch goes back to T and
+			# no part of the delivery survives, the environment records
 			# failed, and the run walks on to the next one.  A run-fatal or
-			# unsurvivable failure is not caught, and it reaches the run's
-			# own eval below, which aborts everything.
+			# unsurvivable failure is not caught, and it reaches the run's own
+			# eval below, which aborts everything.
 			Genesis::CI::Walk::walk_one(
 				session => $session,
 				record  => $env_record,
@@ -957,27 +956,27 @@ sub propagate {
 			} unless $dry_run;
 		}
 
-		# D51's removals, which are the pull request branches this run
-		# retires.  They are gathered once the walk is over rather than beside
-		# each arm, because a removal is a push like any other and D83 has
-		# every push wait for the whole walk to finish.
+		# The removals, which are the pull request branches this run retires.
+		# They are gathered once the walk is over rather than beside each arm,
+		# because a removal is a push like any other and every push waits for
+		# the whole walk to finish.
 		push @publish_specs, Genesis::CI::PullRequest::_nothing_due_specs(
 			git     => $git,
 			records => $record->{environments},
 		) unless $dry_run;
 
-		# D96's third stage.  The publish is held to the end of the walk, so
-		# a run that failed halfway has put nothing on the remote.
+		# The third stage.  The publish is held to the end of the walk, so a
+		# run that failed halfway has put nothing on the remote.
 		#
 		# The push set is the deployment branches alone.  Control is the run's
-		# input and never its output, which is D30, so what the publish does
-		# with control is read it once more before the first push and refuse
-		# where it has moved.  It is named to the stage for that reading and
-		# for nothing else.
+		# input and never its output, so what the publish does with control is
+		# read it once more before the first push and refuse where it has
+		# moved.  It is named to the stage for that reading and for nothing
+		# else.
 		#
 		# It is inside the session rather than after it, because a remote that
-		# has gone away is D82's unsurvivable failure and the answer to one
-		# is the abort.  A run that could publish nothing leaves nothing
+		# has gone away is an unsurvivable failure and the answer to one is
+		# the abort.  A run that could publish nothing leaves nothing
 		# half-delivered in L either, and the next run redoes the whole of it.
 		# A session already finished has nothing left to reset, and a branch
 		# the remote refused is put back through the session for the same
@@ -992,11 +991,11 @@ sub propagate {
 					control => $control,
 					records => $record->{environments},
 					specs   => \@publish_specs,
-					# D83's ask.  The delta every push would carry is
-					# shown either way, and this answers the question
-					# that follows it.
+					# The publish's ask.  The delta every push would carry is
+					# shown either way, and this answers the question that
+					# follows it.
 					yes     => $opts->{yes},
-					# D82's two shapes reach one reading.  git push failing to
+					# The two shapes reach one reading.  git push failing to
 					# run at all raises, and a remote nobody can resolve comes
 					# back as a refused push per ref, so a run where nothing
 					# landed and no result named a ref is the remote being
@@ -1046,9 +1045,9 @@ sub propagate {
 	};
 	my $failure = $@;
 
-	# D82's two classes, which are the errors no environment survives.  Both
-	# abort the same way and differ only in the status they exit with, and
-	# both leave through here, because everything an environment could
+	# The two failure classes, which are the errors no environment survives.
+	# Both abort the same way and differ only in the status they exit with,
+	# and both leave through here, because everything an environment could
 	# survive was answered inside the walk and never reached this eval.
 	Genesis::CI::Walk::abort_run(
 		session => $session,
@@ -1058,23 +1057,22 @@ sub propagate {
 		error   => $failure,
 	) unless $ran;
 
-	# D30's in-sync rule, answered a second time by the publish and spent
-	# here.  Control moving under the run leaves every marker the run wrote
-	# naming a commit computed from a tip that has already moved, so the run
-	# refuses rather than publishing it.  Nothing went to the remote and
-	# every branch the run committed to is back where the remote has it, so
-	# the refusal leaves the repository as it found it.
+	# The in-sync rule, answered a second time by the publish and spent here.
+	# Control moving under the run leaves every marker the run wrote naming a
+	# commit computed from a tip that has already moved, so the run refuses
+	# rather than publishing it.  Nothing went to the remote and every branch
+	# the run committed to is back where the remote has it, so the refusal
+	# leaves the repository as it found it.
 	#
-	# D106 puts the status at TEMPFAIL, because a code says whether an
-	# unaided retry fixes the condition.  Nothing the operator wrote is
-	# wrong here.  Another clone moved control while this run was walking,
-	# and the next run the pipeline job cuts starts from a fresh clone, so
-	# it refreshes, walks from what is there now, and succeeds with nobody
-	# doing anything first.  An operator running from a clone of their own
-	# keeps a control branch a commit behind, and the run there is refused
-	# for an illegal initial state until they pull.  That is the rejected
-	# push this refusal resembles, which is the same event on a different
-	# ref.
+	# The status is TEMPFAIL, because a code says whether an unaided retry
+	# fixes the condition.  Nothing the operator wrote is wrong here.  Another
+	# clone moved control while this run was walking, and the next run the
+	# pipeline job cuts starts from a fresh clone, so it refreshes, walks from
+	# what is there now, and succeeds with nobody doing anything first.  An
+	# operator running from a clone of their own keeps a control branch a
+	# commit behind, and the run there is refused for an illegal initial state
+	# until they pull.  That is the rejected push this refusal resembles,
+	# which is the same event on a different ref.
 	$refuse->({exitcode => TEMPFAIL}, '%s', $publish->{refused})
 		if $publish && $publish->{refused};
 
@@ -1083,9 +1081,9 @@ sub propagate {
 	# reads the working tree.
 	$session->finish;
 
-	# D53's sequence, spent here.  A commit that carries a hold trailer sets
-	# the hold as it is delivered rather than as it is deployed, so the write
-	# goes after the publish, which is what settles whether the delivery
+	# The hold sequence, spent here.  A commit that carries a hold trailer
+	# sets the hold as it is delivered rather than as it is deployed, so the
+	# write goes after the publish, which is what settles whether the delivery
 	# landed, and before the report, which says what this run did.  A preview
 	# publishes nothing and so writes nothing here either.
 	_write_trailer_holds($top, $record) if $publish;
@@ -1096,10 +1094,10 @@ sub propagate {
 	# call rather than lines scattered through the walk, because
 	# pipeline-status renders the same record through the same helpers and
 	# two outputs composing one phrase twice are two that can disagree.
-	# D44's preview and the run's own report are one report, composed from
-	# one record by one renderer, so the two cannot disagree about a word.
-	# The preview enters through its own sub because it has a banner and one
-	# verb of its own, and everything under those is the run's.
+	# The preview and the run's own report are one report, composed from one
+	# record by one renderer, so the two cannot disagree about a word.  The
+	# preview enters through its own sub because it has a banner and one verb
+	# of its own, and everything under those is the run's.
 	#
 	# The preview's three caveats, gathered here and said by the report.
 	# The run has already asked git every one of those questions, to decide
@@ -1160,20 +1158,20 @@ sub propagate {
 		info "\n#Yi{No changes to propagate.}";
 	}
 
-	# D97's decline, which is the one status the publish decides rather than
-	# the run's second stage.  It is the number every shell user reads as
-	# the person having stopped it, and it is spent here rather than beside
-	# the ask so the operator reads the report of what the run wrote before
-	# they read the status of the run they stopped.  Every branch that work
-	# went onto is already back where the remote has it.
+	# The decline, which is the one status the publish decides rather than the
+	# run's second stage.  It is the number every shell user reads as the
+	# person having stopped it, and it is spent here rather than beside the
+	# ask so the operator reads the report of what the run wrote before they
+	# read the status of the run they stopped.  Every branch that work went
+	# onto is already back where the remote has it.
 	exit ABORTED if $publish && $publish->{declined};
 
-	# D97's second stage, decided in one place and spent here.  The run's
+	# The run's second stage, decided in one place and spent here.  The run's
 	# own status is the only thing a caller reads, so the reading is not
-	# repeated beside the report: the report says which environment ended
-	# which way, and the sentence below says what the whole of that means
-	# for the next run.  It names nobody, because naming an environment
-	# twice sends an operator looking for two different problems.
+	# repeated beside the report.  The report says which environment ended
+	# which way, and the sentence below says what the whole of that means for
+	# the next run.  It names nobody, because naming an environment twice
+	# sends an operator looking for two different problems.
 	my $status = run_status($record);
 	warning(
 		"\nThe run was partial.  Everything the report says was published ".
@@ -1184,11 +1182,11 @@ sub propagate {
 
 # _write_trailer_holds - set the holds this run's deliveries carried {{{
 #
-# D53 makes propagate the hold record's writer and puts the write at delivery
-# rather than at the deploy's exodus write, which closes the window between the
-# BOSH step and that write.  D83 publishes one branch at a time and D99 pins the
-# consequence, so an environment whose push the remote refused was reset to T,
-# delivered nothing, and takes no hold.
+# Propagate is the hold record's writer, and the write goes at delivery rather
+# than at the deploy's exodus write, which closes the window between the BOSH
+# step and that write.  The publish takes one branch at a time, so an
+# environment whose push the remote refused was reset to T, delivered nothing,
+# and takes no hold.
 #
 # The trailer is never read here, and it is never read twice.  gate_state is
 # the one reader of the stage, and the walk asks it about each commit with the
@@ -1292,7 +1290,7 @@ sub _preview_warnings {
 }
 
 # }}}
-# run_status - the exit status D97 gives the run's second stage {{{
+# run_status - the exit status of the run's second stage {{{
 #
 # Zero is the run in which every environment ended published or held with
 # its reason.  TEMPFAIL is a partial run, which the next run repairs, and
@@ -1301,9 +1299,9 @@ sub _preview_warnings {
 # Three exits leave before this sub is reached and none of them is decided
 # here.  The illegal initial state at DATAERR belongs to the first stage,
 # because only a person can clear it.  The declined confirmation at ABORTED
-# belongs to the publish.  So does the pre-publish re-check of control,
-# which D106 puts at TEMPFAIL, the same code for the same reason a partial
-# run earns it, which is that the next run repairs the condition unaided.
+# belongs to the publish.  So does the pre-publish re-check of control, which
+# sits at TEMPFAIL, the same code for the same reason a partial run earns it,
+# which is that the next run repairs the condition unaided.
 #
 # The whole outcome is matched, because the record carries
 # the bare enum word in outcome and the qualifier beside it in
@@ -1334,11 +1332,12 @@ sub run_status {
 # }}}
 # _push_failure - the sentence and the remedy one refused push earns {{{
 #
-# D82 lists the remote unreachable, the credential rejected, and the host
-# answering with a server error, and says that where the cause is known the
-# report names it.  The three want different things of the operator, so each
-# carries a corrective step of its own and a report that said the remote was
-# unreachable over a rejected credential would send them to the wrong one.
+# A refused push has three known causes, which are the remote unreachable, the
+# credential rejected, and the host answering with a server error, and where
+# the cause is known the report names it.  The three want different things of
+# the operator, so each carries a corrective step of its own and a report that
+# said the remote was unreachable over a rejected credential would send them
+# to the wrong one.
 #
 # Two of git's own words arrive here rather than one.  What git wrote to its
 # standard error is classified first, because the phrases that name a class
@@ -1389,7 +1388,7 @@ sub _verify_deployed {
 
 	my $branch_head = $git->sha($env_name);
 
-	# Vault access is required — soft-fail if unavailable
+	# Vault access is required, and this soft-fails if it is unavailable
 	my $env_with_vault = eval { $env->with_vault };
 	unless ($env_with_vault) {
 		warning(
@@ -1416,7 +1415,7 @@ sub _verify_deployed {
 			$env_name
 		);
 	} elsif (!$deployed_commit) {
-		# Pre-pipeline deployment (no git context in exodus) — warn only
+		# Pre-pipeline deployment (no git context in exodus), so warn only
 		warning(
 			"Environment #C{%s} was deployed before pipeline tracking was enabled.\n".
 			"Cannot verify deployment state.  Ensure it has been deployed.",
@@ -1664,11 +1663,11 @@ sub resume {
 
 # open_control_session - begin a session and stand it on control {{{
 #
-# D65: the run switches to control inside its session rather than refusing
-# off it, and finish puts the operator back where they stood.  The switch is
-# what makes the run read the same topology wherever the operator was
-# standing, because the environment files are read off the working tree and
-# a feature branch carries whichever of them its author happened to touch.
+# The run switches to control inside its session rather than refusing off it,
+# and finish puts the operator back where they stood.  The switch is what
+# makes the run read the same topology wherever the operator was standing,
+# because the environment files are read off the working tree and a feature
+# branch carries whichever of them its author happened to touch.
 #
 # Nothing here asks whether the local control ref is there, because every
 # caller reaches this sub through Genesis::CI::Preflight::require_control,
@@ -1723,11 +1722,11 @@ sub describe {
 
 
 # ci_pipeline_deploy, ci_show_changes, ci_generate_cache, and
-# ci_pipeline_run_errand — the legacy pipeline task entry points —
-# have been retired.  Their commands remain registered in bin/genesis
-# with `retired => ...` so run_command bails at dispatch time and a
-# legacy pipeline fails loudly instead of producing a silent-but-
-# inconsistent deploy.  See lib/Genesis/Commands.pm run_command.
+# ci_pipeline_run_errand, which were the legacy pipeline task entry points,
+# have been retired.  Their commands remain registered in bin/genesis with
+# `retired => ...` so run_command bails at dispatch time and a legacy pipeline
+# fails loudly instead of producing a silent-but-inconsistent deploy.  See
+# lib/Genesis/Commands.pm run_command.
 
 # }}}
 # }}}
@@ -1735,11 +1734,11 @@ sub describe {
 
 # _compile_pipeline - compile from the repository configuration {{{
 #
-# D27 leaves one configuration source, which is the pipeline section of
+# There is one configuration source, which is the pipeline section of
 # .genesis/config, so there is no precedence to work through here and no
-# legacy file to fall back to.  A leftover .genesis/ci/ directory is not
-# read and is not named either, because a directory nothing consults is
-# not worth a line of the operator's attention.
+# legacy file to fall back to.  A leftover .genesis/ci/ directory is not read
+# and is not named either, because a directory nothing consults is not worth a
+# line of the operator's attention.
 sub _compile_pipeline {
 	my ($top, $platform) = @_;
 
@@ -1774,11 +1773,11 @@ sub _compile_pipeline {
 # }}}
 # _apply_init_branches - create every missing deployment branch {{{
 #
-# D43 makes this command the only creator of a deployment branch, and D42
-# gives the branch its shape, which is an orphan whose root commit adds a
-# single init file and carries [ci skip], so the pipeline's git resource
-# registers the head as a version and skips the commit.  The first commit it
-# does not skip is the seed the propagate run delivers later.
+# This command is the only creator of a deployment branch, and the branch has
+# one shape, which is an orphan whose root commit adds a single init file and
+# carries [ci skip], so the pipeline's git resource registers the head as a
+# version and skips the commit.  The first commit it does not skip is the seed
+# the propagate run delivers later.
 #
 # Both sides are asked whether the branch is there, because they answer
 # differently and each answer means something.  A branch the remote carries
@@ -1788,17 +1787,17 @@ sub _compile_pipeline {
 # branch that never reaches anybody else.
 #
 # Every question and every write names the remote that
-# pipeline.source_control.remote resolves to, under D29, because that is the
-# repository's own answer to where its branches live.  Reading whichever
-# remote git happens to list first would ask the wrong repository on a clone
-# that has two, and git lists them alphabetically rather than in the order
-# the operator added them.
+# pipeline.source_control.remote resolves to, because that is the repository's
+# own answer to where its branches live.  Reading whichever remote git happens
+# to list first would ask the wrong repository on a clone that has two, and
+# git lists them alphabetically rather than in the order the operator added
+# them.
 #
 # The publish goes through push_append_only, so a tip that would rewrite what
 # the remote already carries is refused by name instead of being force-pushed
 # or swallowed.
 #
-# D44's preview is the same stage asking the same two questions and making
+# The preview is the same stage asking the same two questions and making
 # neither write, so a dry run reports the branches it would cut and the ones
 # it would publish and leaves the clone and the remote as it found them.
 sub _apply_init_branches {
@@ -1810,13 +1809,13 @@ sub _apply_init_branches {
 	# asked.
 	my $remote = $top->source_control_remote;
 
-	# D31 makes R the home of every deployment branch, so a repository with
-	# nowhere to publish to is turned away before the first branch is
-	# written rather than after it.  Creating one and then failing on the
-	# publish would leave an orphan standing in the clone and would leave
-	# every environment behind the first with nothing at all.  A remote the
-	# clone does not have is configuration rather than a crash, so the
-	# refusal carries the configuration code.
+	# R is the home of every deployment branch, so a repository with nowhere
+	# to publish to is turned away before the first branch is written rather
+	# than after it.  Creating one and then failing on the publish would leave
+	# an orphan standing in the clone and would leave every environment behind
+	# the first with nothing at all.  A remote the clone does not have is
+	# configuration rather than a crash, so the refusal carries the
+	# configuration code.
 	bail(
 		{exitcode => CONFIG},
 		"Refusing to apply.  This repository has no git remote named ".
@@ -1881,31 +1880,30 @@ sub _apply_init_branches {
 # }}}
 # _protection_rules_for - derive one branch's protection from decided state {{{
 #
-# D45 derives the protection from state the repository has already decided
-# and one key, so nothing here is configured twice.  Control and every
-# deployment branch block force pushes and require linear history, which is
-# what makes D31's append-only rule enforceable rather than a convention
-# Genesis observes on its own side.  A deployment branch requires a pull
-# request where its require_pr is true, and control where
-# control_requires_pr is true, whose default is false.  D52 makes rebase the
-# only merge method into a deployment branch, so the merger never gets the
-# chance to rewrite the aggregate commit's message and lose its marker,
-# while control keeps squash or rebase because user pull requests carry no
-# markers.  Nothing here dismisses a stale approval, because D51 keeps
-# review safety in the mechanism and an approval has to survive the rebuild
-# a later run pushes.
+# The protection is derived from state the repository has already decided and
+# one key, so nothing here is configured twice.  Control and every deployment
+# branch block force pushes and require linear history, which is what makes
+# the append-only rule enforceable rather than a convention Genesis observes
+# on its own side.  A deployment branch requires a pull request where its
+# require_pr is true, and control where control_requires_pr is true, whose
+# default is false.  Rebase is the only merge method into a deployment branch,
+# so the merger never gets the chance to rewrite the aggregate commit's
+# message and lose its marker, while control keeps squash or rebase because
+# user pull requests carry no markers.  Nothing here dismisses a stale
+# approval, because review safety lives in the mechanism and an approval has
+# to survive the rebuild a later run pushes.
 #
-# allowed_merge_methods is a parameter of GitHub's pull_request rule, and
-# that rule type requires a pull request before merging, so asking for
-# rebase-only on a branch that takes direct pushes would stop them.  D45
-# serves "a PR-only site and a lab that pushes directly" both, so the rule
-# is gated on require_pr the way control's is gated on control_requires_pr.
-# Nothing is lost where it is off: non_fast_forward and
-# required_linear_history already keep history unrewritten and every commit
-# fast-forward on every branch, and the marker rebase-only protects can only
-# be lost by squashing a pull request, which a branch in no PR mode does not
-# have.  D52's recovery covers a pull request opened into such a branch by
-# hand, taking the marker from the pull request's body.
+# allowed_merge_methods is a parameter of GitHub's pull_request rule, and that
+# rule type requires a pull request before merging, so asking for rebase-only
+# on a branch that takes direct pushes would stop them.  The protection serves
+# "a PR-only site and a lab that pushes directly" both, so the rule is gated
+# on require_pr the way control's is gated on control_requires_pr.  Nothing is
+# lost where it is off.  non_fast_forward and required_linear_history already
+# keep history unrewritten and every commit fast-forward on every branch, and
+# the marker rebase-only protects can only be lost by squashing a pull
+# request, which a branch in no PR mode does not have.  The recovery covers a
+# pull request opened into such a branch by hand, taking the marker from the
+# pull request's body.
 sub _protection_rules_for {
 	my ($top, $branch, %opts) = @_;
 
@@ -1946,9 +1944,9 @@ sub _protection_rules_for {
 #
 # The environment is never read here, because the caller has already derived
 # every rule, so this sub takes the client, the pair, the branches it is to
-# send, and whether it is to send them at all.  Under D44's preview it names
-# each branch and the settings that branch would be given, and asks the
-# repository for nothing.
+# send, and whether it is to send them at all.  Under a preview it names each
+# branch and the settings that branch would be given, and asks the repository
+# for nothing.
 sub _apply_branch_protection {
 	my ($gh, $owner_repo, %opts) = @_;
 
@@ -1993,9 +1991,9 @@ sub _apply_branch_protection {
 # }}}
 # _apply_records - write what the apply learned to exodus {{{
 #
-# D103 splits the writes across two owners, because the deploy rewrites its
-# own exodus record on every run and would clobber anything the apply left
-# beside it.  The pipeline's own facts go to Genesis::Top's path, and each
+# The writes are split across two owners, because the deploy rewrites its own
+# exodus record on every run and would clobber anything the apply left beside
+# it.  The pipeline's own facts go to Genesis::Top's path, and each
 # environment's compiled facts go beside that environment's own record.
 #
 # Neither this helper nor the command spells either address.  Each owner
@@ -2058,10 +2056,10 @@ sub _apply_records {
 
 	# One pass over the topology computes each environment's set and writes
 	# it, in the order the walk itself reads, so the report reads top down.
-	# D103 puts each record beside that environment's own exodus record, and
-	# the absence of that subpath is the membership test the walk uses in
-	# place of a roster, so an environment this loop never reaches carries
-	# none and reads as one the applied record does not know.
+	# Each record goes beside that environment's own exodus record, and the
+	# absence of that subpath is the membership test the walk uses in place of
+	# a roster, so an environment this loop never reaches carries none and
+	# reads as one the applied record does not know.
 	for my $name (@{$top->pipeline_topology->{order}}) {
 		my $env = eval {$top->load_env($name)};
 		my ($deps, $complete) = ([], 0);
@@ -2069,11 +2067,11 @@ sub _apply_records {
 		if ($env) {
 			($deps, $complete) = $env->dependency_set;
 		} else {
-			# An environment that will not load is the same case as one
-			# that will not render, which D77 answers with a warning and an
-			# incomplete mark rather than a refusal.  A failure here costs
-			# the manifest and nothing else, so the declared half is still
-			# read, and only the discovered half goes missing.
+			# An environment that will not load is the same case as one that
+			# will not render, and both are answered with a warning and an
+			# incomplete mark rather than a refusal.  A failure here costs the
+			# manifest and nothing else, so the declared half is still read,
+			# and only the discovered half goes missing.
 			#
 			# Both the declared read and the record write go through a bare
 			# environment, which resolves the whole of genesis.pipeline and
@@ -2140,7 +2138,7 @@ sub _apply_records {
 }
 
 # }}}
-# _refuse_disabled_pipeline - D64's refusal on a pipeline nobody declared {{{
+# _refuse_disabled_pipeline - refuse to apply a pipeline nobody declared {{{
 #
 # The key is read straight off .genesis/config, the way
 # Genesis::Top::pipeline_enabled reads it, and a Genesis::Top is not built
@@ -2169,15 +2167,17 @@ sub _refuse_disabled_pipeline {
 # }}}
 # _root_environments - the deployment root's environments, in DAG order {{{
 #
-# D50 gives both hold commands a form with no environment argument, over the
-# deployment root and not the repository, because under D66 two roots can share
-# an environment name and holding the wrong `prod` would be worse than holding
-# nothing.  The topology is the same enumeration the walk reads, so the run and
-# the two commands never disagree about what the root holds.
+# Both hold commands have a form with no environment argument, over the
+# deployment root and not the repository, because two roots can share an
+# environment name and holding the wrong `prod` would be worse than holding
+# nothing.  The topology is the same enumeration the walk reads, so the run
+# and the two commands never disagree about what the root holds.
 #
-# pipeline_topology answers every field empty where the pipeline is disabled or
-# where no environment file declares one, so an empty order is the one state
-# worth a sentence: a command that silently held nothing would read as success.
+# pipeline_topology answers every field empty where the pipeline is disabled
+# or where no environment file declares one, so an empty order is the one
+# state worth a sentence, since a command that silently held nothing would
+# read as success.
+#
 # The sentence names both causes, because the two are indistinguishable from
 # here and an operator whose pipeline is switched off would otherwise be sent
 # to read their environment files.
@@ -2283,10 +2283,10 @@ sub _dump_debug_artifacts {
 # }}}
 # _describe_source_control - print each source-control value and its tier {{{
 #
-# D29 has pipeline-describe open with the resolved source-control values,
-# so an override that has drifted away from what git says is visible
-# rather than silent.  Genesis::Top resolves them and says which tier each
-# came from; this only lays them out.
+# pipeline-describe opens with the resolved source-control values, so an
+# override that has drifted away from what git says is visible rather than
+# silent.  Genesis::Top resolves them and says which tier each came from; this
+# only lays them out.
 sub _describe_source_control {
 	my ($top) = @_;
 
