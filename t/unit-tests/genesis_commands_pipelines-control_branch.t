@@ -37,8 +37,8 @@ Harness::Propagation::run(
 	'git', 'checkout', '-q', '-b', 'elsewhere');
 
 subtest 'propagate switches to the configured name and comes back' => sub {
-	# D65 took the off-control refusal away, so what this row used to read
-	# out of a refusal it now reads out of the switch.  A run started on
+	# The off-control refusal is gone, so what this row used to read out of
+	# a refusal it now reads out of the switch.  A run started on
 	# `elsewhere` stands itself on trunk, and a reader that fell back to the
 	# schema default would look for a branch called `control`, find it
 	# neither here nor on the remote, and say so by name.
@@ -88,12 +88,12 @@ subtest 'pipeline-status resolves the configured branch head' => sub {
 };
 
 subtest 'the bare run measures every read against the configured branch' => sub {
-	# D36 retired the <env> argument and the cascade it scoped, so a run
+	# The <env> argument and the cascade it scoped are retired, so a run
 	# resolves no propagation base any more and the marker warnings that
 	# used to prove where each base came from are unreachable from here.
 	# What is left to prove, and what this file is about, is that the whole
-	# run is measured against the branch the configuration names rather
-	# than against the schema default: the topology is read from trunk, the
+	# run is measured against the branch the configuration names rather than
+	# against the schema default: the topology is read from trunk, the
 	# source commit is trunk's own tip, and the branch check compares the
 	# run against trunk and so never fires.
 	plan tests => 4;
