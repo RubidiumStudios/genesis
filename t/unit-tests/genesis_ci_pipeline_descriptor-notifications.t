@@ -159,7 +159,7 @@ sub _outcome_hook {
 }
 
 # =========================================================================
-# 1. style: per-env — notify jobs created, inline with deploy
+# 1. style: per-env (notify jobs created, inline with deploy)
 # =========================================================================
 subtest 'per-env style: notify jobs created and inlined with deploy' => sub {
 	my $ast = _ast_for(
@@ -193,7 +193,7 @@ subtest 'per-env style: notify jobs created and inlined with deploy' => sub {
 };
 
 # =========================================================================
-# 2. style: grouped — notify jobs created, in separate group, deploy independent
+# 2. style: grouped (notify jobs in a separate group, deploy independent)
 # =========================================================================
 subtest 'grouped style: notify jobs in separate group, deploy gets changes directly' => sub {
 	my $ast = _ast_for(
@@ -227,7 +227,7 @@ subtest 'grouped style: notify jobs in separate group, deploy gets changes direc
 };
 
 # =========================================================================
-# 3. style: minimal — no notify jobs; only on_failure hook
+# 3. style: minimal (no notify jobs, only the on_failure hook)
 # =========================================================================
 subtest 'minimal style: no notify jobs, only on_failure hook in deploy' => sub {
 	my $ast = _ast_for(
@@ -253,7 +253,7 @@ subtest 'minimal style: no notify jobs, only on_failure hook in deploy' => sub {
 };
 
 # =========================================================================
-# 4. style: none — no notifications at all
+# 4. style: none (no notifications at all)
 # =========================================================================
 subtest 'none style: no slack resources, no notify jobs, no hooks' => sub {
 	my $ast = _ast_for(

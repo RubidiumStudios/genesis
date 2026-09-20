@@ -300,7 +300,7 @@ subtest 'task_library: token auth with explicit username' => sub {
 };
 
 # =========================================================================
-# 6. AC3 — Jobs reference library tasks by name (path resolution)
+# 6. AC3, jobs reference library tasks by name (path resolution)
 # =========================================================================
 subtest 'No task_library: errand uses inline config' => sub {
 	my $ast = _ast_for(errands => ['smoke-tests']);
