@@ -78,12 +78,12 @@ subtest 'the registry is consulted by both families and owned by neither' => sub
 		'Genesis::CI::ProviderCompiler::Concourse',
 		'resolving a compiler class answers the compiling class';
 
-	# A provider that loads or calls a compiler is the inversion this rules
-	# out.  A %INC check would answer whatever the rows above it happened to
-	# load first, so the row reads the source instead, and no load order can
-	# defeat that, because nothing in the provider family, and nothing in
-	# the registry both families consult, loads a compiler module or calls
-	# one.
+	# A provider that loads or calls a compiler is the inversion this
+	# rules out.  A %INC check would answer whatever the rows above it
+	# happened to load first, so the row reads the source instead, and no
+	# load order can defeat that, because nothing in the provider family,
+	# and nothing in the registry both families consult, loads a compiler
+	# module or calls one.
 	#
 	# What the registry writes down is a different matter.  Its map says
 	# which class compiles for which type, because being that map is the

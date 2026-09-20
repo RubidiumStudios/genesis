@@ -208,12 +208,12 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 	plan tests => 2;
 
 	# The readers the design allows, and why each one may read the key
-	# rather than ask the accessor.  The schema builder is no longer among
-	# them, because the block declares the field that decides its shape, so
-	# nothing reads the value raw to build a schema out of it.  The
-	# capability gates have left it too, because every provider declares its
-	# abilities now, so the gates take the type from the accessor and read a
-	# declaration for whatever it answers.
+	# rather than ask the accessor.  The schema builder is no longer
+	# among them, because the block declares the field that decides its
+	# shape, so nothing reads the value raw to build a schema out of it.
+	# The capability gates have left it too, because every provider
+	# declares its abilities now, so the gates take the type from the
+	# accessor and read a declaration for whatever it answers.
 	my @allowed = (
 		# It is the accessor, and every caller outside the load-time
 		# validation below reads the provider through it.

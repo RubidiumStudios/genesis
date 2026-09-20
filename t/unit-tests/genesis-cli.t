@@ -102,13 +102,14 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		},
 		# The four secrets commands are in the sweep for one flag apiece.
 		# The deployed commit has exactly two selections, and this is the
-		# spelling six of the seven commands take, so a step that gave one of
-		# them a third spelling of its own is what these rows catch.  Their
-		# other flags are not swept, because what they declare is a matter
-		# for the secrets surface and not for this one.  The registration and
-		# branch-class rows of the four were green on arrival, because those
-		# classes are already declared, and they stand as guards on those
-		# declarations rather than as proof of anything here.
+		# spelling six of the seven commands take, so a step that gave one
+		# of them a third spelling of its own is what these rows catch.
+		# Their other flags are not swept, because what they declare is a
+		# matter for the secrets surface and not for this one.  The
+		# registration and branch-class rows of the four were green on
+		# arrival, because those classes are already declared, and they
+		# stand as guards on those declarations rather than as proof of
+		# anything here.
 		'check-secrets' => {
 			class   => Genesis::Commands::PRE_DEPLOY,
 			options => [qw/as-deployed/],
@@ -164,9 +165,9 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			if exists $surface{$cmd}{option_group};
 	}
 
-	# The seeding command is retired, so it is not part of the surface this
-	# sweep reads.  Green on arrival, and a guard against a step that revives
-	# it.
+	# The seeding command is retired, so it is not part of the surface
+	# this sweep reads.  Green on arrival, and a guard against a step
+	# that revives it.
 	ok(!has_command('pipeline-prepare')
 		|| command_properties('pipeline-prepare')->{retired},
 		'the retired seeding command is absent from the flag-carrying set');

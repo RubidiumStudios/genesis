@@ -565,9 +565,9 @@ out of the same repository.
 Writes a commit carrying no marker, which is the emergency hatch.  It is
 written from copy B by default and pushed, because the interesting case is a
 hand edit that the operator's own clone has not yet seen.  The options are
-C<copy>, C<files>, C<message>, and C<push>, which defaults on.  Where the copy
-has never seen the branch, it is cut from R's tip first, so the commit lands
-where the caller named it.
+C<copy>, C<files>, C<message>, and C<push>, which defaults on.  Where the
+copy has never seen the branch, it is cut from R's tip first, so the commit
+lands where the caller named it.
 
 =head2 local_only_commit($h, $branch, %opts)
 

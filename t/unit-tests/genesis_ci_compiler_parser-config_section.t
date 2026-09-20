@@ -49,8 +49,8 @@ use_ok 'Genesis::CI::Compiler::Parser';
 }
 
 # The settled shape puts the provider and the integrations under the
-# section, and takes the topology from the environment files rather than
-# from a workflows block.
+# section, and takes the topology from the environment files rather
+# than from a workflows block.
 my $SECTION = {
 	enabled  => 1,
 	provider => {type => 'concourse'},

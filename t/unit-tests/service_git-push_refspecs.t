@@ -46,9 +46,9 @@ subtest 'Genesis refuses to rewrite history on either protected class' => sub {
 	}
 
 	# The same lease on a pull request branch is allowed, because a branch
-	# that is derived and private until it merges may be rewritten.  The null
-	# sha asks for a branch the remote has not got yet, which is what this
-	# one is.
+	# that is derived and private until it merges may be rewritten.  The
+	# null sha asks for a branch the remote has not got yet, which is what
+	# this one is.
 	my $pr = $git->push(remote => 'origin', refs => [
 		{branch => $h->pr_branch('lab'), kind => 'pr',
 		 expect => Service::Git::NULL_SHA()},

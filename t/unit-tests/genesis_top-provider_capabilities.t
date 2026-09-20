@@ -66,12 +66,12 @@ subtest 'every provider declares its abilities' => sub {
 
 # An assert helper: write the pair of classes a provider takes, with
 # capabilities that are the six defaults with the named ones overridden,
-# register them, and answer with the type.  The CLI-side class carries both
-# halves, the fragment and the capabilities, because one class answers for
-# a provider and the compiler-side class reads the declaration from it.
-# That fragment declares group_commits itself, because a key no fragment
-# declares is refused as unknown before any gate is read, so a gate row
-# needs its key declared to reach the gate at all.
+# register them, and answer with the type.  The CLI-side class carries
+# both halves, the fragment and the capabilities, because one class
+# answers for a provider and the compiler-side class reads the declaration
+# from it.  That fragment declares group_commits itself, because a key no
+# fragment declares is refused as unknown before any gate is read, so a
+# gate row needs its key declared to reach the gate at all.
 #
 # The layout key is declared only where the fixture claims it can emit
 # several files, which is how a provider declares it.  A fixture that
@@ -139,10 +139,10 @@ CAP
 subtest 'the declaration carries six names' => sub {
 	plan tests => 3;
 
-	# Asked of the provider class that declares it.  The compiler side used
-	# to answer through a forwarder of its own, and now a compiler asks the
-	# provider it holds, so the class that declares the six is the only one
-	# to ask.
+	# Asked of the provider class that declares it.  The compiler side
+	# used to answer through a forwarder of its own, and now a compiler
+	# asks the provider it holds, so the class that declares the six is
+	# the only one to ask.
 	my $caps = Genesis::CI::Provider->provider_class('concourse')->capabilities;
 	is_deeply [sort keys %$caps], [@NAMES],
 		'the six names, and no others';

@@ -50,8 +50,8 @@ subtest 'one class per pipeline-aware registration' => sub {
 			"$cmd declares the $expected{$cmd} branch class");
 	}
 
-	# propagate is the one exception, and it says so at its own registration
-	# rather than in a special case inside the gate.
+	# propagate is the one exception, and it says so at its own
+	# registration rather than in a special case inside the gate.
 	is(command_properties('propagate')->{branch_target}, 'control',
 		'propagate declares that it switches to control itself');
 	is(scalar(grep {
@@ -130,11 +130,11 @@ subtest 'only the command that deploys fast-forwards its branch' => sub {
 };
 
 subtest 'only the command that commits on control declares it' => sub {
-	# The refusal is about a commit that cannot reach control through a pull
-	# request, so it is asked of the command and not of the class.  Every
-	# other pre-deploy command runs on control as before, and pipeline-apply
-	# writes to the provider, so refusing it would leave an operator no way
-	# to turn on the very protection the key derives.
+	# The refusal is about a commit that cannot reach control through a
+	# pull request, so it is asked of the command and not of the class.
+	# Every other pre-deploy command runs on control as before, and
+	# pipeline-apply writes to the provider, so refusing it would leave
+	# an operator no way to turn on the very protection the key derives.
 	is(command_properties('create')->{commits}, 1,
 		'create declares that it commits on control');
 

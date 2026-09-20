@@ -17,14 +17,14 @@ use Genesis;
 # ===========================================================================
 # Service::Vault::Remote re-auth ladder.
 #
-# Step 2a: _interactive_auth_available — pure predicate.
-# Step 2b: _authenticate_interactively — prompt-driven re-auth flow.
+# Step 2a: _interactive_auth_available, a pure predicate.
+# Step 2b: _authenticate_interactively, the prompt-driven re-auth flow.
 #         Uses Genesis::UI prompts for method choice + per-method
 #         credential collection, then issues the same `safe auth`
 #         query the env-var path uses.
-# Step 3:  authenticate() wiring — interactive fallback between
+# Step 3:  authenticate() wiring, the interactive fallback between
 #         env-var attempts and the bail.
-# Step 5:  Enriched bail — when __renewer_armed_at is set on the
+# Step 5:  Enriched bail, used when __renewer_armed_at is set on the
 #         instance (i.e. we had a renewer running earlier in the
 #         session), the bail leads with "session expired" rather than
 #         the generic first-time-setup message.
@@ -49,8 +49,9 @@ sub make_remote {
 }
 
 # Convenience: install per-subtest gate stubs.  Defaults model
-# "interactive context is fully available" — each subtest overrides
-# the one gate it cares about to assert that single gate's behaviour.
+# "interactive context is fully available", and each subtest
+# overrides the one gate it cares about to assert that single gate's
+# behaviour.
 sub with_gates (&%) {
 	my ($block, %overrides) = @_;
 	my %defaults = (
@@ -295,8 +296,8 @@ subtest 'returns 0 when user enters an empty credential (cancellation)' => sub {
 # ---------- authenticate() wiring ----------
 
 # Strip the four sets of VAULT_* env vars so the env-var loop in
-# authenticate() never enters its body — we're testing the fallback
-# path, not the env-var path.
+# authenticate() never enters its body, because we're testing the
+# fallback path and not the env-var path.
 sub clear_auth_env {
 	delete $ENV{$_} for qw(
 		VAULT_ROLE_ID VAULT_SECRET_ID

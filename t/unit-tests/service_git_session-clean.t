@@ -82,8 +82,8 @@ subtest 'a tracked modification at finish names the files and aborts' => sub {
 	$git->checkout_file($control, 'qa.yml');
 	$git->commit('deliver qa.yml', 'qa.yml');
 
-	# A kit hook writing into the repository is the defect the clean check
-	# names.
+	# A kit hook writing into the repository is the defect the clean
+	# check names.
 	put_file($h->a . '/qa.yml', "---\nkit: written by a hook\n");
 
 	my $err = exception(sub { $session->finish });

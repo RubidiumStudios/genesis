@@ -578,10 +578,11 @@ sub heads_in {
 # }}}
 # reachable_on_r - can R reach this commit at all {{{
 #
-# A record naming a commit R cannot reach is the breach the staleness read and
-# the pre-flight both have to catch, and a row proves it by asking R rather
-# than by trusting the record.  The object is looked for first, because
-# merge-base cannot be asked about a commit the repository does not hold.
+# A record naming a commit R cannot reach is the breach the staleness read
+# and the pre-flight both have to catch, and a row proves it by asking R
+# rather than by trusting the record.  The object is looked for first,
+# because merge-base cannot be asked about a commit the repository does not
+# hold.
 sub reachable_on_r {
 	my ($self, $sha) = @_;
 	return 0 unless $sha;
@@ -973,13 +974,13 @@ sub _seed_control {
 # provider's own validate_config, and both of those run on every load, so a
 # row that asks for an automated provider and nothing else would meet them
 # before it reached whatever it came to prove.  The blocks come from
-# automation_blocks, which is the same answer the automated shape writes, and
-# the target says harness because nothing here talks to a real Concourse.
-# They are written before the source-control loop rather than after it, so a
-# row that names an auth type or a committer identity of its own lands on top
-# of them instead of losing to them without a word.  A row that cares what any
-# of the rest is writes its own through the pipeline hashref, which is set
-# last.
+# automation_blocks, which is the same answer the automated shape writes,
+# and the target says harness because nothing here talks to a real
+# Concourse.  They are written before the source-control loop rather than
+# after it, so a row that names an auth type or a committer identity of its
+# own lands on top of them instead of losing to them without a word.  A row
+# that cares what any of the rest is writes its own through the pipeline
+# hashref, which is set last.
 sub _seed_pipeline_section {
 	my ($self, $root) = @_;
 	my $want = $self->{pipeline};
@@ -1388,10 +1389,10 @@ sub init_branch {
 # deliver - write one delivered commit onto a deployment branch {{{
 #
 # A delivery is a mirror rather than an overlay, so the commit's tree is the
-# propagation set as it stood at the delivered control commit and nothing
-# else.  The keep and corrupt options exist so a row can stop the mirror's
-# removing half or land a file at the wrong content, which is what the
-# snapshot assertion has to catch.
+# propagation set as it stood at the delivered control commit and nothing else.
+# The keep and corrupt options exist so a row can stop the mirror's removing
+# half or land a file at the wrong content, which is what the snapshot
+# assertion has to catch.
 #
 # It is written in copy B by default, because a delivery is a teammate's
 # published work and the operator's clone is meant to read behind it until it
@@ -1686,9 +1687,10 @@ sub _ensure_branch {
 # }}}
 # hand_commit - a commit on a branch carrying no marker {{{
 #
-# A hand commit pushed to R is the emergency hatch, so a row needs a commit an
-# operator made by hand.  It is written from copy B by default, because a hand
-# edit the operator's own clone has not seen is the interesting case.
+# A hand commit pushed to R is the emergency hatch, so a row needs a
+# commit an operator made by hand.  It is written from copy B by default,
+# because a hand edit the operator's own clone has not seen is the
+# interesting case.
 sub hand_commit {
 	my ($self, $branch, %opts) = @_;
 	my $copy = $opts{copy} // 'b';
@@ -1833,9 +1835,9 @@ sub diverge {
 # }}}
 # move_on_r - have copy B advance a branch on R behind copy A's back {{{
 #
-# This is how a row makes an expected-tip push fail.  Copy A is not refreshed
-# afterwards, so its remote-tracking ref still names the commit the run will
-# offer git as the expected tip.
+# This is how a row makes an expected-tip push fail.  Copy A is not
+# refreshed afterwards, so its remote-tracking ref still names the commit
+# the run will offer git as the expected tip.
 sub move_on_r {
 	my ($self, $branch, %opts) = @_;
 	# The branch is moved with a checkout rather than with update-ref, so
@@ -2218,7 +2220,8 @@ sub move_on_r_at {
 # add_deployment_root - a second root sharing an environment name {{{
 #
 # The H32 shape: one repository, two deployment roots, one environment name.
-# Each deployment root composes its own slug, so the two never share a branch.
+# Each deployment root composes its own slug, so the two never share a
+# branch.
 #
 # Genesis::Top->create appends a directory to the path it is handed, so naming
 # that directory outright lands the second root at its repository-relative path
@@ -2688,8 +2691,8 @@ sub fixture_pipeline_record {
 # certify - write or advance an environment's exodus deployment record {{{
 #
 # git.commit is the deployment-branch commit the deploy stood on and
-# git.control_commit is the control commit that tip's newest marker names, and
-# those two are the pair the hatch case has to tell apart.
+# git.control_commit is the control commit that tip's newest marker names,
+# and those two are the pair the hatch case has to tell apart.
 #
 # dependencies_read is the fact half of the staleness comparison, and it is
 # written as one comma-joined value rather than as a list, because that is the
@@ -4357,9 +4360,9 @@ sub gh_calls {
 # fixture directory to the run under test alone, which is what keeps the
 # harness's own calls on the real binaries.
 #
-# hold_lock has the wrapper put a stranger in the window left open between the
-# session's finish and the child's own start, and probe has it poll the lock
-# while the child runs.
+# hold_lock has the wrapper put a stranger in the window left open between
+# the session's finish and the child's own start, and probe has it poll
+# the lock while the child runs.
 sub child_recorder {
 	my ($self, %opts) = @_;
 	my $copy = $opts{copy} // 'a';
@@ -4839,9 +4842,9 @@ sub _automation_preamble {
 #
 # An automated provider reaches a shuttle, a vault, and a locker, and the
 # configuration schema requires all three of it, so a fixture that names an
-# automation has to carry them.  Six test files write the same nine lines out
-# by hand today, which means the next key an automation requires has to be
-# added in six places.  This is the one answer.
+# automation has to carry them.  Six test files write the same nine lines
+# out by hand today, which means the next key an automation requires has to
+# be added in six places.  This is the one answer.
 #
 # The hash form is for a file that builds the configuration as a structure,
 # and the line form is for a file that writes it as text.  The lines come back
@@ -4938,8 +4941,8 @@ sub fanned_harness {
 
 # seeded_harness is the same shape over one environment, and its applied
 # option turned off leaves the applied record out, which is the shape a row
-# proving the applied record's membership test needs, since the undef stands
-# in for a roster.
+# proving the applied record's membership test needs, since the undef
+# stands in for a roster.
 sub seeded_harness {
 	my (%opts) = @_;
 	return ready_harness(%opts, envs => $opts{envs} // ['qa']);
@@ -5115,9 +5118,9 @@ sub two_env_harness {
 	return ready_harness(%opts, envs => $opts{envs} // ['lab', 'qa']);
 }
 
-# inherited_harness writes its pipeline keys at a site file rather than at the
-# leaf, which is the merged read every pipeline key gets, and leaf_keys puts a
-# second set at the leaf so a row can watch the two meet.
+# inherited_harness writes its pipeline keys at a site file rather than at
+# the leaf, which is the merged read every pipeline key gets, and
+# leaf_keys puts a second set at the leaf so a row can watch the two meet.
 sub inherited_harness {
 	my (%opts) = @_;
 	my $h = make_harness(%opts, envs => $opts{envs} // ['qa']);
