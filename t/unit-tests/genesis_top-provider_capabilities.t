@@ -1,9 +1,9 @@
 #!perl
-# Proves T39 and T40: a provider declares the six capabilities D101 names,
-# Concourse declares the first five true and multi_file_output false, a
-# capability that is false refuses the key it gates, naming both the key
-# and the capability, and the layout key is declared by the provider that
-# can emit several files rather than offered on its behalf.
+# Proves T39 and T40: a provider declares its six capabilities, Concourse
+# declares the first five true and multi_file_output false, a capability
+# that is false refuses the key it gates, naming both the key and the
+# capability, and the layout key is declared by the provider that can emit
+# several files rather than offered on its behalf.
 use strict;
 use warnings;
 use utf8;
@@ -66,12 +66,12 @@ subtest 'every provider declares its abilities' => sub {
 
 # An assert helper: write the pair of classes a provider takes, with
 # capabilities that are the six defaults with the named ones overridden,
-# register them, and answer with the type.  The CLI-side class carries
-# both halves, the fragment and the capabilities, because under D105 one
-# class answers for a provider and the compiler-side class reads the
-# declaration from it.  That fragment declares group_commits itself,
-# because a key no fragment declares is refused as unknown before any gate
-# is read, so a gate row needs its key declared to reach the gate at all.
+# register them, and answer with the type.  The CLI-side class carries both
+# halves, the fragment and the capabilities, because one class answers for
+# a provider and the compiler-side class reads the declaration from it.
+# That fragment declares group_commits itself, because a key no fragment
+# declares is refused as unknown before any gate is read, so a gate row
+# needs its key declared to reach the gate at all.
 #
 # The layout key is declared only where the fixture claims it can emit
 # several files, which is how a provider declares it.  A fixture that
@@ -94,7 +94,7 @@ sub provider_with {
 	my $decl = join(', ', map {"$_ => ".($all{$_} ? 1 : 0)} @NAMES);
 
 	# The ability is what decides whether the key is there to write, and
-	# D67 gives the key the default it carries wherever it is declared.
+	# the key carries the same default wherever it is declared.
 	my $layout = $all{multi_file_output} ? <<'LAYOUT' : '';
 		output_layout => {
 			type        => 'enum',
@@ -139,13 +139,13 @@ CAP
 subtest 'the declaration carries six names' => sub {
 	plan tests => 3;
 
-	# Asked of the provider class that declares it.  The compiler side
-	# used to answer through a forwarder of its own, and under D108 a
-	# compiler asks the provider it holds, so the class that declares the
-	# six is the only one to ask.
+	# Asked of the provider class that declares it.  The compiler side used
+	# to answer through a forwarder of its own, and now a compiler asks the
+	# provider it holds, so the class that declares the six is the only one
+	# to ask.
 	my $caps = Genesis::CI::Provider->provider_class('concourse')->capabilities;
 	is_deeply [sort keys %$caps], [@NAMES],
-		'the six names D101 fixes, and no others';
+		'the six names, and no others';
 	is_deeply [grep {$caps->{$_}} sort keys %$caps],
 		[qw/cross_pipeline_events deployment_locks optional_git_triggers
 		    per_commit_runs scheduled_jobs/],
@@ -155,7 +155,7 @@ subtest 'the declaration carries six names' => sub {
 };
 
 # Concourse has a row of its own above and GitHub Actions had none, so
-# nothing pinned the declaration D101 leaves provisional until that
+# nothing pinned the declaration, which stays provisional until that
 # provider's compiler class is written.  A change to it should be a
 # deliberate one that comes here and says so.
 subtest 'GitHub Actions declares the file layout and nothing else' => sub {
@@ -217,7 +217,7 @@ subtest 'the layout key is offered by the provider that can use it' => sub {
 	my $multi = provider_with(multi_file_output => 1);
 	my $top   = load_with($h, automated_config($multi));
 	is $top->config->get('pipeline.provider.output_layout'), 'single',
-		'the layout key reads back the default D67 gives it';
+		'the layout key reads back its declared default';
 	$top = load_with($h, automated_config($multi, 'output_layout: multiple'));
 	is $top->config->get('pipeline.provider.output_layout'), 'multiple',
 		'and reads back what an operator wrote over that default';
