@@ -2191,9 +2191,10 @@ sub _prior_env_record {
 	# raw here and normalised there is a predecessor that has deployed by one
 	# reader's reckoning and never deployed by the other's.  The environment
 	# handed to the constructor is the deploying one rather than the
-	# predecessor, which the constructor only stores; the predecessor is not
-	# loaded as an environment at all, because a pipeline key is read through
-	# the merged hierarchy with no kit loaded and nothing connected.
+	# predecessor, which the constructor only stores.  The predecessor is not
+	# loaded as an environment at all, because everything read here comes out
+	# of its exodus deployment record, and a load would cost a kit and a
+	# director for facts vault already holds.
 	require Genesis::Env::Deployment;
 	for my $at (sort {$b cmp $a} keys %$deploys) {
 		my $entry = $deploys->{$at};
