@@ -1334,14 +1334,14 @@ sub _ref_names {
 }
 
 # }}}
-# _checked_out_branch - the branch HEAD points at, born or not {{{
+# checked_out_branch - the branch HEAD points at, born or not {{{
 #
 # current_branch reads `git rev-parse --abbrev-ref HEAD`, which fails on an
 # unborn branch, so it answers undefined there and cannot name the branch a
 # fresh orphan checkout is standing on.  symbolic-ref names that branch, and
 # it answers nothing at all on a detached HEAD, which tells the two cases
 # apart.
-sub _checked_out_branch {
+sub checked_out_branch {
 	my ($self) = @_;
 	my ($out, $rc) = run({dir => $self->{root}, stderr => 0},
 		'git', 'symbolic-ref', '--short', '-q', 'HEAD');
@@ -1477,7 +1477,7 @@ sub fetch_branches {
 		# for-each-ref does not list, so without this a fresh orphan
 		# checkout would take the forced refspec and lose every other
 		# branch in the list with it.
-		my $here = $self->_checked_out_branch;
+		my $here = $self->checked_out_branch;
 		$is_local{$here} = 1 if defined $here;
 
 		my ($fout, $frc, $ferr) = run({%opts}, 'git', 'fetch', $remote,

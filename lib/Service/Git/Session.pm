@@ -1044,7 +1044,7 @@ sub _standing_on {
 	# to standard error and prints the word HEAD, and the reader below
 	# merges the two.
 	unless (defined $branch) {
-		my $unborn = $git->_checked_out_branch;
+		my $unborn = $git->checked_out_branch;
 		return sprintf("%s, which has no commits yet", $unborn)
 			if defined $unborn;
 	}
