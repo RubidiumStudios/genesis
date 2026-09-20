@@ -1017,11 +1017,24 @@ sub plan {
 
 	# The composed scope is dereferenced far below, where a caller that
 	# handed in the wrong shape would be told about it by a line in this
-	# file rather than by the name of the option they got wrong.
-	bug("Genesis::CI::Walk::plan takes composed as the two values scope_for ".
-		"answers, which is an arrayref of the scope and the topology")
-		if exists $opts{composed}
-		&& !(ref $opts{composed} eq 'ARRAY' && @{$opts{composed}} == 2);
+	# file rather than by the name of the option they got wrong.  The
+	# narrowing is refused beside it for the reason the durable state's own
+	# two options are, since the pair handed in is already narrowed and a
+	# name given here would be dropped without a word.  Both questions are
+	# about the one option, so they are asked in one place and before
+	# anything is read.
+	if (exists $opts{composed}) {
+		bug("Genesis::CI::Walk::plan takes composed as the two values ".
+			"scope_for answers, which is an arrayref of the scope and the ".
+			"topology")
+			unless ref $opts{composed} eq 'ARRAY'
+			&& @{$opts{composed}} == 2;
+
+		bug("Genesis::CI::Walk::plan was handed a composed scope and a ".
+			"scope to narrow by, and the composed one is already narrowed, ".
+			"so the narrowing would be dropped")
+			if defined $opts{scope};
+	}
 
 	# Everything I11 lets the run read, read once.  A caller that has already
 	# read it hands the answer in, because the command prints control's own
@@ -1055,15 +1068,7 @@ sub plan {
 	#
 	# A caller that has already composed it hands the pair in, because
 	# composing it walks the environment files for the whole topology and
-	# Genesis::Top::pipeline_topology memoises none of that work.  The
-	# narrowing is refused beside it for the reason the durable state's own
-	# two options are, since the pair handed in is already narrowed and a
-	# name given here would be dropped without a word.
-	bug("Genesis::CI::Walk::plan was handed a composed scope and a scope to ".
-		"narrow by, and the composed one is already narrowed, so the ".
-		"narrowing would be dropped")
-		if $opts{composed} && defined $opts{scope};
-
+	# Genesis::Top::pipeline_topology memoises none of that work.
 	my ($scope, $topo) = $opts{composed}
 		? @{$opts{composed}}
 		: scope_for($top, scope => $opts{scope});
