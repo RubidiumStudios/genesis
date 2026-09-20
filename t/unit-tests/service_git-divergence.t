@@ -24,8 +24,20 @@ sub div {
 	return $h->git('a')->resolve_branch($branch, %opts);
 }
 
+# The six states the query can answer with.  An assertion helper, beside the
+# test that uses it, because it is about what these rows mean rather than
+# about what the tree holds.
+my @STATES = qw/ahead behind diverged in-sync no-local no-remote/;
+
+sub one_of_the_six {
+	my ($answer, $what) = @_;
+	my $state = ref($answer) eq 'HASH' ? ($answer->{state} // '') : '';
+	ok(scalar(grep {$_ eq $state} @STATES),
+		"$what answers one of the six states");
+}
+
 subtest 'the four counted states come from the two counts' => sub {
-	plan tests => 4;
+	plan tests => 8;
 
 	my $h    = make_harness(envs => ['qa'], vault => 0);
 	my $slug = $h->slug('qa');
@@ -35,11 +47,13 @@ subtest 'the four counted states come from the two counts' => sub {
 	cmp_deeply(div($h, $slug),
 		{state => 'in-sync', ahead => 0, behind => 0, unverifiable => 0},
 		'equal tips read in-sync');
+	one_of_the_six(div($h, $slug), 'equal tips');
 
 	local_only_commit($h, $slug, marker => 0, message => 'a local commit');
 	cmp_deeply(div($h, $slug),
 		{state => 'ahead', ahead => 1, behind => 0, unverifiable => 0},
 		'a commit L alone holds reads ahead with its count');
+	one_of_the_six(div($h, $slug), 'a commit L alone holds');
 
 	my $h2    = make_harness(envs => ['qa'], vault => 0);
 	my $slug2 = $h2->slug('qa');
@@ -50,6 +64,7 @@ subtest 'the four counted states come from the two counts' => sub {
 	cmp_deeply(div($h2, $slug2),
 		{state => 'behind', ahead => 0, behind => 1, unverifiable => 0},
 		'a commit T alone holds reads behind with its count');
+	one_of_the_six(div($h2, $slug2), 'a commit T alone holds');
 
 	my $h3    = make_harness(envs => ['qa'], vault => 0);
 	my $slug3 = $h3->slug('qa');
@@ -59,10 +74,11 @@ subtest 'the four counted states come from the two counts' => sub {
 	cmp_deeply(div($h3, $slug3),
 		{state => 'diverged', ahead => 2, behind => 1, unverifiable => 0},
 		'commits on both sides read diverged with both counts');
+	one_of_the_six(div($h3, $slug3), 'commits on both sides');
 };
 
 subtest 'the two existence answers come before the counts' => sub {
-	plan tests => 3;
+	plan tests => 5;
 
 	my $h    = make_harness(envs => ['qa'], vault => 0);
 	my $slug = $h->slug('qa');
@@ -73,11 +89,13 @@ subtest 'the two existence answers come before the counts' => sub {
 	cmp_deeply(div($h, $slug),
 		{state => 'no-local', ahead => 0, behind => 0, unverifiable => 0},
 		'T alone reads no-local');
+	one_of_the_six(div($h, $slug), 'T alone');
 
 	local_branch_only($h, 'lab');
 	cmp_deeply(div($h, $h->slug('lab')),
 		{state => 'no-remote', ahead => 0, behind => 0, unverifiable => 0},
 		'L alone reads no-remote');
+	one_of_the_six(div($h, $h->slug('lab')), 'L alone');
 
 	is(div($h, 'nowhere/bosh'), undef,
 		'a branch neither side has gets no state at all');
@@ -161,14 +179,16 @@ subtest 'the query asks refs and never the network' => sub {
 	restore_remote($h);
 };
 
-subtest 'the state set is closed' => sub {
+subtest 'the source of resolve_branch quotes no seventh state' => sub {
 	plan tests => 2;
 
-	# The rows above drive six real repositories and read all six states out
-	# of them, which says every state is reachable and says nothing about
-	# there being no seventh.  A reader that switches on the state has a
-	# catch-all arm for exactly that doubt, so the set is closed here at the
-	# one place that decides it.
+	# Every answer read above is asserted to be one of the six, which says
+	# nothing about a seventh the fixtures never reach.  This reads the
+	# sub's own text for the states it can name, which is the only place
+	# that decides the set, and it is a tripwire on that text rather than
+	# on the behaviour: moving the ternary into a lookup table or naming
+	# the states in constants breaks it without the set having changed, and
+	# whoever does that updates it here.
 	my $src = slurp('lib/Service/Git.pm');
 	my ($body) = $src =~ m{sub resolve_branch \{(.+?)\n\}}s;
 	ok(defined $body && length $body,
