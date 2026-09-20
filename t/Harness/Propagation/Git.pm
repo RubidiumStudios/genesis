@@ -20,7 +20,7 @@ our @ISA = ('Service::Git');
 # the step a row arms to shape a failure one environment survives.
 our @STEPS = qw/
 	checkout checkout_file add rm commit create_branch ls_files
-	fetch_branches push delete_remote_branch
+	fetch_branches push
 /;
 
 # import - install the subclass over Service::Git for a spawned command {{{

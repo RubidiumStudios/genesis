@@ -51,7 +51,7 @@ read a copy before it armed a fault still meets the fault.
 =head1 STEPS
 
 C<checkout>, C<checkout_file>, C<add>, C<rm>, C<commit>, C<create_branch>,
-C<ls_files>, C<fetch_branches>, C<push>, and C<delete_remote_branch>.
+C<ls_files>, C<fetch_branches>, and C<push>.
 
 C<ls_files> is the one reader in that list.  The writer asks it what the
 branch holds before it stages anything and again when it checks that the

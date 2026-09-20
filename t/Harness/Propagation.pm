@@ -3978,8 +3978,7 @@ sub sever_remote {
 		  . "Could not resolve host: the remote is unreachable";
 	fail_on($git, 'fetch_branches', $opts{after} // 1,
 		from => 1, message => $message, kind => 'transport');
-	fail_on($git, $_, $opts{after} // 1, from => 1, message => $message)
-		for qw/push delete_remote_branch/;
+	fail_on($git, 'push', $opts{after} // 1, from => 1, message => $message);
 	return $self;
 }
 
@@ -3989,8 +3988,7 @@ sub restore_remote {
 	my ($self) = @_;
 	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN} or return $self;
 	_with_plan($file, sub {
-		delete $_[0]->{$_}
-			for qw/fetch_branches push delete_remote_branch/;
+		delete $_[0]->{$_} for qw/fetch_branches push/;
 	});
 	return $self;
 }

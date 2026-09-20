@@ -1379,29 +1379,6 @@ sub checked_out_branch {
 }
 
 # }}}
-# delete_remote_branch - remove a branch from the remote {{{
-#
-#   my $result = $git->delete_remote_branch('pr/qa/bosh');
-#   my $result = $git->delete_remote_branch('pr/qa/bosh', expect => $tip);
-#
-# Pushes the deletion refspec through the same one-ref push every other ref
-# goes through, so the removal is read the same way and a refusal is a result
-# rather than a bail.  Under D97 a rejected deletion is the environment's
-# outcome, which is why nothing dies here.
-sub delete_remote_branch {
-	my ($self, $branch, %opts) = @_;
-	my $remote = $opts{remote} // $self->default_remote;
-	return undef unless $remote;
-
-	return $self->_push_one($remote, {
-		branch => $branch,
-		kind   => 'pr',
-		delete => 1,
-		(exists $opts{expect} ? (expect => $opts{expect}) : ()),
-	});
-}
-
-# }}}
 # delete_branch - delete a local branch, forcibly {{{
 #
 # The pull request branch is derived state and is rebuilt from the deployment
