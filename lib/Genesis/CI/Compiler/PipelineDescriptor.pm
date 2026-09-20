@@ -102,7 +102,7 @@ sub describe {
 				);
 			}
 
-			my $notif_style_env = $self->_effective_notif_style($ast);
+			my $notif_style_env = $self->notification_style($ast);
 			unless ($is_auto || $notif_style_env eq 'minimal' || $notif_style_env eq 'none') {
 				my $nj = $self->_notify_job(
 					$ast, $env, $alias, $deploy_type, $trigger_from,
@@ -147,7 +147,7 @@ sub describe {
 		}
 
 		# Groups
-		my $group_notifications = $self->_effective_notif_style($ast) eq 'grouped';
+		my $group_notifications = $self->notification_style($ast) eq 'grouped';
 		my $custom_groups = $config->{groups};
 
 		if (ref($custom_groups) eq 'HASH') {
@@ -404,7 +404,7 @@ sub _resource_types {
 	);
 
 	# slack-notification type only when Slack is configured and not suppressed
-	if ($self->_effective_notif_style($ast) ne 'none') {
+	if ($self->notification_style($ast) ne 'none') {
 		my $has_slack = $ast->integrations->{slack}
 			|| do {
 				my $nn = $ast->integrations->{notifications} || [];
@@ -525,7 +525,7 @@ sub _notification_resources {
 	my @resources;
 
 	# Structured Slack config (new format or legacy-normalized)
-	if ($self->_effective_notif_style($ast) ne 'none') {
+	if ($self->notification_style($ast) ne 'none') {
 		my $slack = $self->_resolve_slack_config($ast, undef);
 		if ($slack) {
 			push @resources, {
@@ -776,7 +776,7 @@ sub _deploy_job {
 	my $passed     = $trigger_from ? $wf_data->{aliases}{$trigger_from} : '';
 	my $passed_job = $passed ? "$passed-$deploy_type" : '';
 	my $pass_cache  = $config->{'require-passed-caches'};
-	my $inline      = $self->_effective_notif_style($ast) eq 'per-env';
+	my $inline      = $self->notification_style($ast) eq 'per-env';
 
 	my $srcdir = $pass_cache
 		? ($trigger_from ? "$alias-cache" : "$alias-changes")
@@ -1149,7 +1149,7 @@ sub _outcome_hooks {
 	my $fail_msg  = "$name: $action $env-$deploy_type failed";
 
 	my $signal_cfg  = $self->_env_signal_config($ast, $env, $wf_data);
-	my $notif_style = $self->_effective_notif_style($ast);
+	my $notif_style = $self->notification_style($ast);
 
 	my %hooks;
 	for my $outcome (qw(success failure abort error)) {
@@ -1636,12 +1636,17 @@ sub _errand_config {
 }
 
 # }}}
-# _effective_notif_style - resolve the active notification style {{{
+# notification_style - resolve the active notification style {{{
 #
 # Returns: 'per-env' | 'grouped' | 'minimal' | 'none'
 # Sources: integrations.slack.style (new format), or legacy
 # configuration.notifications.style mapped to per-env/grouped.
-sub _effective_notif_style {
+#
+# Published rather than private, because the Concourse compiler's
+# description of a pipeline names the style and had been reaching in for
+# it.  A reader that answers a question about the AST alone is fair for
+# anyone holding a descriptor to ask.
+sub notification_style {
 	my ($self, $ast) = @_;
 
 	my $slack = $ast->integrations->{slack};
