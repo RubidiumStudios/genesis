@@ -493,6 +493,12 @@ sub render_preview {
 # been pushed, and a deployment branch whose local commits all carry a marker
 # is reset to the remote by the pre-flight under D32 before the walk begins.
 #
+# A third stands beside them, which is a deployment branch merely behind its
+# remote, fast-forwarded by the pre-flight under D5 before the walk begins.
+# D44 does not name it, and it is said here all the same, because it rests on
+# the same kind of move the other two rest on and an operator who met it
+# above the banner had not yet been told they were reading a preview.
+#
 # The warnings are read off the record rather than worked out here, counts
 # and all.  The run has already asked git both questions, once to decide
 # whether to refuse and once to decide whether to reset, and a renderer that
@@ -525,6 +531,20 @@ sub preview_warnings {
 				$n == 1 ? 'is' : 'are',
 				$caveat->{remote}, $caveat->{branch},
 				$n == 1 ? 'it' : 'them'
+			);
+			next;
+		}
+
+		if ($kind eq 'unmoved-branch') {
+			my $n = $caveat->{commits} // 1;
+			warning(
+				"#Y{This preview assumes }#C{%s}#Y{ is fast-forwarded first.}\n".
+				"It is behind #C{%s/%s} by %s, and a real run moves it up to ".
+				"them before it walks, so what follows is what would happen ".
+				"once that move has been made.",
+				$caveat->{branch},
+				$caveat->{remote}, $caveat->{branch},
+				$n == 1 ? 'a commit' : sprintf('%d commits', $n)
 			);
 			next;
 		}

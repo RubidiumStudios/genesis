@@ -1268,11 +1268,18 @@ sub _preview_warnings {
 		commits => $divergence->{ahead} || 1,
 	} if ($divergence->{state} // '') eq 'ahead';
 
+	# The two moves the stage assumes rather than makes, each in the order
+	# the topology gives, so an operator reads the caveats in the order the
+	# report goes on to name the environments.
+	my %kind_of = (
+		reset          => 'unreset-branch',
+		'fast-forward' => 'unmoved-branch',
+	);
 	for my $env (@$order) {
 		my $branch = $initial->{branches}{$env} or next;
-		next unless ($branch->{assumed_move} // '') eq 'reset';
+		my $kind = $kind_of{$branch->{assumed_move} // ''} or next;
 		push @caveats, {
-			kind    => 'unreset-branch',
+			kind    => $kind,
 			branch  => $branch->{branch},
 			remote  => $remote,
 			commits => $branch->{assumed_commits} || 1,
