@@ -568,12 +568,12 @@ The one command that clears a hold on an environment, as its words alone.
 
 It is composed here and nowhere else, because a command spelled in two places
 is a command the two spellings drift apart on.  Its callers dress it
-differently and share the words. L</hold_detail> puts it in backticks, the
+differently and share the words.  L</hold_detail> puts it in backticks, the
 sentence it sits in being printed inside a colour span already by each of its
 three readers, and L</render_run> puts it in the colour every command this
-report names takes, on the line beneath a hold the run has just set. C<genesis
-pipeline-hold> takes the same colour, in the line it prints once a hold is
-set.
+report names takes, on the line beneath a hold the run has just set.
+C<genesis pipeline-hold> takes the same colour, in the line it prints once a
+hold is set.
 
 An environment name that is undefined answers the placeholder C<< <env> >>,
 which nothing in the tree produces, the walk keying every record it builds on
