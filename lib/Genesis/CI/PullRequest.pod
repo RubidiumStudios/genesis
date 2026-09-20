@@ -203,6 +203,12 @@ what waits is left off there rather than said of nought commits. The gate is
 still named, because the reviewer is being asked to deploy it before anything
 later lands, and that is true whether or not anything later exists yet.
 
+A trailer written with the hold prefix and nothing after it leaves no reason
+at all, and the walk then writes no C<gate_reason> for the entry. The gate
+still gates, so the line names it and stops, reading C<Gate.> on its own and
+C<< Gate. Holding ... >> where commits wait behind it, rather than writing a
+colon with nothing behind it.
+
 B<Parameters:>
 
 =over 4
@@ -232,6 +238,12 @@ B<Examples:>
     gate_line({gate_reason => 'rotate the signing key first.'},
               {count => 0, env => 'prod'});
     # returns 'Gate: rotate the signing key first.'
+
+    gate_line({}, {count => 2, env => 'prod'});
+    # returns 'Gate. Holding 2 later commits for prod until this deploys.'
+
+    gate_line({}, {count => 0, env => 'prod'});
+    # returns 'Gate.'
 
 =head2 review_paragraph($number, $review [, %opts])
 
