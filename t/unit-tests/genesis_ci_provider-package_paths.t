@@ -2,7 +2,7 @@
 # Every package under lib derives its own path, the compiler family and
 # the provider family each keep to their own subject, and the compiler
 # base loads the concrete by the name it declares.  These are the three
-# things D108's rename settles.
+# things that follow from one class answering for a provider.
 use strict;
 use warnings;
 use utf8;
