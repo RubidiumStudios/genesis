@@ -1094,6 +1094,7 @@ sub propagate {
 	# call rather than lines scattered through the walk, because
 	# pipeline-status renders the same record through the same helpers and
 	# two outputs composing one phrase twice are two that can disagree.
+	#
 	# The preview and the run's own report are one report, composed from one
 	# record by one renderer, so the two cannot disagree about a word.  The
 	# preview enters through its own sub because it has a banner and one verb
