@@ -325,7 +325,7 @@ sub current_branch {
 		undef $branch unless length $branch;
 	}
 
-	return $self->{_current_branch} = $branch;
+	return $branch;
 }
 
 # }}}
@@ -356,7 +356,6 @@ sub checkout {
 		'git', 'checkout', $branch);
 	chdir($cwd) if -d $cwd;
 
-	delete $self->{_current_branch};
 	return $self;
 }
 
@@ -402,7 +401,6 @@ sub checkout_detached {
 		'git', 'checkout', '--detach', $commit);
 	chdir($cwd) if -d $cwd;
 
-	delete $self->{_current_branch};
 	return $self;
 }
 
