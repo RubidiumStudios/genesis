@@ -8,10 +8,10 @@
 # bare marker as the whole message, with the control commit spelled in full,
 # so the subject reads the long sha the marker builder was handed, the body
 # is empty, and the pull request carries the subject as its body because the
-# strip of a first line finds no newline to strip.  What the row adds on top of that is the count,
-# the per-commit entries in order, the summary of the files each commit
-# touched inside this environment's set, and the equality of the commit body
-# and the pull request body.
+# strip of a first line finds no newline to strip.  What the row adds on top
+# of that is the count, the per-commit entries in order, the summary of the
+# files each commit touched inside this environment's set, and the equality
+# of the commit body and the pull request body.
 #
 # The two due commits are laid through the environment file at the deployment
 # root, because a path under prod/ is in no propagation set and a commit
