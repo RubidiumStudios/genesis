@@ -43,11 +43,21 @@ sub provision_ci_credentials {
 	$ENV{GIT_COMMITTER_EMAIL} //= $ENV{GIT_AUTHOR_EMAIL} if $ENV{GIT_AUTHOR_EMAIL};
 
 	# Everything below assumes a remote reached over ssh or https with
-	# credentials handed in through the environment -- which is a CI task,
-	# and nothing else.  A repository with no remote, or one whose operator
-	# authenticates through a credential helper or an agent, must be left
-	# exactly as configured: suppressing prompts there would turn a
-	# workflow that asks for a password into one that simply fails.
+	# credentials handed in through the environment, which is a compiled
+	# pipeline task and nothing else.  An operator at a terminal, whose
+	# repository may have no remote at all and who may authenticate through
+	# a credential helper or an agent, must be left exactly as configured,
+	# because suppressing prompts there would turn a workflow that asks for
+	# a password into one that simply fails.
+	#
+	# GENESIS_PIPELINE_TASK is what says a pipeline is running.  Genesis
+	# owns that name, sets it on the deploy task it compiles, and reads it
+	# for this same question at the pre-flight gates.  The credential
+	# variables below cannot answer it, because neither is namespaced to
+	# Genesis and an operator may export either one for another tool.
+	# Reading one of them here would take host key verification away from
+	# every git operation Genesis makes on that operator's machine.
+	return unless $ENV{GENESIS_PIPELINE_TASK};
 	return unless $ENV{GIT_PRIVATE_KEY} || $ENV{GIT_USERNAME};
 
 	# Having established we are answering prompts ourselves, refuse to

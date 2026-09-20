@@ -114,8 +114,8 @@ caller shares.
 
 Also calls L</provision_ci_credentials>, so a process that constructs a
 C<Service::Git> can perform remote operations with credentials supplied
-through the environment. A no-op when none are set, which is every local
-run.
+through the environment. A no-op outside a compiled pipeline task, which
+is every local run.
 
 B<Parameters:>
 
@@ -2689,12 +2689,19 @@ requires both identities, and a CI container rarely has C<user.name> or
 C<user.email> configured, so without this every commit fails with
 "Please tell me who you are".
 
-B<Everything else happens only when the environment carries transport
-credentials> -- that is, when C<GIT_PRIVATE_KEY> or C<GIT_USERNAME> is
-set, which in practice means a CI task and nothing else. A repository
-with no remote, or one whose operator authenticates through a credential
-helper, an ssh agent, or an interactive prompt, is left exactly as
-configured.
+B<Everything else happens only inside a compiled pipeline task that
+carries transport credentials>, which means C<GENESIS_PIPELINE_TASK> is
+set and so is C<GIT_PRIVATE_KEY> or C<GIT_USERNAME>. A repository with no
+remote, or one whose operator authenticates through a credential helper,
+an ssh agent, or an interactive prompt, is left exactly as configured.
+
+C<GENESIS_PIPELINE_TASK> is the gate because Genesis owns that name, sets
+it on the deploy task it compiles, and reads it for this same question at
+the pre-flight gates. Neither credential variable can stand in for it.
+Neither is namespaced to Genesis, and an operator may well export one for
+another tool, so reading one as permission to provision would take host
+key verification away from every git operation Genesis makes on that
+operator's machine.
 
 That restraint is deliberate. Suppressing prompts unconditionally would
 turn a local workflow that asks for a password into one that fails
@@ -2721,9 +2728,11 @@ Idempotent: the temporary directory is created once per process and
 subsequent calls return immediately. The directory is removed when the
 process exits.
 
-Does nothing beyond identity mirroring when neither C<GIT_PRIVATE_KEY>
-nor C<GIT_USERNAME> is present, which is every local run -- including a
-freshly initialised repository with no remote at all.
+Does nothing beyond identity mirroring outside a pipeline task, or when
+neither C<GIT_PRIVATE_KEY> nor C<GIT_USERNAME> is present. That covers
+every local run, including one whose operator has either variable
+exported for another tool, and a freshly initialised repository with no
+remote at all.
 
 B<Errors:>
 
@@ -2749,12 +2758,12 @@ would surface far from its cause as an authentication error.
 
 B<Examples:>
 
-  # In a CI task, with the pipeline supplying credentials:
-  #   GIT_PRIVATE_KEY=... genesis <env> deploy -SFy
+  # In a pipeline task, with the pipeline supplying credentials:
+  #   GENESIS_PIPELINE_TASK=1 GIT_PRIVATE_KEY=... genesis <env> deploy -SFy
   Service::Git::provision_ci_credentials();
   # $ENV{GIT_SSH_COMMAND} is now "ssh -F /tmp/genesis-git-creds.XXXX/ssh_config"
 
-  # Locally, or against a repository with no remote:
+  # Locally, even with GIT_PRIVATE_KEY exported for something else:
   Service::Git::provision_ci_credentials();
   # nothing is written and no git behaviour changes
 
