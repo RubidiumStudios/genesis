@@ -743,6 +743,7 @@ sub _gate_branch_class {
 	# the record an operator has to go and correct.  The resolver reads that
 	# record already, and this is the only caller that knows which one this
 	# run was answered from.
+	#
 	# Genesis writes an environment file as <name>.yml, which is the only
 	# spelling Genesis::Top::_env_file_names globs for, and the command line
 	# tolerates the longer one because an operator may well type it.  The

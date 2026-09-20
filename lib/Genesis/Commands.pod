@@ -420,9 +420,9 @@ to C<undef>.
 control branch, which C<create> alone declares.  It decides whether the
 C<control_requires_pr> refusal applies, because the refusal is about a
 commit that cannot reach control through a pull request and most pre-deploy
-commands make none.  It is declared only alongside
-C<branch_class =E<gt> PRE_DEPLOY>, since that is the one gate that reads it.
-Defaults to C<undef>.
+commands make none.  It is declared only alongside C<branch_class =E<gt>
+PRE_DEPLOY>, since that is the one gate that reads it.  Defaults to
+C<undef>.
 
 =item C<branch_fast_forward> - Boolean.  True where the gate may bring the
 environment's deployment branch up to its remote-tracking ref before it
