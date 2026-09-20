@@ -110,7 +110,7 @@ subtest 'the stale form marks every cell that rests on a refresh' => sub {
 	is($record->{environments}[0]{divergence}{state}, 'unverifiable',
 		'the divergence cell carries the flag rather than a state it cannot know');
 	ok(!exists $record->{events},
-		'and the machine-readable form carries the record D91 fixes and nothing beside it');
+		'and the machine-readable form carries the record and nothing beside it');
 };
 
 subtest 'the refresh a command may skip is declared at its registration' => sub {
