@@ -212,7 +212,7 @@ B<Examples:>
 
     my $words = Genesis::CI::Report::hold_detail($env_record);
 
-What the standing hold is holding, in the three wordings D56 fixes, or
+What the standing hold is holding, in one of three fixed wordings, or
 undefined where no hold stands.
 
 A hold outranks idempotent, so an environment with one standing never reads
@@ -241,7 +241,7 @@ here and not beside each caller, because the run's report, C<pipeline-status>,
 and C<genesis E<lt>envE<gt> deploy> all print this sentence and a sentence
 spelled three times is one the three spellings drift apart on.  A field the
 record is missing is named as unrecorded rather than left to print as a gap,
-since a record older than the four fields D53 fixes can lack any of them.
+since a record older than the four fixed fields can lack any of them.
 
 B<Parameters:>
 
@@ -430,13 +430,13 @@ B<Examples:>
 
     Genesis::CI::Report::render_preview($record, git => $git);
 
-C<--dry-run>'s report, under D44.
+C<--dry-run>'s report.
 
 It names, per environment and per control commit, the files that would land
 and whether each commit would be delivered or held and why, and it writes
 nothing.  It renders the record the run renders, through L</render_run>, so
 the preview and the run cannot disagree about a word, and the held forms read
-as C<genesis pipeline-status>'s do under D54.
+as C<genesis pipeline-status>'s do.
 
 A banner goes out before the first line of the report, because an operator
 who reads the report first and the banner afterwards has already believed it.
