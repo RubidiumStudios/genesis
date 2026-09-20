@@ -34,10 +34,10 @@ sub parse {
 	#   2. .genesis/config pipeline: section (inline genesis-config)
 	#   3. Legacy ci.yml file                (single-file legacy)
 	#
-	# The inline section is named pipeline under D18, with no alias left
-	# behind for its old spelling, and that is the name
+	# The inline section is named pipeline, with no alias left behind for
+	# its old spelling, and that is the name
 	# Genesis::CI::Compiler::can_compile_from_genesis_config reads.  The
-	# two reads have to be about the same section: a gate that answers
+	# two reads have to be about the same section.  A gate that answers
 	# yes and a parser that then goes looking for a file would send a
 	# correctly configured repository to the bail below, which would
 	# complain about a ci.yml nobody is meant to have any more.

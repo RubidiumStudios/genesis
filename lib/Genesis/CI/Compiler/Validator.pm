@@ -439,11 +439,11 @@ sub _validate_multi_file {
 	# Validate integrations section
 	$self->_validate_integrations_section($parsed->{integrations});
 
-	# The provider block is validated at configuration load under D28, by
-	# the provider that owns it under D105, so there is nothing to check
-	# again here.  A second walk of the same fragment could only agree
-	# with the first or be wrong about it, and it had its own wording for
-	# both refusals, which is two sentences for one mistake.
+	# The provider block is validated at configuration load, by the
+	# provider that owns it, so there is nothing to check again here.  A
+	# second walk of the same fragment could only agree with the first or
+	# be wrong about it, and it had its own wording for both refusals,
+	# which is two sentences for one mistake.
 
 	# Cross-reference validation
 	$self->_validate_cross_references($parsed);
