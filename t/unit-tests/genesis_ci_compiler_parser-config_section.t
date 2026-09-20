@@ -3,8 +3,8 @@
 # The compiler asks two questions about a repository's .genesis/config,
 # and they have to be about the same section.  Genesis::CI::Compiler's
 # can_compile_from_genesis_config decides whether the configuration is
-# inline, and Genesis::CI::Compiler::Parser::parse then reads it.  D18
-# renamed that section from ci to pipeline and left no alias behind, so
+# inline, and Genesis::CI::Compiler::Parser::parse then reads it.  That
+# section was renamed from ci to pipeline with no alias left behind, so
 # both reads name pipeline and a section still spelled ci is nothing the
 # compiler will look at.
 #
@@ -48,9 +48,9 @@ use_ok 'Genesis::CI::Compiler::Parser';
 	}
 }
 
-# The shape D27 leaves behind: the provider and the integrations sit
-# under the section, and the topology comes from the environment files
-# rather than from a workflows block.
+# The settled shape puts the provider and the integrations under the
+# section, and takes the topology from the environment files rather than
+# from a workflows block.
 my $SECTION = {
 	enabled  => 1,
 	provider => {type => 'concourse'},
