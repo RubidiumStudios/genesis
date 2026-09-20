@@ -106,7 +106,7 @@ subtest 'the roster comes from control, not from the tree in front of us' => sub
 	# branch class put it on and which carries one environment's hierarchy
 	# and no sibling's.  Read out of that tree, the roster is a list of one
 	# and an environment that changed only on control is invisible, which is
-	# the whole of what D43 asks this query to name.
+	# the whole of what this query has to name.
 	#
 	# bosh is passed for the catch-up alone: a delivery is published from the
 	# teammate's copy, so the operator's own branch stands at the commit the
