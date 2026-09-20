@@ -139,7 +139,7 @@ subtest "the set is the harness's own read and a delivery mirrors it" => sub {
 };
 
 # Proves T2, the vault half: the fixture answers a read of the certified
-# commit and of the applied record at the two addresses D103 fixes.
+# commit and of the applied record at their two vault addresses.
 subtest 'a moved file keeps the mode it carried' => sub {
 	plan tests => 3;
 
@@ -184,7 +184,7 @@ subtest 'the fixture answers the two vault addresses' => sub {
 	my $delivered = deliver($h, 'qa', control => $control);
 
 	is($h->applied_path, '/secret/exodus/_pipelines/bosh',
-		'the applied record sits where D103 puts it');
+		'the applied record sits at the pipeline address');
 	is($h->env_path('qa'), '/secret/exodus/qa/bosh',
 		"the environment's own record sits beside it");
 
