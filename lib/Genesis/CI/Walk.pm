@@ -152,11 +152,17 @@ sub env_state {
 	my $certified = certified_for($env);
 	return $certified if $certified->{error};
 
+	# certified_for reads the same vault a line above and hands its own
+	# error back, so a vault that cannot be reached at all never arrives
+	# here.  What is left for this guard is a vault that answered for the
+	# certified commit and not for the hold, which no row on the tree
+	# builds today, and it stands rather than letting such a read pass as
+	# an environment holding nothing.
 	my $hold = eval {$env->hold_record};
 	# Read off before hold_record_path runs, for the reason
-	# read_durable_state's own guard gives: that reader traces, tracing
-	# evals, and a $@ read inside the argument list is the tracing's rather
-	# than the failure's.
+	# read_durable_state's own guard gives, which is that the reader traces,
+	# tracing evals, and a $@ read inside the argument list is the tracing's
+	# rather than the failure's.
 	my $failure = $@;
 	die sprintf(
 		"Could not read the hold record for %s at %s: %s\n",
