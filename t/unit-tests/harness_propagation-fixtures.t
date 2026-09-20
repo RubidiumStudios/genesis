@@ -277,13 +277,19 @@ subtest 'a harness with no vault refuses to break one' => sub {
 # the whole of /secret/ in the shared fixture vault, so it is kept behind
 # every row that stands on a record.
 subtest 'the tool underneath is found past every fixture directory' => sub {
-	plan tests => 2;
+	plan tests => 4;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	my $fake = Harness::Propagation::_fake_git_dir($h, '2.30.0');
 	local $ENV{PATH} = join(':', $fake, "$h->{base}/tmp/bin", $ENV{PATH});
 
 	my $found = Harness::Propagation::_real_tool('git');
+	# What the two rows below say is that the answer is neither of the two
+	# fixture directories, and an answer of nothing is neither of them too,
+	# so what the lookup found is named first.
+	ok(defined($found) && length($found), 'the lookup answers a path');
+	ok(-x $found, 'and the path it answers can be run');
+
 	unlike($found, qr{/git-2\.30\.0/},
 		'the git that only reports a version is stepped over');
 	unlike($found, qr{/tmp/bin/},
