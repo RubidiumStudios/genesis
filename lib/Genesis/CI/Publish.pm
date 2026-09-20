@@ -4,10 +4,9 @@ package Genesis::CI::Publish;
 # what L now holds onto R and saying, per environment, what the remote made of
 # it.
 #
-# One push per branch, because D83 has a rejection on one branch cost one
-# environment one run and nothing else.  No push's result withholds another's,
-# which is the third stage of D96, and each result is that branch's outcome
-# rather than a warning printed beside a success.
+# One push per branch, so a rejection on one branch costs one environment one
+# run and nothing else.  No push's result withholds another's, and each result
+# is that branch's outcome rather than a warning printed beside a success.
 #
 # The push set is the deployment branches alone.  Control is the run's input
 # and never its output, so what the stage does with control is read it once
@@ -15,7 +14,7 @@ package Genesis::CI::Publish;
 # publish.
 #
 # Everything the push would carry is shown before it goes, and the showing is
-# not conditional on anyone being there to read it.  D83 computes once,
+# not conditional on anyone being there to read it.  The stage computes once,
 # verifies, shows, and asks, because a dry run followed by a real run computes
 # everything twice and control or exodus can move between the two, so the
 # second run may deliver what the operator never previewed.  At a terminal the
@@ -73,7 +72,7 @@ sub publish_run {
 	};
 	return $result unless @specs && $remote;
 
-	# D30's in-sync rule, asked a second time.  The pre-flight asked it once
+	# The in-sync rule, asked a second time.  The pre-flight asked it once
 	# before the walk, and a walk takes long enough for a teammate to push
 	# through the middle of it, so the last thing the run does before its
 	# first push is ask again.  A control that has moved refuses, and the
@@ -86,18 +85,17 @@ sub publish_run {
 		return $result;
 	}
 
-	# D83's ask, and the showing that does not wait on it.  The delta is
-	# read from git rather than recomposed from the walk's record, so what
-	# an operator is shown is what the push sends and not what the run
-	# meant to send.  A decline pushes nothing, and the status the run
-	# exits with is the caller's to decide.
+	# The ask, and the showing that does not wait on it.  The delta is read
+	# from git rather than recomposed from the walk's record, so what an
+	# operator is shown is what the push sends and not what the run meant to
+	# send.  A decline pushes nothing, and the status the run exits with is
+	# the caller's to decide.
 	#
 	# A run the operator declines takes the path a refused control takes,
-	# because a branch carrying a commit the remote has never seen is the
-	# illegal initial state D96 names and a run the operator stopped must
-	# not leave one behind.  Each environment then says it was written,
-	# verified, and not published, with the reason beside the word rather
-	# than inside it.
+	# because a branch carrying a commit the remote has never seen is an
+	# illegal initial state and a run the operator stopped must not leave one
+	# behind.  Each environment then says it was written, verified, and not
+	# published, with the reason beside the word rather than inside it.
 	unless (confirm_publish($git, $remote, \@specs, yes => $args{yes})) {
 		$result->{declined} = 1;
 		_reset_publish_set($session);
@@ -115,21 +113,20 @@ sub publish_run {
 	info "\n#G{Publishing} to #C{%s}...", $remote;
 
 	# A death out of the push itself is the whole command failing rather than
-	# one ref being turned down, and D82 answers it with the same abort a
-	# remote that answered nothing earns, so it is caught here and handed to
-	# the caller's own classifier with everything else.
+	# one ref being turned down, and it earns the same abort a remote that
+	# answered nothing earns, so it is caught here and handed to the caller's
+	# own classifier with everything else.
 	my $pushes = eval {$git->push(remote => $remote, refs => \@specs)};
 	my $died   = $@;
 	$pushes ||= [];
 	$result->{results} = $pushes;
 
-	# D82's unsurvivable remote.  A push the remote answered about on no ref
-	# at all is the remote being gone rather than any branch's own quarrel
-	# with it, so nothing below runs.  No environment is given an outcome it
-	# would have to take back, and the run as a whole ends instead.  The
-	# classifier that turns git's words into a remedy belongs beside the run,
-	# so the caller raises it and this stage only says which reason to raise
-	# it on.
+	# The unsurvivable remote.  A push the remote answered about on no ref at
+	# all is the remote being gone rather than any branch's own quarrel with
+	# it, so nothing below runs.  No environment is given an outcome it would
+	# have to take back, and the run as a whole ends instead.  The classifier
+	# that turns git's words into a remedy belongs beside the run, so the
+	# caller raises it and this stage only says which reason to raise it on.
 	#
 	# What is read is whether git named a ref, because a ref is filled in
 	# from git's own porcelain line and a push that never reached the remote
@@ -208,7 +205,7 @@ sub publish_run {
 # }}}
 # confirm_publish - show every branch's verified delta, then ask {{{
 #
-# D83 has the showing unconditional and the ask conditional.  At a terminal the
+# The showing is unconditional and the ask is conditional.  At a terminal the
 # delta comes first and the operator answers for it, and where there is no
 # controlling terminal the same delta goes to the log and the run goes on, so
 # the pipeline's job and the propagate child print what an operator would have
@@ -330,7 +327,7 @@ sub publish_delta {
 
 ### INTERNAL {{{
 
-# _recheck_control - D30's in-sync rule, asked once more before the first push {{{
+# _recheck_control - the in-sync rule, asked once more before the first push {{{
 #
 # A marker is a bare sha with no ancestry link to the deployment branch, so it
 # means something only where the commit it names can be fetched from the
@@ -345,9 +342,9 @@ sub publish_delta {
 # it speaks and a stage that printed for itself would speak first.
 #
 # A fetch that could not reach the remote is passed over here.  The question
-# this asks is about control and the answer to a remote that has gone away is
-# D82's, which the push below raises for itself, so a failed refresh leaves
-# the reading to the tracking ref and the push to say what it finds.
+# this asks is about control, and the answer to a remote that has gone away
+# belongs to the push below, which raises it for itself, so a failed refresh
+# leaves the reading to the tracking ref and the push to say what it finds.
 sub _recheck_control {
 	my ($git, $control, $remote) = @_;
 	return undef unless $git && defined $control && length $control;
@@ -426,13 +423,13 @@ sub _commits {
 # }}}
 # _reset_publish_set - put every branch the run committed to back at T {{{
 #
-# A branch carrying a commit the remote has never seen is the illegal initial
-# state D96 names, and a run that stops before its first push must not leave
-# one behind.  Both such runs come through here, which are the one a moved
-# control refuses and the one the operator declined, and the set is the
-# session's own, which is the set an abort resets, so those two and the
-# abort put back exactly the same work.  Control is not in it, because I2
-# keeps committed work on control whole.
+# A branch carrying a commit the remote has never seen is an illegal initial
+# state, and a run that stops before its first push must not leave one behind.
+# Both such runs come through here, which are the one a moved control refuses
+# and the one the operator declined, and the set is the session's own, which is
+# the set an abort resets, so those two and the abort put back exactly the same
+# work.  Control is not in it, because I2 keeps committed work on control
+# whole.
 sub _reset_publish_set {
 	my ($session) = @_;
 	return 0 unless $session;

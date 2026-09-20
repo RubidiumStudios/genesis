@@ -34,14 +34,14 @@ local repository now holds onto the remote, and saying, per environment, what
 the remote made of it.
 
 The push set is the deployment branches alone. Control is the run's input and
-never its output, which is D30, so what this stage does with control is read
-it once more before the first push. A marker is a bare sha with no ancestry
-link to the deployment branch, so it means something only where the commit it
-names can be fetched from the remote, and a control that moved under the run
-leaves every marker the run wrote naming a commit computed from a tip that has
-already moved. Such a run refuses before its first push, puts every branch it
-committed to back where the remote has it, and hands the caller the sentence
-to refuse with.
+never its output, so what this stage does with control is read it once more
+before the first push. A marker is a bare sha with no ancestry link to the
+deployment branch, so it means something only where the commit it names can be
+fetched from the remote, and a control that moved under the run leaves every
+marker the run wrote naming a commit computed from a tip that has already
+moved. Such a run refuses before its first push, puts every branch it committed
+to back where the remote has it, and hands the caller the sentence to refuse
+with.
 
 Everything the push would carry is shown before it goes, and the showing does
 not wait on anyone being there to read it. A dry run followed by a real run
@@ -61,9 +61,8 @@ environment that it was written, verified, and held here by the person who was
 asked.
 
 Each branch is pushed on its own. A rejection on one branch costs one
-environment one run and nothing else, which is what D83 asks for, and no
-push's result withholds another's, which is the third stage of D96. The
-branches after a refused one go out regardless of where the refusal fell.
+environment one run and nothing else, and no push's result withholds another's.
+The branches after a refused one go out regardless of where the refusal fell.
 
 A push the remote refused is that environment's outcome and not a warning
 printed beside a success. The record reads C<publish rejected> in the bare
@@ -371,7 +370,7 @@ B<Examples:>
 
     my $refused = Genesis::CI::Publish::_recheck_control($git, 'control', 'origin');
 
-Asks D30's in-sync question a second time, immediately before the first push.
+Asks the in-sync question a second time, immediately before the first push.
 
 The pre-flight asks it once, before the walk, and a walk takes long enough for
 a teammate to push through the middle of it. A marker is a bare sha with no
@@ -394,10 +393,10 @@ ahead and a count behind out of a record an unknown state need not carry
 either of, so such a state was told to the operator as a divergence of no
 commits at all.
 
-A fetch that could not reach the remote is passed over. The question asked
-here is about control, and a remote that has gone away is D82's question,
-which the push raises for itself, so a failed refresh leaves the reading to
-the tracking ref and the push to say what it finds.
+A fetch that could not reach the remote is passed over. The question asked here
+is about control, and a remote that has gone away is the push's question, which
+it raises for itself, so a failed refresh leaves the reading to the tracking
+ref and the push to say what it finds.
 
 B<Parameters:>
 
@@ -470,13 +469,12 @@ B<Examples:>
 
 Puts every branch the run committed to back where this run found it.
 
-A branch carrying a commit the remote has never seen is the illegal initial
-state D96 names, and a run that stops before its first push must not leave one
-behind. Both such runs come through here, which are the one a moved control
-refuses and the one the operator declined, and the set is the session's own,
-which is the set an abort resets, so those two and the abort put back exactly
-the same work. Control is not in it, because I2 keeps committed work on
-control whole.
+A branch carrying a commit the remote has never seen is an illegal initial
+state, and a run that stops before its first push must not leave one behind.
+Both such runs come through here, which are the one a moved control refuses and
+the one the operator declined, and the set is the session's own, which is the
+set an abort resets, so those two and the abort put back exactly the same work.
+Control is not in it, because I2 keeps committed work on control whole.
 
 A deployment branch the remote has never had is refused in the pre-flight, so
 every one of those goes back to C<T>. A pull request branch may be one this
