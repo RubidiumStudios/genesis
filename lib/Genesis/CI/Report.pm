@@ -146,8 +146,8 @@ sub hold_reason {
 # ancestor to certify the commit it has not deployed.  They are answered in
 # that order.
 #
-# It answers the qualifier alone and not the whole phrase, because ruling 22
-# puts the bare enum word in the record's outcome and the qualifier beside it
+# It answers the qualifier alone and not the whole phrase, because the bare
+# enum word stands in the record's outcome and the qualifier stands beside it
 # in outcome_detail, and the renderer reads the two back into one line.  So
 # the word held is written once, where the outcome is decided.
 sub held_qualifier {
@@ -333,7 +333,7 @@ sub note_detail {
 # edit gets a third.  An environment with nothing due reads idempotent rather
 # than being left out, which is the whole of I8.
 #
-# Ruling 12 puts the default here rather than in the walk.  The walk's record
+# The default is settled here rather than in the walk.  The walk's record
 # is computed from durable state alone and leaves the outcome null, so where
 # a hold stands the renderer reads the qualifier that says what the
 # environment waits for, and where nothing stands at all it reads idempotent.
@@ -455,8 +455,8 @@ sub render_run {
 # One verb is written here rather than composed by the renderer.  An
 # environment with commits due would have propagated had this been a run, and
 # the preview is the only thing that knows it was not, so the word goes in
-# where that is known.  Ruling 12 leaves the rest with render_run: a hold
-# that stands and an environment with nothing at all to show are both settled
+# where that is known.  The rest is left to render_run, because a hold that
+# stands and an environment with nothing at all to show are both settled
 # out of the record there, so the run and the preview say those words in one
 # place.
 sub render_preview {
@@ -548,7 +548,7 @@ sub preview_warnings {
 
 # _settle - fill the outcome the record left null {{{
 #
-# Ruling 12 and ruling 22 together: a hold that stands writes the bare word
+# A hold that stands writes the bare word
 # held with its qualifier beside it, and an environment with nothing at all
 # to show writes idempotent.  Everything else was decided by whoever knew,
 # which is the walk for a failure and the run for a delivery.
@@ -626,7 +626,7 @@ sub _commits {
 # }}}
 # _release_command - the one command that clears a hold on an environment {{{
 #
-# Ruling 32: the command is composed here and nowhere else, because a command
+# The command is composed here and nowhere else, because a command
 # spelled in two places is a command the two spellings drift apart on.  The
 # two callers dress it differently, hold_detail in backticks because it sits
 # inside a sentence and render_run in the colour every command this report

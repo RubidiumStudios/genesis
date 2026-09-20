@@ -177,9 +177,8 @@ sub publish_run {
 		if ($rec) {
 			$rec->{outcome} = 'publish rejected';
 			# Appended, for the reason the decline above gives.  This is the
-			# run ruling 42 describes, a hand push followed by the next
-			# propagate, which is exactly the run whose delivery has a
-			# discard sentence standing in the field already.
+			# run that follows a hand push, which is exactly the run whose
+			# delivery has a discard sentence standing in the field already.
 			note_detail($rec, sprintf('%s moved on R', $moved));
 		}
 

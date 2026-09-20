@@ -59,9 +59,9 @@ use constant HOLD_REASONS => qw/
 # tracking ref here as well would be a second reader of one fact, which is
 # the thing this sub exists to remove.
 #
-# The staleness is not read here.  Ruling 14 takes it out, because reading it
-# costs a second read of the applied record and a load of every environment in
-# the pipeline, and nothing the walk decides depends on it.  M17 reads it where
+# The staleness is not read here, because reading it would cost a second read
+# of the applied record and a load of every environment in the pipeline, and
+# nothing the walk decides depends on it.  M17 reads it where
 # it renders it.
 #
 # An applied record the vault answers an error for is the whole run's input and
