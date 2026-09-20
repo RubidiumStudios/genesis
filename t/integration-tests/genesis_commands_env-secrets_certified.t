@@ -136,13 +136,17 @@ subtest 'a deployments directory with no repository is served in silence' => sub
 	# the repository.  The copy is named to the harness the way the two
 	# repositories are, because that is how a run picks up the fixture vault
 	# and the path the harness assembles.
-	my $plain = workdir() . '/no-repo-deployments';
+	# Named before the copy is made, because an empty working directory
+	# answer would aim the removal at a path outside the fixture.  The test
+	# is on what workdir answered, since the name below always carries its
+	# own suffix and so can never read as empty.
+	my $work = workdir();
+	die "the working directory answered nothing, so the copy has no path\n"
+		unless length($work // '') && $work ne '/';
+
+	my $plain = $work . '/no-repo-deployments';
 	system('cp', '-R', $h->a, $plain) == 0
 		or die "cannot copy the deployments directory: $?\n";
-	# Named before it is removed, because an empty working directory answer
-	# would aim the removal at /.git.
-	die "the working directory answered nothing, so the copy has no path\n"
-		unless length($plain // '') && $plain ne '/';
 	system('rm', '-rf', "$plain/.git") == 0
 		or die "cannot take the repository off the copy: $?\n";
 	$h->{plain} = $plain;
