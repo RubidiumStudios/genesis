@@ -542,8 +542,15 @@ sub rev_parse {
 	my @cmd = ('git', 'rev-parse');
 	push @cmd, '--short' if $opts{short};
 	push @cmd, $ref;
-	my ($sha) = run({ dir => $self->{root} }, @cmd);
+
+	# git's own complaint is kept out of the answer, the way current_branch
+	# keeps it out of its own.  A ref git cannot resolve is answered with
+	# nothing, because a caller that recorded this value would otherwise
+	# write a fatal sentence into the slot a commit belongs in.
+	my ($sha, $rc) = run({ dir => $self->{root}, stderr => 0 }, @cmd);
+	return undef if $rc;
 	chomp $sha if defined $sha;
+	return undef unless defined $sha && length $sha;
 	return $sha;
 }
 

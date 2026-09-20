@@ -265,6 +265,7 @@ unit-tests/service_git-orphan_branch.t                     # the two refusals th
 unit-tests/service_git-preflight.t                         # the pre-flight classifies its three failures
 unit-tests/service_git-push_refspecs.t                     # the refspec each branch class is pushed with
 unit-tests/service_git-push_remote.t                       # the publish helper takes its remote by name
+unit-tests/service_git-ref_reads.t                         # what a ref read answers where git cannot resolve the ref
 unit-tests/service_git-remote_branch.t                     # remote_branch helper
 unit-tests/service_git-single_branch_refresh.t             # one named branch refreshes T alone
 unit-tests/service_git-set_branch_ref.t                    # the one forced write onto a local branch
