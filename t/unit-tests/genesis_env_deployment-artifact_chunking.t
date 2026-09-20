@@ -51,7 +51,7 @@ sub make_mock_env {
 	);
 }
 
-# Minimal valid args for Deployment->new — the smaller-than-a-full-blob
+# Minimal valid args for Deployment->new.  The smaller-than-a-full-blob
 # subtests don't need a real action loop.
 sub deploy_args {
 	my (%over) = @_;

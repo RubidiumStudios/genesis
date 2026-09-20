@@ -10,7 +10,7 @@ use Test::More;
 use_ok 'Genesis::Commands::Env';
 
 # Pure-function tests for _format_pipeline_reason.  The callbacks are
-# stubs — no git or vault involved.
+# stubs, with no git or vault involved.
 
 my $short = sub { substr($_[0], 0, 7) };
 my $subjects = {
@@ -51,7 +51,7 @@ subtest 'single propagation marker: subject only, no SHA prefix' => sub {
 };
 
 subtest 'multi-commit: count header + bulleted subjects, oldest-first' => sub {
-	# log is newest-first — reason should reverse to oldest-first
+	# log is newest-first, and reason should reverse it to oldest-first
 	my @log = (
 		'env_sha3 [pipeline] control@c3d4e5f6a1b2 -> lmelt-vsphere-canwest-1-mgmt',
 		'env_sha2 [pipeline] control@b2c3d4e5f6a1 -> lmelt-vsphere-canwest-1-mgmt',

@@ -53,7 +53,7 @@ use Genesis;
 #   - When non-self-deploy, leaves the vault alone.
 #   - When self-deploy but the vault does not respond to
 #     stop_token_renewer (e.g. Service::Vault::Local, plain Mock),
-#     no-op without dying — defensive can() check.
+#     no-op without dying, via a defensive can() check.
 #   - Returns 1 when it stopped a renewer, 0 / undef otherwise.
 # ===========================================================================
 

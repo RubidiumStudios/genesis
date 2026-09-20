@@ -305,7 +305,7 @@ YAML
 		'((/cpi-config/properties/genesis-entombed/secret-vcenter-prod--password--abc12345))',
 		'password is the credhub-var ref from the entombed manifest, not plaintext';
 	is_deeply $secrets, {},
-		'secrets dict is empty — entombment was done at deploy time';
+		'secrets dict is empty, since entombment was done at deploy time';
 };
 
 subtest 'lookup_entombed_self - reads from EntombedSelf manifest data' => sub {
@@ -572,7 +572,7 @@ YAML
 };
 
 # ======================================================================
-# upload_director_cpi_config — I/O wrapper around the resolver
+# upload_director_cpi_config, the I/O wrapper around the resolver
 # ======================================================================
 #
 # These tests use a hand-rolled mock for the bosh director (via the existing
@@ -720,10 +720,10 @@ YAML
 };
 
 # ======================================================================
-# _upload_director_cpi_if_necessary — genesis-driven fallback
-# fired from Env::deploy's success path. Targets older bosh kits (< 4.0.0)
-# whose post-deploy hook predates inline director-cpi awareness — for those,
-# genesis core must perform the self-upload itself. Newer bosh kits (>= 4.0.0
+# _upload_director_cpi_if_necessary, the genesis-driven fallback fired from
+# Env::deploy's success path.  Targets older bosh kits (< 4.0.0) whose
+# post-deploy hook predates inline director-cpi awareness, and for those
+# genesis core must perform the self-upload itself.  Newer bosh kits (>= 4.0.0
 # and dev) delegate via PostDeploy::upload_director_cpi_config, so this helper
 # is a no-op for them to avoid double-uploading.
 # ======================================================================
@@ -735,8 +735,8 @@ sub fallback_env {
 	my $env = make_cpi_env($name, $bosh_configs);
 	no warnings qw(redefine once);
 	local *Genesis::Env::is_bosh_director = sub { 1 };
-	# is_bosh_director is consulted via $self->is_bosh_director — patch in
-	# place by re-blessing isn't needed because we re-stub per subtest.
+	# is_bosh_director is consulted via $self->is_bosh_director, so patching
+	# in place by re-blessing isn't needed because we re-stub per subtest.
 	$env;
 }
 

@@ -690,7 +690,7 @@ subtest 'has_environment_entry - exodus with deployment returns 0 for unknown ke
 };
 
 # ---------------------------------------------------------------------------
-# has_environment_entry — return-list shape (format vs values arity)
+# has_environment_entry, the return-list shape (format vs values arity)
 #
 # has_entry composes an info() call whose sprintf template is
 # "[[    %s>>" concatenated with the format that has_environment_entry
