@@ -305,7 +305,7 @@ ci-compiler.t                                # the AST, its builder, the validat
 ci-compile-e2e.t                             # the multi-file compiler end to end, from the parse to the emitted pipeline
 ci-layout.t                                  # the layout DSL parser, over the shapes a layout file is written in
 ci-phase-c.t                                 # the descriptor stage, over a topology read from the environment files
-unit-tests/manifest_parser-unregistered.t   # the manifest parser, its ordered list and its unregistered warning
+unit-tests/manifest_parser-unregistered.t    # the manifest parser, its ordered list and its unregistered warning
 unit-tests/genesis_top-provider_fragment.t   # the configured provider's own schema fragment, merged at load
 unit-tests/genesis_top-provider_capabilities.t  # the six capabilities a provider declares, and the keys they gate
 unit-tests/genesis_top-manifest_store_gate.t # the manifest store and the kit floor, refused at configuration load
