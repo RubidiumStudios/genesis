@@ -149,7 +149,7 @@ subtest 'a tracked modification at finish withholds the child' => sub {
 	is_deeply([child_runs($h)], [], 'no child was spawned');
 	assert_w_restored($w, 'the starting branch was restored anyway');
 
-	my ($hand, $hand_err, $run) = run_genesis($h, {restore => 0},
+	my (undef, $hand_err, $run) = run_genesis($h, {restore => 0},
 		'propagate', '-y');
 	is($run, 0, 'the hand run afterwards succeeded')
 		or diag("what the hand run said:\n$hand_err");

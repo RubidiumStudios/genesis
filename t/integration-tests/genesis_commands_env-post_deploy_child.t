@@ -56,9 +56,10 @@ plan tests => 7;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# The repository we were started in, read once here, because a row that has
-# run leaves us wherever its harness put us and the last subtest asks this
-# tree a question.
+# We read the repository we were started in here, once, before any row has
+# run.  Every row moves the working directory into a tree its harness made,
+# and the last subtest asks this repository a question rather than one of
+# theirs.
 my $REPO = Cwd::getcwd();
 
 # qa and prod both deployed and delivered at control's tip, prod downstream of
@@ -82,6 +83,8 @@ subtest 'one child, genesis propagate, and its own session' => sub {
 
 	child_recorder($h, probe => 1);
 	stand_on($h, $h->control);
+	# No restoration row here, because this row starts on control and the
+	# header says why that makes one prove nothing.
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '-y');
 	is($exit, 0, 'the deploy command succeeded')
@@ -193,6 +196,8 @@ subtest 'neither process asks the request queue for anything' => sub {
 	my $spy = shuttle_spy($h);
 	child_recorder($h, probe => 1);
 	stand_on($h, $h->control);
+	# No restoration row here, because this row starts on control and the
+	# header says why that makes one prove nothing.
 	my (undef, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '-y');
 	is($exit, 0, 'the deploy command succeeded')
@@ -220,6 +225,8 @@ subtest 'the move carries the two properties across' => sub {
 	my $flagged = chained_harness();
 	child_recorder($flagged, probe => 1);
 	stand_on($flagged, $flagged->control);
+	# No restoration row here, because this row starts on control and the
+	# header says why that makes one prove nothing.
 	my (undef, $said, $exit) = run_genesis($flagged, {restore => 0},
 		'qa', 'deploy', '--no-propagate', '-y');
 	is($exit, 0, 'a deploy under --no-propagate succeeded')
@@ -232,6 +239,7 @@ subtest 'the move carries the two properties across' => sub {
 	my $failing = chained_harness();
 	child_recorder($failing, exit => 3);
 	stand_on($failing, $failing->control);
+	# No restoration row here either, for the same reason the header gives.
 	my (undef, $warned, $still) = run_genesis($failing, {restore => 0},
 		'qa', 'deploy', '-y');
 	is($still, 0, 'a deploy whose child failed still succeeded')
@@ -297,14 +305,23 @@ subtest 'a lock taken in the window is reported, not swallowed' => sub {
 # that nothing raises and nothing reads.  The row is a guard: it cannot
 # go red today, and it catches a change that brings the constant back.
 subtest 'the no-branch refusal code stays gone from the tree' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	require Genesis::Top;
 	ok(!Genesis::Top->can('PROPAGATE_NO_BRANCH_EXIT'),
 		'Genesis::Top declares no no-branch exit code');
 
-	my @named = grep {$_}
-		split(/\n/, qx(git -C $REPO grep -l PROPAGATE_NO_BRANCH_EXIT -- lib/ 2>/dev/null));
+	# The path is quoted for the shell, so a checkout under a directory whose
+	# name has a space in it is one argument rather than two.
+	my $listed = qx(git -C '$REPO' grep -l PROPAGATE_NO_BRANCH_EXIT -- lib/);
+	# git grep -l exits 1 when it matched nothing, which is what green looks
+	# like here, and anything above that is git failing rather than
+	# answering.  The status is read straight after the command, because a
+	# git that never ran leaves the same empty list a clean tree does and the
+	# row below would call that a pass.
+	ok(($? >> 8) <= 1, 'git grep ran, with or without a match');
+
+	my @named = grep {$_} split(/\n/, $listed);
 	is_deeply(\@named, [],
 		'no module and no POD under lib/ still names it');
 };
