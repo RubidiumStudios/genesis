@@ -293,8 +293,8 @@ EOF
 subtest 'both readers name the blueprint fragments the same way' => sub {
 	plan tests => 4;
 
-	# The kit's blueprint names one repository-side fragment, which is the
-	# kind D78 enumerates on control because that is where the kit lives.
+	# The kit's blueprint names one repository-side fragment, which is the kind
+	# that is read on control because that is where the kit lives.
 	my $h = make_harness(envs => ['qa'], root => 'bosh',
 		kit => 't/src/ops-blueprint');
 	fixture_vault($h);
@@ -455,9 +455,9 @@ subtest 'a tracked path that fell out of the list is read at the commit' => sub 
 	# list drops it and leaves it on the branch until a delivery removes it.
 	my $narrow = stale_set_delivery($h, copy => 'a', file => 'ops/tracked.yml');
 
-	# Control takes the path up again, so the working tree and the commit
-	# being delivered disagree about the set, which is the disagreement D69
-	# settles in the commit's favour.
+	# Control takes the path up again, so the working tree and the commit being
+	# delivered disagree about the set, and the commit wins because the set is
+	# computed there.
 	write_env_file($h, 'qa', root => 'bosh',
 		pipeline => {track_additional_files => ['ops/tracked.yml']});
 
