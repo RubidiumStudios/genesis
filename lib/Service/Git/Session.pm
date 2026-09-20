@@ -372,7 +372,11 @@ sub abort {
 	$error =~ s/\s+$//;
 
 	unless ($self->{active}) {
-		bail("%s", $error);
+		# The caller's exit code carries here as it does below.  Nothing
+		# reaches this today, because the one production caller guards on
+		# the session being active, but a caller that asked for TEMPFAIL
+		# and got 1 would be told the wrong thing about its own failure.
+		bail({exitcode => $opts{exitcode}}, "%s", $error);
 	}
 	$self->{active} = 0;
 
