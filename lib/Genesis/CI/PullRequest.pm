@@ -354,6 +354,14 @@ sub forget_lost_branch {
 # name.  The remote is asked for by name rather than spelled origin, because
 # align_with_remote a few lines above reads the same ref through the same
 # accessor and the two must not disagree about which remote R is.
+#
+# The existence question goes through branch_exists, which remembers the
+# answer it gave, so this reader is right only because the run's refresh
+# deletes the tracking name from that cache for every branch it fetched.
+# A run that asked about the tracking ref before the refresh would otherwise
+# be handed that miss here and lease a branch the remote does carry against
+# nothing.  Narrowing that invalidation would give this reader and
+# align_with_remote a stale miss apiece.
 sub expected_tip {
 	my ($git, $pr_branch) = @_;
 	my $remote = $git->default_remote or return undef;

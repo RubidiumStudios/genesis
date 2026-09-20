@@ -1509,7 +1509,9 @@ sub fetch_branches {
 		# the branch's own, because branch_exists remembers the answer it
 		# gave and a caller that asked for origin/<branch> before this
 		# fetch would otherwise be handed that miss for the rest of the
-		# run.
+		# run.  Genesis::CI::PullRequest::expected_tip and its
+		# align_with_remote are the two readers that depend on this, so
+		# narrowing the deletion gives each of them a stale miss.
 		for my $name (@fetched) {
 			$self->{_branch_cache}{$name} = 1;
 			delete $self->{_branch_cache}{"$remote/$name"};

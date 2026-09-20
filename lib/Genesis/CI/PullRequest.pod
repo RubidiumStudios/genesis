@@ -413,6 +413,12 @@ lease would then be against a teammate's commit rather than against the one
 the run reasoned from. That is the whole window D51 asks the expected tip to
 close.
 
+The existence question goes through L<Service::Git/branch_exists>, which
+remembers the answer it gave, so this reader is correct only because
+L<Service::Git/fetch_branches> deletes the tracking name from that cache for
+every branch it fetched. A run that asked about the tracking ref before the
+refresh would otherwise be handed that miss here.
+
 The C<undef> is the answer for a branch the remote has never had, and it is
 carried onto the push spec as C<expect> all the same, because
 C<Service::Git::_push_one> reads that key with C<exists> and turns the C<undef>
