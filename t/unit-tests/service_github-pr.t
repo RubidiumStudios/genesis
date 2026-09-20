@@ -570,6 +570,32 @@ subtest 'pr_reviews - answers the list, and an empty one for a non-list' => sub 
 		'an answer that is not a list reads as no reviews');
 };
 
+subtest 'pr_reviews - follows the Link header to the end' => sub {
+	plan tests => 4;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+
+	# The endpoint answers oldest first and the attachment keeps the last
+	# decisive review it sees, so a pull request with more than one page of
+	# reviews would have the run act on an older decision than the one that
+	# stands.  Under the rebuild rule that decision chooses between
+	# rebuilding a pull request branch and freezing it.
+	my $next = 'https://api.github.com/repos/org/repo/pulls/7/reviews?page=2';
+	queue_curl_response(200, 'OK', encode_json([
+		{state => 'APPROVED', user => {login => 'ann'}, body => 'looks fine'},
+	]), "Link: <$next>; rel=\"next\"\r\n");
+	queue_curl_response(200, 'OK', encode_json([
+		{state => 'CHANGES_REQUESTED', user => {login => 'bob'}, body => 'wait'},
+	]), '');
+
+	my $reviews = $gh->pr_reviews('org/repo', 7);
+	is(scalar(@$reviews), 2, 'both pages come back');
+	is($reviews->[1]{user}{login}, 'bob',
+		'with the newer page last, so the newest decision is the one that stands');
+	is(scalar(@curl_calls), 2, 'the walk made two requests');
+	is($curl_calls[1][1], $next, 'the second reading the URL the header named');
+};
+
 # ======================================================================
 # closed_prs - the closed pull requests for a branch
 # ----------------------------------------------------------------------
