@@ -704,9 +704,9 @@ header row is emitted in bold and separated from the data rows by a single
 light rule (C<─> or C<-> in ASCII mode).
 
 Column widths are auto-sized to fit the widest cell. The alignment markers in
+the Markdown separator row (C<:--->, C<--->, C<---:>, C<:---:>) are honoured.
 Unlike C<build_markdown_table()>, C<tableify> does not wrap or fractionally
-expand columns.  It is intended for short, well-bounded summary tables where
-every cell fits comfortably on one line.
+expand columns. It is intended for short, well-bounded summary tables where
 every cell fits comfortably on one line.
 
 B<Parameters:>
