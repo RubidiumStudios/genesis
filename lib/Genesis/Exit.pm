@@ -2,8 +2,8 @@ package Genesis::Exit;
 # The one home of the named exit codes.  A caller that cannot tell a refusal
 # from a partial result from a crash cannot act on any of them, and a pipeline
 # job in particular needs to know whether to retry, to page someone, or to
-# stop.  D97 opens the table with the three the propagate run spends, and D98
-# makes every exit the design specifies name its cause here.
+# stop.  The table opens with the three the propagate run spends, and every
+# named exit states its cause here.
 #
 # The numbers come from sysexits.h where that file has the meaning, and from
 # shell convention where it does not: nothing in sysexits names a deliberate
