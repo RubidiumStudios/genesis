@@ -228,9 +228,9 @@ sub capability_gates {
 # The provider owns validating the block an operator wrote for it,
 # outright, and it decides how: by declaration, which is what this default
 # does, or programmatically, which is what an override adds.  The
-# framework used to split the two and ask every provider to sort its own
-# rules into its categories, and then checked half of them before the
-# provider was called at all.
+# configuration framework used to split the two and ask every provider to
+# sort its own rules into the framework's own categories.  It then checked
+# half of those rules before the provider was called at all.
 #
 # The default validates the block against this provider's own
 # provider_options_schema, so a provider with no cross-field rule writes
