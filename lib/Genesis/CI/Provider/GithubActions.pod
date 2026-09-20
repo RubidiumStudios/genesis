@@ -27,23 +27,22 @@ L<Genesis::CI::Provider/compiler> answers with C<undef> here, and a
 caller that cannot do without one is refused by name rather than handed
 something that would emit nothing.
 
-D101 gives this provider C<multi_file_output> true, because a workflow
-directory is several files and D67's override name follows them. The
-other five it leaves to be read off the provider when the compiler is
+This provider declares C<multi_file_output> true, because a workflow
+directory is several files and the override file name follows them. The
+other five are left to be read off the provider when the compiler is
 written, so they are false for now and the refusal is the conservative
-one: a key this provider cannot honour is refused as the configuration
+one. A key this provider cannot honour is refused as the configuration
 loads rather than accepted and then dropped when the pipeline is emitted.
 
-The declaration follows from that. Under D105 and D101 the provider that
-can emit several files is the provider that declares the key choosing
-between the forms, so C</provider_options_schema> declares
-C<output_layout> and nothing else.
+The declaration follows from that. The provider that can emit several
+files is the provider that declares the key choosing between the forms,
+so C</provider_options_schema> declares C<output_layout> and nothing
+else.
 
 This provider states no validation rule of its own, so the base's default
-is what runs, and under D105 that validates the block against the
-declaration above and refuses anything else by name. The two rules that
-used to stand here both spoke of the repository. Under D102 the
-repository a pipeline acts on lives in
+is what runs, and that validates the block against the declaration above
+and refuses anything else by name. The two rules that used to stand here
+both spoke of the repository. The repository a pipeline acts on lives in
 C<pipeline.source_control.repository> rather than in the provider block,
 so the declaration names no such key and an operator has nowhere to write
 one. Those rules worked only because the caller resolved the source
@@ -147,9 +146,9 @@ B<Examples:>
 
 =head2 capabilities()
 
-D101's six names. C<multi_file_output> is true, because a workflow
-directory is several files, and the other five are false until the
-compiler is written and their answers can be read off it.
+The six capability names. C<multi_file_output> is true, because a
+workflow directory is several files, and the other five are false until
+the compiler is written and their answers can be read off it.
 
 B<Returns:> a hash reference of the six capability names to booleans.
 
