@@ -208,11 +208,11 @@ EOF
 # provider_options_schema - schema for pipeline.provider: when type=concourse {{{
 #
 # Keys map directly to the pipeline.provider: sub-keys in .genesis/config.
-# Under D86 this fragment is the only place these keys are declared, and
-# under D105 it is the whole of what the block admits beside the type, so
-# a key that is not here is refused by name as the configuration loads.
-# Under D100 that is why target, url, team and insecure live here rather
-# than beside the type, where they sat unread under every other provider.
+# This fragment is the only place these keys are declared, and it is the
+# whole of what the block admits beside the type, so a key that is not
+# here is refused by name as the configuration loads.  That is why
+# target, url, team and insecure live here rather than beside the type,
+# where they sat unread under every other provider.
 #
 # There is no output_layout here.  Concourse emits one pipeline definition
 # and declares multi_file_output false, and a provider offers that key by
@@ -220,9 +220,9 @@ EOF
 # operator who writes it is refused like anybody writing a key nobody
 # declared.
 #
-# pipeline_name is gone, because under D25 and D28 pipeline.name is the one
-# label the compiler and the status commands read, and expose is public
-# under D27 with no alias behind it.
+# pipeline_name is gone, because pipeline.name is the one label the
+# compiler and the status commands read, and expose is public with no
+# alias behind it.
 #
 # NOTE: notification styles, BOSH upgrade locks, and task library are
 # configuration-level features rather than provider-level options, and
@@ -236,9 +236,9 @@ sub provider_options_schema {
 
 		# The floor check_prereqs enforces, declared so that a
 		# repository can set it.  It was readable on the object and
-		# settable only from Perl, so under D105 an operator who wrote
-		# the key was refused by name and the version check had nothing
-		# to enforce.  No default: a repository that names no floor
+		# settable only from Perl, so an operator who wrote the key was
+		# refused by name and the version check had nothing to enforce.
+		# There is no default, because a repository that names no floor
 		# wants any fly that is present, which is what the check does
 		# when the key is absent.
 		#
@@ -287,9 +287,9 @@ sub provider_options_schema {
 # }}}
 # capabilities - Concourse can do all but multi-file output {{{
 #
-# D101's six names, declared beside the fragment above, because under
-# D105 one class answers for both halves of a provider and the gates read
-# this from the class the provider map already names.
+# The six capability names, declared beside the fragment above, because
+# one class answers for both halves of a provider and the gates read this
+# from the class the provider map already names.
 sub capabilities {
 	return {
 		deployment_locks      => 1,  # the locker resource
