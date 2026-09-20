@@ -24,7 +24,7 @@ our @EXPORT_OK = qw/
 
 # I8's three axes, as Publish and outcomes fixes the words.  The enum is
 # declared here rather than in the walk, because the walk, the delivery, the
-# abort, and M11's publish all write into one field and a word spelled in
+# abort, and the publish all write into one field and a word spelled in
 # four places is a word the four drift apart on.
 use constant ENV_OUTCOMES => (
 	'propagated', 'idempotent', 'failed', 'not attempted',

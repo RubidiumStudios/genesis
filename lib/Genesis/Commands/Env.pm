@@ -1187,9 +1187,9 @@ sub _deploy_preflight {
 	# already known false before the resolver is asked.
 	my $target = Genesis::Commands::deployed_target($name, $top);
 
-	# 1.  The one refresh, control included, which M7 already freed of
-	# --no-fetch on this command under D40.  The deploy's own reads are
-	# worthless against a stale tracking ref.
+	# 1.  The one refresh, control included, which D40 freed of
+	# --no-fetch on this command.  The deploy's own reads are worthless
+	# against a stale tracking ref.
 	my $refreshed = $top->fetch_pipeline_envs($git,
 		command => "$env_name deploy",
 		action  => 'deploy',
@@ -1485,7 +1485,7 @@ sub _recreate_wanted {
 # The options hash it is handed is the deploy's own, whose redeploy key the
 # deploy wrote from the commit its pre-flight resolved, so the fact read here
 # is the resolved target and not the flag the operator typed.  That is the
-# same fact M14 keyed the pre-flight's warnings and the hand-off's condition
+# same fact the pre-flight's warnings and the hand-off's condition are keyed
 # on, and a --redeploy that resolved no commit is a plain deploy to all three.
 sub _propagate_after_deploy {
 	my ($env, $options) = @_;
@@ -1664,7 +1664,7 @@ sub deploy {
 	# beside the refresh: the operator chose whether the branch was brought
 	# up to date, and a deploy that skipped the pull read a branch nobody had
 	# moved.  The refresh above is now the one way the branch gets current,
-	# and M8 retires the two private subs this block was the last caller of.
+	# and the two private subs this block was the last caller of are gone.
 
 	my $deployment_files = $env->deployment_cache_path_lookup('existing');
 	if (scalar(keys %$deployment_files)) {

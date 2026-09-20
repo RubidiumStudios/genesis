@@ -1385,8 +1385,8 @@ sub _push_failure {
 # counts.
 #
 # The merge-base fallback stays for a branch that has never been delivered
-# to, which is what the callers below still diff against until the walk of
-# M10 gives them the seed.  The control branch is passed in rather than
+# to, which is what the callers below still diff against until the walk
+# gives them the seed.  The control branch is passed in rather than
 # assumed, because the name is configured per repository and every caller
 # has already read it.
 #

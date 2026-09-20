@@ -648,9 +648,9 @@ sub _shares_history {
 # class hears about all of them at the same time.  The three classes come in
 # the order the stage asks about them, which is the branch the remote has
 # never had, the branch that shares no ancestor with the remote's, and then
-# the branch carrying a commit no marker accounts for.  M13 raises the same
-# text in its deploy form, which is why the act and the closing sentence are
-# arguments.
+# the branch carrying a commit no marker accounts for.  The deploy raises
+# the same text in its own form, which is why the act and the closing
+# sentence are arguments.
 #
 # It was named for the two origin classes when it carried only those.  The
 # hand commit is not a question about where a branch came from, so the name

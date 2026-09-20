@@ -61,7 +61,7 @@ use constant HOLD_REASONS => qw/
 #
 # The staleness is not read here, because reading it would cost a second read
 # of the applied record and a load of every environment in the pipeline, and
-# nothing the walk decides depends on it.  M17 reads it where
+# nothing the walk decides depends on it.  pipeline-status reads it where
 # it renders it.
 #
 # An applied record the vault answers an error for is the whole run's input and
@@ -110,8 +110,8 @@ sub read_durable_state {
 		# The pipeline's own label, which is the name the configuration
 		# gives it, and the deployment type beside it, which is what the
 		# applied record is addressed under.  A repository that names no
-		# label leaves the first null, and M17's renderer chooses which of
-		# the two to print.
+		# label leaves the first null, and the renderer chooses
+		# which of the two to print.
 		pipeline  => $top->config->get('pipeline.name'),
 		type      => $top->type,
 		# Defaulted here and nowhere else.  The accessor answers undef for a

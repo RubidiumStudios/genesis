@@ -248,8 +248,8 @@ Optional, and read only alongside C<recover_from>.  The environment the
 caller is asking about.  Where it is given, a marker in the body addressed
 to some other environment is not recovered.  A body is the one place the
 reader takes a marker from that is not a commit on the environment's own
-branch, and a person can edit it after Genesis wrote it, so the caller at
-M16 should pass the environment it is propagating.
+branch, and a person can edit it after Genesis wrote it, so a caller
+should pass the environment it is propagating.
 
 =back
 

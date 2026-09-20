@@ -399,7 +399,7 @@ rather than assumed from the clean tree. A session that was never opened, and
 one that has already gone out through C<abort>, both have nothing to finish,
 so both answer false over a tree with nothing modified in it.
 
-M13's deploy asks for the finish this way because it wants to say what
+The deploy asks for the finish this way because it wants to say what
 happened in its own words before it decides what to do, and a death would not
 let it.
 
@@ -1052,7 +1052,7 @@ True only where C<finish> completed its clean path. A session that has not
 opened, one that is still open, and one that went out through C<abort> all
 answer false, and so does one that finished and has since been opened again.
 
-M15's post-deploy child reads it, because D84 makes a finished session the
+The post-deploy child reads it, because D84 makes a finished session the
 precondition for spawning one.
 
 B<Parameters:> None.
@@ -1252,7 +1252,7 @@ even where the tip cannot say so.
 C<committed_branches> works the set out for itself by comparing each branch's
 tip against the tip recorded when the session switched to it, and this covers
 the one case that comparison cannot see, which is a commit that leaves the tip
-where it was. M8's writer is the caller, and it says so outright rather than
+where it was. The writer is the caller, and it says so outright rather than
 relying on the comparison.
 
 B<Parameters:>

@@ -19,8 +19,8 @@ use IO::Handle;
 # new - build a session on one handle, without opening it {{{
 #
 # The control option is the branch abort never resets, which is I2 as D32
-# revised it.  The session is told the name rather than reading it, because
-# the accessor that knows it lands at M4 and the session is built at M5.
+# revised it.  The session is told the name rather than reading it, so
+# building one costs no read of the repository's configuration.
 sub new {
 	my ($class, $git, %opts) = @_;
 	bail("A branch session needs a Service::Git handle") unless $git;
@@ -45,8 +45,8 @@ sub new {
 
 # git - the handle this session was built on {{{
 #
-# The writer that lands at M8 already holds the session, and reaching git
-# through it keeps that writer from building a second handle for the same
+# A caller that writes already holds the session, and reaching git
+# through it keeps that caller from building a second handle for the same
 # working tree, which would key a second session and break I9.
 sub git { $_[0]->{git} }
 
@@ -57,8 +57,8 @@ sub active { $_[0]->{active} }
 # }}}
 # finished - did finish complete its clean path {{{
 #
-# D84 makes a finished session the precondition for the post-deploy child of
-# M15, so a session that went out through abort answers false here and the
+# D84 makes a finished session the precondition for the post-deploy child,
+# so a session that went out through abort answers false here and the
 # child is never spawned behind a run that failed.
 sub finished { $_[0]->{finished} ? 1 : 0 }
 
@@ -76,7 +76,7 @@ sub on { $_[0]->{on} }
 # The words are git's own, out of `git status --porcelain`, so a caller
 # naming them to an operator names what the operator would see.  Untracked
 # files are left out, because D84 says they block nothing, and this is the
-# one reader the three verbs and the deploy of M13 all ask, so the list an
+# one reader the three verbs and the deploy all ask, so the list an
 # operator is shown is the same list wherever they are shown it.
 sub modified_paths {
 	my ($self) = @_;
@@ -101,11 +101,11 @@ sub modified_paths_of {
 # }}}
 # committed_branches - the branches this session committed to {{{
 #
-# The writer lands at M8, so the session works out for itself what it wrote
-# rather than being told.  A branch whose tip differs from the tip recorded
-# at switch is one this session committed to, which is exactly the set D32
-# has abort reset back to T, and a branch the writer recorded outright joins
-# it, because a commit can leave a tip where it was.
+# The writer does not say what it wrote, so the session works that out for
+# itself rather than being told.  A branch whose tip differs from the tip
+# recorded at switch is one this session committed to, which is exactly the
+# set D32 has abort reset back to T, and a branch the writer recorded
+# outright joins it, because a commit can leave a tip where it was.
 #
 # Control is filtered out of both halves.  I2 keeps committed work on control
 # whole, so control is never in the set the abort resets, however it got
@@ -329,7 +329,7 @@ sub finish {
 # }}}
 # finish_if_clean - finish, or decline and leave the session open {{{
 #
-# M13's deploy wants to name the modified files in its own words before it
+# The deploy wants to name the modified files in its own words before it
 # decides what to do, so it asks for the finish and is given a false back
 # rather than a death.  The session stays open, so the caller can name the
 # files through modified_paths and then abort.
@@ -930,7 +930,7 @@ sub _members_at {
 # _record_commit - remember a branch this session committed to {{{
 #
 # committed_branches works the set out for itself by comparing tips, and this
-# is the writer of M8 saying so outright, which covers the one case the
+# is the writer saying so outright, which covers the one case the
 # comparison cannot see, a commit that leaves the tip where it was.
 sub _record_commit {
 	my ($self, $branch) = @_;
