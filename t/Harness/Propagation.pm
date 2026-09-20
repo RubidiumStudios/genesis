@@ -63,7 +63,8 @@ our @EXPORT = qw/
 	automation_blocks automation_block_lines load_with automated_config
 	compilable_pipeline shuttle
 
-	ready_envs ready_harness seeded_harness staged due_harness gated_harness
+	ready_envs ready_harness fanned_harness seeded_harness staged
+	due_harness gated_harness
 	held_harness held_prod held_prod_delivered deployable_prod
 	tracked_harness two_env_harness
 	inherited_harness
@@ -745,6 +746,11 @@ sub make_harness {
 		# environments stand beside one another is what most rows want and
 		# an edge nobody asked for changes every DAG the suite builds.
 		chained   => $opts{chained} // 0,
+		# A fanned harness hangs every other environment off the one this
+		# names, which is the shape a deploy that spawns one child for
+		# several branches needs.  It is exclusive with chained, because an
+		# environment has one predecessor.
+		fanned    => $opts{fanned},
 		# The shared files every environment declares through
 		# genesis.pipeline.track_additional_files.  The harness lays each one
 		# down on control as it seeds, so the declaration names a file the
@@ -877,10 +883,15 @@ sub _seed_control {
 	# are the predecessor a chained harness names and the shared files every
 	# environment tracks.  They go in here rather than in a commit of their
 	# own, so that a row's first commit is the first thing the walk finds due.
+	die "a harness is chained or fanned, not both\n"
+		if $self->{chained} && defined $self->{fanned};
 	my $prior;
 	for my $env (@{$self->{envs}}) {
+		my $names = defined $self->{fanned}
+			? ($env eq $self->{fanned} ? undef : $self->{fanned})
+			: ($self->{chained} ? $prior : undef);
 		$self->write_env_file($env, commit => 0, pipeline => {
-			($self->{chained} && defined $prior ? (prior_env => $prior) : ()),
+			(defined $names ? (prior_env => $names) : ()),
 			(@{$self->{shared}}
 				? (track_additional_files => $self->{shared}) : ()),
 		});
@@ -4615,6 +4626,12 @@ sub ready_envs {
 	my $control = $opts{control} // $self->git('a')->sha($self->{control});
 	my %delivered = map {($_ => 1)} @{$opts{delivered} // \@envs};
 	my %certified = map {($_ => 1)} @{$opts{certified} // \@envs};
+	# What each environment last read is per environment wherever the
+	# topology gives them different answers, so a hashref keyed on the
+	# environment is taken as well as one list for all of them.  It is taken
+	# off the options the builders below are handed, because certify writes
+	# the value it is given and a hashref is not one.
+	my $read = delete $opts{dependencies_read};
 
 	$self->fixture_vault;
 	$self->fixture_applied(control => $control,
@@ -4626,7 +4643,11 @@ sub ready_envs {
 		$self->fixture_pipeline_record($env, %opts,
 			dependencies => $opts{dependencies}{$env} // []);
 		$self->deliver($env, %opts, control => $control) if $delivered{$env};
-		$self->certify($env, %opts, control_commit => $control)
+		$self->certify($env, %opts, control_commit => $control,
+			(defined $read
+				? (dependencies_read => ref($read) eq 'HASH'
+					? ($read->{$env} // []) : $read)
+				: ()))
 			if $certified{$env};
 	}
 	$self->refresh('a', $self->{control}, map {$self->slug($_, %opts)} @envs);
@@ -4832,6 +4853,38 @@ sub ready_harness {
 	$h->ready_envs(%opts);
 	$h->_catch_up($_) for $catch_up ? @{$h->{envs}} : ();
 	return $h;
+}
+
+# fanned_harness is the fan-out, which is one environment several others
+# hang off rather than a chain of one predecessor each.  A deploy of the
+# prior environment leaves its child one commit to carry to several
+# branches, which is the shape the rows about a spawned child need and which
+# each of them used to build by hand, a line per record and a line per
+# branch.
+#
+# prior names the environment the others hang off, defaulting to the first,
+# and every other environment declares it as its predecessor and carries it
+# as its one dependency, so the topology and the pipeline records say the
+# same thing.  A row that wants other dependencies passes its own.
+sub fanned_harness {
+	my (%opts) = @_;
+	my @envs  = @{$opts{envs} // ['qa', 'prod', 'stage']};
+	my $prior = $opts{prior} // $envs[0];
+	die "fanned_harness hangs every environment off $prior, which is not "
+	  . "one of them\n" unless grep {$_ eq $prior} @envs;
+
+	# The pipeline record and the certified record say the same thing about
+	# each environment's dependencies, because the staleness comparison reads
+	# one against the other and a fan-out whose halves disagreed would warn
+	# on every run.
+	my $deps = $opts{dependencies} //
+		{map {($_ => $_ eq $prior ? [] : [$prior])} @envs};
+	return ready_harness(%opts,
+		envs              => [@envs],
+		fanned            => $prior,
+		dependencies      => $deps,
+		dependencies_read => $opts{dependencies_read} // $deps,
+	);
 }
 
 # seeded_harness is the same shape over one environment, and its applied
