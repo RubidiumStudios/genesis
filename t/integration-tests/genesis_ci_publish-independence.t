@@ -10,11 +10,11 @@
 # design, which gives every environment's reader its own marker, and it is
 # settled by reading that code rather than by a regex over what a run said.
 #
-# I12 is why the row exists.  Under D99 a future proposal to publish every
-# branch at once has to name a reader that needs two deployment branches to
-# agree, and the state this row watches is the one such a proposal would call
-# invalid: one branch landed, one refused, each marker true of the branch
-# under it, and I11's next run converging from there.
+# I12 is why the row exists.  A future proposal to publish every branch at
+# once has to name a reader that needs two deployment branches to agree, and
+# the state this row watches is the one such a proposal would call invalid:
+# one branch landed, one refused, each marker true of the branch under it,
+# and I11's next run converging from there.
 use strict;
 use warnings;
 use utf8;
