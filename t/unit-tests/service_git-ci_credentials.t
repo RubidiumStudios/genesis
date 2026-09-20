@@ -26,17 +26,25 @@ use_ok 'Service::Git';
 
 # Every test drives the function from a known-clean environment.
 my @VARS = qw(
+	GENESIS_PIPELINE_TASK
 	GIT_PRIVATE_KEY GIT_USERNAME GIT_PASSWORD
 	GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL
 	GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
 	GIT_SSH_COMMAND GIT_ASKPASS GIT_TERMINAL_PROMPT
 );
 
+# Provisioning is for a compiled pipeline task and for nothing else, so
+# every case below runs as one unless it says otherwise.  A caller that
+# wants the local shape passes GENESIS_PIPELINE_TASK as undef, and the
+# variable is then absent rather than empty.
 sub with_env {
 	my (%set) = @_;
 	local %ENV = (%ENV);
 	delete $ENV{$_} for @VARS;
-	$ENV{$_} = $set{$_} for keys %set;
+	$ENV{GENESIS_PIPELINE_TASK} = 1 unless exists $set{GENESIS_PIPELINE_TASK};
+	for my $var (keys %set) {
+		defined $set{$var} ? ($ENV{$var} = $set{$var}) : delete $ENV{$var};
+	}
 	Service::Git::reset_ci_credentials();
 	Service::Git::provision_ci_credentials();
 	return {map {$_ => $ENV{$_}} @VARS};
@@ -96,6 +104,28 @@ subtest 'existing prompt settings are never overridden' => sub {
 		'a caller-supplied GIT_TERMINAL_PROMPT wins';
 	isnt $env->{GIT_ASKPASS}, '/bin/false',
 		'the askpass helper still replaces the fail-fast default';
+};
+
+subtest 'a local run is left alone however its git variables are named' => sub {
+	plan tests => 3;
+
+	# Neither GIT_PRIVATE_KEY nor GIT_USERNAME belongs to Genesis, and an
+	# operator may well export either for another tool.  Reading one of them
+	# as permission to disable host key checking would take that
+	# verification away from every git operation Genesis makes, so the
+	# pipeline task marker is what says a pipeline is running.
+	my $env = with_env(
+		GENESIS_PIPELINE_TASK => undef,
+		GIT_PRIVATE_KEY       => $FAKE_KEY,
+		GIT_USERNAME          => 'someone',
+	);
+
+	ok !defined $env->{GIT_SSH_COMMAND},
+		'no ssh config is written and GIT_SSH_COMMAND is left alone';
+	ok !defined $env->{GIT_ASKPASS},
+		'the operator keeps their own credential helper or agent';
+	ok !defined $env->{GIT_TERMINAL_PROMPT},
+		'and git may still ask for what it cannot find';
 };
 
 # ======================================================================
@@ -200,6 +230,7 @@ subtest 'provisioning twice reuses the first materialisation' => sub {
 
 	local %ENV = (%ENV);
 	delete $ENV{$_} for @VARS;
+	$ENV{GENESIS_PIPELINE_TASK} = 1;
 	$ENV{GIT_PRIVATE_KEY} = $FAKE_KEY;
 	Service::Git::reset_ci_credentials();
 
