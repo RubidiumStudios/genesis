@@ -562,12 +562,12 @@ out of the same repository.
 
 =head2 hand_commit($h, $branch, %opts)
 
-Writes a commit carrying no marker, which is the emergency hatch of D33.  It
-is written from copy B by default and pushed, because the interesting case is
-a hand edit that the operator's own clone has not yet seen.  The options are
-C<copy>, C<files>, C<message>, and C<push>, which defaults on.  Where the
-copy has never seen the branch, it is cut from R's tip first, so the commit
-lands where the caller named it.
+Writes a commit carrying no marker, which is the emergency hatch.  It is
+written from copy B by default and pushed, because the interesting case is a
+hand edit that the operator's own clone has not yet seen.  The options are
+C<copy>, C<files>, C<message>, and C<push>, which defaults on.  Where the copy
+has never seen the branch, it is cut from R's tip first, so the commit lands
+where the caller named it.
 
 =head2 local_only_commit($h, $branch, %opts)
 
@@ -1563,8 +1563,8 @@ which defaults on and runs the real genesis underneath, C<exit>, which answers
 a chosen code without running anything, C<probe>, which polls the lock while
 the child runs and fills C<lock_seen>, and C<hold_lock>, a command string that
 has the wrapper take the lock from a process of its own for the child's whole
-life.  That last is how a row puts a stranger in the window D46 leaves open
-between the session's finish and the child's own start.
+life.  That last is how a row puts a stranger in the window left open between
+the session's finish and the child's own start.
 
 The wrapper is the committed C<t/Harness/bin/genesis-recorder> rather than a
 sub in this process, for the same reason the GitHub double is a fixture
@@ -1607,11 +1607,11 @@ in this process can answer for it.
 
 Records what a run put to the shuttle, so a row can tell a run that made no
 request from a run that had nowhere to make one.  Under the manual provider
-there is no backend at all and D23 refuses a file one, which is why that
-difference needs an observer rather than a reading of the tree.  The spy names
-its log in C<GENESIS_SHUTTLE_SPY> and lays the file down empty, so a row that
-reads no requests back has read a file the spy really wrote, and it answers
-with the spy a row then reads through.
+there is no backend at all, and the shuttle never takes a file backend, which
+is why that difference needs an observer rather than a reading of the tree.
+The spy names its log in C<GENESIS_SHUTTLE_SPY> and lays the file down empty,
+so a row that reads no requests back has read a file the spy really wrote, and
+it answers with the spy a row then reads through.
 
 =head2 shuttle_requests($spy)
 
