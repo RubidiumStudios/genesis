@@ -42,10 +42,19 @@ subtest 'propagate switches to the configured name and comes back' => sub {
 	# `elsewhere` stands itself on trunk, and a reader that fell back to the
 	# schema default would look for a branch called `control`, find it
 	# neither here nor on the remote, and say so by name.
-	plan tests => 3;
+	plan tests => 4;
 
+	# The run reaches the applied record and stops there, which is after the
+	# switch and before anything that would name a branch out loud, so the
+	# branch it stood on is read off the step log rather than out of a
+	# message.  Both halves of the title are then asserted.
+	my $git = fault_git($h);
 	my $w = snapshot_w($h);
 	my (undef, $err) = $h->run_genesis({restore => 0}, 'propagate');
+
+	my @checkouts = map {$_->[1]} grep {$_->[0] eq 'checkout'} step_log($git);
+	ok(scalar(grep {$_ eq 'trunk'} @checkouts),
+		'the run stood itself on the branch the repository declared');
 
 	unlike $err, qr/must be run from/,
 		'standing off the control branch is a refusal no longer';
