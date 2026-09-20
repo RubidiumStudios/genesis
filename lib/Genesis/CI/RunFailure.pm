@@ -1,7 +1,7 @@
 package Genesis::CI::RunFailure;
-# The two classes of failure that end a propagate run, under D82.  They differ
-# in whether a retry can help.  A run-fatal failure is the writer's own, which
-# nothing the caller could do differently would have fixed, and an unsurvivable
+# The two classes of failure that end a propagate run.  They differ in whether
+# a retry can help.  A run-fatal failure is the writer's own, which nothing
+# the caller could do differently would have fixed, and an unsurvivable
 # failure is an error no environment survives that a retry may fix, the remote
 # being unreachable as the case.  Both abort the run the same way, so both
 # live here.
