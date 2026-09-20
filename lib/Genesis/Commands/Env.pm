@@ -2136,8 +2136,18 @@ sub deploy {
 		# Everything above this line wrote W and the exodus record, so any
 		# git write this command ends with is the child's and not the
 		# deploy's.
+		#
+		# D84 makes a finished session the precondition, and a repository
+		# with no pipeline runs no pre-flight while a deploy that already
+		# stood on its own branch opened no session, which is why an absent
+		# one passes rather than fails.  Where the session went out through
+		# abort the command has already left, so this is a second belt: it
+		# is what stops a later change to the failure path from fanning out
+		# a tree a kit hook has written into.
+		my $session = $preflight ? $preflight->{session} : undef;
 		_spawn_propagate_child($env)
-			if _propagate_after_deploy($env, \%options);
+			if (!$session || $session->finished)
+			&& _propagate_after_deploy($env, \%options);
 
 		# The status is handed back rather than exited with, because the
 		# deploy declares DEPLOYED_STATE and the gate holds a branch session

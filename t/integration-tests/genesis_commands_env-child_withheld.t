@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 # What withholds the propagate child, and what catches up afterwards.
-# Proves T252 and T256 of the test matrix.
+# Proves T252, T256, and T253 of the test matrix.
 #
 # The flag is D35's, and it withholds the child and nothing else.  The gate
 # the hand-off is spawned behind already refuses on it, so nothing here makes
@@ -17,6 +17,14 @@
 # would have produced.  A run that spawned the child anyway would leave that
 # hand run nothing to deliver, and a hand run that delivered nothing would say
 # nothing about whether the flag had withheld anything.
+#
+# The third subtest is the other thing that withholds the child, which is the
+# defect D84 names rather than a flag anybody typed.  A kit hook writes into
+# the repository, the session finds the tracked modification when it ends, and
+# the tree it hands back is not one to fan out from.  It belongs beside the
+# other two because it is the same question asked of a run that failed, and
+# because the hand run it ends with is the same catch-up the second subtest
+# reads.
 #
 # The fixture is the chained shape rather than the step file's bare
 # make_harness, for the reason Task 14.6 recorded against the same rows.  A
@@ -37,7 +45,7 @@ use Test::More;
 
 use Genesis;
 
-plan tests => 2;
+plan tests => 3;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -124,6 +132,51 @@ subtest 'the hand run delivers what the child would have' => sub {
 		'the second run found nothing left to do');
 	unlike($again.$again_err, qr/\bpropagated\b/,
 		'the second run delivered nothing, so the run is level triggered');
+};
+
+subtest 'a tracked modification at finish withholds the child' => sub {
+	plan tests => 7;
+
+	# A kit hook that writes into the repository is the defect D84 names,
+	# and it leaves the tracked modification finish will find.  The hook is
+	# handed to the bosh fixture rather than laid by a call of its own,
+	# because that fixture writes the kit itself and commits it on control,
+	# and a second kit written afterwards would take the blueprint hook with
+	# it and stand its commit on whatever branch the row had reached.
+	my $h = ready_harness(envs => ['qa', 'prod'], chained => 1, bosh => {
+		hooks => {
+			'post-deploy' => 'echo "# tampered" >> "$GENESIS_ROOT/qa.yml"',
+		},
+	});
+	my $control = due_on_control($h);
+
+	child_recorder($h);
+	stand_on($h, $h->control);
+	my $w = snapshot_w($h);
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
+		'qa', 'deploy', '-y');
+
+	isnt($exit, 0, 'the command exited non-zero, because a kit wrote to the repo');
+	my $report = $out.$err;
+	# The sentence read for this is the abort's own rather than the tail of
+	# the command, because the abort ends the command where it stands and
+	# the line that says "deployed successfully" is below it and never
+	# printed.  What the operator is told is that the environment is running
+	# and needs no redeploying, which is the same fact said where they will
+	# actually read it.
+	like($report, qr/deployed and its deployment record is written/,
+		'the deploy is still reported as having succeeded');
+	like($report, qr/qa\.yml/, 'the abort named the file that was modified');
+	is_deeply([child_runs($h)], [], 'no child was spawned');
+	assert_w_restored($w, 'the starting branch was restored anyway');
+
+	my ($hand, $hand_err, $run) = run_genesis($h, {restore => 0},
+		'propagate', '-y');
+	is($run, 0, 'the hand run afterwards succeeded')
+		or diag("what the hand run said:\n$hand_err");
+	refresh($h, 'a', $h->slug('prod'));
+	is(harness_marker($h, 'origin/'.$h->slug('prod')), $control,
+		'the hand run delivered what the child would have');
 };
 
 # vim: ts=2 sw=2 sts=2 noet
