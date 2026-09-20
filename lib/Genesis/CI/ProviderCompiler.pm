@@ -492,6 +492,34 @@ sub _is_yaml_leaf {
 }
 
 # }}}
+# _yaml_key - a hash key in its YAML spelling {{{
+#
+# The rules a value takes, less the block form, because a key cannot be
+# written over several lines.  A key used to be written exactly as it
+# stood whatever it held, so one carrying a colon, a comment marker, or
+# a word a reader takes for a boolean produced a document that came back
+# as something else or would not parse at all.
+sub _yaml_key {
+	my ($name) = @_;
+	return _yaml_quoted($name) if $name =~ /\n/;
+	return _yaml_scalar($name, 0);
+}
+
+# }}}
+# _yaml_quoted - a string in the double-quoted form {{{
+#
+# A newline is written as its escape rather than left where it stands,
+# because a quoted string spread over several lines has them folded into
+# spaces when it is read back.
+sub _yaml_quoted {
+	my ($val) = @_;
+	$val =~ s/\\/\\\\/g;
+	$val =~ s/"/\\"/g;
+	$val =~ s/\n/\\n/g;
+	return "\"$val\"";
+}
+
+# }}}
 # _yaml_pair - write one key and its value under a list item {{{
 #
 # The lead is what the key sits behind, which is the dash for a list
@@ -500,7 +528,8 @@ sub _is_yaml_leaf {
 # written on the key's own line, because a key followed by nothing reads
 # back as null rather than as the empty thing it was.
 sub _yaml_pair {
-	my ($lead, $key, $val, $indent) = @_;
+	my ($lead, $name, $val, $indent) = @_;
+	my $key = _yaml_key($name);
 
 	return "${lead}${key}: ~"  if !defined $val;
 	return "${lead}${key}: " . _yaml_scalar($val, $indent)
@@ -522,8 +551,9 @@ sub _to_yaml {
 		return "~";
 	} elsif (ref($data) eq 'HASH') {
 		my @lines;
-		for my $key (sort keys %$data) {
-			my $val = $data->{$key};
+		for my $name (sort keys %$data) {
+			my $val = $data->{$name};
+			my $key = _yaml_key($name);
 			if (!defined $val) {
 				push @lines, "${prefix}${key}: ~";
 			} elsif (_is_yaml_leaf($val)) {
@@ -636,13 +666,8 @@ sub _yaml_scalar {
 			map {length($_) ? "$pad$_" : ''} split(/\n/, $body, -1));
 	}
 
-	# Strings that need quoting.  A newline is written as its escape rather
-	# than left where it stands, because a quoted value spread over several
-	# lines has them folded into spaces when it is read back.
-	$val =~ s/\\/\\\\/g;
-	$val =~ s/"/\\"/g;
-	$val =~ s/\n/\\n/g;
-	return "\"$val\"";
+	# Strings that need quoting
+	return _yaml_quoted($val);
 }
 
 # }}}

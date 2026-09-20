@@ -478,13 +478,14 @@ than an outside one. Every emitter and C<genesis dev> use this same code,
 so a diff between two renderings is about the pipeline rather than about
 key order or quoting.
 
-What comes back reads as what went in. A boolean is written as C<true> or
-C<false> wherever it sits, a string holding newlines is written as a block
-scalar indented to where its key stands, and a value a reader would take
-for a number, a date, or a keyword is quoted. Anything the writer does not
-recognise is written as the string it prints as rather than passed over,
-so a value it has never seen reaches the document where somebody can see
-it.
+What comes back reads as what went in, keys as well as values. A boolean
+is written as C<true> or C<false> wherever it sits, a string holding
+newlines is written as a block scalar indented to where its key stands,
+and anything a reader would take for a number or a keyword is quoted. A
+key takes those same rules less the block form, since a key cannot be
+written over several lines. Anything the writer does not recognise is
+written as the string it prints as rather than passed over, so a value it
+has never seen reaches the document where somebody can see it.
 
 B<Parameters:>
 
@@ -638,6 +639,57 @@ B<Examples:>
     Genesis::CI::ProviderCompiler::_is_yaml_leaf('a');            # true
     Genesis::CI::ProviderCompiler::_is_yaml_leaf(JSON::PP::true); # true
     Genesis::CI::ProviderCompiler::_is_yaml_leaf({});             # false
+
+=head2 _yaml_key($name)
+
+A hash key in its YAML spelling, by the rules a value takes less the
+block form, since a key cannot be written over several lines and one
+carrying a newline is quoted instead. A key used to be written exactly as
+it stood whatever it held, so one carrying a colon, a comment marker, or
+a word a reader takes for a boolean produced a document that came back as
+something else or would not parse at all.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The key, as the structure holds it.
+
+=back
+
+B<Returns:> the key's spelling, as a string.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::_yaml_key('name');   # 'name'
+    Genesis::CI::ProviderCompiler::_yaml_key('a: b');   # '"a: b"'
+
+=head2 _yaml_quoted($val)
+
+A string in the double-quoted form, which is where both the scalar writer
+and the key writer end up for anything the bare and block forms cannot
+carry. A newline is written as its escape rather than left where it
+stands, because a quoted string spread over several lines has them folded
+into spaces when it is read back.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$val>
+
+The string to quote.
+
+=back
+
+B<Returns:> the quoted string, with its backslashes, quotes, and newlines
+escaped.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::_yaml_quoted("a\nb");  # '"a\nb"'
 
 =head2 _yaml_pair($lead, $key, $val, $indent)
 

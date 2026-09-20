@@ -39,7 +39,7 @@ subtest 'a boolean keeps its type in each of the three positions' => sub {
 
 	my $data = {
 		plain => JSON::PP::true,
-		off   => JSON::PP::false,
+		falsy => JSON::PP::false,
 		list  => [JSON::PP::true, JSON::PP::false],
 		under => [{key => JSON::PP::true, second => JSON::PP::false}],
 	};
@@ -99,10 +99,10 @@ subtest 'the quoting rules keep a string a string' => sub {
 	# Each of these is a value a reader would take for something other than
 	# a string if it reached the document bare.
 	my $data = {
-		yes        => 'yes',
-		no         => 'no',
-		on         => 'on',
-		off        => 'off',
+		word_yes   => 'yes',
+		word_no    => 'no',
+		word_on    => 'on',
+		word_off   => 'off',
 		true       => 'true',
 		false      => 'false',
 		null       => 'null',
@@ -119,6 +119,40 @@ subtest 'the quoting rules keep a string a string' => sub {
 	is $rc, 0, 'the document parses' or diag("$err\n$yaml");
 	is_deeply $read, $data, 'and every value comes back as the string it was'
 		or diag($yaml);
+};
+
+subtest 'a key is spelled by the same rules a value is' => sub {
+	plan tests => 3;
+
+	# A key used to be written exactly as it stood, so each of these
+	# produced a document that came back as something else or would not
+	# parse at all.
+	#
+	# The four words YAML 1.1 reads as booleans, which are on, off, yes,
+	# and no, are not among them.  The writer quotes one, which is right
+	# for the reader a pipeline meets, but spruce puts a marker in front
+	# of a quoted key it recognises as one of the four, so this reader
+	# cannot be asked the question at all.
+	my $data = {
+		'a: b'       => 'colon',
+		'x #y'       => 'comment marker',
+		'0755'       => 'octal looking',
+		'true'       => 'a word a reader takes for a boolean',
+		'null'       => 'and one it takes for nothing',
+		'plain_key'  => 'left alone',
+		'with space' => 'spaces in it',
+	};
+
+	my ($read, $rc, $err, $yaml) = round_trip($data);
+	is $rc, 0, 'the document parses' or diag("$err\n$yaml");
+	is_deeply $read, $data, 'and every key comes back as the key it was'
+		or diag($yaml);
+
+	# A key beneath a list item is written by its own sub, so it is asked
+	# for separately.
+	my ($nested, $nrc, $nerr, $nyaml) = round_trip({list => [{'a: b' => 'v'}]});
+	is_deeply $nested, {list => [{'a: b' => 'v'}]},
+		'including a key under a list item' or diag("$nerr\n$nyaml");
 };
 
 subtest 'the empty and undefined cases keep their shape' => sub {
