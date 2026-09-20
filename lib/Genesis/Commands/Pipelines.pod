@@ -866,8 +866,11 @@ commit computed from a tip that has already moved.  Nothing is pushed, every
 branch the run committed to goes back to where the remote has it, and the
 refusal names the step that repairs control.  The status is the temporary one
 under D106, because nothing the operator wrote is wrong.  Another clone moved
-control while this run was walking, and the next run refreshes and walks from
-what is there now, so it succeeds with nobody doing anything first.
+control while this run was walking, and the next run the pipeline job cuts
+starts from a fresh clone, so it refreshes, walks from what is there now, and
+succeeds with nobody doing anything first.  An operator running from a clone
+of their own keeps a control branch a commit behind, and the run there is
+refused for an illegal initial state until they pull.
 
 Exits C<Genesis::Exit/ABORTED> where the operator was asked whether to publish
 and answered no, which is D97's one number for a run a person stopped.
