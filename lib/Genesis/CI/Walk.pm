@@ -882,10 +882,10 @@ sub is_run_fatal {
 # than decided here, because Genesis::CI::RunFailure already carries the one
 # each class gets.
 #
-# The outcome words come from that same class, and an environment the run
-# had reached records that nothing of its was published while one it never
-# reached records that it was not attempted, because a phrase living in two
-# places is a phrase the two drift apart on.
+# The outcome words come from that same class, because a phrase living in
+# two places is a phrase the two drift apart on.  An environment the run
+# had reached records that nothing of its was published, and one it never
+# reached records that it was not attempted.
 #
 # The abort is the last thing that happens, because it is what resets every
 # branch this session committed to back to T and it ends the process on the
@@ -1169,11 +1169,11 @@ sub plan {
 		};
 		push @{$record->{environments}}, $env_record;
 
-		# The same confinement stands around the walk as it stands around
-		# the delivery, because a blueprint that raises while this
-		# environment's fragments are enumerated is an error of that class
-		# and ends this environment alone.  No session is handed over, since
-		# the walk writes nothing and there is no branch to put back.
+		# An error raised while this environment's fragments are enumerated
+		# is confined to this environment exactly as one raised during the
+		# delivery is, and it ends this environment alone.  No session is
+		# handed over, since the walk writes nothing and there is no branch
+		# to put back.
 		walk_one(record => $env_record, deliver => sub {
 
 			my $env = $env_for->($name);
