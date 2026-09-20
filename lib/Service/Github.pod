@@ -1529,6 +1529,40 @@ B<Examples:>
 
 =head1 INTERNAL METHODS
 
+=head2 _next_page
+
+  my $url = Service::Github::_next_page($headers);
+
+The URL the C<Link> header names as the next page, or C<undef> where there is
+no next page and where no headers were given.
+
+GitHub pages every list endpoint and names the next page in a C<Link> header
+rather than in the body, so a reader that takes the first answer whole acts on
+a prefix of the truth. L</list_prs> and L</pr_reviews> both walk with this.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$headers>
+
+The raw response headers, as C<curl> returns them. An undefined or empty value
+answers C<undef>.
+
+=back
+
+B<Returns:> The next page's URL, or C<undef>.
+
+B<Errors:> None. A header it cannot read answers C<undef>, which ends the walk.
+
+B<Examples:>
+
+  my $url = Service::Github::_next_page($headers);
+  # returns 'https://api.github.com/repos/org/repo/pulls?page=2'
+
+  my $url = Service::Github::_next_page('');
+  # returns undef, so the caller stops
+
 =head2 _attach_review
 
   $gh->_attach_review($owner_repo, $pr);
