@@ -51,13 +51,10 @@ subtest 'a hold stops delivery in direct mode' => sub {
 subtest 'a hold stops a pull request being opened or updated' => sub {
 	plan tests => 3;
 
-	# This row guards the pull-request path until that path exists.  The walk
-	# does not reach the hold in PR mode today, because propagate prints
-	# "not attempted, because delivery by pull request is not built yet" and
-	# carries on past the environment before it reads the hold, so what the
-	# rows below hold true of is a run that opened nothing because it opened
-	# nothing at all.  They say what the hold must go on meaning once the
-	# path lands.
+	# The walk reads the hold in pull request mode and stops there, so the
+	# rows below discriminate: a run over the same fixture with the hold
+	# lifted opens a pull request and pushes its branch, and each of these
+	# three would fail on it.
 	my $h = held(mode => 'pr', github => 1);
 	my $gh = github_double($h);
 	two_due($h, env => 'qa');
