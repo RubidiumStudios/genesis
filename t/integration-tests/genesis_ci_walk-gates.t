@@ -34,9 +34,9 @@ subtest 'the gate travels with its predecessors and ends the delivery' => sub {
 	like($err, qr/\Q@{[substr($shas[3], 0, 7)]}\E.*gate: schema change/s,
 		'the fourth commit is held with the gate\'s reason');
 
-	# The qualifier is the environment's own held reading, which under D54 is
-	# the run delivering nothing new to it, so it is read off a second run
-	# that finds the gate already delivered and the commit behind it held.
+	# The qualifier is the environment's own held reading, which is the run
+	# delivering nothing new to it, so it is read off a second run that finds
+	# the gate already delivered and the commit behind it held.
 	my (undef, $again) = run_genesis($h, {answers => ['y']}, 'propagate');
 	like($again, qr/held, awaiting deployment \(qa at control\@[0-9a-f]+\)/,
 		'the environment waits on its own certification of the gate');
@@ -50,7 +50,7 @@ subtest 'a gate stands until the environment certifies it' => sub {
 	# the first run delivers up to the gate and leaves the branch's marker
 	# standing on it.  A second run that read the gate over the range from
 	# that marker would start at the gate itself and so find no gate at all,
-	# and the commit D49 holds would go out on a run nobody deployed
+	# and the commit the gate holds would go out on a run nobody deployed
 	# anything between.
 	my ($h, @shas) = gated_harness(stage => 'schema change',
 		kit => 'omega-v2.7.0', certified => []);

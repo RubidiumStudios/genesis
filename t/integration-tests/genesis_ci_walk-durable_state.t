@@ -205,7 +205,7 @@ subtest 'an absent input is read and never guessed at' => sub {
 	plan tests => 8;
 
 	# An applied record that is absent is not an input the run cannot read.
-	# D94 gives the absence its own reading, which is that the pipeline awaits
+	# The absence has a reading of its own, which is that the pipeline awaits
 	# genesis pipeline-apply, so the run takes that reading, says which one it
 	# took, and carries on rather than refusing over it.
 	my $h = two_stage();
@@ -223,10 +223,10 @@ subtest 'an absent input is read and never guessed at' => sub {
 
 	# A hold is durable state like any other, so it is read for every
 	# environment the run reads.  An environment the pipeline was never applied
-	# to is one the run reads and does not walk, and D56 asks that a hold
-	# standing over it be reported rather than left unsaid.
+	# to is one the run reads and does not walk, and a hold standing over it
+	# is reported rather than left unsaid.
 	#
-	# D56 also decides which of the two the qualifier names.  A hold is a
+	# The qualifier names the hold rather than the apply.  A hold is a
 	# decision somebody made and only a person clears it, so it outranks the
 	# apply the environment is otherwise waiting for, and the apply is what
 	# the environment reads as waiting for once the hold is gone.
