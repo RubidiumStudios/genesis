@@ -2,7 +2,7 @@ package Genesis::CI::Report;
 # The propagate run's report.  Every word an operator reads about an outcome
 # is composed here, and pipeline-status renders the same record through the
 # same helpers, so the two outputs cannot disagree about a phrase.  I8 is the
-# rule the file exists for: nothing is silently omitted.
+# rule the file exists for, which is that nothing is silently omitted.
 #
 # The report stands on three axes, and every one of them is exhaustive.  Each
 # environment in scope carries exactly one outcome, each control commit the
@@ -175,7 +175,7 @@ sub held_qualifier {
 	# at once and the two commands would rank them apart if either ranked
 	# them for itself.  The hold wins, because the apply is a command the
 	# operator may run at once and the hold is a decision standing in front
-	# of it: an environment that reads as awaiting the apply while a hold
+	# of it.  An environment that reads as awaiting the apply while a hold
 	# stands sends them to a command that would change nothing.  Clearing the
 	# hold leaves the apply as what the environment waits for, and
 	# hold_detail says meanwhile what the hold is holding.
@@ -231,7 +231,7 @@ sub held_qualifier {
 #
 # D56 makes a hold outrank idempotent, so an environment with one standing
 # never reads as though it were fine, and this is the line that says which of
-# three situations it is in: a known number of commits are waiting on the
+# three situations it is in.  A known number of commits are waiting on the
 # hold itself, or something else is holding commits and the hold stands over
 # them, or nothing at all is waiting.
 #
@@ -266,8 +266,9 @@ sub hold_detail {
 	# by something older than D53's four fields can be missing any of them,
 	# so each is named as unrecorded rather than left to print as an empty
 	# gap the reader has to guess at.
-	# In backticks, because it stands mid-sentence and the report has no
-	# colour to spare inside a span it is already printing in.
+	# In backticks, because it stands mid-sentence and every reader of that
+	# sentence is already printing it inside a colour span of its own.  The
+	# three readers are the run's report, the preview, and pipeline-status.
 	my $release = sprintf('`%s`', release_command($record->{env}));
 	my $by = sprintf('held by %s@%s at %s',
 		$hold->{user}     // 'an unrecorded user',
@@ -289,8 +290,9 @@ sub hold_detail {
 		unless @held;
 
 	# Everything held here is held for a reason of its own, and the hold
-	# stands over all of it, so the line says both: clearing what those
-	# commits wait for releases nothing while the hold is still standing.
+	# stands over all of it, so the line says both, because clearing what
+	# those commits wait for releases nothing while the hold is still
+	# standing.
 	return sprintf(
 		'%d commit%s %s blocked for %s own, and %s blocked while this hold '.
 		'stands, which %s clears, %s',
@@ -409,8 +411,8 @@ sub render_run {
 			info "    Release it with #C{%s}", release_command($env->{env});
 		}
 
-		# The commit axis, in control order: what the environment received
-		# first, and then what it is holding behind it.
+		# The commit axis, in control order, which is what the environment
+		# received first and then what it is holding behind it.
 		for my $pending (@{$env->{pending} || []}) {
 			# The word is appended rather than printed into a fixed slot,
 			# because a commit the publish left without one has no word to
@@ -628,13 +630,14 @@ sub _commits {
 #
 # The command is composed here and nowhere else, because a command
 # spelled in two places is a command the two spellings drift apart on.  The
-# two callers dress it differently, hold_detail in backticks because it sits
-# inside a sentence and render_run in the colour every command this report
-# names takes, and what they share is the words.
+# callers dress it differently, hold_detail in backticks because it sits
+# inside a sentence every one of its three readers already prints in a
+# colour span, and render_run in the colour every command this report names
+# takes, and what they share is the words.
 #
 # The placeholder answers a record with no environment on it, which is a
-# record nothing in the tree builds: the walk keys every record it makes on
-# the environment's name.  It is here so that such a record prints something
+# record nothing in the tree builds, because the walk keys every record it
+# makes on the environment's name.  It is here so that such a record prints something
 # an operator can see is wrong rather than a command with a gap in it.
 sub release_command {
 	my ($env_name) = @_;
