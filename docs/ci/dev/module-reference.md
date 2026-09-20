@@ -413,9 +413,6 @@ There is no resolver here. `compile()` builds a `Genesis::CI::Provider` and asks
 - `_extract_workflow_data($ast, $workflow)`
   unified extraction from any workflow type.
 
-- `_git_uri($source_control)`
-  builds git URI.
-
 - `_unwrap_ref($value)`
   unwraps `{secret_ref => '...'}` to `((...))`.
 
@@ -430,9 +427,6 @@ There is no resolver here. `compile()` builds a `Genesis::CI::Provider` and asks
 
 - `_shared_env_files($env, $trigger_from)`
   files shared between envs.
-
-- `_topological_sort($graph)`
-  standard topological sort.
 
 ---
 
