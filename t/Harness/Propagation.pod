@@ -2149,6 +2149,14 @@ names.  Its C<config> option writes the whole C<.genesis/config> on control
 first, replacing what was there, so a row can build the shape with no provider
 key at all rather than editing one key of the file C<make_harness> left.
 
+A configuration that says nothing about C<minimum_version> is given the same
+floor C<load_with> defaults to, which is C<3.2.0>, because a fixture that
+declares no floor stands for a repository a development build created and an
+environment with no floor of its own on such a repository is refused.  A
+configuration that names the key keeps the value it named, so a row that is
+about the floor, including one that wants that refusal, says so in the hash it
+hands in, and naming the key with C<undef> writes no floor.
+
 =head1 METHODS
 
 C<r>, C<a>, and C<b> return the three paths.  C<type>, C<control>, and C<envs>
