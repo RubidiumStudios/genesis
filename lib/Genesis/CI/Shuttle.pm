@@ -8,11 +8,12 @@ use Genesis;
 
 # options_schema - the keys this backend reads (abstract) {{{
 #
-# The second block whose shape is a function of one of its own values,
-# and the smaller one.  The shape is the provider's, which is one class
-# per value of the discriminator, each declaring the keys it reads, and
-# a base that validates a block against whichever declaration the value
-# selected.
+# The second block declared as a custom_struct, and the smaller one.
+# That type names the field that discriminates and maps each of its
+# values to the module owning that shape.  The shape is the provider's,
+# which is one class per value of the discriminator, each declaring the
+# keys it reads, and a base that validates a block against whichever
+# declaration the value selected.
 #
 # It is named options_schema rather than provider_options_schema because
 # the readers that give the provider's method its longer name, which are
