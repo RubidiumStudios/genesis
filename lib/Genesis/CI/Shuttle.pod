@@ -15,14 +15,14 @@ Genesis::CI::Shuttle - the object store behind the pipeline's queue and event
 
 =head1 DESCRIPTION
 
-Under D23 every environment's request queue and its C<_ran> event live in
-one object store, and never in a directory, because a directory on one
-worker cannot trigger a run in another pipeline. Two backends carry that
-store, S3 and GCS, and they do not read the same keys: S3 takes a region
-and may take a non-default endpoint, and the GCS resource takes neither.
+Every environment's request queue and its C<_ran> event live in one
+object store, and never in a directory, because a directory on one worker
+cannot trigger a run in another pipeline. Two backends carry that store,
+S3 and GCS, and they do not read the same keys: S3 takes a region and may
+take a non-default endpoint, and the GCS resource takes neither.
 
 So the block is declared on its backend rather than flat, which is what
-D105 asks of a block whose shape is a function of one of its own values.
+a block whose shape is a function of one of its own values calls for.
 Each backend is a class of its own, it declares the keys it reads through
 C<options_schema>, and this base validates a block against whichever
 declaration the written backend selected. A GCS configuration then has
@@ -36,7 +36,7 @@ needs one today.
 
 The method is called C<options_schema> rather than
 C<provider_options_schema>, which is the name the same declaration carries
-on L<Genesis::CI::Provider>. The longer name is owed to the D86 readers a
+on L<Genesis::CI::Provider>. The longer name is owed to the readers a
 provider has, which are C<pipeline-describe>'s resolved values, the
 per-key defaults, the help text, and the wizard, and a shuttle backend has
 none of them.

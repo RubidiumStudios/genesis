@@ -8,16 +8,17 @@ use Genesis;
 
 # options_schema - the keys this backend reads (abstract) {{{
 #
-# The second user of D105's type, and the smaller one.  The shape is the
-# provider's: one class per value of the discriminator, each declaring
-# the keys it reads, and a base that validates a block against whichever
-# declaration the value selected.
+# The second block whose shape is a function of one of its own values,
+# and the smaller one.  The shape is the provider's, which is one class
+# per value of the discriminator, each declaring the keys it reads, and
+# a base that validates a block against whichever declaration the value
+# selected.
 #
 # It is named options_schema rather than provider_options_schema because
-# the D86 readers that give the provider's method its longer name, which
-# are describe, the per-key defaults, the help text, and the wizard, do
-# not exist for a shuttle backend, so carrying that prefix here would
-# name the method after readers it does not have.
+# the readers that give the provider's method its longer name, which are
+# describe, the per-key defaults, the help text, and the wizard, do not
+# exist for a shuttle backend, so carrying that prefix here would name
+# the method after readers it does not have.
 sub options_schema {
 	my ($self) = @_;
 	bug("Subclass '%s' must implement options_schema()", ref($self) || $self);
