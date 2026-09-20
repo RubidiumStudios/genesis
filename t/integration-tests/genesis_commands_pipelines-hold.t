@@ -184,8 +184,8 @@ subtest 'a hold stops the pull request in PR mode' => sub {
 	# stays pending, the arm opens a pull request and pushes its branch, and
 	# three of the four go red.
 	#
-	# The first two rows are this task's own, and neither could pass before
-	# the command existed: the hold has to be settable in a repository whose
+	# The first two rows belong to this command, and neither could pass
+	# before it existed.  The hold has to be settable in a repository whose
 	# environments deliver by pull request, and the record it wrote has to
 	# still be standing once the run has been past.
 	plan tests => 8;

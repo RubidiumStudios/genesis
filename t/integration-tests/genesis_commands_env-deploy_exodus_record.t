@@ -6,8 +6,8 @@
 #
 # Every run passes --no-propagate, for the reason the due-commits and drifted
 # files give, because the auto-cascade hands off to a child genesis propagate
-# that a later step owns and that fails today, and a row about what the deploy
-# recorded should not be reading the child's failure as the deploy's.
+# that fails today, and a row about what the deploy recorded should not be
+# reading the child's failure as the deploy's.
 use strict;
 use warnings;
 use utf8;
@@ -88,8 +88,8 @@ subtest 'the recorded dependency set is what the deploy actually read' => sub {
 
 subtest 'the two timestamp forms stay apart' => sub {
 	# Every row here was green when it was written, and the subtest stays as
-	# a guard rather than as a proof of anything this task wrote.  What it
-	# catches is a later step writing a time held as a value in the path's
+	# a guard rather than as a proof of anything these rows wrote.  What it
+	# catches is a later change writing a time held as a value in the path's
 	# short numeric form, or an entry name in the value's form, or an ISO
 	# form anywhere, which is the one distinction D58 exists to keep.
 	#

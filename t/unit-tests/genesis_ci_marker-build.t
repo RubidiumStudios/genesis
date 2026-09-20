@@ -3,8 +3,8 @@
 # onto qa/bosh writes "[pipeline] control@<sha> -> qa", and it writes it by
 # asking the builder rather than by spelling the subject itself.  The sweep
 # that proves no other site under lib/ or bin/ spells that subject by hand
-# lands with the last task to touch those files, once every writer and every
-# reader has been pointed at this module.
+# belongs with the change that points every writer and every reader at this
+# module.
 use strict;
 use warnings;
 use utf8;

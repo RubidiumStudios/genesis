@@ -357,7 +357,8 @@ subtest 'the redeploy skips the two warnings about the tip' => sub {
 # whose definition has moved is stale whichever commit is being deployed.
 #
 # Both rows were green on arrival, and they are stated as such.  Nothing in
-# this task touches the gate, and the wrong implementation nearest to hand is
+# the redeploy path touches the gate, and the wrong implementation nearest to
+# hand is
 # one that reads "a redeploy is narrower" as licence to skip everything the
 # pre-flight would otherwise say, which is what these hold still.
 #
@@ -630,7 +631,7 @@ subtest 'recreate_on_deploy reaches every deploy as declared' => sub {
 	# _post_deploy says the post-deployment activities are skipped and exits
 	# there, above the cleanup that would have taken it away.  The run is
 	# therefore told not to assert a restoration it cannot make, and the tree
-	# it leaves is nothing this task changed.
+	# it leaves is nothing the redeploy changed.
 	my (undef, $gerr, $dry_exit) = run_genesis($g, {restore => 0},
 		'qa', 'deploy', '--dry-run', '--no-propagate', '-y');
 	is($dry_exit, 0, 'a repository set to always still allows a dry run')

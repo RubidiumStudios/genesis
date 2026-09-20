@@ -12,8 +12,8 @@
 #
 # The last row is the outcome words the run records when it ends on either of
 # these refusals.  It sits here because this file is where the failure class
-# is first raised, and the walk that reads those words end to end is a later
-# task's row in a file of its own.
+# is first raised, and the walk that reads those words end to end is read in
+# a file of its own.
 use strict;
 use warnings;
 use utf8;

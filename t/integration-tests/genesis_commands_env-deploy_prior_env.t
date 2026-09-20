@@ -77,7 +77,7 @@ subtest 'the predecessor is named by a site file, and read before the load' => s
 	# Genesis::Env->bare, which loads no kit, and this subtest installs a kit
 	# that resolves, so a read moved onto a loaded environment here would
 	# answer about the director it cannot reach and never about a dev kit.
-	# No wrong implementation of this task turns this row red.
+	# No wrong implementation of that read turns this row red.
 	#
 	# The row that would prove it instead takes fixture_kit away and asserts
 	# the absence of "dev kit" against a kit that cannot resolve.  That trade

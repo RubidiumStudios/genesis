@@ -24,9 +24,9 @@ $ENV{NOCOLOR} = 1;
 subtest 'the baseline swallowed a failed restore' => sub {
 	plan tests => 4;
 
-	# H2's shape, read where it lived.  Once restore_branch is gone at the
-	# last task of this step there is nothing left to run, so the evidence
-	# is the code itself: passfail set and the result dropped on the floor.
+	# H2's shape, read where it lived.  Once restore_branch is gone there is
+	# nothing left to run, so the evidence is the code itself, which is
+	# passfail set and the result dropped on the floor.
 	#
 	# The read is asked of the repository by name and both halves of its
 	# answer are weighed, because a tree that does not hold the baseline

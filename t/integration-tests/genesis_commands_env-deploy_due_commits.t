@@ -117,8 +117,8 @@ subtest 'a proposed record is read with no GitHub client built' => sub {
 	# request, and that is what this reads.  The run does make one call, which
 	# is the identity probe the deployment audit makes to record which GitHub
 	# user deployed; it happens after the deploy has finished, it asks about
-	# the operator rather than about a pull request, and it is not this
-	# task's.  A row demanding an empty log would be red for it and would
+	# the operator rather than about a pull request, and it is not the
+	# warning's.  A row demanding an empty log would be red for it and would
 	# stay red however the warning was written.
 	my @asked = grep {($_->{url} // '') =~ m{/pulls\b}} gh_calls($gh);
 	is_deeply(\@asked, [], 'and nothing asked GitHub about the pull request')

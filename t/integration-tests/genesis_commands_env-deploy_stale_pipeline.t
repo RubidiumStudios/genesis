@@ -12,7 +12,7 @@
 # has stood the tree on, and a delivery carries the deploying environment's own
 # hierarchy and no sibling's.  So the roster the query walks on this path holds
 # one name, and a row that changed a sibling's file would watch the warning say
-# nothing.  The report of this task carries that as a concern.
+# nothing.
 #
 # The ordering half of T215, that this warning prints ahead of the due-commits
 # warning, is read in the due-commits file beside this one, where both

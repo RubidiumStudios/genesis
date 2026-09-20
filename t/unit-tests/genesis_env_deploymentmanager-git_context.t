@@ -4,8 +4,7 @@
 # git.control_commit stays the marker's control commit, and where a branch
 # with no marker records no control commit at all.  It carries the second
 # clause of T78 as well, the source sweep that says no file under lib/ or
-# bin/ spells the marker outside the builder, because this is the last task
-# of the step to touch the files that spell it.
+# bin/ spells the marker outside the builder.
 use strict;
 use warnings;
 use utf8;

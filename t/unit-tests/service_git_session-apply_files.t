@@ -569,9 +569,9 @@ subtest 'a dry run writes nothing and checks nothing' => sub {
 
 	# The fault plan belongs to this harness and to its copy A, and the
 	# handle it arms is the one this row has already built at the deployment
-	# root, so the prefix survives the arming.  A subtest a later step adds
-	# builds a harness of its own and inherits the subclass on that copy
-	# rather than on this one.
+	# root, so the prefix survives the arming.  A subtest that builds a
+	# harness of its own inherits the subclass on that copy rather than on
+	# this one.
 	my $fault = fault_git($h, copy => 'a');
 	reset_steps($fault);
 
