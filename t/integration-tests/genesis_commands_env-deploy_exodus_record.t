@@ -91,7 +91,7 @@ subtest 'the two timestamp forms stay apart' => sub {
 	# a guard rather than as a proof of anything these rows wrote.  What it
 	# catches is a later change writing a time held as a value in the path's
 	# short numeric form, or an entry name in the value's form, or an ISO
-	# form anywhere, which is the one distinction D58 exists to keep.
+	# form anywhere, and the whole point is to keep the two forms apart.
 	#
 	# The plan is six rather than four, because the record and the times it
 	# holds are now asserted before their form is judged.  A record that
@@ -144,7 +144,7 @@ subtest 'a failed exodus write after BOSH deployed names its own code' => sub {
 	# "deployed" and already named the vault.  They stay as guards against a
 	# later change dropping either half from a message whose whole job is to
 	# carry both facts at once.  The row between them is the one carrying
-	# D98's own words, and it was red.
+	# the message's own words, and it was red.
 	like(unfolded($out.$err), qr/deployed/i,
 		'it reports the deployment as done');
 	like(unfolded($err), qr/record was not written/i,

@@ -111,7 +111,7 @@ subtest 'a proposed record is read with no GitHub client built' => sub {
 	is($exit, 0, 'the deploy proceeded');
 	like(unfolded($err),
 		qr/PR #41 proposes control\@\Q@{[substr($due[1],0,8)]}\E, not yet merged/,
-		'the warning reads the record in the words D57 fixes')
+		'the warning names the pull request and what it proposes')
 		or diag("what the deploy said:\n$err");
 	# What the warning must not have done is ask GitHub about the pull
 	# request, and that is what this reads.  The run does make one call, which
@@ -132,7 +132,7 @@ subtest 'the stale-pipeline warning prints ahead of this one' => sub {
 	# nothing printed a due-commits line before.
 	#
 	# One tree answers both.  Each commit due_harness lays writes the
-	# environment's own file, which is a path D43 counts as pipeline-defining,
+	# environment's own file, which is a path that defines the pipeline,
 	# so control has moved away from the commit the pipeline was applied from
 	# and the staleness query answers as well.
 	my ($h) = due_harness(bosh => 1);
