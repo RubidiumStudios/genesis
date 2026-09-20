@@ -313,7 +313,6 @@ unit-tests/genesis_top-pipeline_staleness.t  # the one staleness comparison, rea
 unit-tests/genesis_commands_dev-pipeline_compile.t  # dev-pipeline-compile stage renderer
 unit-tests/service_git-ci_credentials.t      # git credentials supplied via CI env vars
 unit-tests/genesis_commands_pipelines-control_branch.t  # commands read the configured control branch
-unit-tests/genesis_commands_pipelines-resolve_base.t  # the propagation base, read through the one marker reader
 unit-tests/genesis_commands_pipelines-config_gate.t  # the manual provider's skip, and the leftover ci directory that is ignored
 unit-tests/genesis_commands_pipelines-provider_gate.t  # the propagate provider gate's ask, its yes, its no, and the -y that never answers it
 unit-tests/genesis_commands_pipelines-hold_surface.t  # the two hold commands register in the pipeline group as pre-deploy, take its disowned refusal, and leave one renderer of the held qualifier

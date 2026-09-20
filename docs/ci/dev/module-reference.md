@@ -734,7 +734,7 @@ Four of the five methods above guard on the `config` key, and `generate_descript
 - `_job_status_label($job)`
   derives a display status from a `fly jobs` entry.
 
-The branch, protection, record, and propagation helpers are `_apply_init_branches`, `_protection_rules_for`, `_apply_branch_protection`, `_apply_records`, `_preview_warnings`, `_push_failure`, `_resolve_propagation_base`, `_verify_deployed`, `_describe_source_control`, and `_describe_topology`.
+The branch, protection, record, and propagation helpers are `_apply_init_branches`, `_protection_rules_for`, `_apply_branch_protection`, `_apply_records`, `_preview_warnings`, `_push_failure`, `_verify_deployed`, `_describe_source_control`, and `_describe_topology`.
 
 ## Genesis::CI::Preflight
 

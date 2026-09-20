@@ -78,33 +78,6 @@ subtest 'pipeline-status resolves the configured branch head' => sub {
 		"the header shows trunk's head";
 };
 
-# Stands in for Service::Git for the one helper that takes the control
-# branch as an argument: it records what merge_base was asked about.
-{
-	package FakeGit;
-	sub new { return bless {seen => []}, $_[0] }
-	sub log_subjects { return () }
-	sub merge_base {
-		my ($self, @args) = @_;
-		push @{$self->{seen}}, [@args];
-		return 'deadbeef';
-	}
-}
-
-subtest 'the propagation base is taken from the branch it is given' => sub {
-	plan tests => 2;
-
-	# An env branch with no propagation marker falls back to the merge
-	# base with control, which is where a wrong control branch would
-	# silently change what the diff is computed against.
-	my $git = FakeGit->new;
-	my ($base) = Genesis::Commands::Pipelines::_resolve_propagation_base(
-		'qa', $git, 'trunk');
-	is $base, 'deadbeef', 'the merge base is what comes back';
-	is_deeply $git->{seen}, [['trunk', 'qa']],
-		'and it was taken against the control branch passed in';
-};
-
 subtest 'the bare run measures every read against the configured branch' => sub {
 	# D36 retired the <env> argument and the cascade it scoped, so a run
 	# resolves no propagation base any more and the marker warnings that
