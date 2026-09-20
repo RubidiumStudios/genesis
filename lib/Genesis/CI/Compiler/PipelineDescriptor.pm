@@ -600,7 +600,7 @@ sub _env_resources {
 		},
 	};
 
-	# BOSH config resources — emitted only when track_bosh_configs is configured
+	# BOSH config resources, emitted only when track_bosh_configs is set
 	unless ($is_create_env) {
 		my $types = $self->_bosh_config_types($ast, $env, $wf_data);
 		if (@$types) {
@@ -648,7 +648,8 @@ sub _env_resources {
 #   Director  (is_bosh_director=1):  emits <alias>-bosh-lock as a shared named
 #                                    lock; all children will acquire this resource.
 #   Child     (bosh_parent set, bosh_upgrade_lock=1):  emits only the
-#                                    deployment-lock — bosh-lock is the director's.
+#                                    deployment-lock, bosh-lock being the
+#                                    director's.
 #   Standalone (no pipeline parent): emits per-env bosh-lock pointing to the
 #                                    BOSH director URL (legacy behaviour).
 #
@@ -676,7 +677,7 @@ sub _locker_resources {
 	my $is_director    = $wf_data->{is_bosh_director}{$env}  || 0;
 
 	if ($is_director) {
-		# Shared bosh-upgrade lock — children acquire this during their deploys.
+		# Shared bosh-upgrade lock, which children acquire during their deploys.
 		# Use lock_name (named lock) so no BOSH URL is required at pipeline-gen time.
 		push @resources, {
 			name   => "$alias-bosh-lock",
@@ -699,8 +700,9 @@ sub _locker_resources {
 			};
 		}
 	}
-	# Children with bosh_parent + bosh_upgrade_lock: no own bosh-lock resource —
-	# they acquire the director's <director-alias>-bosh-lock instead.
+	# A child with bosh_parent and bosh_upgrade_lock emits no bosh-lock
+	# resource of its own, and acquires the director's
+	# <director-alias>-bosh-lock instead.
 
 	push @resources, {
 		name   => "$alias-deployment-lock",
@@ -945,7 +947,7 @@ sub _redeploy_job {
 	my $srcdir = "$alias-changes";
 	$bindir .= "/$root" if $root ne '.';
 
-	# Resource gets — no change-detection triggers
+	# Resource gets, with no change-detection triggers
 	my $signal_cfg = $self->_env_signal_config($ast, $env, $wf_data);
 	my @gets;
 	if ($trigger_mode eq 'cron') {
@@ -975,7 +977,7 @@ sub _redeploy_job {
 		push @gets, $tl_get;
 	}
 
-	# Deploy task — reuses ci-pipeline-deploy with no prior_env
+	# Deploy task, which reuses ci-pipeline-deploy with no prior_env
 	my $deploy_task = {
 		task => 'bosh-redeploy', %to,
 		config => $self->_task_config($ast, $env, $alias, undef, $wf_data,
@@ -987,7 +989,7 @@ sub _redeploy_job {
 	my @priv = @{$config->{task}{privileged} || []};
 	$deploy_task->{privileged} = JSON::PP::true if grep { $_ eq $alias } @priv;
 
-	# Locker steps — mirrors _deploy_job lock topology
+	# Locker steps, mirroring the lock topology of _deploy_job
 	my @lock_steps;
 	my @unlock_steps;
 	my $locker = $ast->integrations->{locker} || {};
@@ -1256,9 +1258,11 @@ sub _auto_update_resources {
 # _auto_update_job - build update-genesis-assets job {{{
 #
 # Emits three optional task steps, each guarded by a flag:
-#   list-kits      — pre-flight kit availability check  (update_kit: true)
-#   update-genesis — embed newer genesis binary          (update_genesis: true)
-#   fetch-kit      — sed kit version + commit           (update_kit: true)
+#   list-kits        a pre-flight check that the kit version is
+#                    available (under update_kit)
+#   update-genesis   embeds a newer genesis binary (under update_genesis)
+#   fetch-kit        seds the kit version and commits it (under
+#                    update_kit)
 #
 # The push target defaults to the pipeline control branch via 'git'.  When
 # target_branch is set to a different branch, a dedicated 'git-autoupdate'
@@ -1317,7 +1321,7 @@ sub _auto_update_job {
 		: 'git';
 
 	# -----------------------------------------------------------------------
-	# in_parallel gets — only include resources that are enabled
+	# in_parallel gets, which include only the resources that are enabled
 	# kit-release and genesis-release both trigger when their flag is set.
 	# -----------------------------------------------------------------------
 	my @parallel_gets = ({ get => 'git' });
@@ -1327,7 +1331,7 @@ sub _auto_update_job {
 		if $update_genesis;
 
 	# -----------------------------------------------------------------------
-	# list-kits — pre-flight: confirm kit version exists in remote registry
+	# list-kits, a pre-flight confirming the kit version is in the registry
 	# -----------------------------------------------------------------------
 	my $list_kits_task = {
 		task   => 'list-kits',
@@ -1345,7 +1349,8 @@ sub _auto_update_job {
 	};
 
 	# -----------------------------------------------------------------------
-	# update-genesis — embed newer genesis binary if upstream > embedded
+	# update-genesis, which embeds a newer genesis binary where upstream
+	# is ahead of the embedded one
 	# -----------------------------------------------------------------------
 	my $update_genesis_script = <<"SCRIPT";
 chmod +x ../genesis-release/genesis
@@ -1388,8 +1393,8 @@ SCRIPT
 	};
 
 	# -----------------------------------------------------------------------
-	# fetch-kit — fetch kit version from GitHub release, sed version file,
-	# commit if changed
+	# fetch-kit, which reads the kit version from a GitHub release, seds
+	# the version file, and commits it where it changed
 	# -----------------------------------------------------------------------
 	my $fetch_kit_script = <<"SCRIPT";
 version="\$(cat ../kit-release/version)"
@@ -1428,7 +1433,7 @@ SCRIPT
 	};
 
 	# -----------------------------------------------------------------------
-	# Assemble plan — only include steps for enabled features
+	# Assemble the plan, taking in only the steps for enabled features
 	# -----------------------------------------------------------------------
 	my @plan = ({ in_parallel => \@parallel_gets });
 	push @plan, $list_kits_task      if $update_kit;
@@ -1543,7 +1548,7 @@ sub _task_config {
 		push @inputs, { name => 'git' } unless $config->{'require-passed-caches'};
 	}
 
-	# Task library input — expose library files to the running task
+	# Task library input, which exposes the library files to the task
 	if (my $tl = $config->{task_library}) {
 		if (ref($tl) eq 'HASH' && $tl->{uri}) {
 			my $rn   = $tl->{resource_name} || 'tasks';

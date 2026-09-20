@@ -45,7 +45,7 @@ sub init {
 		}
 
 		if ($entry) {
-			# Existing target — reject conflicting flags
+			# Existing target, so reject conflicting flags
 			bail(
 				"Target '%s' already exists in ~/.flyrc.\n".
 				"  Cannot combine --ci-target with --ci-url, --ci-team, ".
@@ -62,7 +62,7 @@ sub init {
 			);
 		}
 
-		# Target name provided but doesn't exist yet — fall through
+		# Target name provided but does not exist yet, so fall through
 		# to new-target creation below (--ci-url and --ci-team required)
 	}
 
@@ -225,8 +225,8 @@ EOF
 # under D27 with no alias behind it.
 #
 # NOTE: notification styles, BOSH upgrade locks, and task library are
-# configuration-level features, not provider-level options — they are
-# documented in the compiler class's cli_opts_help and POD.
+# configuration-level features rather than provider-level options, and
+# they are documented in the compiler class's cli_opts_help and POD.
 sub provider_options_schema {
 	return {
 		target   => {type => 'string',  description => 'Fly target alias (fly login -t <target>)'},

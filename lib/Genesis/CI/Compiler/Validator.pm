@@ -479,7 +479,8 @@ sub _validate_pipeline_section {
 			unless $pipeline->{branches}{Genesis::Top::CI_PIPELINE_CONTROL_KEY()};
 	}
 
-	# Workflows are optional — absent means topology is derived from env files
+	# Workflows are optional, and absent means the topology is derived
+	# from the env files
 	if ($pipeline->{workflows}) {
 		for my $wf_name (keys %{$pipeline->{workflows}}) {
 			$self->_validate_workflow($wf_name, $pipeline->{workflows}{$wf_name});

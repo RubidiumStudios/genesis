@@ -144,7 +144,7 @@ sub cli_opts_help {
 #
 # Returns a flat hashref of key => default_value.  Keys match those the
 # held provider declares.  Values here are NOT included in the config()
-# output — only explicitly-set non-default values are saved.
+# output, since only explicitly-set non-default values are saved.
 #
 # An instance method rather than a class method, because the declaration
 # is read off the provider this compiler holds and a class has no
@@ -157,8 +157,8 @@ sub provider_options_defaults {
 # provider_config - return stored provider options (non-defaults only) {{{
 #
 # Returns a hashref suitable for round-tripping through the ci.provider:
-# config section — i.e. the type key plus any explicitly-set values that
-# differ from provider_options_defaults().
+# config section, which is the type key plus any explicitly-set values
+# that differ from provider_options_defaults().
 sub provider_config {
 	my ($self) = @_;
 	my $defaults = $self->provider_options_defaults();
@@ -219,7 +219,7 @@ sub describe_provider {
 
 # }}}
 # }}}
-### Class Methods — Provider Options Parsing {{{
+### Class Methods for Provider Options Parsing {{{
 
 # parse_cli_opts - two-pass CLI option parsing (mirrors Kit::Provider::parse_opts) {{{
 #
