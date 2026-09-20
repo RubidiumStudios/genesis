@@ -33,7 +33,7 @@ our @EXPORT = qw/
 
 	commit_on_control commit_from_b publish_from_b push_from refresh
 	init_branch deliver propagation_set edited_file harness_marker
-	add_deployment_root write_env_file due_commit patch_calls
+	add_deployment_root write_env_file due_commit due_on_control patch_calls
 	hand_commit local_only_commit squash_merge unrelated_branch
 	diverge move_on_r delete_on_r delete_local
 	rewrite_control rewrite_branch
@@ -2292,6 +2292,47 @@ sub due_commit {
 		trailers => $opts{trailers},
 		push     => defined $opts{push} ? $opts{push} : 1,
 	);
+}
+
+# }}}
+# due_on_control - one control commit two chained environments are due {{{
+#
+# A deploy that hands off to a child needs exactly one commit for the child to
+# carry, and that commit has to be due to both environments so that the
+# certification the deploy writes is what releases the downstream one.  So the
+# commit touches both environment files, and it is delivered to the upstream
+# environment alone, which leaves the downstream one waiting on its
+# predecessor.
+#
+# Both files are written without a commit of their own and committed together
+# afterwards, because one commit is the whole point and write_env_file would
+# otherwise lay one per file.  The paths committed are the ones write_env_file
+# hands back rather than names spelled out here, so a harness that moves its
+# environment files to a deployment root moves this with it.
+#
+# Each file is written whole, so prod's prior_env is named again here even
+# though a chained seeding already laid it, because the rewrite would drop a
+# key it did not restate.  A harness seeded with shared files has the same
+# exposure on track_additional_files, so a row that wants both this commit
+# and tracked files wants a builder that keeps them.
+sub due_on_control {
+	my ($self) = @_;
+	my @paths = (
+		$self->write_env_file('qa', params => {n => 2}, commit => 0),
+		$self->write_env_file('prod',
+			genesis => {pipeline => {prior_env => 'qa'}},
+			params  => {n => 2}, commit => 0),
+	);
+	run({dir => $self->{a}}, 'git', 'add', '--', @paths);
+	run({dir => $self->{a}, onfailure => 'Failed to commit the due change'},
+		'git', 'commit', '-q', '-m', 'A change both environments are due');
+	$self->push_from('a', $self->{control});
+
+	my $control = $self->git('a')->sha($self->{control});
+	$self->deliver('qa', control => $control);
+	$self->refresh('a', $self->{control},
+		$self->slug('qa'), $self->slug('prod'));
+	return $control;
 }
 
 # }}}

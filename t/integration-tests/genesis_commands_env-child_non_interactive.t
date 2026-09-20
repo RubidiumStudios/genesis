@@ -67,8 +67,8 @@ subtest 'the child asks nothing and finishes' => sub {
 	# suite runs under opens its own standard input there.  A spawn that
 	# stopped redirecting would then hand the child that same null device by
 	# accident, and the row would pass on it.  A pipe with nothing in it
-	# reaches the deploy as the empty input /dev/null would have been, and
-	# under -y nothing asks for any.
+	# reaches the deploy as the empty input /dev/null would have been.  Under
+	# -y nothing asks for any.
 	set_stdin('');
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '-y');
