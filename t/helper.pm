@@ -843,9 +843,14 @@ sub vault_start {
 		unless $pid =~ /^[0-9]+$/;
 
 	chomp($pid);
-	$VAULT_PID{$target} = $pid;
+
+	# The pid is recorded only once the process answers a signal.  Recorded
+	# first, a vault that reported a start and then went left the record
+	# standing, and the next vault_ok on the same target read the key, said
+	# the vault was already running, and passed.
 	kill(-0, $pid)
 		or die "failed to spin a vault server: couldn't signal pid $pid.\n";
+	$VAULT_PID{$target} = $pid;
 	chomp($VAULT_URL = `SAFE_TARGET=$target safe env --json | jq -r '.VAULT_ADDR'`);
 	$VAULT_URL{$target} = $VAULT_URL;  # track the latest
 	return $target;
