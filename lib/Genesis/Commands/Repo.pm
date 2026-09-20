@@ -345,8 +345,8 @@ sub _repo_init_validate {
 
 # -- Phase 2: Execution -------------------------------------------------------
 #
-# All validation is complete. This phase only does work — no prompts, no bails
-# on user input. Failures here are unexpected errors.
+# All validation is complete. This phase only does work, with no prompts and no
+# bails on user input. Failures here are unexpected errors.
 #
 sub _repo_init_execute {
 	my (
@@ -459,9 +459,10 @@ sub _repo_init_execute {
 
 		# Check if the only staged changes are metadata-only (the
 		# "Last updated" comment and/or updater/creator_version in
-		# .genesis/config).  If so, roll them back — re-running
-		# repo-init with --force on the same kit version shouldn't
-		# produce a commit with no meaningful content.
+		# .genesis/config).  If so, roll them back, because
+		# re-running repo-init with --force on the same kit
+		# version shouldn't produce a commit with no meaningful
+		# content.
 		my ($diff_names) = run({}, 'git diff --cached --name-only -- .');
 		if ($diff_names && $diff_names =~ /\S/) {
 			my @changed = grep { /\S/ } split /\n/, $diff_names;
@@ -493,7 +494,7 @@ sub _repo_init_execute {
 		# Commit unless the user explicitly opted out or there is
 		# nothing staged.
 		if (!$stat || $stat !~ /\S/) {
-			# nothing to commit — already reported above
+			# nothing to commit, already reported above
 		} elsif ($no_commit) {
 			info "Skipping initial commit (#C{--no-commit} set); files remain staged.";
 		} else {

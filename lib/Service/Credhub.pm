@@ -249,11 +249,11 @@ sub set {
 		$rc
 	) if $rc;
 	my $result = read_json_from($out, $rc, $err);
-	# Cache the value credhub returned — except when it's redacted.
+	# Cache the value credhub returned, except when it's redacted.
 	# Older credhub CLIs returned the actual value in the set
 	# response; newer ones return "<redacted>".  When we see the
-	# redacted sentinel, drop the cache entry so the next get()
-	# pulls the live value from credhub for verification.
+	# redacted sentinel, drop the cache entry so the next get() pulls
+	# the live value from credhub for verification.
 	if (defined($self->{cached})) {
 		if (defined($result->{value}) && $result->{value} ne '<redacted>') {
 			$self->{cached}{$path} = $result->{value};
