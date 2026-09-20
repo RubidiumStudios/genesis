@@ -2617,6 +2617,38 @@ B<Examples:>
   my $bool = Service::Git->is_inside_work_tree($dir);
   # returns false rather than bailing, unlike new()
 
+=head2 checked_out_branch
+
+  my $branch = $git->checked_out_branch;
+
+The branch C<HEAD> points at, whether or not it has a commit on it yet.
+
+L</current_branch> cannot answer this. It runs C<git rev-parse --abbrev-ref
+HEAD>, which fails on an unborn branch, so a fresh orphan checkout reads as
+C<undef> there and the branch it stands on goes unnamed. C<git symbolic-ref>
+names the branch in that state, and it says nothing at all on a detached
+C<HEAD>, which is what tells the two cases apart.
+
+L</fetch_branches> asks it because git refuses to fetch into the ref C<HEAD>
+points at, and an unborn branch is the one checked-out branch
+C<git for-each-ref> does not list, so without this reader the refresh would
+force a write git declines and lose the whole fetch with it.
+
+B<Parameters:> None.
+
+B<Returns:> The branch name, or C<undef> on a detached C<HEAD>.
+
+B<Errors:> None. A detached C<HEAD> is an answer rather than a failure.
+
+B<Examples:>
+
+  $git->checked_out_branch;
+  # returns 'control' on an ordinary checkout, and 'newbranch' on a
+  # `git checkout --orphan newbranch` that has committed nothing
+
+  $git->checked_out_branch;
+  # returns undef where HEAD names a commit rather than a branch
+
 =head1 FUNCTIONS
 
 These are plain functions rather than methods -- credentials are a
@@ -3121,38 +3153,6 @@ B<Examples:>
 
   $git->_ref_names('refs/remotes/origin/');
   # returns { control => 1 }, with the remote's name already stripped
-
-=head2 _checked_out_branch
-
-  my $branch = $git->_checked_out_branch;
-
-The branch C<HEAD> points at, whether or not it has a commit on it yet.
-
-L</current_branch> cannot answer this. It runs C<git rev-parse --abbrev-ref
-HEAD>, which fails on an unborn branch, so a fresh orphan checkout reads as
-C<undef> there and the branch it stands on goes unnamed. C<git symbolic-ref>
-names the branch in that state, and it says nothing at all on a detached
-C<HEAD>, which is what tells the two cases apart.
-
-L</fetch_branches> asks it because git refuses to fetch into the ref C<HEAD>
-points at, and an unborn branch is the one checked-out branch
-C<git for-each-ref> does not list, so without this reader the refresh would
-force a write git declines and lose the whole fetch with it.
-
-B<Parameters:> None.
-
-B<Returns:> The branch name, or C<undef> on a detached C<HEAD>.
-
-B<Errors:> None. A detached C<HEAD> is an answer rather than a failure.
-
-B<Examples:>
-
-  $git->_checked_out_branch;
-  # returns 'control' on an ordinary checkout, and 'newbranch' on a
-  # `git checkout --orphan newbranch` that has committed nothing
-
-  $git->_checked_out_branch;
-  # returns undef where HEAD names a commit rather than a branch
 
 =head2 _provision_ssh_key
 

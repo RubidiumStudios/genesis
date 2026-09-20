@@ -19,7 +19,7 @@ $ENV{NOCOLOR} = 1;
 # override_inspections installs its stubs on the package rather than on an
 # instance, and it does not put them back, so the one row that drives the
 # real reader keeps a copy of it from before anything is overridden.
-my $real_checked_out = \&Service::Git::_checked_out_branch;
+my $real_checked_out = \&Service::Git::checked_out_branch;
 
 # Build a Service::Git instance pointed at any path (we never invoke the
 # real git subprocess; run() is stubbed per-test).
@@ -88,7 +88,7 @@ sub run_argv { my ($n) = @_; my @a = @{$run_calls[$n]}; shift @a; return \@a; }
 sub override_inspections {
 	my (%opts) = @_;
 	no warnings qw(redefine once);
-	*Service::Git::_checked_out_branch = sub { $opts{checked_out} };
+	*Service::Git::checked_out_branch = sub { $opts{checked_out} };
 	*Service::Git::default_remote      = sub { $opts{default_remote} };
 }
 
@@ -449,7 +449,7 @@ subtest 'fetch_branches - the report is read off the refs, not off the probe' =>
 		'and created says the same, because the probe does not write refs';
 };
 
-subtest '_checked_out_branch - symbolic-ref, because rev-parse cannot say' => sub {
+subtest 'checked_out_branch - symbolic-ref, because rev-parse cannot say' => sub {
 	# current_branch runs `git rev-parse --abbrev-ref HEAD`, which fails on
 	# an unborn branch, so current_branch answers undefined there and cannot
 	# name the branch a fresh orphan checkout stands on.  symbolic-ref names
@@ -458,18 +458,18 @@ subtest '_checked_out_branch - symbolic-ref, because rev-parse cannot say' => su
 	reset_stub();
 	install_run_stub();
 	no warnings qw(redefine once);
-	local *Service::Git::_checked_out_branch = $real_checked_out;
+	local *Service::Git::checked_out_branch = $real_checked_out;
 	push @run_results, ["newbranch\n", 0, ''];
 
 	my $git = make_git();
-	is $git->_checked_out_branch, 'newbranch', 'the unborn branch is named';
+	is $git->checked_out_branch, 'newbranch', 'the unborn branch is named';
 	cmp_deeply run_argv(0), [qw(git symbolic-ref --short -q HEAD)],
 		'and it is symbolic-ref that names it';
 
 	reset_stub();
 	install_run_stub();
 	push @run_results, ['', 1, ''];
-	is make_git()->_checked_out_branch, undef, 'a detached HEAD names nothing';
+	is make_git()->checked_out_branch, undef, 'a detached HEAD names nothing';
 };
 
 subtest 'fetch_branches - a local-head read that failed is raised, not assumed' => sub {

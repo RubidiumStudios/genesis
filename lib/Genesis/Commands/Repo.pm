@@ -220,7 +220,7 @@ sub _repo_init_validate {
 			# HEAD that names no branch at all is left with <no branch>.
 			my $standing_on = $branch;
 			unless (defined $standing_on) {
-				my $unborn = $enclosing_git->_checked_out_branch;
+				my $unborn = $enclosing_git->checked_out_branch;
 				$standing_on = defined $unborn
 					? "$unborn, which has no commits yet"
 					: '<no branch>';
