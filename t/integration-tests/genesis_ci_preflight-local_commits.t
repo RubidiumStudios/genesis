@@ -192,8 +192,8 @@ subtest 'no option adopts the remote over a hand commit' => sub {
 	# The claim is read from the product rather than from the absence of
 	# three flags nobody ever wrote.  A run that drives three unbuilt
 	# options is green whatever the refusal says, and says nothing about
-	# what it offers.  So the refusal itself is driven, and the
-	# row reads what it puts in front of the operator.
+	# what it offers.  So the refusal itself is driven, and the row reads
+	# what it puts in front of the operator.
 	plan tests => 5;
 
 	my $h  = make_harness(envs => ['qa']);

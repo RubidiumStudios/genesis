@@ -13,9 +13,9 @@
 # undone afterwards.
 #
 # The root is passed as undef throughout, because the sub takes it and does
-# not read it: it comes first so the call reads like the other questions the
-# deploy asks of a run, and so that a later step can let a repository setting
-# answer the question without rewriting every call site.  A row passing a
+# not read it.  It comes first so the call reads like the other questions the
+# deploy asks of a run, and so that a repository setting could answer the
+# question later without rewriting every call site.  A row passing a
 # real root would say that the root matters, which is the one thing these
 # rows must not say.
 use strict;

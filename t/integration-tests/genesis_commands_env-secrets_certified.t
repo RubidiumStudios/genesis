@@ -20,13 +20,13 @@
 # by something.
 #
 # The warning the rows read says "the secrets this run served" where the
-# sketch it was written from says "the secrets just written".  That earlier
-# wording is wrong for two of the four commands that raise it, check-secrets
+# wording it replaced said "the secrets just written".  That earlier wording
+# is wrong for two of the four commands that raise it, check-secrets
 # validating and remove-secrets removing, and it is wrong again for any run
 # that errored before it wrote anything, because the call sits above each
 # command's own error bail.  The rows match on the sentence's later words, so
 # they would pass under either wording.  The departure is recorded here
-# because the code no longer says what that sketch said.
+# because the message no longer reads the way it once did.
 use strict;
 use warnings;
 use utf8;

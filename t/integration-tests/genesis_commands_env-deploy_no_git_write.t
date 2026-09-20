@@ -2,7 +2,8 @@
 # Proves T210, that a successful deploy moves L on no branch, makes no commit
 # and no push, and still writes the exodus record; T238, which is an absence
 # guard now that the writer it reproduced is gone; and T228, the sweep of the
-# retired routing sense of "entry point" from the files this step touches.
+# retired routing sense of "entry point" from the four files the deploy path
+# is written in.
 #
 # Two walls stood in front of T210 and T238 until the deploy declared its
 # branch class.  The deploy switched to a branch named for the environment
@@ -110,7 +111,8 @@ subtest 'the retired routing sense of entry point is gone' => sub {
 				if $lines[$i] =~ /entry[- ]point/i;
 		}
 	}
-	is_deeply(\@hits, [], 'no file this step touches carries the retired term');
+	is_deeply(\@hits, [],
+		'no file of the deploy path carries the retired term');
 };
 
 done_testing;

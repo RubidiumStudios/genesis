@@ -88,8 +88,8 @@ subtest 'the merged read finds an inherited key the leaf lacks' => sub {
 		leaf_keys => {prior_env => 'lmelt-vsphere-canwest-1-lab'});
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
 
-	# The hazard's shape, which the compiler story fixes and this step
-	# does not: the baseline reader opens the leaf alone, finds the key
+	# The hazard's shape, which the compiler fixes and the reader below
+	# does not.  The baseline reader opens the leaf alone, finds the key
 	# absent, and says nothing about it.
 	my $leaf_only = Genesis::CI::Compiler::ASTBuilder::_read_genesis_pipeline_keys(
 		$top->path("$LEAF.yml")
