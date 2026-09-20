@@ -27,7 +27,7 @@ Parts of this document described a design that was never built, and the built de
 | Explicit branch creation and reconciliation | Implemented | `genesis pipeline-prepare` → `Genesis::Commands::Pipelines::pipeline_prepare` |
 | Branch creation during propagation | Implemented, authorized per run | `Genesis::Commands::Pipelines::_authorize_branch_creation`, `_create_missing_branches` |
 | Single topology source | Implemented | `Genesis::Top::pipeline_topology` |
-| Propagation planning (entry points) | Implemented | `Genesis::CI::Propagation::compute_propagation_targets` |
+| Propagation planning (deliver or hold, per commit) | Implemented | `Genesis::CI::Walk::plan`, `Genesis::CI::Walk::hold_for` |
 | Propagation execution | Implemented | `Genesis::CI::Propagation::propagate_envs` |
 | PR-gated propagation (`require_pr`) | Implemented, GitHub only | `Genesis::CI::Propagation::_propagate_one_pr_env` |
 | Cascade after deploy | Implemented (manual provider) | `Genesis::Env::_post_deploy`, `genesis propagate <env>` |
@@ -36,7 +36,7 @@ Parts of this document described a design that was never built, and the built de
 | `kickoff` dispatch branch | **Superseded** — propagation goes control → env branches directly | nothing |
 | Sequence tags (`push-<n>`) and hybrid tags | **Not built** — ordering comes from the deploy-certified control commit | nothing |
 | Sidecar files | **Not built** | nothing |
-| `genesis push` | **Not built** — `genesis propagate` is the entry point | nothing |
+| `genesis push` | **Not built** — `genesis propagate` is the command operators run | nothing |
 | `pipeline.mode: branch` / `pipeline.branches:` in `ci.yml` | **Superseded** — config moved to `.genesis/config` and per-env `genesis.pipeline.*` | `.genesis/config`, env YAML |
 | Concourse-driven propagation | **Not wired** — only the manual provider drives propagation today | see Open Questions |
 
@@ -70,7 +70,7 @@ What remains out of scope is anything finer-grained than the whole directory. `d
 | **Env DAG** | The deployment topology, built from per-environment `genesis.pipeline.prior_env` keys by `Genesis::CI::Compiler::ASTBuilder::_build_from_env_files` and reached by every pipeline command through the single accessor `Genesis::Top::pipeline_topology`. Each environment has at most one parent and any number of children. This — not `ci.yml` layouts — is what propagation walks. See "Topology source". |
 | **Layout** | A deployment progression plan defined in legacy `ci.yml` under `pipeline.layout` or `pipeline.layouts`, using arrow notation (`->`) and the `auto <pattern>` directive. Still parsed by the compiler for legacy configs, but propagation does not read it; the env DAG replaced it for that purpose. |
 | **Propagation** | Copying changed files from a control commit onto the environment branches that depend on them, one commit per environment, subject `[pipeline] control@<short-sha> -> <env>`. |
-| **Entry point** | An environment that receives a propagation event directly, rather than waiting for it to cascade down from its parent. Computed by `compute_propagation_targets`. |
+| **Environment with no `prior_env`** | An environment that nothing deploys before. No ancestor can hold its commits, so a control commit reaches it as soon as that commit changes a file in its propagation set. |
 | **Cascade** | `genesis propagate <env>`, which scopes propagation to `<env>`'s descendants and sources files from the control commit that `<env>`'s last successful deployment certified. |
 | **Certified control commit** | `git.control_commit` in an environment's latest successful exodus deployment record — the control SHA that was actually deployed. This, not a tag, is what orders the pipeline. |
 | **Propagation marker** | The `[pipeline] control@<sha>` string in an environment branch commit subject. Load-bearing: it is parsed to find the last propagated control SHA, to derive a deploy reason, and to decide PR idempotency. |
@@ -168,7 +168,7 @@ The one namespaced branch in the system is `pr/<env>`, used only for `require_pr
 
 **Creation:** three commands create environment branches, all of them through `Genesis::Env::prepare_branch`, which creates the branch if absent and reconciles its contents — adding the files this environment needs, pruning files it does not, and recording a seed commit even when nothing changed so the branch has a propagation anchor.
 
-| Entry point | When it creates |
+| Command | When it creates |
 |-------------|-----------------|
 | `genesis new <env>` | Always, as the last step of creating the environment. Commits the new environment file to control first, then prepares the branch |
 | `genesis pipeline-prepare` | Always. Every environment in the topology, or just one with `genesis <env> pipeline-prepare`. This is the command for an environment that already exists on control but whose branch does not |
@@ -222,7 +222,7 @@ Propagation is one stage, not two. A run of `genesis propagate`:
 3. **Resolves the source control commit** — control HEAD for a root run, the certified control commit of the named environment for a cascade run, or `--commit` if given.
 4. **Handles missing branches** — any environment in scope without a branch is either created (with authorization) or the run refuses. See "Missing branches during propagation".
 5. **Diffs, per environment**, that control commit against the environment branch, filtered to the environment's propagation set. Also computes an undeployed set: the diff between the environment's certified control commit and the source commit.
-6. **Picks entry points** with `compute_propagation_targets`: an environment is an entry point when its diff is non-empty and none of those files overlap an ancestor's undeployed set. Everything else waits for the cascade.
+6. **Routes each commit** with `Genesis::CI::Walk::route_commit` and `hold_for`. A control commit is delivered to an environment when it changes a file in that environment's propagation set, and it is held when an ancestor has certified nothing or holds a file the commit touches. A held commit holds every commit behind it for that environment.
 7. **Executes** with `propagate_envs`: per environment, a direct commit onto `<env>` or a commit onto the rolling `pr/<env>` branch, then one batched push, then the PR API calls. Branches created in step 4 are added to the batched push explicitly, because a freshly seeded branch has no propagation commit and would otherwise stay local.
 8. **Deploys** happen separately. Under the manual provider, a successful deploy runs `genesis propagate <env>` automatically, which is what moves the change down one level.
 
@@ -429,7 +429,7 @@ Pushes are batched into a single `git push` at the end of the run, and PR API ca
 
 ### Preconditions
 
-For any `require_pr` environment that is an entry point in a non-dry run:
+For any `require_pr` environment that takes a delivery in a non-dry run:
 
 - The origin remote must parse to a GitHub `owner/repo`.
 - Unless `--no-push`, `GITHUB_AUTH_TOKEN` must be set and must authenticate; the token is validated against the API before any branch is touched.
@@ -470,7 +470,7 @@ genesis:
 
 ### Topology source
 
-The env DAG comes from `genesis.pipeline.prior_env` in the environment files, not from `ci.yml` layouts. `_build_from_env_files` scans the environment YAMLs, makes a node per valid environment (including ones with no `genesis.pipeline` block at all, so entry points appear), and adds a `prior_env -> env` edge wherever `prior_env` names another environment present on disk.
+The env DAG comes from `genesis.pipeline.prior_env` in the environment files, not from `ci.yml` layouts. `_build_from_env_files` scans the environment YAMLs, makes a node per valid environment (including ones with no `genesis.pipeline` block at all, so an environment that another one names as its `prior_env` appears), and adds a `prior_env -> env` edge wherever `prior_env` names another environment present on disk.
 
 **One accessor, not several.** `Genesis::Top::pipeline_topology` is the single entry point onto that DAG, returning `nodes`, `edges`, `children`, `parent_of`, and a stable breadth-first `order`. `propagate`, `pipeline-status`, `pipeline-prepare`, and `pipeline-graph` all read it; none of them collects edges or computes an ordering of its own. `Genesis::Top::pipeline_env_names` is a wrapper over the same call, so "which environments are in this pipeline" has one answer rather than two that happened to agree.
 
@@ -535,9 +535,9 @@ When `ci.enabled` and a provider type are set, deploy does more than deploy:
 3. **Pulls** that branch fast-forward-only from the remote.
 4. **Asserts the prior-environment invariant** — if the environment declares a `prior_env`, that predecessor must have deployed successfully at least once. This has no `--yes` override.
 5. **Warns on manual deploys** of a pipeline-managed environment under a non-manual provider, and prompts for confirmation. Skipped under the manual provider, where the operator *is* the pipeline.
-6. **`--pull`** (implied by `-F`/`--fix-checks`, opt out with `--no-pull`) propagates onto this environment's branch before deploying, sourced from `prior_env`'s last successful `git.control_commit`, or control HEAD for an entry point. It is a no-op when the branch is already current.
+6. **`--pull`** (implied by `-F`/`--fix-checks`, opt out with `--no-pull`) propagates onto this environment's branch before deploying, sourced from `prior_env`'s last successful `git.control_commit`, or control HEAD where nothing deploys before this environment. It is a no-op when the branch is already current.
 7. **Derives a reason** from the `[pipeline] control@<sha>` markers in the branch's commit range when `--reason` is not given, using the control commit subjects.
-8. **Records git context in exodus**: `git.branch`, `git.commit`, and `git.control_commit`. The control commit is read from the most recent propagation marker in the last 20 subjects, falling back to the control branch's SHA for entry points, which never receive markers.
+8. **Records git context in exodus**: `git.branch`, `git.commit`, and `git.control_commit`. The control commit is read from the newest propagation marker on the branch. A branch carrying no marker has been delivered nothing, so the record names no control commit rather than standing control's own tip in for one.
 9. **Commits and pushes deploy artifacts** to the environment branch when `manifest_store` writes to the repository, rebasing onto the remote first.
 10. **Cascades** — under the manual provider only, and unless `--no-propagate`, checks out control and runs `genesis propagate <env>` after success. Failure there warns and tells the operator to retry; it does not fail the deploy, which already succeeded.
 
@@ -573,7 +573,7 @@ Three details of that subprocess matter, all of them about propagation staying a
 
 | Scenario | Behavior |
 |----------|----------|
-| Two environments queued for the same file, one an ancestor | Descendant is withheld; only the entry point receives it, and it reaches the descendant by cascade after the ancestor deploys |
+| Two environments queued for the same file, one an ancestor | The descendant's commit is held; the ancestor takes the file first, and it reaches the descendant by cascade after the ancestor deploys |
 | Cascade would move an environment backwards | Environment is skipped and named in the run summary as already ahead |
 | Manual commits on top of an environment branch's last propagation | `_resolve_propagation_base` warns; propagation proceeds from the marker, so manual edits to propagated files are overwritten and edits to other files are left alone |
 | `pr/<env>` remote has commits the local branch lacks | Push fails, environment reported in errors, whole run's pushes and PR calls skipped |
@@ -636,7 +636,7 @@ There are no configurable strategies. The behavior is fixed: propagation copies 
 
 | Key | Meaning |
 |-----|---------|
-| `prior_env` | Parent in the DAG; absence makes the environment an entry point |
+| `prior_env` | Parent in the DAG; absent, nothing has to deploy before this environment |
 | `require_pr` | Route propagation through `pr/<env>` and a PR |
 | `manual` | Require a manual CI trigger (graph/describe annotation only today) |
 | `redeploy`, `redeploy_cron_start`, `redeploy_cron_stop` | Scheduled redeploy lane |

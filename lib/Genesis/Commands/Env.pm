@@ -139,8 +139,8 @@ sub create {
 				push @choices, { separator => 1 };
 				push @choices, {
 					value => '',
-					label => '#Yi{(none — pipeline entrypoint)}',
-					summary => '(entrypoint)',
+					label => '#Yi{(none, nothing deploys before this one)}',
+					summary => '(no prior environment)',
 				};
 				$prior_env = new_prompt_for_choice(
 					header      => "Select prior environment (must succeed before this one):",
@@ -149,7 +149,7 @@ sub create {
 				);
 			} else {
 				$prior_env = '';
-				info("No other environments found — #C{%s} will be the pipeline entrypoint.", $name);
+				info("No other environments found, so nothing deploys before #C{%s}.", $name);
 			}
 		}
 
@@ -175,7 +175,7 @@ sub create {
 		}
 
 		# Write pipeline: section when there is something to record.
-		# Entrypoints (no prior_env) can still carry manual: true.
+		# An environment with no prior_env can still carry manual: true.
 		if (length($prior_env // '') || $require_pr || $manual) {
 			my $pipeline_yaml = "  pipeline:\n";
 			$pipeline_yaml .= "    prior_env:    $prior_env\n" if length($prior_env // '');
@@ -206,7 +206,7 @@ sub create {
 			}
 		} else {
 			info(
-				"#C{%s} is a pipeline entrypoint with no gate flags — no pipeline section written.",
+				"#C{%s} has no prior environment and no gate flags, so no pipeline section was written.",
 				$name
 			);
 		}
