@@ -63,6 +63,15 @@ sub active { $_[0]->{active} }
 sub finished { $_[0]->{finished} ? 1 : 0 }
 
 # }}}
+# aborted_clean - did abort do everything it came to do {{{
+#
+# The last-resort net reads this to decide whether to say anything, and it
+# asks for it rather than reaching into the hash, because a reader outside
+# the class that knows the field's name is a second place the field is
+# spelled.
+sub aborted_clean { $_[0]->{aborted_clean} ? 1 : 0 }
+
+# }}}
 # origin - the branch, the HEAD sha, and the cwd begin recorded {{{
 sub origin { $_[0]->{origin} }
 
@@ -1113,7 +1122,7 @@ sub _register_net {
 			# operator standing somewhere they did not ask to be, and that
 			# is worth saying whatever the status, so the abort's own
 			# answer is what the silence turns on.
-			print STDERR "\n$err\n" unless $status && $me->{aborted_clean};
+			print STDERR "\n$err\n" unless $status && $me->aborted_clean;
 		};
 
 		$? = $status;

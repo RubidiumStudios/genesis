@@ -1065,6 +1065,24 @@ B<Parameters:> None.
 
 B<Returns:> 1 where the session finished cleanly, 0 otherwise.
 
+=head2 aborted_clean
+
+  print STDERR $why unless $session->aborted_clean;
+
+True only where C<abort> did everything it came to do, which is to discard
+the working tree, put every branch it wrote back, and return to the branch
+the session began on. An abort that could not discard, or could not return,
+answers false, and so does a session that has never aborted.
+
+The last-resort net reads it to decide whether to say anything on the way
+out. An abort that did what it came for on a process already exiting
+non-zero has nothing to add, and one that left the operator standing
+somewhere they did not ask to be is worth saying whatever the status.
+
+B<Parameters:> None.
+
+B<Returns:> 1 where the abort completed, 0 otherwise.
+
 B<Examples:>
 
   my $done = $session->finished;
