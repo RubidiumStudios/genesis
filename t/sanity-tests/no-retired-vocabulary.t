@@ -88,8 +88,10 @@ File::Find::find({
 
 # A run from anywhere but the repository root reads nothing and passes, which
 # is a green that proves nothing.  pod-complete.t guards its own walk the same
-# way.
-BAIL_OUT("no files found under " . join(', ', @ROOTS)) unless @files;
+# way.  The per-root guard above catches nearly every way of reaching this,
+# so what is left is four roots that all exist and hold no readable file.
+BAIL_OUT("no files found under " . join(', ', map {"$_/"} @ROOTS))
+	unless @files;
 
 my @offences;
 for my $file (sort @files) {
