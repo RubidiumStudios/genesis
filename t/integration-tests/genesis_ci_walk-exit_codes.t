@@ -49,7 +49,7 @@ subtest 'one failed environment exits TEMPFAIL' => sub {
 
 	# qa's file asks the suite's broken-blueprint kit to refuse, so the set
 	# qa would receive cannot be enumerated and the walk confines the error
-	# to qa, which is the failure D96 lets the run walk past.
+	# to qa, which is the kind of failure the run walks past.
 	my $h = ready_harness(envs => ['lab', 'qa'], kit => 'broken-blueprint');
 	write_env_file($h, 'qa', genesis => {kit_blueprint_fails => 1});
 	push_from($h, 'a', $h->control);

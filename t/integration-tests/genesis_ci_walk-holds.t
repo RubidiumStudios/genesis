@@ -198,7 +198,7 @@ subtest 'an environment with no branch anywhere waits for the apply' => sub {
 	unlike($err, qr/\blab: (?:delivered|would deliver)\b/,
 		'and nothing was delivered to an environment with no branch');
 
-	# D56 ranks a standing hold ahead of the apply, and an environment can
+	# A standing hold ranks ahead of the apply, and an environment can
 	# be in both states at once, so the row that reads the branch has to
 	# read the hold first.  The run would otherwise send an operator to a
 	# command that changes nothing while the hold still stands.

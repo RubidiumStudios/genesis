@@ -75,7 +75,7 @@ subtest 'a hold stops a pull request being opened or updated' => sub {
 subtest 'the preview still shows what waits behind the hold' => sub {
 	plan tests => 3;
 
-	# D50 keeps the walk computing what is due while the hold stands, so the
+	# The walk goes on computing what is due while the hold stands, so the
 	# preview lists the same commits whether they are pending or held, and
 	# the two rows below name the commits rather than the list they are in
 	# for exactly that reason.
@@ -95,8 +95,8 @@ subtest 'the hold outranks idempotent, with two detail wordings' => sub {
 	my (undef, $quiet) = run_genesis($nothing_due, {answers => ['y']},
 		'propagate');
 	# Nothing on the walk's path prints that word today, so this row guards
-	# D56 against a later stage teaching it one: a held environment must
-	# never read as though it were fine.
+	# against a later stage teaching it one.  A held environment must never
+	# read as though it were fine.
 	unlike($quiet, qr/qa.*idempotent/, 'a held environment never reads idempotent');
 	like($quiet,
 		qr/nothing is due now, and anything that becomes due stays blocked/,

@@ -65,7 +65,7 @@ subtest 'a broken environment ends itself and the run walks on' => sub {
 	# qa's file names a kit this repository does not hold, which is a file
 	# Genesis::Env::is_valid_env_file still reads as an environment and
 	# Genesis::Top::load_env cannot load.  That is the environment-local
-	# failure of D60, and it is the one the run has to walk past.
+	# failure, and it is the one the run has to walk past.
 	my $due = commit_on_control($h,
 		files => {
 			'lab.yml'  => env_file(env => 'lab', n => 1),
@@ -155,7 +155,7 @@ subtest 'every environment in scope ends with an outcome' => sub {
 	for my $env (qw/lab qa prod/) {
 		like($err, qr/^\s*\Q$env\E\b/m, "$env is in the report");
 	}
-	# The renderer fixes the outcome words of D96, and what is asserted here
+	# The renderer fixes the outcome words, and what is asserted here
 	# is that none of the three falls silent: every one of them carries a
 	# line saying what became of it, in one of those words.
 	my @outcome_lines = grep {
@@ -170,7 +170,7 @@ subtest 'a blueprint error records failed and the run goes on' => sub {
 	# The suite's broken-blueprint kit refuses any environment whose file
 	# sets genesis.kit_blueprint_fails, so qa's set cannot be enumerated at
 	# the commit that sets it while lab's renders as it always did.  That is
-	# D78's blueprint error, read on control while the run enumerates the
+	# the blueprint error, read on control while the run enumerates the
 	# repository-side fragments.
 	my $h = ready_harness(envs => ['lab', 'qa'], kit => 'broken-blueprint');
 	commit_on_control($h,
