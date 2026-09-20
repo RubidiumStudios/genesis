@@ -83,6 +83,10 @@ Each commit is classified by asking C<Genesis::CI::Marker::newest> for the
 newest marker within a walk of one, so this module carries no second reader
 of the marker.
 
+The read keeps git's standard error off what comes back, because every line
+that does come back is parsed as a commit record and a git that warned while
+succeeding would have its warning read as a commit.
+
 B<Parameters:>
 
 =over 4

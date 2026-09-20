@@ -39,7 +39,16 @@ use Genesis::UI qw/prompt_for_boolean prompt_for_line/;
 sub local_only_commits {
 	my ($git, $branch) = @_;
 
-	my ($out) = run({dir => $git->root, onfailure => "Failed to list local-only commits on '$branch'"},
+	# stderr => 0, because the default folds git's standard error into
+	# what comes back and the loop below reads every line as a commit
+	# record.  A git that warned while succeeding would have the warning
+	# parsed as a commit.  _shares_history below and Marker::trailers
+	# both read git the same way for the same reason.
+	my ($out) = run({
+			dir       => $git->root,
+			stderr    => 0,
+			onfailure => "Failed to list local-only commits on '$branch'",
+		},
 		'git', 'log', '--format=%H%x00%h%x00%s', $branch, '--not', '--remotes');
 
 	my @commits;
