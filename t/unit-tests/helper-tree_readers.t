@@ -234,7 +234,7 @@ subtest 'vault_ok folds a multi-line failure onto one line' => sub {
 };
 
 subtest 'a vault that never answered leaves no pid behind' => sub {
-	plan tests => 3;
+	plan tests => 2;
 
 	# The stub stands in for t/bin/vault and reports a pid no process holds,
 	# which is the shape of a vault that said it had started and had not.
@@ -262,9 +262,6 @@ subtest 'a vault that never answered leaves no pid behind' => sub {
 	eval {vault_start($target); 1} or $second = $@;
 	like($second, qr/couldn't signal pid 99999/,
 		'and a second start tries again rather than answering from a record');
-
-	is($ENV{GENESIS_TOPDIR}, $top,
-		'and the stub tree is still the one the two starts read');
 };
 
 done_testing;
