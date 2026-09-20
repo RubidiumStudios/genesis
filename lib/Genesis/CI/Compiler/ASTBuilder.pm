@@ -426,8 +426,9 @@ sub _build_from_env_files {
 		$pipeline_data{$env} = $data if %$data;
 	}
 
-	# Identify envs referenced as prior_env — these are pipeline entrypoints
-	# that may have no genesis.pipeline block themselves (Phase C design).
+	# Identify every environment that another environment names as its
+	# prior_env, since such an environment may carry no genesis.pipeline
+	# block of its own (Phase C design).
 	my %referenced_upstream;
 	for my $env (keys %pipeline_data) {
 		my $upstream = $pipeline_data{$env}{prior_env} or next;
