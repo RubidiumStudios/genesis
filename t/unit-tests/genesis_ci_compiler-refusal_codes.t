@@ -72,7 +72,7 @@ subtest 'a configuration directory missing a required file is refused' => sub {
 };
 
 subtest 'a legacy file the parser cannot make sense of is refused' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $dir = tempdir(CLEANUP => 1);
 	my $parser = Genesis::CI::Compiler::Parser->new;
@@ -91,6 +91,12 @@ subtest 'a legacy file the parser cannot make sense of is refused' => sub {
 
 	is refusal_code(sub {$parser->_normalize_legacy_layouts({})}),
 		CONFIG, 'and neither of them';
+
+	# The layout body is the operator's text just as the keys above it are,
+	# and the two refusals over those keys sit two screens from this one in
+	# the same file.
+	is refusal_code(sub {$parser->_parse_layout_dsl('not a layout at all')}),
+		CONFIG, 'and a layout body the DSL cannot read';
 };
 
 subtest 'the compiler refuses a configuration section of the wrong shape' => sub {

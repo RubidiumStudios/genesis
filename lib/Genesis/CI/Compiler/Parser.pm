@@ -466,7 +466,7 @@ sub _parse_layout_dsl {
 	my %opts = @known_envs ? (known_envs => \@known_envs) : ();
 
 	my $layout = eval { Genesis::CI::Layout->parse($src, %opts) };
-	bail("Layout DSL error: %s", $@) if $@;
+	bail({exitcode => CONFIG}, "Layout DSL error: %s", $@) if $@;
 
 	return {
 		environments => $layout->{envs},
