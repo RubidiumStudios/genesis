@@ -829,18 +829,19 @@ sub propagate {
 			# and fails on it again.
 			next if $env_record->{error};
 
-			# The awaiting outcome.  genesis pipeline-apply is the one command
-			# that cuts a deployment branch, so the run carries on past the
-			# environment without writing, and the report says what it is
-			# waiting for.  Nothing is decided here, because a run and a
-			# preview that decided it separately are two outputs that can
-			# disagree about a word.
+			# The environment takes the awaiting outcome here.  genesis
+			# pipeline-apply is the one command that cuts a deployment branch,
+			# so the run carries on past the environment without writing, and
+			# the report says what it is waiting for.  Nothing is decided
+			# here, because a run and a preview that decided it separately are
+			# two outputs that can disagree about a word.
 			next unless $initial->{branches}{$env_name};
 
-			# The pull request arm.  An environment whose repository policy
-			# says its branch may only receive a proposal takes its delivery
-			# on the pull request branch, and the commits it is given are the
-			# same ones the direct arm would have delivered.
+			# The pull request arm starts here.  An environment whose
+			# repository policy says its branch may only receive a proposal
+			# takes its delivery on the pull request branch, and the commits
+			# it is given are the same ones the direct arm would have
+			# delivered.
 			if ($topo->{nodes}{$env_name}{require_pr}) {
 				my @pending = @{$env_record->{pending}};
 
@@ -910,12 +911,12 @@ sub propagate {
 			my $env    = $env_of{$env_name};
 			my $branch = $env_record->{branch};
 
-			# The second stage.  A delivery that dies halfway ends this
-			# environment and nothing else, so the branch goes back to T and
-			# no part of the delivery survives, the environment records
-			# failed, and the run walks on to the next one.  A run-fatal or
-			# unsurvivable failure is not caught, and it reaches the run's own
-			# eval below, which aborts everything.
+			# This is the run's second stage.  A delivery that dies halfway
+			# ends this environment and nothing else: the branch goes back to
+			# T so that no part of the delivery survives, the environment
+			# records failed, and the run walks on to the next one.  A
+			# run-fatal or unsurvivable failure is not caught, and it reaches
+			# the run's own eval below, which aborts everything.
 			Genesis::CI::Walk::walk_one(
 				session => $session,
 				record  => $env_record,
@@ -965,8 +966,9 @@ sub propagate {
 			records => $record->{environments},
 		) unless $dry_run;
 
-		# The third stage.  The publish is held to the end of the walk, so a
-		# run that failed halfway has put nothing on the remote.
+		# This is the run's third stage.  The publish is held to the end of
+		# the walk, so a run that failed halfway has put nothing on the
+		# remote.
 		#
 		# The push set is the deployment branches alone.  Control is the run's
 		# input and never its output, so what the publish does with control is
@@ -991,9 +993,9 @@ sub propagate {
 					control => $control,
 					records => $record->{environments},
 					specs   => \@publish_specs,
-					# The publish's ask.  The delta every push would carry is
-					# shown either way, and this answers the question that
-					# follows it.
+					# The publish's ask arrives here.  The delta every push
+					# would carry is shown either way, and this answers the
+					# question that follows it.
 					yes     => $opts->{yes},
 					# The two shapes reach one reading.  git push failing to
 					# run at all raises, and a remote nobody can resolve comes
@@ -2177,11 +2179,9 @@ sub _refuse_disabled_pipeline {
 # pipeline_topology answers every field empty where the pipeline is disabled
 # or where no environment file declares one, so an empty order is the one
 # state worth a sentence, since a command that silently held nothing would
-# read as success.
-#
-# The sentence names both causes, because the two are indistinguishable from
-# here and an operator whose pipeline is switched off would otherwise be sent
-# to read their environment files.
+# read as success.  The sentence names both causes, because the two are
+# indistinguishable from here and an operator whose pipeline is switched off
+# would otherwise be sent to read their environment files.
 sub _root_environments {
 	my ($top) = @_;
 
