@@ -412,7 +412,7 @@ subtest 'Redeploy job does not pollute the main workflow group' => sub {
 };
 
 # =========================================================================
-# 12. Multiple envs — only envs with redeploy config get redeploy jobs
+# 12. Multiple envs (only envs with redeploy config get redeploy jobs)
 # =========================================================================
 subtest 'Multiple envs: only configured envs get redeploy jobs' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new(

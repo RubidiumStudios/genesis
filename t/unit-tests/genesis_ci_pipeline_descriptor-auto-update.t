@@ -299,7 +299,7 @@ subtest 'Both enabled: both resources trigger' => sub {
 };
 
 # =========================================================================
-# 6. update_genesis: false — skip genesis tasks and resource
+# 6. update_genesis: false (skip genesis tasks and resource)
 # =========================================================================
 subtest 'update_genesis: false omits genesis-release resource' => sub {
 	my $ast = _ast_for(auto_update => {
@@ -338,7 +338,7 @@ subtest 'update_genesis: false omits genesis-release get' => sub {
 };
 
 # =========================================================================
-# 7. update_kit: false — skip kit tasks and resource
+# 7. update_kit: false (skip kit tasks and resource)
 # =========================================================================
 subtest 'update_kit: false omits kit-release resource' => sub {
 	my $ast = _ast_for(auto_update => {

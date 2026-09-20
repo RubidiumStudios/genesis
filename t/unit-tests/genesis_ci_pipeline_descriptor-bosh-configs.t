@@ -177,7 +177,7 @@ sub _get_names {
 }
 
 # =========================================================================
-# AC7 — Opt-in: default off
+# AC7 (opt-in, off by default)
 # =========================================================================
 subtest 'Default (no track_bosh_configs): no bosh-config resources emitted' => sub {
 	my $pl = _describe(_ast_for());
@@ -198,7 +198,7 @@ subtest 'track_bosh_configs: false suppresses all resources' => sub {
 };
 
 # =========================================================================
-# AC2 — Concourse emits bosh-config resources when configured
+# AC2 (Concourse emits bosh-config resources when configured)
 # =========================================================================
 subtest 'track_bosh_configs: true emits cloud-config and runtime-config' => sub {
 	my $pl = _describe(_ast_for(track_bosh_configs => 1));
@@ -217,7 +217,7 @@ subtest 'track_bosh_configs: [cloud, runtime, cpi] emits all three types' => sub
 };
 
 # =========================================================================
-# AC3 — Resource connection derived from env's bosh target
+# AC3 (resource connection derived from env's bosh target)
 # =========================================================================
 subtest 'bosh-config resource source derived from env target connection' => sub {
 	my $pl = _describe(_ast_for(track_bosh_configs => 1));
@@ -251,7 +251,7 @@ subtest 'cpi-config resource source correct' => sub {
 };
 
 # =========================================================================
-# AC4 — Subset selection
+# AC4 (subset selection)
 # =========================================================================
 subtest 'track_bosh_configs: [cloud] emits only cloud-config' => sub {
 	my $pl = _describe(_ast_for(track_bosh_configs => ['cloud']));
@@ -286,7 +286,7 @@ subtest 'track_bosh_configs: [cloud, cpi] emits cloud and cpi but not runtime' =
 };
 
 # =========================================================================
-# AC5 — Per-env override
+# AC5 (per-env override)
 # =========================================================================
 subtest 'Per-env track_bosh_configs overrides global default (off)' => sub {
 	my $ast = _ast_for(
@@ -399,7 +399,7 @@ subtest 'CPI-config resource has chip icon' => sub {
 };
 
 # =========================================================================
-# Multi-env — correct resources per env with independent targets
+# Multi-env (correct resources per env with independent targets)
 # =========================================================================
 subtest 'Two-env pipeline emits per-env bosh-config resources' => sub {
 	my $pl = _describe(_two_env_ast(track_bosh_configs => 1));
