@@ -1720,10 +1720,18 @@ nothing else.  Each load carries a count of its own beside the configuration,
 because two rows in a row can ask for the same block and a commit needs a
 delta to make.
 
-The one option is C<deployment_type>, which names the type the configuration
-declares and defaults to C<bosh>.  The type is a top-level key rather than
-part of the pipeline block, so a file whose rows vary it has nowhere in the
-body to say so and names it in the call instead.
+C<deployment_type> names the type the configuration declares and defaults to
+C<bosh>.  The type is a top-level key rather than part of the pipeline block,
+so a file whose rows vary it has nowhere in the body to say so and names it in
+the call instead.
+
+C<minimum_version> is the Genesis floor the configuration declares, and it
+defaults to C<3.2.0>.  It is written for the same reason C<creator_version>
+is, which is that C<Genesis::Top::create> writes both for every released
+build, so a configuration assembled here stands for a repository Genesis made
+rather than for the one shape that carries no floor at all, which is a
+development build's.  A row that is about the floor names the value it wants,
+and passing C<undef> writes no floor.
 
 =head2 automated_config($type, @lines)
 

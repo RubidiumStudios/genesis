@@ -4697,15 +4697,30 @@ sub deliver_all {
 # is a top-level key rather than part of the pipeline block, and a file whose
 # rows vary it has nowhere in the body to say so.  It defaults to bosh, which
 # is what every other caller wants.
+#
+# minimum_version is written for the same reason creator_version is, which is
+# that Genesis::Top::create writes both for every released build and a
+# configuration assembled here stands for a repository Genesis made.  Leaving
+# it out made every fixture built through this look like one a development
+# build created, which is the one repository that carries no floor at all.  A
+# row that is about the floor itself names the value it wants, and passing
+# undef writes no floor, which is the development build's own shape.
 sub load_with {
 	my ($h, $body, %opts) = @_;
 	require Genesis::Top;
+
+	my $floor = exists $opts{minimum_version}
+		? $opts{minimum_version}
+		: '3.2.0';
 
 	$h->commit_on_control(files => {
 		'.genesis/config' => join("\n",
 			'---', 'deployment_type: ' . ($opts{deployment_type} // 'bosh'),
 			'version: "3"',
-			'creator_version: 3.2.0', $body, ''),
+			'creator_version: 3.2.0',
+			(defined($floor) && length($floor)
+				? ("minimum_version: $floor") : ()),
+			$body, ''),
 		'.load-count' => sprintf("%d\n", ++$h->{loads}),
 	});
 
