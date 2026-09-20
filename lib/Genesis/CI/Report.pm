@@ -33,7 +33,7 @@ use constant ENV_OUTCOMES => (
 use constant COMMIT_OUTCOMES => ('delivered', 'held');
 use constant FILE_OUTCOME    => 'overwrote-hand-edit';
 
-# D54's qualifier for an environment the pipeline has never been applied to,
+# The qualifier for an environment the pipeline has never been applied to,
 # and for one with no deployment branch on either side, which is the same wait
 # read off a different absence.  It is declared here because this module owns
 # every word an operator reads about an outcome, and held_qualifier is the one
@@ -79,10 +79,10 @@ my %COLOUR = (
 # Publish and outcomes spells these exactly, so that genesis propagate, its
 # dry run, and the routing column of genesis pipeline-status can never
 # disagree about a word.  The overlap form carries the ancestor's own state
-# under D72 and the never-certified form carries no such clause, an
-# environment that has never deployed being already clear about why.  The
-# frozen form names the pull request an operator merges to release the commit,
-# because a number is what they act on.
+# and the never-certified form carries no such clause, an environment that has
+# never deployed being already clear about why.  The frozen form names the
+# pull request an operator merges to release the commit, because a number is
+# what they act on.
 sub hold_reason {
 	my ($held) = @_;
 
@@ -116,15 +116,15 @@ sub hold_reason {
 	return sprintf('held behind control@%s',
 		substr($held->{behind}, 0, 7)) if $reason eq 'behind-held-commit';
 
-	# D50: the environment's own hold is what holds this commit, and what an
+	# The environment's own hold is what holds this commit, and what an
 	# operator has to do about it is the reason somebody wrote on the record,
 	# so the line carries that rather than the word on-hold.
 	return sprintf('held (%s)', $held->{hold_reason})
 		if $reason eq 'on-hold' && defined $held->{hold_reason};
 
-	# D51: an approved pull request is frozen, so what holds this commit is
-	# the merge nobody has made yet, and the number is what an operator acts
-	# on.  The enum already carries the reason and this is its wording.
+	# An approved pull request is frozen, so what holds this commit is the
+	# merge nobody has made yet, and the number is what an operator acts on.
+	# The enum already carries the reason and this is its wording.
 	#
 	# An entry carrying the reason and no number falls through to the bare
 	# wording at the foot of the sub, which reads held (awaiting-merge),
@@ -140,7 +140,7 @@ sub hold_reason {
 # }}}
 # held_qualifier - what one held environment waits for, or undef {{{
 #
-# D54's qualifier, which says what the environment waits for rather than why
+# The qualifier, which says what the environment waits for rather than why
 # any one commit is held.  An environment with no deployment branch on either
 # side waits for the apply that cuts one, one with a hold standing against it
 # waits for somebody to clear it, one the pipeline was never applied to waits
@@ -157,7 +157,7 @@ sub hold_reason {
 sub held_qualifier {
 	my ($record) = @_;
 
-	# D43: an environment the pre-flight found no branch for on either side is
+	# An environment the pre-flight found no branch for on either side is
 	# waiting for the one command that cuts one.  The walk reads nothing else
 	# about it, so its certified state is never filled in, and that absence is
 	# what says which environment this is.  It is composed here rather than by
@@ -170,24 +170,24 @@ sub held_qualifier {
 	# certified state for this to answer over.
 	return AWAITING_APPLY unless defined $record->{certified};
 
-	# D50: a hold is a decision somebody made for a reason the pipeline
+	# A hold is a decision somebody made for a reason the pipeline
 	# cannot see, and only a human clears it, so it outranks whatever the
 	# commits underneath it happen to be waiting for.
 	#
-	# D56 puts it ahead of the never-applied answer below as well.  Both
-	# states are read for every environment, so an environment can be in both
-	# at once and the two commands would rank them apart if either ranked
-	# them for itself.  The hold wins, because the apply is a command the
-	# operator may run at once and the hold is a decision standing in front
-	# of it.  An environment that reads as awaiting the apply while a hold
-	# stands sends them to a command that would change nothing.  Clearing the
-	# hold leaves the apply as what the environment waits for, and
-	# hold_detail says meanwhile what the hold is holding.
+	# It stands ahead of the never-applied answer below as well.  Both states
+	# are read for every environment, so an environment can be in both at
+	# once and the two commands would rank them apart if either ranked them
+	# for itself.  The hold wins, because the apply is a command the operator
+	# may run at once and the hold is a decision standing in front of it.  An
+	# environment that reads as awaiting the apply while a hold stands sends
+	# them to a command that would change nothing.  Clearing the hold leaves
+	# the apply as what the environment waits for, and hold_detail says
+	# meanwhile what the hold is holding.
 	return sprintf('needs clearing (%s)',
 		$record->{hold}{reason} // 'no reason given')
 		if $record->{hold};
 
-	# D43's wait, in one wording for the two states that share it.  An
+	# The same wait, in one wording for the two states that share it.  An
 	# environment whose record carries no certified commit waits for the
 	# apply to write one, and an environment with no deployment branch on
 	# either side waits for the apply to cut it.  Both are answered here so
@@ -231,13 +231,13 @@ sub held_qualifier {
 }
 
 # }}}
-# hold_detail - what the standing hold is holding, in D56's three wordings {{{
+# hold_detail - what the standing hold is holding, in three wordings {{{
 #
-# D56 makes a hold outrank idempotent, so an environment with one standing
-# never reads as though it were fine, and this is the line that says which of
-# three situations it is in.  A known number of commits are waiting on the
-# hold itself, or something else is holding commits and the hold stands over
-# them, or nothing at all is waiting.
+# A hold outranks idempotent, so an environment with one standing never
+# reads as though it were fine, and this is the line that says which of three
+# situations it is in.  A known number of commits are waiting on the hold
+# itself, or something else is holding commits and the hold stands over them,
+# or nothing at all is waiting.
 #
 # The count is of the commits the hold itself took, and not of everything
 # held, because a commit a gate or an ancestor had already stopped is
@@ -260,16 +260,16 @@ sub hold_detail {
 
 	my $hold = $record->{hold} or return undef;
 
-	# D50 has every reader of a hold name the one command that clears it,
-	# and name who set it and when.  The clause is composed here rather than
-	# beside each of the three callers, because a sentence spelled in three
-	# places is a sentence the three spellings drift apart on.  T302 quotes
-	# the first of the wordings with this clause on the end of it.
+	# Every reader of a hold names the one command that clears it, and name
+	# who set it and when.  The clause is composed here rather than beside
+	# each of the three callers, because a sentence spelled in three places
+	# is a sentence the three spellings drift apart on.  T302 quotes the
+	# first of the wordings with this clause on the end of it.
 	#
 	# The three identity fields are the record's own, and a record written
-	# by something older than D53's four fields can be missing any of them,
-	# so each is named as unrecorded rather than left to print as an empty
-	# gap the reader has to guess at.
+	# older than the four fixed fields can be missing any of them, so each
+	# is named as unrecorded rather than left to print as an empty gap the
+	# reader has to guess at.
 	# In backticks, because it stands mid-sentence and every reader of that
 	# sentence is already printing it inside a colour span of its own.  The
 	# three readers are the run's report, the preview, and pipeline-status.
@@ -399,11 +399,11 @@ sub render_run {
 		my $detail = hold_detail($env);
 		info "    #Y{%s}", $detail if defined $detail && length $detail;
 
-		# D53 puts a trailer's hold after the delivery, so an environment
-		# that took one on this run reads as delivered with one line saying
-		# so beneath it.  It is not held_qualifier's held, needs clearing,
-		# which is what the next run reads off the record this one wrote:
-		# a report says what this run did, and this run delivered.
+		# A trailer's hold goes after the delivery, so an environment that
+		# took one on this run reads as delivered with one line saying so
+		# beneath it.  It is not held_qualifier's held, needs clearing,
+		# which is what the next run reads off the record this one wrote: a
+		# report says what this run did, and this run delivered.
 		#
 		# This one keeps a release line of its own, because the sentence
 		# above it is about a hold the run found standing and this is about
@@ -429,11 +429,11 @@ sub render_run {
 			info "      #G{M} %s", $_ for _paths($git, $pending->{delivered});
 			info "      #R{D} %s", $_ for _paths($git, $pending->{removed});
 
-			# D33: an overwrite is never silent, and it is named per file,
-			# because the branch was carrying a hand edit that the mirror has
-			# just taken back off it.  It is the report's third axis rather
-			# than a warning beside it, since a warning is not an outcome and
-			# I8 asks for one per file.
+			# An overwrite is never silent, and it is named per file, because
+			# the branch was carrying a hand edit that the mirror has just
+			# taken back off it.  It is the report's third axis rather than a
+			# warning beside it, since a warning is not an outcome and I8
+			# asks for one per file.
 			info "      #Y{%s} %s", FILE_OUTCOME, $_
 				for _paths($git, $pending->{overwrote});
 		}
@@ -451,12 +451,11 @@ sub render_run {
 # }}}
 # render_preview - the preview's report, which is the run's own {{{
 #
-# D44 leaves --dry-run as the only preview, and it reports, per environment
-# and per control commit, the files that would land and whether each commit
-# would be delivered or held and why, and writes nothing.  It is the same
-# record and the same renderer the run uses, because two renderers drift and
-# the held forms have to read word for word as pipeline-status's do under
-# D54.
+# --dry-run is the only preview, and it reports, per environment and per
+# control commit, the files that would land and whether each commit would be
+# delivered or held and why, and writes nothing.  It is the same record and
+# the same renderer the run uses, because two renderers drift and the held
+# forms have to read word for word as pipeline-status's do.
 #
 # One verb is written here rather than composed by the renderer.  An
 # environment with commits due would have propagated had this been a run, and
@@ -487,11 +486,11 @@ sub render_preview {
 # }}}
 # preview_warnings - the three cases a preview's answer rests on {{{
 #
-# D44 gives the preview two loud warnings, because in each case its answer
+# The preview carries two loud warnings, because in each case its answer
 # rests on something the preview deliberately did not do.  A control branch
-# that is ahead of its remote is refused by a real run under D30 until it has
-# been pushed, and a deployment branch whose local commits all carry a marker
-# is reset to the remote by the pre-flight under D32 before the walk begins.
+# that is ahead of its remote is refused by a real run until it has been
+# pushed, and a deployment branch whose local commits all carry a marker is
+# reset to the remote by the pre-flight before the walk begins.
 #
 # A third stands beside them, which is a deployment branch merely behind its
 # remote, fast-forwarded by the pre-flight before the walk begins.  The rule
