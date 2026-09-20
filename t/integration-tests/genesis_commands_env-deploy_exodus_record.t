@@ -29,7 +29,10 @@ $ENV{NOCOLOR} = 1;
 # list the row wants.  A row that drops a prerequisite has to put the whole
 # file back on the deployment branch, because that branch is what the deploy
 # reads, and this keeps the two writes saying the same thing but for the list.
-sub env_body {
+# The name says what the body carries, because the harness exports an
+# env_body of its own and two bodies under one name in one file is a body a
+# reader picks at random.
+sub tracking_body {
 	my ($h, @prereqs) = @_;
 	return "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n"
 	     . "genesis:\n  env: qa\n  pipeline:\n    track_dependencies:\n"
@@ -64,7 +67,7 @@ subtest 'the recorded dependency set is what the deploy actually read' => sub {
 	# what the deploy reads and a rewrite on control alone would not reach
 	# it until a propagate had routed it there.
 	hand_commit($h, $h->slug('qa'),
-		files   => {edited_file($h, 'qa') => env_body($h, 'lab')},
+		files   => {edited_file($h, 'qa') => tracking_body($h, 'lab')},
 		message => 'stop tracking a prerequisite');
 	refresh($h, 'a', $h->control, $h->slug('qa'));
 	fixture_director($h, 'qa', url => $director->{url});
