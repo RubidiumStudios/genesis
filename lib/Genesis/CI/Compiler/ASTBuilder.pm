@@ -181,7 +181,7 @@ sub _build_legacy_workflows {
 		my $env_dir = $self->{env_dir}
 			|| ($self->{top} ? $self->{top}->path() : undef);
 		if ($env_dir) {
-			my ($ef_nodes) = $self->_build_from_env_files($env_dir);
+			my ($ef_nodes) = $self->build_from_env_files($env_dir);
 			for my $env (keys %nodes) {
 				my $ef = $ef_nodes->{$env} or next;
 				$nodes{$env}{require_pr}          = $ef->{require_pr};
@@ -266,7 +266,7 @@ sub _build_from_multi_file {
 		my $env_dir = $parsed->{env_dir}
 			|| $self->{env_dir}
 			|| ($self->{top} ? $self->{top}->path : '.');
-		my ($nodes, $edges) = $self->_build_from_env_files($env_dir);
+		my ($nodes, $edges) = $self->build_from_env_files($env_dir);
 		$workflows = {
 			default => {
 				name     => 'default',
@@ -391,7 +391,7 @@ sub _build_workflow_graph {
 # }}}
 ### Env-File Topology Builder {{{
 
-# _build_from_env_files - build workflow graph nodes+edges from genesis.pipeline.* {{{
+# build_from_env_files - build workflow graph nodes+edges from genesis.pipeline.* {{{
 #
 # Scans *.yml files in $dir.  For each file that contains a
 #
@@ -407,12 +407,11 @@ sub _build_workflow_graph {
 #
 # Returns: (\%nodes, \@edges)
 #
-# The leading underscore notwithstanding, this is called from outside
-# this class, because Genesis::Top asks it for the topology an
-# environment directory describes.  The name and the arguments are a
-# documented seam rather than this file's own business, and a change
-# to either of them reaches that caller.
-sub _build_from_env_files {
+# This is called from outside this class, because Genesis::Top asks it
+# for the topology an environment directory describes.  The name and
+# the arguments are a documented seam rather than this file's own
+# business, and a change to either of them reaches that caller.
+sub build_from_env_files {
 	my ($self, $dir) = @_;
 
 	opendir(my $dh, $dir) or return ({}, []);

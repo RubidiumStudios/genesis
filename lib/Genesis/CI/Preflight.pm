@@ -42,7 +42,7 @@ sub local_only_commits {
 	# stderr => 0, because the default folds git's standard error into
 	# what comes back and the loop below reads every line as a commit
 	# record.  A git that warned while succeeding would have the warning
-	# parsed as a commit.  _shares_history below and Marker::trailers
+	# parsed as a commit.  shares_history below and Marker::trailers
 	# both read git the same way for the same reason.
 	my ($out) = run({
 			dir       => $git->root,
@@ -464,7 +464,7 @@ sub initial_state {
 
 		# A branch the remote has and this clone lacks is never asked the
 		# ancestry question.  There is no refs/heads/<branch> for git to
-		# answer it with, and _shares_history reads a ref it cannot resolve
+		# answer it with, and shares_history reads a ref it cannot resolve
 		# as no shared history, so the branch would be refused with a text
 		# written for a different fault.  Nothing reaches here in that state
 		# today, because the refresh creates the local ref from the tracking
@@ -474,7 +474,7 @@ sub initial_state {
 		# has to say what a branch in this state means there.
 		next if $div->{state} eq 'no-local';
 
-		next if _shares_history($git, $branch, $remote);
+		next if shares_history($git, $branch, $remote);
 		push @unrelated, $branch;
 		$state->{branches}{$env}{unrelated} = 1;
 	}
@@ -629,7 +629,7 @@ sub initial_state {
 }
 
 # }}}
-# _shares_history - has this branch a commit in common with its counterpart {{{
+# shares_history - has this branch a commit in common with its counterpart {{{
 #
 # Asked through run with passfail on and stderr off rather than through
 # Service::Git::merge_base, which folds git's stderr into the value it
@@ -639,7 +639,7 @@ sub initial_state {
 # status is the whole answer here, and both of the states that answer no,
 # which are a pair with no common commit and a ref this clone cannot resolve,
 # are states this stage refuses rather than passes over.
-sub _shares_history {
+sub shares_history {
 	my ($git, $branch, $remote) = @_;
 	return run({dir => $git->root, passfail => 1, stderr => 0},
 		'git', 'merge-base', "refs/heads/$branch",

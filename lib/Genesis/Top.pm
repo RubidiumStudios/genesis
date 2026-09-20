@@ -1533,7 +1533,7 @@ sub pipeline_env_names {
 # The single answer to "what environments are in this pipeline, and in
 # what order".  Previously that question had two implementations that
 # agreed only by coincidence: this method globbed *.yml, while
-# Genesis::CI::Compiler::ASTBuilder::_build_from_env_files walked the
+# Genesis::CI::Compiler::ASTBuilder::build_from_env_files walked the
 # same directory building a DAG -- and the DAG one, though private, was
 # called from four places in Genesis::Commands::Pipelines.  Anything
 # reading pipeline membership now goes through here.
@@ -1559,7 +1559,7 @@ sub pipeline_topology {
 		top     => $self,
 		env_dir => $self->path,
 	);
-	my ($nodes, $edges) = $builder->_build_from_env_files($self->path);
+	my ($nodes, $edges) = $builder->build_from_env_files($self->path);
 	return \%empty unless $nodes && %$nodes;
 
 	my (%children, %has_parent, %parent_of);

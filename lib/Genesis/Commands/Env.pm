@@ -1100,7 +1100,7 @@ sub _deploy_branch_action {
 	# initial state uses, so the two commands mean the same thing by it.  It
 	# is asked here rather than above, because both refs have to exist for
 	# git to answer it and only these two states promise that.
-	if (!Genesis::CI::Preflight::_shares_history($git, $branch, $remote)) {
+	if (!Genesis::CI::Preflight::shares_history($git, $branch, $remote)) {
 		bail({exitcode => DATAERR},
 			"Refusing to deploy.  The local branch #C{%s} shares no ancestor ".
 			"with #C{%s/%s}, which #C{pipeline-apply} created.  The marker-only ".
