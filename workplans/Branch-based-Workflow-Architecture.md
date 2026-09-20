@@ -713,9 +713,9 @@ A v3 pipeline is never applied on top of a v2 one, and a repository moves to v3 
 
 The move has six parts.
 
-1. `control` is a new orphan branch, cut from the existing branch's HEAD content, so it shares no history with the branch it replaces.
+1. `control` is a new orphan branch, cut from the existing branch's HEAD content, so it shares no history with the branch it replaces. It is pushed as soon as it is cut, with `git push -u origin control`, because a control branch that exists in one clone and nowhere else holds a topology no other machine can read, and the first propagate, deploy, or pipeline-status to look for it refuses with that push as the remedy.
 
-2. `.genesis/config` itself moves to version 3, which is a hand edit of its `version` key from `2` to `3`. Nothing else in the file changes, because the version 3 schema is the version 2 schema with the `pipeline:` section added to it, and no command makes this move for you, since the only upgrade Genesis carries ends at version 2. The step below is refused until this one is done, because a pipeline section belongs to a version 3 configuration and the refusal says so.
+2. `.genesis/config` itself moves to version 3, which is a hand edit of its `version` key from `2` to `3`. Nothing else in the file changes, because the version 3 schema is the version 2 schema with the `pipeline:` section added to it, and no command makes this move for you, since the only upgrade Genesis carries ends at version 2. Write the block below before making this edit and Genesis turns it away, because a pipeline section belongs to a version 3 configuration and the refusal says as much.
 
 3. The `pipeline:` block is written into `.genesis/config` with `enabled: true`, taking its provider, git URI, branch, pipeline name, and vault URL from the `pipeline:` block of the old `ci.yml`, and `ci.yml` is then removed. Nothing below runs until this is done, because the topology every later step walks is empty while `pipeline.enabled` is false, and the pipeline commands are refused outright while `ci.yml` still stands.
 
