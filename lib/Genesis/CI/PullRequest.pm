@@ -459,6 +459,12 @@ sub settled {
 	my $marker = Genesis::CI::Marker::newest($git, "$remote/$pr_branch");
 	return 0 unless $marker && $marker eq $newest;
 
+	# The read is defined because of the two questions above it.  A ref git
+	# cannot resolve answers nothing now rather than git's own complaint,
+	# and this comparison would meet that nothing as an uninitialized value.
+	# It cannot: the marker walk two lines up read commits off this very
+	# ref and answered one, so the ref was there, and nothing between the
+	# two reads fetches or prunes.
 	return $git->rev_parse("$remote/$pr_branch^{tree}") eq $tree ? 1 : 0;
 }
 
