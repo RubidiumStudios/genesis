@@ -721,9 +721,9 @@ The move has six parts.
 
 3. The `pipeline:` block is written into `.genesis/config` with `enabled: true`, taking its provider, git URI, branch, pipeline name, and vault URL from the `pipeline:` block of the old `ci.yml`, and `ci.yml` is then removed. Nothing below runs until this is done, because the topology every later step walks is empty while `pipeline.enabled` is false, and the pipeline commands are refused outright while `ci.yml` still stands.
 
-4. The deployment branches are the init branches `genesis pipeline-apply` creates, one orphan root commit per `<env>/<type>` adding a single `init` file, and each environment file gains its `genesis.pipeline` block.
+4. A branch named for an environment alone is deleted, or renamed with `git branch -m lab lab/<type>` where its history is wanted, because such a name blocks every `<env>/<type>` beneath it. This comes before the apply, since the apply cuts `lab/<type>` and git cannot create that ref while `lab` stands. The rename moves the local ref alone, so the old name goes from the remote too and the renamed branch goes onto it, either as `git push origin :lab` and then `git push -u origin lab/<type>`, or as the one `git push origin lab/<type> :lab`. A renamed branch stands in place of that environment's init branch, and it is still uncertified.
 
-5. A branch named for an environment alone is deleted, or renamed with `git branch -m lab lab/<type>` where its history is wanted, because such a name blocks every `<env>/<type>` beneath it. A renamed branch stands in place of that environment's init branch, and it is still uncertified.
+5. The deployment branches are the init branches `genesis pipeline-apply` creates, one orphan root commit per `<env>/<type>` adding a single `init` file, and each environment file gains its `genesis.pipeline` block. Where the part above left a renamed branch, the apply finds that branch already standing and publishes it rather than cutting one, which is what puts a renamed branch in an init branch's place.
 
 6. Every existing clone then fetches once with `--prune`, because `refs/remotes/origin/lab` collides in the same way and a plain fetch reports "unable to update local ref" until it is gone.
 
