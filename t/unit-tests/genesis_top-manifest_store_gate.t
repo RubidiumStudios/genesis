@@ -35,16 +35,21 @@ my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 # a bare repository at a filesystem path, whose URL carries no GitHub
 # owner/repo pair, and the derivation's own refusal belongs to the
 # source-control rows rather than to these.
+# The floor goes to the harness rather than into the body, because the
+# harness writes it for every repository it assembles and a row that says
+# nothing about the floor should get the one a real repository has.  A row
+# that is about the floor names its own, and undef asks for none.
 sub load_store {
 	my ($store, %opts) = @_;
 	my @lines;
-	push @lines, "minimum_version: $opts{minimum_version}"
-		if $opts{minimum_version};
 	push @lines, "manifest_store: $store" if $store;
 	push @lines, 'pipeline:', '  enabled: true',
 		'  source_control:', '    repository: genesis/bosh-deployments'
 		unless $opts{no_pipeline};
-	return load_with($h, join("\n", @lines));
+	return load_with($h, join("\n", @lines),
+		exists $opts{minimum_version}
+			? (minimum_version => $opts{minimum_version})
+			: ());
 }
 
 subtest 'the store must be exodus under a pipeline' => sub {
@@ -78,13 +83,13 @@ subtest 'an old kit floor cannot reach the repository store' => sub {
 	my $path = write_env_file($h, 'legacy',
 		genesis => {min_version => '3.0.0'}, commit => 0);
 
-	throws_ok {load_store('exodus')}
+	throws_ok {load_store('exodus', minimum_version => undef)}
 		qr/environment legacy has\s+a\s+Genesis\s+floor\s+below\s+3\.1\.0/i,
 		'the floor case is refused by name';
-	throws_ok {load_store('exodus')}
+	throws_ok {load_store('exodus', minimum_version => undef)}
 		qr/Raise\s+the\s+kit's\s+floor\s+to\s+3\.1\.0/,
 		'and the refusal carries the remedy';
-	throws_ok {load_store('exodus')}
+	throws_ok {load_store('exodus', minimum_version => undef)}
 		qr/genesis\.min_version/,
 		'and names the key too, for a floor somebody set by hand';
 
