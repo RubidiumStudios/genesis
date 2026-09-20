@@ -178,6 +178,37 @@ subtest 'begin reaches the pre-flight through the shared helper' => sub {
 		'so a fixture with no identity fails in begin naming the fix');
 };
 
+subtest 'a session begun on a detached HEAD comes back to its commit' => sub {
+	plan tests => 5;
+
+	# current_branch answers the literal string HEAD on a detached head, so
+	# the recorded name is not a branch and a checkout of it is a no-op that
+	# leaves the run standing on the deployment branch.  begin records the
+	# commit as well, and that is what the restore has to steer by.  Every
+	# deployed-state command opens a session where the deployment branch
+	# exists, so an ordinary info run from a detached head takes this path.
+	my $h   = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $git = $h->git('a');
+
+	my $commit = $git->sha('HEAD');
+	run({dir => $h->a}, 'git', 'checkout', '--detach', $commit);
+	is($git->current_branch, 'HEAD', 'the run is standing on a detached head');
+
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	is($session->origin->{head}, $commit, 'begin recorded the commit');
+
+	$session->switch($h->slug('qa'));
+	isnt($git->current_branch, 'HEAD',
+		'the session is standing on the deployment branch');
+
+	is(exception(sub {$session->finish}), '',
+		'finish returns rather than bailing over a branch it cannot name');
+	is($git->sha('HEAD'), $commit,
+		'and the run is back on the commit it started from');
+};
+
 # One local helper, because an assertion helper lives beside its test.
 sub exception {
 	my ($code) = @_;

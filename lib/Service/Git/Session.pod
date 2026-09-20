@@ -675,7 +675,9 @@ the session checks out the branch it began on first, because git will not
 delete the branch the tree stands on. That step back is a checkout rather than
 a switch and asks nothing about the session still being open, so a branch this
 run cut is taken off on an abort exactly as it is on a decline. A session begun
-on a detached HEAD has no branch to step back to, and the step is skipped.
+on a detached HEAD steps back to the commit C<begin> recorded, because the name
+it recorded is the literal string C<HEAD> and a checkout of that would stay
+where it is.
 
 The branch then leaves the recorded half of what L</committed_branches>
 answers, exactly as C<discard> takes it off. That set is the union of the
@@ -1675,6 +1677,13 @@ branch we came back to does not carry it, it says so and leaves us at the
 root rather than somewhere the caller did not choose. The branch is read back
 afterwards and a return that did not land raises.
 
+C<< $git->current_branch >> answers the literal string C<HEAD> on a detached
+head, so a session begun on one recorded no branch name at all, and a checkout
+of C<HEAD> is a no-op that would leave the run standing on the deployment
+branch. C<begin> records the commit as well, so a detached session is put back
+with C<< $git->checkout_detached >> onto that commit, and the check that the
+return landed compares commits rather than names.
+
 B<Parameters:> None.
 
 B<Returns:> C<$self>, and C<$self> unchanged where C<begin> never ran.
@@ -1697,7 +1706,8 @@ there but cannot be entered.
 
 C<< "Failed to return to %s: we are on %s." >> -- raised where the checkout
 reported no failure but we are not on the recorded branch, which is a working
-tree we could not put back.
+tree we could not put back. For a session begun on a detached head it names
+the recorded commit, because that is what the return is measured against.
 
 =back
 
