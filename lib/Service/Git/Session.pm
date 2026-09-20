@@ -1201,9 +1201,19 @@ sub _take_lock {
 
 # }}}
 # _release_lock - finish lets go, and nothing else does {{{
+#
+# The file is emptied before the flock goes, so it never names a holder that
+# has already let go.  The kernel drops the flock either way, but the file
+# outlives it, and a reader that tests a holder's liveness reads the pid line:
+# a file still naming the process that just released would be read as held for
+# the rest of that process's life.  Emptying while the flock is still held is
+# what keeps anybody else from writing a pid we would then truncate away, and
+# the take side truncates before it writes, so an empty file is a shape it
+# already expects.
 sub _release_lock {
 	my ($self) = @_;
 	my $fh = delete $self->{lock} or return $self;
+	truncate($fh, 0);
 	flock($fh, LOCK_UN);
 	close $fh;
 	return $self;

@@ -204,6 +204,48 @@ subtest 'a switch that removes the current directory lands at the root' => sub {
 	$session->finish;
 };
 
+subtest 'the lock file stops naming a holder once it is released' => sub {
+	plan tests => 3;
+
+	# The kernel drops the flock when the session finishes, and the file
+	# outlives it.  A reader that tests a holder's liveness reads the pid
+	# line, so a file still naming the process that just let go would be
+	# read as held for as long as that process runs, which is the rest of
+	# the command.  Emptying it on release is what makes the line mean
+	# what a reader takes it to mean.
+	my $h   = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $git = $h->git('a');
+	my $path = $git->git_dir . '/genesis-session.lock';
+
+	my $session = $git->session(control => $h->control);
+	$session->begin;
+	$session->switch($h->slug('qa'));
+	is(read_first_line($path), "$$",
+		'the lock names our pid while the session holds it');
+
+	$session->finish;
+	is(read_first_line($path), '',
+		'and names nobody once the session has let go');
+
+	# The take side truncates before it writes, so an emptied file is a
+	# shape it already expects and a later session takes the lock as
+	# readily as it took the first one.
+	my $second = $git->session(control => $h->control);
+	ok(eval {$second->begin; $second->switch($h->slug('qa')); 1},
+		'and a later session takes the same file again');
+	$second->finish;
+};
+
+sub read_first_line {
+	my ($path) = @_;
+	return '' unless -f $path;
+	open my $fh, '<', $path or die "cannot read the session lock: $!\n";
+	chomp(my $line = <$fh> // '');
+	close $fh;
+	return $line;
+}
+
 sub exception {
 	my ($code) = @_;
 	local $ENV{GENESIS_IGNORE_EVAL} = '';
