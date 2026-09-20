@@ -91,7 +91,7 @@ subtest 'a run-fatal failure leaves walk_one for the run to end on' => sub {
 
 	is(ref($err), 'Genesis::CI::RunFailure', 'the failure is re-raised whole');
 	is($err->kind, 'run-fatal', 'still carrying the class it was raised as');
-	is($err->exit_code, 1, 'and the status that class carries');
+	is($err->exit_code, 1, 'and a writer failure exits a bare 1');
 	is($record->{outcome}, undef,
 		'the environment records no outcome of its own');
 	is_deeply($session->{discarded}, [],
@@ -114,7 +114,7 @@ subtest 'an unsurvivable failure leaves walk_one the same way' => sub {
 	is(ref($err), 'Genesis::CI::RunFailure', 'the failure is re-raised whole');
 	is($err->kind, 'unsurvivable', 'still carrying the class it was raised as');
 	is($err->exit_code, Genesis::Exit::TEMPFAIL,
-		'and the status that class carries');
+		'and a retriable failure exits TEMPFAIL');
 	is($record->{outcome}, undef,
 		'the environment records no outcome of its own');
 	is_deeply($session->{discarded}, [],
