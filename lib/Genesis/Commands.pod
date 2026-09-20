@@ -2235,12 +2235,12 @@ which command declared what.
 
 The two names sit in the gate for now.  D81 would rather a registration
 declared that it needs no refresh, the way it declares its class, and the
-step that gives registrations such an attribute moves these names onto it,
-M17 for C<pipeline-status>.
+attribute that gives a registration such a declaration takes these names
+onto it, C<pipeline-status> included.
 
 Whether the command commits on control goes down as C<< commits => ... >>,
 read straight off the registration. The C<control_requires_pr> refusal is
-asked of that rather than of the class, and M17's attribute pattern absorbs
+asked of that rather than of the class, and that attribute pattern absorbs
 the declaration later the way it absorbs the two refresh exemptions above.
 
 The name a command is about to add goes down with it as C<< adding => ... >>.
