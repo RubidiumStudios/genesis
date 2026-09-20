@@ -45,6 +45,27 @@ subtest 'a registry lookup answers a copy of the entry' => sub {
 		'writing into the answer leaves the registry as it was';
 };
 
+subtest 'a registration keeps a copy of what it was handed' => sub {
+	plan tests => 2;
+
+	# The same guard from the other side.  A caller that goes on writing
+	# into the hash it registered would rewrite the registry just as surely
+	# as one writing into an answer, and the entry it rewrote would be the
+	# one every later lookup reads.
+	my %entry = (cli_class => 'Genesis::CI::Provider::Concourse');
+	Genesis::CI::ProviderRegistry->register_provider('fixture-copy', \%entry);
+
+	$entry{cli_class} = 'Genesis::CI::Provider::Rewritten';
+	is Genesis::CI::ProviderRegistry->provider_info('fixture-copy')->{cli_class},
+		'Genesis::CI::Provider::Concourse',
+		'writing into the registered hash leaves the registry as it was';
+
+	# Registered under its own name, so the rows above and every other file
+	# in the run still see the real entries.
+	ok !Genesis::CI::ProviderRegistry->provider_info('fixture-rewritten'),
+		'and nothing else was registered along the way';
+};
+
 subtest 'the task block declares privileged beside image and version' => sub {
 	plan tests => 2;
 
