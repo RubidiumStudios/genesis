@@ -388,13 +388,23 @@ sub _recheck_control {
 		                "computed is stale", $tracking, _commits($state->{behind}));
 		$remedy = sprintf("Rebase it with #C{git pull --rebase %s %s}",
 		                  $named, $control);
-	} else {
+	} elsif ($what eq 'diverged') {
 		$said = sprintf("is ahead of #C{%s} by %s and behind it by %s, so it ".
 		                "is both unpushed and stale", $tracking,
 		                _commits($state->{ahead}), _commits($state->{behind}));
 		$remedy = sprintf("Rebase with #C{git pull --rebase %s %s} and push ".
 		                  "with #C{git push %s %s}",
 		                  $named, $control, $named, $control);
+	} else {
+		# An answer the query grew since these arms were written.  Naming
+		# it is all this can honestly do: divergence was the fall-through
+		# once, and it read two counts out of a record that need not carry
+		# either, so an unknown state was told to the operator as a
+		# divergence of no commits at all.
+		$said = sprintf("answers #C{%s}, which this run has no words for",
+		                $what);
+		$remedy = sprintf("Compare it against #C{%s} with #C{git status}",
+		                  $tracking);
 	}
 
 	return sprintf(
