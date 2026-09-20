@@ -282,7 +282,7 @@ define_command("create", {
 			"Name of the prior environment in the pipeline chain (the environment ".
 			"that must succeed before this one deploys).  Only used when a CI ".
 			"provider is configured in #C{.genesis/config}.  Omit or leave blank ".
-			"to designate this environment as a pipeline entrypoint.",
+			"when nothing has to deploy before this environment.",
 
 		"require-pr" =>
 			"Require a pull-request gate before this environment deploys.  ".

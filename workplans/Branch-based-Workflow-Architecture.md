@@ -36,7 +36,7 @@ Parts of this document described a design that was never built, and the built de
 | `kickoff` dispatch branch | **Superseded** — propagation goes control → env branches directly | nothing |
 | Sequence tags (`push-<n>`) and hybrid tags | **Not built** — ordering comes from the deploy-certified control commit | nothing |
 | Sidecar files | **Not built** | nothing |
-| `genesis push` | **Not built** — `genesis propagate` is the command operators run | nothing |
+| `genesis push` | **Not built**. `genesis propagate` is the command operators run | nothing |
 | `pipeline.mode: branch` / `pipeline.branches:` in `ci.yml` | **Superseded** — config moved to `.genesis/config` and per-env `genesis.pipeline.*` | `.genesis/config`, env YAML |
 | Concourse-driven propagation | **Not wired** — only the manual provider drives propagation today | see Open Questions |
 
@@ -70,7 +70,7 @@ What remains out of scope is anything finer-grained than the whole directory. `d
 | **Env DAG** | The deployment topology, built from per-environment `genesis.pipeline.prior_env` keys by `Genesis::CI::Compiler::ASTBuilder::_build_from_env_files` and reached by every pipeline command through the single accessor `Genesis::Top::pipeline_topology`. Each environment has at most one parent and any number of children. This — not `ci.yml` layouts — is what propagation walks. See "Topology source". |
 | **Layout** | A deployment progression plan defined in legacy `ci.yml` under `pipeline.layout` or `pipeline.layouts`, using arrow notation (`->`) and the `auto <pattern>` directive. Still parsed by the compiler for legacy configs, but propagation does not read it; the env DAG replaced it for that purpose. |
 | **Propagation** | Copying changed files from a control commit onto the environment branches that depend on them, one commit per environment, subject `[pipeline] control@<short-sha> -> <env>`. |
-| **Environment with no `prior_env`** | An environment that nothing deploys before. No ancestor can hold its commits, so a control commit reaches it as soon as that commit changes a file in its propagation set. |
+| **Environment with no `prior_env`** | An environment that nothing has to deploy before. No ancestor can hold its commits, so a control commit is routed to it as soon as that commit changes a file in its propagation set. It reaches the environment once nothing holds it, and a gate ahead of the commit, an operator hold on the environment, an open pull request, or a commit already held for that environment can each still hold it. |
 | **Cascade** | `genesis propagate <env>`, which scopes propagation to `<env>`'s descendants and sources files from the control commit that `<env>`'s last successful deployment certified. |
 | **Certified control commit** | `git.control_commit` in an environment's latest successful exodus deployment record — the control SHA that was actually deployed. This, not a tag, is what orders the pipeline. |
 | **Propagation marker** | The `[pipeline] control@<sha>` string in an environment branch commit subject. Load-bearing: it is parsed to find the last propagated control SHA, to derive a deploy reason, and to decide PR idempotency. |
@@ -88,6 +88,7 @@ These appeared in earlier drafts and have no counterpart in the implementation. 
 | **`kickoff` branch** | A pipeline-controlled branch mirroring `control` up to the latest pushed tag, serving as the dispatch point to environment branches. | Superseded 2026-08-28. Never built; `grep -rn kickoff lib/` returns nothing. Propagation reads directly from a control commit. |
 | **Sidecar** | A tag reference to files destined for downstream environments, pulled from `kickoff` when the pipeline progressed rather than committed to intermediate branches. | Not built. Downstream delivery is instead a fresh diff against the certified control commit at cascade time. |
 | **Sequence tag** | Monotonically increasing `push-<n>` tags providing ordering for conflict resolution. | Not built. See "Ordering without sequence tags". |
+| **`entry point`** | An environment that received a propagation event directly, rather than waiting for it to cascade down from its parent. Computed ahead of the walk by `compute_propagation_targets`. | Retired 2026-09-19. The walk takes every control commit for every environment and either delivers it or holds it with a reason, so no set of environments is computed ahead of it. An environment with no `prior_env` is what the term named. |
 
 ---
 
@@ -222,7 +223,7 @@ Propagation is one stage, not two. A run of `genesis propagate`:
 3. **Resolves the source control commit** — control HEAD for a root run, the certified control commit of the named environment for a cascade run, or `--commit` if given.
 4. **Handles missing branches** — any environment in scope without a branch is either created (with authorization) or the run refuses. See "Missing branches during propagation".
 5. **Diffs, per environment**, that control commit against the environment branch, filtered to the environment's propagation set. Also computes an undeployed set: the diff between the environment's certified control commit and the source commit.
-6. **Routes each commit** with `Genesis::CI::Walk::route_commit` and `hold_for`. A control commit is delivered to an environment when it changes a file in that environment's propagation set, and it is held when an ancestor has certified nothing or holds a file the commit touches. A held commit holds every commit behind it for that environment.
+6. **Routes each commit** with `Genesis::CI::Walk::route_commit` and `hold_for`. A control commit is routed to an environment when it changes one of the files in that environment's propagation set that trigger a deploy, and a commit that changes only the other files in the set rides along with the next delivery. A routed commit is held when an ancestor has certified nothing or holds a file the commit touches, and a held commit holds every commit behind it for that environment.
 7. **Executes** with `propagate_envs`: per environment, a direct commit onto `<env>` or a commit onto the rolling `pr/<env>` branch, then one batched push, then the PR API calls. Branches created in step 4 are added to the batched push explicitly, because a freshly seeded branch has no propagation commit and would otherwise stay local.
 8. **Deploys** happen separately. Under the manual provider, a successful deploy runs `genesis propagate <env>` automatically, which is what moves the change down one level.
 
@@ -535,7 +536,7 @@ When `ci.enabled` and a provider type are set, deploy does more than deploy:
 3. **Pulls** that branch fast-forward-only from the remote.
 4. **Asserts the prior-environment invariant** — if the environment declares a `prior_env`, that predecessor must have deployed successfully at least once. This has no `--yes` override.
 5. **Warns on manual deploys** of a pipeline-managed environment under a non-manual provider, and prompts for confirmation. Skipped under the manual provider, where the operator *is* the pipeline.
-6. **`--pull`** (implied by `-F`/`--fix-checks`, opt out with `--no-pull`) propagates onto this environment's branch before deploying, sourced from `prior_env`'s last successful `git.control_commit`, or control HEAD where nothing deploys before this environment. It is a no-op when the branch is already current.
+6. **`--pull`** (implied by `-F`/`--fix-checks`, opt out with `--no-pull`) propagates onto this environment's branch before deploying, sourced from `prior_env`'s last successful `git.control_commit`, or control HEAD where nothing has to deploy before this environment. It is a no-op when the branch is already current.
 7. **Derives a reason** from the `[pipeline] control@<sha>` markers in the branch's commit range when `--reason` is not given, using the control commit subjects.
 8. **Records git context in exodus**: `git.branch`, `git.commit`, and `git.control_commit`. The control commit is read from the newest propagation marker on the branch. A branch carrying no marker has been delivered nothing, so the record names no control commit rather than standing control's own tip in for one.
 9. **Commits and pushes deploy artifacts** to the environment branch when `manifest_store` writes to the repository, rebasing onto the remote first.

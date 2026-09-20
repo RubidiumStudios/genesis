@@ -139,7 +139,7 @@ sub create {
 				push @choices, { separator => 1 };
 				push @choices, {
 					value => '',
-					label => '#Yi{(none, nothing deploys before this one)}',
+					label => '#Yi{(none, nothing has to deploy before this one)}',
 					summary => '(no prior environment)',
 				};
 				$prior_env = new_prompt_for_choice(
@@ -149,7 +149,7 @@ sub create {
 				);
 			} else {
 				$prior_env = '';
-				info("No other environments found, so nothing deploys before #C{%s}.", $name);
+				info("No other environments found, so nothing has to deploy before #C{%s}.", $name);
 			}
 		}
 

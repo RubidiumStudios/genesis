@@ -1,8 +1,8 @@
 #!perl
 #
-# Proves T296: no file under lib/, docs/ci, or workplans/ uses the retired
-# routing sense of "entry point", while the ordinary meaning of a command's
-# CLI entry is left untouched.
+# Proves T296: no file under bin/, lib/, docs/ci, or workplans/ uses the
+# retired routing sense of "entry point", while the ordinary meaning of a
+# command's CLI entry is left untouched.
 #
 # D89 retired the term in its routing sense, because it named the output of a
 # computation the design removed.  The walk visits every environment and each
@@ -12,8 +12,13 @@
 # The two senses are told apart by the company the term keeps.  The routing
 # sense always travels with the propagation vocabulary, and the ordinary sense
 # never does, so a hit counts only when one of the routing words stands within
-# three lines of it.  A line that names a command's own entry in a code span
-# is allowed outright, which is what keeps the check from banning a word.
+# three lines of it.  Five shapes of line are then allowed outright, and they
+# are what keeps the check from banning a word.  A line may name a command's
+# or a CLI's entry point, or an entry point for, of, or to a name written in
+# a code span, or an entry point that something registers or calls, or a
+# primary, single, or top-level entry point.  The fifth is a row of the
+# workplan's superseded terms table, which records that the routing sense was
+# retired rather than using it.
 #
 use strict;
 use warnings;
@@ -44,6 +49,13 @@ my @ORDINARY = (
 	qr/entry[- ]?points? (?:for|of|to) (?:the )?[C`]/i,
 	qr/entry[- ]?point (?:registered|called by|used by)\b/i,
 	qr/(?:primary|secondary|third|single|top-level) entry[- ]?point/i,
+
+	# A row of the workplan's superseded terms table, which is where the
+	# document records a term it dropped.  Such a row names the term to say
+	# it is gone, so it mentions the sense rather than using it, and without
+	# this the one table built to keep the reasoning trail is the one place
+	# the trail cannot be written.
+	qr/^\|\s*\*\*[^|]+\*\*\s*\|[^|]*\|\s*(?:Retired|Superseded)\b/,
 );
 
 my @files;
@@ -52,13 +64,18 @@ File::Find::find({
 	wanted   => sub {
 		return unless -f $File::Find::name;
 		return if -B $File::Find::name;
-		push @files, ($File::Find::name =~ s{^\./}{}r);
+		push @files, $File::Find::name;
 	},
-}, 'lib', 'docs/ci', 'workplans');
+}, 'bin', 'lib', 'docs/ci', 'workplans');
+
+# A run from anywhere but the repository root reads nothing and passes, which
+# is a green that proves nothing.  pod-complete.t guards its own walk the same
+# way.
+BAIL_OUT("no files found under bin/, lib/, docs/ci/, or workplans/") unless @files;
 
 my @offences;
 for my $file (sort @files) {
-	open my $fh, '<', $file or next;
+	open my $fh, '<', $file or BAIL_OUT("$file could not be read: $!");
 	my @lines = <$fh>;
 	close $fh;
 
@@ -79,7 +96,7 @@ for my $file (sort @files) {
 	}
 }
 
-ok(!@offences, 'no file under lib/, docs/ci, or workplans/ carries the retired routing sense')
+ok(!@offences, 'no file under bin/, lib/, docs/ci, or workplans/ carries the retired routing sense')
 	or diag(
 		sprintf("Found %d line(s) using the retired routing sense.\n", scalar @offences) .
 		"The term named the output of a computation the design removed.  The\n" .
