@@ -496,8 +496,8 @@ B<Errors:>
 =item *
 
 The error it was handed, which is re-raised once the discard, the resets, and
-the restore are done. A session that is not open re-raises it and does
-nothing else.
+the restore are done. A session that is not open re-raises it, carrying the
+same C<exitcode>, and does nothing else.
 
 =item *
 
