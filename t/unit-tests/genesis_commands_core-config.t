@@ -771,4 +771,40 @@ subtest 'a pipeline section is refused on a version 2 repository' => sub {
 		'with nothing written to the file');
 };
 
+subtest 'a deployment root outside its repository exits 1' => sub {
+	plan tests => 2;
+
+	# Genesis::Exit keeps three numbers out of its table on purpose, and the
+	# first of them is that a fatal system error stays a bare 1.  A
+	# deployment root that is not inside its own repository is that kind of
+	# defect, so the refusal takes the bare exit and a pipeline job reading
+	# the number gets the one Genesis has always answered with.
+	# Test::Exit runs the block inside an eval, and bail dies rather than
+	# exits inside one unless it is told to ignore it, which is what the
+	# other exit-code rows here do too.
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+
+	my $dir = config_repo('carries-outside');
+	require Service::Git;
+	require Genesis::Top;
+	my $git = Service::Git->new($dir);
+
+	# A second repository root, so the Top's path is genuinely outside the
+	# one the git handle answers for rather than merely named differently.
+	my $elsewhere = config_repo('carries-elsewhere');
+	my $top = Genesis::Top->new($elsewhere, no_vault => 1);
+
+	# One call, so the refusal is read rather than printed past the row.
+	my $code;
+	my $said = stderr_from {
+		$code = exit_code {
+			Genesis::Commands::branch_carries_repository($top, $git, 'qa/bosh')
+		};
+	};
+
+	is($code, 1, 'the refusal exits a bare 1 rather than a named code');
+	like($said, qr/is not inside the repository at/,
+		'and names the root, the repository, and the branch');
+};
+
 done_testing;

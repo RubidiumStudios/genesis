@@ -54,7 +54,7 @@ use Genesis;
 use Genesis::State;
 use Genesis::Term qw/wrap terminal_width csprintf decolorize csize/;
 use Genesis::Log;
-use Genesis::Exit qw/CONFIG SOFTWARE/;
+use Genesis::Exit qw/CONFIG/;
 
 our ($COMMAND, $CALLED, %RUN, %PROPS, %GENESIS_COMMANDS, @COMMANDS, @COMMAND_ARGS);
 our $COMMAND_OPTIONS = {};
@@ -486,12 +486,11 @@ sub branch_carries_repository {
 
 	my $under_root = '';
 	if ($path ne $root) {
-		# A deployment root outside its own repository is a state the
-		# comment above calls a defect, and SOFTWARE is the code for one.
-		# It is named rather than left to the default, which lands on the
-		# same number by omission.
+		# A deployment root outside its own repository is the defect the
+		# comment above describes, and a fatal system error is one of the
+		# three exits Genesis::Exit keeps out of its table on purpose.  It
+		# stays a bare 1, which is chosen here rather than fallen into.
 		bail(
-			{exitcode => SOFTWARE},
 			"The deployment root #C{%s} is not inside the repository at ".
 			"#C{%s},\nso there is no path on #C{%s} to read it from.",
 			$top->path, $git->root, $branch
