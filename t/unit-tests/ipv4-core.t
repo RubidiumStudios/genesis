@@ -776,7 +776,7 @@ subtest 'IPv4::Span' => sub {
   };
 
   subtest 'slice method' => sub {
-    plan tests => 15;
+    plan tests => 21;
     my $span = IPv4::Span->new('192.168.1.1', '192.168.1.10');
     my $slice = $span->slice(3);
     isa_ok($slice, 'IPv4::Span', 'slice() returns IPv4::Span object');
@@ -806,9 +806,17 @@ subtest 'IPv4::Span' => sub {
     is($slice->range, '192.168.1.1-192.168.1.5', 'slice() with negative offset and a greater size than available addresses returns correct slice');
 
     $slice = $span->slice(0);
-    isa_ok($slice, 'IPv4::Range', 'slice() with offset of 0 returns IPv4::Range object');
-    is($slice->size, 0, 'slice() with offset of 0 returns empty range');
+    isa_ok($slice, 'IPv4::Range', 'slice() with size of 0 returns IPv4::Range object');
+    is($slice->size, 0, 'slice() with size of 0 returns empty range');
 
+    # A negative size, or a negative offset reaching past the start, is empty
+    # rather than a span running backwards to addresses below the start
+    for my $args ([-1], [-2, 1], [10, -20]) {
+      my $label = sprintf('slice(%s)', join(', ', @$args));
+      $slice = $span->slice(@$args);
+      isa_ok($slice, 'IPv4::Range', "$label returns an IPv4::Range object");
+      is($slice->size, 0, "$label is empty");
+    }
   };
 
   subtest 'cidrs method' => sub {
@@ -1233,7 +1241,7 @@ subtest 'IPv4::Range' => sub {
   };
 
   subtest 'slice method' => sub {
-    plan tests => 12;
+    plan tests => 24;
     my $range = IPv4::Range->new('192.168.1.1-192.168.1.3', '192.168.2.1-192.168.2.2');
     my $slice = $range->slice(2);
     isa_ok($slice, 'IPv4::Range', 'slice() returns IPv4::Range object');
@@ -1260,6 +1268,20 @@ subtest 'IPv4::Range' => sub {
 
     $slice = $range->slice(4, 10);
     is($slice->size, 0, 'slice() with offset greater than size returns empty range');
+    is(scalar($slice->spans), 0, 'slice() with offset greater than size holds no spans');
+
+    ok(!(grep {!$_->isa('IPv4::Span')} $range->slice(4, -1)->spans),
+      'every span of a slice is an IPv4::Span');
+
+    # A zero or negative size, or a negative offset reaching past the start,
+    # is an empty range with no spans: never a range holding an empty range as
+    # a span, and never addresses outside the range running backwards
+    for my $args ([0], [0, 2], [-1], [-2, 1], [10, -20]) {
+      my $label = sprintf('slice(%s)', join(', ', @$args));
+      $slice = $range->slice(@$args);
+      is($slice->size, 0, "$label is empty");
+      is(scalar($slice->spans), 0, "$label holds no spans");
+    }
   };
 
   subtest 'span method' => sub {

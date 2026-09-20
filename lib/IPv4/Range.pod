@@ -204,6 +204,8 @@ Given a size and an optional offset (default 0), returns a new C<IPv4::Range> co
 
 If there is not enough space in the range to accommodate the requested size and offset, the offset will be maintained while the size will be reduced to the maximum possible size.
 
+A size of zero or less, an offset beyond the end of the range, or a negative offset that places the whole slice before its start, returns an empty C<IPv4::Range> holding no spans.
+
 B<Examples:>
 
   my $range = IPv4::Range->new('192.168.1.1-192.168.1.10');

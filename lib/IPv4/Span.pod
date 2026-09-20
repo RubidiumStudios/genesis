@@ -455,7 +455,9 @@ values count from the end. Defaults to 0.
 =back
 
 B<Returns:> A new C<IPv4::Span> object representing the slice, or an empty
-C<IPv4::Range> if the offset is beyond the span or the effective size is 0.
+C<IPv4::Range> if the offset is beyond the span or the effective size is zero
+or less, which includes a negative offset that places the whole slice before
+the start.
 
 B<Examples:>
 

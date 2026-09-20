@@ -164,8 +164,11 @@ sub slice($self, $size, $offset=0) {
 		# Reduce size if the offset is greater than the size of the span
 		$size = $self->size - $offset;
 	}
+	# Nothing to take: a zero or negative size would otherwise push the empty
+	# range a span's slice returns in as a span, or run backwards past the start
+	return IPv4->range() if $size <= 0;
 
-  my $slice = IPv4->range();
+	my $slice = IPv4->range();
 	for my $span ($self->spans) {
 		if ($offset > $span->size -1) {
 			$offset -= $span->size;
@@ -178,7 +181,7 @@ sub slice($self, $size, $offset=0) {
 		last unless $size;
 	}
 	$slice->compact;
-	return ($slice);
+	return $slice;
 }
 
 # Return a span object that starts at the lowest address in the Range and

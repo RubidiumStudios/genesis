@@ -321,7 +321,7 @@ sub slice($self, $size, $offset = 0) {
 		# Reduce size if the offset is greater than the size of the span
 		$size = $self->size - $offset;
 	}
-	return IPv4->range() if ($offset >= $self->size || $size == 0);
+	return IPv4->range() if ($offset >= $self->size || $size <= 0);
 
 	# Calculate the starting and ending addresses of the slice
 	my $slice_start = $self->{start} + $offset;
