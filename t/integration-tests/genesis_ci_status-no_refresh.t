@@ -32,27 +32,6 @@ use Genesis::Commands qw/command_properties/;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
-sub plain {
-	# The tree with every SGR sequence taken out, which is what the words of
-	# a line are asserted against.  NOCOLOR is set above and the renderer
-	# honours it, so this ordinarily changes nothing.  It is here because a
-	# colour escape ends in the letter m, so a word boundary can never hold
-	# in front of a coloured name, and a line that met one would fail for a
-	# reason that had nothing to do with the words.
-	my ($tree) = @_;
-	$tree =~ s/\e\[[0-9;]*m//g;
-	return $tree;
-}
-
-sub env_line {
-	# The one rendered row an environment's name opens, selected by the
-	# indent that opens a row as well as by the name, because the header
-	# above the table names environments too.
-	my ($tree, $name) = @_;
-	my ($line) = grep { plain($_) =~ /^\s{2,}\Q$name\E\s/ } split(/\n/, $tree);
-	return plain($line // '');
-}
-
 subtest 'the stale form marks every cell that rests on a refresh' => sub {
 	# Eleven assertions, one of which is this row's own restoration, and one
 	# more for the restoration run_genesis asserts on the second command.

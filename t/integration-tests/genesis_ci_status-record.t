@@ -45,12 +45,6 @@ sub env_file_with {
 		"  note: $note", '');
 }
 
-sub env_row {
-	my ($record, $name) = @_;
-	my ($row) = grep { $_->{env} eq $name } @{$record->{environments}};
-	return $row;
-}
-
 # The moment the first row's deployment is certified at, pinned rather than
 # taken from the clock, so the row can compare what --json emits against the
 # exact string vault was given.

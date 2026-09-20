@@ -26,7 +26,7 @@ our @EXPORT = qw/
 	make_harness
 	ref_in tree_of upstream_of counts
 	tip_of remote_sha refs_in branch_of git_in blob_at files_at slurp
-	in_set covered_paths in_root
+	in_set covered_paths in_root plain env_line env_row
 	branches_on_r fresh_clone clone_copy subjects_of commits_on heads_in
 	reachable_on_r
 	newest_record trailers_of unfolded env_body
@@ -313,9 +313,54 @@ sub slurp {
 # The readers answer lists, and nearly every row about a set asks whether one
 # path is in one of them, so the question is asked here rather than in a copy
 # of the same grep in each file that asks it.
+#
+# The answer is a yes or a no, because that is the question, and every caller
+# reads it as one.  A count would invite a row to assert on how many times a
+# list held one path, which is a question about the list and not about the
+# path.
 sub in_set {
 	my ($path, @set) = @_;
-	return scalar(grep {$_ eq $path} @set);
+	return (grep {$_ eq $path} @set) ? 1 : 0;
+}
+
+# }}}
+# plain - a rendered line or tree with the colour taken out {{{
+#
+# A colour escape ends in the letter m, so a word boundary can never hold in
+# front of a coloured name and a row matching on words would fail for a
+# reason that has nothing to do with what the report said.  Every file that
+# reads a rendered report asks for this, so it is asked here rather than once
+# per file.
+sub plain {
+	my ($text) = @_;
+	return '' unless defined $text;
+	$text =~ s/\e\[[0-9;]*m//g;
+	return $text;
+}
+
+# }}}
+# env_line - the one rendered row an environment's name opens {{{
+#
+# The row is selected by the indent that opens a row as well as by the name,
+# because the header above the table names environments too, and the line
+# comes back with its colour taken out so the caller asserts on words.
+sub env_line {
+	my ($tree, $name) = @_;
+	my ($line) = grep {plain($_) =~ /^\s{2,}\Q$name\E\s/}
+		split(/\n/, $tree // '');
+	return plain($line // '');
+}
+
+# }}}
+# env_row - one environment's record out of a report the run emitted {{{
+#
+# A report answers a list of environments and a row asks about one of them,
+# so the selection is made here rather than in a copy of the same grep in
+# each file that reads a record.
+sub env_row {
+	my ($record, $name) = @_;
+	my ($row) = grep {$_->{env} eq $name} @{$record->{environments} || []};
+	return $row;
 }
 
 # }}}

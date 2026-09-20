@@ -35,26 +35,17 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
-sub env_line {
-	# The one rendered row an environment's name opens, and its index in the
-	# report, selected by the indent that opens a row as well as by the name,
-	# because the header above the table names environments too.
+sub env_line_and_index {
+	# The row an environment's name opens and where it stands in the report,
+	# because this file reads what is printed around that row as well as
+	# what is on it.  The harness's env_line answers the line alone, and the
+	# selection here is the same one, which is the indent that opens a row as
+	# well as the name, because the header above the table names environments
+	# too.
 	my ($tree, $name) = @_;
 	my @lines = split(/\n/, $tree);
 	my ($index) = grep { plain($lines[$_]) =~ /^\s{2,}\Q$name\E\s/ } 0 .. $#lines;
 	return defined($index) ? (plain($lines[$index]), $index) : ('', -1);
-}
-
-sub plain {
-	# The tree with every SGR sequence taken out, which is what the words of
-	# a line are asserted against.  NOCOLOR is set above and the renderer
-	# honours it, so this ordinarily changes nothing.  It is here because a
-	# colour escape ends in the letter m, so a word boundary can never hold
-	# in front of a coloured name, and a line that met one would fail for a
-	# reason that had nothing to do with the words.
-	my ($tree) = @_;
-	$tree =~ s/\e\[[0-9;]*m//g;
-	return $tree;
 }
 
 subtest 'a rewritten control orphans a marker and the status says so' => sub {
@@ -120,7 +111,7 @@ subtest 'a rewritten control orphans a marker and the status says so' => sub {
 	# It is a multibyte symbol and the output arrives as bytes, so the line
 	# is decoded before it is read: the red class draws a cross where the
 	# settled class draws a tick.
-	my ($line, $row_at) = env_line($out, 'lab');
+	my ($line, $row_at) = env_line_and_index($out, 'lab');
 	like(Encode::decode_utf8($line), qr/^\s+lab\s+\S+\s+\S+\s+\x{2718}/,
 		'and the breached row carries the glyph of the red class');
 

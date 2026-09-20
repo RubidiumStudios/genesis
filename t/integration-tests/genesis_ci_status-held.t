@@ -32,27 +32,6 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
-sub plain {
-	# The tree with every SGR sequence taken out, which is what the words of
-	# a row are asserted against.  NOCOLOR is set above and the renderer
-	# honours it, so this ordinarily changes nothing.  It is here because a
-	# colour escape ends in the letter m, so a word boundary can never hold
-	# in front of a coloured name, and a row that met one would fail for a
-	# reason that had nothing to do with the words.
-	my ($tree) = @_;
-	$tree =~ s/\e\[[0-9;]*m//g;
-	return $tree;
-}
-
-sub env_line {
-	# The one line of the tree that belongs to this environment, selected by
-	# its leading indent as well as its name, so a header carrying the name
-	# could not stand in for it.
-	my ($tree, $name) = @_;
-	my ($line) = grep { /^\s+\Q$name\E\s/ } split(/\n/, plain($tree));
-	return $line // '';
-}
-
 subtest "the held qualifiers print in the run's words" => sub {
 	# Five assertions and one restoration.
 	plan tests => 6;
