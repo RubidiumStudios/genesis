@@ -584,13 +584,13 @@ sub exists {
 # }}}
 # bare - build an environment with no deployment behind it {{{
 #
-# The named constructor extracted from is_valid_env_file.  It performs
-# the name check and the file-existence check that sub already performs
-# and nothing else, and the object it returns resolves its ancestral
-# hierarchy through lookup, with no kit loaded and nothing connected, so
-# every genesis.pipeline.* read is the merged read rather than the leaf
-# file alone.  A leaf-only read finds an inherited key absent, silently,
-# and answers wrongly with no error, which is H35.
+# This is the named constructor extracted from is_valid_env_file.  It
+# performs the name check and the file-existence check that sub already
+# performs and nothing else, and the object it returns resolves its
+# ancestral hierarchy through lookup, with no kit loaded and nothing
+# connected, so every genesis.pipeline.* read is the merged read rather
+# than the leaf file alone.  A leaf-only read finds an inherited key
+# absent, silently, and answers wrongly with no error, which is H35.
 #
 # The name is bare and not shallow, because shallow would read as
 # skipping the hierarchy, which is the one thing it must not do.
@@ -3437,14 +3437,14 @@ sub hold_record {
 # }}}
 # set_hold - write the propagation hold record {{{
 #
-# The hold is a per-environment record carrying a reason, who set it, and when,
-# and those four fields are all of it.  The user and the hostname take the
-# shape the director's network claim lock writes, so the two identity fields
-# read the same way wherever Genesis records who did something.  A time held as
-# a value is EXODUS_TIME_FORMAT, and the short numeric form belongs to a time
-# that is part of a path, which this record has none of.  The path is cleared
-# before the write so a replacing hold cannot leave a key of the hold it
-# replaced standing beside it.
+# The hold is a per-environment record carrying a reason, who set it, where,
+# and when, and those four fields are all of it.  The user and the hostname
+# take the shape the director's network claim lock writes, so the two identity
+# fields read the same way wherever Genesis records who did something.  A time
+# held as a value is EXODUS_TIME_FORMAT, and the short numeric form belongs to
+# a time that is part of a path, which this record has none of.  The path is
+# cleared before the write so a replacing hold cannot leave a key of the hold
+# it replaced standing beside it.
 sub set_hold {
 	my ($self, %rec) = @_;
 
