@@ -80,7 +80,11 @@ subtest 'a repository with no remote provisions nothing' => sub {
 	# authenticate to.
 	use File::Temp qw/tempdir/;
 	my $dir = tempdir(CLEANUP => 1);
-	system('git', '-C', $dir, 'init', '-q') == 0 or plan skip_all => 'git init failed';
+	# A plan is already declared above, and skip_all would make
+	# Test::Builder croak about planning twice.  A git that cannot
+	# initialise a repository should take the row red anyway.
+	system('git', '-C', $dir, 'init', '-q') == 0
+		or die "cannot initialise the fixture repository: $?\n";
 
 	local %ENV = (%ENV);
 	delete $ENV{$_} for @VARS;

@@ -139,6 +139,10 @@ subtest 'a deployments directory with no repository is served in silence' => sub
 	my $plain = workdir() . '/no-repo-deployments';
 	system('cp', '-R', $h->a, $plain) == 0
 		or die "cannot copy the deployments directory: $?\n";
+	# Named before it is removed, because an empty working directory answer
+	# would aim the removal at /.git.
+	die "the working directory answered nothing, so the copy has no path\n"
+		unless length($plain // '') && $plain ne '/';
 	system('rm', '-rf', "$plain/.git") == 0
 		or die "cannot take the repository off the copy: $?\n";
 	$h->{plain} = $plain;

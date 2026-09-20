@@ -121,8 +121,11 @@ subtest 'the refresh never prunes' => sub {
 		[qw/marker sha short subject/],
 		'and a record carries those four keys and no fifth');
 
+	# The read is of the whole module rather than of the refresh subs, so
+	# what it actually says is that the option appears nowhere in the file,
+	# which is the wider claim and the one worth keeping as a tripwire.
 	my $src = slurp('lib/Service/Git.pm');
-	unlike($src, qr{--prune}, 'nothing in the refresh path prunes a ref');
+	unlike($src, qr{--prune}, 'Service::Git names --prune nowhere at all');
 };
 
 done_testing;
