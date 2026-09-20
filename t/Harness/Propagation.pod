@@ -1260,7 +1260,7 @@ refusal is not written against the other's words.
 =head2 restore_remote($h)
 
 Disarms the three remote steps C<sever_remote> armed, which are
-C<fetch_branches>, C<push>, and C<delete_remote_branch>, and returns the
+C<fetch_branches> and C<push>, and returns the
 harness.  It reads the plan out of the environment and answers without doing
 anything where no plan was ever armed.  A row reaches for it where the remote
 has to come back partway through, so that a later phase can reach it again.
