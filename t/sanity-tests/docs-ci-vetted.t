@@ -50,14 +50,14 @@ sub section_of {
 # v2" section, which lives in another file.  No row below reads that pointer,
 # and the workplan's own check is where it resolves.
 #
-# D72 made the key provider-conditional and said it was inert rather than an
-# error under a provider that could not honour it, and that it was not refused
-# as the configuration loaded.  D101 replaced that: a capability is what a
+# The key was once provider-conditional, inert rather than an error under a
+# provider that could not honour it, and it was not refused as the
+# configuration loaded.  That reading is gone.  A capability is what a
 # provider can do, a key is the operator's choice inside that ability, and a
 # key whose capability is false is refused by name.  optional_git_triggers is
 # the capability that gates this key, and the manual provider declares all six
-# false, so the two later rows are written to what the code does rather than to
-# what D72 said it would do.
+# false, so the two later rows are written to what the code does rather than
+# to what the older reading promised.
 subtest 'the reference states the provider condition and the refusal' => sub {
 	plan tests => 5;
 
