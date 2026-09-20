@@ -50,7 +50,7 @@ subtest 'a backend nobody owns is refused by name' => sub {
 
 	throws_ok {load_with($h, shuttle('file', 'path: /tmp/signals'))}
 		qr/pipeline\.shuttle\.backend: unknown value: file; expected one of gcs, s3/,
-		'D23 refuses a directory, and the map is what says so';
+		'a directory backend is refused, and the map is what says so';
 };
 
 done_testing;
