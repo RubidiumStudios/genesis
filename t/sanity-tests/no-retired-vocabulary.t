@@ -70,10 +70,20 @@ my @ROOTS = ('bin', 'lib', 'docs/ci', 'workplans');
 
 # A root that is missing narrows the sweep without saying so, because the
 # other three still fill the list and the walk only warns on standard error.
-# Each one is asked for by name, so a root that moves or is renamed stops the
-# run rather than quietly shrinking what it reads.
+# Each one is asked for by name, so a root that moves or is renamed fails
+# here rather than quietly shrinking what this file reads.
+#
+# It is a failing row and not a bail, which is the shape docs-ci-vetted.t
+# reads its own missing root with.  The exit ends this file, so no later row
+# here rests on a sweep that stood in the wrong place, and a run of the whole
+# manifest still reports every other file.
 for my $root (@ROOTS) {
-	BAIL_OUT("root $root is missing") unless -d $root;
+	next if -d $root;
+	# The exit carries no status of its own, because Test::Builder sets one
+	# from the failing row.
+	fail("root $root is missing");
+	done_testing();
+	exit;
 }
 
 my @files;
@@ -87,18 +97,21 @@ File::Find::find({
 }, @ROOTS);
 
 # A run from anywhere but the repository root reads nothing and passes, which
-# is a green that proves nothing.  pod-complete.t guards its own walk the same
-# way.  The per-root guard above catches nearly every way of reaching this,
-# so what is left is four roots that all exist and hold no readable file.
-BAIL_OUT("no files found under " . join(', ', map {"$_/"} @ROOTS))
-	unless @files;
+# is a green that proves nothing.  The per-root guard above catches nearly
+# every way of reaching this, so what is left is four roots that all exist and
+# hold no readable file.
+unless (@files) {
+	fail("no files found under " . join(', ', map {"$_/"} @ROOTS));
+	done_testing();
+	exit;
+}
 
 my @offences;
 for my $file (sort @files) {
 	# A file that will not open is an ordinary failure of this check alone,
-	# so it fails here and the sweep carries on.  The guards above earn
-	# their BAIL_OUT, because a walk that stood in the wrong place makes
-	# every later result in the run suspect.
+	# so it fails here and the sweep carries on.  The guards above end the
+	# file instead, because a walk that stood in the wrong place makes every
+	# later row here meaningless.
 	my $fh;
 	unless (open $fh, '<', $file) {
 		fail("$file could not be read: $!");
