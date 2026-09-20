@@ -118,7 +118,7 @@ subtest 'the unverifiable flag rides on every answer' => sub {
 };
 
 subtest 'the query asks refs and never the network' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	my $h    = make_harness(envs => ['qa'], vault => 0);
 	my $slug = $h->slug('qa');
@@ -147,6 +147,11 @@ subtest 'the query asks refs and never the network' => sub {
 	# fixture never takes.
 	my $src = slurp('lib/Service/Git.pm');
 	my ($body) = $src =~ m{sub resolve_branch \{(.+?)\n\}}s;
+	# The capture is asserted before it is read, because a rename or a
+	# reformat that stopped the pattern matching would leave it undefined
+	# and the negation below would pass over nothing at all.
+	ok(defined $body && length $body,
+		'the body of resolve_branch was found to read');
 	unlike($body, qr{fetch_branches|remote_branch_exists|ls-remote},
 		'and the query neither fetches nor asks the remote');
 
@@ -154,6 +159,32 @@ subtest 'the query asks refs and never the network' => sub {
 	# the log and the tally and leaves the armed step itself in the plan, and
 	# an arming left standing here would be inherited by every row below.
 	restore_remote($h);
+};
+
+subtest 'the state set is closed' => sub {
+	plan tests => 2;
+
+	# The rows above drive six real repositories and read all six states out
+	# of them, which says every state is reachable and says nothing about
+	# there being no seventh.  A reader that switches on the state has a
+	# catch-all arm for exactly that doubt, so the set is closed here at the
+	# one place that decides it.
+	my $src = slurp('lib/Service/Git.pm');
+	my ($body) = $src =~ m{sub resolve_branch \{(.+?)\n\}}s;
+	ok(defined $body && length $body,
+		'the body of resolve_branch was found to read');
+
+	# The two early returns name their state in a pair, and the counted
+	# four are the arms of one ternary, so both shapes are read and nothing
+	# else quoted in the sub is mistaken for a state.
+	my ($ternary) = $body =~ m{my \$state\s*=(.+?);}s;
+	my %named = map {$_ => 1} (
+		$body    =~ m{state\s*=>\s*'([a-z][a-z-]*)'}g,
+		($ternary // '') =~ m{'([a-z][a-z-]*)'}g,
+	);
+	cmp_deeply([sort keys %named],
+		[sort qw/ahead behind diverged in-sync no-local no-remote/],
+		'the sub names these six states and no others');
 };
 
 # The sweep asks for the forced form the retired single-branch helper wrote,
