@@ -4,8 +4,9 @@
 # whose body lists both oldest first with their diff --stat lines, and whose
 # pull request body is that commit body verbatim.
 #
-# The row is not green on arrival.  Task 16.1 writes the bare marker as the
-# whole message, with the control commit spelled in full, so the subject reads
+# The row is not green on arrival.  The builder it starts from writes the
+# bare marker as the whole message, with the control commit spelled in full,
+# so the subject reads
 # the long sha the marker builder was handed, the body is empty, and the pull
 # request carries the subject as its body because the strip of a first line
 # finds no newline to strip.  What the row adds on top of that is the count,

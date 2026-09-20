@@ -321,7 +321,7 @@ subtest 'control behind its remote-tracking ref is still left alone' => sub {
 
 	# The session never rebases control and never says anything about it.
 	# The message that tells the operator to rebase by hand belongs to the
-	# pre-flight of M7, which refuses a control that is behind or ahead.
+	# pre-flight, which refuses a control that is behind or ahead.
 	my $h = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
 	publish_from_b($h,

@@ -19,14 +19,14 @@
 # sites, so an edit that dropped the warning from one command alone is caught
 # by something.
 #
-# The warning the rows read says "the secrets this run served" where the brief
-# it was written from says "the secrets just written".  The brief's wording is
-# wrong for two of the four commands that raise it, check-secrets validating
-# and remove-secrets removing, and it is wrong again for any run that errored
-# before it wrote anything, because the call sits above each command's own
-# error bail.  The rows match on the sentence's later words, so they would
-# pass under either wording; the departure is recorded here because the code
-# no longer says what the brief said.
+# The warning the rows read says "the secrets this run served" where the
+# sketch it was written from says "the secrets just written".  That earlier
+# wording is wrong for two of the four commands that raise it, check-secrets
+# validating and remove-secrets removing, and it is wrong again for any run
+# that errored before it wrote anything, because the call sits above each
+# command's own error bail.  The rows match on the sentence's later words, so
+# they would pass under either wording.  The departure is recorded here
+# because the code no longer says what that sketch said.
 use strict;
 use warnings;
 use utf8;

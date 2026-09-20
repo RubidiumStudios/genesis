@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# The GitHub double answers and records, so the pull request rows of M16 can
+# The GitHub double answers and records, so the pull request rows can
 # declare a review state, close and merge, and read every call back.
 use strict;
 use warnings;

@@ -13,8 +13,8 @@
 #
 # Both deploys run with --no-propagate.  The auto-cascade hands off to a
 # child genesis propagate, which is a command that writes to the deployment
-# branches on purpose and which M15 owns, so a row about what the deploy
-# itself writes says so rather than reading the child's work as the deploy's.
+# branches on purpose, so a row about what the deploy itself writes says so
+# rather than reading the child's work as the deploy's.
 use strict;
 use warnings;
 use utf8;
@@ -63,7 +63,7 @@ subtest 'a successful deploy writes no git and writes its record' => sub {
 subtest 'no deploy path writes a file into the propagation set' => sub {
 	# An absence guard.  It catches a step that puts a propagation write
 	# back on the deploy path, which is what overwrote an operator's
-	# uncommitted edit under -F before M8 withdrew it.  The edit itself is
+	# uncommitted edit under -F before that write was withdrawn.  The edit is
 	# no longer the way to read that, because the session refuses a tracked
 	# modification before the deploy runs at all, so the row watches the
 	# files a clean deploy leaves behind instead.  A deploy that copied the

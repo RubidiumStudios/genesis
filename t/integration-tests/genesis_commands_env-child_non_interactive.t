@@ -9,8 +9,8 @@ use utf8;
 # half is in t/unit-tests/genesis_commands_env-child_stdin.t.
 #
 # The fixture stands a director, a bosh, and a kit up before the branches
-# are cut, for the reason Task 14.6 recorded against the same rows.  A
-# harness that stands none of them up deploys nothing, and a deploy that
+# are cut.  A harness that stands none of them up deploys nothing, and a
+# deploy that
 # never succeeds hands off to no child at all, so every row below would
 # read a silence it had built itself.  Every environment is delivered at
 # the seeded tip as well, because the kit is a kind of the propagation set

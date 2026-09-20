@@ -138,8 +138,8 @@ subtest 'a branch the remote has never had leases the empty object name' => sub 
 	# had, which git refuses outright as stale info.
 	ok(remote_sha($h, $new), "and prod's branch reached R all the same");
 
-	# Green on arrival, both of these: Task 16.1 already classes the pull
-	# request branch and the publish already sends one call for the whole set.
+	# Green on arrival, both of these.  The pull request branch is already
+	# classed and the publish already sends one call for the whole set.
 	# They guard the two assertions above, which read the class and the count
 	# they name.
 	is($spec_of{$new}{kind}, 'pr', 'and both go as pull request branches');

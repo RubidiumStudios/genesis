@@ -107,9 +107,9 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		# Their other flags are not swept, because what they declare is a
 		# matter for the secrets surface and not for this one.  The
 		# registration and branch-class rows of the four were green on
-		# arrival, M12 having declared those classes, and they stand as
-		# guards on those declarations rather than as proof of anything
-		# here.
+		# arrival, because those classes are already declared, and they
+		# stand as guards on those declarations rather than as proof of
+		# anything here.
 		'check-secrets' => {
 			class   => Genesis::Commands::PRE_DEPLOY,
 			options => [qw/as-deployed/],

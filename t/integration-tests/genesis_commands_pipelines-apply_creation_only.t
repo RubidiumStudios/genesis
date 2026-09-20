@@ -60,7 +60,7 @@ subtest 'genesis new still runs with the branch helper gone' => sub {
 	# The third caller of the branch helper goes in the same commit as the
 	# helper, so this row is the one that would catch a step shipping a
 	# genesis new that calls a method the tree no longer has.  What the
-	# command writes is M12's to assert; what it must do here is run.
+	# command writes is asserted elsewhere.  What it must do here is run.
 	my $h = make_harness(envs => ['qa']);
 	# The new hook writes the environment file the command asks it for,
 	# and the blueprint hook names the one manifest the environment is

@@ -12,9 +12,9 @@
 # by name.
 #
 # Every run passes --no-propagate, for the reason the due-commits file gives:
-# the auto-cascade hands off to a child genesis propagate that M15 owns and
-# that fails today, and a row about what the deploy said should not be reading
-# the child's failure as the deploy's.
+# the auto-cascade hands off to a child genesis propagate that fails today,
+# and a row about what the deploy said should not be reading the child's
+# failure as the deploy's.
 #
 # One arm of the warning has no row here and will not get one.  A branch
 # carrying no marker returns early and says nothing, and a delivered branch

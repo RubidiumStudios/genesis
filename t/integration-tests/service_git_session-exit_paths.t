@@ -53,8 +53,8 @@ PERL
 subtest 'the net discards and resets rather than only changing back' => sub {
 	plan tests => 4;
 
-	# The brief's other rows pass against a net that only checks the branch
-	# back out, because they leave nothing behind for a net to clean up.
+	# The other rows in this file pass against a net that only checks the
+	# branch back out, because they leave nothing behind to clean up.
 	# This one leaves both kinds of debris, a commit on the deployment
 	# branch and a half-written file over it, so it can tell a bare restore
 	# from the abort D32 asks for.

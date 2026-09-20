@@ -31,9 +31,9 @@
 # refuses it as a non-fast-forward, so the environment's publish is rejected
 # before any of the four is reached.  What carries the row's red is the other
 # half, which is the exit status, the environment's own line, the held commit,
-# and its reason.  The four become discriminating once Task 16.11 puts expect
-# on the publish spec, because the run will then have left the branch alone
-# rather than been refused, and the row is worth re-reading then.
+# and its reason.  The four become discriminating where the publish spec
+# carries expect, because the run has then left the branch alone rather than
+# been refused.
 use strict;
 use warnings;
 use utf8;
@@ -242,8 +242,8 @@ subtest 'changes requested rebuilds and names the review' => sub {
 	is(harness_marker($h, "origin/$pr"), $fix,
 		'the branch on R was rebuilt at the fix');
 
-	# A guard: which pull request the update named is Task 16.5's work, and it
-	# is read because the body asserted below is this call's own.
+	# A guard.  Which pull request the update named is proved elsewhere, and
+	# it is read here because the body asserted below is this call's own.
 	my ($call) = patch_calls($gh);
 	like($call->{url}, qr{/pulls/$number$},
 		'the update named the pull request the reviewer read');

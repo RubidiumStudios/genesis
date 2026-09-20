@@ -12,9 +12,8 @@
 # to reach its end needs the three things that builder puts up.
 #
 # Every run passes --no-propagate.  The auto-cascade hands off to a child
-# genesis propagate, which M15 owns and which fails today, and a row about
-# what the deploy read should not be reading the child's work as the deploy's
-# own.
+# genesis propagate, which fails today, and a row about what the deploy read
+# should not be reading the child's work as the deploy's own.
 use strict;
 use warnings;
 use utf8;
@@ -158,10 +157,9 @@ subtest 'the three prior-env cases, with L unchanged on each' => sub {
 		# predecessor certified rather than whether it had deployed at all,
 		# which would refuse here.
 		#
-		# The two warning rows of the brief's subtest for this state, that
-		# the warning names the holding ancestor and says nothing is due, are
-		# Task 13.9's: _warn_commits_due does not exist yet, so a row here
-		# would be reading a warning nothing prints.
+		# The two warning rows for this state, that the warning names
+		# the holding ancestor and says nothing is due, are read where
+		# _warn_commits_due is proved, in the due-commits file.
 		certify($h, 'lab', control_commit => undef) if $case eq 'no control';
 
 		fixture_bosh($h);

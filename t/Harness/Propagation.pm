@@ -511,7 +511,7 @@ sub heads_in {
 # reachable_on_r - can R reach this commit at all {{{
 #
 # A record naming a commit R cannot reach is the breach D103's staleness read
-# and M13's pre-flight both have to catch, and a row proves it by asking R
+# and the pre-flight both have to catch, and a row proves it by asking R
 # rather than by trusting the record.  The object is looked for first,
 # because merge-base cannot be asked about a commit the repository does not
 # hold.
@@ -1414,8 +1414,8 @@ sub _modes_at {
 #
 # The harness computes the set itself rather than calling propagation_files,
 # because a row that asserts a delivery against the product's own reader would
-# be asserting the reader against itself.  M4 changes propagation_files and
-# must not silently change what the snapshot assertion compares.
+# be asserting the reader against itself.  A change to propagation_files must
+# not silently change what the snapshot assertion compares.
 sub propagation_set {
 	my ($self, $env, %opts) = @_;
 	my $at   = $opts{at} // $self->{control};
@@ -1639,8 +1639,8 @@ sub local_only_commit {
 # squash_merge - squash the PR branch onto the deployment branch {{{
 #
 # A squash keeps the merger's title as the subject and pushes the merged
-# message down into the body, which is the shape the marker reader of M6
-# has to survive.  keep_marker off is the site that lost it altogether.
+# message down into the body, which is the shape the marker reader has to
+# survive.  keep_marker off is the site that lost it altogether.
 sub squash_merge {
 	my ($self, $env, %opts) = @_;
 	my $branch  = $self->slug($env, %opts);
@@ -3910,8 +3910,8 @@ sub restore_remote {
 # }}}
 # hold_session_lock - take the switch lock in a child process {{{
 #
-# The lock lands at M5, so here the harness takes the flock the design fixes,
-# on genesis-session.lock in the git directory, and writes the pid and the
+# The harness takes the flock the design fixes, on genesis-session.lock in
+# the git directory, and writes the pid and the
 # command inside for the refusal message to read.  The pid is the first line
 # and the command the second, so a reader that splits on newline gets both
 # whatever the command holds.  A row that wants the lock released by the
@@ -4245,8 +4245,9 @@ sub gh_calls {
 # }}}
 # child_recorder - watch every genesis child a command spawns {{{
 #
-# M14 asks that a run spawn no second genesis process and M15 asks that it
-# spawn exactly one, so both want the same observer and the harness carries
+# Some rows ask that a run spawn no second genesis process and others ask
+# that it spawn exactly one, so both want the same observer and the harness
+# carries
 # one rather than two.  The wrapper is t/Harness/bin/genesis-recorder, copied
 # onto the directory _path_prefix already names, and GENESIS_CALLBACK_BIN
 # points at it, so a child spawned through the hook helper's genesis function

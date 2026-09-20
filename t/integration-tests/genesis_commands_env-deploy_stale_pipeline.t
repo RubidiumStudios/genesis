@@ -15,17 +15,16 @@
 # nothing.  The report of this task carries that as a concern.
 #
 # The ordering half of T215, that this warning prints ahead of the due-commits
-# warning, is Task 13.9's, which builds _warn_commits_due.  Nothing prints a
-# due-commits warning yet, so a row reading the order here would be reading one
-# message against another that is not there.
+# warning, is read in the due-commits file beside this one, where both
+# messages stand in front of one run.
 #
 # Every run calls fixture_bosh, because each of these rows asserts that the
 # deploy proceeded past the warning, and a deploy that reaches its end needs
 # the director, the bosh, and the kit that builder puts up.
 #
 # Every run passes --no-propagate.  The auto-cascade hands off to a child
-# genesis propagate, which M15 owns and which fails today, and a row about what
-# the deploy said should not be reading the child's failure as the deploy's.
+# genesis propagate, which fails today, and a row about what the deploy said
+# should not be reading the child's failure as the deploy's.
 use strict;
 use warnings;
 use utf8;
@@ -102,7 +101,7 @@ subtest 'a compiled dependency set the last deploy never read warns' => sub {
 subtest 'a sibling changed only on control is named as well' => sub {
 	plan tests => 3;
 
-	# The brief's own row, which could not stand while the staleness query
+	# This row could not stand while the staleness query
 	# took its roster from the working tree.  A deploy stands on the
 	# deployment branch, which carries the deploying environment's hierarchy
 	# and no sibling's, so staging's file is nowhere in front of this command
