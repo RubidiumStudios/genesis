@@ -685,6 +685,11 @@ C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
 Answers whether a local branch and its counterpart on the remote have a commit
 in common.
 
+It carries a leading underscore and is called from outside this class all the
+same: C<Genesis::Commands::Env> asks it before it offers to reset a deployment
+branch.  So the name and the arguments are a documented seam rather than this
+file's own business, and a change to either reaches that caller.
+
 The question is asked through C<Genesis::run> with C<passfail> on and C<stderr>
 off rather than through C<Service::Git::merge_base>, which folds git's standard
 error into the value it hands back.  A ref this clone cannot resolve makes
