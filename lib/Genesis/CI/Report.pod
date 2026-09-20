@@ -442,7 +442,7 @@ One verb is written into the record here rather than composed by the
 renderer.  An environment with commits due would have propagated had this been
 a run, and the preview is the only thing that knows it was not, so the word
 goes in where that is known.  Everything else the record leaves null is
-settled by L</render_run> under ruling 12, so the run and the preview compose
+settled by L</render_run>, so the run and the preview compose
 the held phrase from one line of code.
 
 The two loud warnings D44 asks for go out between the banner and the first

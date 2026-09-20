@@ -1295,7 +1295,7 @@ sub _preview_warnings {
 # which D106 puts at TEMPFAIL, the same code for the same reason a partial
 # run earns it, which is that the next run repairs the condition unaided.
 #
-# The whole outcome is matched, under ruling 22, because the record carries
+# The whole outcome is matched, because the record carries
 # the bare enum word in outcome and the qualifier beside it in
 # outcome_detail.  Cutting a phrase at its comma was what the field split
 # removed the need for, and the two ways an environment comes to read

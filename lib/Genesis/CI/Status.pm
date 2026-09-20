@@ -519,8 +519,8 @@ sub render_tree {
 # is the fallback the pull request column is built for rather than something to
 # warn an operator about.
 #
-# This command never refuses on any of it.  Ruling 49 leaves pipeline-status
-# one refusal, which is the disowned pipeline, and D57 already has the column
+# This command never refuses on any of it.  The one refusal pipeline-status
+# keeps is the disowned pipeline, and D57 already has the column
 # report a proposed record flagged as possibly outdated where no token was
 # there to validate it with.  All three refusals the two subs below raise are
 # therefore rendered that same way, which are an API that will not answer, a
