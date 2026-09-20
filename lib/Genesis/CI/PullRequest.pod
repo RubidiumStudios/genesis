@@ -806,6 +806,77 @@ B<Examples:>
         url => 'https://github.test/owner/repo/pull/42', superseded => []});
     # $record->{pr}{number} is now 42 and its state is approved
 
+=head2 state_for_scope($top [, %opts])
+
+    my ($github, $owner_repo, $state_of) =
+        Genesis::CI::PullRequest::state_for_scope($top,
+            envs   => \@in_scope,
+            refuse => $refuse);
+
+The run's one GitHub client, the owner and repository pair it was built
+against, and one reading of L</pr_state($github, $owner_repo, $record, %opts)>
+for each environment handed in, keyed by environment name.
+
+Two commands need all three and select their environments differently.
+C<genesis propagate> takes the environments whose policy asks for a pull
+request and refuses where the API will not answer; C<genesis pipeline-status>
+takes the environments the walk seeded a branch for and degrades instead. So
+the selecting and the refusing are the caller's, and what is shared is the
+building and the reading.
+
+An environment that holds a proposed record and whose policy no longer asks
+for a pull request does not earn a client here. D57 draws the rule wider than
+that, and both commands narrow it the same way, so such an environment reads
+its proposed record unvalidated in both rather than in one of them.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment root. The pair is read off its source control block, which
+resolves once and keeps its answer.
+
+=item C<envs>
+
+The environments to read, as a list of hash references of C<env>, C<branch>,
+and C<pr_branch>. An empty list answers no client and no readings, and nothing
+is asked of GitHub.
+
+=item C<refuse>
+
+The caller's refusal closure, handed to
+L</client_for_run($top [, %opts])> and to each reading. A caller inside an
+open session hands one in so the operator is put back on the branch they
+started from before they are told why the run stopped.
+
+=item C<stop>
+
+Asked after each environment is read, and a true answer ends the reading
+there. A client that could not be read once is not one a caller should keep
+asking, and a caller that means to stop says so rather than reading every
+environment and throwing the rest away.
+
+=back
+
+B<Returns:> Three values, the client, the pair, and a hash reference of
+readings keyed by environment name. The client is C<undef> where no
+environment needed one, where the repository names no pair, and where no token
+was set, and the readings are then empty.
+
+B<Errors:> None of its own. Everything it would refuse is refused by
+L</client_for_run($top [, %opts])> and by each reading, through the closure
+the caller handed in.
+
+B<Examples:>
+
+  my ($github, $owner_repo, $state_of) =
+      Genesis::CI::PullRequest::state_for_scope($top,
+          envs => [{env => 'prod', branch => 'prod/bosh',
+                    pr_branch => 'pr/prod/bosh'}]);
+  # $state_of->{prod} is what the API says about pr/prod/bosh
+
 =head2 deliver($session, $record, %opts)
 
     my $word = Genesis::CI::PullRequest::deliver($session, $record,

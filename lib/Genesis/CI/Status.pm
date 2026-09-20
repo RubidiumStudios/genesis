@@ -504,11 +504,9 @@ sub render_tree {
 #
 # The client is built where an environment in scope would deliver into a pull
 # request, which is the branch the walk seeded, and not at all where none
-# would.  D57 draws the rule wider than that, since it counts an environment
-# holding a proposed record as one that needs the API too, and the propagate
-# run narrows it the same way this does, so an environment whose policy no
-# longer asks for a pull request reads its proposed record unvalidated in both
-# commands.
+# would.  That selection is this command's own, and the building and the
+# reading behind it are Genesis::CI::PullRequest::state_for_scope's, which
+# propagate asks with a selection of its own.
 #
 # The answer is keyed by environment, and an environment it holds no key for
 # is one nothing was read about.
@@ -553,6 +551,11 @@ sub _pull_request_state {
 	# options first, which is the contract this closure is written to, and
 	# anything else is read as the configuration case rather than taken
 	# apart as a hashref and died on.
+	#
+	# Three refusals reach here today.  A fourth raised at CONFIG would be
+	# read as the token case, because the pair resolves by the time this
+	# command runs, Genesis::Top having refused a repository that names none
+	# long before the column is read.
 	my $unconsulted;
 	my $refuse = sub {
 		my ($spec) = @_;
@@ -566,39 +569,25 @@ sub _pull_request_state {
 		return;
 	};
 
-	my $github = Genesis::CI::PullRequest::client_for_run($top,
-		records => [map {{pr => {branch => $_->{pr_branch}}}} @wanted],
-		refuse  => $refuse);
+	# The client goes back with the answer, because the walk reads a marker a
+	# squash merge dropped out of the merged pull request itself and wants
+	# both.  propagate takes the same three values from the same reader, so
+	# the two callers hand the walk the same thing.
+	#
+	# The stop closure ends the reading at the first refusal.  One
+	# environment the API would not answer about says nothing about how it
+	# would answer about the next, but a client that could not be read once
+	# is not one this report should keep asking, and every environment it
+	# would have served reads alike.
+	my ($github, undef, $state_of) = Genesis::CI::PullRequest::state_for_scope(
+		$top,
+		envs   => \@wanted,
+		refuse => $refuse,
+		stop   => sub {defined $unconsulted});
 	return _unconsulted($unconsulted) if $unconsulted;
 	return (undef, {}) unless $github;
 
-	my $owner_repo = $top->source_control_repository;
-
-	# The client goes back with the answer, because the walk reads a marker a
-	# squash merge dropped out of the merged pull request itself and wants
-	# both.  What it takes and why is beside propagate's own pair, in
-	# Genesis::Commands::Pipelines::propagate, and the two callers hand the
-	# walk the same thing.
-	#
-	# The three fields pr_state reads and no more, which is what lets the
-	# state be read before the walk has composed a record of its own.
-	my %state_of;
-	for my $env (@wanted) {
-		my $state = Genesis::CI::PullRequest::pr_state($github, $owner_repo, {
-			env    => $env->{env},
-			branch => $env->{branch},
-			pr     => {branch => $env->{pr_branch}},
-		}, refuse => $refuse);
-
-		# One environment the API would not answer about says nothing about
-		# how it would answer about the next, but a client that could not be
-		# read once is not one this report should keep asking, and every
-		# environment it would have served reads alike.
-		return _unconsulted($unconsulted) if $unconsulted;
-		$state_of{$env->{env}} = $state;
-	}
-
-	return ($github, \%state_of);
+	return ($github, $state_of);
 }
 
 # }}}

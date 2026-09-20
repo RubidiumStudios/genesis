@@ -534,13 +534,11 @@ one nothing was read about.
 
 The client is built by C<Genesis::CI::PullRequest::client_for_run> and the
 state by C<Genesis::CI::PullRequest::pr_state>, so the decision about when a
-client is needed at all is the run's own rather than a second one here. The
-client is asked for where an environment in scope would deliver into a pull
-request and not at all where none would, which is narrower than the rule D57
-states, since that rule counts an environment holding a proposed record as
-one that needs the API too. C<genesis propagate> narrows it the same way, so
-an environment whose policy no longer asks for a pull request reads its
-proposed record unvalidated in both commands.
+client is needed at all is the run's own rather than a second one here. Both
+are asked through L<Genesis::CI::PullRequest/state_for_scope($top [, %opts])>,
+which C<genesis propagate> asks with a selection of its own. The selection
+here is the environments in scope that would deliver into a pull request, and
+no others.
 
 It asks for a client only where C<GITHUB_AUTH_TOKEN> is set. A client built
 without one warns that the run's branches are still written and published,
@@ -549,9 +547,13 @@ fallback the pull request column is built for rather than something to warn an
 operator about.
 
 No refusal the two subs raise ends this command. Both take a closure that
-records why the API went unasked and returns, so an API that will not answer,
-a repository that resolves no C<owner/repo> pair, and a token GitHub will not
-name an owner for each leave the report standing. The run then says once, on
+records why the API went unasked and returns, so an API that will not answer
+and a token GitHub will not name an owner for each leave the report standing.
+The third of them, a repository that resolves no C<owner/repo> pair, is one
+this command never meets, because C<Genesis::Top> refuses such a repository at
+C<Genesis::Exit/CONFIG> before the column is read at all. The closure answers
+it anyway, so a later change to that order reads as a sentence rather than as
+a report with no reason on it. The run then says once, on
 standard error, which of the three it met and what the column is reading
 instead, and every environment the client would have served renders as the
 no-token case does, reading its proposed record and flagged as possibly
