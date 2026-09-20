@@ -1018,9 +1018,9 @@ sub type {
 # deployment_slug_for - the deployment slug for an environment name {{{
 #
 # <env>/<type>, the one identity the branch, the vault path, and the BOSH
-# deployment name all render (D66, D71).  The argument is a name as a
-# string and never an environment object, so that a caller holding only a
-# name composes the slug without loading one, which is what pipeline-apply
+# deployment name all render.  The argument is a name as a string and
+# never an environment object, so that a caller holding only a name
+# composes the slug without loading one, which is what pipeline-apply
 # creating branches and pipeline-status listing them both do.
 sub deployment_slug_for {
 	my ($self, $env_name) = @_;
@@ -1036,7 +1036,7 @@ sub deployment_slug_for {
 # }}}
 # branch_for - the deployment branch for an environment name {{{
 #
-# The deployment branch is the slug, with no decoration of its own (D66).
+# The deployment branch is the slug, with no decoration of its own.
 sub branch_for {
 	my ($self, $env_name) = @_;
 	return $self->deployment_slug_for($env_name);
@@ -1046,15 +1046,14 @@ sub branch_for {
 # pr_branch_for - the pull request branch for an environment name {{{
 #
 # The prefix joined onto the slug, with no second argument, so the branch
-# reads pr/qa/bosh under the defaults (D19, D66, D71).  The join can take
-# a name that is already the control branch or that a deployment branch
-# already owns, and the second of those needs an environment whose name
-# is the prefix followed by another environment's name, as with the
-# prefix pr- and the environments lab and pr-lab.  Both the prefix and
-# the type append, so the type cancels on both sides and the comparison
-# is against the composed branch names.  Refusing the collision belongs
-# here, in the one place a pull request branch is named, rather than in
-# each caller.
+# reads pr/qa/bosh under the defaults.  The join can take a name that is
+# already the control branch or that a deployment branch already owns,
+# and the second of those needs an environment whose name is the prefix
+# followed by another environment's name, as with the prefix pr- and the
+# environments lab and pr-lab.  Both the prefix and the type append, so
+# the type cancels on both sides and the comparison is against the
+# composed branch names.  Refusing the collision belongs here, in the one
+# place a pull request branch is named, rather than in each caller.
 #
 # The names to compare against are the caller's to pass where it already
 # holds them.  pipeline_env_names memoises nothing and builds the whole
@@ -1091,10 +1090,10 @@ sub pr_branch_for {
 # }}}
 # pipeline_enabled - whether this repository declares a pipeline {{{
 #
-# Reads pipeline.enabled and nothing else, under D70.  It replaces
-# ci_configured and ci_enabled, which are removed rather than kept as a
-# guard beside the provider read, because pairing the two is what let a
-# repository with no pipeline and one with a manual pipeline read alike.
+# Reads pipeline.enabled and nothing else.  It replaces ci_configured
+# and ci_enabled, which are removed rather than kept as a guard beside
+# the provider read, because pairing the two is what let a repository
+# with no pipeline and one with a manual pipeline read alike.
 sub pipeline_enabled {
 	my ($self) = @_;
 	return $self->config->get('pipeline.enabled') ? 1 : 0;
@@ -1105,10 +1104,9 @@ sub pipeline_enabled {
 #
 # Checks pipeline_enabled first and answers undef when the pipeline is not
 # enabled, so one read answers both questions and no call site needs a
-# guard beside it.  The default is manual, under D15, so pipeline.enabled
-# on its own is a manual pipeline rather than a half-configured one.  The
-# name is qualified because Genesis classifies providers of several kinds
-# (D64, D70).
+# guard beside it.  The default is manual, so pipeline.enabled on its own
+# is a manual pipeline rather than a half-configured one.  The name is
+# qualified because Genesis classifies providers of several kinds.
 sub pipeline_provider_type {
 	my ($self) = @_;
 	return undef unless $self->pipeline_enabled;
@@ -1119,7 +1117,7 @@ sub pipeline_provider_type {
 # manual_pipeline - whether the enabled pipeline is the manual one {{{
 #
 # True only when pipeline_provider_type is defined and equals manual, so
-# the check stays out of every call site (D70).
+# the check stays out of every call site.
 sub manual_pipeline {
 	my ($self) = @_;
 	my $type = $self->pipeline_provider_type;
@@ -1129,7 +1127,7 @@ sub manual_pipeline {
 # }}}
 # recreate_on_deploy - when this repository recreates VMs on a deploy {{{
 #
-# D101: never, redeploy-only, or always, repository-wide rather than per
+# Never, redeploy-only, or always, repository-wide rather than per
 # environment, because a key that changes how a deployment progresses has to
 # be uniform or the earlier environments stop rehearsing the later ones.  It
 # has no capability behind it, since --recreate is a BOSH flag and not a
@@ -1142,8 +1140,8 @@ sub recreate_on_deploy {
 # }}}
 # control_branch - the name of the branch that is control {{{
 #
-# The one reader of pipeline.source_control.control_branch, under D19.
-# The constant is its default and nothing more, so a site that reads the
+# The one reader of pipeline.source_control.control_branch.  The
+# constant is its default and nothing more, so a site that reads the
 # constant instead of this accessor contradicts the design.
 sub control_branch {
 	my ($self) = @_;
@@ -1153,12 +1151,12 @@ sub control_branch {
 }
 
 # }}}
-# control_requires_pr - the one reader of the key D45 derives from {{{
+# control_requires_pr - the one reader of the pull request key {{{
 #
 # It decides the branch protection pipeline-apply applies to control, and
-# under D45 it also decides whether a command that commits on control
-# expects a feature branch instead.  One key, two readings of it, so a
-# site that turns the protection on never has to find a second switch.
+# it also decides whether a command that commits on control expects a
+# feature branch instead.  One key, two readings of it, so a site that
+# turns the protection on never has to find a second switch.
 sub control_requires_pr {
 	my ($self) = @_;
 	return $self->config->get('pipeline.source_control.control_requires_pr', 0)
@@ -1169,8 +1167,8 @@ sub control_requires_pr {
 # pr_prefix - the prefix every pull request branch carries {{{
 #
 # The one reader of pipeline.source_control.pr_prefix, defaulting to
-# 'pr/', under D19.  It is joined onto the deployment slug to name the
-# pull request branch.
+# 'pr/'.  It is joined onto the deployment slug to name the pull
+# request branch.
 sub pr_prefix {
 	my ($self) = @_;
 	return $self->config->get(
@@ -1183,9 +1181,9 @@ sub pr_prefix {
 #
 # The public reader over the resolved block, so a caller asks for the one
 # value it wants instead of reaching into a private hash.  Precedence is
-# explicit over derived over default, under D29, and the derivation and
-# every refusal live in _source_control, which resolves once and keeps
-# its answer.
+# explicit over derived over default, and the derivation and every
+# refusal live in _source_control, which resolves once and keeps its
+# answer.
 sub source_control_remote {
 	my ($self) = @_;
 	return $self->_source_control->{remote};
@@ -1209,10 +1207,10 @@ sub source_control_repository {
 # source_control_resolved - every source-control value and its tier {{{
 #
 # What pipeline-describe prints, so an override that has drifted away from
-# what git says is visible rather than silent, under D29.  A value is
-# explicit where the operator wrote the key, derived where git answered for
-# it, unset where a derivation was never run, and default where the key
-# takes no derivation at all.
+# what git says is visible rather than silent.  A value is explicit where
+# the operator wrote the key, derived where git answered for it, unset
+# where a derivation was never run, and default where the key takes no
+# derivation at all.
 #
 # is_set decides the explicit tier rather than get, the way
 # _validate_capability_gates does, because the schema fills control_branch
@@ -1232,9 +1230,9 @@ sub source_control_resolved {
 			# A value that never resolved shows as (none) rather than as a
 			# blank column the reader has to interpret.
 			value => $value // '(none)',
-			# A derived key with no value was never derived: under D29 the
-			# url is asked of git only where the repository has to come out
-			# of it, so calling that row derived would tell the reader git
+			# A derived key with no value was never derived.  The url is
+			# asked of git only where the repository has to come out of it,
+			# so calling that row derived would tell the reader git
 			# answered when git was never asked.
 			source => $self->config->is_set("pipeline.source_control.$key")
 				? 'explicit'
@@ -1250,7 +1248,7 @@ sub source_control_resolved {
 # }}}
 # _pipeline_exodus_mount - the one exodus mount the pipeline shares {{{
 #
-# D103 puts the applied record at <exodus mount>_pipelines/<type>, so a
+# The applied record lives at <exodus mount>_pipelines/<type>, so a
 # pipeline whose environments kept separate mounts would have no single
 # home for it.  Configuration load already refuses a repository whose
 # environments resolve the mount differently, in
@@ -1261,12 +1259,12 @@ sub source_control_resolved {
 # The pipeline's environments are asked first and the root's environment
 # files second, because the record has to stay readable when
 # pipeline.enabled reads false.  pipeline_env_names answers nothing at all
-# for a disabled pipeline, and D64's disowned repository is exactly one
-# whose key is off while the record still stands, so an address that only
-# a live pipeline could spell would put that record out of reach of the
-# refusal that exists to find it.  The mount is a repository-wide fact
-# either way, and configuration load refuses a repository whose
-# environments disagree about it.
+# for a disabled pipeline, and a disowned repository is exactly one whose
+# key is off while the record still stands, so an address that only a live
+# pipeline could spell would put that record out of reach of the refusal
+# that exists to find it.  The mount is a repository-wide fact either way,
+# and configuration load refuses a repository whose environments disagree
+# about it.
 sub _pipeline_exodus_mount {
 	my ($self) = @_;
 	return $self->_memoize(sub {
@@ -1289,7 +1287,7 @@ sub _pipeline_exodus_mount {
 # <exodus mount>_pipelines/<type>, which reads /secret/exodus/_pipelines/bosh
 # under the nominal mount.  The leading underscore makes the address
 # unreachable by any environment, because Env::_env_name_errors requires a
-# name to start with a lowercase letter (D103).
+# name to start with a lowercase letter.
 sub applied_record_path {
 	my ($self) = @_;
 	return sprintf(
@@ -1300,17 +1298,17 @@ sub applied_record_path {
 # }}}
 # applied_record - read or write the control commit the pipeline was applied from {{{
 #
-# D103 makes this the owner of the pipeline's own facts, so pipeline-apply
-# writes through here and never spells the address for itself.  Called with
-# no arguments it reads the three flat fields, and answers undef where the
+# This is the owner of the pipeline's own facts, so pipeline-apply writes
+# through here and never spells the address for itself.  Called with no
+# arguments it reads the three flat fields, and answers undef where the
 # path is absent.  Called with a field list it writes those fields and
 # returns what it wrote.  The deploy rewrites its own exodus record every
 # run, which is why these live at their own path rather than beside the
 # deployments.
 #
-# D58 makes `at` an EXODUS_TIME_FORMAT value rather than an ISO one, and a
-# write that names no time of its own is stamped with the current time in
-# that format.
+# The `at` field is an EXODUS_TIME_FORMAT value rather than an ISO one,
+# and a write that names no time of its own is stamped with the current
+# time in that format.
 sub applied_record {
 	my ($self, %fields) = @_;
 	my $path = $self->applied_record_path;
@@ -1349,16 +1347,16 @@ sub applied_record {
 # }}}
 # pipeline_staleness - the environments whose pipeline no longer matches control {{{
 #
-# The one home of the comparison (D103).  The propagate pre-flight, the
-# deploy pre-flight, and pipeline-status all ask this rather than each
+# The one home of the comparison.  The propagate pre-flight, the deploy
+# pre-flight, and pipeline-status all ask this rather than each
 # computing its own, because three copies would drift three ways.
 #
 # Three inputs go in.  The applied commit comes from the applied record.
-# The second is a path diff between that commit and control over D43's
+# The second is a path diff between that commit and control over the
 # known set, which is .genesis/config and every file of each
 # environment's hierarchy.  The third is each environment's compiled
 # dependency set against the set its last deploy recorded reading, which
-# is a fact where the compile's answer was a prediction (D77).
+# is a fact where the compile's answer was a prediction.
 #
 # A repository the apply has never run against reports nothing, because
 # there is no commit to be stale against; that case is the awaiting
@@ -1606,17 +1604,17 @@ sub pipeline_topology {
 # run that never compares control with the remote propagates whatever the
 # clone happens to hold.
 #
-# The names are deployment branches rather than environment names, under D66,
-# because the branch is what the remote has and an environment name is not a
-# ref on it.  A refresh asking for the name fetched nothing for any
-# environment whose branch carries a type, which is every environment in a
-# typed repository.
+# The names are deployment branches rather than environment names, because
+# the branch is what the remote has and an environment name is not a ref on
+# it.  A refresh asking for the name fetched nothing for any environment
+# whose branch carries a type, which is every environment in a typed
+# repository.
 #
 # Returns fetch_branches' result, whose `created` list is what the caller
 # reports the creation of a local ref from.  A failure is fatal here rather
-# than survivable later, because under D40 every pipeline command but
-# pipeline-status refreshes unconditionally, so an unreachable remote is the
-# unsurvivable class and exits TEMPFAIL for the caller to retry.
+# than survivable later, because every pipeline command but pipeline-status
+# refreshes unconditionally, so an unreachable remote is the unsurvivable
+# class and exits TEMPFAIL for the caller to retry.
 sub fetch_pipeline_envs {
 	my ($self, $git, %opts) = @_;
 	return undef unless $self->pipeline_enabled;
@@ -1913,8 +1911,8 @@ sub _validate_config {
 		$self->config->validate($self->_repo_config_schema());
 		$self->{__config_disk_version} = 3;
 
-		# The checks a declarative schema cannot state, under D28, run for
-		# every command and right after the schema.  Later work extends
+		# The checks a declarative schema cannot state run for every
+		# command and right after the schema.  Later work extends
 		# _validate_pipeline_config and never touches this call.
 		$self->_validate_pipeline_config;
 
@@ -2148,16 +2146,16 @@ sub _repo_config_schema {
 # }}}
 # _pipeline_config_schema - the pipeline section of the v3 schema {{{
 #
-# Under D18 the section is named pipeline while the Genesis::CI code
-# namespace stays where it is, and under D28 the schema is the contract:
-# every key the compiler reads is declared here, so Genesis::Config's own
-# recursion refuses an undeclared key by name at configuration load, for
-# every command and not only for the pipeline ones.  There are no
-# compatibility aliases, because the v3 schema is unreleased.
+# The section is named pipeline while the Genesis::CI code namespace
+# stays where it is, and the schema is the contract.  Every key the
+# compiler reads is declared here, so Genesis::Config's own recursion
+# refuses an undeclared key by name at configuration load, for every
+# command and not only for the pipeline ones.  There are no compatibility
+# aliases, because the v3 schema is unreleased.
 #
-# The provider block is not required beside an enabled gate, because
-# under D15 an absent provider type is a manual pipeline rather than no
-# pipeline at all.
+# The provider block is not required beside an enabled gate, because an
+# absent provider type is a manual pipeline rather than no pipeline at
+# all.
 sub _pipeline_config_schema {
 	my ($self) = @_;
 
@@ -2170,12 +2168,12 @@ sub _pipeline_config_schema {
 				default     => Genesis::Config::FALSE,
 				description => 'Whether this repository has a pipeline'
 			},
-			# D105: the schema for this block is a function of the block's
-			# own type, so the block says so rather than having something
-			# read the type ahead of validation and assemble a schema from
-			# what it found.  D15 keeps its default here, on the
-			# declaration, so an enabled section with no provider block is
-			# still a manual pipeline.
+			# The schema for this block is a function of the block's own
+			# type, so the block says so rather than having something read
+			# the type ahead of validation and assemble a schema from what
+			# it found.  The default stays here, on the declaration, so an
+			# enabled section with no provider block is still a manual
+			# pipeline.
 			# The empty hash is what lets that default be reached, because
 			# validation walks into a block that is present and nowhere
 			# else.
@@ -2189,7 +2187,7 @@ sub _pipeline_config_schema {
 				description           => 'The automation that owns the pipeline',
 				modules               => $self->_provider_module_map(),
 			},
-			# D66 released the label from the branch, so it names the
+			# The label is released from the branch, so it names the
 			# provider's pipeline and nothing else, and it is deliberately
 			# not checked as a git ref component.
 			name => {
@@ -2197,7 +2195,7 @@ sub _pipeline_config_schema {
 				description => "The pipeline's name in its provider (defaults to deployment_type)"
 			},
 
-			# D101: a BOSH flag rather than a provider feature, so no
+			# A BOSH flag rather than a provider feature, so no
 			# capability gates it.  Repository-wide, because a key that
 			# changes how a deployment progresses must be uniform or the
 			# earlier environments stop rehearsing the later ones.
@@ -2250,8 +2248,8 @@ sub _pipeline_config_schema {
 				}
 			},
 
-			# D23 fixes the backend and refuses a directory, and D105 makes
-			# the block say that its backend decides its shape, so a GCS
+			# The backend is fixed and a directory is refused, and the
+			# block says that its backend decides its shape, so a GCS
 			# configuration can no longer carry a region that nothing will
 			# ever read.
 			#
@@ -2273,7 +2271,7 @@ sub _pipeline_config_schema {
 				},
 			},
 
-			# D17 and D27: the vault a pipeline task writes exodus through.
+			# The vault a pipeline task writes exodus through.
 			vault => {
 				type        => 'hash',
 				required    => \&_automated_provider_configured,
@@ -2286,8 +2284,8 @@ sub _pipeline_config_schema {
 				}
 			},
 
-			# D22 and D74: the locker behind the two mandatory deploy locks,
-			# read by the compiler for the emitted resources and by the CLI.
+			# The locker behind the two mandatory deploy locks, read by the
+			# compiler for the emitted resources and by the CLI.
 			locker => {
 				type        => 'hash',
 				required    => \&_automated_provider_configured,
@@ -2301,7 +2299,7 @@ sub _pipeline_config_schema {
 				}
 			},
 
-			# D27: optional, with a repository default the environment's own
+			# Optional, with a repository default the environment's own
 			# genesis.pipeline.notifications.* overrides.
 			notifications => {
 				type        => 'hash',
@@ -2319,9 +2317,9 @@ sub _pipeline_config_schema {
 # }}}
 # _current_config_schema - the schema for the version on disk {{{
 #
-# Built on demand rather than read back off the config object.  Under D86
-# the configured provider's own fragment is merged as the schema is built,
-# so a command that changes the provider type changes the schema its keys
+# Built on demand rather than read back off the config object.  The
+# configured provider's own fragment is merged as the schema is built, so
+# a command that changes the provider type changes the schema its keys
 # have to be judged against, and the copy the load left behind is a
 # version out of date.  Every writer that re-validates asks for this one.
 sub _current_config_schema {
@@ -2364,9 +2362,9 @@ sub _refuse_v2_pipeline {
 # }}}
 # _provider_module_map - every provider type, and the class that owns it {{{
 #
-# One read of the registry under D28, where the enum and the lookup used
-# to be two.  Every registered type has a CLI class, so the map is total
-# and nothing downstream asks whether a provider has a class.
+# One read of the registry, where the enum and the lookup used to be
+# two.  Every registered type has a CLI class, so the map is total and
+# nothing downstream asks whether a provider has a class.
 sub _provider_module_map {
 	my ($self) = @_;
 
@@ -2384,7 +2382,7 @@ sub _provider_module_map {
 #
 # Declared as its own schema rather than folded into the repository's,
 # because it is validated once per environment against that environment's
-# merged parameters.  Under D79 the read is merged and never leaf-only: a
+# merged parameters.  The read is merged and never leaf-only.  A
 # leaf-only read finds an inherited key absent, silently, and answers
 # wrongly with no error, and most of these keys live high in the
 # hierarchy, typically in the site file.
@@ -2398,9 +2396,9 @@ sub _pipeline_env_keys_schema {
 			require_pr => {type => 'boolean', description => 'Propagate through a pull request rather than directly'},
 			manual     => {type => 'boolean', description => "The deploy job waits for a human trigger"},
 
-			# D21 replaced the shipped redeploy key, the two flat cron keys,
-			# and the boolean-or-block form with one crontab expression, or a
-			# list of them, in UTC.  A bare string is normalised to a
+			# One crontab expression, or a list of them, in UTC, replaced the
+			# shipped redeploy key, the two flat cron keys, and the
+			# boolean-or-block form.  A bare string is normalised to a
 			# one-element list before validation, so the declaration stays a
 			# list of strings and the operator may still write one.
 			redeploy_cron => {
@@ -2410,8 +2408,8 @@ sub _pipeline_env_keys_schema {
 				description => 'Crontab expressions, in UTC, that trigger the redeploy job'
 			},
 
-			# D26: two sources, no opt-out.  An entry is a deployment type at
-			# this environment, or <env>/<type> elsewhere, and the shape is
+			# Two sources, no opt-out.  An entry is a deployment type at this
+			# environment, or <env>/<type> elsewhere, and the shape is
 			# checked beside the declaration because the validator has no
 			# pattern of its own.
 			track_dependencies => {
@@ -2421,7 +2419,7 @@ sub _pipeline_env_keys_schema {
 				description => 'Deployments whose exodus records this one reads'
 			},
 
-			# D24: renamed, with its path semantics unchanged.
+			# Renamed, with its path semantics unchanged.
 			track_additional_files => {
 				type        => 'array',
 				subtype     => 'string',
@@ -2429,7 +2427,7 @@ sub _pipeline_env_keys_schema {
 				description => 'Extra deployment-root-relative paths for the propagation set'
 			},
 
-			# D27: per environment only; the global fallback went with the
+			# Per environment only; the global fallback went with the
 			# multi-file layout.  A boolean turns every config type on, and a
 			# list names them, so the declaration is permissive here and the
 			# shape is checked beside it.
@@ -2450,9 +2448,9 @@ sub _pipeline_env_keys_schema {
 # _automated_provider_configured - true when the pipeline is not manual {{{
 #
 # The predicate the required flag of source_control.auth, identity,
-# shuttle, vault, and locker reads.  Under D15 an absent provider type is
-# manual, so an absent block is only required once somebody names an
-# automation that has to do the work unattended.
+# shuttle, vault, and locker reads.  An absent provider type is manual,
+# so an absent block is only required once somebody names an automation
+# that has to do the work unattended.
 sub _automated_provider_configured {
 	my ($siblings, $config) = @_;
 	return 0 unless $config && $config->get('pipeline.enabled');
@@ -2463,14 +2461,14 @@ sub _automated_provider_configured {
 # }}}
 # _source_control - the resolved source-control values {{{
 #
-# Precedence is explicit over derived over default, under D29.  The remote
-# is the control branch's configured upstream, else origin where it
-# exists, and never "the first git remote", because that is alphabetical
-# order and a repository holding dev and origin would pick dev.  The
-# repository is the GitHub owner/repo the remote's URL carries; under D102
-# the MVP supports GitHub alone, whether github.com or GitHub Enterprise,
-# so any other host needs the override and is refused by name without it,
-# with no exception under the manual provider.
+# Precedence is explicit over derived over default.  The remote is the
+# control branch's configured upstream, else origin where it exists, and
+# never "the first git remote", because that is alphabetical order and a
+# repository holding dev and origin would pick dev.  The repository is the
+# GitHub owner/repo the remote's URL carries; the MVP supports GitHub
+# alone, whether github.com or GitHub Enterprise, so any other host needs
+# the override and is refused by name without it, with no exception under
+# the manual provider.
 sub _source_control {
 	my ($self) = @_;
 
@@ -2552,9 +2550,9 @@ sub _source_control {
 # _github_owner_repo - the owner/repo a GitHub URL carries, or undef {{{
 #
 # Enterprise parses the same way, because its URLs carry the pair in the
-# same shape and only the host differs.  The host is what says GitHub: any
-# https URL at all carries two path segments, so without a host test every
-# forge on earth would parse and the D102 refusal would never fire.
+# same shape and only the host differs.  The host is what says GitHub.
+# Any https URL at all carries two path segments, so without a host test
+# every forge on earth would parse and the refusal would never fire.
 #
 # The host test is a substring rather than a label boundary, and it is
 # deliberately loose, because it has to admit every Enterprise hostname an
@@ -2588,13 +2586,13 @@ sub _ref_component_errors {
 # }}}
 # _validate_slug_components - both halves of the deployment slug {{{
 #
-# Under D66 the deployment branch is <env>/<type>, so both halves become
-# git ref components and neither is trusted over the other.  Both already
-# reach vault through the exodus slug and BOSH through the deployment
-# name, so the check is narrow in practice and catches a value that was
-# never safe in those places either.  The message names the branch the
-# value would have composed, because that is what makes it obvious why a
-# name that was fine before this release is not fine now.
+# The deployment branch is <env>/<type>, so both halves become git ref
+# components and neither is trusted over the other.  Both already reach
+# vault through the exodus slug and BOSH through the deployment name, so
+# the check is narrow in practice and catches a value that was never safe
+# in those places either.  The message names the branch the value would
+# have composed, because that is what makes it obvious why a name that
+# was fine before this release is not fine now.
 sub _validate_slug_components {
 	my ($self) = @_;
 
@@ -2629,11 +2627,11 @@ sub _validate_slug_components {
 # }}}
 # _validate_one_exodus_mount - every environment resolves the same mount {{{
 #
-# Under D103 the applied record lives at <exodus mount>_pipelines/<type>,
-# so a pipeline whose environments kept separate mounts would have no
-# single home for it.  The merged hierarchy of D79 makes the root file the
-# natural place to set it, and D101's uniformity rule already argues for
-# it, so the load refuses two mounts by name.
+# The applied record lives at <exodus mount>_pipelines/<type>, so a
+# pipeline whose environments kept separate mounts would have no single
+# home for it.  The merged hierarchy makes the root file the natural place
+# to set it, and the uniformity rule for repository-wide keys already
+# argues for it, so the load refuses two mounts by name.
 sub _validate_one_exodus_mount {
 	my ($self) = @_;
 
@@ -2675,10 +2673,10 @@ sub _validate_one_exodus_mount {
 # _validate_pipeline_config - the checks a declarative schema cannot state {{{
 #
 # Runs from _validate_config after Genesis::Config::validate, for every
-# command, under D28.  What it checks, in what order, and what each check
-# refuses is in this module's POD under _validate_pipeline_config, so the
-# account lives in one place as the sub grows.  Later work extends the sub
-# and leaves the one call site in _validate_config alone.
+# command.  What it checks, in what order, and what each check refuses is
+# in this module's POD under _validate_pipeline_config, so the account
+# lives in one place as the sub grows.  Later work extends the sub and
+# leaves the one call site in _validate_config alone.
 sub _validate_pipeline_config {
 	my ($self) = @_;
 
@@ -2706,9 +2704,9 @@ sub _validate_pipeline_config {
 	# read for their shape.
 	$self->_validate_one_exodus_mount;
 
-	# Every environment's genesis.pipeline block, read merged under D79.
-	# A file whose genesis key is not a hash at all carries no block to
-	# check, and is left to whatever reads the environment itself.
+	# Every environment's genesis.pipeline block, read merged.  A file
+	# whose genesis key is not a hash at all carries no block to check,
+	# and is left to whatever reads the environment itself.
 	for my $env_name ($self->_env_file_names) {
 		my $params  = $self->_merged_env_params($env_name);
 		my $genesis = $params->{genesis};
@@ -2723,17 +2721,17 @@ sub _validate_pipeline_config {
 # }}}
 # _validate_capability_gates - refuse a key whose capability is false {{{
 #
-# Under D101 a key is the operator's choice inside an ability the provider
-# has.  Where the ability is absent the key cannot mean anything, so it is
+# A key is the operator's choice inside an ability the provider has.
+# Where the ability is absent the key cannot mean anything, so it is
 # refused at load naming both the key and the capability, rather than
 # being accepted and quietly ignored when the pipeline is emitted.
 sub _validate_capability_gates {
 	my ($self) = @_;
 
-	# Every provider declares its abilities under D105, so there is a
-	# declaration to gate against for each of them and nothing here asks
-	# whether a provider has a class.  The type comes through the accessor
-	# rather than off the key, because the gates are reached only from
+	# Every provider declares its abilities, so there is a declaration to
+	# gate against for each of them and nothing here asks whether a
+	# provider has a class.  The type comes through the accessor rather
+	# than off the key, because the gates are reached only from
 	# _validate_pipeline_config, which has already returned for a
 	# repository with no pipeline, so the accessor always has an answer.
 	require Genesis::CI::Provider;
@@ -2803,12 +2801,12 @@ sub _validate_capability_gates {
 # }}}
 # _validate_manifest_store - the store a pipeline repository may use {{{
 #
-# D14 requires the exodus store under a pipeline and D63 makes the
-# refusal permanent and puts it here, where every command sees it, rather
-# than in the compiler's validator, where a deploy never met it.  The
-# certified commit and the applied, hold and proposed records all live in
-# exodus, so an environment whose manifests live only in git still needs
-# every one of them and the routing cannot run without them.
+# A pipeline requires the exodus store, and the refusal is permanent and
+# lives here, where every command sees it, rather than in the compiler's
+# validator, where a deploy never met it.  The certified commit and the
+# applied, hold and proposed records all live in exodus, so an
+# environment whose manifests live only in git still needs every one of
+# them and the routing cannot run without them.
 #
 # The floor case is the same refusal reached another way.  An environment
 # whose kit declares a Genesis floor below 3.1.0 is forced onto the
@@ -2893,11 +2891,11 @@ sub _validate_manifest_store {
 # _merged_env_params - an environment's merged parameters, without a kit {{{
 #
 # Genesis resolves an environment by merging its ancestral hierarchy, with
-# the nearer file winning, and under D79 every genesis.pipeline.* read
-# follows that rule.  This is the load-time form of that read: it works
-# from the name through Genesis::Env::relate_by_name, loads the files that
-# exist, and deep-merges them.  It builds no Genesis::Env and needs no
-# kit, so validation at load stays a read of the files on disk.
+# the nearer file winning, and every genesis.pipeline.* read follows that
+# rule.  This is the load-time form of that read.  It works from the name
+# through Genesis::Env::relate_by_name, loads the files that exist, and
+# deep-merges them.  It builds no Genesis::Env and needs no kit, so
+# validation at load stays a read of the files on disk.
 sub _merged_env_params {
 	my ($self, $env_name) = @_;
 
@@ -2926,10 +2924,10 @@ sub _merged_env_params {
 			$env_name, undef, $self->path, $self->path)) {
 		next unless -f $file;
 
-		# A file that will not parse is refused rather than skipped: under
-		# D79 a key can live anywhere in the hierarchy, so a file nobody
-		# could read is a key nobody can see, which is the silent wrong
-		# answer this read exists to prevent.
+		# A file that will not parse is refused rather than skipped.  A
+		# key can live anywhere in the hierarchy, so a file nobody could
+		# read is a key nobody can see, which is the silent wrong answer
+		# this read exists to prevent.
 		my ($params, $rc, $err) = load_yaml_file($file);
 		bail({exitcode => CONFIG},
 			"An environment file could not be read as YAML.\n".
@@ -2985,7 +2983,7 @@ sub _validate_env_pipeline_block {
 	# error out of the checks below.
 	my %block = ref($block) eq 'HASH' ? %$block : ();
 
-	# D21 lets an operator write one crontab expression where a list is
+	# An operator may write one crontab expression where a list is
 	# declared, and the other list keys are owed the same courtesy, so a
 	# bare string becomes a one-element list first.  Nothing is split on
 	# the way, because a crontab expression carries commas of its own.
