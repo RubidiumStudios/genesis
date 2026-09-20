@@ -1092,7 +1092,7 @@ EOF
 };
 
 subtest '_remove_repository_manifest_copies - only a store somebody chose' => sub {
-	plan tests => 4;
+	plan tests => 6;
 
 	# The five files a deploy leaves under .genesis/manifests, laid down so
 	# the removal has something to find.
@@ -1104,19 +1104,22 @@ subtest '_remove_repository_manifest_copies - only a store somebody chose' => su
 			for @suffixes;
 		return map {$top->path(".genesis/manifests/$name$_")} @suffixes;
 	};
+	# env_min is the minimum version the environment file declares, and
+	# leaving it undefined writes an environment file that declares none.
 	my $build = sub {
 		my ($name, %opts) = @_;
+		my $env_min = exists $opts{env_min} ? delete $opts{env_min} : '3.1.0';
 		my $top = make_top(name => $name, minimum_version => '3.1.0',
 			creator_version => '3.1.0', no_vault => 1, %opts);
 		$top->link_dev_kit('t/src/simple');
+		my $declares = defined($env_min) ? "\n  min_version: $env_min" : '';
 		put_file($top->path("$name-env.yml"), <<EOF);
 ---
 kit:
   name:    dev
   version: latest
 genesis:
-  env: $name-env
-  min_version: 3.1.0
+  env: $name-env$declares
 EOF
 		return ($top, $top->load_env("$name-env"));
 	};
@@ -1139,6 +1142,22 @@ EOF
 		'an explicit exodus removes all five copies');
 	is(scalar(grep {-f $_} @doomed), 0,
 		'and none of them survives');
+
+	# An environment below the 3.1.0 floor is served out of the repository
+	# whatever the key says, because an older Genesis cannot write the
+	# exodus deployment record.  Declaring no minimum version puts an
+	# environment there, since the effective floor resolves to 0.0.0.  The
+	# copies are the only manifest such an environment has, and terminate
+	# and the create-env delete path both come back for them, so a deploy
+	# must leave them alone.
+	my ($below_top, $below) = $build->('below',
+		manifest_store => 'exodus', minimum_version => undef, env_min => undef);
+	is($below->manifest_store, 'repository',
+		'an environment declaring no minimum version is served from the repository');
+	my @needed = $lay_down->($below_top, 'below-env');
+	$below->_remove_repository_manifest_copies;
+	is(scalar(grep {-f $_} @needed), 5,
+		'and a deploy leaves every copy it still needs in place');
 };
 
 done_testing;  # 22 subtests + 4 use_ok calls = 26 tests total

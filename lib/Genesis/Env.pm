@@ -1013,12 +1013,21 @@ sub manifest_store {
 # is_set reads the loaded and set layers alone, where get and has look
 # through the filled defaults too and cannot tell a written value from a
 # supplied one.
+#
+# Which store is in force is manifest_store's question and not the raw
+# key's.  An environment below the 3.1.0 floor is served out of the
+# repository whatever the key says, because an older Genesis cannot write
+# the exodus deployment record, and an environment that declares no
+# minimum version resolves to 0.0.0 and is one of those.  The copies are
+# the only manifest such an environment has, and terminate and the
+# create-env delete path both come back for them, so reading the key here
+# would delete the state file bosh delete-env needs.
 sub _remove_repository_manifest_copies {
 	my ($self) = @_;
 
 	my $config = $self->top->config;
 	return 0 unless $config->is_set('manifest_store');
-	return 0 unless ($config->get('manifest_store') // '') eq 'exodus';
+	return 0 unless $self->manifest_store eq 'exodus';
 
 	my $name = $self->name;
 	my @found = grep {-f $_} (
@@ -5337,8 +5346,10 @@ sub _post_deploy {
 
 	$self->notify("#G{Deployment successful.}") if $deployment_ok;
 
-	# Save deployment log
-	my $manifest_store = $self->top->config->get('manifest_store','exodus');
+	# Save deployment log.  The accessor, not the raw key, because an
+	# environment below the 3.1.0 floor is served out of the repository
+	# however the key is written.
+	my $manifest_store = $self->manifest_store;
 	mkfile_or_fail(
 		$self->deployment_cache_path_lookup('deploy_log'),
 		decode_utf8($state->{results}[0]//'No output received')
