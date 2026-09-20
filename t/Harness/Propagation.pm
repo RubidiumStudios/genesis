@@ -702,6 +702,13 @@ sub unfolded {
 sub make_harness {
 	my (%opts) = @_;
 
+	# An environment has one predecessor, so a harness is chained or fanned
+	# and never both.  It is refused here, where the two keys arrive,
+	# rather than at the seeding, so a caller that asked for both hears
+	# before three repositories have been built for it.
+	die "a harness is chained or fanned, not both\n"
+		if $opts{chained} && defined $opts{fanned};
+
 	# Nothing in the environment gets to say which repository the git below
 	# runs against.  This is the harness's one entry point, so a scrub here
 	# covers every helper a row reaches for afterwards.
@@ -749,7 +756,8 @@ sub make_harness {
 		# A fanned harness hangs every other environment off the one this
 		# names, which is the shape a deploy that spawns one child for
 		# several branches needs.  It is exclusive with chained, because an
-		# environment has one predecessor.
+		# environment has one predecessor, which is why the two are refused
+		# together at the top of this sub.
 		fanned    => $opts{fanned},
 		# The shared files every environment declares through
 		# genesis.pipeline.track_additional_files.  The harness lays each one
@@ -883,8 +891,6 @@ sub _seed_control {
 	# are the predecessor a chained harness names and the shared files every
 	# environment tracks.  They go in here rather than in a commit of their
 	# own, so that a row's first commit is the first thing the walk finds due.
-	die "a harness is chained or fanned, not both\n"
-		if $self->{chained} && defined $self->{fanned};
 	my $prior;
 	for my $env (@{$self->{envs}}) {
 		my $names = defined $self->{fanned}
