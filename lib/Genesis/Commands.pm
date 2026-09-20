@@ -937,8 +937,8 @@ sub _gate_deployed_state {
 	# commit the local ref names, so a clone that has not pulled would be
 	# stood on the init commit and asked to deploy from it.  It is made on
 	# the one state that promises a fast-forward, so it creates and discards
-	# nothing, which is the one ref move this span allows and the one the
-	# deploy's own --ff-only pull was the precedent for.  Nothing is
+	# nothing, which is the one ref move the deploy's span allows and the
+	# one the deploy's own --ff-only pull was the precedent for.  Nothing is
 	# fetched, because the refresh is its own step.
 	if ($behind && command_properties()->{branch_fast_forward}) {
 		info(
