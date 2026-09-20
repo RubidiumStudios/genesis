@@ -556,7 +556,7 @@ sub _next_page {
 # pr_reviews - the reviews on one pull request, oldest first {{{
 #
 # What a reviewer decided is what decides whether the run rebuilds a pull
-# request branch or freezes it (D51), so it is read before the arm touches the
+# request branch or freezes it, so it is read before the arm touches the
 # branch.  The API answers every review in submission order, and the caller
 # takes the newest decisive one, because a comment-only review neither
 # approves nor asks for changes.
@@ -593,9 +593,9 @@ sub pr_reviews {
 # }}}
 # closed_prs - the closed pull requests for a branch, merged and unmerged {{{
 #
-# The supersedes list of D49 names the closed-unmerged attempts and quotes
-# whoever asked for the change, and D52's recovery reads a merged one's body,
-# so all three come from here.
+# The supersedes list names the closed-unmerged attempts and quotes whoever
+# asked for the change, and the recovery reads a merged one's body, so all
+# three come from here.
 #
 # The review is attached only where something reads one, which is the entries
 # nobody merged.  The pull request branch is reused for every delivery, so this
@@ -635,11 +635,11 @@ sub closed_prs {
 #   $gh->open_prs($owner_repo, $base)           # all open PRs targeting $base
 #   $gh->open_prs($owner_repo, $base, $head)    # filtered to PRs from $head
 #
-# Returns an arrayref.  When $head is provided the server-side
-# filter is applied AND a defensive grep filters the response (in
-# case the API surfaces unrelated results from pagination edge cases
-# or fork heads).  Every entry that comes back carries merged_at and
-# the newest decisive review, which is what D51 has the caller act on.
+# Returns an arrayref.  When $head is provided the server-side filter
+# is applied AND a defensive grep filters the response (in case the
+# API surfaces unrelated results from pagination edge cases or fork
+# heads).  Every entry that comes back carries merged_at and the
+# newest decisive review, which is what the caller acts on.
 sub open_prs {
 	my ($self, $owner_repo, $base, $head) = @_;
 	bail("Missing owner/repo for open_prs") unless $owner_repo;
@@ -662,11 +662,11 @@ sub open_prs {
 # }}}
 # _attach_review - merged_at and the newest decisive review, on one entry {{{
 #
-# D51 has the run act on what a reviewer decided, so the wrapper attaches it
-# rather than leaving each caller to fetch it, and D52's recovery needs
-# merged_at, which the list endpoint gives on every entry.  A COMMENTED or a
-# DISMISSED review is neither an approval nor a request for changes, so it
-# never decides an arm.
+# The run acts on what a reviewer decided, so the wrapper attaches it rather
+# than leaving each caller to fetch it, and the recovery needs merged_at,
+# which the list endpoint gives on every entry.  A COMMENTED or a DISMISSED
+# review is neither an approval nor a request for changes, so it never
+# decides an arm.
 sub _attach_review {
 	my ($self, $owner_repo, $pr) = @_;
 
@@ -788,9 +788,9 @@ sub list_rulesets {
 # }}}
 # set_ruleset - create or replace one named ruleset {{{
 #
-# Returns ($ok, $reason) rather than bailing, because D45 has the apply
-# report what it could not grant and carry on.  A ruleset of the same name
-# is replaced, so a re-run is idempotent and does not accumulate rules.
+# Returns ($ok, $reason) rather than bailing, because the apply reports
+# what it could not grant and carries on.  A ruleset of the same name is
+# replaced, so a re-run is idempotent and does not accumulate rules.
 sub set_ruleset {
 	my ($self, $owner_repo, %opts) = @_;
 	bail("Missing owner/repo for set_ruleset") unless $owner_repo;
