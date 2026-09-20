@@ -689,6 +689,24 @@ Repositories with a legacy pipeline `ci.yml` are detected at config load (`has_l
 
 ---
 
+## Migration from v2
+
+A v3 pipeline is never applied on top of a v2 one, and a repository moves to v3 by hand. Genesis translates no v2 branch layout and adopts no v2 pipeline state, so there is nothing to run and nothing to convert, and a pipeline `ci.yml` beside a v3 configuration is refused with the migration named.
+
+The move has four parts.
+
+1. `control` is a new orphan branch, cut from the existing branch's HEAD content, so it shares no history with the branch it replaces.
+
+2. The deployment branches are the init branches `genesis pipeline-apply` creates, one orphan root commit per `<env>/<type>` adding a single `init` file, and each environment file gains its `genesis.pipeline` block.
+
+3. A branch named for an environment alone is deleted, or renamed with `git branch -m lab lab/<type>` where its history is wanted, because such a name blocks every `<env>/<type>` beneath it. A renamed branch stands in place of that environment's init branch, and it is still uncertified.
+
+4. Every existing clone then fetches once with `--prune`, because `refs/remotes/origin/lab` collides in the same way and a plain fetch reports "unable to update local ref" until it is gone.
+
+Because control shares no history with the old branch, no exodus record's `git.commit` sits on control or carries a marker, so nothing is backfilled and every environment starts without a certified commit. Each one holds its descendants until it has deployed once, in DAG order, which is the proving run a migration wants and which is a BOSH no-op wherever the branch content matches what is already running. Nothing is assumed about what an environment certified before the pipeline existed.
+
+---
+
 ## Edge Cases
 
 ### Proto-BOSH (create-env)
