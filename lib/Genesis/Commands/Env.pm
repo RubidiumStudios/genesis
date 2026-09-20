@@ -81,25 +81,25 @@ sub create {
 	$kit->check_prereqs() or exit 86;
 
 	# Under a pipeline the branch class gate has already refreshed control
-	# into T and refused a derived branch, so create has nothing left to
-	# check about the branch it stands on (D40, D41, D81).
+	# into T and refused a derived branch, so create has nothing left to check
+	# about the branch it stands on.
 	my $pipeline_enabled = $top->pipeline_enabled;
 	my $git;
 	if ($pipeline_enabled) {
 		require Service::Git;
 		$git = Service::Git->new('.');
 
-		# D80: genesis new opens no session, because it writes on the branch
-		# the operator chose and there is nothing to leave.  What it does
-		# share with begin is the pre-flight, so H20 closes for it too.
+		# genesis new opens no session, because it writes on the branch the
+		# operator chose and there is nothing to leave.  What it does share
+		# with begin is the pre-flight, so H20 closes for it too.
 		$git->preflight;
 
 		# The command commits the environment file, and a commit takes
-		# everything the index already holds, so an operator with staged
-		# work of their own would otherwise find it swept into the
-		# environment's own commit and have to undo a commit to get it
-		# back.  Under --no-commit there is no commit for anything to be
-		# swept into, so the check is skipped (D80).
+		# everything the index already holds, so an operator with staged work
+		# of their own would otherwise find it swept into the environment's
+		# own commit and have to undo a commit to get it back.  Under
+		# --no-commit there is no commit for anything to be swept into, so the
+		# check is skipped.
 		_assert_clean_index($git) unless get_options->{'no-commit'};
 	}
 
@@ -229,12 +229,12 @@ sub create {
 			my $sha = $git->sha('HEAD', short => 1);
 			info "#G{Committed} #C{%s} -- %s", $sha // '<unknown>', $message;
 
-			# Branch creation belongs to genesis pipeline-apply and to
-			# nothing else, so this command writes the environment file on
-			# the branch the operator is standing on and touches no
-			# deployment branch.  The environment reaches its branch when a
-			# propagate run delivers this commit onto it, and the shape of
-			# the pipeline that carries it is the apply's to write (D43).
+			# Branch creation belongs to genesis pipeline-apply and to nothing
+			# else, so this command writes the environment file on the branch
+			# the operator is standing on and touches no deployment branch.
+			# The environment reaches its branch when a propagate run delivers
+			# this commit onto it, and the shape of the pipeline that carries
+			# it is the apply's to write.
 			info(
 				"#C{%s} reaches its deployment branch when the next ".
 				"#C{genesis propagate} run delivers this commit.  The branch ".
@@ -244,9 +244,9 @@ sub create {
 		}
 	}
 
-	# Generate secrets.  Non-fatal — the env file, pipeline metadata, and
-	# git branch are already in place; secrets can be retried later with
-	# `genesis add-secrets` or will be generated at deploy time.
+	# Generate secrets.  This is non-fatal, because the env file, pipeline
+	# metadata, and git branch are already in place, and secrets can be
+	# retried later with `genesis add-secrets` or generated at deploy time.
 	# quiet_if_empty: this runs immediately after create_env, so the
 	# source vault is expected to be empty for a brand-new env.
 	my $secrets_ok = eval {
@@ -286,12 +286,11 @@ sub create {
 
 # _assert_clean_index - refuse a commit that would sweep in staged work {{{
 #
-# D80: a session asserts a clean tree and a clean index, because its abort
-# has to discard only what it wrote.  This command discards nothing, and its
-# one real risk is a commit that carries somebody else's staged change, so
-# the check is on the index alone.  An unstaged edit is left where it is,
-# because it never enters the commit and refusing it would protect nothing
-# (I3).
+# A session asserts a clean tree and a clean index, because its abort has to
+# discard only what it wrote.  This command discards nothing, and its one real
+# risk is a commit that carries somebody else's staged change, so the check is
+# on the index alone.  An unstaged edit is left where it is, because it never
+# enters the commit and refusing it would protect nothing (I3).
 sub _assert_clean_index {
 	my ($git) = @_;
 
@@ -930,11 +929,11 @@ sub manifest {
 
 # _derive_deploy_reason - build a default --reason from the pipeline commit range {{{
 #
-# Reads the last successful deployment's `git.commit` from exodus and
-# compares it to the env branch HEAD.  If equal, this is a redeploy —
-# returns a "Redeploy of <sha>" stub.  If different, walks commits in
-# the `$last_deployed..$branch_head` range on the env branch and
-# delegates to _format_pipeline_reason to produce the audit string.
+# Reads the last successful deployment's `git.commit` from exodus and compares
+# it to the env branch HEAD.  Where the two are equal this is a redeploy, and
+# it returns a "Redeploy of <sha>" stub.  Where they differ it walks commits
+# in the `$last_deployed..$branch_head` range on the env branch and delegates
+# to _format_pipeline_reason to produce the audit string.
 #
 # Returns undef if vault is unreachable (caller falls back to the
 # operator-provided or default reason).
@@ -984,10 +983,10 @@ sub _derive_deploy_reason {
 # _format_pipeline_reason - pure formatter for the derived deploy reason {{{
 #
 # Inputs:
-#   \@log_lines   — output of `git log --format='%H %s'` for the range
-#   $short_sha    — callback: sha => abbreviated-sha (kept for API
-#                   compatibility; may be unused)
-#   $subject_of   — callback: sha => commit subject line
+#   \@log_lines   (output of `git log --format='%H %s'` for the range)
+#   $short_sha    (a callback from sha to abbreviated sha, kept for API
+#                  compatibility, and possibly unused)
+#   $subject_of   (a callback from sha to the commit subject line)
 #
 # Reads the propagation marker off each env-branch log line through the one
 # reader, flips the control commits it finds into oldest-first order, and
@@ -1035,15 +1034,15 @@ sub _format_pipeline_reason {
 # }}}
 # _deploy_branch_action - classify <env>/<type> and act by the class table {{{
 #
-# The one ref move D35's span allows is the fast-forward of a behind branch,
-# which moves L toward T and neither creates nor discards a commit (D5).  An
-# ahead or diverged branch is refused, because the marker-only reset and the
+# The one ref move a deploy is allowed is the fast-forward of a behind branch,
+# which moves L toward T and neither creates nor discards a commit.  An ahead
+# or diverged branch is refused, because the marker-only reset and the
 # hand-commit refusal are the propagate run's and a deploy never discards a
-# commit.  A branch R lacks, or one sharing no ancestor with R's, is refused
-# under D48, because it has no legitimate origin and a deploy from it would
-# certify a commit that is not on R.  A branch with nothing delivered to it is
-# D56's, awaiting pipeline-apply and the propagation that fills what the apply
-# cut.  Genesis deletes nothing on any of them.
+# commit.  A branch R lacks, or one sharing no ancestor with R's, is refused,
+# because it has no legitimate origin and a deploy from it would certify a
+# commit that is not on R.  A branch with nothing delivered to it is waiting
+# on pipeline-apply and the propagation that fills what the apply cut.
+# Genesis deletes nothing on any of them.
 sub _deploy_branch_action {
 	my ($top, $env_name, $git) = @_;
 
@@ -1146,7 +1145,7 @@ sub _deploy_branch_action {
 # repository root, so this is the same handle the branch-class gate used and
 # not a second one.  The session is the gate's, read through
 # Genesis::Commands::branch_session, and it is undef where the gate switched
-# nothing (D80).
+# nothing.
 sub _deploy_preflight {
 	# The options come down whole rather than by the keys read here, because
 	# the steps that follow this one ask about --yes for the prompt they put
@@ -1167,9 +1166,9 @@ sub _deploy_preflight {
 	my $branch = $top->branch_for($name);
 
 	# Which commit this run is about, resolved once for the two steps that
-	# ask.  D87 has --redeploy select the commit the last successful
-	# deployment recorded, and the gate has already stood the working tree on
-	# it, detached, inside the session.  Step 5 asks whether this deploy is
+	# ask.  --redeploy selects the commit the last successful deployment
+	# recorded, and the gate has already stood the working tree on it,
+	# detached, inside the session.  Step 5 asks whether this deploy is
 	# reading the branch at all, and the notice in step 8 tells the operator
 	# which of the two commits the run is about.
 	#
@@ -1187,9 +1186,9 @@ sub _deploy_preflight {
 	# already known false before the resolver is asked.
 	my $target = Genesis::Commands::deployed_target($name, $top);
 
-	# 1.  The one refresh, control included, which D40 freed of
-	# --no-fetch on this command.  The deploy's own reads are worthless
-	# against a stale tracking ref.
+	# 1.  The one refresh, control included, which --no-fetch no longer
+	# withholds on this command.  The deploy's own reads are worthless against
+	# a stale tracking ref.
 	my $refreshed = $top->fetch_pipeline_envs($git,
 		command => "$env_name deploy",
 		action  => 'deploy',
@@ -1206,23 +1205,23 @@ sub _deploy_preflight {
 		on_divergence => 'report');
 	info("  #Gi{%s}", $_) for @{$control_state->{events}};
 
-	# 3.  The session the gate opened asserts the tree clean in begin, and
-	# for a deploy that switches that is the whole of the check.  Three arms
-	# of the gate open no session at all, though, and two of them have
-	# nothing to do with cleanliness: an environment with no deployment
-	# branch, and a branch pipeline-apply cut that carries no repository.  A
-	# deploy from a dirty tree there deploys uncommitted content and records
-	# a commit that does not hold it, which is the audit trail describing
-	# something other than what shipped, so D84's precondition is asserted
-	# here for those two.  It is asserted before the classification refuses
-	# either of them, because a dirty tree is the operator's to settle
-	# whatever the branch turns out to be.
+	# 3.  The session the gate opened asserts the tree clean in begin, and for
+	# a deploy that switches that is the whole of the check.  Three arms of
+	# the gate open no session at all, though, and two of them have nothing to
+	# do with cleanliness: an environment with no deployment branch, and a
+	# branch pipeline-apply cut that carries no repository.  A deploy from a
+	# dirty tree there deploys uncommitted content and records a commit that
+	# does not hold it, which is the audit trail describing something other
+	# than what shipped, so the clean-tree precondition is asserted here for
+	# those two.  It is asserted before the classification refuses either of
+	# them, because a dirty tree is the operator's to settle whatever the
+	# branch turns out to be.
 	#
 	# The third arm is exempt on purpose.  A command already standing on the
-	# branch it would switch to is leaving nothing behind, and D80 lets an
-	# operator deploy an edit in place, which is how a change is tested
-	# before it is committed.  That is the same branch the retired switch
-	# asked about, and it is asked the same way.
+	# branch it would switch to is leaving nothing behind, and an operator may
+	# deploy an edit in place, which is how a change is tested before it is
+	# committed.  That is the same branch the retired switch asked about, and
+	# it is asked the same way.
 	my $session = Genesis::Commands::branch_session();
 	if (!$session && ($git->current_branch // '') ne $branch) {
 		unless ($git->is_clean) {
@@ -1243,8 +1242,8 @@ sub _deploy_preflight {
 
 	# 4.  What the branch is, and the one move its class allows.  The pull is
 	# made where the deploy stands, which the gate has stood on the branch,
-	# and it is the fast-forward D5 named as its precedent rather than the
-	# unconditional pull the deploy used to make of every branch alike.
+	# and it is a fast-forward rather than the unconditional pull the deploy
+	# used to make of every branch alike.
 	my $on_branch = ($git->current_branch // '') eq $branch;
 	my $action    = _deploy_branch_action($top, $name, $git);
 	if ($action->{action} eq 'fast-forward' && $on_branch) {
@@ -1311,9 +1310,9 @@ sub _deploy_preflight {
 		);
 	}
 
-	# 6.  D79: every genesis.pipeline.* key the pre-flight reads comes from
-	# the merged environment hierarchy and never from the leaf file alone, so
-	# a predecessor named on a site file is seen by the check that refuses on
+	# 6.  Every genesis.pipeline.* key the pre-flight reads comes from the
+	# merged environment hierarchy and never from the leaf file alone, so a
+	# predecessor named on a site file is seen by the check that refuses on
 	# it.  bare runs the name and file-existence checks and nothing else, so
 	# lookup resolves through the hierarchy with no kit loaded and nothing
 	# connected, and the read is made here rather than after the environment
@@ -1328,10 +1327,10 @@ sub _deploy_preflight {
 	my $prior_record = _prior_env_record($bare, $prior);
 	_assert_prior_env_deployed($bare, $prior, $prior_record) if $prior;
 
-	# 7.  D73.  The deploy's words for a gate the propagate run also meets,
-	# and the typed acknowledgement is what makes the operator read what they
-	# are doing.  -y means stop asking questions and must never mean accept
-	# an unlocked deploy, so nothing here reads it.
+	# 7.  The deploy's words for a gate the propagate run also meets, and the
+	# typed acknowledgement is what makes the operator read what they are
+	# doing.  -y means stop asking questions and must never mean accept an
+	# unlocked deploy, so nothing here reads it.
 	#
 	# It sits after the predecessor's record and before the warnings, which
 	# makes it the last refusal we raise on our own judgment rather than the
@@ -1348,13 +1347,13 @@ sub _deploy_preflight {
 		acknowledge => 'I accept the risk');
 
 	# 8.  What this run is about, said before anything is said about the
-	# branch, because every warning below it describes the tip and an
-	# operator has to know first that the tip is not what is being deployed.
-	# D87 has --redeploy select the deployed commit, and an operator standing
-	# on a branch whose tip holds something else needs to be told which of
-	# the two this run is about before it starts.  A run that resolved no
-	# target is deploying the tip, as every deploy did before the flag
-	# existed, and says nothing here.
+	# branch, because every warning below it describes the tip and an operator
+	# has to know first that the tip is not what is being deployed.
+	# --redeploy selects the deployed commit, and an operator standing on a
+	# branch whose tip holds something else needs to be told which of the two
+	# this run is about before it starts.  A run that resolved no target is
+	# deploying the tip, as every deploy did before the flag existed, and says
+	# nothing here.
 	if (defined $target) {
 		info(
 			"\nRedeploying #C{%s} at its deployed commit #C{%s}, which is what ".
@@ -1364,14 +1363,14 @@ sub _deploy_preflight {
 	}
 
 	# 9, 10, 11, and 12.  The pre-flight's four warnings, through the one
-	# caller that decides which of them this run skips.  Their order is the
-	# design's: the stale pipeline first, because what is stale decides which
+	# caller that decides which of them this run skips.  They run in a fixed
+	# order, the stale pipeline first, because what is stale decides which
 	# environments and which branches the warnings after it are talking about;
 	# the standing hold second, because it is what an operator acts on before
 	# anything else the pre-flight has to say; what control carries that has
 	# not reached this branch third; and the branch's own drift from its
 	# marker's snapshot last, because a drifted branch is a smaller thing to
-	# know than a pipeline that no longer matches control (D33).  A run that
+	# know than a pipeline that no longer matches control.  A run that
 	# resolved a target skips the two that describe the tip and keeps the two
 	# that do not, and that is decided inside _warn_about_the_tip rather than
 	# at each of the four call sites.
@@ -1430,9 +1429,9 @@ sub _deploy_preflight {
 # }}}
 # redeploy_wanted - is this run a redeploy {{{
 #
-# D87 gives the deployed commit one selection on the deploy, so the question
-# "is this a redeploy" has one answer and wants one reader.  Four spellings of
-# one question are four chances for them to drift apart.
+# The deployed commit is selected once on the deploy, so the question "is this
+# a redeploy" has one answer and wants one reader.  Four spellings of one
+# question are four chances for them to drift apart.
 #
 # A caller with no options hash omits the second argument and the command line
 # is asked, which answers the flag as the operator typed it.  A caller holding
@@ -1457,9 +1456,9 @@ sub redeploy_wanted {
 # }}}
 # _recreate_wanted - true when this run should pass --recreate to BOSH {{{
 #
-# The operator's own --recreate always wins; this only adds the flag where the
-# repository asked for it.  D101 applies the key to the CLI's --redeploy as
-# well as to the pipeline's own redeploy job, since D94 made them one path.
+# The operator's own --recreate always wins, and this only adds the flag where
+# the repository asked for it.  The key applies to the CLI's --redeploy as
+# well as to the pipeline's own redeploy job, because the two are one path.
 sub _recreate_wanted {
 	my ($top, $options) = @_;
 	return 1 if $options->{recreate};
@@ -1473,13 +1472,12 @@ sub _recreate_wanted {
 # }}}
 # _propagate_after_deploy - does this deploy hand off to the child? {{{
 #
-# D36 spawns the child under the manual provider alone, and it asks
-# $top->manual_pipeline rather than reading a key, so an absent provider
-# key is the manual default D15 gives it.  D21 and D87 withhold it from
-# a redeploy, which deploys the deployed commit and certifies nothing,
-# and the question is asked through redeploy_wanted so that the tree
-# carries one reader of it.  D35 makes --no-propagate the one flag that
-# withholds the child and nothing else.
+# The child is spawned under the manual provider alone, and the command asks
+# $top->manual_pipeline rather than reading a key, so an absent provider key
+# reads as the manual default.  A redeploy withholds the child, because it
+# deploys the deployed commit and certifies nothing, and the question is asked
+# through redeploy_wanted so that the tree carries one reader of it.
+# --no-propagate is the one flag that withholds the child and nothing else.
 #
 # The options hash it is handed is the deploy's own, whose redeploy key the
 # deploy wrote from the commit its pre-flight resolved, so the fact read here
@@ -1497,18 +1495,16 @@ sub _propagate_after_deploy {
 # }}}
 # _spawn_propagate_child - run genesis propagate after the deploy {{{
 #
-# D7 makes the propagation a separate process and D36 gives it the one
-# run with no argument and no option.  The deploy's session has already
-# finished when we get here, so there is nothing to check out and the
-# child's own first switch takes the switch lock, and under D46 nothing
-# is passed to it.
+# The propagation is a separate process, and it is given the one run with no
+# argument and no option.  The deploy's session has already finished when we
+# get here, so there is nothing to check out, the child's own first switch
+# takes the switch lock, and nothing is passed to it.
 #
-# Standard input comes from /dev/null rather than being inherited,
-# because the child would otherwise hold this terminal and D83's
-# confirmation is asked wherever one is present, so an interactive
-# deploy would stop on a question about a branch the operator never
-# asked about.  Closing it covers every prompt the run may grow later
-# without each one having to test a flag.
+# Standard input comes from /dev/null rather than being inherited, because the
+# child would otherwise hold this terminal and the publish confirmation is
+# asked wherever one is present, so an interactive deploy would stop on a
+# question about a branch the operator never asked about.  Closing it covers
+# every prompt the run may grow later without each one having to test a flag.
 #
 # The redirect is made by reopening STDIN in place, with the handle it
 # replaces saved aside and put back afterwards, and not by localising
@@ -1557,9 +1553,9 @@ sub _spawn_propagate_child {
 	};
 
 	# The deploy stands whatever the child did, so the warning says both
-	# things, and the retry it names is the bare run of D36, because one
-	# propagate run walks control for every environment and an argument
-	# naming this one would say something the command no longer takes.
+	# things, and the retry it names is the bare run, because one propagate
+	# run walks control for every environment and an argument naming this one
+	# would say something the command no longer takes.
 	#
 	# What it does not say is that nothing downstream moved.  The publish
 	# takes one branch at a time and a run refused on the third of three
@@ -1591,10 +1587,10 @@ sub deploy {
 	# The pre-flight reads run on the environment's own branch, because the
 	# cloud-config download, the manifest viability check, the secret checks,
 	# and the stemcell checks all read the files that branch carries.  The
-	# switch belongs to the branch class (D81, D80) rather than to the
-	# command, so by the time this runs the gate has already opened the
-	# session, asserted a clean tree and index as is_clean means it, taken
-	# the switch lock, and stood the working tree on <env>/<type>.
+	# switch belongs to the branch class rather than to the command, so by the
+	# time this runs the gate has already opened the session, asserted a clean
+	# tree and index as is_clean means it, taken the switch lock, and stood
+	# the working tree on <env>/<type>.
 	#
 	# Top is therefore the one built on that branch and is never rebuilt
 	# from '.' partway through.  A root rebuilt after a checkout is a root
@@ -1603,12 +1599,12 @@ sub deploy {
 	# is not there rather than the problem in front of it (H10).
 	my $top = Genesis::Top->new('.');
 
-	# D64.  A pipeline the configuration has disowned is one that is still
-	# live, still watching its branches, and still deploying, and the
-	# propagate run has always refused it.  A deploy is about to read what
-	# is already there rather than write to it, and an operator mid-teardown
-	# has a reason to be here, so it warns and carries on; inside the
-	# pipeline's own job it refuses, because nobody there reads a warning.
+	# A pipeline the configuration has disowned is one that is still live,
+	# still watching its branches, and still deploying, and the propagate run
+	# has always refused it.  A deploy is about to read what is already there
+	# rather than write to it, and an operator mid-teardown has a reason to be
+	# here, so it warns and carries on; inside the pipeline's own job it
+	# refuses, because nobody there reads a warning.
 	#
 	# It sits ahead of the block below rather than inside it, because the
 	# state it answers for is a repository whose pipeline.enabled reads
@@ -1650,17 +1646,16 @@ sub deploy {
 	$options{redeploy} = ($preflight && defined $preflight->{target}) ? 1 : 0;
 	my $env = $top->load_env($env_name)->with_vault()->with_bosh();
 
-	# Everything a pipeline deploy asks, it asks in the pre-flight above.
-	# The last check to leave here was the warning about deploying by hand
-	# what a pipeline manages, which spoke only where a predecessor was
-	# named, said nothing about the locks it was warning of, and put its
-	# question behind --yes.  The provider gate replaces it under D73: it
-	# refuses rather than warns, it asks for an acknowledgement --yes cannot
-	# answer, and it is asked before the environment is loaded rather than
-	# after.
+	# Everything a pipeline deploy asks, it asks in the pre-flight above.  The
+	# last check to leave here was the warning about deploying by hand what a
+	# pipeline manages, which spoke only where a predecessor was named, said
+	# nothing about the locks it was warning of, and put its question behind
+	# --yes.  The provider gate replaces it.  It refuses rather than warns, it
+	# asks for an acknowledgement --yes cannot answer, and it is asked before
+	# the environment is loaded rather than after.
 	#
-	# --pull is gone with --no-fetch (D40).  It was a second source of truth
-	# beside the refresh: the operator chose whether the branch was brought
+	# --pull is gone with --no-fetch.  It was a second source of truth beside
+	# the refresh, because the operator chose whether the branch was brought
 	# up to date, and a deploy that skipped the pull read a branch nobody had
 	# moved.  The refresh above is now the one way the branch gets current,
 	# and the two private subs this block was the last caller of are gone.
@@ -1981,9 +1976,9 @@ sub deploy {
 				);
 			}
 		} elsif ($env->is_ocfp) {
-			# OCFP env opted out via genesis.manage-cloud-configs: false.
-			# For non-OCFP envs the cloud-config is always externally
-			# managed, so skip the warning entirely — it's not actionable.
+			# OCFP env opted out via genesis.manage-cloud-configs: false.  For
+			# non-OCFP envs the cloud-config is always externally managed, so
+			# skip the warning entirely, since it is not actionable.
 			warning(
 				"Cloud Configs will not be generated for this deployment.  ".
 				"Ensure that the BOSH director has the necessary cloud config in place."
@@ -2124,25 +2119,24 @@ sub deploy {
 	if ($ok) {
 		success "#M{%s}/#c{%s} deployed successfully.\n", $env->name, $env->type;
 
-		# The hand-off, under D35 and D36.  It stands here, at the tail of
-		# the command, because _post_deploy finished the deploy's session
-		# before it returned, which released the switch lock, put the
-		# operator back on the branch they started on, and handed the
-		# working tree back.  A child spawned any earlier would open a
-		# second session inside the first one's scope, in the one working
-		# tree (H19).
+		# The hand-off.  It stands here, at the tail of the command, because
+		# _post_deploy finished the deploy's session before it returned, which
+		# released the switch lock, put the operator back on the branch they
+		# started on, and handed the working tree back.  A child spawned any
+		# earlier would open a second session inside the first one's scope, in
+		# the one working tree (H19).
 		#
 		# Everything above this line wrote W and the exodus record, so any
 		# git write this command ends with is the child's and not the
 		# deploy's.
 		#
-		# D84 makes a finished session the precondition, and a repository
-		# with no pipeline runs no pre-flight while a deploy that already
-		# stood on its own branch opened no session, which is why an absent
-		# one passes rather than fails.  Where the session went out through
-		# abort, the command has already left, so this is a second belt.
-		# It is what stops a later change to the failure path from fanning
-		# out a tree a kit hook has written into.
+		# A finished session is the precondition, and a repository with no
+		# pipeline runs no pre-flight while a deploy that already stood on its
+		# own branch opened no session, which is why an absent one passes
+		# rather than fails.  Where the session went out through abort, the
+		# command has already left, so this is a second belt.  It is what
+		# stops a later change to the failure path from fanning out a tree a
+		# kit hook has written into.
 		my $session = $preflight ? $preflight->{session} : undef;
 		_spawn_propagate_child($env)
 			if (!$session || $session->finished)
@@ -2192,12 +2186,13 @@ sub _prior_env_record {
 	# Each entry is read through the same constructor
 	# Genesis::Env::DeploymentManager::_all reads them through, with
 	# from_storage, because a record may predate the current schema by years
-	# and the two readers must not disagree about what it says.  A record
-	# read raw here and normalised there is a predecessor that has deployed
-	# by one reader's reckoning and never deployed by the other's.  The
-	# environment handed to the constructor is the deploying one rather than
-	# the predecessor, which the constructor only stores; the predecessor is
-	# not loaded as an environment at all, because D79 forbids that read.
+	# and the two readers must not disagree about what it says.  A record read
+	# raw here and normalised there is a predecessor that has deployed by one
+	# reader's reckoning and never deployed by the other's.  The environment
+	# handed to the constructor is the deploying one rather than the
+	# predecessor, which the constructor only stores; the predecessor is not
+	# loaded as an environment at all, because a pipeline key is read through
+	# the merged hierarchy with no kit loaded and nothing connected.
 	require Genesis::Env::Deployment;
 	for my $at (sort {$b cmp $a} keys %$deploys) {
 		my $entry = $deploys->{$at};
@@ -2223,8 +2218,8 @@ sub _prior_env_record {
 # A hard invariant with no --yes override.  It judges the record
 # _prior_env_record already read rather than reading again, and it asks only
 # whether the predecessor has ever deployed; which commit it certified is the
-# due computation's question, and a predecessor that never certified one holds
-# everything below it under D43 rather than failing this check.
+# due computation's question, and a predecessor that never certified one still
+# holds everything below it rather than failing this check.
 sub _assert_prior_env_deployed {
 	my ($env, $prior_name, $record) = @_;
 	return 1 if $record;
@@ -2238,17 +2233,16 @@ sub _assert_prior_env_deployed {
 }
 
 # }}}
-# _warn_stale_pipeline - the first of the pre-flight's warnings, under D43 {{{
+# _warn_stale_pipeline - the first of the pre-flight's warnings {{{
 #
 # The deploy computes no diff of its own.  pipeline_staleness is the one
-# staleness query (D103), and it reads three things: the commit the applied
-# record names, a git path diff from that commit to control over each
-# environment's own defining paths, and each environment's compiled
-# dependency set against the set its last deployment recorded reading, which
-# is D77's fact standing where the compile had only a prediction.  The
-# propagate pre-flight and pipeline-status ask the same sub the same
-# question, and it takes the git handle because a path diff is a git
-# question.
+# staleness query, and it reads three things: the commit the applied record
+# names, a git path diff from that commit to control over each environment's
+# own defining paths, and each environment's compiled dependency set against
+# the set its last deployment recorded reading, which is a fact standing where
+# the compile had only a prediction.  The propagate pre-flight and
+# pipeline-status ask the same sub the same question, and it takes the git
+# handle because a path diff is a git question.
 #
 # What comes back is one entry per changed environment, naming the
 # environment and the reason it changed, and the warning prints the reason
@@ -2274,14 +2268,14 @@ sub _warn_stale_pipeline {
 }
 
 # }}}
-# _warn_commits_due - the second of the pre-flight's warnings, under D35 {{{
+# _warn_commits_due - the second of the pre-flight's warnings {{{
 #
 # The due set is the walk's own computation, run read-only for one
-# environment, so the deploy and the propagate run read the same durable
-# state and cannot disagree about what is due.  A predecessor that has never
-# certified a commit holds everything below it (D43), so the set is empty and
-# we name the ancestor that holds it rather than report that we cannot tell.
-# There is one remedy, and it is genesis propagate (D37).
+# environment, so the deploy and the propagate run read the same durable state
+# and cannot disagree about what is due.  A predecessor that has never
+# certified a commit holds everything below it, so the set is empty and we
+# name the ancestor that holds it rather than report that we cannot tell.
+# There is one remedy, and it is genesis propagate.
 #
 # The holding ancestor is named off the hold's own reason, where the walk put
 # it, rather than off any read of our own, for the reason the stale warning
@@ -2308,8 +2302,8 @@ sub _warn_commits_due {
 
 	my @due = @{$record->{pending} || []};
 
-	# The uncertified ancestor of D43, which holds everything below it.  It is
-	# read with the pending list rather than ahead of it, because the sentence
+	# The uncertified ancestor, which holds everything below it.  It is read
+	# with the pending list rather than ahead of it, because the sentence
 	# below says that nothing is due and only an empty list makes that true.
 	# Nothing routed can stand beside such a hold today, hold_for returning on
 	# the uncertified ancestor at lib/Genesis/CI/Walk.pm:459 before it reads
@@ -2352,10 +2346,10 @@ sub _warn_commits_due {
 # }}}
 # _warn_hold - say what propagation hold stands on this environment {{{
 #
-# D50 and D57: the deploy reads the hold record itself, with no GitHub client,
-# and says what it found.  It is its own sub beside _warn_commits_due rather
-# than a clause inside it, because the two warn about unrelated things and a
-# warning that says two things at once is a warning nobody finishes reading.
+# The deploy reads the hold record itself, with no GitHub client, and says
+# what it found.  It is its own sub beside _warn_commits_due rather than a
+# clause inside it, because the two warn about unrelated things and a warning
+# that says two things at once is a warning nobody finishes reading.
 #
 # It has to read the record for itself rather than take the hold off the
 # walk's own record, because a hold moves everything due behind it into the
@@ -2381,9 +2375,10 @@ sub _warn_hold {
 	# just wrote something.
 	#
 	# The reason is defended the way hold_detail defends the record's other
-	# three fields, and for the reason it gives: a record written before D53
-	# fixed the four can be missing any of them, and an undefined argument
-	# ends this warning inside csprintf rather than printing what it found.
+	# three fields, and for the reason it gives.  A record written before the
+	# four fields were fixed can be missing any of them, and an undefined
+	# argument ends this warning inside csprintf rather than printing what it
+	# found.
 	warning(
 		"\nA propagation hold stands on #C{%s}: %s\n%s",
 		$env->name, $hold->{reason} // 'an unrecorded reason',
@@ -2416,15 +2411,14 @@ sub _confirm_commits_due {
 }
 
 # }}}
-# _warn_drifted - the third of the pre-flight's warnings, under D33 {{{
+# _warn_drifted - the third of the pre-flight's warnings {{{
 #
 # The branch should be a verified mirror of the control commit its newest
 # marker names, over the propagation set and nothing else.  Where it is not,
 # somebody pushed a hand commit, which is the emergency hatch: legal,
 # temporary by construction, and never silent.  We name the files and deploy,
-# because refusing would leave the operator with nothing to do in the case
-# the hatch exists for, and the record tells the two commits apart afterwards
-# (D87).
+# because refusing would leave the operator with nothing to do in the case the
+# hatch exists for, and the record tells the two commits apart afterwards.
 #
 # A branch carrying no marker anywhere has been delivered nothing, and there
 # is no snapshot to compare it against, so this says nothing rather than
@@ -2466,11 +2460,11 @@ sub _warn_drifted {
 # }}}
 # _warn_about_the_tip - the deploy's four warnings, and what they found {{{
 #
-# D87: a run that resolved a deployed commit is not trying to ship the tip, so
-# what is due to the branch and how the branch differs from its marker's
-# snapshot are both beside the point, and telling an operator about work this
-# run cannot deliver is noise.  The stale pipeline is not about the tip at
-# all, so it is warned about on every deploy, redeploy included: a repository
+# A run that resolved a deployed commit is not trying to ship the tip, so what
+# is due to the branch and how the branch differs from its marker's snapshot
+# are both beside the point, and telling an operator about work this run
+# cannot deliver is noise.  The stale pipeline is not about the tip at all, so
+# it is warned about on every deploy, redeploy included, because a repository
 # and a running pipeline that disagree about which environments exist disagree
 # whichever commit is being deployed.  The standing hold is kept for the same
 # reason, being a decision against the environment rather than a fact about
@@ -2539,9 +2533,9 @@ sub _warn_about_the_tip {
 
 # }}}
 # The two subs that resolved a source commit and copied the predecessor's
-# state onto the branch are gone.  D35 withdraws the step outright rather
-# than renaming it, so what the predecessor certified reaches this branch
-# through the propagate run, in control order, under D34.
+# state onto the branch are gone.  The step was withdrawn outright rather than
+# renamed, so what the predecessor certified reaches this branch through the
+# propagate run, in control order.
 sub terminate {
 	my ($env, $reason, @extras) = @_;
 	command_usage(1) if @extras || !defined($env);
