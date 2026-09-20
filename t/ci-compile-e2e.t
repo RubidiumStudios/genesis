@@ -2,8 +2,14 @@
 use strict;
 use warnings;
 
-# Minimal test harness to drive the CI compiler pipeline against
-# a real .genesis/ci/ directory and see what comes out.
+# The six stages of the CI compiler over one real multi-file directory,
+# from can_compile through the parse, the validation, the AST, and the
+# descriptor, to the Concourse pipeline the emitter writes.  Each stage
+# asserts what it produced, and the warnings the fixture raises are
+# asserted too, so a green run prints nothing.
+#
+# The fixture under t/repos/compile-test/ is the legacy multi-file form,
+# which is the one surface this file covers and no other file does.
 
 BEGIN {
 	$ENV{GENESIS_LIB} ||= 'lib';
