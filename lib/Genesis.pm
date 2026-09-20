@@ -761,7 +761,12 @@ sub run {
 my $duration = gettimeofday() - $start_time;
 qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',undef,1));
 
-	my $err = slurp($err_file) if ($err_file && -f $err_file);
+	# Declared and then filled, rather than declared under the modifier.
+	# Perl leaves such a variable holding whatever the last call left in it
+	# on the false branch, so a call that captured no standard error would
+	# answer with the text the call before it captured.
+	my $err;
+	$err = slurp($err_file) if ($err_file && -f $err_file);
 	my $rc = $? >>8;
 	if (defined($out)) {
 		if ($out =~ m/[\x00-\x08\x0b-\x0c\x0e\x1f\x7f-\xff]/) {
