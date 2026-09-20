@@ -40,8 +40,15 @@ sub install_run_stub {
 	no warnings qw(redefine once);
 	*Service::Git::run = sub {
 		push @run_calls, [@_];
-		my $r = shift @run_results;
-		$r //= ['', 0, ''];   # default to success on under-queue
+		# A row queues one result per read the sub performs, in the order
+		# it performs them.  Answering an empty success where a row ran
+		# short would let a drift between the queue and the reads come
+		# back green, so the shortfall is named where it happens.
+		my $r = shift @run_results or die sprintf(
+			"the run stub has no result queued for read %d: %s\n",
+			scalar(@run_calls),
+			join(' ', grep {!ref} @_)
+		);
 		return @$r;
 	};
 }
