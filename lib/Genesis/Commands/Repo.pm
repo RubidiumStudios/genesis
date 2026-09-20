@@ -483,7 +483,7 @@ sub _repo_init_execute {
 			info "  %s", $_ for split /\n/, $stat;
 			info "";
 		} else {
-			info "\nNo changes to commit — repository contents are unchanged.";
+			info "\nNo changes to commit, because the repository contents are unchanged.";
 			$kit_desc = "unchanged (already up to date)";
 		}
 

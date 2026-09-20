@@ -1454,7 +1454,7 @@ sub _verify_deployed {
 		# Pre-pipeline deployment (no git context in exodus) — warn only
 		warning(
 			"Environment #C{%s} was deployed before pipeline tracking was enabled.\n".
-			"Cannot verify deployment state — ensure it has been deployed.",
+			"Cannot verify deployment state.  Ensure it has been deployed.",
 			$env_name
 		);
 	}
@@ -1554,7 +1554,8 @@ sub diff {
 
 	my ($live, $rc) = run("fly${k_flag} -t \$1 get-pipeline -p \$2", $target, $name);
 	if ($rc != 0) {
-		info("#Y{Pipeline '%s' does not exist on target '%s' — nothing to diff against.}",
+		info("#Y{Pipeline '%s' does not exist on target '%s', so there is ".
+			"nothing to diff against.}",
 			$name, $target);
 		info("Run #C{genesis pipeline-apply} to deploy it first.");
 		exit 0;
@@ -1567,7 +1568,8 @@ sub diff {
 	);
 
 	if ($diff_rc == 0) {
-		info("#G{No differences} — compiled pipeline matches live pipeline.");
+		info("#G{No differences}.  The compiled pipeline matches the live ".
+			"pipeline.");
 	} else {
 		output({raw => 1}, $diff_out);
 	}

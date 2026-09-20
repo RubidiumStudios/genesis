@@ -130,10 +130,10 @@ sub cli_opts_help {
   legacy ci.yml):
 
     Notification styles (integrations.slack.style):
-        per-env  — pending-changes notify job gates each deployment (default)
-        grouped  — notify jobs exist but do not block deployments
-        minimal  — no notify jobs; Slack alerts on failure only
-        none     — no Slack resource or notifications at all
+        per-env,  pending-changes notify job gates each deployment (default)
+        grouped,  notify jobs exist but do not block deployments
+        minimal,  no notify jobs; Slack alerts on failure only
+        none,     no Slack resource or notifications at all
 
     BOSH upgrade locks (genesis.pipeline.locks.bosh_upgrade):
         Automatically wired when a pipeline manages a BOSH director alongside
@@ -356,7 +356,8 @@ sub deploy {
 		// $self->provider_option('pipeline_name')
 		// $self->{config}{pipeline}{name}
 		// ($self->{top} ? $self->{top}->type : undef);
-	bail("Cannot determine pipeline name — set pipeline.name or ensure deployment_type is set")
+	bail("Cannot determine pipeline name.  Set pipeline.name, or ensure ".
+		"deployment_type is set")
 		unless $pipeline_name;
 
 	# Pause/expose/dry-run/insecure: call-site override > provider_opts > defaults
@@ -545,7 +546,7 @@ sub graph_md {
 	# Legacy fallback: no Mermaid support; return minimal document
 	if ($self->{_platform} && $self->{_platform} eq 'legacy') {
 		my $name = ($self->{config}{pipeline} || {})->{name} || 'pipeline';
-		return "# Pipeline: $name\n\n*(Legacy provider — graph not available)*\n";
+		return "# Pipeline: $name\n\n*(Legacy provider, graph not available)*\n";
 	}
 
 	# Native Mermaid from AST
