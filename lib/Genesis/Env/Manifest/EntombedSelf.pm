@@ -6,7 +6,7 @@ package Genesis::Env::Manifest::EntombedSelf;
 # Use case: post-deploy operations that upload env-file data (e.g.
 # bosh-configs.director-cpi.cpis) to the newly-deployed BOSH director.
 # Those uploads must carry credhub-var references that the new
-# director's own Credhub can resolve — not the parent's, where the
+# director's own Credhub can resolve, and not the parent's, where the
 # standard Manifest::Entombed pass landed the values.
 #
 # Inherits every behavior from Manifest::Entombed and only overrides
