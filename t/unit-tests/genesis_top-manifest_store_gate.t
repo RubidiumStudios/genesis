@@ -118,6 +118,31 @@ subtest 'the schema supplies the store where nobody named one' => sub {
 	lives_ok {load_store(undef)} 'and the gate is satisfied by it';
 };
 
+subtest 'an environment that declares no floor is refused' => sub {
+	plan tests => 3;
+
+	# An environment declaring no minimum version resolves to 0.0.0, which
+	# is below 3.1.0, so the run time serves it out of the repository store
+	# and the deploy commits manifests onto the deployment branch that the
+	# propagation writer also advances.  That is the two-writer case the
+	# gate exists to refuse, and a declaration it cannot read is not a
+	# reason to pass it.  A newly written environment file omits the
+	# minimum version whenever Genesis is a development build, so this is
+	# reached rather than theoretical.
+	my $path = write_env_file($h, 'floorless', genesis => {}, commit => 0);
+
+	throws_ok {load_store('exodus', minimum_version => undef)}
+		qr/environment floorless/i,
+		'the environment is refused by name';
+	throws_ok {load_store('exodus', minimum_version => undef)}
+		qr/declares\s+no\s+minimum\s+Genesis\s+version/i,
+		'and the refusal says it declared none';
+	lives_ok {load_store('exodus', minimum_version => '3.1.0')}
+		'while a repository floor of 3.1.0 lifts it as it lifts any other';
+
+	unlink $h->a . "/$path";
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

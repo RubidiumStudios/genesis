@@ -3276,7 +3276,7 @@ B<Examples:>
 
 Refuses, at C<Genesis::Exit::CONFIG>, a C<manifest_store> that is not
 C<exodus>, and any environment whose effective Genesis floor is below
-3.1.0. It does not read C<pipeline.enabled> itself, because
+3.1.0 or is not declared at all. It does not read C<pipeline.enabled> itself, because
 L</_validate_pipeline_config> is its only caller and has already returned
 where the section is off, so everything below is said of a repository
 whose pipeline is known to be on.
@@ -3310,6 +3310,14 @@ environment is read merged through L</_merged_env_params> and refused by
 name, with the remedy of raising the kit's floor rather than changing the
 store's value.
 
+An environment where neither line is written declares nothing, and that
+resolves to C<0.0.0> rather than to no opinion, so the run time serves it
+out of the repository store exactly as it serves a declared 3.0.0. It is
+therefore refused too, in its own words, because the remedy there is to
+write a floor down rather than to raise one. A newly written environment
+file omits the minimum version whenever Genesis is a development build,
+so this is a case an operator meets rather than a theoretical one.
+
 B<Returns:> 1.
 
 B<Errors:>
@@ -3321,6 +3329,13 @@ B<Errors:>
 C<"manifest_store: ... cannot be used under a pipeline"> - raised when the
 repository's pipeline is enabled and its store is C<repository> or
 C<hybrid>, naming the value that was configured.
+
+=item *
+
+C<"The environment ... declares no minimum Genesis version"> - raised when
+neither the environment's merged C<genesis.min_version>, nor its
+C<genesis.minimum_version>, nor the repository's C<minimum_version> is
+written, naming the environment and both keys that would settle it.
 
 =item *
 
