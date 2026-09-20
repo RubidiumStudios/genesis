@@ -13,7 +13,6 @@ use Genesis::Env;
 use Genesis::CI::Legacy qw//;
 use Genesis::CI::Compiler;
 use Genesis::CI::ProviderCompiler;
-use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
 use Genesis::CI::ProviderRegistry;
 use Genesis::CI::Publish;
@@ -1373,46 +1372,6 @@ sub _push_failure {
 	);
 }
 
-# }}}
-# _resolve_propagation_base - the control commit the branch's marker names {{{
-#
-# The marker walk lives in Genesis::CI::Marker, so this asks it rather than
-# scanning subjects with a regex of its own.  The old scan was anchored
-# against a format its caller never passed and it read subject lines alone,
-# so a squash merge that pushed the marker down into the body answered
-# nothing at all.  The walk reads bodies too, and it skips the commits above
-# the marker rather than following them, which is what the warning below
-# counts.
-#
-# The merge-base fallback stays for a branch that has never been delivered
-# to, which is what the callers below still diff against until the walk
-# gives them the seed.  The control branch is passed in rather than
-# assumed, because the name is configured per repository and every caller
-# has already read it.
-#
-# Returns: ($control_commit, $manual_commits_on_top).  The first value is
-# the commit the marker names, spelled as fully as this repository can spell
-# it, so a marker naming a commit the clone has never fetched comes back at
-# the width the marker wrote it.
-sub _resolve_propagation_base {
-	my ($branch, $git, $control) = @_;
-	$git ||= Service::Git->new('.');
-
-	my ($marker, $depth) = Genesis::CI::Marker::newest($git, $branch);
-	if (defined $marker) {
-		warning(
-			"Branch #C{%s} has %d manual commit%s on top of the last propagation.",
-			$branch, $depth, $depth == 1 ? '' : 's'
-		) if $depth > 0;
-		return ($marker, $depth);
-	}
-
-	# No propagation commit — use merge-base with control
-	my $merge_base = $git->merge_base($control, $branch);
-	return ($merge_base, 0) if $merge_base;
-
-	return (undef, 0);
-}
 # }}}
 # _verify_deployed - check that an env's propagated state was deployed {{{
 #

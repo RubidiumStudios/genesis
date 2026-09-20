@@ -1675,68 +1675,6 @@ B<Examples:>
   #         Set pipeline.enabled: true on control, commit it, then run
   #         genesis pipeline-apply again.  Nothing was written.
 
-=head2 _resolve_propagation_base
-
-  my ($sha, $depth) = _resolve_propagation_base($branch, $git, $control);
-
-Finds the control-branch commit an environment branch was last brought
-up to, so propagation knows what to diff against.
-
-It reads the branch's own log first, looking for the most recent
-C<[pipeline] control@E<lt>shaE<gt>> marker, and warns when that marker is
-not the tip, since commits on top of it were made by hand. A branch
-carrying no marker was spawned from control and never propagated to, so
-the merge base with the control branch is used instead.
-
-B<The control branch is passed in rather than assumed.> Its name is
-configured per repository at C<pipeline.source_control.control_branch>,
-every caller has already read it through
-L<Genesis::Top/control_branch>, and taking a merge base against the
-wrong branch would silently change what the diff is computed from.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$branch>
-
-The environment branch to resolve a base for.
-
-=item C<$git>
-
-The C<Service::Git> handle to read through. Optional, and it defaults to
-one opened on the current directory.
-
-=item C<$control>
-
-The repository's control branch, as its configuration names it.
-Mandatory, and it has no default, because there is no name this sub
-could fall back to that would be right for every repository.
-
-=back
-
-B<Returns:> Two values. The first is the control commit the branch was
-last brought up to, spelled as fully as this repository can spell it. A
-marker naming a commit this clone has never fetched comes back at the
-width the marker wrote it, because a sha the repository cannot reach is
-a sha it cannot expand. The second is a count only on the marker path,
-where it is the number of commits standing on top of the newest marker,
-and it is a literal zero on the merge-base path, where nothing is
-counted. A branch that shares no history with control comes back as
-C<undef> and zero.
-
-B<Errors:> None, in that no input makes it die, and an unresolvable base
-comes back as C<undef>. It does warn: where the newest marker is not the
-tip, it says how many commits were made by hand on top of the last
-propagation, because those commits are about to be diffed against
-control.
-
-B<Examples:>
-
-  my ($sha, $depth) = _resolve_propagation_base('qa', $git, 'trunk');
-  # returns the sha from qa's newest [pipeline] marker, and 0
-  # returns the merge base with trunk, and 0, when qa has no marker
-
 =head2 _root_environments($top)
 
 The deployment root's environments in DAG order, off
