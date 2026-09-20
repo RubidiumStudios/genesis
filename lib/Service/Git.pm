@@ -264,10 +264,10 @@ sub prefix { $_[0]->{prefix} }
 # }}}
 # git_dir - the absolute git directory of this working tree {{{
 #
-# Not the same as the working tree root, and deliberately so: in a linked
+# Not the same as the working tree root, and deliberately so.  In a linked
 # working tree this resolves under .git/worktrees/<name>/, so a lock written
 # here is per working tree and two working trees of one repository never
-# contend, which is the scope D46 gives the switch lock.
+# contend, which is the scope the switch lock is meant to have.
 sub git_dir {
 	my ($self) = @_;
 	return $self->{_git_dir} if $self->{_git_dir};
@@ -362,9 +362,9 @@ sub checkout {
 # reset_hard - put the checked-out branch's tree, index, and tip at a ref {{{
 #
 # The pull request branch is derived state, rebuilt from the deployment branch
-# on every run under D51, so the arm needs one call that moves all three at
-# once.  It runs from the repository root, because the ref being reset to may
-# not carry the directory we are standing in.
+# on every run, so the arm needs one call that moves all three at once.  It
+# runs from the repository root, because the ref being reset to may not carry
+# the directory we are standing in.
 sub reset_hard {
 	my ($self, $ref) = @_;
 	run({dir => $self->{root}, onfailure => "Failed to reset to '$ref'"},
@@ -452,11 +452,11 @@ sub set_branch_ref {
 # }}}
 # create_orphan_branch - write a root commit with plumbing and no checkout {{{
 #
-# D42 makes a missing deployment branch an orphan whose root commit adds a
-# single init file, and D80 has pipeline-apply create it with plumbing and
-# no checkout, so the command needs no session and the operator's working
-# tree never moves.  The objects go into the database through a private
-# index, so the repository's own index is untouched too.
+# A missing deployment branch is created as an orphan whose root commit adds a
+# single init file, and pipeline-apply creates it with plumbing and no
+# checkout, so the command needs no session and the operator's working tree
+# never moves.  The objects go into the database through a private index, so
+# the repository's own index is untouched too.
 sub create_orphan_branch {
 	my ($self, $branch, %opts) = @_;
 
@@ -543,7 +543,7 @@ sub sha {
 # rev_parse - resolve a ref via git rev-parse (low-level) {{{
 #
 # Options:
-#   short => 1   — return abbreviated SHA
+#   short => 1   (return the abbreviated SHA)
 sub rev_parse {
 	my ($self, $ref, %opts) = @_;
 	my @cmd = ('git', 'rev-parse');
@@ -629,7 +629,7 @@ sub commit_exists {
 # }}}
 # is_clean - true if working tree has no modified/staged/conflicted files {{{
 #
-# Ignores untracked files — they don't affect branch switching.
+# Ignores untracked files, which do not affect branch switching.
 sub is_clean {
 	my ($self) = @_;
 	my ($status) = run({ dir => $self->{root} }, 'git', 'status', '--porcelain');
@@ -640,12 +640,12 @@ sub is_clean {
 # }}}
 # preflight - classify the three failures a switch or a commit hides {{{
 #
-# D80 keeps this in the session's begin and shares it with genesis new, the
-# one writer that never switches, so H20 closes for both without either
-# growing its own copy.  One cheap git command asks the question, and its
-# stderr is what tells the three apart: git itself names dubious ownership,
-# reports an empty HEAD, and complains about an unknown committer, and each
-# of those becomes a message naming the fix rather than a failed checkout.
+# This lives in the session's begin and is shared with genesis new, the one
+# writer that never switches, so H20 closes for both without either growing
+# its own copy.  One cheap git command asks the question, and its stderr is
+# what tells the three apart: git itself names dubious ownership, reports an
+# empty HEAD, and complains about an unknown committer, and each of those
+# becomes a message naming the fix rather than a failed checkout.
 sub preflight {
 	my ($self) = @_;
 
@@ -698,7 +698,7 @@ sub status {
 	my %unclean;
 	for my $line (split /\n/, ($out // '')) {
 		next unless length $line;
-		# Format: "XY path" — two-char status, single space, path.
+		# Format: "XY path", a two-char status, a single space, and the path.
 		my $code = substr($line, 0, 2);
 		my $path = substr($line, 3);
 		$unclean{$path} = $code if length $path;
@@ -815,7 +815,7 @@ sub diff_names {
 # }}}
 # commit_stat - the diff --stat lines for one commit, scoped to a pathspec {{{
 #
-# Each entry of D49's aggregate body carries the files one control commit
+# Each entry of the aggregate body carries the files one control commit
 # changed within this environment's propagation set, in the shape git prints,
 # so a reviewer reads the same summary they would read on control.
 #
@@ -966,10 +966,10 @@ sub ls_tree {
 # ls_files - list what the index holds, optionally scoped by pathspec {{{
 #
 # The index and not the working tree, which is the difference that matters to
-# every caller here: the mirror asks what the branch holds before it writes,
-# and D82's second assertion asks what the index holds after it has written,
-# and a reader that walked the working tree would answer both questions with
-# the operator's untracked files thrown in.
+# every caller here.  The mirror asks what the branch holds before it writes,
+# the second of the writer's assertions asks what the index holds after it has
+# written, and a reader that walked the working tree would answer both
+# questions with the operator's untracked files thrown in.
 #
 # The paths come back git-root-relative whatever directory the caller is
 # standing in, because --full-name fixes them to the root, and the run is made
@@ -999,7 +999,7 @@ sub ls_files {
 # }}}
 # diff_cached_quiet - does the index match a ref's tree over these paths {{{
 #
-# D82's first assertion, spelled the way the design spells it.  True when the
+# The writer's first assertion asks this, and the answer is true when the
 # index and the ref agree, which is git's own quiet exit status, where nought
 # means they agree and one means they differ.
 #
@@ -1045,16 +1045,17 @@ sub diff_cached_names {
 # log_subjects - return commit lines, or whole messages, for a branch {{{
 #
 # Options:
-#   limit  => N       — max number of entries
-#   format => '...'   — custom format (default: %H %s, or %H\x1f%B with body)
-#   paths  => [...]   — git-root-relative pathspec
-#   body   => 1       — return whole commit messages rather than lines
+#   limit  => N       (the maximum number of entries)
+#   format => '...'   (a custom format, %H %s by default, or %H\x1f%B
+#                      with body)
+#   paths  => [...]   (a git-root-relative pathspec)
+#   body   => 1       (return whole commit messages rather than lines)
 #
 # The body walk exists because a squash merge keeps the pull request's title
 # as its subject and pushes the aggregate's message down into the body, so a
 # marker that is plainly on the commit is invisible to a walk over subject
-# lines.  D49 has the marker walk read subjects and bodies alike, and this is
-# the primitive it reads them with.  Records are separated by an ASCII record
+# lines.  The marker walk reads subjects and bodies alike, and this is the
+# primitive it reads them with.  Records are separated by an ASCII record
 # separator and their two fields by a unit separator, so a commit message may
 # carry any text at all without confusing the split.
 sub log_subjects {
@@ -1290,9 +1291,9 @@ sub remote_branch_exists {
 # no-local after one.  The counts are taken against refs/heads, and a local
 # half that disagreed with them would turn this query into a bail.
 #
-# The query never fetches.  Under D40 the refresh is its own step, so a
-# caller refreshes first and passes unverifiable => 1 when it did not,
-# which is what `genesis pipeline-status --no-refresh` does.
+# The query never fetches.  The refresh is its own step, so a caller refreshes
+# first and passes unverifiable => 1 when it did not, which is what `genesis
+# pipeline-status --no-refresh` does.
 sub resolve_branch {
 	my ($self, $branch, %opts) = @_;
 	my $remote       = exists $opts{remote} ? $opts{remote} : $self->default_remote;
@@ -1493,12 +1494,12 @@ sub fetch_branches {
 			: $self
 			if $frc;
 
-		# What the result reports is read back off the refs rather than
-		# taken from the probe.  The probe says what the remote had a round
-		# trip ago, and only a ref says what arrived, so a branch the remote
-		# lost in between is reported by what is here rather than by what
-		# was there.  D9 asks a refresh to re-read for exactly this reason,
-		# since `git fetch --porcelain` arrived above the git floor.
+		# What the result reports is read back off the refs rather than taken
+		# from the probe.  The probe says what the remote had a round trip
+		# ago, and only a ref says what arrived, so a branch the remote lost
+		# in between is reported by what is here rather than by what was
+		# there.  A refresh re-reads for exactly this reason, since `git fetch
+		# --porcelain` arrived above the git floor.
 		my $after_local = $self->_ref_names('refs/heads/', \%opts);
 		my $after_track = $self->_ref_names("refs/remotes/$remote/", \%opts);
 		@created = grep {!$is_local{$_} && $after_local->{$_}} @present;
@@ -1546,14 +1547,14 @@ sub _classify_remote_error {
 #       { branch => 'pr/qa/bosh', kind => 'pr' },
 #   ]);
 #
-# The remote is required and named, under D83.  Deciding it by asking whether
-# a local branch of that name exists is H4, because a repository carrying a
-# branch called origin published that branch along with the rest, and a
-# mistyped remote that collided with a branch name went to the default remote
-# instead of the one the caller meant.
+# The remote is required and named.  Deciding it by asking whether a local
+# branch of that name exists is H4, because a repository carrying a branch
+# called origin published that branch along with the rest, and a mistyped
+# remote that collided with a branch name went to the default remote instead
+# of the one the caller meant.
 #
 # Each ref is pushed on its own, so no ref's rejection withholds another's
-# push, which is the third stage of D96.
+# push.
 #
 # Returns an arrayref of per-ref results, in the order the specs were given.
 # A result carries the reason git gave for a ref it turned down, because a
@@ -1599,14 +1600,14 @@ sub _push_one {
 	bug("#R{Service::Git->push} was handed a ref spec with no branch name")
 		unless defined $branch && length $branch;
 
-	# D31 lets a pull request branch be rewritten, because it is derived and
-	# private until it merges, and forbids the rewrite on control and on
-	# every deployment branch, whose history is append-only.  The refusal
-	# sits beside the refspec it would otherwise build, because this is the
-	# one place every caller passes through, so Genesis never leaves the
-	# guarantee to the repository's own branch protection.  The refusal
-	# itself is _refuse_rewrite, which push_append_only raises as well, so
-	# an operator who meets this rule on two commands meets one sentence.
+	# A pull request branch may be rewritten, because it is derived and
+	# private until it merges, and the rewrite is forbidden on control and on
+	# every deployment branch, whose history is append-only.  The refusal sits
+	# beside the refspec it would otherwise build, because this is the one
+	# place every caller passes through, so Genesis never leaves the guarantee
+	# to the repository's own branch protection.  The refusal itself is
+	# _refuse_rewrite, which push_append_only raises as well, so an operator
+	# who meets this rule on two commands meets one sentence.
 	_refuse_rewrite($branch, $remote)
 		if exists $spec->{expect} && $kind ne 'pr';
 
@@ -1632,9 +1633,9 @@ sub _push_one {
 # }}}
 # _read_push_result - read one ref's fate out of git push --porcelain {{{
 #
-# D83 has the run name the moved ref from git's own output rather than from a
-# message it composed, so the flag and the ref pair are read here and nowhere
-# else.  The flags are git's own: a space is a fast-forward, a plus is a forced
+# The run names the moved ref from git's own output rather than from a message
+# it composed, so the flag and the ref pair are read here and nowhere else.
+# The flags are git's own: a space is a fast-forward, a plus is a forced
 # update, a minus is a deletion, a star is a new ref, an equals sign is a ref
 # already up to date, and an exclamation mark is a refusal.
 #
@@ -1690,11 +1691,11 @@ sub _read_push_result {
 # }}}
 # _refuse_rewrite - the one refusal both append-only paths raise {{{
 #
-# D31 makes control and every deployment branch append-only on R, and two
-# commands enforce that.  pipeline-apply checks the ancestry before it pushes,
-# and the publish refuses a lease before it builds a refspec.  The sentence
-# lives here so the two cannot come to word the same rule differently, since
-# an operator can meet it on either command.
+# Control and every deployment branch are append-only on R, and two commands
+# enforce that.  pipeline-apply checks the ancestry before it pushes, and the
+# publish refuses a lease before it builds a refspec.  The sentence lives here
+# so the two cannot come to word the same rule differently, since an operator
+# can meet it on either command.
 sub _refuse_rewrite {
 	my ($branch, $remote) = @_;
 	bail(
@@ -1709,12 +1710,12 @@ sub _refuse_rewrite {
 # }}}
 # push_append_only - publish a branch without ever rewriting its history {{{
 #
-# D31 makes control and every deployment branch append-only on R, so the
-# previous tip is always an ancestor of the new tip and Genesis never
-# force-pushes either class.  The push carries no force option of any kind,
-# and the ancestry is checked against the remote's own tip first, so a
-# refusal names the branch and says what the remedy is rather than leaving
-# a rejected push to be read out of git's stderr.
+# Control and every deployment branch are append-only on R, so the previous
+# tip is always an ancestor of the new tip and Genesis never force-pushes
+# either class.  The push carries no force option of any kind, and the
+# ancestry is checked against the remote's own tip first, so a refusal names
+# the branch and says what the remedy is rather than leaving a rejected push
+# to be read out of git's stderr.
 #
 # The remote is asked for the fully qualified ref rather than for the bare
 # branch name, because ls-remote matches the tail of a ref and a bare name
