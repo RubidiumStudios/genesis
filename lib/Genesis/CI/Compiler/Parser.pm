@@ -3,6 +3,7 @@ use strict;
 use warnings;
 
 use Genesis;
+use Genesis::Exit qw/CONFIG/;
 use Genesis::Top ();
 use Genesis::CI::Layout;
 use JSON::PP;
@@ -47,11 +48,14 @@ sub parse {
 	} elsif ($self->{file} && -f $self->{file}) {
 		return $self->_parse_legacy_file($self->{file});
 	} elsif ($self->{ci_dir}) {
-		bail("CI configuration directory '%s' not found", $self->{ci_dir});
+		bail({exitcode => CONFIG},
+			"CI configuration directory '%s' not found", $self->{ci_dir});
 	} elsif ($self->{file}) {
-		bail("CI configuration file '%s' not found", $self->{file});
+		bail({exitcode => CONFIG},
+			"CI configuration file '%s' not found", $self->{file});
 	} else {
-		bail("No CI configuration found: no configuration directory, no ".
+		bail({exitcode => CONFIG},
+			"No CI configuration found: no configuration directory, no ".
 			"pipeline: section in .genesis/config, and no ci.yml file");
 	}
 }
@@ -80,12 +84,14 @@ sub _parse_multi_file {
 
 	# Load targets.yml (required)
 	my $targets_file = "$ci_dir/targets.yml";
-	bail("Missing required '%s'", $targets_file) unless -f $targets_file;
+	bail({exitcode => CONFIG}, "Missing required '%s'", $targets_file)
+		unless -f $targets_file;
 	$parsed{targets} = $self->_load_yaml_file($targets_file);
 
 	# Load integrations.yml (required)
 	my $integrations_file = "$ci_dir/integrations.yml";
-	bail("Missing required '%s'", $integrations_file) unless -f $integrations_file;
+	bail({exitcode => CONFIG}, "Missing required '%s'", $integrations_file)
+		unless -f $integrations_file;
 	$parsed{integrations} = $self->_load_yaml_file($integrations_file);
 
 	# Load scripts/manifest.yml (optional)
@@ -200,9 +206,10 @@ sub _parse_legacy_file {
 
 	my $raw = $self->_load_yaml_file($file);
 
-	bail("Missing top-level 'pipeline:' key in %s", $file)
+	bail({exitcode => CONFIG}, "Missing top-level 'pipeline:' key in %s", $file)
 		unless exists $raw->{pipeline};
-	bail("Top-level 'pipeline:' key must be a map in %s", $file)
+	bail({exitcode => CONFIG},
+		"Top-level 'pipeline:' key must be a map in %s", $file)
 		unless ref($raw->{pipeline}) eq 'HASH';
 
 	my $p = $raw->{pipeline};
@@ -425,13 +432,15 @@ sub _normalize_legacy_layouts {
 	# Normalize layout/layouts into a consistent structure
 	my %layouts;
 	if (exists $p->{layout} && exists $p->{layouts}) {
-		bail("Both 'pipeline.layout' and 'pipeline.layouts' specified; pick one");
+		bail({exitcode => CONFIG},
+			"Both 'pipeline.layout' and 'pipeline.layouts' specified; pick one");
 	} elsif (exists $p->{layout}) {
 		$layouts{default} = $p->{layout};
 	} elsif (exists $p->{layouts} && ref($p->{layouts}) eq 'HASH') {
 		%layouts = %{$p->{layouts}};
 	} else {
-		bail("Missing 'pipeline.layout' or 'pipeline.layouts'");
+		bail({exitcode => CONFIG},
+			"Missing 'pipeline.layout' or 'pipeline.layouts'");
 	}
 
 	# Parse each layout into workflow definitions

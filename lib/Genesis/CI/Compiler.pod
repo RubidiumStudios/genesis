@@ -133,9 +133,11 @@ B<Returns:> a hash reference carrying C<ast>, C<output>, C<provider>,
 C<compiler>, and C<parsed>.
 
 B<Errors:> raises "Missing required 'provider' parameter for compile()"
-when no type is named, and "Pipeline configuration is invalid" after
-printing each of the validator's errors. The parser, the registry, and
-the override merge raise their own refusals through this call as well.
+when no type is named, and "Pipeline configuration is invalid" at
+C<Genesis::Exit::CONFIG> after printing each of the validator's errors.
+The parser, the registry, and the override merge raise their own refusals
+through this call as well, and every one of them that is about something
+an operator wrote exits at the same code.
 
 B<Examples:>
 
@@ -261,7 +263,8 @@ B<Returns:> 1 when the section is a hash, and nothing when there is no
 section to check.
 
 B<Errors:> raises "'pipeline' configuration in .genesis/config must be a
-hash" for a section of any other shape.
+hash" at C<Genesis::Exit::CONFIG> for a section of any other shape, the
+section being the operator's own.
 
 B<Examples:>
 

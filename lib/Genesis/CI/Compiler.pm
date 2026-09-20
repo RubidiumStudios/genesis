@@ -69,7 +69,7 @@ sub compile {
 	if ($validator->has_errors) {
 		error("#R{ERRORS encountered} in pipeline configuration:");
 		error("  - #R{%s}", $_) for @{$validator->errors};
-		bail("Pipeline configuration is invalid");
+		bail({exitcode => CONFIG}, "Pipeline configuration is invalid");
 	}
 
 	# Stage 3: Discover scripts
@@ -229,7 +229,8 @@ sub validate_config_section {
 	my ($class, $data, $top) = @_;
 
 	return unless defined $data;
-	bail("'pipeline' configuration in .genesis/config must be a hash")
+	bail({exitcode => CONFIG},
+		"'pipeline' configuration in .genesis/config must be a hash")
 		unless ref($data) eq 'HASH';
 
 	return 1;
