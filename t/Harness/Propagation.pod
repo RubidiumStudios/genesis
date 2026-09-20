@@ -1580,6 +1580,16 @@ answers undef for a free lock and a hashref of C<pid> and C<command> for a held
 one, reading both out of the lock file, where the holder writes its pid on the
 first line and its command on the second.  The one option is C<copy>.
 
+The probe never asks for the lock itself.  Taking it to find out whether
+anybody holds it would refuse a process that asked for it in between, and the
+polling loop asks every fifty milliseconds beside a real genesis, so a refusal
+a row read could have been the probe's doing rather than the product's.  The
+pid line can be trusted instead, because C<Service::Git::Session> empties the
+file before it lets the flock go, so a released lock names nobody.  A pid
+still written and no longer running is a holder that died without releasing,
+which the kernel has already dropped the flock for, and the liveness test is
+what tells that apart from a lock somebody is really holding.
+
 C<lock_probe_bin> is the same probe as a standalone script, whose path it
 answers with, so a kit hook or any other child can call it with a label of its
 own and have the answer appended to a log.

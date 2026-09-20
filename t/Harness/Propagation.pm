@@ -4400,28 +4400,36 @@ sub child_runs {
 # }}}
 # lock_probe - is the switch lock held, and by whom {{{
 #
-# A non-blocking flock, so the probe answers rather than waiting.  The pid and
-# the command are written inside the lock file by whoever took it, the pid on
-# the first line and the command on the second, which is how a row can name
-# the stranger standing in the window.
+# The pid and the command are written inside the lock file by whoever took it,
+# the pid on the first line and the command on the second, which is how a row
+# can name the stranger standing in the window.
+#
+# The line is what answers the question, and the probe never asks for the
+# lock, which is the same way the recorder's own probe answers it.  Taking the
+# lock to find out whether anybody holds it would refuse a process that asked
+# for it in between, and the holder empties the file before it lets the flock
+# go, so a released lock names nobody and the line can be trusted.  A pid
+# still written and no longer running is a holder that died without
+# releasing, and the kernel has already dropped the flock for that one.
 sub lock_probe {
 	my ($self, %opts) = @_;
 	my $copy = $opts{copy} // 'a';
 	my $file = "$self->{$copy}/.git/genesis-session.lock";
 	return undef unless -f $file;
 
-	require Fcntl;
 	open my $fh, '<', $file or return undef;
-	if (flock($fh, Fcntl::LOCK_EX() | Fcntl::LOCK_NB())) {
-		flock($fh, Fcntl::LOCK_UN());
-		close $fh;
-		return undef;
-	}
 	my $held = do {local $/; <$fh>};
 	close $fh;
 
 	my ($pid, $command) = split /\n/, ($held // ''), 2;
 	chomp $command if defined $command;
+	return undef unless defined $pid && $pid =~ /^\d+$/;
+
+	# Signal zero asks whether the process is there without touching it, and
+	# a process somebody else owns answers EPERM rather than ESRCH.
+	require Errno;
+	return undef unless kill(0, $pid) || $! == Errno::EPERM();
+
 	return {pid => $pid, command => $command};
 }
 

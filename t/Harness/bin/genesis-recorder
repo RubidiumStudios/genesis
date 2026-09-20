@@ -14,6 +14,7 @@ use strict;
 use warnings;
 
 use Cwd ();
+use Errno ();
 use Fcntl qw/:flock/;
 use IO::Handle ();
 use JSON::PP;
@@ -163,37 +164,38 @@ sub refuse {
 # }}}
 # probe - is the switch lock held, and by whom {{{
 #
-# A non-blocking flock, so the recorder answers rather than waiting.  The
-# holder writes its pid on the first line and its command on the second, which
-# is how a recorded child can name the stranger standing in the window.
+# The holder writes its pid on the first line and its command on the second,
+# which is how a recorded child can name the stranger standing in the window.
 #
-# Taking the lock is what answers the question, so the probe holds it for the
-# two calls between the test and the release.  A child asking for it inside
-# that window is refused at TEMPFAIL, and the polling loop asks every fifty
-# milliseconds beside a real genesis, so the refusal a row reads can be this
-# probe's doing rather than the product's.
+# The pid line is what answers the question, and the probe never asks for the
+# lock.  Taking it to find out whether anybody holds it would refuse a child
+# that asked inside the window between the test and the release, and the
+# polling loop asks every fifty milliseconds beside a real genesis, so a
+# refusal a row read could have been this probe's doing rather than the
+# product's.
 #
-# Reading the pid line and asking whether that process is alive would take
-# the window away, and it is what the harness waits on elsewhere, but it
-# cannot replace the flock while the lock file outlives the lock.  The holder
-# truncates the file when it takes the lock and writes nothing when it lets
-# go, so a released lock still names a pid, and a probe that trusted the line
-# would call a free lock held for as long as its last holder ran.
+# The line can be trusted because the holder empties the file before it lets
+# the flock go, so a released lock names nobody.  A pid that is still written
+# and no longer running is a holder that died without releasing, which the
+# kernel has already dropped the flock for, so the liveness test is what
+# tells that apart from a lock somebody is really holding.
 sub probe {
 	my ($file) = @_;
 	return undef unless defined $file && -f $file;
 
 	open my $fh, '<', $file or return undef;
-	if (flock($fh, LOCK_EX | LOCK_NB)) {
-		flock($fh, LOCK_UN);
-		close $fh;
-		return undef;
-	}
 	my $held = do {local $/; <$fh>};
 	close $fh;
 
 	my ($pid, $command) = split /\n/, (defined $held ? $held : ''), 2;
 	chomp $command if defined $command;
+	return undef unless defined $pid && $pid =~ /^\d+$/;
+
+	# Signal zero asks whether the process is there without touching it.
+	# A process somebody else owns answers EPERM rather than ESRCH, and it
+	# is there, so the two are told apart rather than both read as gone.
+	return undef unless kill(0, $pid) || $! == Errno::EPERM();
+
 	return {pid => $pid, command => $command};
 }
 
