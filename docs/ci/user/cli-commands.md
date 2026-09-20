@@ -16,7 +16,7 @@ genesis pipeline-apply [<pipeline-layout>] [options]
 
 `pipeline-apply` compiles the pipeline your repository configures and uploads it to the CI system that pipeline names, through `fly set-pipeline` where that system is Concourse. It prompts for confirmation before uploading unless you pass `--yes`. The configuration is the `pipeline:` section of `.genesis/config`, and the provider is read from `pipeline.provider.type` rather than from any flag.
 
-There is no fallback to `ci.yml`. A repository whose `pipeline:` section is absent or not enabled has no pipeline to apply, and `repipe` says so instead of compiling anything. A repository that still carries a `ci.yml` with a top-level `pipeline:` key is refused earlier still, by a check that names the migration and exits `Genesis::Exit::CONFIG`, so no pipeline command reads that file.
+There is no fallback to `ci.yml`. A repository whose `pipeline:` section is absent or not enabled has no pipeline to apply, and `pipeline-apply` says so instead of compiling anything. A repository that still carries a `ci.yml` with a top-level `pipeline:` key is refused earlier still, by a check that names the migration and exits `Genesis::Exit::CONFIG`, so no pipeline command reads that file.
 
 The optional positional argument selects which pipeline layout to deploy when your configuration defines multiple layouts via `pipeline.layouts`. If you have a single `pipeline.layout`, the argument is ignored. If you have multiple layouts and one is named `default`, it is selected when no argument is given.
 
@@ -27,8 +27,6 @@ The optional positional argument selects which pipeline layout to deploy when yo
 `--dry-run` or `-n` generates the pipeline YAML and prints it to stdout without deploying to Concourse. Combine this with output redirection to save the generated YAML for review.
 
 `--target` or `-t` specifies the Concourse target name (as shown by `fly targets`). By default, the target name is derived from the layout name.
-
-`--config` or `-c` is kept for compatibility and nothing reads it any more. The pipeline comes from the `pipeline:` section of `.genesis/config`.
 
 `--paused` or `-P` keeps the pipeline paused after uploading. By default, Genesis unpauses the pipeline after a successful `set-pipeline`.
 
@@ -229,7 +227,8 @@ Four commands once ran inside a legacy Concourse task. All four are retired and 
 flowchart TD
     A[genesis pipeline-apply] --> H[Genesis::CI::Compiler::Parser]
     H --> I[Genesis::CI::Compiler::Validator]
-    I --> J[Genesis::CI::Compiler::ASTBuilder]
+    I --> S[Genesis::CI::Compiler::ScriptDiscovery]
+    S --> J[Genesis::CI::Compiler::ASTBuilder]
     J --> K[Genesis::CI::Compiler::PipelineDescriptor]
     K --> L{pipeline.provider.type}
     L -->|concourse| M[Genesis::CI::Provider::Concourse]
