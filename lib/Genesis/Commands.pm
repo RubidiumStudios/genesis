@@ -54,7 +54,7 @@ use Genesis;
 use Genesis::State;
 use Genesis::Term qw/wrap terminal_width csprintf decolorize csize/;
 use Genesis::Log;
-use Genesis::Exit qw/CONFIG/;
+use Genesis::Exit qw/CONFIG SOFTWARE/;
 
 our ($COMMAND, $CALLED, %RUN, %PROPS, %GENESIS_COMMANDS, @COMMANDS, @COMMAND_ARGS);
 our $COMMAND_OPTIONS = {};
@@ -486,7 +486,12 @@ sub branch_carries_repository {
 
 	my $under_root = '';
 	if ($path ne $root) {
+		# A deployment root outside its own repository is a state the
+		# comment above calls a defect, and SOFTWARE is the code for one.
+		# It is named rather than left to the default, which lands on the
+		# same number by omission.
 		bail(
+			{exitcode => SOFTWARE},
 			"The deployment root #C{%s} is not inside the repository at ".
 			"#C{%s},\nso there is no path on #C{%s} to read it from.",
 			$top->path, $git->root, $branch
@@ -739,6 +744,10 @@ sub _gate_branch_class {
 	# the record an operator has to go and correct (D94).  The resolver reads
 	# that record already, and this is the only caller that knows which one
 	# this run was answered from.
+	# Genesis writes an environment file as <name>.yml, which is the only
+	# spelling Genesis::Top::_env_file_names globs for, and the command line
+	# tolerates the longer one because an operator may well type it.  The
+	# same expression strips it wherever an argument is read as a name.
 	my $name = $COMMAND_ARGS[0];
 	my ($target, $record);
 	if (defined($name) && length($name)) {
@@ -797,7 +806,7 @@ sub _gate_branch_class {
 		my $adding;
 		$adding = $COMMAND_ARGS[0] if is_equivalent_command(create => $COMMAND)
 			&& defined($COMMAND_ARGS[0]);
-		$adding =~ s/\.yml$// if defined $adding;
+		$adding =~ s/\.ya?ml$// if defined $adding;
 
 		require Genesis::BranchClass;
 		Genesis::BranchClass::assert_pre_deploy($top, $git,
