@@ -511,7 +511,7 @@ the only other place either number is said is the pre-flight's event line,
 which stands above the banner, where an operator has not yet been told they
 are reading a preview.
 
-Neither warning says anything about the files the report goes on to name.  A
+No warning says anything about the files the report goes on to name.  A
 preview threads each delivery's tree forward into the next, so those lists
 are already true of the branch as the reset would leave it.
 
