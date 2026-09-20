@@ -145,7 +145,7 @@ subtest 'the declaration carries six names' => sub {
 	# the only one to ask.
 	my $caps = Genesis::CI::Provider->provider_class('concourse')->capabilities;
 	is_deeply [sort keys %$caps], [@NAMES],
-		'the six names, and no others';
+		'the six names every provider declares, and no others';
 	is_deeply [grep {$caps->{$_}} sort keys %$caps],
 		[qw/cross_pipeline_events deployment_locks optional_git_triggers
 		    per_commit_runs scheduled_jobs/],
