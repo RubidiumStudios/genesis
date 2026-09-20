@@ -10,9 +10,8 @@ use utf8;
 #
 # The fixture stands a director, a bosh, and a kit up before the branches
 # are cut.  A harness that stands none of them up deploys nothing, and a
-# deploy that
-# never succeeds hands off to no child at all, so every row below would
-# read a silence it had built itself.  Every environment is delivered at
+# deploy that never succeeds hands off to no child at all, so every row
+# below would read a silence it had built itself.  Every environment is delivered at
 # the seeded tip as well, because the kit is a kind of the propagation set
 # and a branch left at its init commit gives the walk a commit whose tree
 # names a kit nothing carries.  The commit the child carries downstream is

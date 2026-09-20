@@ -5,9 +5,9 @@
 # no spawned run ever sees a controlling terminal.
 #
 # The holding-ancestor half of the warning is here for a different reason.  A
-# deploy stands on the environment's own
-# deployment branch, which mirrors that environment's hierarchy and carries no
-# sibling's file, so the topology the walk reads there has no node for the
+# deploy stands on the environment's own deployment branch, which mirrors that
+# environment's hierarchy and carries no sibling's file, so the topology the
+# walk reads there has no node for the
 # predecessor and Genesis::CI::Compiler::ASTBuilder lays no edge to a node it
 # does not have.  The walk therefore finds no ancestor at all on the deploy
 # path, and no spawned deploy can produce an ancestor-uncertified hold.  The

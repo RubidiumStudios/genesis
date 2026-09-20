@@ -358,9 +358,9 @@ subtest 'the redeploy skips the two warnings about the tip' => sub {
 #
 # Both rows were green on arrival, and they are stated as such.  Nothing in
 # the redeploy path touches the gate, and the wrong implementation nearest to
-# hand is
-# one that reads "a redeploy is narrower" as licence to skip everything the
-# pre-flight would otherwise say, which is what these hold still.
+# hand is one that reads "a redeploy is narrower" as licence to skip
+# everything the pre-flight would otherwise say, which is what these hold
+# still.
 #
 # The second run carries GENESIS_PIPELINE_TASK, which is the one way a
 # spawned command gets past an automated provider's gate: --force needs a

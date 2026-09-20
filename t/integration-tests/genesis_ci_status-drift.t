@@ -11,10 +11,9 @@
 # Which assertions here discriminate and which guard is said beside each.
 # The hand commit's sha reaches the record through the snapshot flag rather
 # than through anything here, so the two assertions that read it are this
-# file's
-# discriminators and the fold assertions around them are guards: the renderer
-# that folded the two axes into one string was deleted when the read model
-# landed, so nothing in the tree can fail them today.
+# file's discriminators and the fold assertions around them are guards.  The
+# renderer that folded the two axes into one string was deleted when the read
+# model landed, so nothing in the tree can fail them today.
 use strict;
 use warnings;
 use utf8;
