@@ -595,21 +595,17 @@ sub initial_state {
 
 		my $tracking = sprintf('refs/remotes/%s/%s', $remote, $branch);
 
-		# The warning says only that the fast-forward is assumed, because
-		# the event line below is the one record of what would be done and
-		# the caller prints it either way.
-		#
-		# It is said here rather than under the preview's banner, where the
-		# reset's caveat moved to, because D44 names two caveats and a
-		# fast-forward is neither.  It takes their sentence shape all the
-		# same, so an operator who meets all three reads one kind of
-		# sentence rather than two.
+		# The assumption is recorded rather than warned about here, for the
+		# reason the reset above gives.  A caveat printed above the preview's
+		# banner is one the operator meets before they have been told they
+		# are reading a preview, and all three caveats take one sentence
+		# shape so that an operator who meets them reads one kind of
+		# sentence rather than two.  The event line below is printed either
+		# way, so nothing about the move goes unsaid.
 		if ($assume) {
-			warning(
-				"#Y{This preview assumes }#C{%s}#Y{ is fast-forwarded first.}",
-				$branch) if $opts{dry_run};
-			$record->{assumed}      = $tracking;
-			$record->{assumed_move} = 'fast-forward';
+			$record->{assumed}         = $tracking;
+			$record->{assumed_move}    = 'fast-forward';
+			$record->{assumed_commits} = $div->{behind};
 		} else {
 			$git->set_branch_ref($branch, $tracking);
 			$record->{fast_forwarded} = 1;

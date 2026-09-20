@@ -110,6 +110,26 @@ subtest 'a marker-only local commit warns that the result assumes the reset' => 
 		'L is untouched, so the reset did not happen');
 };
 
+subtest 'a branch behind its remote warns that the result assumes the move' => sub {
+	# Three rows, and one more for the run's own restoration assertion.
+	plan tests => 4;
+
+	my $h = ready_harness(envs => ['lab'], kit => 'omega-v2.7.0');
+	# A deployment branch a teammate has moved and this clone has not
+	# caught up with, which the pre-flight fast-forwards before the walk
+	# rather than refusing.
+	move_on_r($h, $h->slug('lab'));
+	stand_on($h, $h->control);
+
+	my (undef, $err, $exit) = run_genesis($h, 'propagate', '--dry-run');
+
+	like($err, qr/assumes.*fast-forwarded/i,
+		'the preview says its result assumes the fast-forward');
+	ok(said_under_the_banner($err, 'is fast-forwarded first'),
+		'and says it under the banner rather than above it');
+	is($exit, 0, 'and it still runs');
+};
+
 subtest 'a control that is behind is refused, preview or not' => sub {
 	# Four rows, and one more for the run's own restoration assertion.
 	plan tests => 5;
