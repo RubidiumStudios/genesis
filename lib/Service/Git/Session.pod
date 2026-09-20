@@ -1531,6 +1531,11 @@ the first line of that file and the command the holder is running on the
 second, which is the form every reader of the file agrees on, so a command
 carrying spaces cannot be mistaken for part of the pid.
 
+It truncates before it writes, so a file left empty by L</_release_lock> is a
+shape it already expects. A file that names nobody is therefore a lock nobody
+holds, and a pid written there that is no longer running is a holder that died
+without releasing, which the kernel has already dropped the C<flock> for.
+
 Taking it twice in one session is a no-op, so a session that has already
 switched switches again without asking for what it holds.
 
@@ -1583,9 +1588,16 @@ B<Examples:>
 
   $session->_release_lock;
 
-Lets the switch lock go and closes the handle on it. C<finish> is the only
-caller, so the lock is held for the whole of a session and released once the
-restore has been verified.
+Empties the lock file, lets the switch lock go, and closes the handle on it.
+C<finish> is the only caller, so the lock is held for the whole of a session
+and released once the restore has been verified.
+
+The file is emptied while the C<flock> is still held, so a released lock names
+nobody and no waiting taker can write a pid that would then be truncated away.
+That is what lets a reader trust the pid line rather than asking for the lock
+to find out whether anybody holds it. The emptying is read back and traced
+where it fails, rather than raised, because the session is already finishing
+and the lock is going either way.
 
 Releasing a lock that is not held is a no-op, so a session that never switched
 may be finished like any other.
