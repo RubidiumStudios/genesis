@@ -15,6 +15,7 @@ If you are an operator who wants to set up automated deployment pipelines for yo
 | [Layout DSL](user/layout-dsl.md) | The pipeline layout language for defining environment progression |
 | [Pipeline Section Configuration](user/multi-file-configuration.md) | The `pipeline:` section of `.genesis/config`, and the one override file that sits beside it |
 | [CLI Commands](user/cli-commands.md) | `genesis propagate` and the `pipeline-*` commands |
+| [Branches and Commands](user/branches-and-commands.md) | Which branch each command expects, the conditions a feature branch has to meet, and the two flags that target the deployed commit |
 
 ## For Developers
 
