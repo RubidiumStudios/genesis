@@ -11,6 +11,7 @@ use lib 'lib';
 use lib 't';
 use helper;
 use Test::More;
+use File::Temp ();
 
 $ENV{NOCOLOR} = 1;
 
@@ -230,6 +231,40 @@ subtest 'vault_ok folds a multi-line failure onto one line' => sub {
 		'the text handed to fail carries no newline and no run of whitespace');
 	like($failed[0], qr/numeric value for Vault pid, but got this: not-a-pid/,
 		'because the whole message folded onto one readable line');
+};
+
+subtest 'a vault that never answered leaves no pid behind' => sub {
+	plan tests => 3;
+
+	# The stub stands in for t/bin/vault and reports a pid no process holds,
+	# which is the shape of a vault that said it had started and had not.
+	my $top = File::Temp::tempdir(CLEANUP => 1);
+	mkdir "$top/t" and mkdir "$top/t/bin"
+		or die "could not build the stub tree under $top: $!\n";
+	open my $stub, '>', "$top/t/bin/vault"
+		or die "could not write the stub vault: $!\n";
+	print $stub "#!/bin/sh\necho 99999\n";
+	close $stub;
+	chmod 0755, "$top/t/bin/vault";
+
+	local $ENV{GENESIS_TOPDIR} = $top;
+	my $target = 'helper-t-dead-vault';
+
+	my $first;
+	eval {vault_start($target); 1} or $first = $@;
+	like($first, qr/couldn't signal pid 99999/,
+		'the start dies where the pid it was handed answers no signal');
+
+	# The record is what vault_ok reads to say a vault is already running,
+	# so a start that died must leave none, and the second call proves it by
+	# trying again instead of answering from it.
+	my $second;
+	eval {vault_start($target); 1} or $second = $@;
+	like($second, qr/couldn't signal pid 99999/,
+		'and a second start tries again rather than answering from a record');
+
+	is($ENV{GENESIS_TOPDIR}, $top,
+		'and the stub tree is still the one the two starts read');
 };
 
 done_testing;
