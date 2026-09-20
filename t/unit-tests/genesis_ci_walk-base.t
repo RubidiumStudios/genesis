@@ -36,7 +36,8 @@ sub env_file {
 # seeding commit, which is control's root, and prod is introduced part way
 # along, so the rows have both an environment whose E is the root and one
 # whose E has a commit before it.  lab's branch is delivered to and the other
-# two are cut and left alone, which is the init-only shape D61 is about.
+# two are cut and left alone, which is the init-only shape a first
+# propagation meets.
 sub fixture {
 	my $h = make_harness(envs => ['lab', 'qa'], root => '',
 		kit => 'omega-v2.7.0');
