@@ -410,11 +410,10 @@ sub _base_deployment_content {
 
 # _git_context - the deployed commit and the certified commit {{{
 #
-# The record lays the pair side by side.  git.commit is the
-# deployment-branch commit the deploy stood on, which is what actually ran,
-# hatch case included, and git.control_commit is the control commit the
-# branch's newest marker names, which is what the holds and the staleness
-# read.
+# The record lays the pair side by side.  git.commit is the deployment-branch
+# commit the deploy stood on, which is what actually ran, hatch case
+# included, and git.control_commit is the control commit the branch's newest
+# marker names, which is what the holds and the staleness read.
 #
 # The marker read goes through the one reader, so a squash merge's body is
 # found and a hand commit above the marker is skipped.  There is no fallback
