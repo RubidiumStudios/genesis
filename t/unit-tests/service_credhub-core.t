@@ -821,7 +821,7 @@ subtest 'Phase 4: Write operations — set()' => sub {
 			'rejects undef for explicit value type';
 	};
 
-	subtest 'value type — a dollar sign passes through untouched' => sub {
+	subtest 'value type, a dollar sign passes through untouched' => sub {
 		my $ch = make_credhub();
 		my $hash = '$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ012345';
 		$set_result_json = encode_json({ id => 'dollar-id', value => $hash });
