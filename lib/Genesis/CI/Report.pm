@@ -170,9 +170,9 @@ sub held_qualifier {
 	# certified state for this to answer over.
 	return AWAITING_APPLY unless defined $record->{certified};
 
-	# A hold is a decision somebody made for a reason the pipeline
-	# cannot see, and only a human clears it, so it outranks whatever the
-	# commits underneath it happen to be waiting for.
+	# A hold is a decision somebody made for a reason the pipeline cannot
+	# see, and only a human clears it, so it outranks whatever the commits
+	# underneath it happen to be waiting for.
 	#
 	# It stands ahead of the never-applied answer below as well.  Both states
 	# are read for every environment, so an environment can be in both at
@@ -260,16 +260,17 @@ sub hold_detail {
 
 	my $hold = $record->{hold} or return undef;
 
-	# Every reader of a hold names the one command that clears it, and name
-	# who set it and when.  The clause is composed here rather than beside
-	# each of the three callers, because a sentence spelled in three places
-	# is a sentence the three spellings drift apart on.  T302 quotes the
-	# first of the wordings with this clause on the end of it.
+	# Every reader of a hold names the one command that clears it, and
+	# names who set it and when.  The clause is composed here rather than
+	# beside each of the three callers, because a sentence spelled in three
+	# places is a sentence the three spellings drift apart on.  T302 quotes
+	# the first of the wordings with this clause on the end of it.
 	#
-	# The three identity fields are the record's own, and a record written
-	# older than the four fixed fields can be missing any of them, so each
-	# is named as unrecorded rather than left to print as an empty gap the
-	# reader has to guess at.
+	# The three identity fields are the record's own.  A hold carries four
+	# fields, which are the reason, the user, the hostname, and the time,
+	# and a record older than those four can be missing any of them, so
+	# each is named as unrecorded rather than left to print as an empty
+	# gap the reader has to guess at.
 	# In backticks, because it stands mid-sentence and every reader of that
 	# sentence is already printing it inside a colour span of its own.  The
 	# three readers are the run's report, the preview, and pipeline-status.
@@ -402,8 +403,8 @@ sub render_run {
 		# A trailer's hold goes after the delivery, so an environment that
 		# took one on this run reads as delivered with one line saying so
 		# beneath it.  It is not held_qualifier's held, needs clearing,
-		# which is what the next run reads off the record this one wrote: a
-		# report says what this run did, and this run delivered.
+		# which is what the next run reads off the record this one wrote.
+		# A report says what this run did, and this run delivered.
 		#
 		# This one keeps a release line of its own, because the sentence
 		# above it is about a hold the run found standing and this is about
