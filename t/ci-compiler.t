@@ -1224,6 +1224,68 @@ subtest 'PipelineDescriptor - _unwrap_ref' => sub {
 		"undef passes through as undef";
 };
 
+# The rows above on the compiler base's git_uri and topological_sort are
+# only worth their run if the descriptor is what calls them.  Each row
+# below swaps the base's copy for one that answers something nothing else
+# would say, and then asks the descriptor a question whose answer has to
+# carry it.  A descriptor keeping a private copy answers past the swap.
+subtest 'PipelineDescriptor - the emit helpers come off the compiler base' => sub {
+	plan tests => 3;
+
+	my $ast = Genesis::CI::Compiler::AST->new(
+		metadata     => { name => 'helpers-test', deployment_type => 'cf' },
+		branches     => { control => 'main' },
+		integrations => {
+			source_control => { provider => 'github', repository => 'org/repo' },
+		},
+		workflows => {
+			default => {
+				name  => 'default',
+				graph => {
+					nodes => {
+						alpha => { stage_name => 'alpha', alias => 'alpha', auto => 1 },
+						beta  => { stage_name => 'beta',  alias => 'beta',  auto => 0 },
+						gamma => { stage_name => 'gamma', alias => 'gamma', auto => 0 },
+					},
+					edges => [
+						{ from => 'alpha', to => 'beta' },
+						{ from => 'beta',  to => 'gamma' },
+					],
+				},
+			},
+		},
+	);
+	my $descriptor = Genesis::CI::Compiler::PipelineDescriptor->new(ast => $ast);
+
+	{
+		no warnings qw/redefine once/;
+		local *Genesis::CI::ProviderCompiler::git_uri =
+			sub {'git@base.example:swapped.git'};
+		is $descriptor->_git_resource($ast)->{source}{uri},
+			'git@base.example:swapped.git',
+			"the git resource's URI is whatever the base answers";
+	}
+
+	{
+		no warnings qw/redefine once/;
+		local *Genesis::CI::ProviderCompiler::secret_ref = sub {'<<swapped>>'};
+		is Genesis::CI::Compiler::PipelineDescriptor::_unwrap_ref(
+			{ secret_ref => 'vault/path' }), '<<swapped>>',
+			"and a secret reference is spelled the way the base spells it";
+	}
+
+	{
+		# Reversed, so the first edge the diagram draws is the last one a
+		# real sort would reach.
+		no warnings qw/redefine once/;
+		local *Genesis::CI::ProviderCompiler::topological_sort =
+			sub {qw/gamma beta alpha/};
+		my ($first_edge) = grep {/-->/} split /\n/, $descriptor->mermaid();
+		like $first_edge, qr/beta.*-->.*gamma/,
+			"and the diagram is walked in the order the base gives";
+	}
+};
+
 ### ============================================================ ###
 ### Concourse Provider - output_files
 ### ============================================================ ###

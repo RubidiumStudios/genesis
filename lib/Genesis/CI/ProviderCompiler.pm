@@ -386,9 +386,16 @@ sub dump_yaml {
 
 # }}}
 # git_uri - build git URI from source_control config {{{
+#
+# The declaration falls back to the AST's own only for a caller that
+# holds one, because the pipeline descriptor asks this class for the
+# spelling rather than asking an instance of it, and a class name has no
+# AST to fall back to.
 sub git_uri {
 	my ($self, $source_control) = @_;
-	$source_control ||= ($self->{ast} ? $self->{ast}->integrations->{source_control} : {});
+	$source_control ||= (ref($self) && $self->{ast})
+		? $self->{ast}->integrations->{source_control}
+		: {};
 
 	my $provider = $source_control->{provider} || '';
 	my $repo     = $source_control->{repository} || '';

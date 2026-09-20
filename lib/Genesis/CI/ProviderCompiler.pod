@@ -516,7 +516,8 @@ B<Parameters:>
 =item C<$source_control>
 
 The declaration, as a hash reference. Omitted, it is read off the AST's
-integrations.
+integrations, which only a caller holding one has, since the pipeline
+descriptor asks this class for the spelling rather than an instance of it.
 
 =back
 
@@ -531,7 +532,9 @@ B<Examples:>
 
 A secret reference in the platform's own spelling. The base writes
 Concourse's double parentheses, and a platform that spells them
-differently overrides this.
+differently overrides this. It is the one place a reference is spelled:
+L<Genesis::CI::Compiler::PipelineDescriptor> calls it for every reference
+it writes into a pipeline.
 
 B<Parameters:>
 
@@ -554,7 +557,8 @@ B<Examples:>
 
 A workflow graph's nodes in dependency order. The nodes are walked in
 sorted order, so the same graph always sorts the same way and a
-regenerated pipeline does not churn.
+regenerated pipeline does not churn. The pipeline descriptor orders both
+its jobs and its diagram through this call.
 
 B<Parameters:>
 
