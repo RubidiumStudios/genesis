@@ -210,9 +210,9 @@ subtest 'one class action leaves the other two classes alone' => sub {
 
 	init_branch($h, $_) for qw/qa prod/;
 	refresh($h, 'a', $qa, $prod);
-	# Nothing in this milestone opens a pull request branch, so this push
-	# cannot fire today.  It is here for M11 and M16, which give the pull
-	# request branch its own actions, and it is those two steps that would
+	# Nothing here opens a pull request branch, so this push cannot fire
+	# today.  It is here for the publish and the pull request paths, which
+	# give the pull request branch its own actions, and those are what would
 	# make the row below it bite.
 	push_from($h, 'a', $pr) if $h->git('a')->branch_exists($pr);
 
@@ -242,7 +242,7 @@ subtest 'one class action leaves the other two classes alone' => sub {
 	# with control and the walk finds nothing due for it.  Without that the
 	# walk would have something to deliver to prod, and the writer still
 	# switches to the environment's own name, which is a branch a typed
-	# repository cannot hold until M10 rewrites it.
+	# repository cannot hold.
 	deliver($h, 'prod', control => $control, copy => 'a');
 	refresh($h, 'a', $qa);
 	my $before_control  = ref_in($h->a, "refs/heads/@{[$h->control]}");

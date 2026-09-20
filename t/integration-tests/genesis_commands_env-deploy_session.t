@@ -44,8 +44,8 @@ subtest 'a deploy from a feature branch in a subdirectory restores W' => sub {
 	my $w = snapshot_w($h);
 	# --no-propagate, as the no-git-write rows do: the auto-cascade hands off
 	# to a child genesis propagate, which writes to deployment branches on
-	# purpose and which M15 owns, so a row about what this deploy did should
-	# not be reading the child's work as the deploy's own.
+	# purpose, so a row about what this deploy did should not be reading the
+	# child's work as the deploy's own.
 	my ($out, $err, $exit) = run_genesis($h, {dir => 'bosh', restore => 0},
 		'qa', 'deploy', '--no-propagate', '-y', 'a reason');
 	is($exit, 0, 'the deploy succeeded');

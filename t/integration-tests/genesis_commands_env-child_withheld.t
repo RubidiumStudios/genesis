@@ -26,8 +26,7 @@
 # because the hand run it ends with is the same catch-up the second subtest
 # reads.
 #
-# The fixture is the chained shape rather than the step file's bare
-# make_harness, for the reason Task 14.6 recorded against the same rows.  A
+# The fixture is the chained shape rather than a bare make_harness.  A
 # harness that stands up no director, no bosh, and no kit deploys nothing, and
 # a deploy that never succeeds hands off to no child at all, so every row here
 # would read a silence it had built itself.  ready_harness with bosh names qa

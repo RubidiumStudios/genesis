@@ -151,8 +151,8 @@ subtest 'the refresh a command may skip is declared at its registration' => sub 
 	ok(!defined(command_properties('pipeline-apply')->{refresh}),
 		'pipeline-apply declares nothing either');
 
-	# A guard.  M7 took no-fetch off this command, and this goes red against
-	# a step that revives the old name beside the new one.
+	# A guard.  The no-fetch option came off this command, and this goes red
+	# against a change that revives the old name beside the new one.
 	my %opts = @{command_properties('pipeline-status')->{options} || []};
 	ok(!exists $opts{'no-fetch'}, 'the old name is gone from pipeline-status');
 };

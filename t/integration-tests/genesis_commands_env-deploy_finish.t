@@ -12,7 +12,7 @@
 #
 # Neither run passes --no-propagate, which every other deploy file does pass,
 # because the auto-cascade is the subject of the second row.  The abort leaves
-# before the cascade, so the child that M15 owns is never spawned, and a run
+# before the cascade, so the child is never spawned, and a run
 # that had opted out of the cascade could not tell that apart from a cascade
 # that was never reached.
 #

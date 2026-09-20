@@ -80,7 +80,7 @@ subtest 'a branch only on the remote is still created from the remote' => sub {
 # A row here once drove resolve_branch into a refresh that reported a failure
 # and asked it to refuse rather than answer 'fetched'.  That claim has moved.
 # The query reads refs alone now and makes no fetch to fail, so the refusal
-# belongs to the refresh itself, which M7 makes bail at TEMPFAIL when it
-# cannot reach the remote.
+# belongs to the refresh itself, which bails at TEMPFAIL when it cannot
+# reach the remote.
 
 done_testing;

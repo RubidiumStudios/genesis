@@ -54,10 +54,9 @@ my @cases = (
 		# safe.directory rows in t/unit-tests/service_git-preflight.t.
 		#
 		# The alternation is to be narrowed to safe.directory alone when
-		# the carry item from Task 5.1's second fix round lands, which is
-		# the one that has Genesis::Top stop pre-checking
-		# is_inside_work_tree and swallowing git's dubious-ownership
-		# reason.  Whoever closes that item narrows this matcher with it.
+		# Genesis::Top stops pre-checking is_inside_work_tree and
+		# swallowing git's dubious-ownership reason.  Whoever makes that
+		# change narrows this matcher with it.
 		name    => 'a working tree git refuses to touch',
 		kind    => 'safe_directory',
 		matches => qr/safe\.directory|is not a git checkout/i,

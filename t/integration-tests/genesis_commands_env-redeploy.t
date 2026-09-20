@@ -310,9 +310,9 @@ subtest 'the redeploy skips the two warnings about the tip' => sub {
 	my $url = record_at($h, $h->env_path('qa'))->{url};
 
 	# Every run passes --no-propagate, for the reason the file above gives:
-	# the auto-cascade hands off to a child genesis propagate that M15 owns
-	# and that fails today, and a row about what the deploy said should not
-	# be reading the child's failure as the deploy's.
+	# the auto-cascade hands off to a child genesis propagate that fails
+	# today, and a row about what the deploy said should not be reading the
+	# child's failure as the deploy's.
 	my (undef, $err, $exit) = run_genesis($h,
 		'qa', 'deploy', '--redeploy', '--no-propagate', '-y', 'r');
 
@@ -586,9 +586,9 @@ subtest 'recreate_on_deploy reaches every deploy as declared' => sub {
 		stand_on($h, $h->control);
 
 		# Both runs pass --no-propagate, for the reason the file above gives:
-		# the auto-cascade hands off to a child genesis propagate that M15
-		# owns and that fails today, and a row about what BOSH was given
-		# should not be reading that child's failure as the deploy's.
+		# the auto-cascade hands off to a child genesis propagate that
+		# fails today, and a row about what BOSH was given should not be
+		# reading that child's failure as the deploy's.
 		my (undef, $err, $exit) = run_genesis($h,
 			'qa', 'deploy', '--no-propagate', '-y');
 		is($exit, 0, "the ordinary deploy proceeded under $setting")

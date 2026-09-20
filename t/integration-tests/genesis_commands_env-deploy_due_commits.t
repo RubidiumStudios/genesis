@@ -18,8 +18,8 @@
 # carrying no kit refuses by name.
 #
 # Every run passes --no-propagate.  The auto-cascade hands off to a child
-# genesis propagate, which M15 owns and which fails today, and a row about what
-# the deploy said should not be reading the child's failure as the deploy's.
+# genesis propagate, which fails today, and a row about what the deploy said
+# should not be reading the child's failure as the deploy's.
 use strict;
 use warnings;
 use utf8;

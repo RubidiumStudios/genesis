@@ -2,7 +2,8 @@
 # Proves T81's reader half: where the site could not grant the rebase-only
 # merge method and a squash merge took the marker with it, the reader takes
 # it from the pull request's body and says where it came from.  The event
-# line the run prints is M16's, because the run is M16's.
+# line a run prints over that recovery belongs to the propagate command
+# rather than to this reader.
 use strict;
 use warnings;
 use utf8;

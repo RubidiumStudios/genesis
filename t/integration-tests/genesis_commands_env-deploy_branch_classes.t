@@ -32,9 +32,9 @@
 # the builder out or pass catch_up => 0.
 #
 # Every run passes --no-propagate.  The auto-cascade hands off to a child
-# genesis propagate, which writes to deployment branches on purpose and which
-# M15 owns, and a row about what the deploy decided should not be reading the
-# child's work as the deploy's own.
+# genesis propagate, which writes to deployment branches on purpose, and a
+# row about what the deploy decided should not be reading the child's work as
+# the deploy's own.
 use strict;
 use warnings;
 use utf8;

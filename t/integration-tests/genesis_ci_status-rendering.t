@@ -3,10 +3,10 @@
 # each phrase component takes its own colour class, and the row's glyph and
 # name take the worst class present, which here is the red of drifted.
 #
-# The third row settles the question M17's rulings hand this file, which is
-# whether the illegal initial state D96 refuses applies to a command that
-# resolves nothing.  A hand commit the operator's own clone has not published
-# is the state D33 legalises and the state drift_for exists to report, so a
+# The third row settles whether the illegal initial state D96 refuses
+# applies to a command that resolves nothing.  A hand commit the operator's
+# own clone has not published is the state D33 legalises and the state
+# drift_for exists to report, so a
 # report that refused it would refuse to explain the one thing it was written
 # to explain.
 use strict;

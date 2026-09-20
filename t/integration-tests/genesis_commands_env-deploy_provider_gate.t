@@ -14,8 +14,8 @@
 # the gate, so every harness here names its provider outright.
 #
 # Every run passes --no-propagate.  The auto-cascade hands off to a child
-# genesis propagate, which M15 owns and which fails today, and a row about
-# the gate should not be reading the child's work as the deploy's own.
+# genesis propagate, which fails today, and a row about the gate should not
+# be reading the child's work as the deploy's own.
 use strict;
 use warnings;
 use utf8;

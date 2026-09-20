@@ -190,7 +190,7 @@ subtest 'a new pull request supersedes the closed attempts' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
 
 	# A guard rather than a row that starts red: the arm that opens a pull
-	# request landed with Task 16.1, and the exit is read here because
+	# request is already in place, and the exit is read here because
 	# everything below it is read off a run that got as far as the create.
 	is($exit, 0, 'the run succeeded');
 

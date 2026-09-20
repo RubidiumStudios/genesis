@@ -3,8 +3,7 @@
 # and what neither process writes.  Proves T248, T249, T250, T254, T255, T257,
 # and T258 of the test matrix.
 #
-# The fixture is the named shape rather than the step file's bare
-# make_harness, for the reason Task 14.6 recorded against the same rows.  A
+# The fixture is the named shape rather than a bare make_harness.  A
 # harness that stands up no director, no bosh, and no kit deploys nothing,
 # and a deploy that never succeeds hands off to no child at all, so every
 # row here would read a silence it had built itself.  ready_harness with
@@ -160,7 +159,7 @@ subtest 'the two gates keep the child away' => sub {
 
 	for my $case (
 		# The automated arm runs the way the pipeline's own job runs it,
-		# with GENESIS_PIPELINE_TASK set, because M13's provider gate
+		# with GENESIS_PIPELINE_TASK set, because the provider gate
 		# refuses an automated provider from the command line and a refusal
 		# proves nothing about the gate this step adds.  Under the task
 		# variable the gate is skipped, the deploy succeeds, and the

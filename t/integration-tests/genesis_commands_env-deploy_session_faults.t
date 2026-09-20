@@ -4,9 +4,9 @@
 # T231, the failed restore that dies naming what it could not restore; and
 # T232, the SIGINT between the switch and the BOSH step.
 #
-# Three of the four arrive green, the session and the gate having landed at
-# M5 and M12.  T234 is the one that drives code, and what it drives is D80's
-# "will switch" trigger in the gate.
+# Three of the four arrive green, because the session and the gate are
+# already in place.  T234 is the one that drives code, and what it drives is
+# D80's "will switch" trigger in the gate.
 #
 # The first two rows make the same edit to the same file and differ only in
 # the branch the operator is standing on, because that is the whole of what
@@ -83,8 +83,8 @@ subtest 'an unswitched deploy opens no session and keeps the edit' => sub {
 
 	# --no-propagate for the reason the rows in the neighbouring files give:
 	# the auto-cascade hands off to a child genesis propagate, which writes
-	# to deployment branches on purpose and which M15 owns, and a row about
-	# what this deploy did should not be reading the child's work as its own.
+	# to deployment branches on purpose, and a row about what this deploy did
+	# should not be reading the child's work as its own.
 	my ($out, $err, $exit) = run_genesis($h,
 		'qa', 'deploy', '--no-propagate', '-y', 'a reason');
 
