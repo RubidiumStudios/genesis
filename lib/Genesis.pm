@@ -97,7 +97,6 @@ our @EXPORT = qw/
 	ordify
 	count_nouns
 	bail_text
-	without_backtrace
 
 	spruce_diff
 
@@ -142,6 +141,13 @@ our @EXPORT = qw/
 	die_unless_controlling_terminal
 
 	validate_global_config global_config_schema
+/;
+
+# Asked for by name rather than handed to every module that says
+# use Genesis, because the name is a general one and a module of its own
+# could reasonably want it for something else.
+our @EXPORT_OK = qw/
+	without_backtrace
 /;
 
 sub init_forked_child {
