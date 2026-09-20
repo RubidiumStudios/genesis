@@ -19,7 +19,7 @@ use Genesis::Exit;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 120;
 $ENV{NOCOLOR} = 1;
 
-subtest 'the applied record lands at the address D103 fixes' => sub {
+subtest 'the applied record lands under exodus _pipelines' => sub {
 	# Six rows, and one more for the run's own restoration assertion, which
 	# run_genesis makes unless a row turns it off.
 	plan tests => 7;
