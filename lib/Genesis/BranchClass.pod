@@ -15,10 +15,10 @@ Genesis::BranchClass - which branch a pipeline-aware command belongs on
 
 =head1 DESCRIPTION
 
-Under D81 every pipeline-aware command declares one of two branch classes
-at its registration. This module answers the questions that declaration
-raises, which are what class of branch the repository is standing on and
-whether a pre-deploy command may run from it.
+Every pipeline-aware command declares one of two branch classes at its
+registration. This module answers the questions that declaration raises,
+which are what class of branch the repository is standing on and whether a
+pre-deploy command may run from it.
 
 Nearly every pre-deploy command also brings the control branch in from the
 remote before it reads anything, because the question the assertion answers
@@ -352,12 +352,12 @@ direct push and a commit made on control then has no way to reach control
 through a pull request. The refusal names the key, so an operator can see
 which setting moved the expectation onto a feature branch.
 
-It is asked of the command and not of the class. D45 speaks of a commit,
-and most pre-deploy commands make none on control, so C<pipeline-apply>,
-C<pipeline-status>, C<pipeline-describe>, and the secrets commands all run
-there as before. C<pipeline-apply> matters most, because it is the command
-that applies the protection this key derives, and a refusal that caught it
-would leave an operator no way to turn the protection on.
+It is asked of the command and not of the class. The refusal is about a
+commit, and most pre-deploy commands make none on control, so
+C<pipeline-apply>, C<pipeline-status>, C<pipeline-describe>, and the secrets
+commands all run there as before. C<pipeline-apply> matters most, because it
+is the command that applies the protection this key derives, and a refusal
+that caught it would leave an operator no way to turn the protection on.
 
 A detached HEAD is allowed through, because it is neither control nor
 derived and neither remedy the predicate offers can be carried out on it. A
