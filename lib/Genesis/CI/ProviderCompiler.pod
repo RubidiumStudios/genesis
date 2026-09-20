@@ -608,6 +608,70 @@ B<Examples:>
 
 =head1 INTERNAL METHODS
 
+=head2 _is_yaml_leaf($val)
+
+Whether the scalar writer can take a value. A plain scalar can, and so
+can a boolean, which is a blessed reference and therefore answers false
+to an ordinary reference test. Every place that writes a value asks this
+rather than testing for a reference itself, so the hash writer, the list
+writer, and the writer for a key under a list item cannot drift apart
+about what a leaf is.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$val>
+
+The value to judge.
+
+=back
+
+B<Returns:> true for a plain scalar or a boolean, false otherwise.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::_is_yaml_leaf('a');            # true
+    Genesis::CI::ProviderCompiler::_is_yaml_leaf(JSON::PP::true); # true
+    Genesis::CI::ProviderCompiler::_is_yaml_leaf({});             # false
+
+=head2 _yaml_pair($lead, $key, $val, $indent)
+
+One key and its value beneath a list item. The lead is what the key sits
+behind, which is the dash for the item's first key and plain spaces for
+the rest of them, and both take the same writer because that lead is the
+only thing separating them. An empty list or hash is written on the key's
+own line, since a key followed by nothing reads back as null.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$lead>
+
+The indentation and dash the key sits behind.
+
+=item C<$key>
+
+The key.
+
+=item C<$val>
+
+Its value.
+
+=item C<$indent>
+
+The nesting depth the value's own lines take, in two-space steps.
+
+=back
+
+B<Returns:> one line, or the key's line followed by the value's, as a list.
+
+B<Examples:>
+
+    Genesis::CI::ProviderCompiler::_yaml_pair('  - ', 'name', 'deploy', 2);
+    # '  - name: deploy'
+
 =head2 _to_yaml($data, $indent)
 
 The serializer behind C</dump_yaml>. It is written here rather than taken
@@ -662,12 +726,20 @@ B<Examples:>
     Genesis::CI::ProviderCompiler::_to_yaml_array(['a', 'b'], 0);
     # "- a\n- b"
 
-=head2 _yaml_scalar($val)
+=head2 _yaml_scalar($val, $indent)
 
 One scalar in its YAML spelling. A JSON::PP boolean is written as C<true>
 or C<false>, a number is written bare, a string that could be read as a
 number or as a boolean is quoted so that it reads back as a string, and a
 string with newlines in it becomes a literal block.
+
+The block form is the reason this takes an indent. Its body has to stand
+further in than the key or the dash that opened it, so a body written a
+fixed distance in produces a document no reader accepts anywhere below
+the top level. A value ending in one newline takes the clipping form and
+one ending in none takes the stripping form, so the string reads back as
+it was written, and a value that opens on whitespace or ends in more than
+one newline is quoted instead.
 
 B<Parameters:>
 
@@ -676,6 +748,12 @@ B<Parameters:>
 =item C<$val>
 
 The value to format.
+
+=item C<$indent>
+
+The nesting depth the value's own lines take, in two-space steps. Only a
+block scalar reads it. It defaults to the one step a top-level value
+takes.
 
 =back
 
