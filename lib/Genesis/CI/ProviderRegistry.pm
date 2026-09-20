@@ -116,7 +116,11 @@ sub register_provider {
 			unless $info->{$path_key} eq _path_of($info->{$class_key});
 	}
 
-	$_providers{$type} = $info;
+	# A shallow copy rather than the caller's own hash, for the same reason
+	# provider_info takes one on the way out: a caller that goes on writing
+	# into what it registered would rewrite the entry every later lookup
+	# reads.
+	$_providers{$type} = {%$info};
 	return 1;
 }
 
