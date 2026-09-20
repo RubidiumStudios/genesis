@@ -62,12 +62,12 @@ subtest "the label is the provider's alone" => sub {
 	# Both spellings of the read open the window, because the label is
 	# reached through the dotted key in some files and walked out of the
 	# parsed configuration in others, and a branch built at either one is
-	# the thing this guard rules out.  A branch is named by the word, by a
-	# ref path, by the two porcelain forms that create one without saying
-	# branch at all, and by the HEAD refspec a push composes.  The two
-	# porcelain forms allow punctuation between the verb and its flag,
-	# because git is called here as a list of arguments far more often than
-	# as a command line.
+	# the thing this guard rules out.  A branch is named by the word, by
+	# a ref path, by the two porcelain forms that create one without
+	# saying branch at all, and by the HEAD refspec a push composes.  The
+	# two porcelain forms allow punctuation between the verb and its
+	# flag, because git is called here as a list of arguments far more
+	# often than as a command line.
 	my @pms = sort split /\n/, qx{find lib -name '*.pm'};
 	cmp_ok scalar(@pms), '>', 0,
 		'the sweep has files to read, so a green row means something';

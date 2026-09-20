@@ -735,8 +735,9 @@ sub fallback_env {
 	my $env = make_cpi_env($name, $bosh_configs);
 	no warnings qw(redefine once);
 	local *Genesis::Env::is_bosh_director = sub { 1 };
-	# is_bosh_director is consulted via $self->is_bosh_director, so patching
-	# in place by re-blessing isn't needed because we re-stub per subtest.
+	# is_bosh_director is consulted via $self->is_bosh_director, so
+	# patching in place by re-blessing isn't needed because we re-stub per
+	# subtest.
 	$env;
 }
 

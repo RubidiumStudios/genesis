@@ -298,8 +298,8 @@ sub _mock_bosh {
 
 	no strict 'refs';
 	# 'once' silences the "used only once" compile-time check for the
-	# fully-qualified typeglob names, which are assigned here once per
-	# _mock_bosh call but never read by name in this file.
+	# fully-qualified typeglob names, which are assigned here once
+	# per _mock_bosh call but never read by name in this file.
 	no warnings 'redefine', 'once';
 	*MockBOSH::execute   = sub { my ($s,$o,@c) = @_; push @{$s->{_executed}}, {opts=>$o,cmd=>[@c]}; return ('output',0,'') };
 	*MockBOSH::dryrun_of = sub { my ($s,@c)    = @_; push @{$s->{_executed}}, {dryrun=>1,cmd=>[@c]} };

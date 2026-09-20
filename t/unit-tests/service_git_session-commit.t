@@ -111,10 +111,10 @@ subtest 'a commit the refresh cannot reach is refused at DATAERR' => sub {
 	deliver($h, 'qa', control => $control);
 	refresh($h, 'a', $h->slug('qa'));
 
-	# A rewritten branch on R is what the ban on force pushes makes rare and
-	# does not make impossible, so the recorded commit can be gone.  The
-	# rewrite drops the commit behind the tip, so control needs a tip above
-	# the one the record names before there is anything to take away.
+	# A rewritten branch on R is what the ban on force pushes makes rare
+	# and does not make impossible, so the recorded commit can be gone.
+	# The rewrite drops the commit behind the tip, so control needs a tip
+	# above the one the record names before there is anything to take away.
 	commit_on_control($h,
 		files   => {'ops/later.yml' => "---\nlater: 1\n"},
 		message => 'a later change',

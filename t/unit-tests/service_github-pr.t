@@ -434,10 +434,11 @@ subtest 'pagination: two-page list with Link header' => sub {
 # provided (server-side), with a defensive grep on the response (in
 # case the API surfaces unrelated results).
 #
-# Every pull request that survives the filter is then asked for its reviews,
-# because the caller acts on what a reviewer decided and open_prs attaches
-# that rather than leaving each caller to fetch it.  So each row below queues
-# one reviews response per surviving pull request, after the listing response.
+# Every pull request that survives the filter is then asked for its
+# reviews, because the caller acts on what a reviewer decided and
+# open_prs attaches that rather than leaving each caller to fetch it.  So
+# each row below queues one reviews response per surviving pull request,
+# after the listing response.
 # ======================================================================
 
 subtest 'open_prs - lists all open PRs against base when head omitted' => sub {

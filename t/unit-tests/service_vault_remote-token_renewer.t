@@ -23,12 +23,12 @@ use Genesis;
 # parent vault instance.  Built in atomic steps; this file grows with each
 # commit.
 #
-# Step 1: _token_renewal_available($info) — pure predicate.
-# Step 3: _run_renewer_loop — testable loop body with injected callbacks
-#         for sleep, parent-liveness check, vault query, and token_info.
-#         Returns an exit code instead of calling POSIX::_exit so unit
-#         tests can drive it without forking.
-# Step 4: start_token_renewer / stop_token_renewer / renewer_pid —
+# Step 1: _token_renewal_available($info), a pure predicate.
+# Step 3: _run_renewer_loop, the testable loop body with injected
+#         callbacks for sleep, parent-liveness check, vault query, and
+#         token_info.  Returns an exit code instead of calling
+#         POSIX::_exit so unit tests can drive it without forking.
+# Step 4: start_token_renewer / stop_token_renewer / renewer_pid, the
 #         lifecycle plumbing.  Exercises real fork() for the kill/waitpid
 #         path; the loop body is stubbed so the child only sleeps.
 # Step 5: Wire DESTROY -> stop_token_renewer, authenticate ->
@@ -349,9 +349,9 @@ subtest 'start_token_renewer fails closed when token_info dies' => sub {
 	my $v = make_remote();
 	no warnings 'redefine', 'once';
 	# token_info dies if read_json_from chokes on an empty/malformed
-	# vault response.  start_token_renewer must NOT propagate the die —
-	# unreachable vault => no renewer, but never a crash inside
-	# authenticate().
+	# vault response.  start_token_renewer must NOT propagate the die,
+	# since an unreachable vault means no renewer and never a crash
+	# inside authenticate().
 	local *Service::Vault::Remote::token_info = sub { die "vault unreachable\n" };
 	use warnings 'redefine';
 	my $pid;
@@ -394,7 +394,7 @@ subtest 'child exits non-zero via POSIX::_exit when loop body dies' => sub {
 		{data => {renewable => 1, ttl => 3600}};
 	};
 	# Stub the loop body to die immediately.  The eval wrap in
-	# start_token_renewer should catch it and POSIX::_exit(2) — bypassing
+	# start_token_renewer should catch it and POSIX::_exit(2), bypassing
 	# Perl's END blocks.
 	local *Service::Vault::Remote::_run_renewer_loop = sub { die "boom\n" };
 	use warnings 'redefine';
@@ -448,8 +448,8 @@ subtest 'authenticate starts the renewer after successful auth' => sub {
 	my $start_called = 0;
 	no warnings 'redefine', 'once';
 	# Already-authenticated short-circuit means authenticate() returns
-	# self without touching credentials — exactly the path real callers
-	# hit on every Genesis command.
+	# self without touching credentials, which is exactly the path real
+	# callers hit on every Genesis command.
 	local *Service::Vault::Remote::authenticated      = sub { 1 };
 	local *Service::Vault::Remote::start_token_renewer = sub {
 		$start_called++;

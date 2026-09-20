@@ -60,10 +60,11 @@ subtest 'an untracked file is not in the way' => sub {
 
 	# An operator's scratch file blocks no session, so it blocks no command
 	# either, and this row is what keeps the two readings the same.  An
-	# untracked path reports two question marks, so the index check skips it
-	# exactly as is_clean did.  The run goes on to do the rest of `genesis
-	# new`, which needs answers this row does not give it, so what is
-	# asserted is that it got past the refusal rather than that it finished.
+	# untracked path reports two question marks, so the index check skips
+	# it exactly as is_clean did.  The run goes on to do the rest of
+	# `genesis new`, which needs answers this row does not give it, so what
+	# is asserted is that it got past the refusal rather than that it
+	# finished.
 	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
 	helper::put_file($h->a . '/scratch.txt', "notes to self\n");
 

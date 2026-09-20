@@ -416,10 +416,10 @@ QUIET
 	unlike $refusal, qr/Provider::Boom::validate_config/,
 		'without the frames Carp::Always folded in behind it';
 
-	# The provider's rules are not a phase of their own, so what a provider
-	# says is gathered with every other error under the one sentence a
-	# configuration refusal carries, and the wrapper that announced the
-	# provider's half separately is gone.
+	# The provider's rules are not a phase of their own, so what a
+	# provider says is gathered with every other error under the one
+	# sentence a configuration refusal carries, and the wrapper that
+	# announced the provider's half separately is gone.
 	unlike $refusal, qr/Invalid configuration for the/,
 		'and with no second heading of its own in front of it';
 

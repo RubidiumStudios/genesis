@@ -92,8 +92,8 @@ subtest 'the bare run measures every read against the configured branch' => sub 
 	# resolves no propagation base any more and the marker warnings that
 	# used to prove where each base came from are unreachable from here.
 	# What is left to prove, and what this file is about, is that the whole
-	# run is measured against the branch the configuration names rather than
-	# against the schema default: the topology is read from trunk, the
+	# run is measured against the branch the configuration names rather
+	# than against the schema default: the topology is read from trunk, the
 	# source commit is trunk's own tip, and the branch check compares the
 	# run against trunk and so never fires.
 	plan tests => 4;

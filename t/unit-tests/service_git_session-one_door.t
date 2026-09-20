@@ -51,11 +51,11 @@ subtest 'the two subs the session replaces are gone' => sub {
 	unlike($git_pm, qr/sub restore_branch/, 'restore_branch is removed');
 
 	# The session gained a verb of this name, and it is not the method this
-	# row is about.  Service::Git's own put a branch back at its tracking ref
-	# with no session to promise anything, where the session's puts a branch
-	# back where this run found it and takes off one the run cut itself.  So
-	# what is still forbidden is a call on a git handle, and a call on a
-	# session is read as the verb rather than as a leftover.
+	# row is about.  Service::Git's own put a branch back at its tracking
+	# ref with no session to promise anything, where the session's puts a
+	# branch back where this run found it and takes off one the run cut
+	# itself.  So what is still forbidden is a call on a git handle, and a
+	# call on a session is read as the verb rather than as a leftover.
 	my @callers = grep {
 		grep {!/session/i} (get_file($_) =~ /(\$\w+)->restore_branch/g)
 	} sources();

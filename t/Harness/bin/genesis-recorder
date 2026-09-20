@@ -32,9 +32,9 @@ use constant REFUSED => 99;
 
 my $plan = read_json($ENV{GENESIS_HARNESS_CHILD_PLAN}) || {};
 
-# The stranger takes the lock before anything is read, so the window left open
-# between the session's finish and the child's start is already occupied when
-# the child's own start is recorded.
+# The stranger takes the lock before anything is read, so the window left
+# open between the session's finish and the child's start is already
+# occupied when the child's own start is recorded.
 my $holder = $plan->{hold_lock} ? hold_the_lock($plan) : undef;
 
 my %record = (
@@ -203,10 +203,10 @@ sub probe {
 # }}}
 # hold_the_lock - take the switch lock in a process of its own {{{
 #
-# The holder is a separate process because a lock this process took would be a
-# lock the child inherits rather than one it meets, and the window left open
-# between the session's finish and the child's start is a window somebody else
-# is standing in.
+# The holder is a separate process because a lock this process took would be
+# a lock the child inherits rather than one it meets, and the window left
+# open between the session's finish and the child's start is a window
+# somebody else is standing in.
 sub hold_the_lock {
 	my ($plan) = @_;
 
