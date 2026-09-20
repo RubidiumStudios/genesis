@@ -23,7 +23,7 @@ use_ok 'Genesis::CI::Propagation';
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-subtest 'the builder renders the subject D34 fixes' => sub {
+subtest 'the builder renders the subject a marker carries' => sub {
 	plan tests => 4;
 
 	is($Genesis::CI::Marker::PREFIX, '[pipeline] control@',
@@ -82,8 +82,8 @@ subtest 'a direct-mode delivery writes the built subject' => sub {
 	# read the real prefix back would pass just as well against a writer that
 	# spelled the subject with its own sprintf.  A writer that asks the
 	# builder picks the moved prefix up, and one that does not commits the
-	# string the design fixes and turns both rows red.  The first subtest is
-	# what holds the real prefix to what D34 says.
+	# fixed string and turns both rows red.  The first subtest is what holds
+	# the real prefix to its declared spelling.
 	my $subject;
 	{
 		local $Genesis::CI::Marker::PREFIX = '[moved] control@';
