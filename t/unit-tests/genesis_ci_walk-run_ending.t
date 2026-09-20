@@ -1,8 +1,8 @@
 #!/usr/bin/env perl
-# Proves T165 and T166 at the sub that decides them: both of D82's classes
+# Proves T165 and T166 at the sub that decides them.  Both run-ending classes
 # leave walk_one for the run to end on, and everything else is confined to
-# the environment that raised it.  The two run-ending rows are what cover
-# the two names is_run_fatal accepts, and the third row is the contrast that
+# the environment that raised it.  The two run-ending rows are what cover the
+# two names is_run_fatal accepts, and the third row is the contrast that
 # stops the other two passing because walk_one re-raised everything.
 use strict;
 use warnings;
@@ -91,7 +91,7 @@ subtest 'a run-fatal failure leaves walk_one for the run to end on' => sub {
 
 	is(ref($err), 'Genesis::CI::RunFailure', 'the failure is re-raised whole');
 	is($err->kind, 'run-fatal', 'still carrying the class it was raised as');
-	is($err->exit_code, 1, 'and the status D82 gives that class');
+	is($err->exit_code, 1, 'and the status that class carries');
 	is($record->{outcome}, undef,
 		'the environment records no outcome of its own');
 	is_deeply($session->{discarded}, [],
@@ -114,7 +114,7 @@ subtest 'an unsurvivable failure leaves walk_one the same way' => sub {
 	is(ref($err), 'Genesis::CI::RunFailure', 'the failure is re-raised whole');
 	is($err->kind, 'unsurvivable', 'still carrying the class it was raised as');
 	is($err->exit_code, Genesis::Exit::TEMPFAIL,
-		'and the status D82 gives that class');
+		'and the status that class carries');
 	is($record->{outcome}, undef,
 		'the environment records no outcome of its own');
 	is_deeply($session->{discarded}, [],
