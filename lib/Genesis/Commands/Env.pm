@@ -2193,8 +2193,8 @@ sub _prior_env_record {
 	# handed to the constructor is the deploying one rather than the
 	# predecessor, which the constructor only stores.  The predecessor is not
 	# loaded as an environment at all, because everything read here comes out
-	# of its exodus deployment record, and a load would cost a kit and a
-	# director for facts vault already holds.
+	# of its exodus deployment record, and a load would cost a kit for facts
+	# vault already holds.
 	require Genesis::Env::Deployment;
 	for my $at (sort {$b cmp $a} keys %$deploys) {
 		my $entry = $deploys->{$at};
