@@ -406,6 +406,12 @@ sub _build_workflow_graph {
 # is added: prior_env -> this_env.
 #
 # Returns: (\%nodes, \@edges)
+#
+# The leading underscore notwithstanding, this is called from outside
+# this class: Genesis::Top asks it for the topology an environment
+# directory describes.  The name and the arguments are a documented seam
+# rather than this file's own business, and a change to either reaches
+# that caller.
 sub _build_from_env_files {
 	my ($self, $dir) = @_;
 
