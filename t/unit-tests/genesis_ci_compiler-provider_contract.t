@@ -151,12 +151,12 @@ subtest 'the provider block is not checked a second time' => sub {
 	ok !Genesis::CI::Compiler::Validator->can('_validate_provider_section'),
 		'the validator keeps no copy of the provider check';
 
-	# D28 validated the block at load, so what reaches the compiler has
-	# already met the provider's own rules and cannot fail them here.  The
-	# base used to read the CLI class's declaration through a forwarder of
-	# its own, and under D108 a compiler asks the provider it holds, so no
-	# file of the compiler family itself names the declaration.  The sweep
-	# reads that family and not the provider compilers under it, where
+	# The block is validated at configuration load, so what reaches the
+	# compiler has already met the provider's own rules and cannot fail them
+	# here.  The base used to read the CLI class's declaration through a
+	# forwarder of its own, and now a compiler asks the provider it holds,
+	# so no file of the compiler family itself names the declaration.  The
+	# sweep reads that family and not the provider compilers under it, where
 	# Concourse reads the declaration through the provider it holds, which
 	# is what a compiler is meant to do.
 	#
