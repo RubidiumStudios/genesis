@@ -50,8 +50,8 @@ subtest 'one class per pipeline-aware registration' => sub {
 			"$cmd declares the $expected{$cmd} branch class");
 	}
 
-	# propagate is the one exception D81 carries, and it says so at its own
-	# registration rather than in a special case inside the gate.
+	# propagate is the one exception, and it says so at its own registration
+	# rather than in a special case inside the gate.
 	is(command_properties('propagate')->{branch_target}, 'control',
 		'propagate declares that it switches to control itself');
 	is(scalar(grep {
@@ -75,12 +75,11 @@ subtest 'one class per pipeline-aware registration' => sub {
 };
 
 subtest 'every registration declares which commit it means' => sub {
-	# D87 puts the default target beside the branch class, so one
-	# declaration says both which branch a command belongs to and which
-	# commit on that branch the command means.  info and the bosh
-	# subcommands report on the running deployment, so they name the deployed
-	# commit; every other command means the tip of the branch, and says so by
-	# saying nothing.
+	# The default target sits beside the branch class, so one declaration
+	# says both which branch a command belongs to and which commit on that
+	# branch the command means.  info and the bosh subcommands report on the
+	# running deployment, so they name the deployed commit; every other
+	# command means the tip of the branch, and says so by saying nothing.
 	my %targets = map {$_ => 'tip'} keys %expected;
 	$targets{$_} = 'deployed' for qw/info bosh/;
 
@@ -131,11 +130,11 @@ subtest 'only the command that deploys fast-forwards its branch' => sub {
 };
 
 subtest 'only the command that commits on control declares it' => sub {
-	# D45's refusal is about a commit that cannot reach control through a
-	# pull request, so it is asked of the command and not of the class.
-	# Every other pre-deploy command runs on control as before:
-	# pipeline-apply writes to the provider, and refusing it would leave
-	# an operator no way to turn on the very protection the key derives.
+	# The refusal is about a commit that cannot reach control through a pull
+	# request, so it is asked of the command and not of the class.  Every
+	# other pre-deploy command runs on control as before, and pipeline-apply
+	# writes to the provider, so refusing it would leave an operator no way
+	# to turn on the very protection the key derives.
 	is(command_properties('create')->{commits}, 1,
 		'create declares that it commits on control');
 
