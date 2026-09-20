@@ -7,7 +7,9 @@
 # The first row holds a token throughout, because what it proves is that a
 # repository delivering to nobody by pull request never reaches the API at
 # all.  A row that withheld the token would have proved only that a run with
-# no token makes no call, which is a different rule proved elsewhere.
+# no token makes no call.  That is a separate rule, that a run without a token
+# still runs and reports the review state as unread rather than refusing, and
+# genesis_ci_pullrequest-preview.t proves it.
 #
 # Every due commit is laid through due_commit, or through the two helpers
 # due_commit is made of where the file also has to keep a pipeline key,
