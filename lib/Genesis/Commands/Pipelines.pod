@@ -976,6 +976,209 @@ B<Examples:>
   $session->finish;
   # the operator is back on the branch they ran this from
 
+=head2 pipeline_graph([$layout])
+
+    genesis pipeline-graph
+
+Writes F<pipeline.md>, a Markdown page holding a Mermaid flowchart of the
+pipeline's environments and the edges between them.
+
+A repository whose pipeline is configured in F<.genesis/config> is drawn
+straight from C<< $top->pipeline_topology >>, because that topology is the one
+source of the DAG and no provider is involved in drawing it.  Any other
+repository is compiled first and the drawing comes off the compiler, with
+Concourse standing in as the platform, since nothing here chooses a provider
+and every compiler that emits a Concourse pipeline draws the same graph.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$layout> (optional)
+
+The pipeline layout, accepted for the legacy call shape and not read.
+
+=back
+
+B<Returns:> Nothing. It writes the file, says where it wrote it, and exits 0.
+
+B<Errors:> Bails where the repository has no pipeline section for the parser
+to read.
+
+B<Examples:>
+
+  genesis pipeline-graph
+  # Wrote pipeline.md
+
+=head2 pipeline_describe([$layout])
+
+    genesis pipeline-describe
+
+Prints the pipeline's progression in the operator's own words, which is the
+source control the pipeline reads and writes, and then each environment with
+the environments it follows.
+
+A repository whose pipeline is configured in F<.genesis/config> is described
+from C<< $top->pipeline_topology >>, and the source control values are printed
+only on that path, because a repository with no pipeline configured has
+nothing for those derivations to read.  Any other repository is compiled and
+the compiler tells it, with Concourse standing in for the same reason
+L</pipeline_graph([$layout])> gives.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$layout> (optional)
+
+The pipeline layout, accepted for the legacy call shape and not read.
+
+=back
+
+B<Returns:> Nothing. It prints the description and exits 0.
+
+B<Errors:> Bails where the repository has no pipeline section for the parser
+to read.
+
+B<Examples:>
+
+  genesis pipeline-describe
+
+=head2 diff()
+
+    genesis pipeline-diff
+
+Compiles the pipeline and prints a unified diff between the pipeline
+Concourse is running and the one this repository would set.
+
+The live pipeline is read with C<fly get-pipeline>, so a target that does not
+carry the pipeline is reported as nothing to diff against rather than as a
+failure, with the command that would set it named beside the report.
+
+B<Parameters:> None.  The environment is not an argument to this command.
+
+B<Options (via C<get_options>):>
+
+=over 4
+
+=item C<--target>
+
+The C<fly> target to read the live pipeline from.  It defaults to the
+configured provider target, and then to the pipeline's own name.
+
+=item C<--skip-vault>
+
+Compile without vault access.
+
+=back
+
+B<Returns:> Nothing. It prints the diff, or says there is none, and exits 0.
+
+B<Errors:> Bails where the compiled AST carries no name and where the
+Concourse provider produced no F<pipeline.yml>.
+
+B<Examples:>
+
+  genesis pipeline-diff
+  # No differences.  The compiled pipeline matches the live pipeline.
+
+=head2 status([$env])
+
+    genesis pipeline-status-jobs
+    genesis pipeline-status-jobs sandbox
+
+Prints one line per job in the running pipeline, which is the environment, the
+state of its last build, and whether it is paused or errored.
+
+The jobs are ordered by the workflow order the compiled AST carries, so the
+table reads in the order the pipeline runs, and any job the AST does not name
+follows in alphabetical order rather than being left out.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env> (optional)
+
+Print only the job of this name.
+
+=back
+
+B<Options (via C<get_options>):> C<--target> and C<--skip-vault>, as
+L</diff()> takes them.
+
+B<Returns:> Nothing. It prints the table and exits 0.
+
+B<Errors:> Bails where the compiled AST carries no name, where C<fly> could
+not list the jobs, and where its answer is not JSON this command can read.
+
+B<Examples:>
+
+  genesis pipeline-status-jobs
+
+=head2 pause([$env])
+
+    genesis pipeline-pause
+    genesis pipeline-pause sandbox
+
+Pauses one environment's job, or the whole pipeline where no environment is
+named, through C<fly>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env> (optional)
+
+The job to pause.  Pauses the pipeline itself where it is omitted.
+
+=back
+
+B<Options (via C<get_options>):> C<--target> and C<--skip-vault>, as
+L</diff()> takes them.
+
+B<Returns:> Nothing. It says what it paused and exits 0.
+
+B<Errors:> Bails where the compiled AST carries no name and where C<fly>
+refuses the pause.
+
+B<Examples:>
+
+  genesis pipeline-pause sandbox
+  # Paused job sandbox in pipeline my-bosh
+
+=head2 resume([$env])
+
+    genesis pipeline-resume
+    genesis pipeline-resume sandbox
+
+Resumes one environment's job, or the whole pipeline where no environment is
+named, through C<fly>.  It is L</pause([$env])> the other way round, and the
+two take the same arguments and the same options.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env> (optional)
+
+The job to resume.  Resumes the pipeline itself where it is omitted.
+
+=back
+
+B<Options (via C<get_options>):> C<--target> and C<--skip-vault>, as
+L</diff()> takes them.
+
+B<Returns:> Nothing. It says what it resumed and exits 0.
+
+B<Errors:> Bails where the compiled AST carries no name and where C<fly>
+refuses the resume.
+
+B<Examples:>
+
+  genesis pipeline-resume
+  # Resumed pipeline my-bosh
+
 =head1 INTERNAL FUNCTIONS
 
 =head2 INIT_FILE_BODY
@@ -1678,7 +1881,7 @@ B<Examples:>
   #         Set pipeline.enabled: true on control, commit it, then run
   #         genesis pipeline-apply again.  Nothing was written.
 
-=head2 _root_environments($top)
+=head2 _root_environments
 
 The deployment root's environments in DAG order, off
 C<< $top->pipeline_topology >>, which both no-argument forms walk.  Bails with
@@ -1710,6 +1913,233 @@ B<Examples:>
 
   my @envs = _root_environments($top);
   # ('lab', 'qa', 'prod'), in the order the walk reads them
+
+=head2 _concourse_fly_flags($result, $opts, $name)
+
+    my ($target, $k_flag) = _concourse_fly_flags($result, $opts, $name);
+
+The C<fly> target this run talks to, and the insecure flag to talk to it
+with, for the four commands that shell out to C<fly>.
+
+The target is the C<--target> option where the operator gave one, then the
+configured provider target, and then the pipeline's own name.  Both values are
+read off the compiler the compile handed back, and they are derived together
+because the second becomes the C<-k> flag and a rewrite that took only the
+first would drop it for all four commands.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$result>
+
+The compile's answer, whose C<compiler> key is what the provider options are
+read through.
+
+=item C<$opts>
+
+The command's own options.
+
+=item C<$name>
+
+The pipeline's name, which is the last fallback for the target.
+
+=back
+
+B<Returns:> Two values, the target and either C<' -k'> or the empty string.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my ($target, $k) = _concourse_fly_flags($result, {}, 'my-bosh');
+  # ('my-bosh', '')
+
+=head2 _describe_topology($top, $nodes, $edges)
+
+    _describe_topology($top, $topo->{nodes}, $topo->{edges});
+
+Prints the pipeline's name, its provider, and then each environment under the
+environment it follows, for a repository whose topology comes from its
+environment files.
+
+A topology with no nodes in it is said to hold no environments with pipeline
+metadata rather than printed as an empty tree, because an empty tree reads as
+a pipeline with nothing due.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment root, read for the pipeline's name and its provider type.
+
+=item C<$nodes>
+
+The topology's nodes, keyed by environment name.
+
+=item C<$edges>
+
+The topology's edges, each a hash of C<from> and C<to>.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _describe_topology($top, {}, []);
+  # No environments with pipeline metadata found.
+
+=head2 _dump_debug_artifacts($debug_dir, $result, $platform)
+
+    _dump_debug_artifacts('/tmp/ci-debug', $result, 'concourse');
+
+Writes the compiler's intermediate answers into a directory, numbered in the
+order the compile produced them, and says where each one went.
+
+Each artefact is written only where the compile produced it, so a debug
+directory holds what this compile actually did rather than a fixed set of
+files with empty ones among them.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$debug_dir>
+
+The directory to write into.  It is created where it does not exist.
+
+=item C<$result>
+
+The compile's answer, whose parsed configuration, AST, and emitted output are
+what get written.
+
+=item C<$platform>
+
+The platform the compile ran for, which names the emitted output.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> Bails where the directory or any file cannot be written.
+
+B<Examples:>
+
+  genesis pipeline-apply --debug-dir /tmp/ci-debug
+  # Debug: wrote /tmp/ci-debug/01-parsed.json
+
+=head2 _get_top($opts, %defaults)
+
+    my $top = _get_top($opts);
+    my $top = _get_top($opts, skip_vault => 1);
+
+The deployment root for a pipeline command, with or without a vault on it.
+
+A command that only compiles asks for one with C<skip_vault>, because nothing
+it does reads a secret.  Every other command gets a root carrying the vault
+the operator named or the repository configured, and a repository with
+neither is refused here rather than at the first read.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$opts>
+
+The command's options.  C<--skip-vault> and C<--vault> are what this reads.
+
+=item C<%defaults>
+
+C<skip_vault> says that this caller never needs a vault, whatever the
+operator asked for.
+
+=back
+
+B<Returns:> The C<Genesis::Top>.
+
+B<Errors:> Bails where a vault is wanted and neither the options nor the
+repository names one, naming C<--skip-vault> as the way to compile without.
+
+B<Examples:>
+
+  my $top = _get_top($opts, skip_vault => 1);
+
+=head2 _job_status_label($job)
+
+    my $label = _job_status_label($job);
+
+The word a job's row in the status table reads, out of one entry of C<fly
+jobs --json>.
+
+A paused job reads paused whatever its last build did, because that is the
+fact an operator acts on, and a job with no finished build reads pending
+rather than blank.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$job>
+
+One job as C<fly> described it.
+
+=back
+
+B<Returns:> The label, as one word.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _job_status_label({paused => 1});                        # 'paused'
+  _job_status_label({finished_build => {status => 'ok'}}); # 'ok'
+  _job_status_label({});                                   # 'pending'
+
+=head2 _verify_deployed($env_name, $env, $git)
+
+    _verify_deployed('qa', $env, $git);
+
+Refuses a cascade from an environment whose branch carries work nobody has
+deployed, by reading the commit the newest successful deployment recorded and
+comparing it with the branch's own tip.
+
+Two states are warned about rather than refused.  A repository whose vault
+cannot be reached cannot be asked at all, and an environment deployed before
+pipeline tracking existed recorded no commit to compare, so in both cases the
+operator is told what could not be checked and the cascade goes on.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env_name>
+
+The environment's name, which is also its branch.
+
+=item C<$env>
+
+The environment, which the deployment record is read through.
+
+=item C<$git>
+
+The handle the branch tip is read off.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> Bails where the environment has never deployed successfully, and
+where the commit it deployed is not the commit its branch now holds.
+
+B<Examples:>
+
+  _verify_deployed('qa', $env, $git);
+  # [FATAL] Environment qa has been propagated but not yet deployed
 
 =head2 _write_trailer_holds($top, $run)
 
