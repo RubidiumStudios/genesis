@@ -145,6 +145,11 @@ subtest 'the lock is per working tree' => sub {
 	my $refused = exception(sub { $sa->switch($h->slug('qa')) });
 	like($refused, qr/\b$pid\b/,
 		'while copy A is still refused, naming the holder in copy A');
+
+	# The refused switch left the session open on control, and a session
+	# still open at exit is what the last-resort net aborts and complains
+	# about, so this row closes the one it opened.
+	$sa->finish;
 	release_session_lock($h, $pid);
 };
 
