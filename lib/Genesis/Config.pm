@@ -928,7 +928,7 @@ sub _validate_key {
 		# hands the block to the module that owns the shape.
 		push @errors, $self->_validate_custom_struct($key, $schema);
 	} elsif ($type eq 'opaque') {
-		# Passthrough.  Any value accepted, sub-keys not validated here.
+		# A passthrough accepts any value and validates no sub-keys here.
 		# Used for config sections delegated to other modules (see Top::register_config_section).
 	} elsif ($type eq 'any') {
 		# Do nothing
