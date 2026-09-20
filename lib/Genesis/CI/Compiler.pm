@@ -237,6 +237,22 @@ sub validate_config_section {
 }
 
 # }}}
+# _flat_name - an emitted file's name as one path segment {{{
+#
+# An emitted file may sit under a directory, and two places need its name
+# flattened to a single segment: the override that sits beside the
+# configuration, and the temporary file each merge is based on.  They
+# flatten here rather than each for itself, because a file one of them
+# finds and the other misses fails at the open with a directory nobody
+# created.
+sub _flat_name {
+	my ($name) = @_;
+	$name =~ s{^\./+}{};
+	$name =~ s{/+}{-}g;
+	return $name;
+}
+
+# }}}
 # override_file_names - the override files this run may merge {{{
 #
 # D27 put the override beside .genesis/config and took the old CI
@@ -262,8 +278,7 @@ sub override_file_names {
 
 	return map {
 		(my $base = $_) =~ s{\.[^./]+$}{};
-		$base =~ s{^\./+}{};
-		$base =~ s{/+}{-}g;
+		$base = _flat_name($base);
 		".genesis/pipeline-overrides-${provider_type}-${base}.yml"
 	} @$output_names;
 }
@@ -333,7 +348,7 @@ sub _apply_provider_overrides {
 		info("Applying %s...", humanize_path($override, base_dir => $top->path))
 			unless $single;
 
-		my $base_path = "$dir/override-base-${filename}";
+		my $base_path = "$dir/override-base-" . _flat_name($filename);
 		open(my $fh, '>', $base_path)
 			or bail("Cannot write temporary override base %s: %s", $base_path, $!);
 		print $fh $content

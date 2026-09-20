@@ -330,6 +330,32 @@ B<Examples:>
 
 =head1 INTERNAL METHODS
 
+=head2 _flat_name($name)
+
+An emitted file's name as one path segment, with a leading C<./> dropped
+and every separator turned into a dash. Two things need it: the override
+file that sits beside the configuration, and the temporary file each
+merge is based on. They ask for it here rather than each flattening for
+itself, because a file one of them finds and the other misses fails at
+the open with a directory nobody created.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The emitted file's name, which may carry directories.
+
+=back
+
+B<Returns:> the flattened name, as a string.
+
+B<Examples:>
+
+    Genesis::CI::Compiler::_flat_name('jobs/deploy.yml');
+    # 'jobs-deploy.yml'
+
 =head2 _apply_provider_overrides($output, $provider_type)
 
 Merges the override files over the emitted output and returns what came

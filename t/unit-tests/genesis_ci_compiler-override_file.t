@@ -311,4 +311,29 @@ subtest 'a merge spruce refuses exits at the configuration code' => sub {
 		'an override spruce cannot merge is a configuration refusal';
 };
 
+subtest 'an emitted file in a subdirectory still merges' => sub {
+	plan skip_all => 'spruce not in PATH' unless have_spruce();
+	plan tests => 1;
+
+	# The override name flattens an emitted file's separators to dashes so
+	# that it stays one path segment beside the configuration.  The
+	# temporary file the merge is based on is named from the same string,
+	# and a name carrying its separators wants a directory under the work
+	# directory that nothing creates.  Concourse emits one file at the top
+	# level, so the first provider to emit a tree is what meets this.
+	my ($tmp, $top) = override_top();
+	write_override($tmp, "---\nextra_key: injected_by_override\n");
+
+	my $compiler = Genesis::CI::Compiler->new(top => $top);
+	my $output   = {'jobs/deploy.yml' => "---\nbase_key: base_value\n"};
+
+	my $result;
+	output_from {
+		$result = $compiler->_apply_provider_overrides($output, 'concourse');
+	};
+
+	like $result->{'jobs/deploy.yml'}, qr/extra_key:\s*injected_by_override/,
+		'a file emitted under a directory is merged like any other';
+};
+
 done_testing;
