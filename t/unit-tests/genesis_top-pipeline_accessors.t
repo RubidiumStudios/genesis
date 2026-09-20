@@ -208,12 +208,12 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 	plan tests => 2;
 
 	# The readers the design allows, and why each one may read the key
-	# rather than ask the accessor.  Under D105 the schema builder is no
-	# longer among them: the block declares the field that decides its
-	# shape, so nothing reads the value raw to build a schema out of it.
-	# The capability gates have left it too, because every provider
-	# declares its abilities now, so the gates take the type from the
-	# accessor and read a declaration for whatever it answers.
+	# rather than ask the accessor.  The schema builder is no longer among
+	# them, because the block declares the field that decides its shape, so
+	# nothing reads the value raw to build a schema out of it.  The
+	# capability gates have left it too, because every provider declares its
+	# abilities now, so the gates take the type from the accessor and read a
+	# declaration for whatever it answers.
 	my @allowed = (
 		# It is the accessor, and every caller outside the load-time
 		# validation below reads the provider through it.
@@ -256,7 +256,7 @@ subtest 'the provider block declares what decides its shape' => sub {
 	is $schema->{discriminator}, 'type',
 		'and it names the field that decides';
 	is $schema->{discriminator_default}, 'manual',
-		"and D15's default sits on the declaration";
+		'and the manual default sits on the declaration';
 	is_deeply $schema->{default}, {},
 		'beside the empty block that lets that default be reached';
 	is_deeply [sort keys %{$schema->{modules}}],
