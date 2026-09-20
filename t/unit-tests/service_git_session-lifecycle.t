@@ -138,8 +138,8 @@ subtest 'a discard names the paths it is about to throw away' => sub {
 	$session->switch($h->slug('qa'));
 
 	# The file is committed onto the branch first, because the change has to
-	# be a tracked one: an untracked file survives a discard under D84 and so
-	# is not evidence a discard owes anybody.
+	# be a tracked one.  An untracked file survives a discard and so is not
+	# evidence a discard owes anybody.
 	$git->checkout_file($session->origin->{head}, 'qa.yml');
 	$git->commit('deliver qa.yml', 'qa.yml');
 	helper::put_file($git->root . '/qa.yml', "---\nedited: in the tree\n");
