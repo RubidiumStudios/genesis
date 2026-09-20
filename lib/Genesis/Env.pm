@@ -5790,13 +5790,13 @@ sub update_deployment_exodus {
 		# one message.  That is H37, and UNAVAILABLE is what it costs.
 		bail({exitcode => UNAVAILABLE},
 			"#C{%s} %s, but its deployment record was not written:%s\n\n".
-			"The environment is running.  Restore the vault at #C{%s} and run ".
-			"#C{genesis %s info} to confirm what is recorded, then %s only if ".
-			"the record is still missing.",
+			"The environment is running.  Restore write access to #C{%s} at ".
+			"the vault #C{%s} and run #C{genesis %s info} to confirm what is ".
+			"recorded, then %s only if the record is still missing.",
 			$self->{name},
 			$action eq 'deploy' ? 'deployed' : 'terminated',
 			join("\n[[  - >>", '', @errors),
-			$self->vault->url, $self->{name},
+			$self->exodus_base, $self->vault->url, $self->{name},
 			$action eq 'deploy' ? 'redeploy' : 'terminate again'
 		);
 	}
