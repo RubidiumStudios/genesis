@@ -288,7 +288,7 @@ subtest 'the tool underneath is found past every fixture directory' => sub {
 	# fixture directories, and an answer of nothing is neither of them too,
 	# so what the lookup found is named first.
 	ok(defined($found) && length($found), 'the lookup answers a path');
-	ok(-x $found, 'and the path it answers can be run');
+	ok($found && -x $found, 'and the path it answers can be run');
 
 	unlike($found, qr{/git-2\.30\.0/},
 		'the git that only reports a version is stepped over');
