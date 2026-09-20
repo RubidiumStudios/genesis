@@ -153,6 +153,45 @@ subtest 'a failed exodus write after BOSH deployed names its own code' => sub {
 	restore_vault($h);
 };
 
+subtest 'a failed deploy records the options it ran with' => sub {
+	plan tests => 3;
+
+	# The successful arm composes the flags out of the options the operator
+	# gave and writes them beside the record.  The failing arm wrote an
+	# empty string, so an audit trail could say what a deploy that worked
+	# was asked to do and never what a deploy that failed was asked to do,
+	# which is the one an operator goes back to read.
+	my $h = tracked_harness();
+	local $ENV{GENESIS_HARNESS_BOSH_FAILS} = 1;
+
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
+		'qa', 'deploy', '--no-propagate', '--recreate', '-y', 'r');
+	isnt($exit, 0, 'the deploy failed');
+
+	my $record = newest_record($h, $h->env_path('qa').'/deployments');
+	isnt($record, undef, 'and it still wrote a record to read');
+	like($record->{flags} // '', qr/--recreate/,
+		'which names the options the run was given');
+};
+
+subtest 'a short answer from BOSH is read without reading past its end' => sub {
+	plan tests => 2;
+
+	# The failure arm reads the last five lines of what BOSH said, to tell
+	# an operator who cancelled from a deployment that fell over, and it
+	# took the slice without asking how many lines there were.  A director
+	# that says less than five then hands Perl a read past the end of the
+	# list, once for every line that is not there.
+	my $h = tracked_harness();
+	local $ENV{GENESIS_HARNESS_BOSH_FAILS} = 1;
+
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
+		'qa', 'deploy', '--no-propagate', '-y', 'r');
+	isnt($exit, 0, 'the deploy failed');
+	unlike($err, qr/uninitialized value/,
+		'and nothing was read past the end of what BOSH said');
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet
