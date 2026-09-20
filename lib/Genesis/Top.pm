@@ -2174,6 +2174,7 @@ sub _pipeline_config_schema {
 			# it found.  The default stays here, on the declaration, so an
 			# enabled section with no provider block is still a manual
 			# pipeline.
+			#
 			# The empty hash is what lets that default be reached, because
 			# validation walks into a block that is present and nowhere
 			# else.
