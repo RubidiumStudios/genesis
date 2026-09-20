@@ -166,6 +166,19 @@ sub refuse {
 # A non-blocking flock, so the recorder answers rather than waiting.  The
 # holder writes its pid on the first line and its command on the second, which
 # is how a recorded child can name the stranger standing in the window.
+#
+# Taking the lock is what answers the question, so the probe holds it for the
+# two calls between the test and the release.  A child asking for it inside
+# that window is refused at TEMPFAIL, and the polling loop asks every fifty
+# milliseconds beside a real genesis, so the refusal a row reads can be this
+# probe's doing rather than the product's.
+#
+# Reading the pid line and asking whether that process is alive would take
+# the window away, and it is what the harness waits on elsewhere, but it
+# cannot replace the flock while the lock file outlives the lock.  The holder
+# truncates the file when it takes the lock and writes nothing when it lets
+# go, so a released lock still names a pid, and a probe that trusted the line
+# would call a free lock held for as long as its last holder ran.
 sub probe {
 	my ($file) = @_;
 	return undef unless defined $file && -f $file;
