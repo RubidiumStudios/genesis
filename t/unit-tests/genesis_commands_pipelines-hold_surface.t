@@ -2,7 +2,8 @@
 # Proves T308, that the two hold commands register with the pipeline group and
 # the pre-deploy branch class, that they take the group's disowned refusal,
 # that the record path and the readers the earlier steps left reachable still
-# resolve, and that the command reference records the boundary D59 asks for.
+# resolve, and that the command reference records the boundary between what is
+# built now and what is deferred.
 use strict;
 use warnings;
 use utf8;
@@ -44,7 +45,7 @@ subtest 'both commands register' => sub {
 subtest 'both commands take the pipeline group refusal' => sub {
 	# Four rows, and one more for each of the two runs' own restoration
 	# assertions.  A repository with an applied record and the pipeline
-	# disabled is the disowned state D64 names.
+	# disabled is the disowned state.
 	plan tests => 6;
 
 	for my $command (qw(pipeline-hold pipeline-release)) {
