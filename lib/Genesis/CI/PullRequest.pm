@@ -506,9 +506,10 @@ sub carry_state {
 # so what is shared is the building and the reading and nothing else.
 #
 # An environment that holds a proposed record and whose policy no longer asks
-# for a pull request does not earn a client here.  D57 draws the rule wider
-# than that, and both commands narrow it the same way, so such an environment
-# reads its proposed record unvalidated in both rather than in one.
+# for a pull request does not earn a client here.  The design draws the rule
+# wider than that, counting a proposed record as reason enough to ask the
+# API, and both commands narrow it the same way, so such an environment reads
+# its proposed record unvalidated in both rather than in one.
 #
 # The client goes back beside the answer, because the walk reads a marker a
 # squash merge dropped out of the merged pull request itself and wants the
