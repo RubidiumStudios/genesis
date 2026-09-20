@@ -144,6 +144,15 @@ sub _fault {
 	# that sub and holds this answer to the same keys, so a key added there
 	# cannot leave this one answering a shape the product never produces.
 	if ($kind eq 'transport') {
+		# The shape below is fetch_branches's and nobody else's, so arming
+		# transport on another step would hand that step's caller a result
+		# it never returns.  push promises an arrayref, for one, and a row
+		# that got a hashref instead would fail somewhere well away from
+		# the fixture that caused it.  sever_remote already arms transport
+		# on fetch_branches alone; this is for a row that arms it by hand.
+		die "the harness answers a transport fault for fetch_branches, ".
+		    "not for $step\n" unless $step eq 'fetch_branches';
+
 		require Service::Git;
 		my $err = ($armed->{message} // "the harness severed $step on call $n")."\n";
 		my $result = {
