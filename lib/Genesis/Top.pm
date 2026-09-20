@@ -2420,7 +2420,8 @@ sub _pipeline_env_keys_schema {
 				description => 'Deployments whose exodus records this one reads'
 			},
 
-			# Renamed, with its path semantics unchanged.
+			# This key was once called genesis.pipeline.required_files, and
+			# its path semantics are unchanged.
 			track_additional_files => {
 				type        => 'array',
 				subtype     => 'string',
