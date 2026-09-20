@@ -397,7 +397,7 @@ sub _recheck_control {
 		                  $named, $control, $named, $control);
 	} else {
 		# An answer the query grew since these arms were written.  Naming
-		# it is all this can honestly do: divergence was the fall-through
+		# it is all this can honestly do.  Divergence was the fall-through
 		# once, and it read two counts out of a record that need not carry
 		# either, so an unknown state was told to the operator as a
 		# divergence of no commits at all.
