@@ -578,11 +578,10 @@ sub heads_in {
 # }}}
 # reachable_on_r - can R reach this commit at all {{{
 #
-# A record naming a commit R cannot reach is the breach D103's staleness read
-# and the pre-flight both have to catch, and a row proves it by asking R
-# rather than by trusting the record.  The object is looked for first,
-# because merge-base cannot be asked about a commit the repository does not
-# hold.
+# A record naming a commit R cannot reach is the breach the staleness read and
+# the pre-flight both have to catch, and a row proves it by asking R rather
+# than by trusting the record.  The object is looked for first, because
+# merge-base cannot be asked about a commit the repository does not hold.
 sub reachable_on_r {
 	my ($self, $sha) = @_;
 	return 0 unless $sha;
@@ -969,18 +968,18 @@ sub _seed_control {
 #
 # An automated provider gets the whole automated shape as well, which is the
 # provider's target, the clone credential, the committer identity, and the
-# shuttle, the vault, and the locker of D23.  A repository that names an
-# automation and carries none of them is refused by the schema and by the
-# Concourse provider's own validate_config, and both of those run on every
-# load, so a row that asks for an automated provider and nothing else would
-# meet them before it reached whatever it came to prove.  The blocks come
-# from automation_blocks, which is the same answer the automated shape
-# writes, and the target says harness because nothing here talks to a real
-# Concourse.  They are written before the source-control loop rather than
-# after it, so a row that names an auth type or a committer identity of its
-# own lands on top of them instead of losing to them without a word.  A row
-# that cares what any of the rest is writes its own through the pipeline
-# hashref, which is set last.
+# shuttle, the vault, and the locker.  A repository that names an automation
+# and carries none of them is refused by the schema and by the Concourse
+# provider's own validate_config, and both of those run on every load, so a
+# row that asks for an automated provider and nothing else would meet them
+# before it reached whatever it came to prove.  The blocks come from
+# automation_blocks, which is the same answer the automated shape writes, and
+# the target says harness because nothing here talks to a real Concourse.
+# They are written before the source-control loop rather than after it, so a
+# row that names an auth type or a committer identity of its own lands on top
+# of them instead of losing to them without a word.  A row that cares what any
+# of the rest is writes its own through the pipeline hashref, which is set
+# last.
 sub _seed_pipeline_section {
 	my ($self, $root) = @_;
 	my $want = $self->{pipeline};
@@ -1073,7 +1072,7 @@ sub _embed_genesis {
 }
 
 # }}}
-# Accessors - the paths, the names, and the two vault addresses D103 fixes {{{
+# # Accessors - the paths, the names, and the two vault addresses {{{
 sub r { $_[0]->{r} }
 sub a { $_[0]->{a} }
 sub b { $_[0]->{b} }
@@ -1343,8 +1342,8 @@ sub _branch_parent {
 # }}}
 # init_branch - cut an environment's branch on R as the apply would {{{
 #
-# D42 makes the missing deployment branch an orphan whose root commit adds a
-# single init file and carries [ci skip], and D80 has the apply create it with
+# A missing deployment branch is cut as an orphan whose root commit adds a
+# single init file and carries [ci skip], and the apply creates it with
 # plumbing and no checkout.  We write the objects straight into copy A's
 # database with a private index and push the ref, so no working tree moves.
 sub init_branch {
@@ -1388,10 +1387,11 @@ sub init_branch {
 # }}}
 # deliver - write one delivered commit onto a deployment branch {{{
 #
-# A delivery is a mirror under D69, so the commit's tree is the propagation set
-# as it stood at the delivered control commit and nothing else.  The keep and
-# corrupt options exist so a row can stop the mirror's removing half or land a
-# file at the wrong content, which is what the snapshot assertion has to catch.
+# A delivery is a mirror rather than an overlay, so the commit's tree is the
+# propagation set as it stood at the delivered control commit and nothing
+# else.  The keep and corrupt options exist so a row can stop the mirror's
+# removing half or land a file at the wrong content, which is what the
+# snapshot assertion has to catch.
 #
 # It is written in copy B by default, because a delivery is a teammate's
 # published work and the operator's clone is meant to read behind it until it
@@ -1586,7 +1586,7 @@ sub edited_file {
 # }}}
 # _tracked_files - the tracked list an environment file declares at a commit {{{
 #
-# D69 reads the set from the tree at the commit being delivered, so the list
+# The set is read from the tree at the commit being delivered, so the list
 # that narrows it is read there too and never from the working tree.  The
 # answer is the list's deployment-root-relative paths where the file declares
 # one, and undef where it declares none, which is how propagation_set tells a
@@ -1686,9 +1686,9 @@ sub _ensure_branch {
 # }}}
 # hand_commit - a commit on a branch carrying no marker {{{
 #
-# D33 keeps the emergency hatch open, so a row needs a commit an operator
-# made by hand.  It is written from copy B by default, because a hand edit
-# the operator's own clone has not seen is the interesting case.
+# A hand commit pushed to R is the emergency hatch, so a row needs a commit an
+# operator made by hand.  It is written from copy B by default, because a hand
+# edit the operator's own clone has not seen is the interesting case.
 sub hand_commit {
 	my ($self, $branch, %opts) = @_;
 	my $copy = $opts{copy} // 'b';
@@ -1833,9 +1833,9 @@ sub diverge {
 # }}}
 # move_on_r - have copy B advance a branch on R behind copy A's back {{{
 #
-# This is how a row makes an expected-tip push fail under D51 and D83.  Copy
-# A is not refreshed afterwards, so its remote-tracking ref still names the
-# commit the run will offer git as the expected tip.
+# This is how a row makes an expected-tip push fail.  Copy A is not refreshed
+# afterwards, so its remote-tracking ref still names the commit the run will
+# offer git as the expected tip.
 sub move_on_r {
 	my ($self, $branch, %opts) = @_;
 	# The branch is moved with a checkout rather than with update-ref, so
@@ -2218,7 +2218,7 @@ sub move_on_r_at {
 # add_deployment_root - a second root sharing an environment name {{{
 #
 # The H32 shape: one repository, two deployment roots, one environment name.
-# Under D66 each root composes its own slug, so the two never share a branch.
+# Each deployment root composes its own slug, so the two never share a branch.
 #
 # Genesis::Top->create appends a directory to the path it is handed, so naming
 # that directory outright lands the second root at its repository-relative path
@@ -2272,9 +2272,9 @@ sub add_deployment_root {
 # write_env_file - write an environment file on control {{{
 #
 # The site option writes the file at a level of the hierarchy rather than at
-# the leaf, which is what the merged-read rows of D79 need.  The type option is
-# taken for symmetry with the helpers that compose a slug and is not written,
-# because nothing in the file body names a deployment type.
+# the leaf, which is what the rows proving the merged read need.  The type
+# option is taken for symmetry with the helpers that compose a slug and is not
+# written, because nothing in the file body names a deployment type.
 #
 # A value that is an arrayref renders as a YAML list rather than a scalar,
 # because genesis.pipeline.track_dependencies and its neighbours are lists and
@@ -2645,8 +2645,9 @@ sub _artifact_blob {
 # }}}
 # _now - the one timestamp form a record's value takes {{{
 #
-# EXODUS_TIME_FORMAT under D58, which is the value form.  A path never carries
-# one of these, and the two forms are kept apart on purpose.
+# A time held as a value takes EXODUS_TIME_FORMAT, which is the value form.  A
+# path never carries one of these, and the two forms are kept apart on
+# purpose.
 sub _now {
 	my ($self, $at, $offset) = @_;
 	return $at if defined $at;
@@ -2659,7 +2660,7 @@ sub _now {
 #
 # The leading underscore makes the address unreachable from any environment,
 # because Genesis::Env::_env_name_errors requires a name to start with a
-# lowercase letter.  That is D103's reason for choosing it.
+# lowercase letter.  That is why the address was chosen.
 sub fixture_applied {
 	my ($self, %opts) = @_;
 	return $self->_write_record($self->applied_path(%opts),
@@ -2687,12 +2688,12 @@ sub fixture_pipeline_record {
 # certify - write or advance an environment's exodus deployment record {{{
 #
 # git.commit is the deployment-branch commit the deploy stood on and
-# git.control_commit is the control commit that tip's newest marker names,
-# which D87 makes the pair the hatch case has to tell apart.
+# git.control_commit is the control commit that tip's newest marker names, and
+# those two are the pair the hatch case has to tell apart.
 #
-# dependencies_read is the fact half of the staleness comparison under D77, and
-# it is written as one comma-joined value rather than as a list, because that
-# is the one form a flat exodus record can carry.
+# dependencies_read is the fact half of the staleness comparison, and it is
+# written as one comma-joined value rather than as a list, because that is the
+# one form a flat exodus record can carry.
 #
 # artifacts belongs to the audit rather than to the flat record, because that
 # is where the reader looks for it, and it is taken as a hash of filename to
@@ -3332,11 +3333,11 @@ sub bosh_runs {
 # }}}
 # fixture_preflight - the three shapes the pre-flight classifies {{{
 #
-# D80 has the pre-flight name a safe.directory refusal, a missing committer
-# identity, and a repository with no commits, each with its fix.  Each shape is
-# built in a fresh repository beside the harness rather than in either clone,
-# because the safe.directory shape needs an ownership git will actually refuse
-# and neither clone can be given one.
+# The pre-flight names a safe.directory refusal, a missing committer identity,
+# and a repository with no commits, each with its fix.  Each shape is built in
+# a fresh repository beside the harness rather than in either clone, because
+# the safe.directory shape needs an ownership git will actually refuse and
+# neither clone can be given one.
 #
 # The first two shapes leave a marker in the repository and lean on the fixture
 # git for the rest, because neither an ownership git refuses nor a missing
@@ -3605,10 +3606,10 @@ sub assert_w_restored {
 # }}}
 # assert_snapshot_invariant - I7, read through {{{
 #
-# Two comparisons and not one, for D82's reason.  The source tree at the
-# delivered control commit carries every environment's files, so no
-# whole-tree comparison is possible: the branch has to match the source over
-# the set's paths, and hold nothing outside the set.  The second is the half
+# The check is two comparisons and not one.  The source tree at the delivered
+# control commit carries every environment's files, so no whole-tree
+# comparison is possible.  The branch has to match the source over the set's
+# paths, and it has to hold nothing outside the set.  The second is the half
 # that fires in practice, because a copy-only writer never removes a leftover
 # init or a path that dropped out of the set.
 sub assert_snapshot_invariant {
@@ -4356,9 +4357,9 @@ sub gh_calls {
 # fixture directory to the run under test alone, which is what keeps the
 # harness's own calls on the real binaries.
 #
-# hold_lock has the wrapper put a stranger in the window D46 leaves open
-# between the session's finish and the child's own start, and probe has it
-# poll the lock while the child runs.
+# hold_lock has the wrapper put a stranger in the window left open between the
+# session's finish and the child's own start, and probe has it poll the lock
+# while the child runs.
 sub child_recorder {
 	my ($self, %opts) = @_;
 	my $copy = $opts{copy} // 'a';
@@ -4486,11 +4487,12 @@ sub lock_probe_log {
 # }}}
 # shuttle_spy, shuttle_requests - what a run put to the shuttle {{{
 #
-# Under the manual provider there is no backend at all and D23 refuses a file
-# one, so nothing in the tree can tell a run that made no request from a run
-# that had nowhere to make one.  The spy is that difference: the log it names
-# is empty until something writes a request into it, and a row reading an
-# empty log is reading an answer rather than an absence.
+# Under the manual provider there is no backend at all, and the shuttle never
+# takes a file backend, so nothing in the tree can tell a run that made no
+# request from a run that had nowhere to make one.  The spy is that
+# difference, because the log it names is empty until something writes a
+# request into it, and a row reading an empty log is reading an answer rather
+# than an absence.
 #
 # The log is written empty rather than removed, so a row that reads no
 # requests back has read a file the spy really laid down.  A reader that
@@ -4835,11 +4837,11 @@ sub _automation_preamble {
 # }}}
 # automation_blocks, automation_block_lines - what an automation requires {{{
 #
-# Under D23 an automated provider reaches a shuttle, a vault, and a locker,
-# and the configuration schema requires all three of it, so a fixture that
-# names an automation has to carry them.  Six test files write the same nine
-# lines out by hand today, which means the next key an automation requires
-# has to be added in six places.  This is the one answer.
+# An automated provider reaches a shuttle, a vault, and a locker, and the
+# configuration schema requires all three of it, so a fixture that names an
+# automation has to carry them.  Six test files write the same nine lines out
+# by hand today, which means the next key an automation requires has to be
+# added in six places.  This is the one answer.
 #
 # The hash form is for a file that builds the configuration as a structure,
 # and the line form is for a file that writes it as text.  The lines come back
@@ -4936,7 +4938,7 @@ sub fanned_harness {
 
 # seeded_harness is the same shape over one environment, and its applied
 # option turned off leaves the applied record out, which is the shape a row
-# proving the membership test of D43 and D103 needs, since the undef stands
+# proving the applied record's membership test needs, since the undef stands
 # in for a roster.
 sub seeded_harness {
 	my (%opts) = @_;
@@ -5113,8 +5115,8 @@ sub two_env_harness {
 	return ready_harness(%opts, envs => $opts{envs} // ['lab', 'qa']);
 }
 
-# inherited_harness writes its pipeline keys at a site file rather than at
-# the leaf, which is the merged read D79 asks for, and leaf_keys puts a
+# inherited_harness writes its pipeline keys at a site file rather than at the
+# leaf, which is the merged read every pipeline key gets, and leaf_keys puts a
 # second set at the leaf so a row can watch the two meet.
 sub inherited_harness {
 	my (%opts) = @_;
