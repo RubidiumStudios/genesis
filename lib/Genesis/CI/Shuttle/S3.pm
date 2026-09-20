@@ -10,9 +10,9 @@ use base 'Genesis::CI::Shuttle';
 #
 # The region and the endpoint live here rather than on the block, because
 # S3 is the backend that reads them.  auth is the vault reference to this
-# backend's credentials, which is what D23 and the configuration surface
-# both call it.  How that reference becomes the two credentials the
-# emitted resource takes is the emitter's question and not this file's.
+# backend's credentials, and the configuration surface calls it by that
+# name too.  How that reference becomes the two credentials the emitted
+# resource takes is the emitter's question and not this file's.
 sub options_schema {
 	return {
 		bucket    => {type => 'string', required => 1, description => 'The bucket the resources live in'},
