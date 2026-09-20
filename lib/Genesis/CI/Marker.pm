@@ -8,12 +8,12 @@ use Genesis qw/bug run/;
 
 our @EXPORT_OK = qw/STAGE RELEASE_STAGE/;
 
-# The propagation marker, in one place.  D34 fixes it as the subject
-# "[pipeline] control@<sha> -> <env>" on a deployment-branch commit, naming
-# the control commit the branch now holds and the receiving environment, and
-# the routing contract's provenance rules make it the only claim a branch
-# makes about what it carries.  Everything that writes or reads that string
-# goes through this module.
+# The propagation marker, in one place.  It is the subject "[pipeline]
+# control@<sha> -> <env>" on a deployment-branch commit, naming the control
+# commit the branch now holds and the receiving environment, and the routing
+# contract's provenance rules make it the only claim a branch makes about what
+# it carries.  Everything that writes or reads that string goes through this
+# module.
 our $PREFIX = '[pipeline] control@';
 
 # The head of the one regex, which is everything up to and including the
@@ -24,7 +24,7 @@ our $PREFIX = '[pipeline] control@';
 # the group after it.
 our $HEAD = qr/^[ \t]*(?:[-*][ \t]+)?\Q$PREFIX\E([0-9a-f]{4,40})/m;
 
-# The two trailers D49 gives a control commit, and the keys we answer them
+# The two trailers a control commit may carry, and the keys we answer them
 # under.  Genesis-Stage makes the commit a gate and carries the reason, whose
 # hold form reads "hold: <reason>", and Genesis-Release-Stage releases a gate
 # by naming its control commit.  It sits here beside the prefix, because both
@@ -47,10 +47,9 @@ my %TRAILERS = (
 
 # build - render the marker subject for one delivery {{{
 #
-# The sha is written exactly as it is handed over, because only the caller
-# has a git handle and knows which abbreviation git resolved for it, and the
-# environment is its own name rather than the deployment slug, which is the
-# fourth provenance rule under D66.
+# The sha is written exactly as it is handed over, because only the caller has
+# a git handle and knows which abbreviation git resolved for it, and the
+# environment is its own name rather than the deployment slug.
 sub build {
 	my ($control_sha, $env) = @_;
 
@@ -69,12 +68,12 @@ sub build {
 # The one regex.  It anchors to the start of a line, so a subject that
 # mentions a short sha in passing can never match, which is the coincidental
 # half of H7, and it runs over a whole message rather than a subject, so a
-# squash merge that pushed the marker into the body still answers, which is
-# D49.  One list bullet may stand between the anchor and the prefix, because
-# a squash that collects several commit subjects writes each of them as a
-# bulleted line and the marker is still the marker with a bullet in front of
-# it.  The literal prefix rather than the anchor is what defeats a
-# coincidental short sha, so the bullet costs nothing.
+# squash merge that pushed the marker into the body still answers.  One list
+# bullet may stand between the anchor and the prefix, because a squash that
+# collects several commit subjects writes each of them as a bulleted line and
+# the marker is still the marker with a bullet in front of it.  The literal
+# prefix rather than the anchor is what defeats a coincidental short sha, so
+# the bullet costs nothing.
 #
 # A sha comes back exactly as its marker carries it, because only a caller
 # with a git handle can resolve an abbreviation.  In list context every
@@ -139,18 +138,18 @@ sub envs_in_text {
 # newest - the control commit the ref's newest marker names {{{
 #
 # Walks the ref newest first and returns the control commit of the first
-# marker it meets, skipping every commit above it that carries none, which is
-# D33's hand-commit skip: a hotfix pushed onto a deployment branch is legal
-# and temporary, and it must not move what the branch is certified to hold.
-# There is no fallback to a control tip.  A branch with no marker anywhere
-# has been delivered nothing, and saying so is the point.
+# marker it meets, skipping every commit above it that carries none.  A hotfix
+# pushed onto a deployment branch by hand is legal and temporary, and it must
+# not move what the branch is certified to hold.  There is no fallback to a
+# control tip.  A branch with no marker anywhere has been delivered nothing,
+# and saying so is the point.
 #
 # In list context the walk also reports the number of markerless commits it
 # passed, which is what the propagate base warns about, and where the answer
 # came from.
 #
-# D52's recovery is the one arm that answers from anywhere but the ref, and
-# it stands at the end of the walk so the branch is always asked first.
+# The recovery arm is the one that answers from anywhere but the ref, and it
+# stands at the end of the walk so the branch is always asked first.
 sub newest {
 	my ($git, $ref, %opts) = @_;
 
@@ -161,7 +160,7 @@ sub newest {
 	#
 	# It skips the walk rather than leaving the sub, because a branch the
 	# reader never read says no marker exactly as loudly as one it read to
-	# the root, and D52's recovery answers for the two of them alike.  A
+	# the root, and the recovery arm answers for the two of them alike.  A
 	# recovery that turned on how far the caller let the walk read would be
 	# a recovery about the caller rather than about the branch.
 	my $walk = !(defined $opts{limit} && $opts{limit} < 1);
@@ -183,7 +182,7 @@ sub newest {
 		return wantarray ? ($sha, $depth, 'branch') : $sha;
 	}
 
-	# D52's recovery.  Where a site could not grant the rebase-only merge
+	# The recovery arm.  Where a site could not grant the rebase-only merge
 	# method, a squash can rewrite the aggregate's one commit and take the
 	# marker with it, and the pull request's body still carries what Genesis
 	# itself wrote there.  The branch always answers first, so this arm is
