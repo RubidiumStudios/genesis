@@ -11,9 +11,9 @@
 # the same fixture through both commands and assert one wording.
 #
 # Three of the four qualifiers are asserted here.  The fourth, awaiting merge
-# with the pull request number, is written by the pull request mode work that
-# fills the walk record's pr field, and nothing in this tree fills it yet, so
-# the row for it belongs here once that lands.
+# with the pull request number, needs a frozen pull request to stand behind
+# it, so it is asserted where that state is built, in
+# genesis_ci_pullrequest-review_arms.t.
 #
 # Which assertions discriminate and which guard is said beside each.
 use strict;
