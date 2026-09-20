@@ -1,6 +1,8 @@
 # Legacy Bridge
 
-The Genesis CI system maintains full backward compatibility with the original monolithic pipeline generator (`Genesis::CI::Legacy`). This document explains how the legacy code interoperates with the modern compiler pipeline, when the bridge is activated, and how data flows between the two systems.
+A pipeline `ci.yml` is refused under v3. `Genesis::Top` flags a repository that carries one, and `_gate_pipeline_on_legacy_ci_yml` in `Genesis::Commands` bails on every command of the pipeline group with `Genesis::Exit::CONFIG`, naming the migration, so no pipeline command reads that file. The bridge below exists for the repositories that have not moved yet, and for the deprecated `genesis graph`, which is the one route that still reaches the legacy generator directly.
+
+That is worth saying first, because everything below describes machinery a v3 repository never reaches. The rest of this page explains how the legacy code interoperates with the modern compiler pipeline, when the bridge is activated, and how data flows between the two systems.
 
 ## Legacy Module Overview
 
@@ -29,7 +31,7 @@ There is no longer a `--platform` flag to route on, and the other deprecated com
 
 ## When the Bridge is Activated
 
-The bridge is activated when all of these conditions are true:
+The bridge is activated when all of these conditions are true, which together can only hold in a repository whose configuration load has not refused it:
 
 1. The repository is configured for the Concourse provider, so the compiler pipeline runs and hands its AST to the Concourse compiler
 2. The configuration source is a legacy `ci.yml` file, rather than the `pipeline:` section of `.genesis/config`
@@ -151,6 +153,6 @@ Nothing in the tree calls `init()` any more, since the factory that used to is g
 
 ## Why the Bridge Exists
 
-The bridge exists to guarantee output parity during the transition from legacy to modern generation. The Legacy module produces YAML with specific formatting, spruce operator placement, and ordering that operators have come to expect. By routing legacy configurations back through `Legacy::generate_pipeline_concourse_yaml()`, the system guarantees that the output is identical regardless of which code path was taken.
+The bridge exists to guarantee output parity for the repositories still on the legacy format, during their transition to modern generation. The Legacy module produces YAML with specific formatting, spruce operator placement, and ordering that operators have come to expect. By routing legacy configurations back through `Legacy::generate_pipeline_concourse_yaml()`, the system guarantees that the output is identical regardless of which code path was taken.
 
 As confidence in the native generator grows (through testing against real deployment repositories), the bridge can eventually be removed and all configurations can flow through PipelineDescriptor and `_generate_native()`.

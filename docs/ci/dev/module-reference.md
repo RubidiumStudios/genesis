@@ -1,6 +1,6 @@
 # Module Reference
 
-This document catalogs every Perl module in the Genesis CI system, its purpose, its public API, and its relationships with other modules. Modules are listed in dependency order: foundational modules first, then the modules that depend on them.
+This document catalogs every Perl module in the Genesis CI system, its purpose, its public API, and its relationships with other modules. The compiler half comes first, in dependency order, with the foundational modules before the modules that depend on them, and the propagation half follows it. Every module's own `.pod` beside it is the full reference, and the entries here say what each one is for.
 
 ## Genesis::CI::ProviderRegistry
 
@@ -735,3 +735,21 @@ Four of the five methods above guard on the `config` key, and `generate_descript
   derives a display status from a `fly jobs` entry.
 
 The branch, protection, record, and propagation helpers are `_apply_init_branches`, `_protection_rules_for`, `_apply_branch_protection`, `_apply_records`, `_preview_warnings`, `_push_failure`, `_resolve_propagation_base`, `_verify_deployed`, `_describe_source_control`, and `_describe_topology`.
+
+## The Propagation Half
+
+These modules run under `genesis propagate` and `genesis pipeline-status`. None of them compiles anything, and none of them is reached by `genesis pipeline-apply` except through the branch work that command does before it compiles. Each one's `.pod` beside it in `lib/Genesis/CI/` is the reference for its API.
+
+| Module | File | Purpose |
+|--------|------|---------|
+| `Genesis::CI::Preflight` | `lib/Genesis/CI/Preflight.pm` | The initial state a propagation run may find, and the refusals it owes before the walk begins. `assert_not_disowned` lives here because `genesis <env> deploy` asks the same question and is answered with a warning instead |
+| `Genesis::CI::Walk` | `lib/Genesis/CI/Walk.pm` | The per-commit walk and its record. It visits every environment and decides, for each control commit in control order, whether that commit is delivered or held, and with what reason |
+| `Genesis::CI::Marker` | `lib/Genesis/CI/Marker.pm` | The propagation marker and the Genesis commit trailers. The marker is where the next run starts each branch from |
+| `Genesis::CI::Propagation` | `lib/Genesis/CI/Propagation.pm` | The pull request half of pipeline propagation |
+| `Genesis::CI::PullRequest` | `lib/Genesis/CI/PullRequest.pm` | The pull request arm of the run, for the environments whose `require_pr` asks for one |
+| `Genesis::CI::Publish` | `lib/Genesis/CI/Publish.pm` | The run's third stage, which is one push per branch |
+| `Genesis::CI::Report` | `lib/Genesis/CI/Report.pm` | The run's report, on the three axes the design gives it |
+| `Genesis::CI::RunFailure` | `lib/Genesis/CI/RunFailure.pm` | The two classes of failure that end a run, and what each one leaves behind |
+| `Genesis::CI::Status` | `lib/Genesis/CI/Status.pm` | The `pipeline-status` read model. It renders the record the walk wrote, which is why the two commands cannot disagree |
+| `Genesis::CI::Shuttle` | `lib/Genesis/CI/Shuttle.pm` | The object store behind every deployment's request queue and `_ran` event, with `Shuttle/S3.pm` and `Shuttle/GCS.pm` declaring the keys each backend reads |
+| `Genesis::CI::Layout` | `lib/Genesis/CI/Layout.pm` | The layout DSL parser. A v3 repository writes no layout, and the legacy configuration still reaches this |
