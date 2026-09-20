@@ -34,11 +34,11 @@ C<< <pr_prefix><env>/<type> >> as one aggregate commit, and a pull request
 from there into C<< <env>/<type> >>. This module owns that aggregate, the
 rule that reads what a reviewer decided, and the proposed record's lifecycle.
 
-The pull request branch is derived state under D51. It is rebuilt from the
-deployment branch on every run rather than appended to, so what stands on it
-is always exactly one commit above the branch the pull request is opened
-against, and a run that is declined or aborted can put the branch back
-without having to work out which commits on it were its own.
+The pull request branch is derived state. It is rebuilt from the deployment
+branch on every run rather than appended to, so what stands on it is always
+exactly one commit above the branch the pull request is opened against, and
+a run that is declined or aborted can put the branch back without having to
+work out which commits on it were its own.
 
 Nothing here opens a session. The arm writes inside the run's own session,
 because the run owes the operator their branch back whatever happens and a
@@ -188,10 +188,9 @@ The one paragraph an aggregate's body carries when a gate ends the delivery,
 naming the reason the C<Genesis-Stage> trailer gave and how many of that
 environment's commits are held behind it.
 
-D49, as it was corrected on 2026-09-09, has a gate constrain only what
-follows it. So the gate travels with the commits already ahead of it and ends
-the delivery there, and this line is what tells a reviewer why the pull
-request stops where it does.
+A gate constrains only what follows it. So the gate travels with the commits
+already ahead of it and ends the delivery there, and this line is what tells
+a reviewer why the pull request stops where it does.
 
 The reason is read under C<gate_reason>, which is the name the walk writes it
 by on every entry the gate governs. C<gate> beside it is the gate's own
@@ -255,10 +254,10 @@ the reviewer, the date, and the review's own text quoted. C<opening> and
 C<prefix> give the caller its own opening sentence. Returns C<undef> when the
 review carried no text.
 
-Two bodies quote a reviewer and they are the same paragraph. D49 has a
-superseding body carry the rejection text of the attempt it replaces, and D56
-has a rebuild that answers a request for changes name the review it answers.
-One renderer writes both, so the quoting cannot drift apart between them.
+Two bodies quote a reviewer and they are the same paragraph. A superseding
+body carries the rejection text of the attempt it replaces, and a rebuild
+that answers a request for changes names the review it answers. One renderer
+writes both, so the quoting cannot drift apart between them.
 
 B<Parameters:>
 
@@ -267,7 +266,8 @@ B<Parameters:>
 =item C<$number>
 
 The number of the pull request the review was left on, which is the attempt
-being superseded for D49 and the pull request being rebuilt for D56.
+being superseded in the one case and the pull request being rebuilt in the
+other.
 
 =item C<$review>
 
@@ -422,7 +422,7 @@ own push rejected and no other branch in the run is affected.
 It is read before the arm fetches the branch and rewrites it, because a read
 taken afterwards would name the value this run is about to overwrite, and the
 lease would then be against a teammate's commit rather than against the one
-the run reasoned from. That is the whole window D51 asks the expected tip to
+the run reasoned from. That is the whole window the expected tip has to
 close.
 
 The existence question goes through L<Service::Git/branch_exists>, which
@@ -465,9 +465,9 @@ B<Examples:>
 
     my $word = Genesis::CI::PullRequest::freeze($record, \@pending);
 
-Takes the approved arm of D51. It writes nothing, holds every due commit with
-the reason C<awaiting-merge> and the pull request's number, and answers
-C<undef>, so the report settles the environment as C<held> with the qualifier
+Takes the approved arm. It writes nothing, holds every due commit with the
+reason C<awaiting-merge> and the pull request's number, and answers C<undef>,
+so the report settles the environment as C<held> with the qualifier
 C<Genesis::CI::Report::held_qualifier> composes.
 
 Rebuilding a branch somebody has already approved would throw that review
@@ -522,12 +522,12 @@ supersedes list included. Without one it still reports the title, says the
 review state is unread because the token is missing, and marks the prediction
 of the pull request branch unverified.
 
-D44 leaves C<--dry-run> as the only preview, and a preview that could not say
-what it would do with the branch would be worth little, so it reads. Writing
-nothing does not forbid reading, and only a writing run refuses on a state it
-cannot read under D55. The asymmetry is deliberate, because a writing run that
-guessed wrong would leave a proposal standing that nobody asked for, where a
-preview that guessed wrong is read and forgotten.
+C<--dry-run> is the only preview, and a preview that could not say what it
+would do with the branch would be worth little, so it reads. Writing nothing
+does not forbid reading, and only a writing run refuses on a state it cannot
+read. The asymmetry is deliberate, because a writing run that guessed wrong
+would leave a proposal standing that nobody asked for, where a preview that
+guessed wrong is read and forgotten.
 
 The title is composed the way the aggregate's own subject is composed, off the
 newest due commit's abbreviated control sha, so the line the operator reads
@@ -717,9 +717,9 @@ newest due control commit as its marker and holds the same tree the rebuild
 would write, which is what makes a repeated run push nothing and touch no
 pull request.
 
-D48 makes idempotency the marker walk on both branches rather than a match on
-the tip's subject. The subject broke three ways. A squash or an amend rewrote
-it and re-propagated, an edited subject re-propagated, and a short hash that
+Idempotency is the marker walk on both branches rather than a match on the
+tip's subject. The subject broke three ways. A squash or an amend rewrote it
+and re-propagated, an edited subject re-propagated, and a short hash that
 happened to appear in somebody else's subject suppressed a real propagation.
 The marker reader walks subjects and bodies alike and skips commits carrying
 no marker, so all three read correctly here.
@@ -932,8 +932,8 @@ report then settles the environment as one that would propagate, which is the
 answer the direct arm's preview gives, and no word about a run that never
 happened reaches the record.
 
-The single writer is called once, at the newest due commit's source. D69
-makes a delivery a mirror, so the mirror of the newest commit is the whole
+The single writer is called once, at the newest due commit's source. A
+delivery is a mirror, so the mirror of the newest commit is the whole
 aggregate's tree, and the writer's own index assertions run against that same
 commit.
 
@@ -1318,10 +1318,10 @@ environment instead, returns that text as a second value so the caller can say
 which of the two it met. The pull request was written by Genesis, so nothing
 here is inferred from somebody else's prose.
 
-D52 makes rebase the only merge method a deployment branch allows, and
-C<genesis pipeline-apply> sets it with the rest of the protection. Where the
-GitHub user lacks the permission to grant that setting, C<pipeline-apply> says
-so and the run carries on, and a squash then rewrites the aggregate's subject
+Rebase is the only merge method a deployment branch allows, and C<genesis
+pipeline-apply> sets it with the rest of the protection. Where the GitHub
+user lacks the permission to grant that setting, C<pipeline-apply> says so
+and the run carries on, and a squash then rewrites the aggregate's subject
 and body and takes the marker off the branch with them. This is where the run
 gets it back.
 
@@ -1438,10 +1438,10 @@ Returns the pull request's title, which is the aggregate commit's subject,
 with C<(supersedes #a, #b)> appended when there are closed-unmerged attempts
 to name.
 
-D49 puts the marker in the title as well as in the subject, so a squash merge
-keeps it. The supersedes list is named by number rather than by branch, under
-D12, because a number survives a closed pull request and a deleted branch
-where a branch name does not.
+The marker goes in the title as well as in the subject, so a squash merge
+keeps it. The supersedes list is named by number rather than by branch,
+because a number survives a closed pull request and a deleted branch where
+a branch name does not.
 
 The title is composed on every sync and not only when the pull request is
 opened, which is what displaces the earlier rule that an open pull request
