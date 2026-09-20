@@ -10,6 +10,7 @@ use lib 'lib';
 use lib 't';
 use helper;
 use Harness::Propagation;
+use Genesis qw/load_yaml/;
 
 # Set up minimal Genesis testing environment
 $ENV{GENESIS_TESTING} = "yes";
@@ -1458,6 +1459,114 @@ subtest 'Concourse - auto-update job generated' => sub {
 
 	# Auto-update group
 	like $output, qr/genesis-updates/, "genesis-updates group present";
+};
+
+### ============================================================ ###
+### Concourse Provider - The emitted document, read back
+### ============================================================ ###
+
+# Every other row above this one matches the emitted pipeline as a string,
+# so a document that no parser accepts still passes them all.  This row
+# reads the document back with a real YAML reader and compares what comes
+# out against the structure the descriptor handed the serializer, which is
+# the only assertion here that can tell a pipeline Concourse would take
+# from one it would reject.
+subtest 'Concourse - the emitted pipeline parses back to what it was built from' => sub {
+	my $ast = Genesis::CI::Compiler::AST->new(
+		metadata => { name => 'roundtrip-test', deployment_type => 'cf', source => 'modern' },
+		branches => { control => 'main' },
+		integrations => {
+			vault => { url => 'https://vault.example.com' },
+			source_control => {
+				provider => 'github', repository => 'org/repo',
+				auth => { type => 'ssh-key', private_key => 'key' },
+			},
+			locker => {
+				url      => 'https://locker.example.com',
+				username => 'locker',
+				password => 'sekrit',
+			},
+			notifications => [],
+		},
+		targets => {
+			sandbox => {
+				type => 'bosh-director',
+				connection => { url => 'https://bosh:25555',
+					auth => { client_id => 'admin', client_secret => 's' } },
+			},
+			prod => {
+				type => 'bosh-director',
+				connection => { url => 'https://bosh:25555',
+					auth => { client_id => 'admin', client_secret => 's' } },
+			},
+		},
+		workflows => {
+			default => {
+				name => 'default',
+				graph => {
+					nodes => {
+						sandbox => {
+							stage_name => 'sandbox', alias => 'sandbox',
+							genesis_env => 'sandbox', auto => 1,
+						},
+						prod => {
+							stage_name => 'prod', alias => 'prod',
+							genesis_env => 'prod', auto => 0,
+						},
+					},
+					edges => [{ from => 'sandbox', to => 'prod' }],
+				},
+			},
+		},
+		configuration => {
+			task          => { image => 'img', version => 'v1' },
+			notifications => { style => 'inline' },
+			auto_update   => {
+				enabled => 1,
+				file    => 'sandbox.yml',
+				kit     => 'cf',
+				org     => 'genesis-community',
+			},
+		},
+	);
+
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);
+	my $output   = $provider->generate_from_ast($ast);
+
+	_debug_write('concourse-roundtrip.yml', $output // '');
+
+	# The same four sections _generate_native serializes, asked of the AST
+	# after the generate above has resolved the pipeline, so this is the
+	# structure that went in rather than a second rendering of it.
+	my $built = {
+		groups         => $ast->groups,
+		resources      => $ast->pipeline_resources,
+		resource_types => $ast->resource_types,
+		jobs           => $ast->jobs,
+	};
+
+	my ($read, $rc, $err) = load_yaml($output);
+	is $rc, 0, "the emitted pipeline is a document a YAML reader accepts"
+		or diag($err);
+
+	is_deeply $read, $built,
+		"and it reads back as the structure the descriptor built";
+
+	# The two shapes the string assertions cannot see at all, named here so
+	# a failure says which one moved.
+	my ($locker) = grep {($_->{name} // '') eq 'sandbox-bosh-lock'}
+		@{$read->{resources} || []};
+	ok $locker, "the locker resource survives the round trip" or return;
+	isa_ok $locker->{source}{skip_ssl_validation}, 'JSON::PP::Boolean',
+		"and its skip_ssl_validation reads back as a boolean";
+
+	my ($job) = grep {($_->{name} // '') eq 'update-genesis-assets'}
+		@{$read->{jobs} || []};
+	ok $job, "the auto-update job survives the round trip" or return;
+	my ($task) = grep {($_->{task} // '') eq 'update-genesis'} @{$job->{plan}};
+	ok $task, "and its update-genesis task with it" or return;
+	like $task->{config}{run}{args}[1], qr/\n/,
+		"and the shell script it runs comes back as the several lines it was";
 };
 
 ### ============================================================ ###

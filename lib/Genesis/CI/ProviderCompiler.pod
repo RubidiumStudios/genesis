@@ -478,6 +478,14 @@ than an outside one. Every emitter and C<genesis dev> use this same code,
 so a diff between two renderings is about the pipeline rather than about
 key order or quoting.
 
+What comes back reads as what went in. A boolean is written as C<true> or
+C<false> wherever it sits, a string holding newlines is written as a block
+scalar indented to where its key stands, and a value a reader would take
+for a number, a date, or a keyword is quoted. Anything the writer does not
+recognise is written as the string it prints as rather than passed over,
+so a value it has never seen reaches the document where somebody can see
+it.
+
 B<Parameters:>
 
 =over 4
