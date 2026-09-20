@@ -3,8 +3,9 @@
 # provider whose repository declares a minimum fly version is refused by
 # a fly that does not meet it, the refusal names both versions, it exits
 # 86, and no second check_prereqs stands on any class the command can be
-# handed.  The last subtest is ruling 13, which belongs beside the floor
-# because both are about the provider the compile hands back.
+# handed.  The last subtest proves that the caller's provider type wins
+# over the type the pipeline block declares, which belongs beside the
+# floor because both are about the provider the compile hands back.
 use strict;
 use warnings;
 use utf8;
@@ -204,8 +205,8 @@ subtest 'the provider the caller asked for is the provider it gets' => sub {
 	# Two rows, and one more for the run's own restoration assertion.
 	plan tests => 3;
 
-	# Ruling 13.  pipeline-diff names Concourse itself, whatever the
-	# block says, so a repository whose block declares github-actions
+	# pipeline-diff names Concourse itself, whatever the block says, so a
+	# repository whose block declares github-actions
 	# tells the two apart: github-actions has no compiling class, and a
 	# compile that read the type off the block would be refused by the
 	# registry and exit CONFIG before any fly was reached.

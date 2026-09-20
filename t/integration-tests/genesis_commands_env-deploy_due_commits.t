@@ -128,8 +128,8 @@ subtest 'a proposed record is read with no GitHub client built' => sub {
 subtest 'the stale-pipeline warning prints ahead of this one' => sub {
 	plan tests => 3;
 
-	# Ruling 38 sends this row here, because it reads one warning against the
-	# other and nothing printed a due-commits line until this task.
+	# This row sits here because it reads one warning against the other, and
+	# nothing printed a due-commits line before.
 	#
 	# One tree answers both.  Each commit due_harness lays writes the
 	# environment's own file, which is a path D43 counts as pipeline-defining,

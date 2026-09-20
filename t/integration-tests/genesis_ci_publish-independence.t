@@ -8,8 +8,7 @@
 # moved or held on its own, and no line the run printed named the two branches
 # together.  That no reader consults the two tips together is the walk's own
 # design, which gives every environment's reader its own marker, and it is
-# settled by reading that code at the final review rather than by a regex over
-# what a run said.  Ruling 49 is where that reach is fixed.
+# settled by reading that code rather than by a regex over what a run said.
 #
 # I12 is why the row exists.  Under D99 a future proposal to publish every
 # branch at once has to name a reader that needs two deployment branches to
@@ -88,8 +87,8 @@ subtest 'one branch landing and another not is a valid state that converges' => 
 	assert_snapshot_invariant($h, 'lab',
 		name => 'lab mirrors the set at its own marker');
 
-	# Read off what the run printed, because ruling 35 adds no per-ref step to
-	# the fault log and ruling 13 leaves the ref specs stringified in it.  A
+	# Read off what the run printed, because the fault log carries no per-ref
+	# step and stringifies the ref specs it does hold.  A
 	# publish that pushed the set as one batch and reported the batch would
 	# name both branches on the line it reported, and that is the
 	# implementation this catches.

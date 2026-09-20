@@ -442,7 +442,7 @@ YAML
 		'a command whose default is the tip still reaches the deployed commit');
 };
 
-# Proves ruling 22: an environment whose file is not on the branch the
+# Proves that an environment whose file is not on the branch the
 # operator is standing on is never read through a bare environment built on
 # that tree.  A run that resolved its target from its registration's default
 # yields, so the gate switches to the deployment branch and the command reads

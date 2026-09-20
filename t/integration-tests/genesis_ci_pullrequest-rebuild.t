@@ -273,7 +273,7 @@ subtest 'the three subject-match shapes give the right answer now' => sub {
 };
 
 # Proves that the discard sentence survives a publish the remote refuses.
-# Ruling 42 names the run: a hand push followed by the next propagate, where
+# The run is a hand push followed by the next propagate, where
 # the clone has not seen the branch move, the lease is taken against what it
 # last saw, and the push is turned down.  The refresh the rows above call
 # after a hand commit is deliberately absent here, because the refusal is the

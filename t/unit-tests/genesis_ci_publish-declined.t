@@ -115,9 +115,9 @@ subtest 'a no resets every branch and publishes nothing' => sub {
 			"$rec->{env} records why it was not published");
 	}
 
-	# The other regression guard, and the one ruling 30's report defaults
-	# want: a pending commit left with no outcome of its own is what stops
-	# the report calling it delivered.
+	# The other regression guard, and the one the report's own defaults
+	# want, is that a pending commit left with no outcome of its own is
+	# what stops the report calling it delivered.
 	is($records->[0]{pending}[0]{outcome}, undef,
 		'and a commit that never reached R is delivered in no sense');
 };

@@ -4,8 +4,8 @@
 # These are here because helper::set_stdin gives a spawned command a pipe, so
 # no spawned run ever sees a controlling terminal.
 #
-# The holding-ancestor half of the warning is here for a different reason, and
-# ruling 31 sent it to this task.  A deploy stands on the environment's own
+# The holding-ancestor half of the warning is here for a different reason.  A
+# deploy stands on the environment's own
 # deployment branch, which mirrors that environment's hierarchy and carries no
 # sibling's file, so the topology the walk reads there has no node for the
 # predecessor and Genesis::CI::Compiler::ASTBuilder lays no edge to a node it
