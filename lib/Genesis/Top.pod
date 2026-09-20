@@ -1597,10 +1597,10 @@ B<Examples:>
     my $needs_pr = $top->control_requires_pr();
 
 Whether control accepts a direct push. It decides the branch protection
-C<pipeline-apply> applies to the control branch, and under D45 it also
-decides whether a command that commits on control expects to run on a
-feature branch instead. There is no second key for the expectation, so a
-site that turns the protection on gets the expectation with it.
+C<pipeline-apply> applies to the control branch, and it also decides whether a
+command that commits on control expects to run on a feature branch instead.
+There is no second key for the expectation, so a site that turns the
+protection on gets the expectation with it.
 
 B<Parameters:> None.
 
@@ -1922,8 +1922,8 @@ matters to one caller. The propagate pre-flight and C<pipeline-status> stand
 on control, so for them the tree and the ref say the same thing, but the
 deploy stands on a deployment branch, which carries one environment's
 hierarchy and no sibling's. Read from that tree the roster would be a list of
-one, and an environment added to control since the apply would be invisible
-to every deploy, which is the case D43's own example is about.
+one, and an environment added to control since the apply would be invisible to
+every deploy, which is the case this comparison exists to catch.
 
 Only this comparison reads control's tree that way. L</pipeline_topology>
 and L</pipeline_env_names> still answer for the tree in front of them,
@@ -2765,13 +2765,12 @@ Returns the map C<pipeline.provider> declares, which pairs every registered
 provider type with the class that owns its block and the file that class
 lives in.
 
-It is built from
-C<< Genesis::CI::ProviderRegistry->known_providers >> and the registry
-entry behind each one, so the map and every class lookup read one list and
-cannot spell a provider two ways. Under D28 the registry is read
-once here, where the schema's enum and the class lookup used to read it
-twice. Every registered type has a CLI-side class, so the map is total and
-nothing downstream asks whether a provider has a class.
+It is built from C<< Genesis::CI::ProviderRegistry->known_providers >> and the
+registry entry behind each one, so the map and every class lookup read one
+list and cannot spell a provider two ways. The registry is read once here,
+where the schema's enum and the class lookup used to read it twice. Every
+registered type has a CLI-side class, so the map is total and nothing
+downstream asks whether a provider has a class.
 
 Each value names the class under C<Genesis::CI::Provider> that declares the
 block's keys and validates it, and the file to require before calling it.
@@ -3124,12 +3123,11 @@ hierarchy, because L</_validate_one_exodus_mount> has already refused a
 repository whose environments resolve the mount differently. Where the
 pipeline names none, the first of the root's own environment files answers
 instead. That fallback is what keeps the record readable while
-C<pipeline.enabled> is false, since L</pipeline_env_names> answers nothing
-at all for a disabled pipeline and the disowned repository of D64 is
-precisely one whose key is off while the record still stands. The value
-comes back normalised with a trailing slash, so a caller appends to it
-directly. The answer is memoized, since it is the same for every read in a
-run.
+C<pipeline.enabled> is false, since L</pipeline_env_names> answers nothing at
+all for a disabled pipeline and a disowned repository is precisely one whose
+key is off while the record still stands. The value comes back normalised with
+a trailing slash, so a caller appends to it directly. The answer is memoized,
+since it is the same for every read in a run.
 
 B<Parameters:> None.
 
