@@ -274,12 +274,12 @@ sub publish_delta {
 	# puts the other nowhere.
 	#
 	# Neither survives the reads below, and the way each fails is worse than
-	# a refusal.  ls_tree checks git's status and bails with a sentence about
-	# listing a ref, which stops the run over a caller's mistake as though
-	# the repository were at fault.  log_subjects checks none, and it runs
-	# under the default that folds git's standard error in with its output,
-	# so the three lines of git's fatal message would come back as three
-	# commits and be printed as their subjects.
+	# a refusal here.  ls_tree checks git's status and bails with a sentence
+	# about listing a ref, and log_subjects refuses a walk git cannot resolve
+	# with a sentence about fetching the missing commit.  Both stop the run
+	# over a caller's mistake as though the repository were at fault, and
+	# neither says that the branch was one the caller should never have asked
+	# about.
 	bug("publish_delta was asked for the branch #C{%s}, which neither this ".
 	    "repository nor #C{%s} holds",
 	    $branch, $remote // 'the remote')
