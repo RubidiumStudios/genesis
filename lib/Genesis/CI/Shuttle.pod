@@ -24,12 +24,11 @@ take a non-default endpoint, and the GCS resource takes neither.
 So the block is declared on its backend rather than flat, as a
 C<custom_struct>, which is the schema type that names the field a block's
 shape depends on and maps each of that field's values to the module
-owning that shape.
-Each backend is a class of its own, it declares the keys it reads through
-C<options_schema>, and this base validates a block against whichever
-declaration the written backend selected. A GCS configuration then has
-nowhere to put a region, and the refusal names the key rather than
-accepting it and dropping it later.
+owning that shape. Each backend is a class of its own, it declares the
+keys it reads through C<options_schema>, and this base validates a block
+against whichever declaration the written backend selected. A GCS
+configuration then has nowhere to put a region, and the refusal names the
+key rather than accepting it and dropping it later.
 
 A backend with a rule a declaration cannot state overrides
 C<validate_config> and calls C<SUPER> first, because the declaration is
