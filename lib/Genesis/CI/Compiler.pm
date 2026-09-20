@@ -102,12 +102,12 @@ sub compile {
 
 	# Stage 6: build the provider and ask it for its compiler
 	#
-	# D108: one class answers for a provider, and the compiler that
-	# emits its artefact is a component that class owns.  The compile
-	# used to resolve a compiler class out of the registry and build it
-	# directly, so nothing in a run ever held a Genesis::CI::Provider
-	# and the command that asked for check_prereqs was handed the
-	# compiler-side copy instead.
+	# One class answers for a provider, and the compiler that emits its
+	# artefact is a component that class owns.  The compile used to
+	# resolve a compiler class out of the registry and build it directly,
+	# so nothing in a run ever held a Genesis::CI::Provider and the
+	# command that asked for check_prereqs was handed the compiler-side
+	# copy instead.
 	info("Generating %s pipeline...", $provider_type);
 
 	# Provider options come from the parsed pipeline.provider: block and
@@ -174,9 +174,9 @@ sub compile {
 
 # can_compile - detect if a named directory holds a pipeline.yml {{{
 #
-# D27 took the conventional directory away, so there is no name to fall
-# back on and the caller says which directory it means.  A caller that
-# names none is asking about nowhere, and the answer is no.
+# There is no conventional directory to fall back on, so the caller
+# says which directory it means.  A caller that names none is asking
+# about nowhere, and the answer is no.
 sub can_compile {
 	my ($class, $ci_dir) = @_;
 	return 0 unless $ci_dir;
@@ -208,8 +208,8 @@ sub can_compile_from_env_files {
 #
 # Returns true when $top has a Genesis::Config with a pipeline: key,
 # meaning the pipeline configuration is embedded inline in .genesis/config
-# rather than in separate files.  The section is named pipeline under D18,
-# so the read is by that name and there is no alias for its old spelling.
+# rather than in separate files.  The section is named pipeline, so the
+# read is by that name and there is no alias for its old spelling.
 sub can_compile_from_genesis_config {
 	my ($class, $top) = @_;
 	return 0 unless $top && $top->can('config');
@@ -220,10 +220,10 @@ sub can_compile_from_genesis_config {
 # }}}
 # validate_config_section - the pipeline section's owner check {{{
 #
-# Under D86 the declarative half runs in Top, which merges this provider's
-# fragment into the schema before Genesis::Config::validate sees it, so
-# there is no per-key loop here any more.  What is left is the shape check
-# the schema cannot state, which is that the section is a hash at all.
+# The declarative half runs in Top, which merges this provider's fragment
+# into the schema before Genesis::Config::validate sees it, so there is
+# no per-key loop here any more.  What is left is the shape check the
+# schema cannot state, which is that the section is a hash at all.
 sub validate_config_section {
 	my ($class, $data, $top) = @_;
 
@@ -273,15 +273,14 @@ sub _flat_name {
 # }}}
 # override_file_names - the override files this run may merge {{{
 #
-# D27 put the override beside .genesis/config and took the old CI
-# subdirectory away, because a file whose name says what it is needs no
-# subdirectory to say it again.  D67 generalised the name for a provider
-# that emits more than one file: that provider takes one override per
-# emitted file, named by the file's base name without its extension,
-# because it would have nothing to merge a single override onto.  Under
-# D101 the form follows the effective output_layout rather than the
-# capability, so a multi-file provider set to single takes the single
-# form.
+# The override sits beside .genesis/config rather than in a CI
+# subdirectory of its own, because a file whose name says what it is
+# needs no subdirectory to say it again.  A provider that emits more
+# than one file takes one override per emitted file, named by the
+# file's base name without its extension, because it would have
+# nothing to merge a single override onto.  The form follows the
+# effective output_layout rather than the capability, so a multi-file
+# provider set to single takes the single form.
 #
 # The whole output name goes into the override name, directory and all,
 # with the separators flattened to dashes so the result is still one
