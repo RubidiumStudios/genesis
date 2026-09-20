@@ -719,20 +719,10 @@ sub propagate {
 	# read, and an environment that would not deliver into a pull request has
 	# no use for the client that a stale proposal of its own could give it.
 	my @in_scope = map {{
-		pr => $pr_branch_of{$_} ? {branch => $pr_branch_of{$_}} : undef,
-	}} @dag_order;
-
-	my $github = Genesis::CI::PullRequest::client_for_run($top,
-		records => \@in_scope,
-		refuse  => $refuse);
-
-	# The pair the client was built against, read back for the state query
-	# and for the pull request sync at the end of the run.  The walk takes
-	# the client alone and never the pair, because the recovery reads the
-	# merged pull requests out of the answer this run already has.  The block
-	# resolves once and keeps its answer, so this costs nothing, and it is
-	# undefined exactly where there is no client to use it with.
-	my $owner_repo = $github ? $top->source_control_repository : undef;
+		env       => $_,
+		branch    => $top->branch_for($_),
+		pr_branch => $pr_branch_of{$_},
+	}} grep {$topo->{nodes}{$_}{require_pr}} @dag_order;
 
 	# D55's refusal, read once for the whole run and ahead of it.  What a
 	# reviewer decided is what decides whether an environment's pull request
@@ -749,17 +739,16 @@ sub propagate {
 	# The two branch names are composed from the same accessors the walk
 	# composes its record from, so the state read here and the record the arm
 	# is handed cannot disagree about which branches an environment owns.
-	my %pr_state_of;
-	if ($github && $owner_repo) {
-		for my $env_name (grep {$topo->{nodes}{$_}{require_pr}} @dag_order) {
-			$pr_state_of{$env_name} = Genesis::CI::PullRequest::pr_state(
-				$github, $owner_repo, {
-					env    => $env_name,
-					branch => $top->branch_for($env_name),
-					pr     => {branch => $pr_branch_of{$env_name}},
-				}, refuse => $refuse);
-		}
-	}
+	#
+	# The pair the client was built against comes back beside it, for the
+	# pull request sync at the end of the run.  The walk takes the client
+	# alone and never the pair, because the recovery reads the merged pull
+	# requests out of the answer this run already has.
+	my ($github, $owner_repo, $pr_state) =
+		Genesis::CI::PullRequest::state_for_scope($top,
+			envs   => \@in_scope,
+			refuse => $refuse);
+	my %pr_state_of = %$pr_state;
 
 	my @publish_specs;
 	my $publish;

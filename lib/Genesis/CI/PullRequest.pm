@@ -18,7 +18,8 @@ use Genesis::CI::Report qw/note_detail/;
 use Service::Github;
 
 use Exporter qw/import/;
-our @EXPORT_OK = qw/client_for_run pr_state carry_state sync_pull_request/;
+our @EXPORT_OK = qw/client_for_run pr_state carry_state state_for_scope
+	sync_pull_request/;
 
 # align_with_remote - bring the local pull request branch level with R {{{
 #
@@ -480,6 +481,67 @@ sub carry_state {
 	$pr->{superseded} = $state ? $state->{superseded} : [];
 
 	return $record;
+}
+
+# }}}
+# state_for_scope - one client, and what the API says about each branch {{{
+#
+# The run's one GitHub client and one reading per environment, for the two
+# commands that both need them.  propagate selects the environments whose
+# policy asks for a pull request and refuses where the API will not answer;
+# pipeline-status selects the environments the walk seeded a branch for and
+# degrades instead.  The selecting is the caller's, because those are
+# different questions, and the refusing is the caller's for the same reason,
+# so what is shared is the building and the reading and nothing else.
+#
+# An environment that holds a proposed record and whose policy no longer asks
+# for a pull request does not earn a client here.  D57 draws the rule wider
+# than that, and both commands narrow it the same way, so such an environment
+# reads its proposed record unvalidated in both rather than in one.
+#
+# The client goes back beside the answer, because the walk reads a marker a
+# squash merge dropped out of the merged pull request itself and wants the
+# client to read it with.  The owner and repository pair goes back too, since
+# the caller that syncs a pull request at the end of its run needs the pair
+# the client was built against and the block resolves once and keeps its
+# answer.
+#
+# stop is asked after each environment is read.  A client that could not be
+# read once is not one a caller should keep asking, and a caller that means
+# to stop there says so rather than reading every environment and throwing
+# the rest away.
+sub state_for_scope {
+	my ($top, %opts) = @_;
+
+	my $envs   = $opts{envs} || [];
+	my $refuse = $opts{refuse};
+	my $stop   = $opts{stop};
+
+	return (undef, undef, {}) unless @$envs;
+
+	my $github = client_for_run($top,
+		records => [map {{
+			pr => $_->{pr_branch} ? {branch => $_->{pr_branch}} : undef,
+		}} @$envs],
+		refuse  => $refuse);
+	return (undef, undef, {}) unless $github;
+
+	my $owner_repo = $top->source_control_repository;
+	return ($github, $owner_repo, {}) unless $owner_repo;
+
+	# The three fields pr_state reads and no more, which is what lets the
+	# state be read before the walk has composed a record of its own.
+	my %state_of;
+	for my $env (@$envs) {
+		$state_of{$env->{env}} = pr_state($github, $owner_repo, {
+			env    => $env->{env},
+			branch => $env->{branch},
+			pr     => {branch => $env->{pr_branch}},
+		}, refuse => $refuse);
+		last if $stop && $stop->();
+	}
+
+	return ($github, $owner_repo, \%state_of);
 }
 
 # }}}
