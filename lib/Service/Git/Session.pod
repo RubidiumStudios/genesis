@@ -1323,19 +1323,24 @@ branch has no commits yet.
 
 B<Parameters:> None.
 
+The phrase carries its own colour markup, because the three messages that
+print it read it as a whole rather than wrapping it in a span of their own,
+and the name is the part of it an operator types back at git.
+
 B<Returns:> The branch name, a phrase naming the commit we are detached at, or
-a phrase naming the unborn branch we are standing on.
+a phrase naming the unborn branch we are standing on, each with its own
+markup on the name.
 
 B<Examples:>
 
   my $where = $session->_standing_on;
-  # returns 'qa/bosh' on a branch
+  # returns '#C{qa/bosh}' on a branch
 
   my $where = $session->_standing_on;
-  # returns 'a detached HEAD at 9f0d1c2a...' after a switch to a commit
+  # returns 'a detached HEAD at #C{9f0d1c2a...}' after a switch to a commit
 
   my $where = $session->_standing_on;
-  # returns 'main, which has no commits yet' where nothing is committed
+  # returns '#C{main}, which has no commits yet' where nothing is committed
 
 =head2 _register_net
 
