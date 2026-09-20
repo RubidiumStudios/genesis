@@ -1,18 +1,18 @@
 package Genesis::CI::Preflight;
-# The propagate run's first stage under D96, which settles what the run is
-# allowed to find before it writes anything.  Everything here reads the
-# refresh and the divergence query and refuses; the one thing it writes is
-# the reset D32 permits, and the fast-forward D5 permits.
+# The propagate run's first stage, which settles what the run is allowed to
+# find before it writes anything.  Everything here reads the refresh and the
+# divergence query and refuses; the only writes it makes are the reset and
+# the fast-forward the rules permit.
 use strict;
 use warnings;
 
 use Genesis;
 use Genesis::CI::Marker;
 
-# The three codes D97 gives this stage's refusals to spend.  They are
+# The three codes this stage's refusals are given to spend.  They are
 # imported rather than named in full, because Genesis::Exit exports nothing
-# by default and a fully qualified constant in a package nobody has loaded
-# is a bareword that dies where it stands.
+# by default and a fully qualified constant in a package nobody has loaded is
+# a bareword that dies where it stands.
 use Genesis::Exit qw/ABORTED CONFIG DATAERR NOPERM TEMPFAIL/;
 
 # The gate below asks the operator a question, and the two modules that own
@@ -76,16 +76,16 @@ sub local_only_commits {
 #
 # Returns { divergence => $div, events => \@lines }.
 #
-# Three cases, and D65 settles all three.  Where the remote has control and
-# this clone does not, the refresh has already created the local ref, and the
-# creation is reported as an event line rather than passed over in silence.
-# Where control exists nowhere, every pipeline command refuses, because the
-# environment files live on control and nothing can read the topology without
-# it, and no command creates it, since cutting the branch that becomes the
-# source of truth is the operator's act.  Where both have it, D30 requires
-# in-sync and refuses either way, naming ahead as unpushed and behind as
-# stale, because a marker names a control commit by its sha alone and a
-# deploy on another machine can only read what the remote has.
+# Three cases.  Where the remote has control and this clone does not, the
+# refresh has already created the local ref, and the creation is reported as
+# an event line rather than passed over in silence.  Where control exists
+# nowhere, every pipeline command refuses, because the environment files live
+# on control and nothing can read the topology without it, and no command
+# creates it, since cutting the branch that becomes the source of truth is
+# the operator's act.  Where both have it, control must be in sync, and the
+# stage refuses either way, naming ahead as unpushed and behind as stale,
+# because a marker names a control commit by its sha alone and a deploy on
+# another machine can only read what the remote has.
 #
 # on_divergence => 'report' is for `genesis pipeline-status`, which reports
 # every state and resolves none.
@@ -137,12 +137,12 @@ sub require_control {
 		);
 	}
 
-	# The remote has control and this clone does not, which is the one case
-	# D65 asks the refresh to close by writing the local ref.  The refresh gives
-	# the branch the working tree stands on the tracking refspec and nothing
-	# else, so a tree standing on an unborn control leaves the ref unwritten and
-	# the query answers here.  The refusal says the creation did not happen,
-	# rather than reading a staleness out of two counts that are both zero.
+	# The remote has control and this clone does not, which is the one case the
+	# refresh closes by writing the local ref.  The refresh gives the branch the
+	# working tree stands on the tracking refspec and nothing else, so a tree
+	# standing on an unborn control leaves the ref unwritten and the query
+	# answers here.  The refusal says the creation did not happen, rather than
+	# reading a staleness out of two counts that are both zero.
 	bail({exitcode => DATAERR},
 		"Refusing to %s.  The control branch #C{%s} is on #C{%s/%s} and not in ".
 		"this clone.  The refresh writes the local ref for a branch the remote ".
@@ -154,7 +154,7 @@ sub require_control {
 		$outcome
 	) if $div->{state} eq 'no-local';
 
-	# D44's preview refuses nothing it can warn about instead, so a caller
+	# The preview refuses nothing it can warn about instead, so a caller
 	# that is only going to report says so here.  A control branch that is
 	# ahead of its remote is the one divergence a preview can still answer,
 	# because everything the preview reads is on control itself and all the
@@ -207,12 +207,13 @@ sub require_control {
 #       command => "$env_name deploy", outcome => 'Nothing was deployed.',
 #       locally => 'warn');
 #
-# D64: where pipeline-apply has left an applied record while pipeline.enabled
+# Where pipeline-apply has left an applied record while pipeline.enabled
 # reads false, the configuration disowns a pipeline that is still live, still
 # watching its branches, and still deploying.  The check needs the record and
 # not just the key, because a repository that never had a pipeline has
-# neither and is not disowning anything: it falls through to the pre-flight,
-# which has its own words for a repository with no pipeline at all.
+# neither and is not disowning anything.  Such a repository falls through to
+# the pre-flight, which has its own words for a repository with no pipeline
+# at all.
 #
 # Two callers want the same state answered two ways, so the check lives here
 # rather than beside either of them.  The propagate run is about to write, so
@@ -220,7 +221,7 @@ sub require_control {
 # operator mid-teardown has a reason to be here, so it warns and carries on.
 # Inside the pipeline's own job the answer is a refusal whatever the caller
 # asked for, because nobody there reads a warning and a job never deploys
-# what its own configuration disowns (D27).
+# what its own configuration disowns.
 #
 # command, outcome, and in_job give the refusal the caller's own words, so
 # one state is described in one sentence however the operator arrived at it.
@@ -279,10 +280,10 @@ sub assert_not_disowned {
 #       outcome     => 'Nothing was deployed.',
 #       acknowledge => 'I accept the risk');
 #
-# D95 for the propagate run and D73 for the deploy, which are one rule with
-# two sentences.  Under an automated provider the pipeline owns the work, so
-# a bare command refuses and --force is the only way past.  With the flag at
-# a terminal the operator acknowledges once; outside a terminal the refusal
+# One rule with two sentences, one for the propagate run and one for the
+# deploy.  Under an automated provider the pipeline owns the work, so a bare
+# command refuses and --force is the only way past.  With the flag at a
+# terminal the operator acknowledges once; outside a terminal the refusal
 # stands, because an acknowledgement nobody reads is not one and the
 # pipeline's own job sets GENESIS_PIPELINE_TASK and never reaches here.  -y
 # answers no part of this, which is why nothing below reads it.
@@ -366,12 +367,12 @@ sub assert_provider_gate {
 # control is already settled when the caller passes them in.  Then every
 # deployment branch in scope is classified, every refusal is collected before
 # anything is written, and only after that does the run touch a ref.  A
-# violation is an illegal initial state under D96, so the run stops before it
-# writes and the refusal states the corrective measure beside the branch.  A
-# caller that passes read_only is reporting rather than running, and it is
-# given the classification without the refusal, because there is no write in
-# front of it for the gate to stand before.  Each branch record then carries
-# what its class was, so the report can say it.
+# violation is an illegal initial state, so the run stops before it writes
+# and the refusal states the corrective measure beside the branch.  A caller
+# that passes read_only is reporting rather than running, and it is given the
+# classification without the refusal, because there is no write in front of
+# it for the gate to stand before.  Each branch record then carries what its
+# class was, so the report can say it.
 #
 # The whole DAG is classified rather than the cascade's scope, because the
 # initial state is a property of the repository rather than of the run: a
@@ -410,11 +411,11 @@ sub initial_state {
 
 	# Two callers want the stage to move nothing, and they want it for two
 	# different reasons.  A preview holds its writes back because the operator
-	# asked to be shown a run rather than given one, and it says so in the
-	# caveats D44 fixes.  A report holds them back because reporting is all it
-	# ever does, and a caveat about a run nobody is about to make would be a
-	# sentence it has no business printing.  So the assumption is one flag and
-	# the preview's wording stays on the other.
+	# asked to be shown a run rather than given one, and it says so in its
+	# caveats.  A report holds them back because reporting is all it ever does,
+	# and a caveat about a run nobody is about to make would be a sentence it
+	# has no business printing.  So the assumption is one flag and the preview's
+	# wording stays on the other.
 	my $assume = $opts{dry_run} || $opts{read_only};
 
 	my (@local_only, @unrelated);
@@ -422,8 +423,8 @@ sub initial_state {
 		my $branch = $top->branch_for($env);
 		my $div    = $git->resolve_branch($branch);
 
-		# Neither side has it: the environment is awaiting pipeline-apply
-		# under D43, which is the walk's outcome and not a refusal here.
+		# Neither side has it, so the environment is awaiting pipeline-apply,
+		# which is the walk's outcome and not a refusal here.
 		next unless defined $div;
 
 		$state->{branches}{$env} = {
@@ -480,7 +481,7 @@ sub initial_state {
 
 	# Each branch's local-only commits, classified.  A marker means the walk
 	# reproduces the commit, so the branch may be reset; no marker means a
-	# hand edit that belongs on control, so the whole run refuses (D32, D33).
+	# hand edit that belongs on control, so the whole run refuses.
 	#
 	# A branch already refused for its origin is not asked.  Every commit on
 	# a branch the remote has never had is local-only by construction, and so
@@ -517,23 +518,23 @@ sub initial_state {
 	# argument as a format and a branch name or a commit subject can carry a
 	# percent sign.
 	#
-	# A caller that only ever reports is not refused.  D96 frames the illegal
-	# initial state as a gate in front of the propagate run's first write, and
-	# the refusal's own closing sentence says what was not written, so a
-	# command that was never going to write anything has nothing for the gate
-	# to stop.  Commands and flags gives the status one refusal, the disowned
-	# pipeline of D64, and this is not it.
+	# A caller that only ever reports is not refused.  The illegal initial state
+	# is a gate in front of the propagate run's first write, and the refusal's
+	# own closing sentence says what was not written, so a command that was
+	# never going to write anything has nothing for the gate to stop.  Commands
+	# and flags gives the status one refusal, the disowned pipeline, and this is
+	# not it.
 	#
-	# What the suppression admits is worth naming exactly, because it is not
-	# D33's hatch.  D33 gives a hand commit two fates, and the legal one is
-	# the commit pushed to the remote, which no branch here is ever refused
-	# over: an in-sync branch has no local-only commit for the classification
-	# to find.  What reaches a report through this arm is the unpushed hand
-	# commit, the branch the remote has never had, and the branch that shares
-	# no ancestor with the remote's, and D33 calls the first of those a state
-	# that refuses a run.  So the report describes all three and names the
-	# remedy beside each, rather than refusing to describe the repository at
-	# all because one branch in it is in a state no run may start from.
+	# What the suppression admits is worth naming exactly, because it is not the
+	# hand commit's escape hatch.  A hand commit has two fates, and the legal
+	# one is the commit pushed to the remote, which no branch here is ever
+	# refused over, because an in-sync branch has no local-only commit for the
+	# classification to find.  What reaches a report through this arm is the
+	# unpushed hand commit, the branch the remote has never had, and the branch
+	# that shares no ancestor with the remote's, and the first of those is a
+	# state that refuses a run.  So the report describes all three and names the
+	# remedy beside each, rather than refusing to describe the repository at all
+	# because one branch in it is in a state no run may start from.
 	#
 	# A preview is refused all the same, because a preview stands for a run
 	# that would be refused and showing that run would be a lie about what
@@ -550,11 +551,11 @@ sub initial_state {
 		my $line = sprintf('reset %s to %s/%s, discarding %s that the walk reproduces',
 			$r->{branch}, $remote, $r->{branch}, _commits(scalar @{$r->{commits}}));
 
-		# The assumption is recorded rather than warned about here, because
-		# D44 says it under the preview's own banner and a caveat printed
-		# above that banner is one the operator meets before they have been
-		# told they are reading a preview.  The event line below is printed
-		# either way, so nothing about the reset goes unsaid.
+		# The assumption is recorded rather than warned about here, because the
+		# preview says it under its own banner and a caveat printed above that
+		# banner is one the operator meets before they have been told they are
+		# reading a preview.  The event line below is printed either way, so
+		# nothing about the reset goes unsaid.
 		if ($assume) {
 			# Nothing moved, so the record keeps the state the
 			# classification gave it and names the ref a real run would
@@ -584,11 +585,10 @@ sub initial_state {
 		push @{$state->{events}}, $line;
 	}
 
-	# Last, a branch that is merely behind moves by fast-forward, which
-	# resolves nothing a human would decide and which the deploy's own
-	# --ff-only is the precedent for (D5).  After this a deployment branch
-	# is in-sync or it has no local ref at all, which is what lets the diff
-	# base stay the local ref under D2.
+	# Last, a branch that is merely behind moves by fast-forward, which resolves
+	# nothing a human would decide and which the deploy's own --ff-only is the
+	# precedent for.  After this a deployment branch is in-sync or it has no
+	# local ref at all, which is what lets the diff base stay the local ref.
 	#
 	# The divergence is asked again rather than read off the record, because
 	# a branch this stage has just reset stands where its tracking ref does
@@ -660,8 +660,8 @@ sub _shares_history {
 #
 # It was named for the two origin classes when it carried only those.  The
 # hand commit is not a question about where a branch came from, so the name
-# moved to what the three have in common, which is that each is an initial
-# state D96 calls illegal.
+# moved to what the three have in common, which is that each is an illegal
+# initial state.
 sub _illegal_state_refusal {
 	my ($action, $outcome, $remote, $local_only, $unrelated, $hand) = @_;
 	return sprintf("Refusing to %s.  %s  %s", $action,
@@ -673,7 +673,7 @@ sub _illegal_state_refusal {
 }
 
 # }}}
-# _local_only_refusal - D48's text for a branch the remote has never had {{{
+# _local_only_refusal - the text for a branch the remote has never had {{{
 #
 # One paragraph per branch, so the single-branch case reads exactly as the
 # design quotes it and a run with several names them all.  The act and the
@@ -697,7 +697,7 @@ sub _local_only_refusal {
 }
 
 # }}}
-# _unrelated_refusal - D48's text for a branch that shares no ancestor {{{
+# _unrelated_refusal - the text for a branch that shares no ancestor {{{
 #
 # One paragraph per branch, framed by _illegal_state_refusal like its
 # neighbour.
@@ -718,11 +718,11 @@ sub _unrelated_refusal {
 }
 
 # }}}
-# _hand_commit_refusal - D33's paragraphs for a branch carrying a hand edit {{{
+# _hand_commit_refusal - the paragraphs for a branch carrying a hand edit {{{
 #
 # Names each branch, each commit, and the two ways out with the command for
-# each, which is what D96 asks of an illegal initial state.  No flag does the
-# operator's half, because under D38 the right friction is to undo by hand.
+# each, which is what an illegal initial state calls for.  No flag does the
+# operator's half, because the right friction here is to undo by hand.
 #
 # One block rather than one paragraph per branch, because the opening
 # sentence and the indented list are shared and a per-branch block would say
