@@ -32,8 +32,8 @@ record alone, so C<on_events> is called with them the moment the control check
 answers, which is before the walk runs.  That ordering matters: a walk that
 refuses would otherwise end the command with the control ref the refresh
 created unaccounted for.  That one channel is the whole of it, and the lines
-are not left on the record as well, because the record is the shape D91 fixes
-and C<--json> emits it whole.
+are not left on the record as well, because the record has a fixed shape and
+C<--json> emits it whole.
 
 The one axis the walk leaves to this module is the snapshot, which is what a
 deployment branch holds beyond the commit propagation last wrote on it.  One
@@ -190,7 +190,7 @@ environment the deployment root has.
 A code reference called with the control check's event lines as soon as it has
 them, which is before the walk runs.  A caller that names none is told nothing
 as it goes, because the lines are handed over this one channel and are not
-left on the record: the record is the shape D91 fixes, and C<--json> emits it
+left on the record.  The record has a fixed shape, and C<--json> emits it
 whole.
 
 =back
@@ -433,8 +433,8 @@ the record twice in one line.
 A hold somebody set carries one component more, which is
 C<Genesis::CI::Report::hold_detail>'s sentence.  It names what the hold is
 blocking, who set it as C<< E<lt>userE<gt>@E<lt>hostnameE<gt> >>, when they
-set it, and C<genesis E<lt>envE<gt> pipeline-release>, which is what D50 asks
-this command to show.  It is read from that module rather than spelled here,
+set it, and C<genesis E<lt>envE<gt> pipeline-release>, which is what this
+command has to show.  It is read from that module rather than spelled here,
 because the run's report and C<genesis E<lt>envE<gt> deploy> print the same
 sentence and three commands spelling one sentence are three spellings that
 drift apart.  A row held by an ancestor or by a gate carries no such
@@ -675,7 +675,7 @@ B<Examples:>
   my $seeded = Genesis::CI::Status::_seeded($git, $ref);
 
 Answers whether a branch's delivered history is its first delivery alone,
-which is the seed of D61.  Nothing about the reading tells a first delivery
+which is what the seed is.  Nothing about the reading tells a first delivery
 apart from a tenth, so the question is put to the branch's own history, which
 carries one marked commit and no more where the branch has been delivered to
 once.  What bounds the cost is the fifty-commit limit it asks for, since

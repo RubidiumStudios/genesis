@@ -1,10 +1,10 @@
 package Genesis::CI::Status;
-# The pipeline-status read model of D91.  One canonical record for the
-# deployment root the command runs in, computed from the walk the propagate
-# run uses, rendered either as the indented tree or as the JSON --json emits.
-# It moves no branch and writes nothing to vault.  The refresh it does by
-# default materialises local refs the remote already holds, and it hands its
-# events to the caller rather than printing them.
+# The pipeline-status read model.  One canonical record for the deployment
+# root the command runs in, computed from the walk the propagate run uses,
+# rendered either as the indented tree or as the JSON --json emits.  It moves
+# no branch and writes nothing to vault.  The refresh it does by default
+# materialises local refs the remote already holds, and it hands its events
+# to the caller rather than printing them.
 use strict;
 use warnings;
 
@@ -42,8 +42,8 @@ our @EXPORT_OK = qw/status_records render_tree render_json/;
 # stale report writes onto the record.
 use constant UNVERIFIABLE => 'unverifiable';
 
-# The five classes of D91, each mapped to markup Genesis::Term already has, so
-# the renderer emits no escape sequence of its own.
+# The five classes a row can read as, each mapped to markup Genesis::Term
+# already has, so the renderer emits no escape sequence of its own.
 our %CLASS_MARKUP = (
 	settled   => 'G',
 	in_flight => 'Y',
@@ -66,9 +66,9 @@ our @CLASS_ORDER = qw/wrong on_ice in_flight settled inert/;
 
 # status_records - the canonical record for one deployment root {{{
 #
-# D91 fixes the record, and a command runs in one deployment root, so there is
-# one record and the caller renders it.  The walk decides the routing and the
-# certification, and the command renders what it hands back.
+# The record has a fixed shape, and a command runs in one deployment root, so
+# there is one record and the caller renders it.  The walk decides the routing
+# and the certification, and the command renders what it hands back.
 sub status_records {
 	my ($top, %opts) = @_;
 	my $git     = $opts{git} // Service::Git->new('.');
@@ -131,7 +131,7 @@ sub status_records {
 		branches  => $initial->{branches},
 		composed  => \@composed,
 		refreshed => $refresh ? 1 : 0,
-		# D52's recovery, which the walk makes for itself out of these two.
+		# The walk makes the squash recovery for itself out of these two.
 		# A deployment branch whose pull request went in as a squash carries
 		# no marker of its own, and the merged pull request in the answer
 		# read above is the only thing that still says which control commit
@@ -150,7 +150,7 @@ sub status_records {
 	# The walk writes the flag as a number, so it is made the encoder's own
 	# boolean here and the marking below writes the same kind.  --json then
 	# emits one shape for the field whichever form of the command wrote the
-	# record, which is what D91 asks of every field it fixes.
+	# record, which is what every fixed field has to do.
 	$record->{refreshed} = $record->{refreshed} ? JSON::PP::true : JSON::PP::false;
 
 	# What the API answered, carried onto the walk's own records through the
@@ -163,7 +163,7 @@ sub status_records {
 		my $state = $pr_state_of->{$row->{env}} or next;
 		Genesis::CI::PullRequest::carry_state($row, $state);
 
-		# D51's approved arm, taken from the sub the run takes it from rather
+		# The approved arm is taken from the sub the run takes it from rather
 		# than decided again here, so the report and the run cannot disagree
 		# about what an approved pull request does to an environment.  It
 		# touches nothing outside the record: the due commits move to held
@@ -174,7 +174,7 @@ sub status_records {
 			&& @{$row->{pending} || []};
 	}
 
-	# D43's staleness, asked through the one query Genesis::Top gives it, so
+	# Staleness is asked through the one query Genesis::Top gives it, so
 	# the deploy pre-flight, the propagate pre-flight, and this command
 	# cannot disagree about whether the pipeline is stale.  The query answers
 	# an arrayref of env and reason pairs, and the reasons are its own two
@@ -223,12 +223,12 @@ sub status_records {
 		my $ref = $settled->{assumed} // $settled->{branch};
 		$row->{drifted} = drift_for($git, $ref);
 
-		# D91 keeps seeded an annotation on the pending reading rather than
-		# a fifth reading of its own, so only a pending row is asked and
-		# every other row costs nothing, which is a whole git process and a
-		# list of fifty commits.  It is written as the encoder's own boolean,
-		# as the walk's manual marker is, so --json emits one shape for the
-		# field whatever the row reads.
+		# The seed is an annotation on the pending reading rather than a
+		# fifth reading of its own, so only a pending row is asked and every
+		# other row costs nothing, which is a whole git process and a list of
+		# fifty commits.  It is written as the encoder's own boolean, as the
+		# walk's manual marker is, so --json emits one shape for the field
+		# whatever the row reads.
 		$row->{seeded} = (($row->{reading} // '') eq 'pending-deploy'
 			&& _seeded($git, $ref)) ? JSON::PP::true : JSON::PP::false;
 	}
@@ -245,7 +245,7 @@ sub status_records {
 # }}}
 # _mark_unverifiable - every value that rests on a refresh nobody ran {{{
 #
-# D40 keeps one --no-refresh, on this command alone, and it yields a
+# There is one --no-refresh, on this command alone, and it yields a
 # read-only report with every cell that rests on the remote-tracking refs
 # marked unverifiable.  The divergence cell is set through its state rather
 # than replaced by a string, so --json emits one shape for that field
@@ -285,13 +285,13 @@ sub _mark_unverifiable {
 }
 
 # }}}
-# drift_for - the snapshot axis of D33 {{{
+# drift_for - the snapshot axis {{{
 #
 # A deployment branch carries a marker on every commit propagation wrote, so
 # the newest marked commit is the snapshot the branch is certified to hold and
-# everything above it is a hand edit.  D33 makes that edit legal and
-# temporary, so the reading is never a refusal; it is a report, and it names
-# every file so the operator sees the whole edit.
+# everything above it is a hand edit.  That edit is legal and temporary, so
+# the reading is never a refusal; it is a report, and it names every file so
+# the operator sees the whole edit.
 #
 # The comparison is git alone.  Asking the environment for its propagation set
 # would load the kit through vault, which a read-only caller that has not
@@ -316,9 +316,9 @@ sub drift_for {
 #
 # A marker is a bare sha with no ancestry link to the branch, because
 # propagation copies files and never commits, so it means something only while
-# a ref still reaches the commit.  D31 closes the hazard through the branch
-# protection; a rewrite that got past it is reported here by name, because
-# nothing else in the command would notice.
+# a ref still reaches the commit.  The branch protection closes that hazard;
+# a rewrite that got past it is reported here by name, because nothing else
+# in the command would notice.
 sub unfetchable_markers {
 	my ($git, $record) = @_;
 	my @breaches;
@@ -339,9 +339,9 @@ sub unfetchable_markers {
 # }}}
 # _seeded - is the branch's delivered history its first delivery alone {{{
 #
-# D61 makes the seed the branch's first delivery, and nothing about the
-# reading tells it apart from the tenth, so the annotation is answered off the
-# branch's own history, which carries one marked commit and no more.
+# The seed is the branch's first delivery, and nothing about the reading tells
+# it apart from the tenth, so the annotation is answered off the branch's own
+# history, which carries one marked commit and no more.
 #
 # What bounds the cost is the fifty-commit limit, since log_subjects runs git
 # and builds the whole list before the loop begins.  Returning at the second
@@ -426,10 +426,10 @@ sub _jsonable {
 # }}}
 # render_tree - the root's environments as an indented tree in DAG order {{{
 #
-# The rendering is D91's constraint and not a suggestion, so we render the
-# tree, the branch and deploy columns side by side, and one composed phrase
-# per row.  The header names the pipeline by the label the configuration gives
-# it, and by the deployment type where a repository names no label.
+# The rendering is a constraint and not a suggestion, so we render the tree,
+# the branch and deploy columns side by side, and one composed phrase per row.
+# The header names the pipeline by the label the configuration gives it, and
+# by the deployment type where a repository names no label.
 sub render_tree {
 	my ($record, %opts) = @_;
 	my @out;
@@ -529,7 +529,7 @@ sub render_tree {
 # warn an operator about.
 #
 # This command never refuses on any of it.  The one refusal pipeline-status
-# keeps is the disowned pipeline, and D57 already has the column
+# keeps is the disowned pipeline, and the column already has to
 # report a proposed record flagged as possibly outdated where no token was
 # there to validate it with.  All three refusals the two subs below raise are
 # therefore rendered that same way, which are an API that will not answer, a
@@ -624,7 +624,7 @@ sub _unconsulted {
 # }}}
 # _applied_line - the header that says the pipeline is stale {{{
 #
-# D43 detects staleness by a path comparison that needs no fly, and
+# Staleness is detected by a path comparison that needs no fly, and
 # Genesis::Top gives it one method, so we ask that method rather than diffing
 # here.  The line names each changed environment with the reason the query
 # gave for it, and the command that fixes it.
@@ -697,7 +697,7 @@ sub _pull_request_component {
 }
 
 # }}}
-# compose_phrase - the components in D91's fixed order {{{
+# compose_phrase - the components in their fixed order {{{
 #
 # The order is the certification word, the routing summary, the snapshot flag,
 # the pull request, the hold, and [manual].  Each component keeps its own
@@ -719,7 +719,7 @@ sub compose_phrase {
 	);
 
 	my @phrase = ($word{$row->{reading}} || [wrong => 'unknown reading']);
-	# D61's seed, directly after the certification word, because the
+	# The seed goes directly after the certification word, because the
 	# annotation qualifies that word rather than standing beside it.  It
 	# takes the in-flight class the pending word beside it takes, since a
 	# seeded environment is one waiting on its first deploy.
@@ -757,7 +757,7 @@ sub compose_phrase {
 		push @phrase, [wrong => sprintf('drifted [%s differs: hand commit]',
 			join(', ', @{$drift->{files}}))];
 	}
-	# D91 puts the pull request between the snapshot flag and the hold.  The
+	# The pull request goes between the snapshot flag and the hold.  The
 	# flag says what the branch itself holds, this says which pull request is
 	# carrying the change and what a reviewer made of it, and the hold below
 	# says what the environment is waiting for.
@@ -780,10 +780,10 @@ sub compose_phrase {
 		push @phrase, [on_ice => sprintf('held, %s%s', $qualifier,
 			($row->{certified} || {})->{unverifiable}
 				? sprintf(' [%s]', UNVERIFIABLE) : '')];
-		# D50 has this command name who set the hold and when, and the one
-		# command that clears it, and hold_detail is where that sentence is
-		# composed for the run's report and for the deploy as well.  It is
-		# read rather than spelled here, because three commands spelling one
+		# This command names who set the hold and when, and the one command
+		# that clears it, and hold_detail is where that sentence is composed
+		# for the run's report and for the deploy as well.  It is read
+		# rather than spelled here, because three commands spelling one
 		# sentence is three spellings that drift apart, which is H23.
 		#
 		# It is answered only for a hold somebody set, which is what
