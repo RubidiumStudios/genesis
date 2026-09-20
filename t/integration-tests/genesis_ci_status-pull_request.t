@@ -11,7 +11,8 @@
 #
 # Two more things this command does with the API are proved here.  An API it
 # cannot read degrades the column and warns rather than ending the report,
-# which is M17 ruling 49, and the client the report hands the walk lets a
+# because the command's one refusal on this path is the disowned pipeline,
+# and the client the report hands the walk lets a
 # squash-merged marker come back, which both says where the marker came from
 # and says aloud where a merged pull request names another environment.
 #

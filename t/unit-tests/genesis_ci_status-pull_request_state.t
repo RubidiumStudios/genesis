@@ -1,10 +1,10 @@
 #!/usr/bin/env perl
 # Proves that the read-only report degrades where the run cannot be told
-# which repository to ask GitHub about.  M17 ruling 49 gives genesis
-# pipeline-status one refusal, which is the disowned pipeline, so a
-# repository that asks for pull requests and resolves no owner and
-# repository pair leaves every column unread rather than ending the report
-# at CONFIG in a writing run's words.
+# which repository to ask GitHub about.  genesis pipeline-status has one
+# refusal on this path, which is the disowned pipeline, so a repository
+# that asks for pull requests and resolves no owner and repository pair
+# leaves every column unread rather than ending the report at CONFIG in a
+# writing run's words.
 #
 # The row is a unit row rather than a command row because Genesis::Top
 # refuses a repository like that as it resolves the source control block, so
