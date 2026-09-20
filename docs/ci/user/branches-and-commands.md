@@ -2,7 +2,7 @@
 
 Once a repository has a pipeline enabled, the branch you are standing on decides what a Genesis command is allowed to do. This page says which branch each command expects, why it refuses where it refuses, and how to ask a command about the version an environment is actually running rather than about the tip of its branch.
 
-Nothing here applies to a repository with no pipeline. With `pipeline.enabled` off, every command behaves on every branch exactly as it always has.
+Most of this applies only to a repository with a pipeline. With `pipeline.enabled` off, no command is refused for the branch you are standing on and none of them switches branches under you. The one thing you still meet is the pair of deployed-commit flags at the end of this page, which are refused outright off a pipeline, because the branch session that makes them safe opens only under one.
 
 ## The branches a pipeline repository carries
 
@@ -13,7 +13,7 @@ A pipeline repository keeps the environment files on one branch and the delivere
 | Control | The branch the environment files live on, and the source every delivery is read from | You, and the commands that commit on your behalf |
 | Deployment | One branch per deployment, named for the deployment slug, holding what was delivered to it | `genesis propagate` |
 | Pull request | The branch a propagation run opens a pull request from, for an environment whose `require_pr` asks for one | `genesis propagate`, which rewrites it each run |
-| Artifacts | The branch a deploy writes its artifacts to | `genesis <env> deploy` |
+| Artifacts | The branch reserved for a deployment's artifacts | Nothing yet. Genesis recognises the name so that it can refuse a command standing there, and no command writes the branch |
 | Feature | Any other branch, which is where you do work that is headed for control | You |
 
 The last four are derived, which means Genesis composes their names from the environments it finds rather than reading them from configuration. A branch that matches none of them is a feature branch.
