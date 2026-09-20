@@ -673,14 +673,9 @@ B<Examples:>
   # $initial->{branches}{qa}{assumed} is 'refs/remotes/origin/qa/bosh',
   # which is the ref the walk takes its diff base from
 
-=head1 INTERNAL FUNCTIONS
+=head2 shares_history($git, $branch, $remote)
 
-Every public entry of this module goes above this heading, under
-C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
-
-=head2 shares_history
-
-    my $shared = Genesis::CI::Preflight::shares_history($git, $branch, $remote);
+  my $shared = Genesis::CI::Preflight::shares_history($git, $branch, $remote);
 
 Answers whether a local branch and its counterpart on the remote have a commit
 in common.
@@ -727,6 +722,11 @@ B<Examples:>
 
   Genesis::CI::Preflight::shares_history($git, 'qa/bosh', 'origin');
   # 0, where the local branch is an orphan of the same name
+
+=head1 INTERNAL FUNCTIONS
+
+Every public entry of this module goes above this heading, under
+C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
 
 =head2 _illegal_state_refusal
 
