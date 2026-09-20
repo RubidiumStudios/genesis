@@ -13,8 +13,8 @@
 # Every row stands its environment up with nothing delivered on its branch, so
 # the branch carries no marker of its own and the merge is the only thing that
 # can say what it received.  A branch delivered to before would answer out of
-# the commit under the merge, which is the hand-commit skip, and no row here
-# would ever reach the recovery.
+# the commit under the merge, because the marker walk skips a hand commit, and
+# no row here would ever reach the recovery.
 use strict;
 use warnings;
 use utf8;
