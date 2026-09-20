@@ -74,27 +74,6 @@ sub chained_harness {
 	);
 }
 
-# One control commit that both environments are due, delivered to qa alone, so
-# that the deploy under test certifies it and the child has exactly one commit
-# to carry to prod.  The bodies come from the harness's own writer rather than
-# being spelled out here, since an environment file the walk reads a topology
-# out of is the harness's to shape.
-sub due_on_control {
-	my ($h) = @_;
-	write_env_file($h, 'qa', params => {n => 2}, commit => 0);
-	write_env_file($h, 'prod', genesis => {pipeline => {prior_env => 'qa'}},
-		params => {n => 2}, commit => 0);
-	run({dir => $h->a}, 'git', 'add', '--', 'qa.yml', 'prod.yml');
-	run({dir => $h->a, onfailure => 'Failed to commit the due change'},
-		'git', 'commit', '-q', '-m', 'A change both environments are due');
-	push_from($h, 'a', $h->control);
-
-	my $control = $h->git('a')->sha($h->control);
-	deliver($h, 'qa', control => $control);
-	refresh($h, 'a', $h->control, $h->slug('qa'), $h->slug('prod'));
-	return $control;
-}
-
 subtest 'one child, genesis propagate, and its own session' => sub {
 	plan tests => 7;
 

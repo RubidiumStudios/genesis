@@ -792,6 +792,33 @@ Takes C<params>, which is handed to C<write_env_file> and is what makes each
 commit a different one, C<message>, C<trailers>, which is how a row lays a
 gate, and C<push>, which defaults on.
 
+=head2 due_on_control($h)
+
+    my $control = due_on_control($h);
+
+Writes one control commit that both C<qa> and C<prod> are due, delivers it to
+C<qa> alone, and returns its sha.  A deploy that hands off to a child wants
+exactly one commit for the child to carry, and a commit due to both
+environments is what makes the certification the deploy writes release the
+downstream one, so the commit touches both environment files and only the
+upstream environment is given it.
+
+The files are written without commits of their own and committed together
+afterwards, because one commit is the whole point and C<write_env_file> would
+otherwise lay one per file.  The paths that commit names are the ones
+C<write_env_file> hands back, so a harness that writes its environment files
+under a deployment root is committed correctly without this saying either
+name.
+
+Each file is written whole, so C<prod>'s C<prior_env> is named again here even
+though a chained seeding has already laid it, because the rewrite would drop
+any key it did not restate.  A harness seeded with shared files has the same
+exposure on C<track_additional_files>, so a row that wants both this commit
+and tracked files wants a builder that keeps them.
+
+Expects a two-environment harness holding C<qa> and C<prod>, which is what
+C<ready_harness> builds under C<chained>.
+
 =head2 patch_calls($gh)
 
     my ($call) = patch_calls($gh);
