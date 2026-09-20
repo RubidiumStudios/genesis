@@ -221,17 +221,19 @@ subtest 'a dry run under a pipeline leaves no session behind' => sub {
 	# passes restore => 0.  The same early exit used to skip the deploy's
 	# own cleanup of its cache directory, so a dry run ended with
 	# .genesis/deploy-cache standing untracked in the tree and an operator
-	# met it at their next git status.  The cache is read here by name
-	# rather than through the restoration, because the expanded dev kit
-	# stands untracked beside it for a reason of its own and reading the
-	# two together would read a second question through the first.
+	# met it at their next git status.  The environment's own directory is
+	# what the cleanup takes; the parent it sits in is left by every
+	# deploy, dry or not.  The cache is read here by name rather than
+	# through the restoration, because the expanded dev kit stands
+	# untracked beside it for a reason of its own and reading the two
+	# together would read a second question through the first.
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '--dry-run', '-y', 'a reason');
 	is($exit, 0, 'the dry run succeeded')
 		or diag("what the dry run said:\n$err");
 	unlike($err, qr/exited with a branch session still open/,
 		'and said nothing about a session it had left open');
-	ok(!-d $h->a . '/.genesis/deploy-cache',
+	ok(!-d $h->a . '/.genesis/deploy-cache/qa',
 		'and took its deployment cache away behind it');
 };
 
