@@ -4,6 +4,7 @@ use warnings;
 
 use Genesis;
 use Genesis::Top ();
+use Genesis::CI::ProviderCompiler;
 use JSON::PP;
 
 ### Constructor {{{
@@ -262,7 +263,7 @@ sub mermaid {
 
 		# Topological order gives a clean left-to-right layout
 		my @order = @$edges
-			? _topological_sort($graph)
+			? Genesis::CI::ProviderCompiler->topological_sort($graph)
 			: sort @{$wf_data->{environments}};
 
 		# Emit edges; node shapes are defined inline on first appearance
@@ -331,7 +332,7 @@ sub description {
 
 		my @order;
 		if ($workflow->{graph}) {
-			@order = _topological_sort($workflow->{graph});
+			@order = Genesis::CI::ProviderCompiler->topological_sort($workflow->{graph});
 		} else {
 			@order = @{$wf_data->{environments}};
 		}
@@ -440,7 +441,7 @@ sub _git_resource {
 	my ($self, $ast) = @_;
 
 	my $sc     = $ast->integrations->{source_control} || {};
-	my $uri    = $self->_git_uri($sc);
+	my $uri    = Genesis::CI::ProviderCompiler->git_uri($sc);
 	my $branch = $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main';
 
 	my $source = { uri => $uri, branch => $branch };
@@ -566,7 +567,7 @@ sub _env_resources {
 
 	my @resources;
 	my $sc   = $ast->integrations->{source_control} || {};
-	my $uri  = $self->_git_uri($sc);
+	my $uri  = Genesis::CI::ProviderCompiler->git_uri($sc);
 	my $br   = $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main';
 	my $root = $sc->{root} || '.';
 	my $pr   = ($root eq '.') ? '' : "$root/";
@@ -1230,7 +1231,7 @@ sub _auto_update_resources {
 		|| 'main';
 	my $target_branch = $auto_update->{target_branch} || '';
 	if ($target_branch && $target_branch ne $control_branch) {
-		my $uri = $self->_git_uri($sc);
+		my $uri = Genesis::CI::ProviderCompiler->git_uri($sc);
 		my %source = (uri => $uri, branch => $target_branch);
 		if ($sc->{auth}) {
 			if (($sc->{auth}{type} || '') eq 'ssh-key') {
@@ -1784,7 +1785,9 @@ sub _extract_workflow_data {
 	}
 
 	return {
-		environments        => (@$edges ? [_topological_sort($graph)] : [sort keys %$nodes]),
+		environments        => (@$edges
+			? [Genesis::CI::ProviderCompiler->topological_sort($graph)]
+			: [sort keys %$nodes]),
 		auto                => \%auto,
 		aliases             => \%aliases,
 		genesis_envs        => \%genesis_envs,
@@ -1803,7 +1806,6 @@ sub _extract_workflow_data {
 }
 
 # }}}
-# _git_uri - build git URI from source_control config {{{
 # _referenced_resources - resource names any job actually uses {{{
 #
 # Walks job plans for get/put steps and task inputs.  Steps nest
@@ -1826,24 +1828,6 @@ sub _referenced_resources {
 	}
 
 	return $seen;
-}
-
-# }}}
-sub _git_uri {
-	my ($self, $source_control) = @_;
-
-	my $provider = $source_control->{provider} || '';
-	my $repo     = $source_control->{repository} || '';
-
-	if ($provider eq 'github') {
-		return sprintf("git\@github.com:%s.git", $repo);
-	} elsif ($provider eq 'gitlab') {
-		return sprintf("git\@gitlab.com:%s.git", $repo);
-	} elsif ($source_control->{uri}) {
-		return $source_control->{uri};
-	} else {
-		return $repo;
-	}
 }
 
 # }}}
@@ -1882,9 +1866,12 @@ sub _bosh_config_types {
 sub _unwrap_ref {
 	my ($value) = @_;
 	return undef unless defined $value;
-	if (ref($value) eq 'HASH' && exists $value->{secret_ref}) {
-		return "(($value->{secret_ref}))";
-	}
+	# How a reference is spelled is the compiler base's to say, because a
+	# provider that spells one differently overrides it there.  What is
+	# this file's is that a value which is not a reference is written as
+	# it stands, a locker URL being a URL rather than a secret.
+	return Genesis::CI::ProviderCompiler->secret_ref($value)
+		if ref($value) eq 'HASH' && exists $value->{secret_ref};
 	return $value;
 }
 
@@ -1978,36 +1965,6 @@ sub _mermaid_node_def {
 }
 
 # }}}
-# _topological_sort - standard topological sort on a workflow graph {{{
-sub _topological_sort {
-	my ($graph) = @_;
-
-	my @sorted;
-	my %visited;
-	my %temp_mark;
-
-	my $visit;
-	$visit = sub {
-		my ($node) = @_;
-		return if $visited{$node};
-		bail("Cycle detected in workflow graph at node '%s'", $node)
-			if $temp_mark{$node};
-		$temp_mark{$node} = 1;
-		for my $edge (@{$graph->{edges} || []}) {
-			$visit->($edge->{to}) if $edge->{from} eq $node;
-		}
-		delete $temp_mark{$node};
-		$visited{$node} = 1;
-		unshift @sorted, $node;
-	};
-
-	for my $node (sort keys %{$graph->{nodes} || {}}) {
-		$visit->($node) unless $visited{$node};
-	}
-	return @sorted;
-}
-
-# }}}
 # }}}
 
 1;
@@ -2029,6 +1986,13 @@ provider (Concourse, GitHub Actions, etc.) into platform-specific format.
 
 All Genesis-specific knowledge lives here: deployment jobs, cache
 generation, locker integration, auto-update, notification wiring, etc.
+
+What is not Genesis-specific comes off L<Genesis::CI::ProviderCompiler>,
+which is where the clone URI of a source control declaration, the order a
+workflow graph is walked in, and the spelling of a secret reference are
+settled. This file asks that class for each of them rather than keeping
+its own answer, so a provider that spells one of them differently
+overrides it in one place and is obeyed here.
 
 =head1 SYNOPSIS
 
