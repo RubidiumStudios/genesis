@@ -1818,6 +1818,21 @@ catch up, and a row that means to keep a stale clone says C<< catch_up => 0 >>
 inside the C<bosh> options the way it would say it to C<fixture_bosh>.  A row
 that only deploys and never walks calls C<fixture_bosh> itself, afterwards.
 
+=head2 fanned_harness(%opts)
+
+  my $h = fanned_harness(envs => ['qa', 'prod', 'stage'], bosh => 1);
+
+C<ready_harness> over the fan-out, which is one environment several others
+hang off rather than a chain of one predecessor each.  A deploy of that one
+leaves its child a commit to carry to several branches, which is the shape
+the rows about a spawned child need.
+
+C<prior> names the environment the others hang off and defaults to the first
+of them.  Every other environment declares it as its predecessor and carries
+it as its one dependency, in its pipeline record and in what its certified
+record last read, so the staleness comparison finds the two halves agreeing.
+A row wanting other dependencies passes its own.
+
 =head2 seeded_harness(%opts)
 
 C<ready_harness> over one environment, which is C<qa> unless the call says
@@ -2054,21 +2069,6 @@ One control commit per environment, each touching the file the next
 environment's row reads, and their shas in the order the environments were
 named.  Each file is the body C<env_body> writes, so the repository a walk
 reads still holds every environment.
-
-=head2 fanned_harness(%opts)
-
-  my $h = fanned_harness(envs => ['qa', 'prod', 'stage'], bosh => 1);
-
-C<ready_harness> over the fan-out, which is one environment several others
-hang off rather than a chain of one predecessor each.  A deploy of that one
-leaves its child a commit to carry to several branches, which is the shape
-the rows about a spawned child need.
-
-C<prior> names the environment the others hang off and defaults to the first
-of them.  Every other environment declares it as its predecessor and carries
-it as its one dependency, in its pipeline record and in what its certified
-record last read, so the staleness comparison finds the two halves agreeing.
-A row wanting other dependencies passes its own.
 
 =head2 gated($h, %opts)
 
