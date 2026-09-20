@@ -7,7 +7,7 @@
 # The first row holds a token throughout, because what it proves is that a
 # repository delivering to nobody by pull request never reaches the API at
 # all.  A row that withheld the token would have proved only that a run with
-# no token makes no call, which is a different rule and one D44 already owns.
+# no token makes no call, which is a different rule proved elsewhere.
 #
 # Every due commit is laid through due_commit, or through the two helpers
 # due_commit is made of where the file also has to keep a pipeline key,
