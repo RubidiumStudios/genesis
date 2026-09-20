@@ -15,7 +15,7 @@ use Harness::Propagation;
 use Test::More;
 use Cwd qw/getcwd/;
 use Genesis;
-use Genesis::Exit qw/SOFTWARE/;
+use Genesis::Exit qw/SOFTWARE TEMPFAIL/;
 use_ok 'Service::Git::Session';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
@@ -379,6 +379,27 @@ subtest 'a local commit on control survives the session' => sub {
 	my $module = get_file($helper::TOPDIR . '/lib/Service/Git/Session.pm');
 	unlike($module, qr/update-ref[^\n]*control|reset --hard[^\n]*control/,
 		'no verb of the session force-writes the local control ref');
+};
+
+subtest 'a session that is not open still carries the exit code' => sub {
+	plan tests => 3;
+
+	# Nothing in the product reaches this today, because the one production
+	# caller guards on the session being active, so the row stands in for
+	# the caller that eventually does.  A caller that asked for TEMPFAIL and
+	# was answered 1 would be told the wrong thing about its own failure.
+	my $h   = make_harness(envs => ['qa']);
+	my $git = $h->git('a');
+	my $session = $git->session(control => $h->control);
+
+	ok(!$session->active, 'the session was never opened');
+
+	my ($said, $code) = bail_from(sub {
+		$session->abort('the remote was not there', exitcode => TEMPFAIL)
+	});
+
+	is($said, 'the remote was not there', 'the error is re-raised as it was');
+	is($code, TEMPFAIL, 'carrying the code the caller asked for');
 };
 
 sub exception {

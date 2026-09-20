@@ -16,6 +16,7 @@ use Harness::Propagation;
 
 use Test::More;
 use Genesis;
+use Genesis::Exit;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -73,6 +74,32 @@ subtest 'an untracked file is not in the way' => sub {
 	unlike(unfolded($err), qr/There are staged changes in this repository/,
 		'the scratch file is not read as staged work');
 	ok(-f $h->a . '/scratch.txt', 'and it is still there afterwards');
+};
+
+subtest 'the longer file suffix comes off the name as well' => sub {
+	plan tests => 3;
+
+	# The gate reads the argument as an environment name before it asks
+	# whether the branch collides with one, and Genesis writes an
+	# environment file as <name>.yml.  An operator may well type the longer
+	# spelling, so both come off, and a name still carrying its suffix
+	# would miss the collision the gate exists to catch.
+	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	my $git = $h->git('a');
+	refresh($h, 'a');
+
+	$git->create_branch('prod2', 'refs/remotes/origin/' . $h->control);
+	stand_on($h, 'prod2');
+
+	my (undef, $err, $exit) =
+		run_genesis($h, {restore => 0}, 'new', 'prod2.yaml', '--no-commit');
+
+	is($exit, Genesis::Exit::DATAERR(),
+		'the collision is refused however the argument was spelled');
+	like($err, qr/named for an environment/i,
+		'the refusal names the condition');
+	ok(!-f $h->a . '/prod2.yml',
+		'and nothing was written');
 };
 
 done_testing;
