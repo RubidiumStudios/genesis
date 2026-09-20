@@ -144,7 +144,7 @@ sub _build_legacy_workflows {
 		my %aliases      = map { $_ => ($boshes->{$_}{alias}       || $_) } @environments;
 		my %genesis_envs = map { $_ => ($boshes->{$_}{genesis_env} || $_) } @environments;
 
-		# Auto-trigger environments — already expanded by Genesis::CI::Layout
+		# Auto-trigger environments, already expanded by Genesis::CI::Layout
 		my %auto_envs = map { $_ => 1 } @{$layout->{_auto_envs} || []};
 
 		# Build trigger map (inverse of will_trigger)
@@ -443,8 +443,8 @@ sub _build_from_env_files {
 	}
 
 	# Pass 2: every valid env becomes a node (so envs without any
-	# genesis.pipeline block still appear in the DAG — useful for
-	# pipeline-status), plus any upstream reference that resolves to a
+	# genesis.pipeline block still appear in the DAG, which is what
+	# pipeline-status wants), plus any upstream reference that resolves to a
 	# file on disk.
 	my %nodes;
 	my %prior_env_map;
@@ -486,8 +486,9 @@ sub _build_from_env_files {
 		$prior_env_map{$env} = $data->{prior_env} if $data->{prior_env};
 	}
 
-	# Second pass: resolve bosh_parent from genesis.bosh_env — only when the
-	# named director is also a pipeline-managed env in this same node set.
+	# Second pass, which resolves bosh_parent from genesis.bosh_env, and
+	# only where the named director is also a pipeline-managed env in this
+	# same node set.
 	for my $env (sort keys %envs_to_include) {
 		my $data   = $pipeline_data{$env} || {};
 		my $be     = $data->{_bosh_env}  || '';
@@ -522,12 +523,15 @@ sub _build_from_env_files {
 # read the internal keys.
 #
 # Internal keys after normalization:
-#   enabled        — 0/1; legacy: enabled when 'file' is present
-#   file           — kit version file path (from kit_version_file or file)
-#   label          — commit prefix (from commit_label or label)
-#   update_genesis — 0/1, default 1
-#   update_kit     — 0/1, default 1
-#   target_branch  — optional branch override for the push commit
+#   enabled          0 or 1.  The legacy form declares no such key and
+#                    counts as enabled wherever 'file' is present.
+#   file             the kit version file path, read from
+#                    kit_version_file or from file
+#   label            the commit prefix, read from commit_label or from
+#                    label
+#   update_genesis   0 or 1, default 1
+#   update_kit       0 or 1, default 1
+#   target_branch    an optional branch override for the push commit
 sub _normalize_auto_update {
 	my ($au) = @_;
 	return unless ref($au) eq 'HASH';
@@ -563,7 +567,7 @@ sub _normalize_slack_config {
 	my ($integrations) = @_;
 
 	if (my $s = $integrations->{slack}) {
-		# New format already present — ensure structural defaults
+		# New format already present, so ensure structural defaults
 		$s->{mentions_on_failure} //= [];
 		$s->{per_env_overrides}   //= {};
 		return 1;
@@ -592,9 +596,9 @@ sub _normalize_slack_config {
 #
 # Reads a YAML file line-by-line capturing:
 #   genesis:
-#     bosh_env: <value>      (genesis-level — stored as _bosh_env)
+#     bosh_env: <value>      (genesis-level, stored as _bosh_env)
 #     pipeline:
-#       key: value           (pipeline sub-keys — stored directly)
+#       key: value           (pipeline sub-keys, stored directly)
 #       locks:
 #         bosh_upgrade: val  (stored as locks->{bosh_upgrade})
 #
