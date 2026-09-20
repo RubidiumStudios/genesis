@@ -4,8 +4,8 @@
 # retired routing sense of "entry point", while the ordinary meaning of a
 # command's CLI entry is left untouched.
 #
-# The term was retired in its routing sense, because it named the output of
-# a computation that no longer exists.  The walk visits every environment and
+# The term was retired in its routing sense, because it named the output of a
+# computation that no longer exists.  The walk visits every environment and
 # each control commit is either delivered or held with a reason, so there is
 # no set of environments picked out ahead of the walk for the term to name.
 #

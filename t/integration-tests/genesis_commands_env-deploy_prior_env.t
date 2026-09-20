@@ -151,8 +151,8 @@ subtest 'the three prior-env cases, with L unchanged on each' => sub {
 		certify($h, 'lab', result => 'post-failed', control_commit => $control)
 			if $case eq 'post-failed';
 		# no control: a predecessor that deployed and certified nothing.
-		# It holds everything below it and the due set is empty, which is
-		# a state this check passes rather than one it refuses.  What this
+		# It holds everything below it and the due set is empty, which is a
+		# state this check passes rather than one it refuses.  What this
 		# catches is a check that asked which commit the predecessor
 		# certified rather than whether it had deployed at all, which would
 		# refuse here.
