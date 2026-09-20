@@ -105,8 +105,9 @@ subtest 'the roster comes from control, not from the tree in front of us' => sub
 	# The deploy asks this query standing on a deployment branch, which the
 	# branch class put it on and which carries one environment's hierarchy
 	# and no sibling's.  Read out of that tree, the roster is a list of one
-	# and an environment that changed only on control is invisible, which is
-	# the whole of what this query has to name.
+	# and an environment that changed only on control is invisible, so the
+	# query has to name every environment the applied record knows, read
+	# from control rather than from the tree in front of it.
 	#
 	# bosh is passed for the catch-up alone: a delivery is published from the
 	# teammate's copy, so the operator's own branch stands at the commit the
