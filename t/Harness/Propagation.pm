@@ -80,6 +80,19 @@ our @EXPORT = qw/
 our $DEFAULT_EXODUS_MOUNT = '/secret/exodus/';
 
 # }}}
+# $DEFAULT_MINIMUM_VERSION - the floor a fixture repository declares {{{
+#
+# Genesis::Top::create writes a minimum_version for every released build, so a
+# configuration assembled here carries one too and the fixture stands for a
+# repository Genesis made.  A repository that declares no floor is the one a
+# development build created, and an environment that declares none of its own
+# on such a repository is refused, so a fixture that left the key out was
+# refused for a reason no row had asked about.  Both builders that write a
+# whole configuration use this, and they share the one value so that a change
+# to the floor cannot move one path and leave the other behind.
+our $DEFAULT_MINIMUM_VERSION = '3.2.0';
+
+# }}}
 # _guard_env, _release_env - the fixture variables the parent has to hold {{{
 #
 # A fixture that arms a spawned command sets its variables in the parent
@@ -4719,7 +4732,7 @@ sub load_with {
 
 	my $floor = exists $opts{minimum_version}
 		? $opts{minimum_version}
-		: '3.2.0';
+		: $DEFAULT_MINIMUM_VERSION;
 
 	$h->commit_on_control(files => {
 		'.genesis/config' => join("\n",
@@ -5476,10 +5489,22 @@ sub _write_whole_config {
 	my $root = $opts{root} // $h->{root};
 	my $path = ($root ? "$root/" : '') . '.genesis/config';
 
+	# The floor is defaulted here for the reason load_with defaults it, and
+	# the two builders read it from the same place.  A configuration that
+	# names minimum_version keeps the value it named, so a row that is about
+	# the floor itself, including one that wants the refusal a missing floor
+	# earns, says so in the hash it hands in, and naming it with undef or the
+	# empty string writes no floor at all.
+	my %whole = %$config;
+	$whole{minimum_version} = $DEFAULT_MINIMUM_VERSION
+		unless exists $whole{minimum_version};
+	delete $whole{minimum_version} unless defined $whole{minimum_version}
+		&& length $whole{minimum_version};
+
 	unlink "$h->{a}/$path";
 	require Genesis::Config;
 	my $written = Genesis::Config->new("$h->{a}/$path");
-	$written->set($_ => $config->{$_}) for sort keys %$config;
+	$written->set($_ => $whole{$_}) for sort keys %whole;
 	$written->save;
 
 	run({dir => $h->{a}}, 'git', 'add', '--', $path);
