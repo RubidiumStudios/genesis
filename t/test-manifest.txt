@@ -170,7 +170,6 @@ unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library 
 #unit-tests/genesis_ci_pipeline_descriptor-redeploy.t
 #unit-tests/genesis_ci_pipeline_descriptor-signal.t
 #ci-pipeline.t                                            # an ASTBuilder row over the multi-file topology answers undef, and the rest of the file is green
-#ci-compile-e2e.t                                         # its .genesis/ci fixture names no control branch, which the validator now requires
 
 # CI propagation tests
 unit-tests/genesis_ci_marker-build.t                 # the one marker builder
@@ -303,6 +302,7 @@ unit-tests/genesis_top-pipeline_repo_keys.t  # the pipeline label and the reposi
 unit-tests/genesis_top-shuttle_backends.t    # the shuttle block, declared on the backend that decides its shape
 ci-provider.t                                # the CI provider classes, their fragments, and the rules each states for its own block
 ci-compiler.t                                # the AST, its builder, the validator, and the pipeline the Concourse compiler emits
+ci-compile-e2e.t                             # the multi-file compiler end to end, from the parse to the emitted pipeline
 ci-layout.t                                  # the layout DSL parser, over the shapes a layout file is written in
 ci-phase-c.t                                 # the descriptor stage, over a topology read from the environment files
 unit-tests/manifest_parser-unregistered.t   # the manifest parser, its ordered list and its unregistered warning

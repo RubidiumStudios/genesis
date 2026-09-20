@@ -29,6 +29,12 @@ use_ok 'Genesis::CI::Compiler::AST';
 
 my $ci_dir = 't/repos/compile-test/.genesis/ci';
 
+# The informational dumps below say what the compiler produced rather than
+# assert anything, so they are printed only where a reader asked for them.
+# Left unconditional they put the whole generated pipeline into the output of
+# every green run.
+my $DUMP = $ENV{DEBUG_TESTS} && $ENV{DEBUG_TESTS} =~ m/^(1|y|yes|true)$/i;
+
 # --- Stage 1: Can we detect the multi-file format? ---
 subtest 'can_compile detects multi-file format' => sub {
 	ok(Genesis::CI::Compiler->can_compile($ci_dir),
@@ -50,7 +56,7 @@ subtest 'Parser reads multi-file config' => sub {
 	ok($parsed->{pipeline}, 'pipeline section present');
 	is($parsed->{pipeline}{metadata}{name}, 'test-deploy-pipeline', 'pipeline name');
 	is($parsed->{pipeline}{metadata}{version}, '2.0', 'pipeline version');
-	is($parsed->{pipeline}{branches}{live}, 'main', 'live branch');
+	is($parsed->{pipeline}{branches}{control}, 'main', 'control branch');
 
 	# Workflows
 	ok($parsed->{pipeline}{workflows}{deploy}, 'deploy workflow present');
@@ -88,9 +94,17 @@ subtest 'Validator accepts valid multi-file config' => sub {
 
 	ok(!$validator->has_errors, 'no validation errors')
 		or diag("Errors: " . join("\n  ", @{$validator->errors}));
-	if ($validator->has_warnings) {
-		diag("Warnings: " . join("\n  ", @{$validator->warnings}));
-	}
+
+	# The warnings this fixture raises are asserted rather than printed.
+	# Its deploy workflow names the script deploy on each of its three
+	# stages and the fixture carries no scripts directory, so three
+	# warnings about that one script are the expected reading, and a
+	# fourth warning of any kind is a change somebody should see.
+	is_deeply(
+		[@{$validator->warnings}],
+		[("Workflow 'deploy' references undefined script 'deploy'") x 3],
+		'the only warnings are the three about the script the fixture omits'
+	);
 };
 
 # --- Stage 4: Build AST ---
@@ -108,7 +122,7 @@ subtest 'ASTBuilder produces AST from multi-file config' => sub {
 	is($ast->metadata->{version}, '2.0', 'AST metadata version');
 
 	# Branches
-	is($ast->branches->{live}, 'main', 'AST live branch');
+	is($ast->branches->{control}, 'main', 'AST control branch');
 
 	# Targets
 	my @targets = $ast->target_names;
@@ -150,25 +164,25 @@ subtest 'PipelineDescriptor resolves generic pipeline' => sub {
 	ok($pipeline->{resource_types}, 'resource_types present');
 	ok(scalar @{$pipeline->{resource_types}} > 0, 'has resource types');
 	my @rt_names = map { $_->{name} } @{$pipeline->{resource_types}};
-	diag("Resource types: " . join(', ', @rt_names));
+	diag("Resource types: " . join(', ', @rt_names)) if $DUMP;
 
 	# Resources
 	ok($pipeline->{resources}, 'resources present');
 	ok(scalar @{$pipeline->{resources}} > 0, 'has resources');
 	my @res_names = map { $_->{name} } @{$pipeline->{resources}};
-	diag("Resources (" . scalar(@res_names) . "): " . join(', ', @res_names));
+	diag("Resources (" . scalar(@res_names) . "): " . join(', ', @res_names)) if $DUMP;
 
 	# Jobs
 	ok($pipeline->{jobs}, 'jobs present');
 	ok(scalar @{$pipeline->{jobs}} > 0, 'has jobs');
 	my @job_names = map { $_->{name} } @{$pipeline->{jobs}};
-	diag("Jobs (" . scalar(@job_names) . "): " . join(', ', @job_names));
+	diag("Jobs (" . scalar(@job_names) . "): " . join(', ', @job_names)) if $DUMP;
 
 	# Groups
 	ok($pipeline->{groups}, 'groups present');
 	ok(scalar @{$pipeline->{groups}} > 0, 'has groups');
 	my @grp_names = map { $_->{name} } @{$pipeline->{groups}};
-	diag("Groups: " . join(', ', @grp_names));
+	diag("Groups: " . join(', ', @grp_names)) if $DUMP;
 
 	# Mermaid (replaced graphviz in the modern compiler path)
 	ok($pipeline->{mermaid}, 'mermaid present');
@@ -204,8 +218,8 @@ subtest 'Concourse provider generates YAML' => sub {
 	like($yaml, qr/resources:/, 'output has resources');
 	like($yaml, qr/jobs:/, 'output has jobs');
 
-	# Print the full output for inspection
-	diag("\n=== Generated Concourse Pipeline YAML ===\n$yaml\n=== END ===\n");
+	# The whole pipeline, for a reader who is looking at what came out.
+	diag("\n=== Generated Concourse Pipeline YAML ===\n$yaml\n=== END ===\n") if $DUMP;
 };
 
 done_testing;
