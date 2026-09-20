@@ -70,7 +70,7 @@ sub _parse_multi_file {
 
 	my %parsed;
 
-	# Load pipeline.yml (optional — topology may come from genesis.pipeline.*
+	# Load pipeline.yml (optional, since topology may come from genesis.pipeline.*
 	# in env files when no explicit layout/workflows are defined)
 	my $pipeline_file = "$ci_dir/pipeline.yml";
 	if (-f $pipeline_file) {

@@ -58,7 +58,7 @@ sub init {
 # }}}
 # }}}
 ### Provider Options System {{{
-# Modelled after Genesis::Kit::Provider::Github — each method mirrors its
+# Modelled after Genesis::Kit::Provider::Github, where each method mirrors its
 # kit-provider counterpart so the patterns are interchangeable.
 
 # provider_type - canonical type string {{{
@@ -185,7 +185,7 @@ sub normalize_provider_opts {
 # }}}
 # describe_provider - structured self-description for display {{{
 #
-# Mirrors Genesis::Kit::Provider::Github::status() — returns a hash with
+# Mirrors Genesis::Kit::Provider::Github::status() and returns a hash with
 # type, label, an ordered 'extras' list, and a per-key status structure.
 # Also surfaces the active notification style and task library when an AST
 # is already resolved (i.e., after parse() has been called).
