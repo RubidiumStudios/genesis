@@ -264,8 +264,8 @@ subtest 'a lock taken in the window is reported, not swallowed' => sub {
 	my $before = $h->git('a')->sha('refs/remotes/origin/'.$h->slug('prod'));
 
 	# The recorder takes the switch lock from a separate process once the
-	# deploy's session has finished and before the child is run, which is
-	# a window that is left open on purpose.  It writes its own pid and the
+	# deploy's session has finished and before the child is run, which is a
+	# window that is left open on purpose.  It writes its own pid and the
 	# command it was given into the lock file, which is what lock_at_start
 	# reads back.
 	child_recorder($h, probe => 1, hold_lock => 'genesis prod deploy');
@@ -291,9 +291,9 @@ subtest 'a lock taken in the window is reported, not swallowed' => sub {
 	like($report, qr/Deploy itself succeeded/,
 		'the deploy said it is complete itself');
 	# The retry sentence is matched whole rather than the command alone, so
-	# anything standing where the retired argument used to stand breaks
-	# the row, whichever environment it names.  The hand-off notice above
-	# names an environment on purpose and is not what this reads.
+	# anything standing where the retired argument used to stand breaks the
+	# row, whichever environment it names.  The hand-off notice above names
+	# an environment on purpose and is not what this reads.
 	like($report, qr/Run genesis propagate to retry it/,
 		'the deploy named the retry, with no environment after it');
 

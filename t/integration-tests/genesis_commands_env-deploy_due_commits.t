@@ -132,9 +132,9 @@ subtest 'the stale-pipeline warning prints ahead of this one' => sub {
 	# nothing printed a due-commits line before.
 	#
 	# One tree answers both.  Each commit due_harness lays writes the
-	# environment's own file, which is a path that defines the pipeline,
-	# so control has moved away from the commit the pipeline was applied from
-	# and the staleness query answers as well.
+	# environment's own file, which is a path that defines the pipeline, so
+	# control has moved away from the commit the pipeline was applied from and
+	# the staleness query answers as well.
 	my ($h) = due_harness(bosh => 1);
 
 	my (undef, $err, $exit) = run_genesis($h,

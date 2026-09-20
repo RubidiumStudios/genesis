@@ -12,10 +12,10 @@
 # to carry.
 #
 # The two halves sit in one file because neither can be asserted without the
-# other.  The flag is only half an answer, and the other half is the hand
-# run, which has to reach the same branches and the same markers the child
-# would have produced.  A run that spawned the child anyway would leave that
-# hand run nothing to deliver, and a hand run that delivered nothing would say
+# other.  The flag is only half an answer, and the other half is the hand run,
+# which has to reach the same branches and the same markers the child would
+# have produced.  A run that spawned the child anyway would leave that hand
+# run nothing to deliver, and a hand run that delivered nothing would say
 # nothing about whether the flag had withheld anything.
 #
 # The third subtest is the other thing that withholds the child, which is a
