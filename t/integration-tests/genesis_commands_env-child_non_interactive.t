@@ -95,22 +95,13 @@ subtest 'the child asks nothing and finishes' => sub {
 subtest 'the child publishes one branch at a time' => sub {
 	plan tests => 8;
 
-	my $h = make_harness(envs => ['qa', 'prod', 'stage'], provider => 'manual');
-	fixture_vault($h);
-	fixture_bosh($h, commit => 1, catch_up => 0);
-	write_env_file($h, $_, genesis => {pipeline => {prior_env => 'qa'}})
-		for qw/prod stage/;
-	push_from($h, 'a', $h->control);
-	my $seeded = $h->git('a')->sha('HEAD');
-	fixture_applied($h, control => $seeded);
-	fixture_pipeline_record($h, 'qa', dependencies => [], discovery => 'complete');
-	fixture_pipeline_record($h, $_, dependencies => ['qa'], discovery => 'complete')
-		for qw/prod stage/;
-	init_branch($h, $_) for qw/qa prod stage/;
-	deliver($h, $_, control => $seeded) for qw/qa prod stage/;
-	certify($h, 'qa', control_commit => $seeded, dependencies_read => []);
-	certify($h, $_, control_commit => $seeded, dependencies_read => ['qa'])
-		for qw/prod stage/;
+	# The fan-out, which is prod and stage both hanging off qa, so the one
+	# commit below leaves the child two branches to carry it to.  The
+	# harness builds it, since a fixture composed here is a fixture that can
+	# fall out of step with the shape every other row of this kind asks for.
+	my $h = fanned_harness(envs => ['qa', 'prod', 'stage'],
+		provider => 'manual', bosh => {catch_up => 0});
+	my $seeded = $h->git('a')->sha($h->control);
 
 	# One control commit all three environments are due, so the deploy
 	# leaves the child two branches to carry it to rather than one.

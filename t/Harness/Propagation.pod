@@ -1791,6 +1791,12 @@ environment, and C<applied>, which turned off leaves the applied record out.
 Every scenario passes them through, so a row stands an unseeded or an
 uncertified environment up without building the tree by hand.
 
+C<dependencies_read> writes what each environment last read onto its
+certified record, and it takes either one list for all of them or a hashref
+keyed on the environment, since a topology can give each of them a different
+answer.  A row that leaves it out certifies without the field, which is what
+every scenario did before the fan-out.
+
 =head2 ready_harness(%opts)
 
   my $h = ready_harness(envs => ['lab', 'qa']);
@@ -2048,6 +2054,21 @@ One control commit per environment, each touching the file the next
 environment's row reads, and their shas in the order the environments were
 named.  Each file is the body C<env_body> writes, so the repository a walk
 reads still holds every environment.
+
+=head2 fanned_harness(%opts)
+
+  my $h = fanned_harness(envs => ['qa', 'prod', 'stage'], bosh => 1);
+
+C<ready_harness> over the fan-out, which is one environment several others
+hang off rather than a chain of one predecessor each.  A deploy of that one
+leaves its child a commit to carry to several branches, which is the shape
+the rows about a spawned child need.
+
+C<prior> names the environment the others hang off and defaults to the first
+of them.  Every other environment declares it as its predecessor and carries
+it as its one dependency, in its pipeline record and in what its certified
+record last read, so the staleness comparison finds the two halves agreeing.
+A row wanting other dependencies passes its own.
 
 =head2 gated($h, %opts)
 
