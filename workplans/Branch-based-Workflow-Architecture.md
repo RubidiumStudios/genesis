@@ -695,21 +695,23 @@ A repository with a legacy pipeline `ci.yml` is detected at configuration load, 
 
 ## Migration from v2
 
-A v3 pipeline is never applied on top of a v2 one, and a repository moves to v3 by hand. Genesis translates no v2 branch layout and adopts no v2 pipeline state, so there is nothing to run and nothing to convert. A repository still carrying a version 2 configuration, or a version 3 configuration with no pipeline enabled, has every pipeline command refused with the migration named, while its other commands run as they always did. A `ci.yml` left beside a version 3 configuration whose pipeline is enabled only warns that it is stale, because the v3 configuration wins.
+A v3 pipeline is never applied on top of a v2 one, and a repository moves to v3 by hand. Genesis translates no v2 branch layout and adopts no v2 pipeline state, so there is nothing to run and nothing to convert. A repository still carrying a legacy `ci.yml`, beside either a version 2 configuration or a version 3 configuration with no pipeline enabled, has every pipeline command refused with the migration named, while its other commands run as they always did. The same `ci.yml` beside a version 3 configuration whose pipeline is enabled only warns that it is stale, because the v3 configuration wins.
 
-The move has five parts.
+The move has six parts.
 
 1. `control` is a new orphan branch, cut from the existing branch's HEAD content, so it shares no history with the branch it replaces.
 
-2. The repository is configured for v3, which means reading the `pipeline:` block of the old `ci.yml` for its provider, git URI, branch, pipeline name, and vault URL, writing them into the `pipeline:` block of `.genesis/config` with `enabled: true`, and removing `ci.yml`. Nothing below runs until this is done, because the topology every later step walks is empty while `pipeline.enabled` is false, and the pipeline commands are refused outright while `ci.yml` still stands.
+2. `.genesis/config` itself moves to version 3, which is a hand edit of its `version` key from `2` to `3`. Nothing else in the file changes, because the version 3 schema is the version 2 schema with the `pipeline:` section added to it, and no command makes this move for you, since the only upgrade Genesis carries ends at version 2. The step below is refused until this one is done, because a pipeline section belongs to a version 3 configuration and the refusal says so.
 
-3. The deployment branches are the init branches `genesis pipeline-apply` creates, one orphan root commit per `<env>/<type>` adding a single `init` file, and each environment file gains its `genesis.pipeline` block.
+3. The `pipeline:` block is written into `.genesis/config` with `enabled: true`, taking its provider, git URI, branch, pipeline name, and vault URL from the `pipeline:` block of the old `ci.yml`, and `ci.yml` is then removed. Nothing below runs until this is done, because the topology every later step walks is empty while `pipeline.enabled` is false, and the pipeline commands are refused outright while `ci.yml` still stands.
 
-4. A branch named for an environment alone is deleted, or renamed with `git branch -m lab lab/<type>` where its history is wanted, because such a name blocks every `<env>/<type>` beneath it. A renamed branch stands in place of that environment's init branch, and it is still uncertified.
+4. The deployment branches are the init branches `genesis pipeline-apply` creates, one orphan root commit per `<env>/<type>` adding a single `init` file, and each environment file gains its `genesis.pipeline` block.
 
-5. Every existing clone then fetches once with `--prune`, because `refs/remotes/origin/lab` collides in the same way and a plain fetch reports "unable to update local ref" until it is gone.
+5. A branch named for an environment alone is deleted, or renamed with `git branch -m lab lab/<type>` where its history is wanted, because such a name blocks every `<env>/<type>` beneath it. A renamed branch stands in place of that environment's init branch, and it is still uncertified.
 
-Because control shares no history with the old branch, no exodus record carries a `git.control_commit` that names a commit on it, so every environment starts without a certified commit. An environment certifies when it deploys a propagated commit, which is one its branch carries a marker for, so a deploy from an init-only branch leaves it uncertified and its descendants held. The fleet therefore proves itself once, in DAG order, which is the proving run a migration wants and which is a BOSH no-op wherever the branch content matches what is already running. Nothing is assumed about what an environment certified before the pipeline existed.
+6. Every existing clone then fetches once with `--prune`, because `refs/remotes/origin/lab` collides in the same way and a plain fetch reports "unable to update local ref" until it is gone.
+
+Because control shares no history with the old branch, no exodus record carries a `git.control_commit` that names a commit on it, so every environment starts without a certified commit. An environment certifies when it deploys a propagated commit, which is one its branch carries a marker for, so a deploy from an init-only branch leaves it uncertified and its descendants held. Every environment therefore proves itself once, in DAG order, which is the proving run a migration wants and which is a BOSH no-op wherever the branch content matches what is already running. Nothing is assumed about what an environment certified before the pipeline existed.
 
 ---
 

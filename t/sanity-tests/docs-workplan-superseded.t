@@ -41,9 +41,12 @@ sub section_of {
 
 my $BODY = slurp($WORKPLAN);
 unless (defined $BODY) {
+	# The exit carries no status of its own.  Test::Builder sets one from
+	# the failing row, and a status set here would earn a second diagnostic
+	# saying the file exited on its own just after that row.
 	fail("$WORKPLAN could not be read: $READ_ERROR");
 	done_testing();
-	exit 1;
+	exit;
 }
 
 subtest 'the migration section describes the move by hand' => sub {
