@@ -3276,10 +3276,10 @@ B<Examples:>
 
 Refuses, at C<Genesis::Exit::CONFIG>, a C<manifest_store> that is not
 C<exodus>, and any environment whose effective Genesis floor is below
-3.1.0 or is not declared at all. It does not read C<pipeline.enabled> itself, because
-L</_validate_pipeline_config> is its only caller and has already returned
-where the section is off, so everything below is said of a repository
-whose pipeline is known to be on.
+3.1.0 or is not declared at all. It does not read C<pipeline.enabled>
+itself, because L</_validate_pipeline_config> is its only caller and has
+already returned where the section is off, so everything below is said of
+a repository whose pipeline is known to be on.
 
 The key is read with no fallback of its own, because the schema declares
 the default and a second one here would read an explicit null as C<exodus>
