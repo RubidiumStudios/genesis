@@ -200,9 +200,9 @@ sub attach {
 			return if $allow_no_vault;
 			if (_has_env_creds()) {
 				# .saferc has no matching target, but the deployment's secrets
-				# provider is authoritative — auto-provision from the caller's
-				# URL+opts. Gated on env creds so authenticate() will succeed
-				# on the connect_and_validate() call below.
+				# provider is authoritative, so auto-provision from the caller's
+				# URL+opts. Gated on env creds so authenticate() will succeed on
+				# the connect_and_validate() call below.
 				my $name = $alias || _derive_target_name($url);
 				$class->create(
 					$url, $name,
@@ -447,9 +447,9 @@ sub start_token_renewer {
 	$self->stop_token_renewer if $self->renewer_pid;
 
 	# token_info() can die (read_json_from bails on malformed/empty
-	# response, network error, etc.).  Treat any failure as "no renewer"
-	# — fail-closed so authenticate() never crashes when the vault is
-	# unreachable or returning garbage.
+	# response, network error, etc.).  Treat any failure as "no
+	# renewer", failing closed so authenticate() never crashes when the
+	# vault is unreachable or returning garbage.
 	my $info = eval { $self->token_info() };
 	return undef unless $self->_token_renewal_available($info);
 
@@ -458,7 +458,7 @@ sub start_token_renewer {
 	return undef unless defined $pid;
 
 	if ($pid == 0) {
-		# CHILD: never `exit`, never `die` uncaught — POSIX::_exit only.
+		# CHILD: never `exit`, never `die` uncaught, POSIX::_exit only.
 		Genesis::init_forked_child();
 		my $rc = eval {
 			$self->_run_renewer_loop(
