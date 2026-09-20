@@ -444,17 +444,17 @@ define_command("deploy", {
 		"a create-env environment.",
 	function_group => Genesis::Commands::ENVIRONMENT,
 	scope => 'env',
-	# D81: the deploy operates on what the environment is running, so it
-	# reads and renders the deployment branch.  The gate opens the session
-	# and makes the switch; this command makes none of its own.
+	# The deploy operates on what the environment is running, so it reads and
+	# renders the deployment branch.  The gate opens the session and makes
+	# the switch; this command makes none of its own.
 	#
 	# The deploy is the one command in the class that brings the branch
 	# forward.  A clone that has not pulled holds the branch where the apply
 	# cut it, and the checkout would stand the deploy on that commit, so the
 	# gate fast-forwards the branch to its counterpart first, which is the
-	# one ref move D35's span allows and the move the deploy's own --ff-only
-	# pull made before the switch belonged to the gate (D5).  Every other
-	# deployed-state command reads, and a read moves no ref.
+	# one ref move the deploy's span allows and the move the deploy's own
+	# --ff-only pull made before the switch belonged to the gate.  Every
+	# other deployed-state command reads, and a read moves no ref.
 	branch_class        => Genesis::Commands::DEPLOYED_STATE,
 	branch_fast_forward => 1,
 	option_group => Genesis::Commands::ENV_OPTIONS,
@@ -2161,7 +2161,7 @@ define_command("pipeline-status", {
 		"disagree about what is held and why.  The command writes nothing.",
 	function_group => Genesis::Commands::PIPELINE,
 	branch_class   => Genesis::Commands::PRE_DEPLOY,
-	# D81 keeps every fact about a command's branch handling here, so the
+	# Every fact about a command's branch handling is kept here, so the
 	# branch-class gate reads this rather than carrying the command's name.
 	# The operator may skip this command's refresh, and --no-refresh below is
 	# how they say so; the gate then makes none on the command's behalf.
@@ -2185,12 +2185,12 @@ define_command("pipeline-status", {
 # }}}
 # genesis propagate - walk control onto every deployment branch {{{
 #
-# One run, no argument, three options.  D36 retired the <env> argument with
-# the cascade it scoped, because the walk releases a held commit by itself
-# once a later run finds the ancestor's certified commit advanced.  D44
-# withdrew --no-push and left --dry-run as the only preview, D40 removed
-# --no-fetch because the refresh is unconditional, and D95 added --force as
-# the one way past the provider gate.
+# One run, no argument, three options.  There is no <env> argument and no
+# cascade scoped by one, because the walk releases a held commit by itself
+# once a later run finds the ancestor's certified commit advanced.  There
+# is no --no-push, since --dry-run is the only preview, and no --no-fetch,
+# since the refresh is unconditional, and --force is the one way past the
+# provider gate.
 define_command("propagate", {
 	summary => "Propagate control branch commits to the deployment branches.",
 	usage   => "propagate [options]",
