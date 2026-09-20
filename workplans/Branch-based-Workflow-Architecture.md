@@ -1,13 +1,15 @@
 # Branch-Based Pipeline Architecture
 
-**Status:** Partially implemented — see Implementation Status
-**Last Updated:** 2026-08-28
+**Status:** Superseded by the pipeline propagation design set, which decided the routing, the configuration surface, and the branch rules this document sketched. What survives here is the shape of the workflow and the decisions log, kept for the trail.
+**Last Updated:** 2026-09-20
+
+Branch rules this document assumes throughout. Control and every `<env>/<type>` branch on the remote are append-only, so the previous tip is always an ancestor of the new tip and Genesis never force-pushes either, while `<pr_prefix><env>/<type>` is derived and may be rewritten freely against the tip the run read at its refresh. A deployment branch is derived state too, and it never carries a local commit outside a propagation activity, so the run resets a marker-only local commit and refuses a hand commit. The repository's own pipeline settings live in `.genesis/config` under `pipeline`, and each environment's live in its own file under `genesis.pipeline`.
 
 ---
 
 ## Overview
 
-This document defines the branch-based pipeline architecture that replaces the cache-based system. Changes originate on a `control` branch and propagate to environment-specific branches.
+This document sketched the branch-based pipeline architecture that replaced the cache-based system. Work lands on a `control` branch, and a propagation run delivers each control commit to the deployment branches that are ready for it, one branch per deployment, named `<env>/<type>`.
 
 ### Goals
 
@@ -18,41 +20,31 @@ This document defines the branch-based pipeline architecture that replaces the c
 
 ### Implementation Status
 
-Parts of this document described a design that was never built, and the built design differs in ways that matter. This table is the map; the sections below carry the detail. "Superseded" means the design in this document was replaced by something else that shipped; "not built" means nothing took its place.
+Parts of this document described a design that was never built, and the built design differs in ways that matter. This table is the map, and the sections below carry the detail. "Superseded" means the design in this document was replaced by something else that shipped, "retired" means something shipped and was then withdrawn, and "not built" means nothing took its place.
 
 | Concept | State | Where it lives |
 |---------|-------|----------------|
-| `control` branch | Implemented | `Genesis::Top::DEFAULT_CONTROL_BRANCH` |
-| Environment branches, named `<env>` | Implemented | `Genesis::Env::prepare_branch` |
-| Explicit branch creation and reconciliation | Implemented | `genesis pipeline-prepare` → `Genesis::Commands::Pipelines::pipeline_prepare` |
-| Branch creation during propagation | Implemented, authorized per run | `Genesis::Commands::Pipelines::_authorize_branch_creation`, `_create_missing_branches` |
+| `control` branch | Implemented | `Genesis::Top::control_branch`, defaulting to `Genesis::Top::DEFAULT_CONTROL_BRANCH` |
+| Deployment branches, named `<env>/<type>` | Implemented | `Genesis::Top::branch_for` over `Genesis::Top::deployment_slug_for`, with `Genesis::BranchClass::classify_branch` for telling the classes apart |
+| Branch creation, by `genesis pipeline-apply` | Implemented | `Genesis::Commands::Pipelines::_apply_init_branches` |
+| Branch protection derived from `require_pr` | Implemented, GitHub only | `Genesis::Commands::Pipelines::_protection_rules_for`, `_apply_branch_protection` |
 | Single topology source | Implemented | `Genesis::Top::pipeline_topology` |
-| Propagation planning (deliver or hold, per commit) | Implemented | `Genesis::CI::Walk::plan`, `Genesis::CI::Walk::hold_for` |
-| Propagation execution | Implemented | `Genesis::CI::Propagation::propagate_envs` |
-| PR-gated propagation (`require_pr`) | Implemented, GitHub only | `Genesis::CI::Propagation::_propagate_one_pr_env` |
-| Cascade after deploy | Implemented (manual provider) | `Genesis::Env::_post_deploy`, `genesis propagate <env>` |
-| Deploy-manifest trigger guard | Implemented | `ignore_paths` on the env-branch resource, `PipelineDescriptor::_env_resources` |
-| Manifest-store / provider warning | Implemented | `Genesis::CI::Compiler::Validator::_validate_manifest_store` |
-| `kickoff` dispatch branch | **Superseded** — propagation goes control → env branches directly | nothing |
-| Sequence tags (`push-<n>`) and hybrid tags | **Not built** — ordering comes from the deploy-certified control commit | nothing |
+| Per-commit routing, delivering or holding each control commit | Implemented | `Genesis::CI::Walk::plan`, `Genesis::CI::Walk::route_commit`, `Genesis::CI::Walk::hold_for` |
+| Delivery onto a deployment branch | Implemented | `Genesis::CI::Propagation::_apply_propagation_commit` |
+| Publishing, one push per branch | Implemented | `Genesis::CI::Publish::publish_run` |
+| Pull request delivery (`require_pr`) | Implemented, GitHub only | `Genesis::CI::PullRequest::deliver` |
+| The propagation hold an operator sets and clears | Implemented | `Genesis::Commands::Pipelines::pipeline_hold`, `pipeline_release` |
+| The run's pre-flight refusals | Implemented | `Genesis::CI::Preflight` |
+| The deploy's two recorded commits | Implemented | `Genesis::Env::DeploymentManager::_git_context` |
+| The environment's branch as the pipeline's trigger | Implemented | `Genesis::CI::Compiler::PipelineDescriptor::_env_resources` |
+| `kickoff` dispatch branch | **Superseded**, delivery goes from control to the deployment branches directly | nothing |
+| Sequence tags (`push-<n>`) and hybrid tags | **Not built**, ordering comes from the deploy-certified control commit | nothing |
 | Sidecar files | **Not built** | nothing |
-| `genesis push` | **Not built**. `genesis propagate` is the command operators run | nothing |
-| `pipeline.mode: branch` / `pipeline.branches:` in `ci.yml` | **Superseded** — config moved to `.genesis/config` and per-env `genesis.pipeline.*` | `.genesis/config`, env YAML |
-| Concourse-driven propagation | **Not wired** — only the manual provider drives propagation today | see Open Questions |
-
-### Non-Goals
-
-- <!-- TBD -->
-
-### Out of Scope
-
-#### Dev Kits (`dev/` directory)
-
-Dev kits (unpacked kits in the `dev/` directory) were never intended for pipeline use but were not explicitly blocked. The legacy cache system did not manage `dev/` contents, meaning changes would deploy immediately to any environment using a dev kit without propagating through predecessor environments.
-
-**Updated 2026-08-28.** The implementation no longer ignores `dev/`. `Genesis::Env::propagation_files` returns the path `dev/` for any environment whose kit `is_dev`, so a dev kit is treated as an ordinary dependency path: changes under `dev/` are diffed and propagated like any other file. The environment does not bypass propagation ordering any more.
-
-What remains out of scope is anything finer-grained than the whole directory. `dev/` propagates as a single path, so every environment on a dev kit receives every dev-kit change, whether or not it uses the changed part.
+| `genesis push` | **Not built**, `genesis propagate` is the command operators run | nothing |
+| `genesis pipeline-prepare`, and branch creation during a propagation run | **Retired**, `genesis pipeline-apply` cuts every branch before a run delivers to it | nothing |
+| The `<env>` argument to `genesis propagate`, and the cascade run it scoped | **Retired**, one run walks every environment and a later run releases what an ancestor was holding | nothing |
+| `pipeline.mode: branch` and `pipeline.branches:` in `ci.yml` | **Superseded**, the repository's settings moved to `.genesis/config` under `pipeline` and the environment's to `genesis.pipeline` | `.genesis/config`, the environment files |
+| A pipeline that runs the propagation itself | **Partly built**, the Concourse provider compiles and sets a pipeline, and the emitted pipeline's own propagate job is not wired | see Open Questions |
 
 ---
 
@@ -61,21 +53,22 @@ What remains out of scope is anything finer-grained than the whole directory. `d
 | Term | Definition |
 |------|------------|
 | **Repository** | A git-based hierarchical structure containing versioned files across multiple branches. Branches share a common base but may diverge in content. All changes are tracked in version history. |
-| **`control` branch** | The primary branch for the standard workflow. Developers commit changes here. Changes do not propagate on commit — propagation is an explicit act (`genesis propagate`, or the automatic cascade a manual-provider deploy runs on success). Named `control`; treat that as fixed. |
-| **Environment Branch** | A branch named exactly for the environment (`staging`, `c-aws-prod`), containing only the files that environment depends on. Created and reconciled by `Genesis::Env::prepare_branch`, which `genesis new`, `genesis pipeline-prepare`, and an authorized `genesis propagate` all call. Cut from `control`, so it does share ancestry with it, but it is never merged back. |
-| **Propagation Set** | The git-root-relative paths an environment depends on, from `Genesis::Env::propagation_files`. This is what gets diffed and what gets copied. See "Propagation Set" below. |
-| **Ancestral File** | A YAML file whose name is a prefix of an environment's name, based on hyphen-delimited segments. For environment `c-aws-east-prod`, ancestral files include `c.yml`, `c-aws.yml`, and `c-aws-east.yml`. Typically lacks a `genesis.env` key, making it a configuration fragment rather than a deployable environment. Ancestral files are shared across all environments matching their prefix and appear in the propagation set of every environment that inherits them. Ancestry does not require saturation—intermediate files may be absent. Using a deployable environment as an ancestor of another is possible but discouraged. |
-| **Ops File** | A manifest fragment in the `ops/` directory that extends or customizes kit behavior. Referenced via the `kit.features` array in environment files. May be shared across environments or environment-specific. Unlike ancestral files, ops file applicability is explicit—determined by which environments reference them, not by naming convention. |
-| **Included File** | A file explicitly inherited via the `genesis.inherits` key in an environment file. Provides direct inheritance independent of hyphen-based naming conventions. Allows environments to share configuration without requiring a common name prefix. |
-| **Env DAG** | The deployment topology, built from per-environment `genesis.pipeline.prior_env` keys by `Genesis::CI::Compiler::ASTBuilder::_build_from_env_files` and reached by every pipeline command through the single accessor `Genesis::Top::pipeline_topology`. Each environment has at most one parent and any number of children. This — not `ci.yml` layouts — is what propagation walks. See "Topology source". |
-| **Layout** | A deployment progression plan defined in legacy `ci.yml` under `pipeline.layout` or `pipeline.layouts`, using arrow notation (`->`) and the `auto <pattern>` directive. Still parsed by the compiler for legacy configs, but propagation does not read it; the env DAG replaced it for that purpose. |
-| **Propagation** | Copying changed files from a control commit onto the environment branches that depend on them, one commit per environment, subject `[pipeline] control@<short-sha> -> <env>`. |
-| **Environment with no `prior_env`** | An environment that nothing has to deploy before. No ancestor can hold its commits, so a control commit is routed to it as soon as that commit changes a file in its propagation set. It reaches the environment once nothing holds it, and a gate ahead of the commit, an operator hold on the environment, an open pull request, or a commit already held for that environment can each still hold it. |
-| **Cascade** | `genesis propagate <env>`, which scopes propagation to `<env>`'s descendants and sources files from the control commit that `<env>`'s last successful deployment certified. |
-| **Certified control commit** | `git.control_commit` in an environment's latest successful exodus deployment record — the control SHA that was actually deployed. This, not a tag, is what orders the pipeline. |
-| **Propagation marker** | The `[pipeline] control@<sha>` string in an environment branch commit subject. Load-bearing: it is parsed to find the last propagated control SHA, to derive a deploy reason, and to decide PR idempotency. |
-| **`require_pr`** | Per-environment flag (`genesis.pipeline.require_pr`) that routes propagation through a rolling `pr/<env>` branch and a pull request instead of committing straight to `<env>`. |
-| **Rolling `pr/<env>` branch** | The branch a `require_pr` environment's propagations accumulate on while its pull request stays open. Not per-propagation — one branch, many commits, one PR. |
+| **`control` branch** | The branch the standard workflow runs on, where developers commit their changes. A commit does not propagate because it was made. Propagation is an act somebody takes, either `genesis propagate` by hand or the child a manual-provider deploy spawns on success. The name defaults to `control` and is read through `Genesis::Top::control_branch`. Control is append-only on the remote, so Genesis never force-pushes it and never rewrites its history. |
+| **Deployment branch** | The branch a deployment's environment is deployed from, named `<env>/<type>`, where `<type>` is the repository's `deployment_type`. It holds only the files that deployment depends on. `genesis pipeline-apply` cuts it as an orphan branch with a single `init` file, and the first delivery replaces that file with the propagation set. It is derived state, so it never carries a local commit outside a propagation activity, and it is append-only on the remote. |
+| **Propagation set** | The git-root-relative paths a deployment depends on, from `Genesis::Env::propagation_files`. This is what a delivery mirrors onto the branch. The set divides into triggering and non-triggering paths, which the "Propagation Set" section below takes apart. |
+| **Ancestral file** | A YAML file whose name is a prefix of an environment's name, based on hyphen-delimited segments. For environment `c-aws-east-prod`, ancestral files include `c.yml`, `c-aws.yml`, and `c-aws-east.yml`. Typically lacks a `genesis.env` key, making it a configuration fragment rather than a deployable environment. Ancestral files are shared across all environments matching their prefix and appear in the propagation set of every environment that inherits them. Ancestry does not require saturation, so intermediate files may be absent. Using a deployable environment as an ancestor of another is possible but discouraged. |
+| **Ops file** | A manifest fragment in the `ops/` directory that extends or customizes kit behavior. Referenced via the `kit.features` array in environment files. May be shared across environments or environment-specific. Unlike ancestral files, an ops file's applicability is explicit, because it is determined by which environments reference it rather than by a naming convention. |
+| **Included file** | A file explicitly inherited via the `genesis.inherits` key in an environment file. Provides direct inheritance independent of hyphen-based naming conventions. Allows environments to share configuration without requiring a common name prefix. |
+| **Env DAG** | The deployment topology, built from per-environment `genesis.pipeline.prior_env` keys by `Genesis::CI::Compiler::ASTBuilder::_build_from_env_files` and reached by every pipeline command through the single accessor `Genesis::Top::pipeline_topology`. Each environment has at most one parent and any number of children. This is what the walk reads, and the `ci.yml` layouts are not. See "Topology source". |
+| **Layout** | A deployment progression plan defined in legacy `ci.yml` under `pipeline.layout` or `pipeline.layouts`, using arrow notation (`->`) and the `auto <pattern>` directive. Still parsed by the compiler for a legacy configuration, and the walk does not read it, the env DAG having replaced it for that purpose. |
+| **Propagation** | Delivering a control commit to the deployment branches that depend on the files it changed, as one commit per branch, with the subject `[pipeline] control@<short-sha> -> <env>`. |
+| **Environment with no `prior_env`** | An environment that nothing has to deploy before. No ancestor can hold its commits, so a control commit is routed to it as soon as that commit changes one of the files in its propagation set that trigger a deploy. It reaches the environment once nothing holds it, and a gate ahead of the commit, an operator hold on the environment, an open pull request, or a commit already held for that environment can each still hold it. |
+| **Certified control commit** | `git.control_commit` in an environment's latest successful exodus deployment record, which is the control commit the deploy actually stood on. This, and not a tag, is what orders the pipeline. |
+| **Propagation marker** | The `[pipeline] control@<sha>` string in a deployment branch commit's subject or body, written and read through `Genesis::CI::Marker`. It is load-bearing, because the walk starts from the newest one, the deploy records the commit it names, and the pull request arm recovers it across a merge. |
+| **Gate** | A control commit carrying a `Genesis-Stage: <reason>` trailer. It travels with the commits already ahead of it and ends the delivery, so everything after it is held until the environment's certified commit reaches it, until a later commit reverts it, or until the hold its reason set is released. |
+| **Propagation hold** | The hold an operator sets with `genesis pipeline-hold` and clears with `genesis pipeline-release`. While it stands, the run delivers nothing new to that environment and opens or updates no pull request, and what the branch already holds stays deployable. |
+| **`require_pr`** | The per-environment key (`genesis.pipeline.require_pr`) that routes delivery through a `<pr_prefix><env>/<type>` branch and a pull request instead of committing straight to the deployment branch, and that `genesis pipeline-apply` also reads when it derives that branch's protection. |
+| **Rolling PR branch** | The branch a `require_pr` environment's deliveries land on, named `<pr_prefix><env>/<type>`, where `pr_prefix` defaults to `pr/`. One branch, one pull request, and one aggregate commit that the run rebuilds each time more is due. |
 | **Trigger** | <!-- TBD --> |
 | **Cache** | <!-- TBD: Legacy term, define for contrast --> |
 
@@ -86,9 +79,10 @@ These appeared in earlier drafts and have no counterpart in the implementation. 
 | Term | Original definition | Status |
 |------|--------------------|--------|
 | **`kickoff` branch** | A pipeline-controlled branch mirroring `control` up to the latest pushed tag, serving as the dispatch point to environment branches. | Superseded 2026-08-28. Never built; `grep -rn kickoff lib/` returns nothing. Propagation reads directly from a control commit. |
-| **Sidecar** | A tag reference to files destined for downstream environments, pulled from `kickoff` when the pipeline progressed rather than committed to intermediate branches. | Not built. Downstream delivery is instead a fresh diff against the certified control commit at cascade time. |
+| **Sidecar** | A tag reference to files destined for downstream environments, pulled from `kickoff` when the pipeline progressed rather than committed to intermediate branches. | Not built. Downstream delivery is instead the ordinary delivery of the control commits an ancestor has certified. |
 | **Sequence tag** | Monotonically increasing `push-<n>` tags providing ordering for conflict resolution. | Not built. See "Ordering without sequence tags". |
 | **`entry point`** | An environment that received a propagation event directly, rather than waiting for it to cascade down from its parent. Computed ahead of the walk by `compute_propagation_targets`. | Retired 2026-09-19. The walk takes every control commit for every environment and either delivers it or holds it with a reason, so no set of environments is computed ahead of it. An environment with no `prior_env` is what the term named. |
+| **Cascade** | `genesis propagate <env>`, a run scoped to `<env>`'s descendants that sourced its files from the control commit `<env>`'s last successful deployment certified. | Retired 2026-09-20. There is one run and it takes no environment argument. It walks control for every environment from that environment's newest marker, so a commit held behind an ancestor is released by the next ordinary run once the ancestor has certified it. |
 
 ---
 
@@ -96,13 +90,9 @@ These appeared in earlier drafts and have no counterpart in the implementation. 
 
 ### The `control` Branch
 
-**Role:** Active development branch where changes are built out iteratively. Developers may rebase to reorder commits as needed before propagating.
+**Role:** The branch development happens on. Changes are built out iteratively here, and developers may rebase to reorder commits before a run delivers them.
 
-**Naming:** `control`, per `Genesis::Top::DEFAULT_CONTROL_BRANCH`. Treat this
-as fixed. A `ci.control_branch` config key exists in the code as an escape
-valve, but it is deliberately unpublished and unsupported: it is not
-exposed as a CLI option, and the propagation commands do not read it (see
-Open Questions). Repositories should not set it.
+**Naming:** `control` by default, read through `Genesis::Top::control_branch` and written as `pipeline.source_control.control_branch` in `.genesis/config` for a repository that wants another name.
 
 **Contents:**
 - All environment YAML files (ancestral and environment-specific)
@@ -111,11 +101,13 @@ Open Questions). Repositories should not set it.
 - `kit-overrides.yml`
 - `.genesis/` directory (config, embedded genesis, compiled kits)
 
-**Access:** Writable by developers
+**Access:** Writable by developers. Where `pipeline.source_control.control_requires_pr` is true the writing goes through a pull request instead, and `genesis pipeline-apply` derives control's branch protection from that key.
 
-**Trigger behavior:** Commits do NOT propagate on their own. Propagation happens when someone runs `genesis propagate`, or automatically after a successful deploy under the manual provider.
+**History:** Append-only and linear on the remote. The previous tip is always an ancestor of the new tip, Genesis never force-pushes control, and because the history is linear the walk can name the commit that introduced an environment file exactly.
 
-**Enforcement:** `genesis propagate` bails unless the working tree is on the control branch and clean — including under `--dry-run`, because uncommitted edits to environment files would make a dry run misrepresent what a real run would do. `genesis pipeline-prepare` enforces the same two conditions, for a different reason: it copies files into each environment branch out of the current branch's HEAD, so the current branch has to be the one those branches are meant to follow. `genesis new` likewise refuses to create an environment from anywhere but control, so the topology stays visible to pipeline tooling.
+**Trigger behavior:** A commit does not propagate because somebody made it. Propagation happens when somebody runs `genesis propagate`, or when a successful deploy under the manual provider spawns that run as a child.
+
+**Enforcement:** `genesis propagate` switches to control inside its own session and puts you back on the branch you started on, so the run reads the topology off control whatever you were standing on. Every other pre-deploy command, `genesis new` and the `pipeline-*` family among them, runs on control or on a feature branch that descends from control's tip, is not a deployment, pull request, or artifacts branch, and does not carry an environment's name. A deployed-state command such as `genesis deploy` switches to the environment's own deployment branch instead. The run also reads where control stands against the remote, and it refuses a control branch that is ahead, because the commits it would deliver are not pushed yet, or behind, because the topology it would read is stale.
 
 ### The `kickoff` Branch (superseded)
 
@@ -155,60 +147,68 @@ Open Questions). Repositories should not set it.
 >
 > **Annotation:** Markdown-formatted comment including Mermaid diagram of planned file flow
 
-### Environment Branches
+### Deployment Branches
 
-**Role:** Deployable state for a specific environment. Contains only the files that environment depends on.
+**Role:** The deployable state of one deployment. It holds only the files that deployment depends on, and a deploy stands on it and certifies the control commit its newest marker names.
 
-**Naming:** The environment name itself — `staging`, `c-aws-prod`. Not namespaced. The earlier `pipeline/<env>` and `<ci-provider>/<env>` proposals were not adopted; `genesis deploy <env>` checks out the branch named `<env>`, and `Genesis::Env::prepare_branch` creates it under that name.
+**Naming:** The deployment slug, `<env>/<type>`, where `<env>` is the environment's name and `<type>` is the repository's `deployment_type`. The environment `qa` of a `bosh` deployment therefore propagates on `qa/bosh`. The branch is per deployment rather than per environment, so one repository holding a `bosh` root and a `cf` root gives `qa` a branch under each.
 
-The one namespaced branch in the system is `pr/<env>`, used only for `require_pr` environments.
+The other two derived names are built from that slug. A `require_pr` environment proposes on `<pr_prefix><env>/<type>`, where `pr_prefix` comes from `pipeline.source_control.pr_prefix` and defaults to `pr/`. The artifacts branch, `artifacts/<env>/<type>`, is named and classified but nothing writes to it yet.
 
-**Ancestry:** Cut from `control` at the point the environment was created, so it shares ancestry with `control`. It is never merged back into `control`, and files arrive on it by copy-and-commit, not by merge.
+One consequence of the slug is a ref collision. A branch named for an environment alone occupies `refs/heads/<env>`, and git cannot then create `refs/heads/<env>/<type>` beneath it, so such a branch has to be deleted or renamed before the environment can have a deployment branch. "Migration from v2" says what to do about the ones a v2 repository already has.
 
-**Contents:** Exactly the propagation set (see below), plus anything already on the branch that `prepare_branch` declines to touch: files under `.genesis/`, and files outside the deployment's git prefix in multi-deployment repositories.
+**Ancestry:** An orphan branch, sharing no history with control. Its root is the `init` commit `genesis pipeline-apply` makes, carrying one `init` file that says who owns the branch, and the first delivery deletes that file as it writes the propagation set. The branch is never merged into control, and files arrive on it by a mirror of a control commit rather than by a merge.
 
-**Creation:** three commands create environment branches, all of them through `Genesis::Env::prepare_branch`, which creates the branch if absent and reconciles its contents — adding the files this environment needs, pruning files it does not, and recording a seed commit even when nothing changed so the branch has a propagation anchor.
+**Contents:** Exactly the propagation set as it stood at the control commit the newest marker names, and nothing else. A delivery is a mirror, so it removes a path that has dropped out of the set as well as writing the paths that are in it, and the writer checks both halves against the index before it commits.
 
-| Command | When it creates |
-|-------------|-----------------|
-| `genesis new <env>` | Always, as the last step of creating the environment. Commits the new environment file to control first, then prepares the branch |
-| `genesis pipeline-prepare` | Always. Every environment in the topology, or just one with `genesis <env> pipeline-prepare`. This is the command for an environment that already exists on control but whose branch does not |
-| `genesis propagate` | Only when authorized — `-y`/`--yes`, or an answered prompt. See "Missing branches during propagation" |
+**Creation:** `genesis pipeline-apply` cuts every branch the topology needs, applies the protection each one's `require_pr` asks for, and pushes them. Nothing else creates one. A propagation run that meets an environment with no branch reports it as awaiting `pipeline-apply` and delivers nothing to it, and a deploy of such an environment refuses, because a deploy with no branch would have to stand on control and certify a commit no run ever routed there.
 
-**Local absence is not absence.** `prepare_branch` asks `Service::Git::resolve_branch` where the branch stands before doing anything, and gets one of four answers: `local` (present here), `fetched` (the remote had it, so it was pulled rather than forked), `absent` (neither has it — create), or `unverifiable` (`--no-fetch`, so the remote could not be consulted). A branch that exists on the remote but not in this clone is the ordinary CI case, where the checkout holds only the control branch; creating it off local HEAD would fork it from the real branch and the subsequent push would either be rejected or overwrite the anchor propagation certifies against. Under `unverifiable`, `pipeline-prepare` skips the environment, warns, and tells the operator to re-run without `--no-fetch`. `--no-fetch` therefore means *offline*, not *unguarded*.
+**History:** Append-only on the remote, exactly as control is, and derived in your clone. A local commit whose subject carries a marker is discarded and the branch reset to the remote's tip, because the next run reproduces it from control. A local commit with no marker is a hand edit that belongs on control, so the run refuses before its first write, naming each branch and commit and the two ways out, which are to push it or to move the change to control and reset the branch. A local branch the remote does not have, or one that shares no ancestor with the remote's, has no legitimate origin, so the run refuses that too and names the remedy in order. Genesis deletes nothing in any of those cases.
 
-`pipeline-status` still reports an environment with no branch as `not propagated` (internal status `no-branch`), with dashes for both SHA columns.
+`genesis pipeline-status` reports an environment whose branch exists nowhere as awaiting `pipeline-apply`, with nothing in its two commit columns.
 
-> **Superseded 2026-08-28.** An earlier revision of this document stated that "`genesis propagate` never creates environment branches. It skips any environment whose branch does not exist." Neither clause holds on this branch, and `genesis pipeline-prepare` did not exist when that sentence was written. Skipping is precisely what the missing-branch guard was added to end: an absent branch and a branch with no pending changes produce the same empty diff, so a repository whose branches were never created reported "nothing to propagate" and exited successfully having done nothing. Propagation now bails on a missing branch, or creates it when authorized. (The same sentence's claim about `pipeline-status` was and remains correct, and is restated above.)
+> **Superseded 2026-08-28.** An earlier revision of this document stated that "`genesis propagate` never creates environment branches. It skips any environment whose branch does not exist." Skipping is what the missing-branch guard was added to end, because an absent branch and a branch with no pending changes produce the same empty diff, so a repository whose branches were never created reported "nothing to propagate" and exited successfully having done nothing. The guard is still there, and what it does now is report the environment as awaiting `pipeline-apply`, that command having taken over branch creation entirely.
 
 ---
 
 ## Propagation Set
 
-What travels with an environment, from `Genesis::Env::propagation_files`. Paths are git-root-relative.
+What travels with a deployment, from `Genesis::Env::propagation_files`. Paths are git-root-relative, and a walk reads the set out of the tree at the commit it is delivering rather than out of your working tree, because a restructure moves the prefix the set is built from.
 
-| Source | Paths |
-|--------|-------|
-| Environment file hierarchy | Every file from `actual_environment_files` — the environment's own YAML, its hyphen-ancestors, and anything reached via `genesis.inherits` |
-| Kit | The compiled kit tarball for a released kit, or the whole `dev/` directory for a dev kit |
-| Repo config | `.genesis/config` |
-| Reaction scripts | `bin/<script>` for every script named under `genesis.reactions` |
-| Explicit extras | `genesis.pipeline.required_files`, which supports globs and an `<env>` placeholder, and rejects absolute, `~`, or `..` paths |
+Every path carries one of two marks. A triggering path is one whose change means deploy me, and a non-triggering path is content the deployment needs that no deploy has to happen for.
 
-Two consequences worth stating plainly:
+| Source | Paths | Kind |
+|--------|-------|------|
+| Environment file hierarchy | Every file from `actual_environment_files`, which is the environment's own YAML, its hyphen-ancestors, and anything reached through `genesis.inherits` | Triggering |
+| Kit | The compiled kit tarball for a released kit, or the whole `dev/` directory for a dev kit | Triggering |
+| Blueprint fragments | The repository-side manifest fragments the kit's blueprint draws on, which is where the ops files arrive | Triggering |
+| Kit overrides | `kit-overrides.yml`, where the repository has one | Triggering |
+| Embedded genesis | `.genesis/bin/genesis`, because a genesis version can change rendering and hook behaviour, which is the thing a pipeline exists to prove in lab before prod | Triggering |
+| Extra tracked paths | `genesis.pipeline.track_additional_files`, which supports globs and an `<env>` placeholder, and rejects absolute, `~`, and `..` paths | Triggering |
+| Repo config | `.genesis/config`, since nothing in it reaches the manifest | Non-triggering |
+| Reaction scripts | `bin/<script>` for every script named under `genesis.reactions`, since a changed script takes effect at the next deploy whenever that comes | Non-triggering |
 
-- **Ops files are not enumerated separately.** They arrive because the merged environment definition references them and `actual_environment_files` resolves them, not because `ops/` is special-cased.
-- **The embedded Genesis binary is not propagated.** `.genesis/bin/genesis` is not in the propagation set, and `prepare_branch` explicitly refuses to prune anything under `.genesis/`. Whatever binary an environment branch has, it keeps, until someone puts a different one there. This differs from the earlier design, which routed `.genesis/bin/genesis` to all environments.
+Three consequences worth stating plainly:
+
+- **Ops files are not enumerated separately.** They arrive because the kit's blueprint draws them out of the repository and the fragment list names what it drew, not because `ops/` is special-cased.
+
+- **A commit of non-triggering content alone makes no delivery.** It rides along with the next delivery that has triggering content, which needs no carry-along mechanism, because a delivery is a snapshot of a control commit and a later snapshot already holds it. Non-triggering paths also never count toward the overlap that computes a hold, since a hold exists to stop unproven content reaching a descendant and a shared `.genesis/config` would otherwise hold every descendant behind the commit that changed it.
+
+- **Deploy artifacts never propagate.** Manifests live in exodus and `.genesis/manifests` is outside the set, so a deployment branch carries the deployment's inputs and never its outputs.
 
 ### The `genesis yamls` approach (superseded)
 
 > **Superseded 2026-08-28.** An earlier draft proposed determining applicability by merging ancestry with `genesis yamls --no-kit <env>` and reading `genesis.inherits` and `kit.features` out of the flattened YAML. The implementation instead asks the loaded `Genesis::Env` object directly via `propagation_files`, which reuses the same file-resolution machinery the deploy path uses. The distinction matters mainly because the answer now comes from a live environment load, so an environment that fails to load produces no propagation set at all rather than a wrong one — `propagate` skips it, and `pipeline-status` shows a `load error` row with the reason.
 
-BOSH config files (under `ops/` but not manifest ops files) remain unresolved — see Open Questions.
+BOSH config files are named by `genesis.pipeline.track_bosh_configs`, which takes either a boolean that turns every config type on or a list that names the ones this environment cares about. A named type gets a resource of its own in the emitted pipeline and a change to it triggers this environment's redeploy job, and none of them is part of the propagation set.
 
 ### Break-Glass Direct Edits
 
-In emergency scenarios, files (including `.genesis/bin/genesis`) can be modified directly on environment branches. Nothing prevents this; propagation will overwrite such an edit the next time it copies that file from control, and will not notice it otherwise. `_resolve_propagation_base` warns when an environment branch has commits on top of its most recent propagation marker, which is the signal that a manual edit happened.
+A hand commit on a deployment branch has two fates, and which one it gets depends on whether anybody else can see it.
+
+Local and unpushed, it makes the run refuse before its first write. The run checks every branch in scope for a local-only commit, names each branch and commit, and gives the two ways out, which are to push it or to move the change to control and reset the branch. Nothing partial is left, because nothing was written. A local-only commit that carries a marker is a different thing, being something a run made and nobody else has seen, so it is reset to the remote's tip and the walk reproduces it from control.
+
+Pushed to the remote, it is legal, and it is the emergency hatch. It deploys at once under an automated provider and by the operator's hand under the manual one, and it is temporary by construction, because the next delivery to that environment overwrites every file of the propagation set that differs from its source and reports each file it overwrote. It is never silent either. `genesis pipeline-status` reports the environment as drifted and names the files that differ from the marker's snapshot, and a deploy warns about the same difference and deploys anyway. The marker walk skips the commit, so the certified commit stays a control commit and the hotfix never travels downstream.
 
 ---
 
@@ -216,96 +216,86 @@ In emergency scenarios, files (including `.genesis/bin/genesis`) can be modified
 
 ### Overview
 
-Propagation is one stage, not two. A run of `genesis propagate`:
+Propagation is one run, and it takes no environment argument. It has three stages, which are settling every branch against the remote, walking control and writing what is due, and publishing. In detail, a run of `genesis propagate`:
 
-1. **Reads the topology** from the environment files on control (`genesis.pipeline.prior_env`) via `Genesis::Top::pipeline_topology`, giving a DAG, a parent map, and a stable order.
-2. **Fetches** every environment branch in one round-trip, so diffs see teammate commits (`--no-fetch` skips this). A branch the remote does not have is reported, not raised — an unprepared environment has to reach the missing-branch guard below rather than dying on a raw git error first.
-3. **Resolves the source control commit** — control HEAD for a root run, the certified control commit of the named environment for a cascade run, or `--commit` if given.
-4. **Handles missing branches** — any environment in scope without a branch is either created (with authorization) or the run refuses. See "Missing branches during propagation".
-5. **Diffs, per environment**, that control commit against the environment branch, filtered to the environment's propagation set. Also computes an undeployed set: the diff between the environment's certified control commit and the source commit.
-6. **Routes each commit** with `Genesis::CI::Walk::route_commit` and `hold_for`. A control commit is routed to an environment when it changes one of the files in that environment's propagation set that trigger a deploy, and a commit that changes only the other files in the set rides along with the next delivery. A routed commit is held when an ancestor has certified nothing or holds a file the commit touches, and a held commit holds every commit behind it for that environment.
-7. **Executes** with `propagate_envs`: per environment, a direct commit onto `<env>` or a commit onto the rolling `pr/<env>` branch, then one batched push, then the PR API calls. Branches created in step 4 are added to the batched push explicitly, because a freshly seeded branch has no propagation commit and would otherwise stay local.
-8. **Deploys** happen separately. Under the manual provider, a successful deploy runs `genesis propagate <env>` automatically, which is what moves the change down one level.
+1. **Refreshes**, bringing every branch in scope from the remote into this clone's tracking refs, control included, before it reads any of them. There is no flag to skip it, because a report that quietly rested on a stale tracking ref is the thing the refresh removes.
+
+2. **Stands itself on control**, inside a session that puts you back on the branch you started on, so a run started from a feature branch reads the same topology as a run started from control.
+
+3. **Refuses what it cannot safely write.** A control branch that is ahead or behind, a deployment branch with a local commit that carries no marker, a local branch the remote lacks or that shares no ancestor with the remote's, and a repository whose configuration disowns a pipeline that is still live each end the run before anything is written. A local commit that carries a marker is reset to the remote's tip instead, being something a run made that nobody else has seen.
+
+4. **Reads the topology** from the environment files on control through `Genesis::Top::pipeline_topology`, which gives the nodes, the edges, each environment's parent, and a stable order.
+
+5. **Walks control, once per environment**, from the commit that environment's newest marker names to control's tip. A branch with no marker has been delivered nothing, so its walk starts at the commit that introduced the environment file instead.
+
+6. **Routes each commit on its own**, in control order. A commit is delivered to an environment when it changes one of the files in that environment's propagation set that trigger a deploy and nothing holds it, and a commit that changes only the other files in the set rides along with the next delivery. A held commit holds every commit behind it for that environment, so the branch is always the snapshot of one control commit.
+
+7. **Writes**, per environment, either one commit per delivered control commit onto `<env>/<type>`, or one aggregate commit onto `<pr_prefix><env>/<type>` for an environment in pull request mode. Each commit is a mirror of the control commit filtered to the propagation set, and the writer checks the index against that source before it commits.
+
+8. **Publishes**, one push per branch, after showing the delta every push would carry and asking at a terminal. No push's result withholds another's, so a branch the remote rejects costs that one environment its run and nothing else. The pull request calls follow the pushes.
+
+9. **Reports** one outcome for every environment in scope, one for every control commit routed to it, and one for every hand edit it overwrote.
+
+Deploys happen separately. Under the manual provider a successful deploy spawns this same run as a child, which is what moves a change down one level.
 
 ```mermaid
 flowchart TD
     A[Developer commits on control] --> B[genesis propagate]
-    B --> C["Topology from genesis.pipeline.prior_env<br/>(Genesis::Top::pipeline_topology)"]
-    C --> M{"any env in scope<br/>without a branch?"}
-    M -->|"no"| D
-    M -->|"yes, and authorized (-y or prompt)"| N["prepare_branch: create,<br/>push via push_extra_branches"]
-    M -->|"yes, unauthorized"| X["bail with<br/>PROPAGATE_NO_BRANCH_EXIT"]
-    N --> D
-    D["Per env: diff source commit vs env branch,<br/>filtered to propagation_files"]
-    D --> E["compute_propagation_targets:<br/>drop envs whose ancestor holds<br/>an overlapping undeployed file"]
-    E --> F{require_pr?}
-    F -->|no| G["commit onto the env branch"]
-    F -->|yes| H["commit onto rolling pr/env branch"]
-    G --> I[Batched push]
-    H --> I
-    H --> J["create or update PR: pr/env into env"]
-    I --> K["genesis deploy env"]
-    J -->|human merges| K
-    K --> L["genesis propagate env — cascade to children<br/>(automatic under the manual provider)"]
-    L --> D
+    B --> R["refresh every branch from the remote"]
+    R --> P{"pre-flight refusals:<br/>control diverged, hand commit,<br/>branch with no legitimate origin"}
+    P -->|"any"| X["refuse, having written nothing"]
+    P -->|"none"| C["Topology from genesis.pipeline.prior_env<br/>(Genesis::Top::pipeline_topology)"]
+    C --> D["Per env: walk control from the branch's<br/>newest marker to control's tip"]
+    D --> E{"per commit: does an ancestor,<br/>a gate, or a hold stand in the way?"}
+    E -->|"yes"| H["hold it, with the reason,<br/>and hold what is behind it"]
+    E -->|"no"| F{require_pr?}
+    F -->|no| G["one commit per control commit<br/>onto env/type"]
+    F -->|yes| J["one aggregate commit onto<br/>pr_prefix env/type"]
+    G --> K["publish, one push per branch"]
+    J --> K
+    K --> L["create or update the pull request"]
+    K --> M["genesis deploy env"]
+    L -->|human merges| M
+    M -->|"under the manual provider, the deploy's child"| B
 ```
 
-### Missing branches during propagation
+### An environment with no branch
 
-An environment in scope with no branch is a broken topology, not an environment with nothing to do — and the per-environment diff cannot tell the two apart, since `git diff <env-branch>..<sha>` against an absent branch yields nothing. `_missing_env_branches` finds them before the diff loop runs, and `_authorize_branch_creation` decides what happens next:
+An environment in the topology with no deployment branch is awaiting `genesis pipeline-apply`, which is the one command that cuts branches. The run reports it that way and delivers nothing to it, and because it has certified no commit it holds its descendants as any uncertified ancestor does.
 
-| Situation | Outcome |
-|-----------|---------|
-| `-y`/`--yes` given | Creates the branches without asking |
-| Interactive terminal, no `-y` | Names every missing environment, then asks once for the whole set. Declining bails with "Aborted - no branches were created." |
-| No controlling terminal, no `-y` | Refuses, naming both `genesis pipeline-prepare` (or `genesis <env> pipeline-prepare` when exactly one is missing) and `-y` |
+That reporting matters because the branch's absence and the branch having nothing due look the same to a diff. An absent branch yields an empty diff exactly as an up-to-date one does, so a repository whose branches were never cut would otherwise report that there was nothing to propagate and exit successfully having done nothing.
 
-Two properties of that refusal are load-bearing:
+A deploy of such an environment refuses outright rather than warning, because a deploy certifies the commit of the branch it stands on, and with no branch it would stand on control and certify a commit no run ever routed there.
 
-- **It names a remedy, not just a complaint.** The message carries the environment list, the reason an absent branch cannot be distinguished from an unchanged one, and both ways forward.
-- **It exits with `Genesis::Top::PROPAGATE_NO_BRANCH_EXIT` (9)**, not 1, so a deploy running propagate as a subprocess can tell "refused, and here is the one-command fix" apart from "propagation actually broke". `Genesis::Env::_post_deploy` branches on exactly that code.
+### Two readings, not one
 
-Creation is opted into rather than assumed because it is incidental to what propagate is for: moving files between branches that already exist. Branch creation is a repair propagate happens to be positioned to perform, and doing it unattended is the kind of silent change that is hard to notice afterwards. `genesis pipeline-prepare` remains the deliberate path; `-y` is the shortcut for an operator who is already standing here.
+The walk asks two different questions about each environment, and conflating them is the mistake the design is shaped to prevent.
 
-A created branch is seeded from control by `prepare_branch`, so its propagation diff is empty and it never becomes a propagation target in the same run. It is pushed via `push_extra_branches` instead.
+- The **changed set** asks what a control commit changes within this environment's propagation set. It drives what a delivery writes, and its triggering half decides whether there is a delivery at all.
 
-Two details of propagate's creation path differ from `pipeline-prepare`'s, both because `_create_missing_branches` calls `prepare_branch` without passing `no_fetch` and without reading its third return value:
+- The **undeployed set** asks what an ancestor has been delivered and has not yet deployed. It is the difference between that ancestor's certified control commit and the commit being routed, and it is what says an ancestor is sitting on an in-flight change.
 
-- `--no-fetch` suppresses the bulk env-branch fetch, but the per-branch `resolve_branch` inside `prepare_branch` still consults the remote, so a branch that exists remotely is fetched rather than forked even on a `--no-fetch` run.
-- The run reports every such branch as `created`. `pipeline-prepare` distinguishes `created` from `fetched` in its output; propagate does not.
+A commit must not reach a descendant past an ancestor that has received it and not yet deployed it, or commits stop travelling as a unit. An ancestor whose record cannot be read, or which has no certified commit at all, holds everything below it for the same reason, and nothing is ever stood in for by control's own tip, because that would assert a deploy that never happened.
 
-### Two diffs, not one
+### One run, and no cascade
 
-The signature of `compute_propagation_targets` takes `env_changed` and `env_undeployed` separately, and conflating them is the mistake it is shaped to prevent.
+`genesis propagate` takes no environment argument and has no modes. One run walks every environment, and a commit held behind an ancestor is released by the next ordinary run, once that ancestor's certified commit has advanced past it.
 
-- `env_changed` asks *what is on control that this environment's branch lacks*. It drives what gets copied.
-- `env_undeployed` asks *what has this environment not yet deployed*. Its branch may already carry a file while exodus still records an older control commit. It identifies an ancestor sitting on an in-flight propagation.
+The earlier design had two runs. A root run sourced control's tip for the whole DAG, and a cascade run, `genesis propagate <env>`, scoped itself to `<env>`'s descendants and sourced the control commit `<env>`'s last successful deployment had certified. Per-commit routing does what the cascade did, because each environment's walk already starts at its own marker and each commit is already checked against its ancestors' certified commits, so a run aimed at one environment would compute the same answer the bare run computes for it.
 
-A file must not cascade past an ancestor that has received it but not yet deployed it, or commits stop travelling as a unit. When exodus has no record — no deploy history, vault down, pre-pipeline deploy — the undeployed set falls back to the environment's own pending set, which blocks descendants rather than letting them run ahead of state nobody can verify.
-
-This filter also does structural work downstream: by the time a propagation reaches a rolling `pr/<env>` branch, it touches files disjoint from anything already queued there, which is why the fast-forward-only push (see Limitations) has held up in practice.
-
-### Root propagation versus cascade
-
-`genesis propagate` with no argument is a **root** run. Scope is the whole DAG, and the source is control HEAD, so freshly committed changes reach the first tier immediately.
-
-`genesis propagate <env>` is a **cascade** run. Scope is `<env>`'s descendants, and the source is `<env>`'s last successful deployment's `git.control_commit` — the control state that was *certified* at that ancestor, not whatever is on control now. That is what keeps a change travelling as a unit while control keeps advancing.
-
-Cascade runs carry extra guards:
-
-- The named environment must have been propagated to at least once, and must have a successful deployment with a `git.control_commit` recorded. Without one, propagation bails rather than guessing. `--commit` overrides the source and skips the certification check.
-- An environment already at or ahead of the cascade source is skipped and reported as such, instead of being rolled back to an older commit.
-- Vault being unavailable downgrades the deployment check to a warning, since the certification cannot be read either way.
+Two guards the cascade carried fell away with it. The at-or-ahead skip is subsumed by ordered delivery, an environment never being sent a commit it already carries, and the certification check is now the ordinary ancestor hold.
 
 ### Ordering without sequence tags
 
-The earlier design solved fast-path/slow-path ordering with monotonic `push-<n>` tags and hybrid `push-34+33` tags. The implementation does not have them. Ordering falls out of three other mechanisms:
+The earlier design solved fast-path and slow-path ordering with monotonic `push-<n>` tags and hybrid `push-34+33` tags. The implementation does not have them. Ordering falls out of three other mechanisms:
 
-- **The certified control commit.** A cascade sources from what the ancestor actually deployed, so a slow-path change cannot arrive downstream carrying a control state the ancestor never ran.
-- **The ancestor-overlap filter.** A change cannot enter at a descendant while an ancestor is still sitting on an overlapping undeployed change.
-- **The at-or-ahead skip.** A cascade that would regress an environment to an older control commit is dropped, and named in the run summary.
+- **Delivery in control order.** Each environment takes the commits due to it oldest first, and a held commit holds everything behind it, so an urgent change cannot overtake the shared change it may depend on.
 
-What is lost relative to the tag design is the audit artifact: there is no per-event record of *what was deliberately omitted and why*. The propagation commit subject names the source control SHA, and the diff shows what was applied, but an environment that was skipped leaves a line in terminal output and nothing in git. Whether that matters enough to reintroduce something tag-like is an open question.
+- **The certified control commit.** An ancestor holds a commit until it has deployed what it was already given, so a change cannot arrive downstream carrying a control state the ancestor never ran.
+
+- **The gate.** A control commit with a `Genesis-Stage` trailer ends the delivery where the author wanted it to stop, and everything after it waits until that commit is certified or released.
+
+The audit gap the tag design worried about is closed by the run's report rather than by git. Every environment in scope ends a run with one recorded outcome, every control commit routed to it carries another, and a held commit carries the reason it was held, so what was withheld and why is something the run says rather than something a reader has to reconstruct.
 
 ### Superseded: two-stage dispatch
 
@@ -353,7 +343,7 @@ What is lost relative to the tag design is the audit artifact: there is no per-e
 
 ### Superseded: sidecar files
 
-> **Superseded 2026-08-28.** Sidecars were never built. The scenario they addressed — a downstream file superseded while in transit — is handled instead by re-diffing at cascade time: a cascade computes a fresh diff between the certified control commit and the environment branch, so a file that a later control commit changed is delivered in its later form, and an environment already ahead of the cascade source is skipped entirely. Original text:
+> **Superseded 2026-08-28.** Sidecars were never built. The scenario they addressed, which is a downstream file superseded while it was in transit, is handled instead by delivering each control commit in order. A superseded file arrives in its earlier form and then in its later one, each delivery held behind whatever its ancestors have not yet deployed, so nothing downstream ever runs ahead of what was proven upstream. Original text:
 >
 > Files destined for downstream environments are referenced via the push tag but NOT committed to intermediate branches. The propagation tool analyzes the push tag to determine which files apply where, commits only applicable files to each env branch, records the tag reference (the "sidecar") for downstream files, and pulls them from `kickoff` at the tagged commit when the pipeline progresses.
 >
@@ -367,80 +357,64 @@ What is lost relative to the tag design is the audit artifact: there is no per-e
 
 ## PR-Based Propagation
 
-An environment with `genesis.pipeline.require_pr: true` does not receive commits on its own branch. Its propagations land on a rolling `pr/<env>` branch, and a pull request from `pr/<env>` into `<env>` is opened or updated. Merging the PR is what puts the change on the environment branch, which is what makes it deployable.
+An environment with `genesis.pipeline.require_pr: true` does not receive commits on its own branch. Its deliveries land on `<pr_prefix><env>/<type>`, and a pull request from that branch into `<env>/<type>` is opened or updated. Merging the pull request is what puts the change on the deployment branch, which is what makes it deployable.
 
-`require_pr` is set per environment, at `genesis new` time (interactively, or with `--require-pr`), and lives in the environment's own YAML under `genesis.pipeline`.
+`require_pr` lives in the environment's own file under `genesis.pipeline`, and `genesis pipeline-apply` reads the same key when it derives the deployment branch's protection, so a site that reviews everything and a lab that pushes straight through are configured the same way and protected differently.
 
-### Why the branch rolls
+### One aggregate commit, not a pile
 
-One branch, many propagations, one PR. A `pr/<env>` branch is not created per propagation event — it persists as long as its PR is open and accumulates a commit per propagation. The pull request body is deliberately generic (it points at the commit history) because it cannot enumerate propagations it does not yet know about.
+The branch is rebuilt rather than appended to. Every time more is due, the run rebuilds `<pr_prefix><env>/<type>` from the deployment branch plus the commits still due, as one commit carrying the aggregate of all of them, with its marker naming the newest. The commit's message, and the pull request body with it, carry one entry per control commit, each with its short hash, its subject, and the files it changed within this environment's propagation set.
 
-The tradeoff is that a reviewer approving a PR may be approving more than they last looked at. Each commit subject names its source control SHA, so the history is readable, but the PR title and body do not change as commits accumulate.
+Rebuilding is what keeps review honest. A commit somebody rejected never lands on its own once its fix arrives, because the fix and the rejected commit are one commit by then, and no merge method can split the aggregate into separate deploys. The pull request's title is the aggregate's subject, so it changes on every rebuild that moves the newest marker.
 
-### The decision tree
+The branch is derived, so the run force-pushes it against the tip it read at its own refresh. That is the one class of branch a forced refspec may touch.
 
-Open pull requests are the authority on state, not branch presence. `propagate_envs` queries `open_prs(base => <env>, head => pr/<env>)` and branches on the count:
+### What the run does with an open pull request
 
-```mermaid
-flowchart TD
-    A["open_prs(base=env, head=pr/env)"] --> B{"how many open?"}
-    B -->|0| C["delete stale remote pr/env if present"]
-    C --> D["branch pr/env from env"]
-    D --> E["apply propagation commit"]
-    E --> F["queue push, then create_pr"]
-    B -->|1| G["fetch pr/env if missing locally, check out"]
-    G --> H{"newest subject names this control SHA?"}
-    H -->|yes| I["skip the env entirely:<br/>no commit, no push, no PR update"]
-    H -->|no| J["append propagation commit"]
-    J --> K["queue push, then update_pr"]
-    B -->|"more than 1"| L["warn, use the first PR"]
-    L --> G
-```
+The pull request's review state decides what the run does, and the run reads that state from the API rather than guessing it from the branch.
 
-The count > 1 case is unreachable in practice — GitHub enforces uniqueness of (head, base) for open PRs — but it is handled rather than assumed away.
+| Review state | What the run does |
+|--------------|-------------------|
+| None open | Rebuilds the branch from the deployment branch plus the commits due, pushes it, and opens a pull request |
+| Open and unreviewed | Rebuilds and force-updates freely, with the body saying what changed |
+| Changes requested | Rebuilds with the fix folded into the aggregate, and names the review it answers |
+| Approved | Freezes the pull request, holds every newly due commit for that environment, and reports merge pending until somebody merges it |
+| Closed without merging | Supersedes it with a new pull request, carrying a link to the closed one |
+| Unreadable | Refuses that environment rather than acting on a state it could not read |
 
-Deleting a stale remote `pr/<env>` in the count-0 case matters: a previous PR may have been closed without merging, leaving the branch behind. Branching from `<env>` on top of that stale branch would carry rejected commits back into a new PR.
+When nothing is due, the branch is deleted on the remote and locally, and a closed and unmerged pull request's branch goes with it.
+
+Commits on the branch the run did not write are reported by count and author before the rebuild discards them, so nothing disappears silently.
 
 ### Idempotency
 
-`_pr_branch_has_control_sha` inspects the newest commit subject on the branch and returns true when it matches `[pipeline] control@<short-sha>` for the control SHA being propagated. When it does, the environment is skipped whole: no commit, no push, no PR update. It still counts as propagated in the result, and is listed under `skipped_idempotent`.
+Idempotency is the marker walk on both branches, and not a subject comparison. A rebuilt branch that comes out equal to the one already there, same markers and same tree, pushes nothing and touches no pull request, and the environment is recorded as idempotent.
 
-This is what makes re-running `genesis propagate` after a successful run a no-op rather than a source of duplicate commits.
+That falls out of the delivery being a mirror. A marker names exactly one control commit and the branch's tree is that commit's propagation set, so two runs from the same state cannot produce different content, and there is nothing left for a separate idempotency rule to decide.
 
-The check is deliberately shallow — newest commit only. A propagation for this SHA buried under a later commit is not detected and the environment is propagated again. The commit-subject format is therefore load-bearing: `_apply_propagation_commit` writes it and `_pr_branch_has_control_sha` parses it, and the match is word-boundary anchored so a shorter SHA cannot match a longer one.
+### Push and pull request control
 
-### Push and PR control
+There are no flags governing the publish. `genesis propagate --dry-run` is the preview, and it writes nothing at all, neither a commit nor a push nor an API call.
 
-Pushing direct commits and pushing PR branches are separately controlled, because the two callers need different combinations:
+A real run shows the delta every push would carry before the first one goes out, and it shows it whether or not anybody is there to read it, so a pipeline job and a deploy's child both log what an operator would have seen. At a terminal the showing comes before the ask, and `-y` answers that ask and nothing else.
 
-| Flag | Default | Meaning |
-|------|---------|---------|
-| `push_direct_commits` | 1 | Queue direct-to-`<env>` commits for the batched push |
-| `push_pr_branches` | 1 | Queue `pr/<env>` branches for the batched push |
-| `create_prs` | 1 | Call `create_pr` / `update_pr` |
-| `no_push` | 0 | Master kill switch — forces all three to 0 |
-| `dry_run` | 0 | Report only; no git, no API |
-| `push_extra_branches` | `[]` | Extra branches to include in the batched push |
-
-The manual provider (the `genesis propagate` command) passes `push_direct_commits => 1` and `push_extra_branches => [control]`, so new control commits land on the remote alongside the propagated branches. The intended Concourse shape sets `push_direct_commits => 0`, because a concourse `put` on the environment's git resource is what lands direct-mode commits — but `push_pr_branches` stays 1 there, because concourse has no resource for creating GitHub pull requests, so those must go through Genesis either way. That Concourse wiring is not landed; see Open Questions.
-
-Pushes are batched into a single `git push` at the end of the run, and PR API calls happen after that. If any environment failed, both blocks are skipped entirely — a partial remote state is worse than none. The command bails on a non-empty error list; the module itself collects errors and returns them rather than bailing, so other callers can decide.
-
-`--no-push` currently still permits read-only network calls: `open_prs` queries the API and `fetch_branches` contacts the remote for the one pull request branch. Local `pr/<env>` branches are left with the commit applied, so mixing `--no-push` runs with normal runs can require manual local cleanup.
+The pushes are one per branch rather than one batch, so a rejection on one branch costs one environment one run. The pull request calls follow the pushes, each pull request for a branch that was actually published.
 
 ### Preconditions
 
-For any `require_pr` environment that takes a delivery in a non-dry run:
+For any `require_pr` environment that takes a delivery in a run that is not a dry run:
 
 - The origin remote must parse to a GitHub `owner/repo`.
-- Unless `--no-push`, `GITHUB_AUTH_TOKEN` must be set and must authenticate; the token is validated against the API before any branch is touched.
+
+- `GITHUB_AUTH_TOKEN` must be set and must authenticate, and the token is validated once for the run before any branch is touched.
 
 ### Limitations
 
-- **GitHub only.** PR lookup, creation, and update go through `Service::Github`. GitLab, Bitbucket, and Gitea are not supported. Adding a forge means a parallel service with the same `open_prs` / `create_pr` / `update_pr` surface plus a dispatch layer in `propagate_envs`.
-- **Single working tree.** `propagate_envs` assumes one `Service::Git` handle in which every target branch can be checked out. That is the manual-mode shape. The one-workspace-per-branch shape a CI job would want is not wired; the interface is stable for it, only the caller layer changes.
-- **Fast-forward-only push.** Appending to an existing `pr/<env>` is pushed with a plain `git push`. A non-fast-forward remote makes the push fail and the environment is reported in errors. The cherry-pick-and-force-push recovery path is deferred, on the reasoning that the ancestor-overlap filter keeps a fresh propagation disjoint from what is already queued. If the case proves reachable, the recovery path gets built; until then the failure surfaces rather than being papered over.
-- **Manifest store.** With `manifest_store` set to `repository` or `hybrid`, the post-deploy manifest writer expects to push to `<env>` — which `require_pr` propagation does not write to. No resolution is settled. Configure `manifest_store: exodus` on `require_pr` environments until one is. The compiler now warns about that pairing (see "Compile-time validation"), but only repository-wide: `manifest_store` is a `.genesis/config` key while `require_pr` is per environment, so the check cannot tell a PR-gated environment from an ordinary one and does not settle this.
+- **GitHub only.** Reading, creating, and updating a pull request all go through Genesis's GitHub service. GitLab, Bitbucket, and Gitea are not supported. Adding a forge means a parallel service with the same surface and a dispatch layer in the pull request arm.
+
+- **One working tree.** The run assumes one git handle in which every target branch can be checked out, which is the shape a person's clone has. The one-workspace-per-branch shape a CI job would want is not wired, and the interface is stable for it.
+
+- **Rebase merges only.** A pull request into a deployment branch is merged by rebase, so the marker survives into the branch's history and the walk can find it. The run also recovers a marker from a tip that was merged without one.
 
 ### Per-Environment Override
 
@@ -454,7 +428,7 @@ pipeline:
       propagation: pr  # override for prod
 ```
 
-**Superseded 2026-08-28.** There is no repository-wide propagation mode and no per-environment override of one. The flag lives in each environment's own file, which is also where the topology lives:
+**Superseded 2026-08-28.** There is no repository-wide propagation mode and no per-environment override of one. The key lives in each environment's own file, which is also where the topology lives:
 
 ```yaml
 genesis:
@@ -465,19 +439,23 @@ genesis:
     manual:       true
 ```
 
+The block is read merged rather than leaf-only, so a key written in a site file is inherited by every environment beneath it and a key written in the environment's own file wins over the one it inherits. That is what makes `require_pr: true` in a site file a policy rather than something each environment has to repeat.
+
 ---
 
 ## Deployment Triggers
 
 ### Topology source
 
-The env DAG comes from `genesis.pipeline.prior_env` in the environment files, not from `ci.yml` layouts. `_build_from_env_files` scans the environment YAMLs, makes a node per valid environment (including ones with no `genesis.pipeline` block at all, so an environment that another one names as its `prior_env` appears), and adds a `prior_env -> env` edge wherever `prior_env` names another environment present on disk.
+The env DAG comes from `genesis.pipeline.prior_env` in the environment files, and not from `ci.yml` layouts. `_build_from_env_files` scans the environment YAMLs, makes a node per valid environment, including one with no `genesis.pipeline` block at all so that an environment another one names as its `prior_env` appears, and adds a `prior_env -> env` edge wherever `prior_env` names another environment present on disk.
 
-**One accessor, not several.** `Genesis::Top::pipeline_topology` is the single entry point onto that DAG, returning `nodes`, `edges`, `children`, `parent_of`, and a stable breadth-first `order`. `propagate`, `pipeline-status`, `pipeline-prepare`, and `pipeline-graph` all read it; none of them collects edges or computes an ordering of its own. `Genesis::Top::pipeline_env_names` is a wrapper over the same call, so "which environments are in this pipeline" has one answer rather than two that happened to agree.
+Every read of a `genesis.pipeline` key goes through the merged hierarchy rather than the leaf file alone, because most of these keys live high in the hierarchy, typically in a site file, and a leaf-only read would find an inherited key absent and say nothing about it.
 
-Membership is every environment `has_env` accepts, with or without a `genesis.pipeline` block — such an environment still has a branch, still appears in `pipeline-status`, and still needs preparing. Every field comes back empty when CI is not configured, so callers iterate without a guard and decide for themselves whether an empty pipeline is fatal (`propagate` and `pipeline-status` bail; `pipeline-prepare` reports that there is nothing to prepare).
+**One accessor, not several.** `Genesis::Top::pipeline_topology` is the single entry onto that DAG, returning `nodes`, `edges`, `children`, `parent_of`, and a stable breadth-first `order`. `propagate`, `pipeline-status`, `pipeline-apply`, and `pipeline-graph` all read it, and none of them collects edges or computes an ordering of its own. `Genesis::Top::pipeline_env_names` is a wrapper over the same call, so "which environments are in this pipeline" has one answer rather than two that happened to agree.
 
-Legacy `ci.yml` layouts are still parsed by the compiler for legacy configurations, and the arrow/`auto` DSL below still describes them, but propagation does not consult them.
+Membership is every environment the deployment root holds, with or without a `genesis.pipeline` block, because such an environment still has a deployment branch and still appears in `pipeline-status`. Every field comes back empty where no pipeline is enabled, so callers iterate without a guard and decide for themselves whether an empty pipeline is fatal.
+
+A legacy `ci.yml` layout is still parsed by the compiler for a legacy configuration, and the arrow and `auto` DSL below still describes one, and the walk does not consult it.
 
 ```
 auto *-sandbox
@@ -488,83 +466,103 @@ sandbox -> preprod -> prod
 
 ```mermaid
 flowchart TD
-    C[control] -->|propagate| S["staging branch"]
-    C -->|propagate| PR["pr/prod (require_pr)"]
-    PR -->|human merges PR| P["prod branch"]
-    S --> SD["genesis deploy staging"]
-    SD -->|"success (manual provider): auto-cascade"| CAS["genesis propagate staging"]
-    CAS -->|"sources staging's certified control commit"| PR
-    P --> PD["genesis deploy prod"]
+    C[control] -->|propagate| S["staging/bosh"]
+    C -->|propagate| PR["pr/prod/bosh (require_pr)"]
+    PR -->|human merges the pull request| P["prod/bosh"]
+    S --> SD["genesis staging deploy"]
+    SD -->|"on success under the manual provider, the propagate child"| CAS["genesis propagate"]
+    CAS -->|"staging's certified commit releases what prod was holding"| PR
+    P --> PD["genesis prod deploy"]
 ```
 
 ### What the emitted pipeline watches
 
-`PipelineDescriptor::_env_resources` gives each environment one git resource, `<alias>-branch`, tracking the branch named `<env>`. There is no path filtering on it: under branch propagation the branch *is* the change signal, since anything that reaches it is by definition intended for that environment. This resource replaced both the path-filtered changes resource and the cache resource that used to carry an upstream environment's files inside the control branch.
+`PipelineDescriptor::_env_resources` gives each environment one git resource, `<alias>-branch`, tracking that environment's branch. There is no path filtering on it, because under branch propagation the branch is the change signal, anything that reaches it being by definition intended for that environment. This resource replaced both the path-filtered changes resource and the cache resource that used to carry an upstream environment's files inside the control branch.
 
-It does carry one exclusion:
+BOSH config resources follow it, one per config type, where a type is `cloud`, `runtime`, or `cpi`. They are emitted only for the types `genesis.pipeline.track_bosh_configs` names, and never for a create-env environment, which has no director to read a config from.
+
+The branch resource carries one exclusion:
 
 ```yaml
 ignore_paths: [".genesis/manifests/*"]     # prefixed with source_control.root when set
 ```
 
-A deploy commits its manifests to the environment branch — which is the branch its own job triggers on, so the commit starts the job again. `ignore_paths` breaks that loop.
+It is emitted unconditionally. Under the store a pipeline repository is required to use, nothing writes to that path at all, so the exclusion costs nothing today and it guards against any later change that puts a git write back on the branch a deploy triggers on. A deploy that committed its manifests to the branch its own job watches would start that job again, and that is the loop this breaks.
 
-It is emitted unconditionally rather than gated on `manifest_store`. Under `exodus` nothing writes there and the exclusion costs nothing; under `hybrid` and `repository` the writes do happen, and those are exactly the configurations that need the guard. Gating would remove the defence from the two stores that need it, and from any later regression that reintroduces git writes.
-
-**This is a loop-breaker, not a resolution.** Ignoring the path stops a deploy retriggering itself, but the deploy is still a git writer on a branch that propagation also advances — two writers on one branch. Only `manifest_store: exodus` removes the second writer, by making the deploy stop writing to the repository at all. `Genesis::CI::Compiler::Validator::_validate_manifest_store` warns about that pairing; see "Compile-time validation".
+**The emitted resource still names the branch after the environment alone.** The descriptor passes the environment name where the deployment slug belongs, so a repository whose deployment type is not implied by the environment name gets a resource pointing at a branch the propagation half never writes. Closing that is the compiler half taking the slug from `Genesis::Top::branch_for`, as everything on the propagation half already does.
 
 ### Per-environment flags
 
-| Flag | Effect today |
-|------|--------------|
-| `require_pr` | Routes propagation through `pr/<env>` and a PR. Surfaces as a `PR` label in the Mermaid graph, a `require_pr` flag in `pipeline-describe`, and `[PR required]` / `[PR #n open]` in `pipeline-status`. |
-| `manual` | Surfaces as a `MANUAL` label in the Mermaid graph and a `manual` flag in `pipeline-describe`. |
-| `redeploy` | `manual`, `cron`, or `signal`; surfaces as a `REDEPLOY` label. |
-
-Note what is *not* in that table: `require_pr` and `manual` do not currently change the emitted Concourse pipeline beyond the graph label. `PipelineDescriptor` reads both only in `_mermaid_node_def`. Whether the emitted pipeline should gate on them is an open question.
+| Key | Effect today |
+|-----|--------------|
+| `require_pr` | Routes delivery through `<pr_prefix><env>/<type>` and a pull request, derives that deployment branch's protection at `pipeline-apply` time, and surfaces in the Mermaid graph, in `pipeline-describe`, and in `pipeline-status` |
+| `manual` | Says the deploy job waits for a person. Every environment built from environment files already takes `trigger: false` on its branch, so what the key reaches is the `MANUAL` label on the graph and the hold reason that says a descendant is waiting on an ancestor's trigger. It is valid only where the provider declares that it emits a triggering resource, and it is refused by name at configuration load where the provider does not |
+| `redeploy_cron` | One crontab expression, or a list of them, in UTC, triggering the environment's redeploy job |
+| `track_dependencies` | The deployments this one reads, declared so that the applied record and the staleness check know about them |
+| `track_bosh_configs` | The BOSH config types whose change triggers this environment's redeploy job, either as a boolean that turns every type on or as a list that names them |
+| `track_additional_files` | Extra deployment-root-relative paths for this environment's propagation set |
+| `notifications` | This environment's override of the repository's notification style |
 
 ---
 
 ## Deployment Execution
 
-### `genesis deploy <env>` in a CI-configured repo
+### `genesis <env> deploy` in a repository with a pipeline
 
-When `ci.enabled` and a provider type are set, deploy does more than deploy:
+The deploy observes and never writes git. Its one write is the exodus record, and the only ref it moves is the fast-forward of a deployment branch that is behind the remote, which neither creates nor discards a commit. In order, a deploy:
 
-1. **Fetches** all pipeline environment branches in one round-trip (`--no-fetch` skips).
-2. **Switches** to the branch named for the environment, refusing to move with a dirty tree and bailing if the branch does not exist. All preflight work then runs against the right branch rather than whatever the operator happened to be on. Note that deploy's missing-branch bail still directs the operator to `genesis new <env>`, unlike propagate's, which now names `pipeline-prepare` — see Open Questions.
-3. **Pulls** that branch fast-forward-only from the remote.
-4. **Asserts the prior-environment invariant** — if the environment declares a `prior_env`, that predecessor must have deployed successfully at least once. This has no `--yes` override.
-5. **Warns on manual deploys** of a pipeline-managed environment under a non-manual provider, and prompts for confirmation. Skipped under the manual provider, where the operator *is* the pipeline.
-6. **`--pull`** (implied by `-F`/`--fix-checks`, opt out with `--no-pull`) propagates onto this environment's branch before deploying, sourced from `prior_env`'s last successful `git.control_commit`, or control HEAD where nothing has to deploy before this environment. It is a no-op when the branch is already current.
-7. **Derives a reason** from the `[pipeline] control@<sha>` markers in the branch's commit range when `--reason` is not given, using the control commit subjects.
-8. **Records git context in exodus**: `git.branch`, `git.commit`, and `git.control_commit`. The control commit is read from the newest propagation marker on the branch. A branch carrying no marker has been delivered nothing, so the record names no control commit rather than standing control's own tip in for one.
-9. **Commits and pushes deploy artifacts** to the environment branch when `manifest_store` writes to the repository, rebasing onto the remote first.
-10. **Cascades** — under the manual provider only, and unless `--no-propagate`, checks out control and runs `genesis propagate <env>` after success. Failure there warns and tells the operator to retry; it does not fail the deploy, which already succeeded.
+1. **Refreshes** every branch in scope from the remote, unconditionally, because the warnings below are worthless against a stale tracking ref. There is no flag to skip it.
 
-#### How the cascade runs its propagate child
+2. **Checks control**, refusing where control exists neither on the remote nor locally, since the environment files live on it and nothing can read the topology without it.
 
-Three details of that subprocess matter, all of them about propagation staying a side effect rather than becoming an interruption:
+3. **Checks whether the configuration disowns a live pipeline**, which is a repository whose `pipeline.enabled` is false while the applied record says a pipeline was applied. A person's deploy warns and continues, because they may be mid-teardown. A deploy inside the pipeline's own job errors instead, because a job never deploys what its own configuration disowns.
 
-- **Stdin comes from `/dev/null`.** The child inherits the deploy's terminal, so it could otherwise stop and ask the operator about a downstream branch mid-deploy. Cut off from stdin, `in_controlling_terminal` fails and propagate takes its non-interactive path.
-- **`-F`/`--fix-checks` on the deploy adds `-y` to the child**, authorizing branch creation during the cascade. Deliberately not `--yes`: on a deploy, `-y` means "don't ask about this deployment", not "create branches on my behalf". `-F` is the flag for repairing secondary issues, which is what creating a downstream branch is.
-- **A refusal is reported, not leaked as a number.** When the child exits with `PROPAGATE_NO_BRANCH_EXIT`, the operator is told the deployment succeeded and is complete, that nothing propagated, and how to proceed — `genesis pipeline-prepare`, or redeploy with `-F`. Any other non-zero exit gets the generic "propagation failed, deploy succeeded, retry manually" warning.
+4. **Switches to `<env>/<type>`** inside a session, so all the preflight work runs against the right branch rather than whatever you happened to be standing on, and so you are put back where you started.
+
+5. **Classifies that branch against the remote.** In sync proceeds, behind is fast-forwarded, and ahead or diverged is refused, naming the counts and `genesis propagate`, because discarding a commit belongs to the propagation run's pre-flight and never to a deploy. A branch that exists nowhere, or one that shares no ancestor with the remote's, is refused with the remedy named in order.
+
+6. **Asserts the prior-environment invariant.** Where the environment declares a `prior_env`, that predecessor must have deployed successfully at least once. There is no override.
+
+7. **Passes the provider gate.** Under an automated provider a deploy by hand is refused unless `--force`, and at a terminal it asks for an acknowledgement that `-y` does not suppress. The manual provider never reaches the gate, because there the operator is the pipeline.
+
+8. **Warns three times, and asks once.** It warns when the applied record is stale against control, naming the environments that changed and `genesis pipeline-apply`. It warns when commits are due to this environment and not yet on its branch, naming them and `genesis propagate`, and at a terminal it asks before continuing unless `-y`. It warns beside that when the branch has drifted from its marker's snapshot, naming the files that differ, and deploys anyway. No flag switches a warning off.
+
+9. **Deploys**, and then **records two commits in exodus**, which are `git.commit`, the deployment branch commit it stood on, and `git.control_commit`, the control commit that branch's newest marker names. A branch carrying no marker has been delivered nothing, so the record names no control commit rather than standing control's own tip in for one.
+
+10. **Finishes the session** and hands off. A tracked modification found at that point is a defect, a kit hook that wrote into the repository or a deploy that died before its cleanup, and it is named before it is discarded, with the deploy reported as succeeded and the command exiting non-zero.
+
+11. **Spawns the propagate child**, under the manual provider only, and unless `--no-propagate`. A failure there warns and tells the operator to run `genesis propagate` themselves, and it does not fail a deploy that already succeeded.
+
+What the deploy computes for its due-commits warning is the same walk the propagation run makes, run read-only for one environment against the same durable state, so a deploy and a run can never disagree about what is due or about why something is held.
+
+#### How the deploy runs its propagate child
+
+Three details of that subprocess matter, and all of them are about propagation staying a side effect rather than becoming an interruption.
+
+- **It runs after the deploy's own session has finished**, and it takes the switch lock itself, so the child and the deploy never both want the working tree.
+
+- **Its standard input comes from `/dev/null`.** The child inherits the deploy's terminal, so it could otherwise stop and ask the operator about another environment's branch mid-deploy. Cut off from standard input it takes its non-interactive path, printing the delta it would publish rather than asking about it.
+
+- **A refusal is reported rather than leaked as a number.** The child's named exit is turned back into a sentence, so the operator is told the deployment succeeded, that nothing propagated, and what to do next.
 
 ### Safeguards
 
 | Scenario | Behavior |
 |----------|----------|
-| `genesis propagate` from a non-control branch | Bails |
-| `genesis propagate` with uncommitted changes | Bails, including under `--dry-run` |
-| `genesis pipeline-prepare` from a non-control branch, or with uncommitted changes | Bails; it copies files out of the current branch's HEAD, so that branch has to be the one they follow |
-| `genesis new` from a non-control branch | Bails |
-| `genesis propagate` with an environment branch missing | Creates it with `-y`; prompts interactively; otherwise bails with `PROPAGATE_NO_BRANCH_EXIT`, naming `pipeline-prepare` and `-y` |
-| `genesis pipeline-prepare --no-fetch` with a branch missing locally | Skips that environment and warns, rather than forking a branch the remote may already have |
-| `genesis deploy` with the environment branch missing | Bails, pointing at `genesis new` |
-| `genesis deploy` with a dirty tree needing a branch switch | Bails |
-| `genesis deploy` of an environment whose `prior_env` never deployed | Bails, no override |
-| Manual `genesis deploy` under a non-manual provider | Warns and prompts |
-| Deploy older revision than branch | <!-- TBD --> |
+| `genesis propagate` from a branch that is not control | Switches to control inside its own session, and puts the operator back afterwards |
+| `genesis propagate` with uncommitted changes | Bails, naming the files, including under `--dry-run` |
+| `genesis propagate` with control ahead of the remote | Bails as unpushed, except under `--dry-run`, which warns that its answer assumes the push |
+| `genesis propagate` with control behind the remote | Bails as stale, because the topology it would read is out of date |
+| `genesis propagate` with a hand commit on a deployment branch in this clone | Bails before the first write, naming each branch and commit and the two ways out |
+| `genesis propagate` with a deployment branch missing | Reports the environment as awaiting `genesis pipeline-apply` and delivers nothing to it |
+| `genesis new` from a feature branch that does not descend from control, or whose name is an environment's | Bails, naming the condition it failed |
+| `genesis <env> deploy` with the deployment branch missing | Bails, pointing at `genesis pipeline-apply` |
+| `genesis <env> deploy` with a dirty tree needing a branch switch | Bails, naming the files |
+| `genesis <env> deploy` with its branch ahead of or diverged from the remote | Bails, naming the counts and `genesis propagate` |
+| `genesis <env> deploy` of an environment whose `prior_env` never deployed | Bails, with no override |
+| `genesis <env> deploy` by hand under an automated provider | Refuses unless `--force`, and asks for an acknowledgement at a terminal |
+| `genesis <env> deploy` with commits due and not yet delivered | Warns, names them, and asks unless `-y` |
+| `genesis <env> deploy` of a branch that has drifted from its marker's snapshot | Warns, names the files that differ, and deploys |
 
 ---
 
@@ -574,35 +572,35 @@ Three details of that subprocess matter, all of them about propagation staying a
 
 | Scenario | Behavior |
 |----------|----------|
-| Two environments queued for the same file, one an ancestor | The descendant's commit is held; the ancestor takes the file first, and it reaches the descendant by cascade after the ancestor deploys |
-| Cascade would move an environment backwards | Environment is skipped and named in the run summary as already ahead |
-| Manual commits on top of an environment branch's last propagation | `_resolve_propagation_base` warns; propagation proceeds from the marker, so manual edits to propagated files are overwritten and edits to other files are left alone |
-| `pr/<env>` remote has commits the local branch lacks | Push fails, environment reported in errors, whole run's pushes and PR calls skipped |
-| Any per-environment failure | Loop stops at the first failure, working tree is reset, no push and no PR calls happen |
+| Two environments queued for the same file, one an ancestor | The descendant's commit is held with the reason `ancestor-overlap`, naming the ancestor and the files that overlap, and the walk delivers it once the ancestor has deployed |
+| A delivery that would move an environment backwards | Cannot arise. The walk replays control forward from the commit each branch's newest marker names, so an environment is never sent a commit it already carries |
+| Hand commits on top of a deployment branch's last delivery | A local unpushed commit with no marker refuses the whole run before its first write, naming each branch and commit and the two ways out. A commit pushed to the remote is legal and temporary, and the next delivery overwrites every file of the propagation set that differs from its source and reports each one it overwrote |
+| The pull request branch on the remote has commits the run did not write | The run reports them by count and author, rebuilds the branch from the deployment branch plus the commits still due, and pushes against the expected tip it read at the refresh |
+| Any per-environment failure | The run holds what it cannot deliver and continues, so one environment's failure does not withhold another's delivery. A failed snapshot assertion is the exception, being fatal to the whole run, which resets every branch it had committed to and publishes nothing |
 
 ### Resolution Strategies
 
-There are no configurable strategies. The behavior is fixed: propagation copies files from a control commit and commits them; it does not merge, rebase, or ask. Whether a `fail`/`merge`/`rebase`/`ask` knob is wanted remains open.
+There are no configurable strategies. Delivery writes each control commit's propagation set onto the branch as a mirror of that commit, so it does not merge, rebase, or ask. A `fail`, `merge`, `rebase`, or `ask` knob was considered and is not in the design.
 
 ---
 
 ## Recovery Procedures
 
-### Failed Deployment at Environment N
+### Failed Delivery at Environment N
 
-**Current (cache-based):** Complex, requires manual cache reconstruction
+The environment's branch is the state. Fix forward on control and run `genesis propagate` again, or check the branch out and inspect it directly.
 
-**Branch-based:** The environment branch is the state. Fix forward on control and re-propagate, or check out the environment branch and inspect it directly. Re-running `genesis propagate` after a partial run is safe: direct-mode environments re-diff and get only what they still lack, and PR-mode environments hit the idempotency skip.
-
-<!-- TBD: worked example -->
+Re-running after a partial run is safe. The walk re-reads each branch's newest marker and replays control forward from the commit it names, so an environment that took its delivery is already up to date and one that did not takes it now. A PR-mode environment's branch is rebuilt from the deployment branch plus the commits still due, rather than skipped, so a half-built pull request corrects itself, and the run reports any commit it did not write before the rebuild discards it.
 
 ### Accidental Manual Deploy
 
-<!-- TBD -->
+The deploy records the commit it stood on as `git.commit` and the control commit its marker names as `git.control_commit`, so the deploy is traceable even where the branch carried a hand commit. `genesis pipeline-status` reports such an environment as drifted and names the files that differ from the marker's snapshot.
 
 ### State File Recovery
 
-<!-- TBD: How are state files (create-env) handled? -->
+A create-env deployment's state file is an artifact of the deploy rather than content a run moves. The deploy writes it into its own cache directory, at `.genesis/deploy-cache/<env>/<env>-state.json`, and names it in the exodus deployment record beside the manifest, so the record is where a later deploy reads it back from. `Genesis::Env::deployment_cache_setup` names the file and `Genesis::Env::DeploymentManager::_base_artifacts` is what puts it in the record.
+
+It never reaches a deployment branch, being outside the propagation set, so recovering one means reading the environment's exodus record rather than checking a branch out. Where no record carries a state file, Genesis falls back to `.genesis/manifests/<env>-state.json` in the repository, which is where a deploy from before the pipeline left it.
 
 ---
 
@@ -624,68 +622,74 @@ There are no configurable strategies. The behavior is fixed: propagation copies 
 
 ### What actually configures this
 
-**Repository level, `.genesis/config`:**
+A repository configures its pipeline in two places. Its own settings live in `.genesis/config` under `pipeline`, and each environment's live in that environment's own file under `genesis.pipeline`. The schema is the contract in both, so every key a command reads is declared, validation runs at configuration load for every command rather than only for the pipeline ones, and a key the schema does not declare is refused by name. There are no compatibility aliases.
+
+**Repository level, `.genesis/config` under `pipeline`:**
 
 | Key | Meaning |
 |-----|---------|
-| `ci.enabled` | Whether CI is on |
-| `ci.provider.type` | `concourse`, `github-actions`, or `manual`. Together with `ci.enabled` this is what `ci_configured` tests, and what gates all the branch-aware behavior |
-| `ci.name` | Pipeline name for display |
-| `manifest_store` | `exodus`, `repository`, or `hybrid`. Defaults to `hybrid` when unset. Interacts with `require_pr` (see Limitations) and with the env-branch trigger (see "What the emitted pipeline watches"); pairing a non-`manual` provider with anything but `exodus` warns at compile time |
+| `enabled` | Whether this repository has a pipeline. A repository whose pipeline is not enabled is not validated against the rest of this table at all |
+| `provider.type` | `concourse`, `github-actions`, or `manual`, and an absent provider block is a manual pipeline rather than no pipeline. The block's remaining keys are the ones that provider declares |
+| `name` | The pipeline's name in its provider, defaulting to the deployment type |
+| `recreate_on_deploy` | `never`, `redeploy-only`, or `always`, saying which runs pass `--recreate` to the BOSH deploy. It is repository-wide, because a key that changes how a deployment progresses has to be uniform or the earlier environments stop rehearsing the later ones |
+| `source_control.remote`, `.uri`, `.repository` | The remote CI clones from, its fetch URL, and the GitHub owner and repository the API targets. Each is derived from git with an explicit override |
+| `source_control.control_branch` | The control branch's name, defaulting to `control` |
+| `source_control.pr_prefix` | The prefix every pull request branch carries, defaulting to `pr/` |
+| `source_control.control_requires_pr` | Whether control accepts direct pushes, defaulting to false |
+| `source_control.auth`, `.identity` | The vault reference for the clone credential, and the name and email a pipeline task commits under. Both are required wherever a provider has to do the work unattended |
+| `shuttle` | The object store behind every deployment's queue and event, either `s3` or `gcs` |
+| `vault` | The vault a pipeline task writes exodus through |
+| `locker` | The locker behind the two mandatory deploy locks |
+| `notifications` | How the pipeline notifies, and where, which an environment may override |
 
-**Environment level, in the environment's own YAML under `genesis.pipeline`:**
+`manifest_store` sits beside the pipeline block rather than inside it, and under a pipeline it must be `exodus`. Any other value is refused by name at configuration load, where every command meets it. The certified commit and the applied, hold, and proposed records all live in exodus, so an environment whose manifests lived only in git would still need every one of them and the routing could not run without them. An environment whose kit declares a Genesis floor below 3.1.0 is refused the same way, because such a kit forces the repository store at run time whatever the configuration says, and the remedy there is the kit's floor.
+
+**Environment level, in the environment's own file under `genesis.pipeline`:**
 
 | Key | Meaning |
 |-----|---------|
-| `prior_env` | Parent in the DAG; absent, nothing has to deploy before this environment |
-| `require_pr` | Route propagation through `pr/<env>` and a PR |
-| `manual` | Require a manual CI trigger (graph/describe annotation only today) |
-| `redeploy`, `redeploy_cron_start`, `redeploy_cron_stop` | Scheduled redeploy lane |
-| `status_signal`, `signal_prefix` | Deployment status signalling |
-| `track_bosh_configs` | BOSH config tracking |
-| `required_files` | Extra paths to include in this environment's propagation set |
+| `prior_env` | The topology edge, naming the environment this one follows. Absent, nothing has to deploy before this environment |
+| `require_pr` | Deliver through `<pr_prefix><env>/<type>` and a pull request, and protect the deployment branch accordingly |
+| `manual` | The deploy job waits for a person. Valid only where the provider declares that it emits a triggering resource |
+| `redeploy_cron` | Crontab expressions, in UTC, that trigger the redeploy job |
+| `track_dependencies` | The deployments whose exodus records this one reads |
+| `track_bosh_configs` | The BOSH config types whose change triggers a redeploy |
+| `track_additional_files` | Extra deployment-root-relative paths for this environment's propagation set |
+| `notifications` | This environment's override of the repository's notification style |
 
 ### Compile-time validation
 
-`Genesis::CI::Compiler::Validator` checks the parsed configuration and collects *warnings* separately from *errors*. Errors bail the compile; warnings are printed by `Genesis::CI::Compiler::compile` and compilation continues. Every command that compiles — `pipeline-apply`, `pipeline-graph`, `pipeline-describe`, `pipeline-diff` — therefore surfaces them.
+`Genesis::CI::Compiler::Validator` checks the parsed configuration and collects warnings separately from errors. An error bails the compile, and a warning is printed and compilation continues, so every command that compiles surfaces them. Those commands are `pipeline-apply`, `pipeline-graph`, `pipeline-describe`, and `pipeline-diff`.
 
-Four warning sites exist today:
+Two warning sites exist today:
 
 | Warning | Condition |
 |---------|-----------|
-| Provider schema not loadable | The named provider class fails to `require`, so its options schema cannot be checked |
 | Workflow trigger matches nothing | A workflow's trigger pattern matches no targets |
 | Undefined script reference | A workflow stage names a script that script discovery did not find |
-| Manifest store versus provider | A non-`manual` provider paired with a `manifest_store` other than `exodus` |
 
-The last of those is the branch-workflow one. Under `hybrid` or `repository`, each deploy commits manifests into the environment's own branch — the same branch the propagate job advances — leaving two writers on one branch. `ignore_paths` on the env-branch resource stops those commits retriggering the deploy that made them, but it does not remove the second writer; only `exodus` does.
-
-Two deliberate choices in that check:
-
-- **It reads the same keys their consumers read.** `ci.provider.type` is the key `Genesis::Env::_post_deploy` gates its cascade on, and `manifest_store` is read with the same `hybrid` default `Genesis::Env` applies, so an unset key reads as "git writes are happening" rather than as absent. The check cannot drift from the behaviour it describes.
-- **It warns rather than bails**, so repositories still on `hybrid` keep compiling while the policy question is settled separately.
-
-Its documented limitation is the repository-wide scope described under PR-Based Propagation → Limitations.
+The checks that used to sit beside them have moved rather than gone. A provider whose options schema cannot be read is now a schema failure at configuration load, because the provider's own fragment is merged into the repository schema as that schema is built. The manifest store is a refusal rather than a warning, and it is raised at configuration load, where a deploy meets it too, rather than in the compiler, where a deploy never did.
 
 ### Backward Compatibility
 
-Repositories with a legacy pipeline `ci.yml` are detected at config load (`has_legacy_ci_yml`) and the pipeline command group is gated behind a migration message, while non-pipeline commands still run. The legacy pipeline task entry points (`ci-pipeline-deploy`, `ci-show-changes`, `ci-generate-cache`, `ci-pipeline-run-errand`) are registered as retired so a legacy pipeline fails loudly at dispatch rather than producing a silent inconsistent deploy.
+A repository with a legacy pipeline `ci.yml` is detected at configuration load, and the pipeline command group is gated behind a migration message while the non-pipeline commands still run. The legacy pipeline task entry points, `ci-pipeline-deploy`, `ci-show-changes`, `ci-generate-cache`, and `ci-pipeline-run-errand`, are registered as retired, so a legacy pipeline fails loudly at dispatch rather than producing a silent inconsistent deploy.
 
 ### Command Surface
 
 | Command | Role |
 |---------|------|
-| `genesis propagate [<env>]` | Root or cascade propagation. `--dry-run`, `--yes`/`-y`, `--commit`, `--no-push`, `--no-fetch` |
-| `genesis pipeline-prepare` / `genesis <env> pipeline-prepare` | Create the branch for any environment lacking one, and reconcile existing branches with the files their environment depends on. Repo- or env-scoped. Must run from control. `--dry-run`, `--no-fetch` |
-| `genesis pipeline-status` | Per-environment branch SHA, deployed SHA, and status across the DAG. `--no-fetch` |
-| `genesis pipeline-apply` (alias `pipeline-push`) | Compile and deploy the pipeline to the provider. Bails on the manual provider, which has no pipeline to apply |
+| `genesis propagate` | Walk control forward and deliver each due commit to the branches ready for it. `--dry-run`, `--yes`, `--force` |
+| `genesis pipeline-apply` | Cut the deployment branches, apply their protection, write the records, and set the pipeline where the provider has one to set. `--yes`, `--dry-run`, `--target`, `--paused`, `--output-dir`, `--skip-vault`, `--debug-dir` |
+| `genesis pipeline-status` | Report where every environment stands, including what is held and why. `--no-refresh`, `--json` |
+| `genesis pipeline-hold` / `genesis <env> pipeline-hold` | Hold delivery to one environment, or to every environment in the deployment root. The reason is required |
+| `genesis pipeline-release` / `genesis <env> pipeline-release` | Clear that hold, which no deploy and no flag does |
 | `genesis pipeline-graph` | Write a Mermaid graph to `pipeline.md` |
-| `genesis pipeline-describe` | Print the environment progression with flags |
-| `genesis pipeline-diff` | Compiled versus live pipeline |
-| `genesis pipeline-jobs`, `pipeline-pause`, `pipeline-resume` | Provider job control |
+| `genesis pipeline-describe` | Print the environment progression with its gates and triggers |
+| `genesis pipeline-diff` | Compare the compiled pipeline against the live one |
+| `genesis pipeline-jobs`, `pipeline-pause`, `pipeline-resume` | Provider job control, Concourse only |
 | `genesis embed` | Copy the running binary to `.genesis/bin/genesis` |
-| `genesis repipe`, `graph`, `describe` | Deprecated; delegate to the `pipeline-*` equivalents |
-| `genesis dev-pipeline-compile` | Developer-only (`DEV` group). Renders one compiler stage from an AST captured by `pipeline-apply --debug-dir`, so an emitter change can be diffed with no repository, vault, or CI provider in the loop |
+| `genesis repipe`, `graph`, `describe` | Deprecated, and they delegate to the `pipeline-*` equivalents, except `graph`, which still draws the legacy topology |
+| `genesis dev-pipeline-compile` | Developer only. Renders one compiler stage from an AST captured by `pipeline-apply --debug-dir`, so an emitter change can be diffed with no repository, vault, or provider in the loop |
 
 ---
 
@@ -711,7 +715,9 @@ Because control shares no history with the old branch, no exodus record's `git.c
 
 ### Proto-BOSH (create-env)
 
-<!-- TBD: Special handling needed? -->
+A create-env environment gets no BOSH config resources in the emitted pipeline, having no director to read a config from, and its state file travels in its exodus record rather than on any branch.
+
+<!-- TBD: whether anything else about create-env wants special handling -->
 
 ### Multi-Region Deployments
 
@@ -719,19 +725,21 @@ Because control shares no history with the old branch, no exodus record's `git.c
 
 ### Multi-Deployment Repositories
 
-`prepare_branch` will not prune files outside the deployment's git prefix, so several deployments (`bosh/`, `vault/`, `cf/`) can share a repository and an environment branch without one deleting another's files. Propagation paths are git-root-relative and prefixed accordingly.
+The branch is per deployment rather than per environment, and it is named for the deployment slug, so several deployments can share a repository and an environment name without colliding. The environment `qa` of a `bosh` root propagates on `qa/bosh` and the same name under a `cf` root propagates on `qa/cf`, each branch holding one deployment's propagation set at its git-root-relative paths, prefix included.
 
 ### Locker Integration
 
-<!-- TBD: Any changes needed? -->
+The locker is configured once for the repository, under `pipeline.locker`, and it backs the two locks every deploy takes. The compiler reads it for the resources it emits and the CLI reads the same block, so one setting serves both.
 
 ### Sync-Back (env → `control`)
 
-Not implemented. Environment branches are write targets, never merged back. Manual edits on an environment branch stay there and are silently overwritten the next time propagation copies that file.
+Not implemented, and not wanted. A deployment branch is derived state and a write target, never merged back, and a hand edit on one is overwritten by the next delivery that touches the file. What changed is that the overwriting is no longer silent, because the run names each file it overwrote and `genesis pipeline-status` reports the branch as drifted until it happens.
 
 ### Unskippable Commits
 
-<!-- TBD: Deferred to post-MVP? How to mark migrations that cannot be skipped? -->
+A control commit that must not be skipped past carries a `Genesis-Stage: <reason>` trailer, which makes it a gate. The gate travels with the commits already ahead of it and ends the delivery there, and every later commit for that environment waits until the environment's certified commit reaches the gate, until a later commit reverts it, or until the hold its reason set is released. Writing `Genesis-Stage: hold: <reason>` makes the run set the environment's propagation hold as it delivers the gated commit, so the deploy of that commit finds the hold already standing and somebody has to release it by hand.
+
+Remembering the trailer is still the author's job. Nothing infers a migration from a diff.
 
 ---
 
@@ -743,14 +751,16 @@ Not implemented. Environment branches are write targets, never merged back. Manu
 
 ### File Classification Decision Tree
 
-<!-- Superseded: there is no classification decision tree. An environment's
+<!-- Superseded: there is no classification decision tree. A deployment's
      propagation set comes from Genesis::Env::propagation_files, and every
-     path in it is diffed the same way regardless of what kind of file it is. -->
+     path in it is mirrored the same way, the one distinction being whether
+     the path triggers a deploy or rides along with the next one. -->
 
 ### Propagation State Machine
 
-<!-- The PR-mode decision tree under "PR-Based Propagation" is the closest
-     thing that exists. Direct mode has no states: check out, copy, commit. -->
+<!-- The review-state table under "PR-Based Propagation" is the closest
+     thing that exists. Direct mode has no states, being a check out, a
+     mirror of one control commit, and a commit. -->
 
 ---
 
@@ -978,12 +988,17 @@ Not implemented. Environment branches are write targets, never merged back. Manu
 - [Kickoff Issues](./Kickoff%20Issues.md)
 - [ci.yml Configuration Reference](./ci.yml%20Configuration%20Reference.md)
 - [Workflows](./Workflows.md)
-- `lib/Genesis/CI/Propagation.pod` — the authoritative description of propagation behaviour
-- `lib/Genesis/Commands/Pipelines.pm` — command surface
-- `lib/Genesis/Commands/Pipelines.pod` — `pipeline_prepare`, `_authorize_branch_creation`, `_missing_env_branches`
-- `lib/Genesis/CI/Compiler/ASTBuilder.pm` — `_build_from_env_files`, the env DAG
-- `lib/Genesis/Top.pod` — `pipeline_topology`, `fetch_pipeline_envs`, `PROPAGATE_NO_BRANCH_EXIT`
-- `lib/Service/Git.pod` — `resolve_branch`, `fetch_branches`, `remote_branch_exists`
-- `lib/Genesis/CI/Compiler/PipelineDescriptor.pm` — `_env_resources`, the env-branch trigger and its `ignore_paths`
-- `lib/Genesis/CI/Compiler/Validator.pm` — compile-time checks; see its `Warnings` POD section
+- [docs/ci](../docs/ci/README.md), which documents the shipped pipeline surface for operators and for contributors
+- `lib/Genesis/CI/Walk.pod`, the walk, the hold reasons, and what each environment's record holds
+- `lib/Genesis/CI/PullRequest.pod`, the pull request arm and its review states
+- `lib/Genesis/CI/Publish.pod`, the publish stage and its outcomes
+- `lib/Genesis/CI/Preflight.pod`, the initial states a run may find and the refusals it owes
+- `lib/Genesis/CI/Marker.pod`, the propagation marker and the two commit trailers
+- `lib/Genesis/Commands/Pipelines.pod`, the command surface, `propagate`, `apply`, `pipeline_status`, `pipeline_hold`, and `pipeline_release`
+- `lib/Genesis/BranchClass.pod`, the three derived branch names and the pre-deploy assertion
+- `lib/Genesis/Top.pod`, `pipeline_topology`, `branch_for`, `pr_prefix`, and `fetch_pipeline_envs`
+- `lib/Genesis/CI/Compiler/ASTBuilder.pm`, `_build_from_env_files`, the env DAG
+- `lib/Service/Git.pod`, `resolve_branch`, `fetch_branches`, and `remote_branch_exists`
+- `lib/Genesis/CI/Compiler/PipelineDescriptor.pm`, `_env_resources`, the branch resource and its `ignore_paths`
+- `lib/Genesis/CI/Compiler/Validator.pm`, the compile-time checks, with its `Warnings` POD section
 - `lib/Genesis/Env.pod` — `prepare_branch`, `propagation_files`, `_post_deploy`
