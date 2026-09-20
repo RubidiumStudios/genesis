@@ -26,8 +26,10 @@ use Genesis::Exit qw/CONFIG/;
 # An entry says the classes and nothing else.  Every package under lib
 # now derives its own path, so a path written beside a class would be a
 # second spelling of the same fact, and the two could disagree.  The
-# concourse entry carried both because Genesis::CI::Concourse sat at a
-# path its package did not derive, and the rename put that right.
+# concourse entry carried both when its compiling class was called
+# Genesis::CI::Concourse, which sat at a path that name does not derive.
+# The class is Genesis::CI::ProviderCompiler::Concourse now, and its own
+# name says where it lives.
 
 my %_providers = (
 	'concourse' => {
