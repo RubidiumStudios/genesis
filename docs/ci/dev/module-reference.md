@@ -650,7 +650,7 @@ Four of the five methods above guard on the `config` key, and `generate_descript
 
 **File:** `lib/Genesis/Commands/Pipelines.pm`
 
-**Purpose:** Command handler for every pipeline command. There is no routing on a `--platform` flag, because D27 took that flag away. The provider is the one the repository configures under `pipeline.provider.type`, and an absent type is the manual provider.
+**Purpose:** Command handler for every pipeline command. There is no routing on a `--platform` flag, because that flag is gone. The provider is the one the repository configures under `pipeline.provider.type`, and an absent type is the manual provider.
 
 **Public Subroutines:**
 
@@ -682,7 +682,7 @@ Four of the five methods above guard on the `config` key, and `generate_descript
   embeds the Genesis binary into the deployment repository, and is `genesis embed`.
 
 - `run_status($record)`
-  the exit status D97 gives the run's second stage.
+  the exit status the run's second stage earns, which is `TEMPFAIL` where any environment ended partial and zero otherwise.
 
 - `Genesis::CI::Preflight::assert_not_disowned($top, %opts)`
   refuses a pipeline the configuration has disowned, and `propagate()` calls it. It lives in `Genesis::CI::Preflight` because `genesis <env> deploy` asks the same question and is answered with a warning instead.
@@ -720,7 +720,7 @@ Four of the five methods above guard on the `config` key, and `generate_descript
   creates the `Genesis::Top`, optionally skipping vault.
 
 - `_refuse_disabled_pipeline()`
-  D64's refusal on a pipeline nobody declared, which reads `.genesis/config` raw so it lands ahead of any vault connection.
+  refuses to apply a pipeline nobody declared, and it reads `.genesis/config` raw so the refusal lands ahead of any vault connection.
 
 - `_concourse_fly_flags($result, $opts, $name)`
   derives the `fly` target and the `-k` flag from the compiled result, reading both through the compiler's `provider_option`.
