@@ -493,15 +493,16 @@ Warns, under the preview's banner and above its first environment, in each
 case where the preview's answer rests on a move it did not make.
 L</render_preview> calls it, so nothing else has to, and it is not exported.
 
-A control branch that is ahead of its remote is refused by a real run until
-it has been pushed, so the preview says its result assumes that push.  A
+A control branch that is ahead of its remote is refused by a real run until it
+has been pushed, so the preview says its result assumes that push.  A
 deployment branch whose local commits all carry a marker is reset to the
 remote by the pre-flight before a real run walks, so the preview says its
 result assumes that reset.  A deployment branch merely behind its remote is
-fast-forwarded there by the pre-flight, so the preview says its result
-assumes that move.  D44 names the first two; the third is said here beside
-them, because it rests on the same kind of move and an operator who met it
-above the banner had not yet been told they were reading a preview.
+fast-forwarded there by the pre-flight, so the preview says its result assumes
+that move.  The rule that gives the preview its warnings names the first two
+and not this one.  The third is said here beside them all the same, because it
+rests on the same kind of move, and an operator who met it above the banner
+had not yet been told they were reading a preview.
 
 Each caveat names how many commits it is about, and the number governs the
 noun and the verb, so one unpushed commit reads "the commit ... is pushed"
