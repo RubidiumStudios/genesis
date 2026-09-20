@@ -69,7 +69,7 @@ subtest 'a fresh repository is initialised with exodus' => sub {
 };
 
 subtest 'an old kit floor cannot reach the repository store' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	# The old floor goes on an environment of its own, written into the
 	# working tree and taken out again below, so no other row ever sees it
@@ -79,18 +79,21 @@ subtest 'an old kit floor cannot reach the repository store' => sub {
 		genesis => {min_version => '3.0.0'}, commit => 0);
 
 	throws_ok {load_store('exodus')}
-		qr/environment legacy uses\s+a\s+kit\s+whose\s+Genesis\s+floor\s+is\s+below\s+3\.1\.0/i,
+		qr/environment legacy has\s+a\s+Genesis\s+floor\s+below\s+3\.1\.0/i,
 		'the floor case is refused by name';
 	throws_ok {load_store('exodus')}
 		qr/Raise\s+the\s+kit's\s+floor\s+to\s+3\.1\.0/,
 		'and the refusal carries the remedy';
+	throws_ok {load_store('exodus')}
+		qr/genesis\.min_version/,
+		'and names the key too, for a floor somebody set by hand';
 
 	# The floor that matters is the effective one, which is the higher of
 	# the repository's own minimum and the environment's, so a repository
 	# that declares nothing better is refused and one that already declares
 	# 3.1.0 is not refused over a line the run time would never honour.
 	throws_ok {load_store('exodus', minimum_version => '3.0.0')}
-		qr/environment legacy uses\s+a\s+kit\s+whose\s+Genesis\s+floor\s+is\s+below\s+3\.1\.0/i,
+		qr/environment legacy has\s+a\s+Genesis\s+floor\s+below\s+3\.1\.0/i,
 		'a repository floor below 3.1.0 leaves the refusal standing';
 	lives_ok {load_store('exodus', minimum_version => '3.1.0')}
 		'and a repository floor of 3.1.0 lifts the environment that declares less';
