@@ -686,7 +686,9 @@ The checks that used to sit beside them have moved rather than gone. A provider 
 
 ### Backward Compatibility
 
-A repository with a legacy pipeline `ci.yml` is detected at configuration load, and the pipeline command group is gated behind a migration message while the non-pipeline commands still run. The legacy pipeline task entry points, `ci-pipeline-deploy`, `ci-show-changes`, `ci-generate-cache`, and `ci-pipeline-run-errand`, are registered as retired, so a legacy pipeline fails loudly at dispatch rather than producing a silent inconsistent deploy.
+A legacy pipeline `ci.yml` is detected at configuration load, and what happens next depends on the configuration standing beside it. Beside a version 2 configuration, or a version 3 one whose pipeline is not enabled, the pipeline command group is refused with the migration named, while every other command runs as it always did. Beside a version 3 configuration whose pipeline is enabled, the load warns once that the file is stale and carries on, because the version 3 configuration wins. A `pipeline:` block written into a version 2 configuration is refused on its own account, with or without a `ci.yml` beside it, and the refusal says to move the configuration to version 3 first.
+
+The legacy pipeline task entry points, `ci-pipeline-deploy`, `ci-show-changes`, `ci-generate-cache`, and `ci-pipeline-run-errand`, are registered as retired, so a legacy pipeline fails loudly at dispatch rather than producing a silent inconsistent deploy.
 
 ### Command Surface
 
