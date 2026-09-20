@@ -234,12 +234,12 @@ that the command switches to control inside the session it already holds,
 so the gate leaves it where it stands.
 
 C<refresh> is optional and says what the command wants of the refresh the
-gate would otherwise make on its behalf, which D40 has every pipeline command
-take before it reads anything. C<'optional'> is a refresh the operator may
-skip, which they do with C<--no-refresh>, and the gate makes it wherever they
-did not; C<pipeline-status> declares it. C<'never'> is a command that answers
-out of the repository's own files, holds no ref a refresh could make current,
-and offers no flag to ask with, so the gate makes none for it at all;
+gate would otherwise make on its behalf, which every pipeline command takes
+before it reads anything. C<'optional'> is a refresh the operator may skip,
+which they do with C<--no-refresh>, and the gate makes it wherever they did
+not; C<pipeline-status> declares it. C<'never'> is a command that answers out
+of the repository's own files, holds no ref a refresh could make current, and
+offers no flag to ask with, so the gate makes none for it at all;
 C<pipeline-describe> declares it. A command that declares nothing is
 refreshed as it always was. The declaration sits here so that the gate reads
 one fact rather than carrying a list of command names that would drift from
@@ -272,12 +272,12 @@ before the process exits. A command that refuses exits with its own code,
 and the session's own last-resort net puts the working tree back.
 
 The branch the session stands on is the deployment branch's tip, unless the
-run resolved a commit of its own. D87 has a deployed-state command default to
-the commit the environment last deployed, and C<deployed_target> resolves
-that commit before the gate switches. Where it answers one, the session
-checks that commit out detached and the tip is not read at all. Where it
-answers C<undef>, which is every run that named neither flag under a
-registration declaring no C<deployed> default, the tip is what is read.
+run resolved a commit of its own. A deployed-state command defaults to the
+commit the environment last deployed, and C<deployed_target> resolves that
+commit before the gate switches. Where it answers one, the session checks
+that commit out detached and the tip is not read at all. Where it answers
+C<undef>, which is every run that named neither flag under a registration
+declaring no C<deployed> default, the tip is what is read.
 
 A command already standing on the branch it would switch to opens no session
 and takes no switch lock, because a session exists to leave a branch and come
@@ -340,8 +340,7 @@ tree a command reads, and the checkout stands that tree on the commit the
 local ref names, so a command that acts on the branch needs it current, while
 a command that only reads it has no business moving a ref. The move is made
 on the one state that promises a fast-forward, so it creates and discards
-nothing, and nothing is fetched, because the refresh is its own step under
-D40.
+nothing, and nothing is fetched, because the refresh is its own step.
 
 Where no move is made, the line the gate prints names how far behind its
 counterpart the branch stands, so an operator of C<genesis info> or the
@@ -419,10 +418,11 @@ to C<undef>.
 
 =item C<commits> - Boolean.  True where the command makes a commit on the
 control branch, which C<create> alone declares.  It decides whether the
-C<control_requires_pr> refusal applies, because D45 is about a commit that
-cannot reach control through a pull request and most pre-deploy commands
-make none.  It is declared only alongside C<branch_class =E<gt> PRE_DEPLOY>,
-since that is the one gate that reads it.  Defaults to C<undef>.
+C<control_requires_pr> refusal applies, because the refusal is about a
+commit that cannot reach control through a pull request and most pre-deploy
+commands make none.  It is declared only alongside
+C<branch_class =E<gt> PRE_DEPLOY>, since that is the one gate that reads it.
+Defaults to C<undef>.
 
 =item C<branch_fast_forward> - Boolean.  True where the gate may bring the
 environment's deployment branch up to its remote-tracking ref before it
@@ -2233,10 +2233,10 @@ always answer from disk.  Both are read here, where the options and the
 command name are, rather than in the assertion, which has no business knowing
 which command declared what.
 
-The two names sit in the gate for now.  D81 would rather a registration
-declared that it needs no refresh, the way it declares its class, and the
-attribute that gives a registration such a declaration takes these names
-onto it, C<pipeline-status> included.
+The two names sit in the gate for now.  It would be better for a
+registration to declare that it needs no refresh, the way it declares its
+class, and the attribute that gives a registration such a declaration takes
+these names onto it, C<pipeline-status> included.
 
 Whether the command commits on control goes down as C<< commits => ... >>,
 read straight off the registration. The C<control_requires_pr> refusal is
@@ -2327,8 +2327,8 @@ the same switch lock.  The branch holds exactly what was delivered, and the
 kit's hooks need a working tree, which is why the command reads a checkout
 rather than a tree object.
 
-B<The commit the session stands on is the caller's to choose.>  D94 gives
-both deployed-commit flags one code path, which is a switch on a commit
+B<The commit the session stands on is the caller's to choose.>  Both
+deployed-commit flags share one code path, which is a switch on a commit
 rather than on a branch, so a run that resolved one is handed it as
 C<< target => ... >> and the session checks it out detached. A run that
 resolved none stands on the branch's tip, as every run did before the flags
@@ -2350,20 +2350,19 @@ the command raises its own usage error rather than meeting a bug report
 about an undefined name.
 
 A command already standing on the branch it would switch to is not switched
-either, so long as the run resolved no target, and it opens no session at
-all.  It says so in one C<info> line
-before it runs, the way the two arms below do, and that line calls the branch
-by name rather than calling it a deployment branch, because the phrase belongs
-to the pre-deploy refusal this class must never meet and a row reads this
-arm's output for its absence.  D80 makes the trigger the switch
-rather than the class, so a command that is already where it would be going
-takes no switch lock and asserts no cleanliness, since a session exists to
-leave a branch and come back and there is nothing here to leave.  That is
-what lets an operator edit a file on the deployment branch and deploy it in
-place, which is the qualifier I3 carries, since a plain C<deploy> resolves no
-target.  A run that did resolve one passes through this arm and stands on
-that commit, because the tip of the branch the operator happens to be on is
-no answer to a request for the commit the environment is running.
+either, so long as the run resolved no target, and it opens no session at all.
+It says so in one C<info> line before it runs, the way the two arms below do,
+and that line calls the branch by name rather than calling it a deployment
+branch, because the phrase belongs to the pre-deploy refusal this class must
+never meet and a test reads this arm's output for its absence.  The trigger is
+the switch rather than the class, so a command that is already where it would
+be going takes no switch lock and asserts no cleanliness, since a session
+exists to leave a branch and come back and there is nothing here to leave.
+That is what lets an operator edit a file on the deployment branch and deploy
+it in place, which is the qualifier I3 carries, since a plain C<deploy>
+resolves no target.  A run that did resolve one passes through this arm and
+stands on that commit, because the tip of the branch the operator happens to
+be on is no answer to a request for the commit the environment is running.
 
 An environment whose deployment branch does not exist is not switched
 either.  Both the local branch and the remote-tracking one are asked about,
