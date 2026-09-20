@@ -247,13 +247,13 @@ sub switch {
 	# exactly as the operator left it.
 	my $is_branch = $self->_is_branch($target);
 
-	# The derived branch.  A pull request branch is rebuilt from the
-	# deployment branch on every run, so the first run for an environment asks
-	# to stand on a name neither side holds, and create_from is what the
-	# caller says to cut it from.  The absence is recorded here, before the
-	# branch exists, because what the reset owes such a branch is the absence
-	# and a branch already cut reads exactly like one that stood before the
-	# run.  The cut itself waits for the lock below.
+	# The switch may also have to cut a derived branch.  A pull request branch
+	# is rebuilt from the deployment branch on every run, so the first run for
+	# an environment asks to stand on a name neither side holds, and
+	# create_from is what the caller says to cut it from.  The absence is
+	# recorded here, before the branch exists, because what the reset owes
+	# such a branch is the absence and a branch already cut reads exactly like
+	# one that stood before the run.  The cut itself waits for the lock below.
 	my $cut = ($is_branch || !defined $opts{create_from})
 		? undef : $opts{create_from};
 	if (defined $cut) {
@@ -357,7 +357,7 @@ sub finish_if_clean {
 # }}}
 # abort - discard, reset, restore, verify, and die {{{
 #
-# What the abort reaches is fixed.  Every deployment branch this session
+# What the abort reaches is settled.  Every deployment branch this session
 # committed to goes back to where it stood before the run, and control is
 # never touched, because committed work on control in L is never discarded.  A
 # branch this run itself created is put back by being deleted, which is what
@@ -498,11 +498,12 @@ sub abort {
 # }}}
 # discard - put one branch back at T, and leave the session open {{{
 #
-# The second stage.  An error confined to one environment resets that
-# environment's branch to T so that nothing of a partial delivery survives,
-# and the run then walks on to the next environment, which is why this is not
-# abort.  Abort ends the session and the run with it, and every environment
-# below the broken one would go unattempted, which is the very shape H3 names.
+# This is the run's second stage.  An error confined to one environment resets
+# that environment's branch to T so that nothing of a partial delivery
+# survives, and the run then walks on to the next environment, which is why
+# this is not abort.  Abort ends the session and the run with it, and every
+# environment below the broken one would go unattempted, which is the very
+# shape H3 names.
 #
 # It reaches what abort reaches for one branch and nothing else.  The tree
 # and the index go first, because a delivery that died between the checkout
