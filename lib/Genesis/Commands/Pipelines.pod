@@ -181,12 +181,12 @@ has its workflows written under C<.github/workflows/> for the operator to
 commit.
 
 Before a Concourse pipeline is set, the run asks whether the toolchain it
-needs is installed, and it asks the provider rather than the compiler
-beside it.  Under D108 the provider is the half that knows what a
-pipeline needs on the operator's machine, and a run whose answer is no
-exits 86 without uploading anything.  The compiler is the half that
-emits, so the upload itself, the resolved options it reads, and the
-C<--dry-run> YAML all come off the compiler the provider handed out.
+needs is installed, and it asks the provider rather than the compiler beside
+it.  The provider is the half that knows what a pipeline needs on the
+operator's machine, and a run whose answer is no exits 86 without uploading
+anything.  The compiler is the half that emits, so the upload itself, the
+resolved options it reads, and the C<--dry-run> YAML all come off the compiler
+the provider handed out.
 
 B<Parameters:>
 
@@ -636,16 +636,15 @@ B<Examples:>
     genesis propagate --dry-run
     genesis propagate --yes
 
-Walks the control branch forward from every deployment branch's newest
-marker and routes each control commit on its own, in control order, under
-D34 and D36.
+Walks the control branch forward from every deployment branch's newest marker
+and routes each control commit on its own, in control order.
 
 A branch that has never been delivered to carries no marker, and the walk
-starts at the commit that introduced the environment instead, under D61.
-That commit is routed, held, and delivered exactly as every commit after it
-is, so a new environment receives its own history rather than one baseline
-taken from control's tip.  There is no separate seeding step, and the run
-cuts no branches: C<genesis pipeline-apply> is the one command that does.
+starts at the commit that introduced the environment instead.  That commit is
+routed, held, and delivered exactly as every commit after it is, so a new
+environment receives its own history rather than one baseline taken from
+control's tip.  There is no separate seeding step, and the run cuts no
+branches, since C<genesis pipeline-apply> is the one command that does.
 
 A branch in pull request mode that carries no marker is asked once more
 before the walk starts from the beginning, because a squashed merge takes
@@ -653,14 +652,14 @@ the marker off a branch that did receive the commit.  The run reads it back
 out of the pull request that merged, which Genesis wrote itself, and says
 beside that environment's outcome which pull request it came from.
 
-The run takes no argument.  A run that is handed one is a usage error,
-because the C<E<lt>envE<gt>> argument went with the cascade it scoped under
-D36, and a commit held behind an ancestor is released by the next bare run
-rather than by a run aimed at it.
+The run takes no argument.  A run that is handed one is a usage error, because
+the C<E<lt>envE<gt>> argument went with the cascade it scoped, and a commit
+held behind an ancestor is released by the next bare run rather than by a run
+aimed at it.
 
-The run may be started from any branch.  It switches to control inside its
-own session under D65, walks from there, and puts the operator back on the
-branch they were standing on, so nobody has to move before running it.  See
+The run may be started from any branch.  It switches to control inside its own
+session, walks from there, and puts the operator back on the branch they were
+standing on, so nobody has to move before running it.  See
 L</open_control_session>.
 
 An environment whose own C<genesis.pipeline.require_pr> is true takes its
@@ -701,8 +700,8 @@ what the next run with a token opens on top of it.
 What a reviewer decided about each of those pull requests is read once, before
 the walk, because it is what decides whether the run rebuilds a pull request
 branch or leaves it alone.  A run that cannot read it refuses the whole walk
-at C<UNAVAILABLE> rather than guess, under D55, and it refuses ahead of the
-first delivery so nothing has to be undone afterwards.
+at C<UNAVAILABLE> rather than guess, and it refuses ahead of the first
+delivery so nothing has to be undone afterwards.
 
 Every branch the run committed to is published at the end of the walk, one
 branch per push, so a branch the remote refuses costs one environment one run
@@ -766,30 +765,29 @@ reports on the wrong one.
 =item C<--yes>, C<-y>
 
 Publish without asking.  The verified delta for every environment is shown
-either way.  D83 returns the flag with this meaning, and it answers no
-other question.
+either way.  The flag carries this meaning and answers no other question.
 
 =item C<--force>
 
-Propagate by hand under a pipeline that owns the work, which D95 makes the
-one way past the provider gate.  At a terminal the operator is still asked
-to confirm, and outside one the refusal stands.
+Propagate by hand under a pipeline that owns the work, which is the one way
+past the provider gate.  At a terminal the operator is still asked to confirm,
+and outside one the refusal stands.
 
 =back
 
-The three options above are the whole table.  C<--commit>, C<--no-push>,
-and C<--no-fetch> are gone, because D44 withdrew the push switch and left
-C<--dry-run> as the only preview, D40 removed the fetch switch once the
-refresh became unconditional, and a caller-chosen source commit is the one
-thing that let the pipeline's run and the operator's run differ.
+The three options above are the whole table.  C<--commit>, C<--no-push>, and
+C<--no-fetch> are gone.  The push switch was withdrawn and C<--dry-run> left
+as the only preview, the fetch switch went once the refresh became
+unconditional, and a caller-chosen source commit was the one thing that let
+the pipeline's run and the operator's run differ.
 
 B<Returns:> Nothing.  The run prints its report as it goes.
 
 B<Exit status:>
 
-Under D97 the status says what the run as a whole came to, so a caller that
-reads nothing else can still tell a run that landed everything from one that
-landed part of it.  Every number below is named in L<Genesis::Exit>, and the
+The status says what the run as a whole came to, so a caller that reads
+nothing else can still tell a run that landed everything from one that landed
+part of it.  Every number below is named in L<Genesis::Exit>, and the
 paragraphs under B<Errors:> say what raises each of them.
 
 =over 4
@@ -823,19 +821,19 @@ request, both of which the run reads ahead of the walk.
 
 =item *
 
-1, the fatal system error of D82, where nothing the caller could have done
+1, the fatal system error, where nothing the caller could have done
 differently would have helped.
 
 =back
 
 B<Errors:>
 
-Exits 1, which is D82's run-fatal class, where nothing the caller could do
-differently would have helped. Most of these are the writer failing to produce
-what it was told to produce, which is a path it could not take off the branch,
-a path it could not stage, an index that does not match its source, an index
-holding paths outside the propagation set, or a commit the repository refused.
-The walk raises one of its own as well, where an environment has certified a
+Exits 1, the run-fatal class, where nothing the caller could do differently
+would have helped. Most of these are the writer failing to produce what it was
+told to produce, which is a path it could not take off the branch, a path it
+could not stage, an index that does not match its source, an index holding
+paths outside the propagation set, or a commit the repository refused. The
+walk raises one of its own as well, where an environment has certified a
 control commit this repository cannot resolve and what that environment has
 left undeployed therefore cannot be read, which is a clone that never fetched
 the commit or a control branch somebody rewrote under it. Whichever of them
@@ -846,10 +844,10 @@ Exits C<Genesis::Exit/UNAVAILABLE> where the vault answers an error for the
 applied record, naming the path it could not read.  The record says which
 commit the pipeline was applied from, which is a whole-run input rather than
 one environment's, so a run that could not read it refuses ahead of the walk
-under D55 and writes nothing.  A record that is merely absent is not that,
-and it comes back null with every environment taking the C<not-propagated>
-reading.  The refusal closes the session first, so the operator is back on
-the branch they started from before they read why the run stopped.
+and writes nothing.  A record that is merely absent is not that, and it comes
+back null with every environment taking the C<not-propagated> reading.  The
+refusal closes the session first, so the operator is back on the branch they
+started from before they read why the run stopped.
 
 Exits C<Genesis::Exit/UNAVAILABLE> as well where GitHub could not say what a
 reviewer decided about an environment's pull request, naming the review state
@@ -864,34 +862,33 @@ remote there, because a marker names a control commit by its sha alone and a
 control somebody has pushed to leaves every marker the run wrote naming a
 commit computed from a tip that has already moved.  Nothing is pushed, every
 branch the run committed to goes back to where the remote has it, and the
-refusal names the step that repairs control.  The status is the temporary one
-under D106, because nothing the operator wrote is wrong.  Another clone moved
-control while this run was walking, and the next run the pipeline job cuts
-starts from a fresh clone, so it refreshes, walks from what is there now, and
-succeeds with nobody doing anything first.  An operator running from a clone
-of their own keeps a control branch a commit behind, and the run there is
-refused for an illegal initial state until they pull.
+refusal names the step that repairs control.  The status is the temporary one,
+because nothing the operator wrote is wrong.  Another clone moved control
+while this run was walking, and the next run the pipeline job cuts starts from
+a fresh clone, so it refreshes, walks from what is there now, and succeeds
+with nobody doing anything first.  An operator running from a clone of their
+own keeps a control branch a commit behind, and the run there is refused for
+an illegal initial state until they pull.
 
 Exits C<Genesis::Exit/ABORTED> where the operator was asked whether to publish
-and answered no, which is D97's one number for a run a person stopped.
-Nothing is pushed, every branch the run committed to goes back to where the
-remote has it, and the report names every environment as C<not published>
-with the decline beside it.  The run is reported in full before the status is
-spent, so the operator reads what the run wrote and then reads that it went
-nowhere.
+and answered no, which is the one number for a run a person stopped. Nothing
+is pushed, every branch the run committed to goes back to where the remote has
+it, and the report names every environment as C<not published> with the
+decline beside it.  The run is reported in full before the status is spent, so
+the operator reads what the run wrote and then reads that it went nowhere.
 
-Exits C<Genesis::Exit/TEMPFAIL> where the remote answered about no ref at
-all, which is D82's unsurvivable failure.  A remote that turned a ref down
-named that ref in its own porcelain line, and a remote nobody could reach
-named nothing, so the question is whether the remote answered rather than
-whether any ref landed.  The push set is the deployment branches alone, and a
-run with one environment in it has one ref to land, so a refusal of that one
-ref is that branch's own quarrel rather than the remote being gone.  The
-report names the cause the remote's own error gives, which
-is a refused credential, a server error, or a remote nothing could reach, each
-with its own corrective step.  The same status is returned by a run that
-finished with any environment C<failed>, C<not attempted>, or C<publish
-rejected>, which is D97's partial run and which L</run_status> decides.
+Exits C<Genesis::Exit/TEMPFAIL> where the remote answered about no ref at all,
+which is an unsurvivable failure.  A remote that turned a ref down named that
+ref in its own porcelain line, and a remote nobody could reach named nothing,
+so the question is whether the remote answered rather than whether any ref
+landed.  The push set is the deployment branches alone, and a run with one
+environment in it has one ref to land, so a refusal of that one ref is that
+branch's own quarrel rather than the remote being gone.  The report names the
+cause the remote's own error gives, which is a refused credential, a server
+error, or a remote nothing could reach, each with its own corrective step.
+The same status is returned by a run that finished with any environment
+C<failed>, C<not attempted>, or C<publish rejected>, which is a partial run
+and which L</run_status> decides.
 
 B<Examples:>
 
@@ -905,10 +902,10 @@ B<Examples:>
 
     run_status($record);
 
-The exit status D97 gives the propagate run.  Zero when every environment in
-scope ended published or held with its reason, and
-C<Genesis::Exit/TEMPFAIL> when any of them ended C<failed>,
-C<not attempted>, or C<publish rejected>, which the next run repairs.
+The exit status of the propagate run.  Zero when every environment in scope
+ended published or held with its reason, and C<Genesis::Exit/TEMPFAIL> when
+any of them ended C<failed>, C<not attempted>, or C<publish rejected>, which
+the next run repairs.
 
 The whole outcome is matched rather than a phrase cut at its comma, because
 the record carries the bare outcome word in C<outcome> and whatever
@@ -949,10 +946,10 @@ B<Examples:>
 
     my $session = open_control_session($top, $git);
 
-Begins the run's session and switches it to the control branch, under D65.
-It asks nothing about the local control ref, because every caller reaches it
-through C<Genesis::CI::Preflight::require_control>, which refuses each state
-in which that ref could be missing.
+Begins the run's session and switches it to the control branch.  It asks
+nothing about the local control ref, because every caller reaches it through
+C<Genesis::CI::Preflight::require_control>, which refuses each state in which
+that ref could be missing.
 
 The run no longer refuses to start off control.  C<finish> returns the
 operator to the branch they stood on, exactly as a deploy that switches to
@@ -961,11 +958,11 @@ stops mattering.  The session comes from the handle rather than being built
 here, because the handle keeps one session per working tree and that is what
 I9 asks for.
 
-The clean-tree refusal that used to stand beside the branch refusal has
-moved rather than gone.  It now lives in the session's own C<begin>, which
-names the files it found, and it applies to a dry run as it does to a
-writing one, because a dry run switches to control like any other run and
-D65 puts the clean assertion on the switch.
+The clean-tree refusal that used to stand beside the branch refusal has moved
+rather than gone.  It now lives in the session's own C<begin>, which names the
+files it found, and it applies to a dry run as it does to a writing one,
+because a dry run switches to control like any other run and the clean
+assertion sits on the switch.
 
 B<Returns:> The open session, standing on control.
 
@@ -1786,11 +1783,12 @@ B<Examples:>
 
 The sentence and the corrective step one refused push earns.
 
-D82 lists the remote unreachable, the credential rejected, and the host
-answering with a server error, and says that where the cause is known the
-report names it.  The three want different things of the operator, so each
-carries a corrective step of its own, and a report that said the remote was
-unreachable over a rejected credential would send them to the wrong one.
+A refused push has three known causes, which are the remote unreachable, the
+credential rejected, and the host answering with a server error, and where the
+cause is known the report names it.  The three want different things of the
+operator, so each carries a corrective step of its own, and a report that said
+the remote was unreachable over a rejected credential would send them to the
+wrong one.
 
 B<Parameters:>
 
@@ -1889,11 +1887,11 @@ C<< $top->pipeline_topology >>, which both no-argument forms walk.  Bails with
 C<CONFIG> where the order is empty, since a command that held nothing and said
 nothing would read as a success.
 
-The unit is the deployment root and not the repository, because under D66 two
-roots in one repository may carry the same environment name, and a command
-that enumerated the repository would hold the wrong C<prod>.  The topology
-this reads is the one the propagate walk reads, so the run and the two
-commands never disagree about what a root holds.
+The unit is the deployment root and not the repository, because two roots in
+one repository may carry the same environment name, and a command that
+enumerated the repository would hold the wrong C<prod>.  The topology this
+reads is the one the propagate walk reads, so the run and the two commands
+never disagree about what a root holds.
 
 B<Parameters:>
 
