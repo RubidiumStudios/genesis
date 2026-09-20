@@ -374,6 +374,15 @@ sub _apply_provider_overrides {
 		close $fh
 			or bail("Cannot flush temporary override base %s: %s", $base_path, $!);
 
+		# One shape does not survive this merge, and it is spruce's doing
+		# rather than ours.  A hash key spelled as one of the four words
+		# YAML 1.1 reads as a boolean, which are on, off, yes, and no,
+		# comes back from spruce with two stray bytes in front of it once
+		# the key is quoted, and the writer quotes it because a reader of
+		# the emitted pipeline would otherwise take it for a boolean.
+		# Nothing emitted or written as an override carries such a key
+		# today, so this is latent, and a document that did carry one
+		# would come out of here with the key renamed.
 		my ($merged_yaml, $rc) = run('spruce', 'merge', $base_path, $override);
 		# A refusal a caller can act on: the override is the operator's
 		# file, so a merge it cannot survive is a configuration problem
