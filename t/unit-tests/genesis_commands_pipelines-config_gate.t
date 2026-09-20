@@ -45,7 +45,7 @@ subtest 'the manual provider skips the stages it has nothing for' => sub {
 };
 
 subtest 'a leftover ci directory is ignored and never named' => sub {
-	plan tests => 2;
+	plan tests => 4;
 
 	# No pipeline section, so the run reaches the compile gate rather
 	# than reading the topology off the environment files.
@@ -56,8 +56,15 @@ subtest 'a leftover ci directory is ignored and never named' => sub {
 	put_file($h->a.'/.genesis/ci/pipeline.yml',
 		"pipeline:\n  name: leftover-ci-directory-marker\n");
 
-	my ($out, $err) = $h->run_genesis({restore => 0}, 'pipeline-describe');
+	my ($out, $err, $exit) = $h->run_genesis({restore => 0}, 'pipeline-describe');
 	my $said = unfolded($out, $err);
+
+	# Two negatives alone would be satisfied by a run that failed early or
+	# printed nothing at all, so the positives come first and say the run
+	# reached the configuration section and read it.
+	is($exit, 1, 'the run refused over its own configuration');
+	like($said, qr/Parsing pipeline configuration/i,
+		'having read .genesis/config, which is the one source it has');
 
 	unlike($said, qr{\.genesis/ci\b},
 		'the run never names a directory it does not read');
