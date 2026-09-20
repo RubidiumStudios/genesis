@@ -1246,13 +1246,14 @@ sub _write_trailer_holds {
 # second pair of git reads.
 #
 # The pre-flight makes two assumed moves and names each on the record it
-# leaves, so the reset is picked out by its name rather than inferred.  D44's
-# second caveat is about the reset alone, because a fast-forward discards
-# nothing the preview would otherwise have reported.
+# leaves, so each is picked out by its name rather than inferred.  They earn
+# a caveat apiece, and the fast-forward's says what a real run would move
+# the branch up to rather than what it would discard, because a fast-forward
+# discards nothing.
 #
-# Each caveat carries its own count, which the renderer says the noun and the
-# verb of.  Both numbers were read once already, one by the control check and
-# one by the classification, so neither is asked of git again here.
+# Each caveat carries its own count, which the renderer says the noun and
+# the verb of.  Every count was read once already, by the control check or
+# by the classification, so none is asked of git again here.
 sub _preview_warnings {
 	my ($git, $control, $control_state, $initial, $order) = @_;
 
