@@ -463,7 +463,7 @@ sub abort {
 		"%s\n\n".
 		"The uncommitted changes in #C{%s} could not be discarded, so the ".
 		"working tree still holds them and we have left it standing on ".
-		"#C{%s}.\n\n".
+		"%s.\n\n".
 		"Put the working tree back by hand before running anything else ".
 		"here.",
 		$error, $git->root, $self->_standing_on
@@ -475,7 +475,7 @@ sub abort {
 	bail(
 		"%s\n\n".
 		"We then failed to return to #C{%s}: %s\n\n".
-		"You are standing on #C{%s}.  Put the working tree back by hand ".
+		"You are standing on %s.  Put the working tree back by hand ".
 		"before running anything else here.",
 		$error, $self->{origin}{branch}, $restore_error,
 		$self->_standing_on
@@ -1042,8 +1042,13 @@ sub _standing_on {
 	my ($self) = @_;
 	my $git    = $self->{git};
 
+	# The phrase carries its own colour, because the three messages that
+	# print it read it as a whole.  The name is the part an operator types
+	# back at git, so that is the part the colour is on, and the prose
+	# beside it is not dressed as if it belonged to the name.
 	my $branch = $git->current_branch;
-	return $branch if defined $branch && length $branch && $branch ne 'HEAD';
+	return sprintf('#C{%s}', $branch)
+		if defined $branch && length $branch && $branch ne 'HEAD';
 
 	# An unborn HEAD is what the undefined answer comes from, and it is not
 	# a detached one, because the branch is there and it is the commit that
@@ -1054,7 +1059,7 @@ sub _standing_on {
 	# merges the two.
 	unless (defined $branch) {
 		my $unborn = $git->checked_out_branch;
-		return sprintf("%s, which has no commits yet", $unborn)
+		return sprintf('#C{%s}, which has no commits yet', $unborn)
 			if defined $unborn;
 	}
 
@@ -1062,10 +1067,10 @@ sub _standing_on {
 	return 'a detached HEAD' unless $head;
 
 	my $on = $self->{on};
-	return sprintf("a detached HEAD at %s, which we switched to as %s",
+	return sprintf('a detached HEAD at #C{%s}, which we switched to as #C{%s}',
 		$head, $on) if defined $on && length $on && $on ne $head;
 
-	return sprintf("a detached HEAD at %s", $head);
+	return sprintf('a detached HEAD at #C{%s}', $head);
 }
 
 # }}}
@@ -1263,7 +1268,7 @@ sub _restore {
 			$origin->{cwd}, $git->root);
 	}
 
-	bail("Failed to return to #C{%s}: we are on #C{%s}.",
+	bail("Failed to return to #C{%s}: we are on %s.",
 		$origin->{branch}, $self->_standing_on)
 		unless ($git->current_branch // '') eq $origin->{branch};
 

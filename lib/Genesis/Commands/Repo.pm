@@ -218,18 +218,21 @@ sub _repo_init_validate {
 			# control is then told what the repository is missing rather
 			# than told they are not on control, which they are.  Only a
 			# HEAD that names no branch at all is left with <no branch>.
-			my $standing_on = $branch;
+			# Coloured here rather than at the format below, because the
+			# unborn form is a name with prose after it and only the name
+			# is what an operator types back at git.
+			my $standing_on = defined $branch ? "#C{$branch}" : undef;
 			unless (defined $standing_on) {
 				my $unborn = $enclosing_git->checked_out_branch;
 				$standing_on = defined $unborn
-					? "$unborn, which has no commits yet"
-					: '<no branch>';
+					? "#C{$unborn}, which has no commits yet"
+					: '#C{<no branch>}';
 			}
 
 			bail(
 				"Configuring a CI provider requires the enclosing git ".
 				"repository to be on a branch named #C{%s}, but it is ".
-				"currently on #C{%s}.\n".
+				"currently on %s.\n".
 				"  Please switch to the #C{%s} branch before running ".
 				"#C{repo-init --with-ci}:\n\n".
 				"    git checkout %s\n\n".

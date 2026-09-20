@@ -147,7 +147,7 @@ subtest 'a commit the refresh cannot reach is refused at DATAERR' => sub {
 };
 
 subtest 'an unborn HEAD is named as the branch it is, not as a commit' => sub {
-	plan tests => 3;
+	plan tests => 5;
 
 	# No caller reaches this today, because begin refuses a repository with
 	# no commits before a session exists, so the row asks the sub itself.
@@ -170,6 +170,16 @@ subtest 'an unborn HEAD is named as the branch it is, not as a commit' => sub {
 		'and says that the branch has none yet');
 	unlike($where, qr/detached|fatal|ambiguous argument/,
 		"rather than calling it detached or handing back git's complaint");
+
+	# The phrase carries its own colour, because the three messages that
+	# print it read it as a whole rather than wrapping it in a span of
+	# their own.  The name is the part an operator types back at git, so
+	# that is the part the colour is on, and the prose beside it is not
+	# dressed as if it belonged to the name.
+	like($where, qr/#C\{\Q$named\E\}/,
+		'the branch name is the coloured half of the phrase');
+	unlike($where, qr/#C\{[^}]*no commits/,
+		'and the prose beside it is left outside the span');
 };
 
 # One local helper, because an assertion helper lives beside its test.  bail
