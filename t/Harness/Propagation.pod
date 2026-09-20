@@ -416,9 +416,9 @@ joined on a newline, so that no phrase can match across the seam where one
 stream ends and the next begins, and an undefined stream counts as an empty
 one, so a row that captured stderr alone passes what it has.
 
-=head2 env_body($env, $n)
+=head2 env_body($h, $env, $n)
 
-  commit_on_control($h, files => {'prod.yml' => env_body('prod', 1)});
+  commit_on_control($h, files => {'prod.yml' => env_body($h, 'prod', 1)});
 
 Returns the environment file body the commit-laying shapes write, which is the
 one C<write_env_file> lays down with a counter beside it.  A row laying its own
@@ -427,6 +427,12 @@ body has to stay a valid environment file: a run reads the topology out of
 these files, and an environment whose kit is not a block mapping drops out of
 the root the walk enumerates.  The counter is what gives each commit a delta to
 make.
+
+The harness is the first argument because the body follows its mode.  A
+harness declared in pr mode writes C<genesis.pipeline.require_pr> into the
+body, the way C<write_env_file> does, since a run reads that key out of the
+environment's own file and a body without it delivers straight to the
+deployment branch instead of taking the pull request arm.
 
 =head2 init_branch($h, $env, %opts)
 
@@ -2007,7 +2013,8 @@ use, so that neither name can drift from the other.
 
 One control commit per environment, each touching the file the next
 environment's row reads, and their shas in the order the environments were
-named.
+named.  Each file is the body C<env_body> writes, so the repository a walk
+reads still holds every environment.
 
 =head2 gated($h, %opts)
 

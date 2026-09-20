@@ -4825,7 +4825,7 @@ sub gated_harness {
 	for my $n (1 .. 4) {
 		push @shas, $h->commit_on_control(
 			files    => $files ? $files->[$n - 1]
-			                   : {"$env.yml" => env_body($env, $n)},
+			                   : {"$env.yml" => env_body($h, $env, $n)},
 			message  => "A change on control, $n",
 			($n == 3 ? (trailers => {'Genesis-Stage' => $opts{stage} // 'prod'}) : ()),
 			push     => 1,
@@ -5161,12 +5161,20 @@ sub three_due {return _due(shift, 3, @_)}
 # and it is the same sub rather than a second body saying the same thing.
 *three = \&three_due;
 
+# chain lays one control commit per environment, each writing that
+# environment's own file, so a walk finds one commit due to each of them.
+#
+# The body is the one env_body writes rather than a flow mapping of the kit's
+# name, because Genesis::Env::is_valid_env_file reads the kit's name and
+# version out of a block mapping and a flow mapping of the same keys leaves
+# the repository with no environments for the walk to visit at all.
 sub chain {
 	my ($h, %opts) = @_;
 	my @envs = @{$opts{envs} // $h->{envs}};
+	my $n = 0;
 	return map {
 		$h->commit_on_control(
-			files   => {"$_.yml" => "---\nkit: {name: dev}\n"},
+			files   => {"$_.yml" => env_body($h, $_, ++$n)},
 			message => "Tune $_",
 			push    => 1,
 		)
@@ -5192,7 +5200,7 @@ sub _due {
 	return map {
 		$h->commit_on_control(
 			files   => $opts{files} ? $opts{files}[$_ - 1]
-			                       : {"$env.yml" => env_body($env, $_)},
+			                       : {"$env.yml" => env_body($h, $env, $_)},
 			message => "A change due to propagate, $_",
 			push    => 1,
 		)
@@ -5209,13 +5217,22 @@ sub _due {
 # because a commit needs a delta to make, and two commits writing one body
 # would leave the second with nothing to commit.
 #
+# The harness comes first because the body follows its mode, the way
+# write_env_file's does.  A run reads genesis.pipeline.require_pr out of the
+# environment's own file, so a body written in pull request mode without the
+# key delivers straight to the deployment branch and takes the pull request
+# arm away from every row that laid its commit through here.
+#
 # It is exported, because a row that lays its own commits on control needs
 # the same body and a copy of it written in a test file is a copy that can
 # fall out of step with the one the shapes here write.
 sub env_body {
-	my ($env, $n) = @_;
+	my ($self, $env, $n) = @_;
+	my $pipeline = $self->{mode} eq 'pr'
+		? "  pipeline:\n    require_pr: true\n"
+		: '';
 	return "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n"
-	     . "genesis:\n  env: $env\nn: $n\n";
+	     . "genesis:\n  env: $env\n" . $pipeline . "n: $n\n";
 }
 
 # }}}

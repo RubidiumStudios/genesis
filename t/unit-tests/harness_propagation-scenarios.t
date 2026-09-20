@@ -192,13 +192,17 @@ subtest 'the second deployment root is delivered under its own prefix' => sub {
 subtest 'the environment body a row commits for itself' => sub {
 	# env_body is exported so that a row laying its own commits on control
 	# writes the body these shapes write, rather than a copy of it that can
-	# fall out of step.  Its two promises are what the rows read: the file
-	# loads as an environment, which takes a kit declared as a block and a
-	# genesis.env key, and it carries the counter that gives a second commit
-	# something to change.
-	plan tests => 3;
+	# fall out of step.  Its promises are what the rows read.  The file loads
+	# as an environment, which takes a kit declared as a block and a
+	# genesis.env key, it carries the counter that gives a second commit
+	# something to change, and it carries the pull request key wherever the
+	# harness is in pull request mode, because a run reads
+	# genesis.pipeline.require_pr out of the environment's own file and a
+	# body without it delivers straight to the deployment branch.
+	plan tests => 5;
 
-	my $body = env_body('prod', 2);
+	my $h    = make_harness(envs => ['prod']);
+	my $body = env_body($h, 'prod', 2);
 	# The kit has to arrive as a block mapping.  is_valid_env_file reads the
 	# kit's name and version out of one, so a flow mapping of the same two
 	# keys leaves the repository with no environments at all, which is the
@@ -209,6 +213,13 @@ subtest 'the environment body a row commits for itself' => sub {
 		'and names the environment Genesis loads the file as');
 	like($body, qr/^n: 2$/m,
 		'and carries the counter that gives two commits a delta');
+	unlike($body, qr/require_pr/,
+		'a harness in direct mode asks for no pull request');
+
+	my $pr = make_harness(envs => ['prod'], mode => 'pr');
+	like(env_body($pr, 'prod', 1),
+		qr/^genesis:\n  env: prod\n  pipeline:\n    require_pr: true$/m,
+		'and one in pull request mode writes the key the run reads');
 };
 
 subtest 'the scenarios that write on control publish it' => sub {
