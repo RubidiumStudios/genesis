@@ -936,12 +936,12 @@ sub client_for_run {
 # pr_state - the pull request and what a reviewer decided about it {{{
 #
 # Answers the state as one of none, unreviewed, approved, changes requested,
-# and closed unmerged, which are the four arms plus the case where there is
-# no pull request at all.  merged carries the merged pull requests, which
-# the squash recovery reads, rejected carries the closed-unmerged ones
-# themselves so the body can quote one, and superseded carries their numbers
-# for the title.  An API that cannot answer is not a fifth state but a
-# refusal.
+# and closed unmerged, which are the four arms the run takes on an open pull
+# request plus the case where there is no pull request at all.  merged
+# carries the merged pull requests, which the squash recovery reads,
+# rejected carries the closed-unmerged ones themselves so the body can quote
+# one, and superseded carries their numbers for the title.  An API that
+# cannot answer is not a fifth state but a refusal.
 #
 # The record it is handed needs three fields and no more, which are the
 # environment's name, its deployment branch, and its pull request branch, so
