@@ -18,9 +18,9 @@ use IO::Handle;
 
 # new - build a session on one handle, without opening it {{{
 #
-# The control option is the branch abort never resets, which is I2 as D32
-# revised it.  The session is told the name rather than reading it, so
-# building one costs no read of the repository's configuration.
+# The control option is the branch abort never resets, which is I2 as the
+# reset rule now stands.  The session is told the name rather than reading it,
+# so building one costs no read of the repository's configuration.
 sub new {
 	my ($class, $git, %opts) = @_;
 	bail("A branch session needs a Service::Git handle") unless $git;
@@ -57,9 +57,9 @@ sub active { $_[0]->{active} }
 # }}}
 # finished - did finish complete its clean path {{{
 #
-# D84 makes a finished session the precondition for the post-deploy child,
-# so a session that went out through abort answers false here and the
-# child is never spawned behind a run that failed.
+# A finished session is the precondition for the post-deploy child, so a
+# session that went out through abort answers false here and the child is
+# never spawned behind a run that failed.
 sub finished { $_[0]->{finished} ? 1 : 0 }
 
 # }}}
@@ -82,11 +82,11 @@ sub on { $_[0]->{on} }
 # }}}
 # modified_paths - the tracked paths that are modified or staged now {{{
 #
-# The words are git's own, out of `git status --porcelain`, so a caller
-# naming them to an operator names what the operator would see.  Untracked
-# files are left out, because D84 says they block nothing, and this is the
-# one reader the three verbs and the deploy all ask, so the list an
-# operator is shown is the same list wherever they are shown it.
+# The words are git's own, out of `git status --porcelain`, so a caller naming
+# them to an operator names what the operator would see.  Untracked files are
+# left out, because they block nothing, and this is the one reader the three
+# verbs and the deploy all ask, so the list an operator is shown is the same
+# list wherever they are shown it.
 sub modified_paths {
 	my ($self) = @_;
 	return modified_paths_of($self->{git});
@@ -95,12 +95,12 @@ sub modified_paths {
 # }}}
 # modified_paths_of - the same list, for a caller holding only a handle {{{
 #
-# The deploy asserts D84's precondition itself on the two arms of the gate
-# that open no session, so it has a handle and no session to ask, and the
-# list it names has to be the list the session would have named: one state
-# described twice is a state an operator fixes twice.  It is a plain
-# function rather than a method, called by its full name, because there is
-# no session for it to be a method on.
+# The deploy asserts the clean-tree precondition itself on the two arms of the
+# gate that open no session, so it has a handle and no session to ask, and the
+# list it names has to be the list the session would have named, because one
+# state described twice is a state an operator fixes twice.  It is a plain
+# function rather than a method, called by its full name, because there is no
+# session for it to be a method on.
 sub modified_paths_of {
 	my ($git) = @_;
 	my $status = $git->status;
@@ -113,8 +113,8 @@ sub modified_paths_of {
 # The writer does not say what it wrote, so the session works that out for
 # itself rather than being told.  A branch whose tip differs from the tip
 # recorded at switch is one this session committed to, which is exactly the
-# set D32 has abort reset back to T, and a branch the writer recorded
-# outright joins it, because a commit can leave a tip where it was.
+# set the abort resets back to T, and a branch the writer recorded outright
+# joins it, because a commit can leave a tip where it was.
 #
 # Control is filtered out of both halves.  I2 keeps committed work on control
 # whole, so control is never in the set the abort resets, however it got
@@ -158,7 +158,7 @@ sub begin {
 
 	$git->preflight;
 
-	# Clean means what is_clean means under D84: no tracked modification and
+	# Clean means what is_clean means, which is no tracked modification and
 	# nothing staged, with untracked files ignored.  An operator's scratch
 	# file blocks no session, and no session removes one.
 	unless ($git->is_clean) {
@@ -219,19 +219,19 @@ sub begin {
 # not carry the directory we are standing in, and returns to the directory
 # begin recorded only if the checkout kept it.
 #
-# The lock is taken here and nowhere else, because D46 has it guard
-# switching alone: a command that never switches never touches it, so a kit
-# hook that shells out to genesis inside a deploy is unaffected while one
-# that tries to switch under that deploy is refused by name.  The directory
-# we came from is handed along, so a refusal stands us back where we were
-# rather than leaving us at the root.
+# The lock is taken here and nowhere else, because it guards switching alone.
+# A command that never switches never touches it, so a kit hook that shells
+# out to genesis inside a deploy is unaffected while one that tries to switch
+# under that deploy is refused by name.  The directory we came from is handed
+# along, so a refusal stands us back where we were rather than leaving us at
+# the root.
 #
-# D94 has both flags of D87 share this one path: --redeploy checks the
-# deployed commit out and deploys it, --as-deployed checks the same commit
-# out for a secrets command, and finish restores the branch begin recorded
-# either way, so a detached HEAD never outlives the session.  Standing on a
-# commit is safe because begin asserted the tree clean and finish catches
-# anything that wrote into it.
+# Both flags share this one path.  --redeploy checks the deployed commit out
+# and deploys it, --as-deployed checks the same commit out for a secrets
+# command, and finish restores the branch begin recorded either way, so a
+# detached HEAD never outlives the session.  Standing on a commit is safe
+# because begin asserted the tree clean and finish catches anything that wrote
+# into it.
 #
 # The tip is recorded for a branch and not for a commit, because the record
 # is what committed_branches reads to say which branches this session moved
@@ -247,13 +247,13 @@ sub switch {
 	# exactly as the operator left it.
 	my $is_branch = $self->_is_branch($target);
 
-	# D51's derived branch.  A pull request branch is rebuilt from the
-	# deployment branch on every run, so the first run for an environment
-	# asks to stand on a name neither side holds, and create_from is what
-	# the caller says to cut it from.  The absence is recorded here, before
-	# the branch exists, because what the reset owes such a branch is the
-	# absence and a branch already cut reads exactly like one that stood
-	# before the run.  The cut itself waits for the lock below.
+	# The derived branch.  A pull request branch is rebuilt from the
+	# deployment branch on every run, so the first run for an environment asks
+	# to stand on a name neither side holds, and create_from is what the
+	# caller says to cut it from.  The absence is recorded here, before the
+	# branch exists, because what the reset owes such a branch is the absence
+	# and a branch already cut reads exactly like one that stood before the
+	# run.  The cut itself waits for the lock below.
 	my $cut = ($is_branch || !defined $opts{create_from})
 		? undef : $opts{create_from};
 	if (defined $cut) {
@@ -304,12 +304,12 @@ sub switch {
 # }}}
 # finish - re-read, restore, verify, and release {{{
 #
-# Re-reads the branch and the cleanliness rather than assuming them, which
-# is the restore clause of I7.  A tracked modification here is a defect and
-# not a by-product under D84, because the deploy writes no git and the
-# exodus store's own cleanup hands the tree back as it found it, so what is
-# left is a kit hook that wrote into the repository or a deploy that died
-# before cleaning up.  It takes the abort path, which names the files.
+# Re-reads the branch and the cleanliness rather than assuming them, which is
+# the restore clause of I7.  A tracked modification here is a defect and not a
+# by-product, because the deploy writes no git and the exodus store's own
+# cleanup hands the tree back as it found it, so what is left is a kit hook
+# that wrote into the repository or a deploy that died before cleaning up.  It
+# takes the abort path, which names the files.
 sub finish {
 	my ($self) = @_;
 	my $git = $self->{git};
@@ -357,14 +357,14 @@ sub finish_if_clean {
 # }}}
 # abort - discard, reset, restore, verify, and die {{{
 #
-# D32 fixes what it reaches: every deployment branch this session committed
-# to goes back to where it stood before the run, and control is never touched,
-# because committed work on control in L is never discarded.  A branch this
-# run itself created is put back by being deleted, which is what derived state
-# is owed.  The discard reaches the index as well as the tree, which is H1,
-# and it names the modified files before it throws them away so the evidence
-# reaches the operator.  Nothing here removes an untracked file, so an
-# operator's scratch file survives under D84.
+# What the abort reaches is fixed.  Every deployment branch this session
+# committed to goes back to where it stood before the run, and control is
+# never touched, because committed work on control in L is never discarded.  A
+# branch this run itself created is put back by being deleted, which is what
+# derived state is owed.  The discard reaches the index as well as the tree,
+# which is H1, and it names the modified files before it throws them away so
+# the evidence reaches the operator.  Nothing here removes an untracked file,
+# so an operator's scratch file survives.
 sub abort {
 	my ($self, $error, %opts) = @_;
 	my $git = $self->{git};
@@ -486,24 +486,23 @@ sub abort {
 	) if $restore_error;
 
 	# The status the caller asked for, which is how the two classes of run
-	# failure under D82 leave through the one abort and still exit
-	# differently.  A caller that asks for none exits 1, which is what bail
-	# does with an undefined code and what every caller before this option
-	# existed already got.  The two refusals above keep SOFTWARE whatever
-	# was asked for, because a tree nobody could put back is a defect in
-	# Genesis rather than the failure the run was reporting.
+	# failure leave through the one abort and still exit differently.  A
+	# caller that asks for none exits 1, which is what bail does with an
+	# undefined code and what every caller before this option existed already
+	# got.  The two refusals above keep SOFTWARE whatever was asked for,
+	# because a tree nobody could put back is a defect in Genesis rather than
+	# the failure the run was reporting.
 	bail({exitcode => $opts{exitcode}}, "%s", $error);
 }
 
 # }}}
 # discard - put one branch back at T, and leave the session open {{{
 #
-# D96's second stage.  An error confined to one environment resets that
+# The second stage.  An error confined to one environment resets that
 # environment's branch to T so that nothing of a partial delivery survives,
-# and the run then walks on to the next environment, which is why this is
-# not abort: abort ends the session and the run with it, and every
-# environment below the broken one would go unattempted, which is the very
-# shape H3 names.
+# and the run then walks on to the next environment, which is why this is not
+# abort.  Abort ends the session and the run with it, and every environment
+# below the broken one would go unattempted, which is the very shape H3 names.
 #
 # It reaches what abort reaches for one branch and nothing else.  The tree
 # and the index go first, because a delivery that died between the checkout
@@ -565,9 +564,9 @@ sub discard {
 #
 # The abort resets every branch a session committed to, and a publish that the
 # remote refused wants the same thing for the one branch it was refused on,
-# because a branch left carrying a commit nobody else can see is the state D83
-# refuses to end a run in.  Both go through the same reset, so the two cannot
-# come to disagree about what putting a branch back means.
+# because a branch left carrying a commit nobody else can see is a state no
+# run may end in.  Both go through the same reset, so the two cannot come to
+# disagree about what putting a branch back means.
 #
 # Control never reaches it.  I2 keeps committed work on control whole, and the
 # abort's own set filters that name out, so a caller asking for it here is
@@ -670,7 +669,7 @@ sub switched_to {
 
 # apply_files - deliver one control commit onto this session's branch {{{
 #
-# The single writer.  D69 makes a delivery a mirror and not an overlay, so the
+# The single writer.  A delivery is a mirror and not an overlay, so the
 # postcondition is that the branch's tree equals the propagation set as it
 # stood at the delivered control commit, which is I7 stated as this method's
 # contract.  The changed and deleted lists a caller passes are the diff it has
@@ -702,13 +701,13 @@ sub apply_files {
 	# so the check that runs before the commit would not fire either, and the
 	# run would report a success over a branch with nothing on it.  No
 	# environment has a legitimately empty set, so an empty one is a reader
-	# that could not answer rather than an answer, which is D82's system
-	# failure and not this environment's.
+	# that could not answer rather than an answer, which is a system failure
+	# and not this environment's.
 	#
 	# The set is read from the tree at the commit being delivered and never
-	# from the working tree (D69), because a restructure moves the prefix
-	# that defines it and a reader working from today's configuration would
-	# look for that prefix at commits where nothing lives there.
+	# from the working tree, because a restructure moves the prefix that
+	# defines it and a reader working from today's configuration would look
+	# for that prefix at commits where nothing lives there.
 	my @set = $env->propagation_files_at($source_sha, git => $git);
 	bail({exitcode => SOFTWARE},
 		"The propagation set of #C{%s} is empty, so there is nothing to ".
@@ -740,8 +739,8 @@ sub apply_files {
 	# The mirror's removing half.  Every path the branch holds that the set no
 	# longer holds goes, which is how a leftover init, a root-level file after
 	# a restructure, and a path that dropped out of track_additional_files
-	# leave the branch.  Under D66 the branch belongs to one deployment root,
-	# so nothing else on it is anybody's to keep.
+	# leave the branch.  The branch belongs to one deployment root, so nothing
+	# else on it is anybody's to keep.
 	#
 	# A removal git refuses is silent, because rm runs under passfail and
 	# hands the handle back whatever git made of it, so nothing here notices a
@@ -751,12 +750,13 @@ sub apply_files {
 	# What the branch holds, and the two readers that answer it.  A run reads
 	# the index, because the index is what the commit below is made from.  A
 	# preview reads a tree instead, because the ref it is asked about is one
-	# no run has checked out: under D44 a dry run makes none of the pre-flight
-	# writes, so the branch still stands where the fast-forward found it and
-	# the pre-flight hands down the ref it would have moved it to.  Without
-	# that ref the preview names every file that fast-forward is about to
-	# bring as one this commit would land, and every file it would take off
-	# as one this commit would remove.
+	# no run has checked out.  A dry run makes none of the pre-flight writes,
+	# so the branch still stands where the fast-forward found it and the
+	# pre-flight hands down the ref it would have moved it to.  Without that
+	# ref the preview names every file that fast-forward is about to bring as
+	# one this commit would land, and every file it would take off as one this
+	# commit would remove.
+	#
 	# The whole of that tree, which git spells as the pathspec '.'.  Left
 	# out, the listing goes in with an empty pathspec, which git refuses.
 	my $base      = $opts{base};
@@ -769,10 +769,10 @@ sub apply_files {
 		$git->diff_names($base // 'HEAD', $source_sha, @set);
 	my @to_write = grep { $differs{$_} } sort keys %in_set;
 
-	# D33 says an overwrite is never silent.  A path the mirror overwrote that
-	# differed from the source although the delivered commit did not change it
-	# is a hand edit the branch was carrying, so it is named per file.  A path
-	# the branch does not hold at all is not an edit, it is an addition.
+	# An overwrite is never silent.  A path the mirror overwrote that differed
+	# from the source although the delivered commit did not change it is a
+	# hand edit the branch was carrying, so it is named per file.  A path the
+	# branch does not hold at all is not an edit, it is an addition.
 	#
 	# The report is worked out here, above the first write, because afterwards
 	# the branch holds the source and nothing on disk still says what it held
@@ -781,13 +781,12 @@ sub apply_files {
 	my %changed = map {$_ => 1} @{$opts{changed} || []};
 	my @overwrote = grep {$held{$_} && !$changed{$_}} @to_write;
 
-	# D44 makes the dry run the one preview, and it writes nothing at all, so
-	# nothing is staged, no commit is made, and D82's two assertions never run,
-	# because the sub returns before either is reached with nothing staged
-	# for them to read.  The preview still reports
-	# what would land and what would go, since the mirror is the only thing
-	# that knows either list, and the run's report names both per environment
-	# and per control commit.
+	# The dry run is the one preview, and it writes nothing at all, so nothing
+	# is staged, no commit is made, and the writer's two assertions never run,
+	# because the sub returns before either is reached with nothing staged for
+	# them to read.  The preview still reports what would land and what would
+	# go, since the mirror is the only thing that knows either list, and the
+	# run's report names both per environment and per control commit.
 	#
 	# The return sits here rather than at the top of the sub, because the
 	# three lists it carries are worked out above it and the first write is
@@ -807,7 +806,7 @@ sub apply_files {
 		};
 	}
 
-	# D82's first class, raised where the writer meets it.  A path this
+	# The first failure class, raised where the writer meets it.  A path this
 	# delivery could not take off the branch or could not put into the index
 	# is the writer failing to produce what it was told to produce, and
 	# nothing a caller could do differently would have helped, so it ends the
@@ -822,9 +821,8 @@ sub apply_files {
 	# path it could not take off the branch unnamed.
 	#
 	# The assertions below and the commit raise the same class for the same
-	# reason: D82 puts a failure to write a file and a failure to make a
-	# commit in one class, and a caller cannot do anything differently about
-	# either.
+	# reason.  A failure to write a file and a failure to make a commit belong
+	# in one class, and a caller cannot do anything differently about either.
 	unless (eval {$git->rm(@stale) if @stale; 1}) {
 		# Read off before anything else runs, because every git call below
 		# would otherwise have had its own chance to clear it first.
@@ -847,7 +845,7 @@ sub apply_files {
 		);
 	}
 
-	# D82 checks the postcondition on the index, before the commit, so a
+	# The postcondition is checked on the index, before the commit, so a
 	# failed check never becomes a commit.  It is two assertions and not one,
 	# because the source tree carries every environment's files and no
 	# whole-tree comparison is possible.
@@ -880,9 +878,9 @@ sub apply_files {
 		);
 	}
 
-	# D32 has abort reset every deployment branch the session committed to,
-	# and the writer is the one method that commits, so it is the one caller
-	# that can tell the session.  Without this line the abort resets only the
+	# The abort resets every deployment branch the session committed to, and
+	# the writer is the one method that commits, so it is the one caller that
+	# can tell the session.  Without this line the abort resets only the
 	# branches whose tips moved, and a commit that left a tip where it was
 	# survives it.
 	unless (eval {$git->commit($message); 1}) {
@@ -981,8 +979,8 @@ sub _through_the_door {
 # a sha and a tag as readily as a branch name, and resolve_branch and the
 # propagation both lean on exactly that looseness to answer "is this thing
 # here at all".  switch needs the strict question instead, because the whole
-# of D94 turns on telling a branch from a commit, and show-ref --verify
-# answers about a named ref and nothing else.
+# of the detached-HEAD path turns on telling a branch from a commit, and
+# show-ref --verify answers about a named ref and nothing else.
 #
 # Both halves are asked, because git's own checkout knows a branch it has
 # only fetched and this has to know it too.  `git checkout qa/bosh` against a
@@ -1008,10 +1006,10 @@ sub _is_branch {
 # }}}
 # _verify_reachable - a recorded commit the repository no longer has {{{
 #
-# D31's append-only protection makes this rare rather than impossible: a
-# branch rewritten on the remote can leave a commit a record still names.
-# D94 refuses it by name at DATAERR, because the record is the input and
-# the operator needs to know which record is wrong.
+# The append-only protection makes this rare rather than impossible, since a
+# branch rewritten on the remote can leave a commit a record still names.  It
+# is refused by name at DATAERR, because the record is the input and the
+# operator needs to know which record is wrong.
 sub _verify_reachable {
 	my ($self, $commit, $record) = @_;
 	my $git = $self->{git};
@@ -1043,11 +1041,10 @@ sub _verify_reachable {
 # operator whose restore failed can act on, so both of them fall through to
 # the fallback below and the fallback names each state for itself.
 #
-# Since D94 a detached HEAD is a designed state rather than an accident, so
-# the question is asked here instead.  The commit is the thing the operator
-# can act on there, and the target the session last switched to is named
-# beside it where the two are not the same, because that is the target they
-# asked for.
+# A detached HEAD is now a designed state rather than an accident, so the
+# question is asked here instead.  The commit is the thing the operator can
+# act on there, and the target the session last switched to is named beside it
+# where the two are not the same, because that is the target they asked for.
 sub _standing_on {
 	my ($self) = @_;
 	my $git    = $self->{git};
@@ -1148,7 +1145,7 @@ sub _register_net {
 }
 
 # }}}
-# _take_lock - the flock D46 fixes, on genesis-session.lock {{{
+# _take_lock - the switch flock, on genesis-session.lock {{{
 #
 # Per working tree, because git_dir resolves under .git/worktrees/<name>/
 # in a linked working tree.  The pid and the command go inside so that the
