@@ -42,19 +42,18 @@ C<--ci-target> then only overrides the name, which is otherwise derived
 from the two. Giving both forms for a target that already exists is
 refused rather than silently resolved one way.
 
-Under D86 the declaration is the only place these keys are named, and
-under D105 it is the whole of what the block admits beside the type, so a
-key that is not declared is refused by name as the configuration loads.
-Under D100 that is why C<target>, C<url>, C<team>, and C<insecure> are
-declared here rather than beside the type, where they sat unread under
-every other provider.
+The declaration is the only place these keys are named, and it is the
+whole of what the block admits beside the type, so a key that is not
+declared is refused by name as the configuration loads. That is why
+C<target>, C<url>, C<team>, and C<insecure> are declared here rather than
+beside the type, where they sat unread under every other provider.
 
 Two keys are deliberately absent. There is no C<output_layout>, because
 Concourse emits one pipeline definition and declares
 C<multi_file_output> false, and a provider offers that key by declaring
-it. There is no C<pipeline_name> either, because under D25 and D28
-C<pipeline.name> is the one label the compiler and the status commands
-read, and C<expose> is C<public> under D27 with no alias behind it.
+it. There is no C<pipeline_name> either, because C<pipeline.name> is the
+one label the compiler and the status commands read, and C<expose> is
+C<public> with no alias behind it.
 
 Notification styles, BOSH upgrade locks, and the task library are
 configuration-level features rather than provider options. They are
@@ -197,7 +196,7 @@ B<Examples:>
 
 =head2 capabilities()
 
-D101's six names. Concourse declares the first five true and
+The six capability names. Concourse declares the first five true and
 C<multi_file_output> false, since it emits one pipeline definition and no
 more.
 
