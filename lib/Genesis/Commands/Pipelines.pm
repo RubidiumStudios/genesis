@@ -6,7 +6,7 @@ use warnings;
 use Genesis;
 use Genesis::State;
 use Genesis::Commands;
-use Genesis::Exit qw/CONFIG DATAERR ABORTED TEMPFAIL/;
+use Genesis::Exit qw/CONFIG ABORTED TEMPFAIL/;
 use Genesis::Config;
 use Genesis::Top;
 use Genesis::Env;
@@ -269,6 +269,11 @@ sub apply {
 		$compiler->deploy(%deploy_opts, yes => $opts->{yes});
 
 	} elsif ($platform eq 'github-actions') {
+		# No run reaches this arm today, because the provider registry
+		# refuses the type before the dispatch is asked about it.  It is
+		# kept as the seam the provider class for GitHub Actions lands
+		# in, so a reader can see the shape the dispatch takes when a
+		# second platform arrives.
 		if ($opts->{'dry-run'}) {
 			for my $file (sort keys %$output) {
 				output "#G{--- %s ---}", $file;
@@ -1001,9 +1006,10 @@ sub propagate {
 					yes     => $opts->{yes},
 					# D82's two shapes reach one reading.  git push failing to
 					# run at all raises, and a remote nobody can resolve comes
-					# back as a refused push per ref, so a push git named no
-					# ref on at all is the remote being gone, where a push git
-					# did name refs on is those branches' own quarrel with it
+					# back as a refused push per ref, so a run where nothing
+					# landed and no result named a ref is the remote being
+					# gone, where a run holding a result that landed or that
+					# named a ref is those branches' own quarrel with it
 					# however many of them it refused.  The words git wrote are
 					# classified here, beside the run, because the remedy each
 					# class earns is the run's to offer and not the stage's.
@@ -1070,9 +1076,13 @@ sub propagate {
 	# D106 puts the status at TEMPFAIL, because a code says whether an
 	# unaided retry fixes the condition.  Nothing the operator wrote is
 	# wrong here.  Another clone moved control while this run was walking,
-	# and the next run refreshes and walks from what is there now, so it
-	# succeeds with nobody doing anything first.  That is the rejected push
-	# this refusal resembles, which is the same event on a different ref.
+	# and the next run the pipeline job cuts starts from a fresh clone, so
+	# it refreshes, walks from what is there now, and succeeds with nobody
+	# doing anything first.  An operator running from a clone of their own
+	# keeps a control branch a commit behind, and the run there is refused
+	# for an illegal initial state until they pull.  That is the rejected
+	# push this refusal resembles, which is the same event on a different
+	# ref.
 	$refuse->({exitcode => TEMPFAIL}, '%s', $publish->{refused})
 		if $publish && $publish->{refused};
 
@@ -1338,11 +1348,6 @@ sub run_status {
 sub _push_failure {
 	my ($remote, $reason, $stderr) = @_;
 
-	# What git wrote to its standard error is read first, because the phrases
-	# that name a class below, such as an authentication that failed, live in
-	# the hint text git prints beside a refusal and not in the short phrase
-	# the porcelain line carries in its parentheses.  The short phrase is
-	# read where there is no hint text, so a refusal still names itself.
 	my $said = (defined $stderr && length "$stderr") ? $stderr : $reason;
 	my $line = ($said && length "$said") ? one_line($said) : '';
 
