@@ -1,8 +1,8 @@
 #!/usr/bin/env perl
-# The two refusals the orphan creation makes before it writes anything.  D42
-# has pipeline-apply cut a missing deployment branch as an orphan root commit,
-# and the creation never moves a branch that is already there and never writes
-# a root commit with no message on it.  Each refusal comes before the first
+# The two refusals the orphan creation makes before it writes anything.
+# pipeline-apply cuts a missing deployment branch as an orphan root commit, and
+# the creation never moves a branch that is already there and never writes a
+# root commit with no message on it.  Each refusal comes before the first
 # object is hashed, so the repository is left exactly as it was found.
 use strict;
 use warnings;
