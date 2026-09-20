@@ -130,7 +130,7 @@ subtest 'the index check refuses a staged file that left its source' => sub {
 	my $failure = failure_of($err);
 	is($failure && $failure->kind, 'run-fatal', 'it is the run-fatal class');
 
-	# The one exit D82 leaves unnamed, asserted by value because there is no
+	# This is the one exit left unnamed, asserted by value because there is no
 	# constant to assert by name.
 	is($failure && $failure->exit_code, 1, 'and it exits a bare 1');
 
