@@ -476,7 +476,7 @@ sub render_tree {
 		# UTF-8 glyphs carry a trailing space and the rest carry none, and
 		# under GENESIS_NO_UTF8 the plain character that stands in for one
 		# carries none at all, so a row that let the glyph do the spacing
-		# read `+deployed` on one terminal and `= deployed` on another.
+		# read `+deployed` on one terminal and `+ deployed` on another.
 		# Whatever the glyph brought with it comes off first.
 		my $glyph = csprintf("#%s\@{%s}",
 			$CLASS_MARKUP{$class}, $CLASS_GLYPH{$class});
