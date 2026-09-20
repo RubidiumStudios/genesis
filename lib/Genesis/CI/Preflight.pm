@@ -26,8 +26,9 @@ use Genesis::UI qw/prompt_for_boolean prompt_for_line/;
 #   my @commits = Genesis::CI::Preflight::local_only_commits($git, $branch);
 #
 # Runs `git log <branch> --not --remotes`, which asks for the commits the
-# branch holds that no remote-tracking ref reaches, and which must run before
-# any prune, since a prune deletes the very tracking refs it reads.  Each commit comes back as
+# branch holds that no remote-tracking ref reaches, and which must run
+# before any prune, since a prune deletes the very tracking refs it reads.
+# Each commit comes back as
 #
 #   { sha => $sha, short => $short, subject => $subject, marker => $control }
 #
