@@ -28,6 +28,13 @@ use Genesis;
 # BOSH mock setup
 local $ENV{BOSH_NON_INTERACTIVE} = 1;
 local $ENV{GENESIS_BOSH_COMMAND};
+
+# A worker whose environment carries no USER leaves the deployment record
+# with no identity in it, because Genesis::Env::DeploymentManager composes
+# user.shell from `who` and $ENV{USER} with nothing behind them, and the rows
+# below read that value back.  The default is named here, ahead of every
+# deployment this file builds, so the record and the rows agree on it.
+local $ENV{USER} = $ENV{USER} || 'unknown';
 write_bosh_config 'standalone';
 my ($director1) = fake_bosh_directors(
 	{alias => 'standalone'},
