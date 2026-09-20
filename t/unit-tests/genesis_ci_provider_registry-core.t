@@ -9,12 +9,18 @@ use utf8;
 
 use lib 'lib';
 use lib 't';
+# Test::Exit installs the hook that makes an exit catchable in a BEGIN
+# block, and the exit it has to catch is the one Genesis::bail spends, so
+# it comes before anything that compiles Genesis.
+use Test::Exit;
 use helper;
 use Harness::Propagation;
 use Test::More;
 use Test::Exception;
+use Test::Output;
 
 use Genesis;
+use Genesis::Exit qw/CONFIG/;
 provide_rc();
 use_ok 'Genesis::Top';
 use_ok 'Genesis::CI::ProviderRegistry';
@@ -290,6 +296,36 @@ subtest 'the registry refuses a bad entry rather than taking it' => sub {
 	is_deeply [Genesis::CI::ProviderRegistry->known_providers],
 		[@before],
 		'and neither refusal left anything behind in the registry';
+};
+
+subtest 'a provider whose module will not load is a refusal an operator can act on' => sub {
+	plan tests => 2;
+
+	# The registry derives the file from the package name and requires it,
+	# so a registration naming a package with no file behind it is a
+	# repository asking for a provider this Genesis cannot load.  That is
+	# something the operator can put right, so the refusal takes the
+	# configuration code rather than a bare one, and it carries the sentence
+	# the load raised without the frames standing behind it.
+	#
+	# It is registered here, after every row that reads the registry as it
+	# stands, because a registration is for the life of the process.
+	Genesis::CI::ProviderRegistry->register_provider('nowhere', {
+		cli_class => 'Genesis::CI::Provider::Nowhere',
+	});
+
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+	my ($code, $said);
+	$said = output_from {
+		$code = exit_code {
+			Genesis::CI::ProviderRegistry->provider_class('nowhere');
+		};
+	};
+
+	is $code, CONFIG,
+		'a provider module that will not load refuses at the configuration code';
+	unlike $said, qr/\bat\s+\S+\s+line\s+\d+/,
+		'and the refusal says what failed without the frames behind it';
 };
 
 done_testing;

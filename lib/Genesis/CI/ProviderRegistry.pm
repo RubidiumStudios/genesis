@@ -3,6 +3,7 @@ use strict;
 use warnings;
 
 use Genesis;
+use Genesis qw/without_backtrace/;
 use Genesis::Exit qw/CONFIG/;
 
 ### The registry {{{
@@ -131,8 +132,16 @@ sub provider_class {
 	my ($class, $type) = @_;
 
 	my $info = $class->provider_info($type) or _unknown($type);
+
+	# A repository asking for a provider this Genesis cannot load is a
+	# repository the operator can put right, so the refusal takes the
+	# configuration code rather than a bare one, matching the refusal
+	# beneath it.  The frames behind the load error are cut, because an
+	# operator needs the sentence and not the stack.
 	eval {require $info->{cli_file}}  ## no critic
-		or bail("Failed to load CI provider '%s': %s", $type, $@);
+		or bail({exitcode => CONFIG},
+			"Failed to load CI provider '%s': %s", $type,
+			without_backtrace($@));
 	return $info->{cli_class};
 }
 
@@ -156,7 +165,9 @@ sub compiler_class {
 		unless $info->{class};
 
 	eval {require $info->{file}}  ## no critic
-		or bail("Failed to load CI provider '%s': %s", $type, $@);
+		or bail({exitcode => CONFIG},
+			"Failed to load CI provider '%s': %s", $type,
+			without_backtrace($@));
 	return $info->{class};
 }
 
