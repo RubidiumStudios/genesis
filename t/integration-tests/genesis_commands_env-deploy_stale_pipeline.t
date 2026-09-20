@@ -56,8 +56,7 @@ subtest 'a pipeline-defining path changed since the apply warns' => sub {
 	# left it, so the change is one only a reader of control can see.  The
 	# body is written through the harness rather than by hand, so what lands
 	# on control is a file Genesis can still read, and the change is made to
-	# the genesis.pipeline block, which is what D43 counts as defining the
-	# pipeline's shape.
+	# the genesis.pipeline block, which is what defines the pipeline's shape.
 	write_env_file($h, 'qa', pipeline => {require_pr => 'true'});
 	push_from($h, 'a', $h->control);
 
@@ -80,7 +79,7 @@ subtest 'a compiled dependency set the last deploy never read warns' => sub {
 
 	# The other reason the query answers with, and it moves nothing on
 	# control: the pipeline compiled a dependency for this environment that
-	# its last deployment did not record reading, which is D77's fact
+	# its last deployment did not record reading, which is a recorded fact
 	# standing against the compile's prediction.  The warning is the same
 	# warning and reads the reason off the query rather than deciding it.
 	my $h = seeded_harness(dependencies => {qa => ['lab/bosh']});
@@ -106,8 +105,8 @@ subtest 'a sibling changed only on control is named as well' => sub {
 	# carries the deploying environment's hierarchy and no sibling's, so
 	# staging's file is nowhere in front of this command and a roster read
 	# from that tree held one name.  The roster now comes from control, and
-	# this is what that buys, which is that D43 asks the deploy to name the
-	# environments that changed and staging is one of them.
+	# this is what that buys, which is that the deploy names the environments
+	# that changed and staging is one of them.
 	#
 	# bosh => 1 stands the director and the kit up before the seeding, which
 	# is what lets the deploy reach its end and what lets the walk read a

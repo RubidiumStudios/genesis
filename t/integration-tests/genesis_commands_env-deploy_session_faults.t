@@ -6,13 +6,13 @@
 #
 # Three of the four arrive green, because the session and the gate are
 # already in place.  T234 is the one that drives code, and what it drives is
-# D80's "will switch" trigger in the gate.
+# the gate's "will switch" trigger.
 #
 # The first two rows make the same edit to the same file and differ only in
-# the branch the operator is standing on, because that is the whole of what
-# D80 settles: a deploy from control is about to leave the branch and refuses
-# to carry an uncommitted change across, and a deploy from the environment's
-# own branch is leaving nothing and has no reason to object.
+# the branch the operator is standing on, because that is the whole of the
+# rule.  A deploy from control is about to leave the branch and refuses to
+# carry an uncommitted change across, and a deploy from the environment's own
+# branch is leaving nothing and has no reason to object.
 #
 # Every row here calls fixture_bosh, even the two whose deploys never reach a
 # director.  It is the builder that catches the operator's own copy of the
