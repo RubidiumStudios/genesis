@@ -1554,7 +1554,7 @@ sub _classify_remote_error {
 # of the one the caller meant.
 #
 # Each ref is pushed on its own, so no ref's rejection withholds another's
-# push.
+# push, which is what the propagate run's third stage asks of the publish.
 #
 # Returns an arrayref of per-ref results, in the order the specs were given.
 # A result carries the reason git gave for a ref it turned down, because a
