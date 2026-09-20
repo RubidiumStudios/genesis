@@ -493,7 +493,7 @@ sub _derive_target_name {
 	# https://pipes.scalecf.net → pipes
 	(my $host = $url) =~ s{^https?://}{}; $host =~ s{[:/].*}{};
 	my $subdomain = (split /\./, $host)[0] // $host;
-	return $team eq 'main' ? $subdomain : "$subdomain/$team";
+	return $team eq DEFAULT_TEAM ? $subdomain : "$subdomain/$team";
 }
 
 # }}}
