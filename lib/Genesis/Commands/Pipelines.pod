@@ -1084,8 +1084,8 @@ B<Examples:>
 
 =head2 status([$env])
 
-    genesis pipeline-status-jobs
-    genesis pipeline-status-jobs sandbox
+    genesis pipeline-jobs
+    genesis pipeline-jobs sandbox
 
 Prints one line per job in the running pipeline, which is the environment, the
 state of its last build, and whether it is paused or errored.
@@ -1114,7 +1114,7 @@ not list the jobs, and where its answer is not JSON this command can read.
 
 B<Examples:>
 
-  genesis pipeline-status-jobs
+  genesis pipeline-jobs
 
 =head2 pause([$env])
 
