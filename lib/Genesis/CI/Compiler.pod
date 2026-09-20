@@ -330,6 +330,43 @@ B<Examples:>
 
 =head1 INTERNAL METHODS
 
+=head2 _normalized_provider_opts($provider_type, $opts)
+
+A provider's command-line options in their configuration spelling, which
+is unprefixed and underscored where the command line is C<ci->-prefixed
+and hyphenated. The question goes to the named provider's own compiling
+class, because a provider may remap one of its options on the way
+through, as Concourse maps the command line's C<pause> onto the schema's
+C<pause_after_set>. A deploy asks the compiler it is holding, so routing
+the compile through the same class is what keeps the two paths answering
+alike about a flag an operator wrote once.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$provider_type>
+
+The provider the compile was asked for.
+
+=item C<$opts>
+
+The options in their command-line spelling, as a hash reference.
+Undefined is taken as none.
+
+=back
+
+B<Returns:> the options in configuration spelling, as a hash reference.
+
+B<Errors:> the registry refuses a type it does not know, and refuses one
+it knows but has no compiler for, both at C<Genesis::Exit::CONFIG>.
+
+B<Examples:>
+
+    Genesis::CI::Compiler->_normalized_provider_opts(
+        'concourse', {'ci-pause' => 1});
+    # {pause_after_set => 1}
+
 =head2 _flat_name($name)
 
 An emitted file's name as one path segment, with a leading C<./> dropped
