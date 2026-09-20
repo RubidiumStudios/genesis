@@ -15,10 +15,13 @@
 # three lines of it.  Five shapes of line are then allowed outright, and they
 # are what keeps the check from banning a word.  A line may name a command's
 # or a CLI's entry point, or an entry point for, of, or to a name written in
-# a code span, or an entry point that something registers or calls, or a
-# primary, single, or top-level entry point.  The fifth is a row of the
-# workplan's superseded terms table, which records that the routing sense was
-# retired rather than using it.
+# a code span, or an entry point that something registers, calls, or uses, or
+# a primary, secondary, third, single, or top-level entry point.  The fifth
+# is a shape rather than a place, and it is a table row whose first cell is
+# bold and whose third cell opens on Retired or Superseded, wherever it
+# stands under the four roots.  Such a row records a term as retired rather
+# than using it, and the only row it matches today is in the workplan's
+# superseded terms table.
 #
 use strict;
 use warnings;
@@ -50,13 +53,28 @@ my @ORDINARY = (
 	qr/entry[- ]?point (?:registered|called by|used by)\b/i,
 	qr/(?:primary|secondary|third|single|top-level) entry[- ]?point/i,
 
-	# A row of the workplan's superseded terms table, which is where the
-	# document records a term it dropped.  Such a row names the term to say
-	# it is gone, so it mentions the sense rather than using it, and without
-	# this the one table built to keep the reasoning trail is the one place
-	# the trail cannot be written.
+	# A table row that records a term as retired or superseded, which is how
+	# a document keeps the trail of a term it dropped.  Such a row names the
+	# term to say it is gone, so it mentions the sense rather than using it,
+	# and without this the one table built to keep the reasoning trail is the
+	# one place the trail cannot be written.
+	#
+	# This is a shape and not a place.  It spares any row under the four
+	# roots whose first cell is bold, whose second cell holds no pipe, and
+	# whose third cell opens on Retired or Superseded, and the only rows it
+	# matches today are in the workplan's superseded terms table.
 	qr/^\|\s*\*\*[^|]+\*\*\s*\|[^|]*\|\s*(?:Retired|Superseded)\b/,
 );
+
+my @ROOTS = ('bin', 'lib', 'docs/ci', 'workplans');
+
+# A root that is missing narrows the sweep without saying so, because the
+# other three still fill the list and the walk only warns on standard error.
+# Each one is asked for by name, so a root that moves or is renamed stops the
+# run rather than quietly shrinking what it reads.
+for my $root (@ROOTS) {
+	BAIL_OUT("root $root is missing") unless -d $root;
+}
 
 my @files;
 File::Find::find({
@@ -66,16 +84,24 @@ File::Find::find({
 		return if -B $File::Find::name;
 		push @files, $File::Find::name;
 	},
-}, 'bin', 'lib', 'docs/ci', 'workplans');
+}, @ROOTS);
 
 # A run from anywhere but the repository root reads nothing and passes, which
 # is a green that proves nothing.  pod-complete.t guards its own walk the same
 # way.
-BAIL_OUT("no files found under bin/, lib/, docs/ci/, or workplans/") unless @files;
+BAIL_OUT("no files found under " . join(', ', @ROOTS)) unless @files;
 
 my @offences;
 for my $file (sort @files) {
-	open my $fh, '<', $file or BAIL_OUT("$file could not be read: $!");
+	# A file that will not open is an ordinary failure of this check alone,
+	# so it fails here and the sweep carries on.  The guards above earn
+	# their BAIL_OUT, because a walk that stood in the wrong place makes
+	# every later result in the run suspect.
+	my $fh;
+	unless (open $fh, '<', $file) {
+		fail("$file could not be read: $!");
+		next;
+	}
 	my @lines = <$fh>;
 	close $fh;
 
