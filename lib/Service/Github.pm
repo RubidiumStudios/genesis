@@ -595,9 +595,15 @@ sub pr_reviews {
 #
 # The supersedes list of D49 names the closed-unmerged attempts and quotes
 # whoever asked for the change, and D52's recovery reads a merged one's body,
-# so all three come from here.  Each entry carries the same decisive review
-# open_prs attaches, because the paragraph that quotes a rejection reads it off
-# a pull request that is closed by then.
+# so all three come from here.
+#
+# The review is attached only where something reads one, which is the entries
+# nobody merged.  The pull request branch is reused for every delivery, so this
+# list is every pull request ever opened on that branch, and a review request
+# apiece would make one propagate run cost as much as the repository's whole
+# history: ten environments with fifty closed pull requests each would spend
+# five hundred of an authenticated five thousand an hour.  A merged entry is
+# read for its marker, its body, and its merged_at, and never for its review.
 sub closed_prs {
 	my ($self, $owner_repo, $base, $head) = @_;
 	bail("Missing owner/repo for closed_prs") unless $owner_repo;
@@ -611,7 +617,11 @@ sub closed_prs {
 	$prs = [ grep { ($_->{head}{ref} // '') eq $head } @$prs ]
 		if defined $head && length $head;
 
-	$self->_attach_review($owner_repo, $_) for @$prs;
+	for my $pr (@$prs) {
+		$pr->{merged_at} //= undef;
+		next if $pr->{merged_at};
+		$self->_attach_review($owner_repo, $pr);
+	}
 	return $prs;
 }
 

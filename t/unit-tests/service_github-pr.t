@@ -616,7 +616,7 @@ subtest 'closed_prs - refuses without an owner/repo or a base' => sub {
 };
 
 subtest 'closed_prs - asks for the closed ones and filters to head' => sub {
-	plan tests => 4;
+	plan tests => 3;
 	reset_mocks();
 	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
 	my @prs = (
@@ -627,18 +627,49 @@ subtest 'closed_prs - asks for the closed ones and filters to head' => sub {
 	);
 	$prs[0]{merged_at} = '2026-09-01T00:00:00Z';
 	queue_curl_response(200, 'OK', encode_json(\@prs), '');
-	queue_curl_response(200, 'OK', encode_json([
-		{state => 'CHANGES_REQUESTED', user => {login => 'ann'},
-		 body => 'not yet', submitted_at => '2026-09-01T00:00:00Z'},
-	]), '');
 
 	my $result = $gh->closed_prs('org/repo', 'staging', 'pr/staging');
 	like($curl_calls[0][1], qr/state=closed/, 'the listing asks for closed');
 	is(scalar(@$result), 1, 'only the pull request from this head survives');
 	is($result->[0]{merged_at}, '2026-09-01T00:00:00Z',
 		'and it carries merged_at, which the recovery reads');
-	is($result->[0]{review}{state}, 'changes requested',
-		'and the decisive review, which the rejection text quotes');
+};
+
+subtest 'closed_prs - only an unmerged entry is worth a review request' => sub {
+	plan tests => 5;
+	reset_mocks();
+	my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
+
+	# The pull request branch is reused for every delivery, so the closed
+	# list is every pull request ever opened on it and a request apiece
+	# would make one propagate run cost as much as the repository's whole
+	# history.  A merged entry is read for its marker and its merged_at and
+	# never for its review, so only the rejected ones earn the call.
+	my @prs = map {
+		my $pr = make_pr(number => $_, state => 'closed',
+			head_ref => 'pr/staging', base_ref => 'staging');
+		$pr->{merged_at} = $_ < 9 ? '2026-09-01T00:00:00Z' : undef;
+		$pr;
+	} (6, 7, 8, 9);
+	queue_curl_response(200, 'OK', encode_json(\@prs), '');
+	queue_curl_response(200, 'OK', encode_json([
+		{state => 'CHANGES_REQUESTED', user => {login => 'ann'},
+		 body => 'not yet', submitted_at => '2026-09-02T00:00:00Z'},
+	]), '');
+
+	my $result = $gh->closed_prs('org/repo', 'staging', 'pr/staging');
+	is(scalar(@$result), 4, 'every closed pull request comes back');
+	is(scalar(@curl_calls), 2,
+		'the listing and one review request, not one per entry');
+	like($curl_calls[1][1], qr{/pulls/9/reviews},
+		'and the request is for the entry nobody merged');
+
+	my ($unmerged) = grep {!$_->{merged_at}} @$result;
+	is($unmerged->{review}{state}, 'changes requested',
+		'the rejected entry carries the decisive review the text quotes');
+	is_deeply([map {$_->{review}} grep {$_->{merged_at}} @$result],
+		[undef, undef, undef],
+		'and a merged entry carries none, because nothing reads one');
 };
 
 done_testing;

@@ -1123,10 +1123,18 @@ The closed pull requests targeting C<$base>, optionally narrowed to those from
 C<$head>, merged and unmerged alike.
 
 Each entry carries C<merged_at>, which is C<undef> for a pull request closed
-without merging, and the same C<review> hashref C<open_prs> attaches. That is
-what tells a merged proposal from a rejected one: the supersedes list names
-the rejected attempts and quotes whoever asked for the change, while the
-recovery reads a merged one's body.
+without merging. That is what tells a merged proposal from a rejected one. The
+supersedes list names the rejected attempts and quotes whoever asked for the
+change, while the recovery reads a merged one's body.
+
+The C<review> hashref C<open_prs> attaches is attached here only to the
+entries nobody merged, because those are the only ones anything reads a review
+off. The attachment costs one request per entry it is made for, and the pull
+request branch is reused for every delivery, so this list is every pull
+request ever opened on that branch. Attaching to all of them would make one
+propagate run cost as much as the repository's whole history. A merged entry
+is read for its marker, its body, and its C<merged_at>, so its C<review> is
+C<undef>.
 
 B<Parameters:>
 
