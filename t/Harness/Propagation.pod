@@ -812,15 +812,19 @@ upstream environment is given it.
 The files are written without commits of their own and committed together
 afterwards, because one commit is the whole point and C<write_env_file> would
 otherwise lay one per file.  The paths that commit names are the ones
-C<write_env_file> hands back, so a harness that writes its environment files
-under a deployment root is committed correctly without this saying either
-name.
+C<write_env_file> hands back rather than names spelled out here, so a harness
+that moves its environment files under a deployment root moves this builder
+with it.
 
 Each file is written whole, so C<prod>'s C<prior_env> is named again here even
 though a chained seeding has already laid it, because the rewrite would drop
 any key it did not restate.  A harness seeded with shared files has the same
 exposure on C<track_additional_files>, so a row that wants both this commit
 and tracked files wants a builder that keeps them.
+
+The commit is laid where copy A is standing, so the builder refuses unless
+that copy is on control.  A row that stood somewhere else on purpose hears
+about it rather than having the builder check control out from under it.
 
 Expects a two-environment harness holding C<qa> and C<prod>, which is what
 C<ready_harness> builds under C<chained>.
@@ -1218,10 +1222,12 @@ is what that phase caused rather than what the first one left behind.
 
 =head2 sever_remote($h, %opts)
 
-Makes every remote step fail with the text a real unreachable remote emits,
-which the code that tells a network failure from an authentication one reads
-off stderr.  C<after> severs the remote partway through a run rather than from
-its first call.
+Makes every remote step fail with the text a real remote emits, which the code
+that tells a network failure from an authentication one reads off stderr.
+C<after> severs the remote partway through a run rather than from its first
+call.  C<kind> names which failure it gives, and it is C<network> by default
+and C<auth> for the credentials the refresh refuses on, so a row proving one
+refusal is not written against the other's words.
 
 =head2 restore_remote($h)
 
@@ -1233,8 +1239,9 @@ has to come back partway through, so that a later phase can reach it again.
 
 =head2 hold_session_lock($h, %opts)
 
-Takes the switch lock in a child process and answers that child's pid.  The lock is the
-C<flock> on C<genesis-session.lock> in the git directory, and the holder
+Takes the switch lock in a child process and answers that child's pid.  The
+lock is the C<flock> on C<genesis-session.lock> in the git directory, and the
+holder
 writes its pid on the first line and its command on the second for the
 refusal message to read.  Options are C<copy> and C<command>.  C<hard> kills
 the holder without letting it finish, so a row can show that the kernel drops
@@ -1621,7 +1628,9 @@ to match, C<body>, the shell that runs when it matches, and C<name>.
 The body is written inside the C<if>, so a body that says nothing about exiting
 falls out of the block and reaches the real git after whatever it did.  That is
 how a row makes git complain on stderr and still answer.  A body that wants to
-answer on its own exits for itself.
+answer on its own exits for itself.  It is required, because an empty one
+writes an C<if> with nothing between it and its C<fi>, which bash refuses to
+parse.
 
 C<name> gives the directory a fixed last component instead of a random one and
 answers with an existing directory rather than writing it twice, which is how
@@ -1872,8 +1881,9 @@ else rides through to C<held_prod>, C<pipeline> included, because a
 pipeline-managed deploy and a plain one are two different rows and the helper
 does not decide which one is being written.
 
-The listener is a C<Test::TCP> object kept on the harness as C<< $h->{director} >>,
-and it lives exactly as long as the harness does, because C<Test::TCP>'s
+The listener is a C<Test::TCP> object kept on the harness as
+C<< $h->{director} >>, and it lives exactly as long as the harness does,
+because C<Test::TCP>'s
 C<DESTROY> stops the child and a listener let out of scope closes the port
 before the caller's deploy dials it.  The director record carries the port the
 listener actually took, so nothing names a port twice.

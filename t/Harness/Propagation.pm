@@ -2317,6 +2317,15 @@ sub due_commit {
 # and tracked files wants a builder that keeps them.
 sub due_on_control {
 	my ($self) = @_;
+	# The commit is made wherever copy A is standing, so a caller standing on
+	# a deployment branch would lay the control commit there and find nothing
+	# due.  It is refused by name rather than checked out from under the
+	# caller, because a row that stood somewhere on purpose should hear about
+	# it instead of having the builder move it.
+	my $on = branch_of($self->{a}) // '';
+	die "due_on_control lays a commit on $self->{control} and copy A is "
+	  . "standing on $on\n" unless $on eq $self->{control};
+
 	my @paths = (
 		$self->write_env_file('qa', params => {n => 2}, commit => 0),
 		$self->write_env_file('prod',
@@ -3879,15 +3888,25 @@ sub reset_steps {
 # severs the remote partway through a run, which the unsurvivable rows need.
 #
 # The refresh is severed as a transport failure rather than as a death,
-# because that is what the real method does with a remote it cannot reach:
+# because that is what the real method does with a remote it cannot reach.
 # `git ls-remote` comes back with an rc, and fetch_branches turns it into a
 # classified result for the caller to refuse on.  A push and a remote delete
 # do die, so those two keep the death they always had.
+#
+# kind names which failure the remote gives, because Service::Git tells them
+# apart by reading stderr and each one has a refusal of its own.  It is
+# network by default, which is the shape most rows want, and auth is what
+# gives the refusal that names the credentials a row to stand on.
 sub sever_remote {
 	my ($self, %opts) = @_;
 	my $git = $self->{"_fault_git_a"} // $self->fault_git;
-	my $message = "fatal: unable to access '$self->{r}': "
-		. "Could not resolve host: the remote is unreachable";
+	my $kind = $opts{kind} // 'network';
+	die "sever_remote knows the network and auth failures, not $kind\n"
+		unless $kind eq 'network' || $kind eq 'auth';
+	my $message = $kind eq 'auth'
+		? "fatal: Authentication failed for '$self->{r}'"
+		: "fatal: unable to access '$self->{r}': "
+		  . "Could not resolve host: the remote is unreachable";
 	fail_on($git, 'fetch_branches', $opts{after} // 1,
 		from => 1, message => $message, kind => 'transport');
 	fail_on($git, $_, $opts{after} // 1, from => 1, message => $message)
@@ -4438,7 +4457,9 @@ sub _path_prefix {
 # The body is shell, and it is written inside the `if`, so a body that says
 # nothing about exiting falls out of the block and reaches the real git after
 # whatever it did.  A body that wants to answer on its own says so with an
-# exit of its own.
+# exit of its own.  It is required, because an empty one renders an `if` with
+# nothing between it and its `fi`, which bash refuses to parse, and the row
+# would meet that as a git the shell could not run.
 #
 # The directory is named git-shim-... under the harness tmp, and the name
 # matters: _real_tool steps over directories named that way, so a wrapper
@@ -4451,7 +4472,8 @@ sub _path_prefix {
 sub shimmed_git {
 	my ($self, %opts) = @_;
 	my $when = $opts{when} or die "shimmed_git needs the subcommand to answer\n";
-	my $body = $opts{body} // '';
+	my $body = $opts{body}
+		or die "shimmed_git needs the shell body that answers $when\n";
 
 	my $dir = "$self->{tmp}/git-shim-"
 		. ($opts{name} // sprintf('%06d', int(rand(1_000_000))));
