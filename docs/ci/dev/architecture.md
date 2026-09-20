@@ -68,7 +68,7 @@ graph TB
 
 ## File Locations
 
-All CI modules live under `lib/Genesis/CI/` in the Genesis CLI repository, and every one of them sits at the path its package name derives.
+All CI modules live under `lib/Genesis/CI/` in the Genesis CLI repository, and every one of them sits at the path its package name derives. The namespace has two halves. The compiler half turns a repository's configuration into a pipeline definition, and the propagation half delivers control's commits to the deployment branches. The tables below take one half each.
 
 | File | Purpose |
 |------|---------|
@@ -89,6 +89,24 @@ All CI modules live under `lib/Genesis/CI/` in the Genesis CLI repository, and e
 | `lib/Genesis/CI/ProviderCompiler/Concourse.pm` | Concourse compiler |
 
 The GitHub Actions and manual providers have no compiling class. A manual pipeline is one Genesis never sets, and the class that emits for GitHub Actions arrives with the provider itself.
+
+The propagation half runs under `genesis propagate` and `genesis pipeline-status`, and it compiles nothing.
+
+| File | Purpose |
+|------|---------|
+| `lib/Genesis/CI/Preflight.pm` | The initial state a propagation run may find, and the refusals it owes |
+| `lib/Genesis/CI/Walk.pm` | The per-commit walk and the record it writes for each environment |
+| `lib/Genesis/CI/Marker.pm` | The propagation marker and the Genesis commit trailers |
+| `lib/Genesis/CI/Propagation.pm` | The pull request half of pipeline propagation |
+| `lib/Genesis/CI/PullRequest.pm` | The pull request arm of the run |
+| `lib/Genesis/CI/Publish.pm` | The run's third stage, one push per branch |
+| `lib/Genesis/CI/Report.pm` | The run's report |
+| `lib/Genesis/CI/RunFailure.pm` | The two classes of failure that end a run |
+| `lib/Genesis/CI/Status.pm` | The `pipeline-status` read model |
+| `lib/Genesis/CI/Shuttle.pm` | The object store behind the pipeline's queue and event, with `S3.pm` and `GCS.pm` beneath it |
+| `lib/Genesis/CI/Layout.pm` | The layout DSL parser, which the legacy configuration still reaches |
+
+The walk decides, the publish writes, and the status read model renders what the walk recorded, so `genesis propagate` and `genesis pipeline-status` never disagree about what is held and why.
 
 The command handler is at `lib/Genesis/Commands/Pipelines.pm` and the CLI command definitions are in `bin/genesis`.
 
