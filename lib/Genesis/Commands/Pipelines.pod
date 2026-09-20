@@ -776,8 +776,8 @@ and outside one the refusal stands.
 =back
 
 The three options above are the whole table.  C<--commit>, C<--no-push>, and
-C<--no-fetch> are gone.  The push switch was withdrawn and C<--dry-run> left
-as the only preview, the fetch switch went once the refresh became
+C<--no-fetch> are gone, because the push switch was withdrawn and C<--dry-run>
+left as the only preview, the fetch switch went once the refresh became
 unconditional, and a caller-chosen source commit was the one thing that let
 the pipeline's run and the operator's run differ.
 
