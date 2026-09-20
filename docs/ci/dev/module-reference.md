@@ -761,6 +761,31 @@ The branch, protection, record, and propagation helpers are `_apply_init_branche
 
 **Internal:** `_shares_history`, `_illegal_state_refusal`, `_local_only_refusal`, `_unrelated_refusal`, `_hand_commit_refusal`, and `_commits`.
 
+## Genesis::BranchClass
+
+**File:** `lib/Genesis/BranchClass.pm`
+
+**Purpose:** The branch-class gate, which decides whether the branch an operator is standing on may run the command they typed. It classifies the branch, refreshes control before it reads anything, and refuses a pre-deploy command off a branch that may not carry a hand commit. It switches nothing, because the operator chose the branch and the fix is theirs. Each refusal spends a named exit code, which is `CONFIG` for a control branch that exists nowhere, `DATAERR` for a branch the design will not let the command run from, and `TEMPFAIL` for a remote this clone cannot reach.
+
+**Public Subroutines:**
+
+- `classify_branch($top, $branch)`
+  answers which of `control`, `deployment`, `pr`, `artifacts`, or `feature` a branch name belongs to. The three derived classes are composed from the environments the repository declares rather than matched against a naming pattern, because the branch is per deployment and its name is the deployment slug. A name that matches none of them is a feature branch, and so is an undefined name.
+
+- `artifacts_branch_for($top, $env_name)`
+  composes the artifacts branch of a deployment, which is the deployment slug behind one fixed prefix. It is composed here rather than in `Genesis::Top` because nothing writes to that branch and only this gate reads it.
+
+- `refresh_control($top, $git)`
+  brings control from the remote into the remote-tracking ref before the ancestry check, and fails loudly where it cannot. Only control is named, because a deployment branch's tip answers a question no pre-deploy command asks. A clone that has lost its control branch is left for the pre-flight to repair and report, so no branch is materialised here silently.
+
+- `permitted_feature_branch($top, $git, $branch, %opts)`
+  answers whether a feature branch meets the three conditions, and otherwise answers false with the condition that failed and the command that fixes it, so the caller writes one refusal and the reasons stay here. The conditions are that control has been fetched, that the branch descends from control's refreshed tip, and that the branch is not named for an environment. `adding` names an environment the command is about to create, because a branch may collide with a name that does not exist yet, and `refresh` says whether the caller allowed a network call.
+
+- `assert_pre_deploy($top, $git, %opts)`
+  refuses a pre-deploy command off a branch that may not carry one, at `DATAERR`, naming the class of branch and the checkout that moves the operator off it. Control is permitted, except where the repository requires a pull request and the command commits, and a detached HEAD is let through for the two landed behaviours that own that state to speak for.
+
+**Internal:** none, in the sense that no sub here carries a leading underscore. Only `assert_pre_deploy` has a caller outside this module today, in `Genesis::Commands`, and the other four are the steps it is built from, each documented in the module's own `.pod` and each covered by rows of its own.
+
 ## The Propagation Half
 
 These modules run under `genesis propagate` and `genesis pipeline-status`. None of them compiles anything, and none of them is reached by `genesis pipeline-apply` except through the branch work that command does before it compiles. Each one's `.pod` beside it in `lib/Genesis/CI/` is the reference for its API.
