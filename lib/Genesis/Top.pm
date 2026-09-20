@@ -2817,6 +2817,11 @@ sub _validate_capability_gates {
 # deploy would commit manifests onto the deployment branch that the
 # propagation writer also advances.  That is the two-writer case, and the
 # remedy is the kit's floor rather than the store's value.
+#
+# An environment that declares no floor at all is the same case, because
+# an absent declaration resolves to 0.0.0 rather than to no opinion, and
+# it gets its own refusal because the remedy is to write a floor down
+# rather than to raise one.
 sub _validate_manifest_store {
 	my ($self) = @_;
 
@@ -2849,13 +2854,28 @@ sub _validate_manifest_store {
 			// '';
 		$env_min =~ s/^v//;
 
+		# An environment where neither line is written declares nothing,
+		# and Genesis::Env::effective_minimum_version resolves that to
+		# 0.0.0 rather than to no opinion, so the run time serves it out
+		# of the repository store exactly as it serves a declared 3.0.0.
+		# Skipping it here would pass the repository the gate exists to
+		# refuse, and a newly written environment file omits the minimum
+		# version whenever Genesis is a development build.
 		my @declared = grep {length $_} ($env_min, $repo_min);
-		next unless @declared;
-		my $floor = shift @declared;
+		my $floor = shift(@declared) // '0.0.0';
 		for my $version (@declared) {
 			$floor = $version if new_enough($version, $floor);
 		}
 		next if new_enough($floor, '3.1.0');
+
+		bail({exitcode => CONFIG},
+			"The environment #C{%s} declares no minimum Genesis version, and ".
+			"neither does the repository, so its floor is #C{0.0.0}, which ".
+			"forces the repository store whatever #C{manifest_store} says.\n".
+			"Set #C{genesis.min_version} to #C{3.1.0} or later on the ".
+			"environment, or #C{minimum_version} on the repository.",
+			$env_name
+		) unless length $env_min || length $repo_min;
 
 		bail({exitcode => CONFIG},
 			"The environment #C{%s} has a Genesis floor below #C{3.1.0}, ".
