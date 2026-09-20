@@ -159,11 +159,11 @@ subtest 'the failure ends the run and every branch goes back to T' => sub {
 	is(ref_in($h->r, 'refs/heads/' . $h->slug('qa')), $before{qa},
 		'nothing was published');
 
-	my $outcomes = Genesis::CI::RunFailure::abort_outcomes(['qa', 'dev', 'prod'], 'dev');
-	is_deeply($outcomes, {
-		qa   => 'not published, run aborted',
-		dev  => 'not published, run aborted',
-		prod => 'not attempted',
+	my $fields = Genesis::CI::RunFailure::abort_fields(['qa', 'dev', 'prod'], 'dev');
+	is_deeply($fields, {
+		qa   => {outcome => 'not published', detail => 'run aborted'},
+		dev  => {outcome => 'not published', detail => 'run aborted'},
+		prod => {outcome => 'not attempted', detail => undef},
 	}, 'every environment walked records the abort and the rest are not attempted');
 
 	assert_w_restored($w, 'the abort restores the working state');

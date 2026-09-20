@@ -325,21 +325,23 @@ subtest 'a path that dropped out of the tracked list is removed' => sub {
 subtest 'an aborted run records one word for every environment' => sub {
 	plan tests => 3;
 
-	my $walked = Genesis::CI::RunFailure::abort_outcomes(
+	my $walked = Genesis::CI::RunFailure::abort_fields(
 		['dev', 'qa', 'prod'], 'qa');
 	is_deeply($walked, {
-		dev  => 'not published, run aborted',
-		qa   => 'not published, run aborted',
-		prod => 'not attempted',
+		dev  => {outcome => 'not published', detail => 'run aborted'},
+		qa   => {outcome => 'not published', detail => 'run aborted'},
+		prod => {outcome => 'not attempted', detail => undef},
 	}, 'the environments already walked are told nothing of theirs was published');
 
 	# A run that names no environment died before it reached one, so there is
 	# nothing for any of them to have published.
-	my $none = Genesis::CI::RunFailure::abort_outcomes(['dev', 'qa'], undef);
-	is_deeply($none, {dev => 'not attempted', qa => 'not attempted'},
-		'and a run that reached none of them says so for every one');
+	my $none = Genesis::CI::RunFailure::abort_fields(['dev', 'qa'], undef);
+	is_deeply($none, {
+		dev => {outcome => 'not attempted', detail => undef},
+		qa  => {outcome => 'not attempted', detail => undef},
+	}, 'and a run that reached none of them says so for every one');
 
-	is_deeply(Genesis::CI::RunFailure::abort_outcomes([], 'qa'), {},
+	is_deeply(Genesis::CI::RunFailure::abort_fields([], 'qa'), {},
 		'an empty list of environments answers with an empty report');
 };
 
