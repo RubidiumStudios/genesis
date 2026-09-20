@@ -36,4 +36,3 @@ Genesis::CI::Compiler::PipelineDescriptor     # No .pod; pipeline rework pending
 Genesis::CI::Compiler::ScriptDiscovery        # No .pod; pipeline rework pending
 Genesis::CI::Compiler::Validator              # No .pod; pipeline rework pending
 Genesis::CI::Layout                           # No .pod; pipeline rework pending
-Genesis::Commands::Pipelines                  # Has .pod; commands are a mix of new and superseded ci-* forms, rework pending
