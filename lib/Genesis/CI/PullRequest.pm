@@ -48,7 +48,7 @@ sub align_with_remote {
 }
 
 # }}}
-# aggregate_message - the whole aggregate commit message D49 fixes {{{
+# aggregate_message - the whole aggregate commit message {{{
 #
 # The subject is the marker naming the newest due control commit, and the body
 # lists every commit the aggregate carries, oldest first, each with its short
@@ -64,8 +64,8 @@ sub align_with_remote {
 # marker's own contract says it must do.
 #
 # The set is read at the commit being delivered, through the same reader the
-# writer uses (D69), because a restructure moves the prefix that defines it and
-# a body scoped by today's configuration would name files the delivery did not
+# writer uses, because a restructure moves the prefix that defines it and a
+# body scoped by today's configuration would name files the delivery did not
 # move.
 #
 # The sha of each entry is read under the name the walk writes on a pending
@@ -110,10 +110,10 @@ sub aggregate_message {
 # }}}
 # gate_line - the paragraph the body carries when the aggregate is a gate {{{
 #
-# D49 as corrected on 2026-09-09 has a gate constrain only what follows it, so
-# the aggregate runs up to and including the gate and the commits after it are
-# held.  The line names the reason the trailer gave and how many wait, so a
-# reviewer can see why the pull request stops where it does.
+# A gate constrains only what follows it, so the aggregate runs up to and
+# including the gate and the commits after it are held.  The line names the
+# reason the trailer gave and how many wait, so a reviewer can see why the
+# pull request stops where it does.
 #
 # The reason is read under gate_reason, which is the name the walk writes it
 # by on the entry it gates; gate beside it is the gate's own commit, and a
@@ -144,10 +144,10 @@ sub gate_line {
 # }}}
 # review_paragraph - the one renderer that quotes a reviewer {{{
 #
-# D49 has a superseding body carry the rejection text where the API gave one,
-# and D56 has a changes-requested rebuild name the review it answers.  The two
-# are the same paragraph with a different opening sentence, so one renderer
-# writes both and the quoting cannot drift apart between them.
+# A superseding body carries the rejection text where the API gave one, and a
+# changes-requested rebuild names the review it answers.  The two are the same
+# paragraph with a different opening sentence, so one renderer writes both
+# and the quoting cannot drift apart between them.
 sub review_paragraph {
 	my ($number, $review, %opts) = @_;
 	return undef unless $review && length($review->{body} // '');
@@ -171,8 +171,8 @@ sub review_paragraph {
 # }}}
 # supersedes_paragraph - the closing paragraph a superseding body carries {{{
 #
-# D49 has the body carry the rejection text where the API gives one, which is
-# the body of a changes-requested review, and a link to the closed pull request
+# The body carries the rejection text where the API gives one, which is the
+# body of a changes-requested review, and a link to the closed pull request
 # where it does not.  A merged pull request is never a prior attempt, so
 # pr_state never puts one in the rejected list.
 sub supersedes_paragraph {
@@ -209,7 +209,7 @@ sub supersedes_paragraph {
 # }}}
 # freeze - the approved arm, which writes nothing at all {{{
 #
-# D51 freezes an approved pull request, so the branch is left exactly as the
+# An approved pull request is frozen, so the branch is left exactly as the
 # reviewer read it and every new due commit is held with the reason
 # awaiting-merge.  A long-stale approval is the operator's to merge or to
 # dismiss, and the run never dismisses one on their behalf.
@@ -237,12 +237,12 @@ sub freeze {
 # }}}
 # preview - what a dry run would do with this environment's pull request {{{
 #
-# D44 makes --dry-run the only preview, and a preview that could not say what
-# it would do with the branch would be worth little, so it reads.  Writing
-# nothing does not forbid reading, and only a writing run refuses on a state it
-# cannot read, under D55.  The asymmetry is the point, because a run that
-# guesses wrong leaves a proposal standing that nobody asked for, where a
-# preview that guesses wrong is read and forgotten.
+# --dry-run is the only preview, and a preview that could not say what it would
+# do with the branch would be worth little, so it reads.  Writing nothing does
+# not forbid reading, and only a writing run refuses on a state it cannot read.
+# The asymmetry is the point, because a run that guesses wrong leaves a
+# proposal standing that nobody asked for, where a preview that guesses wrong
+# is read and forgotten.
 #
 # The title is composed the way the aggregate's own subject is, off the newest
 # due commit's abbreviated control sha, so the line the operator reads here is
@@ -349,7 +349,7 @@ sub forget_lost_branch {
 # }}}
 # expected_tip - the value on R the publish will push against {{{
 #
-# D51 reads it at the run's refresh and nowhere else, because reading it again
+# It is read at the run's refresh and nowhere else, because reading it again
 # at the push would close no window at all.  What the arm does next is fetch
 # the branch and rewrite it, so a read taken after that would name the value
 # this run is about to overwrite and would lease the branch against whatever a
@@ -381,7 +381,7 @@ sub expected_tip {
 # The branch is derived state, reproducible from the deployment branch and the
 # due commits, so the rebuild is right.  I4 still forbids resolving a
 # divergence silently, so what the rebuild is about to destroy is counted and
-# its authors named first (D51).
+# its authors named first.
 #
 # A commit this run's own kind wrote carries a marker naming a control commit,
 # so anything above the deployment branch without one was pushed by hand.  The
@@ -439,10 +439,10 @@ sub discard_line {
 # }}}
 # settled - true when the rebuilt branch equals R's by marker and by tree {{{
 #
-# D48 makes idempotency the marker walk on both branches, so the question is
-# not what the tip's subject says but which control commit the newest marker
-# on each branch names, and whether the tree we would write is the tree that
-# is already there.  A squash, an amend, and a rewritten subject all keep the
+# Idempotency is the marker walk on both branches, so the question is not
+# what the tip's subject says but which control commit the newest marker on
+# each branch names, and whether the tree we would write is the tree that is
+# already there.  A squash, an amend, and a rewritten subject all keep the
 # marker in the body, and a coincidental short hash in somebody else's subject
 # is not a marker at all.
 #
@@ -561,8 +561,8 @@ sub state_for_scope {
 #
 # The branch carries exactly one commit above the deployment branch, so the
 # arm resets it to the deployment branch's tip and calls the single writer
-# once, at the newest due commit's source.  D69 makes a delivery a mirror, so
-# the mirror of the newest commit is the whole aggregate's tree, and D82's two
+# once, at the newest due commit's source.  A delivery is a mirror, so the
+# mirror of the newest commit is the whole aggregate's tree, and the two
 # index assertions run against that same commit.
 #
 # It answers the environment's outcome word, or undef where the report is to
@@ -650,7 +650,7 @@ sub deliver {
 	align_with_remote($git, $pr->{branch});
 
 	# Read what we are about to destroy before we destroy it, because the
-	# rebuild is right and silence about it is not (I4, D51).
+	# rebuild is right and silence about it is not (I4).
 	if (my $discarded = discard_report($git, $pr->{branch}, $record->{branch})) {
 		$pr->{discarded} = $discarded;
 		note_detail($record, discard_line($pr->{branch}, $discarded));
@@ -699,8 +699,8 @@ sub deliver {
 	}) if $gate;
 
 	# When every pull request for this environment was closed without merging,
-	# the next one supersedes them, and D51 has the old branch rebuilt in
-	# place rather than left standing, because it is derived state.
+	# the next one supersedes them, and the old branch is rebuilt in place
+	# rather than left standing, because it is derived state.
 	#
 	# The state is read off the record rather than off the answer itself,
 	# because the answer is undef for a run given no token at all and the
@@ -708,7 +708,7 @@ sub deliver {
 	$body{supersedes} = supersedes_paragraph($state->{rejected})
 		if ($pr->{state} // '') eq 'closed unmerged';
 
-	# D56: a rebuild that answers a reviewer says so, in the same shape a
+	# A rebuild that answers a reviewer says so, in the same shape a
 	# superseding body quotes a rejection, so a reviewer opening the pull
 	# request again reads their own words above the aggregate that answers
 	# them.  One renderer writes both, and the opening sentence is the only
@@ -759,14 +759,13 @@ sub deliver {
 #
 # A rejection leaves no persistent state, and so does a merge, so once nothing
 # is due the branch has nothing to say and goes from R and from L together with
-# any closed attempt's branch (D51).  The local half also answers the
-# second-cycle failure, where a local ref R no longer carries made the next
-# creation die.
+# any closed attempt's branch.  The local half also answers the second-cycle
+# failure, where a local ref R no longer carries made the next creation die.
 #
 # The local refs go now, because nothing later in the run reads one and a
 # leftover is what breaks the next cycle.  The remote refs go through the
-# publish, one push each, under D83, so what is written onto the record here
-# is the list the spec producer reads rather than the removal itself.
+# publish, one push each, so what is written onto the record here is the
+# list the spec producer reads rather than the removal itself.
 #
 # A preview marks the same branches and takes none of them off, because a run
 # given --dry-run owes the operator the report and none of the writes under it.
@@ -778,7 +777,7 @@ sub retire_branch {
 	my $remote = $git->default_remote;
 
 	# A closed attempt that sat on a branch of its own goes with this one,
-	# because D51 leaves no persistent state behind a rejection either.  The
+	# because a rejection leaves no persistent state behind either.  The
 	# environment's own branch is named first and filtered out of the rest, so
 	# an attempt that sat on it is not asked for twice.
 	my @branches = ($pr->{branch});
@@ -801,9 +800,9 @@ sub retire_branch {
 # }}}
 # _nothing_due_specs - the branches this run removes from R {{{
 #
-# D51 removes a pull request environment's branch when nothing is due for it,
-# and D83 makes that removal its own push, so it joins the publish set as a
-# deletion spec rather than happening inside the walk.  The spec is the shape
+# A pull request environment's branch is removed when nothing is due for it,
+# and that removal is its own push, so it joins the publish set as a deletion
+# spec rather than happening inside the walk.  The spec is the shape
 # Service::Git::push already understands, which is a delete refspec leased
 # against the tip the refresh read, so a branch somebody moved since then
 # refuses its own deletion and records why.
@@ -834,8 +833,8 @@ sub _nothing_due_specs {
 # }}}
 # client_for_run - one GitHub client for the whole run, or none at all {{{
 #
-# D57 has the run build a client when any environment in scope needs the API
-# and not at all when none does, which matters for a job that runs on every
+# The run builds a client when any environment in scope needs the API and
+# not at all when none does, which matters for a job that runs on every
 # control change.  An environment needs it when it has a proposed record or
 # would deliver into a pull request, whatever its hold state, because a hold
 # set while a pull request was open leaves that pull request to be read.
@@ -878,9 +877,9 @@ sub client_for_run {
 	}
 
 	# The run carries on without a token and says so, and everything the API
-	# would have decided is left to the next run that has one (D44).  A
-	# writing run still publishes each branch; what it cannot do is open or
-	# update the pull request that names it.
+	# would have decided is left to the next run that has one.  A writing
+	# run still publishes each branch; what it cannot do is open or update
+	# the pull request that names it.
 	unless ($ENV{GITHUB_AUTH_TOKEN}) {
 		warning(
 			"#C{GITHUB_AUTH_TOKEN} is not set, so no pull request is opened ".
@@ -902,12 +901,11 @@ sub client_for_run {
 	# no pull request open, so a run that took it would propose again what it
 	# has already proposed.
 	#
-	# An API that will not answer at all is not this build's to refuse.  D55
-	# gives every failure to read GitHub one refusal, at UNAVAILABLE and in
-	# the reader's own words, and a bail raised here would stand in front of
-	# it with a bare 1 and name a call the operator never made.  A rejected
-	# token arrives there too, which is why only the answered case is refused
-	# here.
+	# An API that will not answer at all is not this build's to refuse.  Every
+	# failure to read GitHub gets one refusal, at UNAVAILABLE and in the
+	# reader's own words, and a bail raised here would stand in front of it
+	# with a bare 1 and name a call the operator never made.  A rejected token
+	# arrives there too, which is why only the answered case is refused here.
 	# The refusal goes through the caller's closure like the pair's above it,
 	# because this build stands inside an open session and a bare bail there
 	# exits 1 with the operator left on whatever branch the run had switched
@@ -938,12 +936,12 @@ sub client_for_run {
 # pr_state - the pull request and what a reviewer decided about it {{{
 #
 # Answers the state as one of none, unreviewed, approved, changes requested,
-# and closed unmerged, which are the four arms of D51 plus the case where
-# there is no pull request at all.  merged carries the merged pull requests,
-# which D52's recovery reads, rejected carries the closed-unmerged ones
+# and closed unmerged, which are the four arms plus the case where there is
+# no pull request at all.  merged carries the merged pull requests, which
+# the squash recovery reads, rejected carries the closed-unmerged ones
 # themselves so the body can quote one, and superseded carries their numbers
 # for the title.  An API that cannot answer is not a fifth state but a
-# refusal, under D55.
+# refusal.
 #
 # The record it is handed needs three fields and no more, which are the
 # environment's name, its deployment branch, and its pull request branch, so
@@ -1002,11 +1000,11 @@ sub pr_state {
 }
 
 # }}}
-# refuse_unreadable - the one refusal D55 specifies, naming the input {{{
+# refuse_unreadable - the one refusal, naming the input {{{
 #
 # The refusal is whole-run, because a run that cannot read what a reviewer
-# decided cannot know what it would do with any pull request branch, and D98
-# gives it UNAVAILABLE (69) since the API is the service it could not reach.
+# decided cannot know what it would do with any pull request branch, and it
+# takes UNAVAILABLE (69) since the API is the service it could not reach.
 # Genesis::Exit declares codes and no subs, so it is raised through bail with
 # a named code, the way every other refusal in the tree is.
 #
@@ -1043,9 +1041,9 @@ sub refuse_unreadable {
 # }}}
 # recover_marker - the marker a merged pull request's title or body carries {{{
 #
-# D52 makes rebase the only merge method for a pull request into a deployment
-# branch, so the aggregate lands unchanged and its marker lands with it.  Where
-# the site could not grant the setting, a squash rewrites the subject and the
+# Rebase is the only merge method for a pull request into a deployment branch,
+# so the aggregate lands unchanged and its marker lands with it.  Where the
+# site could not grant the setting, a squash rewrites the subject and the
 # body, and the marker is taken back from a pull request Genesis itself wrote,
 # so nothing is invented.
 #
@@ -1145,10 +1143,10 @@ sub certified_marker {
 # }}}
 # title_for - the aggregate's subject, with the supersedes list where there is one {{{
 #
-# D49 puts the marker in the title as well as in the subject, so a squash merge
-# keeps it, and the supersedes-title rule of D12 names every closed-unmerged
-# attempt by number, because a number survives a closed pull request and a
-# deleted branch where a branch name does not.
+# The marker goes in the title as well as in the subject, so a squash merge
+# keeps it, and the supersedes-title rule names every closed-unmerged attempt
+# by number, because a number survives a closed pull request and a deleted
+# branch where a branch name does not.
 #
 # The title is composed on every sync rather than only on the open, which is
 # what displaces the earlier rule that an open pull request keeps the title
@@ -1166,8 +1164,8 @@ sub title_for {
 # sync_pull_request - open or update the pull request, after its branch is up {{{
 #
 # It runs after the publish and not inside the arm, because GitHub opens a
-# pull request from a branch the remote holds and D83 makes the pull request
-# branch's push the branch's own at the end of the run.  One call site, so the
+# pull request from a branch the remote holds and the pull request branch's
+# push is the branch's own at the end of the run.  One call site, so the
 # title and the body are composed once and the proposed record is written from
 # what the API actually answered.
 sub sync_pull_request {
