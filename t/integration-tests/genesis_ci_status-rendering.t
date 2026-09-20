@@ -32,22 +32,6 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 # reads one encoding rather than whichever one the machine happens to have.
 $ENV{TERM} = 'xterm';
 
-sub env_row {
-	my ($record, $name) = @_;
-	my ($row) = grep { $_->{env} eq $name } @{$record->{environments}};
-	return $row;
-}
-
-sub plain {
-	# The line with every SGR sequence taken out, which is what the words of
-	# a row are asserted against.  A colour escape ends in the letter m, so a
-	# coloured name has a word character immediately in front of it and a
-	# pattern anchored on a word boundary could never match one.
-	my ($line) = @_;
-	$line =~ s/\e\[[0-9;]*m//g;
-	return $line;
-}
-
 sub classes_in {
 	# Returns the markup letter guarding each coloured run of the line, in
 	# order, by reading the SGR sequences csprintf emitted.

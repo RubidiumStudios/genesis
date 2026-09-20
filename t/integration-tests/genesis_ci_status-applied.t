@@ -32,18 +32,6 @@ use Genesis::Exit;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
-sub plain {
-	# The tree with every SGR sequence taken out, which is what the words of
-	# a row are asserted against.  NOCOLOR is set above and the renderer
-	# honours it, so this ordinarily changes nothing.  It is here because a
-	# colour escape ends in the letter m, so a word boundary can never hold
-	# in front of a coloured name, and a row that met one would fail for a
-	# reason that had nothing to do with the words.
-	my ($tree) = @_;
-	$tree =~ s/\e\[[0-9;]*m//g;
-	return $tree;
-}
-
 subtest 'a new environment file makes the pipeline stale' => sub {
 	# Four assertions and one restoration for each of the two commands.
 	plan tests => 6;

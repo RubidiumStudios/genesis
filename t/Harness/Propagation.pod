@@ -284,11 +284,34 @@ C<use warnings> of a test file does not.
 
 =head2 in_set($path, @set)
 
-Returns the number of entries in C<@set> that equal C<$path>, which a row
-reads as a plain yes or no.  The readers above answer lists, and nearly every
-row about a propagation set asks whether one path is in one of them, so the
-question is asked here rather than in a copy of the same grep in each file
-that asks it.
+Answers whether C<@set> holds C<$path>, as a one or a zero.  The readers above
+answer lists, and nearly every row about a propagation set asks whether one
+path is in one of them, so the question is asked here rather than in a copy of
+the same grep in each file that asks it.  The answer is a yes or a no because
+that is the question; how many times a list holds one path is a question about
+the list.
+
+=head2 plain($text)
+
+Returns the line or the tree with every colour escape taken out, which is what
+the words of a row are asserted against.  A colour escape ends in the letter
+C<m>, so a word boundary can never hold in front of a coloured name and a row
+matching on words would fail for a reason that had nothing to do with what the
+report said.  An undefined text answers an empty string.
+
+=head2 env_line($tree, $name)
+
+Returns the one rendered row an environment's name opens, with its colour
+taken out, or an empty string where the tree holds no such row.  The row is
+selected by the indent that opens a row as well as by the name, because the
+header above the table names environments too.
+
+=head2 env_row($record, $name)
+
+Returns one environment's record out of the report a run emitted under
+C<--json>, or undef where the report names no such environment.  A report
+answers a list and a row asks about one environment, so the selection is made
+here rather than in each file that reads a record.
 
 =head2 covered_paths($dir, $ref, @pathspec)
 
