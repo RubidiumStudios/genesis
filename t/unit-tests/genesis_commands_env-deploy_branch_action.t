@@ -28,7 +28,6 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
-use Test::Deep;
 
 use Genesis;
 use Genesis::Exit qw/DATAERR/;
@@ -41,7 +40,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 # One environment per state, because each state is a fact about one branch and
 # a harness stands up in the time six of them would take one each.
 my @ENVS = qw/qa dev prod lab ops staging perf sandbox/;
-my $h = make_harness(envs => [@ENVS], vault => 0);
+my $h = make_harness(envs => [@ENVS]);
 my $top = top_for($h);
 my $git = $h->git('a');
 
