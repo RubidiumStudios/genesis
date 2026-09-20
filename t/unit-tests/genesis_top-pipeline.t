@@ -153,9 +153,10 @@ subtest 'fetch_pipeline_envs - control is refreshed even with no environments' =
 subtest 'fetch_pipeline_envs - control leads, and the rest are deployment branches' => sub {
 	plan tests => 3;
 
-	# The names are slugs rather than environment names, under D66.  A
-	# refresh asking for `qa` fetched nothing at all in a typed repository,
-	# because the ref on the remote is `qa/bosh`.
+	# The names are slugs rather than environment names, because the branch
+	# is per deployment and not per environment.  A refresh asking for `qa`
+	# fetched nothing at all in a typed repository, because the ref on the
+	# remote is `qa/bosh`.
 	my $top = make_ci_top();
 	put_env($top, $_) for qw(qa lab prod);
 	my $git = mock_git(default_remote => 'dev');
@@ -220,11 +221,11 @@ subtest 'fetch_pipeline_envs - a branch the remote lacks is not a failure' => su
 #
 # The refusal names the remote, says which of the three kinds it was, quotes
 # git's own message, and closes with what was not done.  It advises no flag,
-# because under D40 there is none to advise: every command but
-# pipeline-status refreshes unconditionally, and a retry is the way out.
-# The exit code the refusal carries is TEMPFAIL, which is read from the
-# product in t/integration-tests/genesis_commands_pipelines-refresh_flags.t,
-# where a whole command runs and its exit status can be asked for.
+# because there is none to advise.  Every command but pipeline-status
+# refreshes unconditionally, and a retry is the way out.  The exit code the
+# refusal carries is TEMPFAIL, which is read from the product in
+# t/integration-tests/genesis_commands_pipelines-refresh_flags.t, where a
+# whole command runs and its exit status can be asked for.
 
 subtest 'fetch_pipeline_envs - an unreachable remote names the network' => sub {
 	plan tests => 2;
