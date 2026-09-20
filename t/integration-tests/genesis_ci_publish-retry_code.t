@@ -63,6 +63,9 @@ subtest 'a hand commit refuses, and refuses again on an unaided retry' => sub {
 
 	# Nobody clears anything between the two runs, which is what unaided
 	# means here, so the second run meets exactly what the first one met.
+	# This retry runs in copy A on purpose, because the state it refuses on
+	# is that clone's own hand commit, where the retry below runs in a fresh
+	# clone because the state that one meets is on R.
 	my (undef, $err_again, $again) = run_genesis($h, 'propagate');
 
 	is($again, Genesis::Exit::DATAERR, 'the unaided retry refuses again');
@@ -113,7 +116,7 @@ subtest 'a control a teammate moved refuses once, and the retry publishes' => su
 	# The retry is a clone cut from R now, because that is what the pipeline
 	# job reading this exit code makes on every run.  Genesis never moves
 	# control, so this copy's own control stays a commit behind the
-	# teammate's and the pre-flight refuses it at the data status until the
+	# teammate's and the pre-flight refuses it at DATAERR until the
 	# operator rebases it.  A clone made after the teammate pushed starts on
 	# what R holds, so it needs nobody to repair anything first.
 	my $copy = clone_copy($h);
