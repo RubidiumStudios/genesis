@@ -71,13 +71,13 @@ EOF
 }
 
 # }}}
-# capabilities - what a workflow can do, as far as D101 has fixed it {{{
+# capabilities - what a workflow can do today {{{
 #
-# D101 gives GitHub Actions multi_file_output true, because a workflow
-# directory is several files and D67's override name follows them.  The
-# other five it leaves to be read off the provider when its compiler
+# GitHub Actions declares multi_file_output true, because a workflow
+# directory is several files and the override file name follows them.
+# The other five are left to be read off the provider when its compiler
 # class is written, so they are false here and the refusal is the
-# conservative one: a key this provider cannot honour is refused now
+# conservative one.  A key this provider cannot honour is refused now
 # rather than accepted and dropped when the pipeline is emitted.
 sub capabilities {
 	return {multi_file_output => 1,
@@ -88,10 +88,10 @@ sub capabilities {
 # }}}
 # provider_options_schema - the one key a workflow offers {{{
 #
-# Empty until now, because D102 put this provider's two CLI flags in the
-# source-control block.  Under D105 and D101 the provider that can emit
-# several files is the provider that declares the key choosing between
-# the forms, so declaring multi_file_output above means declaring this.
+# Empty until now, because this provider's two CLI flags moved to the
+# source-control block.  The provider that can emit several files is the
+# provider that declares the key choosing between the forms, so
+# declaring multi_file_output above means declaring this.
 sub provider_options_schema {
 	return {
 		output_layout => {
@@ -106,21 +106,21 @@ sub provider_options_schema {
 # }}}
 # why this provider states no rule of its own {{{
 #
-# Nothing is written here, so the base's default is what runs, and under
-# D105 that validates the block against the fragment above and refuses
-# anything else by name.  With an empty fragment that means no provider
+# Nothing is written here, so the base's default is what runs, and that
+# validates the block against the fragment above and refuses anything
+# else by name.  With an empty fragment that means no provider
 # key is admitted beside this type at all, which is the whole of what
 # this provider has to say about its block today.
 #
-# The two rules that stood here both spoke of repo.  Under D102 the
-# repository a pipeline acts on lives in
-# pipeline.source_control.repository rather than in the provider block,
-# so the fragment declares no such key and an operator has nowhere to
-# write one.  They worked only because the caller resolved the source
-# control first and handed the value in, and the dispatch now runs before
-# any of that is derived.  Genesis::Top::_source_control already refuses
-# a pipeline whose repository cannot be named, in the operator's own
-# terms, so nothing an operator relied on is lost with them.
+# The two rules that stood here both spoke of repo.  The repository a
+# pipeline acts on lives in pipeline.source_control.repository rather
+# than in the provider block, so the fragment declares no such key and
+# an operator has nowhere to write one.  They worked only because the
+# caller resolved the source control first and handed the value in, and
+# the dispatch now runs before any of that is derived.
+# Genesis::Top::_source_control already refuses a pipeline whose
+# repository cannot be named, in the operator's own terms, so nothing an
+# operator relied on is lost with them.
 # }}}
 # }}}
 ### Instance Methods {{{
