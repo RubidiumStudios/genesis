@@ -313,7 +313,7 @@ sub validate {
 	# Defaults are filled below and nothing is cleared first, because no
 	# part of the schema is built out of the configuration's own values
 	# any more.  A block whose shape depends on one of its values declares
-	# that under D105 and is dispatched during the walk, so there is no
+	# as much for itself and is dispatched during the walk, so there is no
 	# rebuild that could leave a previous provider's filled default
 	# standing in the store.
 	my @errors = ();
@@ -345,10 +345,10 @@ sub validate {
 	}
 
 	if (@errors) {
-		# Under D98 an invalid configuration is a refusal and not a crash,
-		# so it carries CONFIG rather than the bare 1 a fatal system error
-		# uses.  A pipeline job reads the code to decide whether to retry,
-		# to page someone, or to stop.
+		# An invalid configuration is a refusal and not a crash, so it
+		# carries CONFIG rather than the bare 1 a fatal system error uses.
+		# A pipeline job reads the code to decide whether to retry, to page
+		# someone, or to stop.
 		bail({exitcode => CONFIG},
 			"Configuration validation failed for #C{%s}:%s",
 			$self->{path} // '<in-memory config>',
@@ -363,9 +363,9 @@ sub validate {
 # }}}
 # validate_subtree - validate one block against a schema {{{
 #
-# Under D105 the module owning a block's shape owns validating it, and
-# validate() above is a method on a whole configuration, so this is how a
-# module asks for the same treatment of the one block it was handed.
+# The module owning a block's shape owns validating it, and validate()
+# above is a method on a whole configuration, so this is how a module asks
+# for the same treatment of the one block it was handed.
 #
 # It fills through _validate_key rather than against a copy, deliberately.
 # The defaults a fragment declares are read back out of the configuration
@@ -921,14 +921,14 @@ sub _validate_key {
 			push @errors, "#R{$key}: expected null, not #ri{".($value ? $value : "<null>")."}";
 		}
 	} elsif ($type eq 'custom_struct') {
-		# D105: a block whose shape is a function of one of its own values
+		# A block whose shape is a function of one of its own values
 		# declares that here rather than having a builder read the value
 		# raw and assemble a schema out of it.  This is a dispatcher and
-		# nothing more: it checks the discriminator against the map and
+		# nothing more.  It checks the discriminator against the map and
 		# hands the block to the module that owns the shape.
 		push @errors, $self->_validate_custom_struct($key, $schema);
 	} elsif ($type eq 'opaque') {
-		# Passthrough — any value accepted, sub-keys not validated here.
+		# Passthrough.  Any value accepted, sub-keys not validated here.
 		# Used for config sections delegated to other modules (see Top::register_config_section).
 	} elsif ($type eq 'any') {
 		# Do nothing
@@ -950,8 +950,8 @@ sub _validate_custom_struct {
 
 	return ("#R{$key}: expected a hash") unless ref($self->get($key)) eq 'HASH';
 
-	# Filled before the match, because D15 gives the provider type a
-	# default and a map has nowhere else to put one.  It is spelled
+	# Filled before the match, because the provider type has a default and
+	# a map has nowhere else to put one.  It is spelled
 	# discriminator_default rather than default because a schema entry's
 	# default belongs to the key that entry declares, and the parent fills
 	# it before this arm is ever reached, so the two cannot share a name.
@@ -1000,9 +1000,8 @@ sub _validate_custom_struct {
 	# The module is somebody else's code, so a rule that dies is answered
 	# with an error the operator can act on rather than with a Carp trace
 	# out of the middle of a configuration load.  It is gathered as an
-	# error like every other, under D105, because the module's rules are
-	# the block's rules and not a phase of their own with a heading of
-	# their own.
+	# error like every other, because the module's rules are the block's
+	# rules and not a phase of their own with a heading of their own.
 	my @errors = eval {$entry->{class}->$method($self, $key, $field)};
 	# Copied first, because the readers below run evals that clear it.
 	my $caught = $@;
