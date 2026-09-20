@@ -94,7 +94,24 @@ subtest 'the pages name the surface the design left standing' => sub {
 	ok($start =~ m{\.genesis/config} && $start =~ /genesis\.pipeline/,
 		'getting started names .genesis/config and the environment block');
 
-	my @stale = grep { $body{$_} =~ m{\.genesis/ci/} && $body{$_} !~ /removed|superseded|legacy/i } sort keys %body;
+	# A page may name the retired directory in its own history and be current
+	# everywhere else, so the exemption is read in the neighbourhood of the
+	# mention rather than anywhere in the file.  Read file-wide it passed a
+	# page that presented the directory as current in one paragraph as long
+	# as the word legacy stood somewhere else in the same page.  The window
+	# is three lines either side, which is what no-retired-vocabulary.t reads
+	# around its own term.
+	my @stale;
+	for my $page (sort keys %body) {
+		my @lines = split /\n/, $body{$page}, -1;
+		for my $i (0 .. $#lines) {
+			next unless $lines[$i] =~ m{\.genesis/ci/};
+			my $from = $i - 3 < 0 ? 0 : $i - 3;
+			my $to   = $i + 3 > $#lines ? $#lines : $i + 3;
+			next if join("\n", @lines[$from .. $to]) =~ /removed|superseded|legacy/i;
+			push @stale, "$page:" . ($i + 1);
+		}
+	}
 	is_deeply(\@stale, [],
 		'no file presents the .genesis/ci/ directory as current');
 };
