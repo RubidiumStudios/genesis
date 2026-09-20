@@ -41,7 +41,7 @@ subtest 'two roots sharing an environment name never share a reading' => sub {
 	# root composes its branches from its own deployment slug, so every row
 	# here was green the day it was written and no code landed with it.  It
 	# stands because nothing else in the suite runs one command in each of two
-	# roots: it catches a reader that took one branch per environment name, as
+	# roots.  It catches a reader that took one branch per environment name, as
 	# the baseline's status did, and one that read either root's label or type
 	# off whichever Genesis::Top it happened to be holding.
 	#
