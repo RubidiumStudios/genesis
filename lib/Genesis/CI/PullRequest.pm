@@ -1069,7 +1069,7 @@ sub certified_marker {
 # deleted branch where a branch name does not.
 #
 # The title is composed on every sync rather than only on the open, which is
-# what displaces FWT-1099's criterion that an open pull request keeps the title
+# what displaces the earlier rule that an open pull request keeps the title
 # it was opened with.  A title left alone names whatever control commit the
 # first proposal carried, and a rebuilt branch proposing a newer one would then
 # be described by a marker that is no longer true of it.
