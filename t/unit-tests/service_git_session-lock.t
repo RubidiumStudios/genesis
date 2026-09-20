@@ -76,8 +76,9 @@ subtest 'a command that never switches proceeds under the lock' => sub {
 
 	my $pid = hold_session_lock($h, copy => 'a', command => 'genesis propagate');
 
-	# A hook shelling out to genesis inside a deploy is the case D46 names,
-	# and pipeline-describe is a command that changes no branch.
+	# A hook shelling out to genesis inside a deploy is unaffected, because
+	# a command that never switches never touches the lock, and
+	# pipeline-describe is a command that changes no branch.
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-describe');
 	is($exit, 0, 'a command that changes no branch runs under a held lock');
 	unlike($err, qr/\b$pid\b/, 'and never meets the lock at all');
@@ -156,9 +157,9 @@ subtest 'the lock is per working tree' => sub {
 subtest 'the child takes the lock itself after the session has finished' => sub {
 	plan tests => 3;
 
-	# D7 and D46 say nothing is handed from one process to another.  The
-	# post-deploy child of D36 takes the lock for itself, which it can only
-	# do once the deploy's own session has released it.
+	# Nothing is handed from one process to another.  The post-deploy child
+	# takes the lock for itself, which it can only do once the deploy's own
+	# session has released it.
 	my $h   = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
 	my $git = $h->git('a');
