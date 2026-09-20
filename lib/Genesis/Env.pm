@@ -1884,30 +1884,55 @@ sub _resolve_track_additional_files {
 
 	require File::Glob;
 
+	# The pattern is refused before it is expanded, because a name an
+	# operator can read is the friendlier refusal, and every expanded
+	# result is refused again, because a character class spells the two
+	# characters of a parent segment without writing them and the pattern
+	# test cannot see through that.  The set is what gets copied between
+	# branches, so a result outside the deployment root would put a file
+	# there.
+	my $refuse_escape = sub {
+		my ($candidate, $named) = @_;
+		bail(
+			"genesis.pipeline.track_additional_files escapes the deployment root.\n".
+			"  The entry #C{%s} must be relative to the deployment root, with ".
+			"no #R{/}, #R{~/}, or #R{..}.",
+			$named
+		) if $candidate =~ m{^/}
+			|| $candidate =~ m{^~}
+			|| $candidate =~ m{(?:^|/)\.\.(?:/|$)};
+		return;
+	};
+
 	my %out;
 	for my $raw (@$entries) {
 		next unless defined $raw && length $raw;
 		(my $path = $raw) =~ s/<env>/$env_name/g;
 
-		bail(
-			"genesis.pipeline.track_additional_files escapes the deployment root.\n".
-			"  The entry #C{%s} must be relative to the deployment root, with ".
-			"no #R{/}, #R{~/}, or #R{..}.",
-			$raw
-		) if $path =~ m{^/} || $path =~ m{^~} || $path =~ m{(?:^|/)\.\.(?:/|$)};
+		$refuse_escape->($path, $raw);
 
-		if ($path =~ m{[*?\[]}) {
+		# A brace group is an alternation, which _glob_regex names as one of
+		# the three things a glob means, so a pattern whose only glob
+		# character is a brace has to reach the expansion too.  Reading it
+		# as a literal name would add a file that can never exist and leave
+		# every real one out of the set.
+		if ($path =~ m{[*?\[\{]}) {
 			# A caller reading a commit hands in the paths that commit
 			# holds, because the tree on disk is not what the set is being
 			# read for and may not hold them at all.
 			if ($listing) {
 				my $re = _glob_regex($path);
-				$out{$_} = 1 for grep {$_ =~ $re} @$listing;
+				for my $held (grep {$_ =~ $re} @$listing) {
+					$refuse_escape->($held, $raw);
+					$out{$held} = 1;
+				}
 			} else {
 				my @matches = File::Glob::bsd_glob("$root/$path");
 				for my $abs (@matches) {
 					(my $rel = $abs) =~ s{^\Q$root/\E}{};
-					$out{$rel} = 1 if length $rel;
+					next unless length $rel;
+					$refuse_escape->($rel, $raw);
+					$out{$rel} = 1;
 				}
 			}
 		} else {

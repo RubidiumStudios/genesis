@@ -133,4 +133,53 @@ subtest 'path-safety rule bails on escape attempts' => sub {
 	);
 };
 
+subtest 'a parent segment spelled as a character class is refused' => sub {
+	plan tests => 2;
+
+	# A character class spells the two characters without writing them, so
+	# the pattern reads as innocent and the expansion does not.  The set is
+	# what gets copied between branches, so a path resolving outside the
+	# deployment root would put one there.
+	my $deep = tempdir(CLEANUP => 1);
+	make_path("$deep/inner");
+	open my $fh, '>', "$deep/outside.yml" or die $!;
+	close $fh;
+
+	throws_ok {
+		Genesis::Env->_resolve_track_additional_files(
+			['.[.]/outside.yml'], 'x', "$deep/inner"
+		);
+	} qr/escapes/, 'the entry is refused however the segment is spelled';
+
+	is_deeply(
+		[Genesis::Env->_resolve_track_additional_files(
+			['[o]utside.yml'], 'x', $deep
+		)],
+		['outside.yml'],
+		'while a class that stays inside the root still resolves',
+	);
+};
+
+subtest 'a brace group is a glob' => sub {
+	plan tests => 1;
+
+	# The translator names brace alternation as one of the three things a
+	# glob means, so a pattern whose only glob character is a brace has to
+	# reach it.  Reading it as a literal name adds a file that can never
+	# exist and leaves both real ones out of the set.
+	my $braced = tempdir(CLEANUP => 1);
+	for my $rel (qw(app.yml db.yml other.yml)) {
+		open my $fh, '>', "$braced/$rel" or die $!;
+		close $fh;
+	}
+
+	is_deeply(
+		[Genesis::Env->_resolve_track_additional_files(
+			['{app,db}.yml'], 'x', $braced
+		)],
+		['app.yml', 'db.yml'],
+		'both alternatives resolve and nothing else joins them',
+	);
+};
+
 done_testing;
