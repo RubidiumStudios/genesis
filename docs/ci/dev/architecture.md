@@ -97,7 +97,7 @@ The propagation half runs under `genesis propagate` and `genesis pipeline-status
 | `lib/Genesis/CI/Preflight.pm` | The initial state a propagation run may find, and the refusals it owes |
 | `lib/Genesis/CI/Walk.pm` | The per-commit walk and the record it writes for each environment |
 | `lib/Genesis/CI/Marker.pm` | The propagation marker and the Genesis commit trailers |
-| `lib/Genesis/CI/Propagation.pm` | The pull request half of pipeline propagation |
+| `lib/Genesis/CI/Propagation.pm` | One sub, `_apply_propagation_commit`, which applies a commit's files to the branch it is on and writes the marked commit |
 | `lib/Genesis/CI/PullRequest.pm` | The pull request arm of the run |
 | `lib/Genesis/CI/Publish.pm` | The run's third stage, one push per branch |
 | `lib/Genesis/CI/Report.pm` | The run's report |

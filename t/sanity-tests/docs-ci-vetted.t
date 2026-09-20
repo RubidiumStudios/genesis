@@ -1,9 +1,9 @@
 #!perl
 #
-# Proves T295: the configuration reference carries the provider-conditional
-# sentence for genesis.pipeline.manual and claims no refusal at load, and the
-# twelve files under docs/ci no longer present the superseded configuration
-# and command surface as the one an operator meets.
+# Proves T295: the configuration reference names the refusal of
+# genesis.pipeline.manual under a provider whose optional_git_triggers
+# capability is false, and the pages under docs/ci no longer present the
+# superseded configuration and command surface as the one an operator meets.
 #
 use strict;
 use warnings;
@@ -18,20 +18,17 @@ sub slurp {
 	return $body;
 }
 
-my @TWELVE = qw(
-	docs/ci/README.md
-	docs/ci/dev/architecture.md
-	docs/ci/dev/ast-and-descriptor.md
-	docs/ci/dev/compiler-pipeline.md
-	docs/ci/dev/legacy-bridge.md
-	docs/ci/dev/module-reference.md
-	docs/ci/dev/writing-a-provider.md
-	docs/ci/user/cli-commands.md
-	docs/ci/user/configuration-reference.md
-	docs/ci/user/getting-started.md
-	docs/ci/user/layout-dsl.md
-	docs/ci/user/multi-file-configuration.md
-);
+# The pages are read from the tree rather than from a list written here, so
+# that the guards below hold every page under docs/ci and not only the twelve
+# that are there today.  The rows that are about one page still name it.
+#
+# A run from anywhere but the repository root lists nothing and would pass,
+# which is a green that proves nothing, so an empty list bails out.
+sub pages {
+	my @found = grep {length} split /\n/, qx(git ls-files docs/ci);
+	BAIL_OUT('git ls-files docs/ci listed no page') unless @found;
+	return sort @found;
+}
 
 # Returns the body of the one section whose heading matches, from the heading
 # to the next heading of the same level or the end of the file.
@@ -76,14 +73,14 @@ subtest 'the reference states the provider condition and the refusal' => sub {
 		'it names the capability the refusal names');
 };
 
-subtest 'the twelve name the surface the design left standing' => sub {
+subtest 'the pages name the surface the design left standing' => sub {
 	plan tests => 5;
 
-	my %body = map { $_ => slurp($_) } @TWELVE;
+	my %body = map { $_ => slurp($_) } pages();
 	my $all = join("\n", values %body);
 	my $start = $body{'docs/ci/user/getting-started.md'};
 
-	# ok rather than like, because a failing like would dump all twelve files.
+	# ok rather than like, because a failing like would dump every page.
 	ok($all =~ /genesis propagate/, 'the set names genesis propagate');
 	ok($all =~ /genesis pipeline-apply/, 'the set names genesis pipeline-apply');
 	ok($all =~ /genesis pipeline-status/, 'the set names genesis pipeline-status');
@@ -91,7 +88,7 @@ subtest 'the twelve name the surface the design left standing' => sub {
 	ok($start =~ m{\.genesis/config} && $start =~ /genesis\.pipeline/,
 		'getting started names .genesis/config and the environment block');
 
-	my @stale = grep { $body{$_} =~ m{\.genesis/ci/} && $body{$_} !~ /removed|superseded|legacy/i } @TWELVE;
+	my @stale = grep { $body{$_} =~ m{\.genesis/ci/} && $body{$_} !~ /removed|superseded|legacy/i } sort keys %body;
 	is_deeply(\@stale, [],
 		'no file presents the .genesis/ci/ directory as current');
 };
@@ -99,12 +96,12 @@ subtest 'the twelve name the surface the design left standing' => sub {
 subtest 'the prose these pages are held to' => sub {
 	plan tests => 2;
 
-	my %body = map { $_ => slurp($_) } @TWELVE;
+	my %body = map { $_ => slurp($_) } pages();
 
 	# The files are read as bytes, so the em dash is matched as the three
 	# bytes UTF-8 spells it with rather than as a character.
 	my $em_dash = "\xE2\x80\x94";
-	my @dashed = grep { index($body{$_}, $em_dash) >= 0 } @TWELVE;
+	my @dashed = grep { index($body{$_}, $em_dash) >= 0 } sort keys %body;
 	is_deeply(\@dashed, [], 'no page under docs/ci carries an em dash');
 
 	# The four retired commands are history rather than surface, so they are

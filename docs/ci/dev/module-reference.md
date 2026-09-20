@@ -745,7 +745,7 @@ These modules run under `genesis propagate` and `genesis pipeline-status`. None 
 | `Genesis::CI::Preflight` | `lib/Genesis/CI/Preflight.pm` | The initial state a propagation run may find, and the refusals it owes before the walk begins. `assert_not_disowned` lives here because `genesis <env> deploy` asks the same question and is answered with a warning instead |
 | `Genesis::CI::Walk` | `lib/Genesis/CI/Walk.pm` | The per-commit walk and its record. It visits every environment and decides, for each control commit in control order, whether that commit is delivered or held, and with what reason |
 | `Genesis::CI::Marker` | `lib/Genesis/CI/Marker.pm` | The propagation marker and the Genesis commit trailers. The marker is where the next run starts each branch from |
-| `Genesis::CI::Propagation` | `lib/Genesis/CI/Propagation.pm` | The pull request half of pipeline propagation |
+| `Genesis::CI::Propagation` | `lib/Genesis/CI/Propagation.pm` | One sub, `_apply_propagation_commit`, which copies a control commit's changed files onto the branch it is on, removes the ones that commit deleted, and writes the commit the marker names |
 | `Genesis::CI::PullRequest` | `lib/Genesis/CI/PullRequest.pm` | The pull request arm of the run, for the environments whose `require_pr` asks for one |
 | `Genesis::CI::Publish` | `lib/Genesis/CI/Publish.pm` | The run's third stage, which is one push per branch |
 | `Genesis::CI::Report` | `lib/Genesis/CI/Report.pm` | The run's report, on the three axes the design gives it |

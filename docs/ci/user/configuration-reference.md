@@ -10,9 +10,9 @@ The `ci.yml` format the rest of this document describes is the legacy format. A 
 |-----|--------------|
 | `prior_env` | Names this environment's parent in the topology. An environment with no `prior_env` takes control's commits without waiting on an ancestor |
 | `require_pr` | Routes delivery through `<pr_prefix><env>/<type>` and a pull request into the deployment branch, and is also the rule `genesis pipeline-apply` applies to that branch's protection |
-| `manual` | Turns the deploy job's automatic trigger off, and is provider-conditional as the section below states |
+| `manual` | Marks the environment as one a person starts, which the graph labels and `genesis pipeline-status` reads, and which is provider-conditional as the section below states |
 | `redeploy_cron` | One crontab string, or a list of them, in UTC, triggering the environment's redeploy job |
-| `track_dependencies` | The declared deployments this one reads, each yielding a shared lock and a trigger |
+| `track_dependencies` | The deployments this one reads, declared so that the applied record and the staleness check know about them |
 | `track_bosh_configs` | Whether, or which, BOSH config changes trigger this environment's redeploy job |
 | `track_additional_files` | Extra paths for this environment's propagation set, relative to the deployment root, with `<env>` substitution and globs |
 | `notifications` | The per-environment override of the repository's notification settings |
@@ -21,11 +21,11 @@ The block is read merged, so a key written in a site file is inherited by every 
 
 ### `manual`
 
-Under a provider that emits a triggering resource, `manual` sets `trigger: false` on the deployment branch's `get` in the deploy job. The pipeline still fetches the branch, and the job then waits for a person to start it.
+Every environment built from environment files already takes `trigger: false` on the deployment branch's `get` in the deploy job, so the pipeline fetches the branch and then waits for a person to start the job, and writing `manual` does not change that get. What the key reaches today is how the pipeline is read rather than how it is emitted. The Mermaid graph labels the environment `MANUAL`, and `genesis pipeline-status` reads the key when it says that a descendant is held by an ancestor awaiting its trigger.
 
-The key is therefore valid only where the provider emits a triggering resource. That ability has a name, `optional_git_triggers`, and every provider declares whether it has it. Concourse declares it true. The manual provider declares all six of its abilities false, because `genesis pipeline-apply` sets no pipeline at all under it. Nothing fetches, nothing triggers, and there is no `get` for the key to sit on, so an operator runs `genesis <env> deploy` by hand instead. GitHub Actions declares the ability false as well, until the class that emits for it is written.
+The key is valid only where the provider emits a triggering resource, because turning a trigger off says nothing where there is no trigger to turn off. That ability has a name, `optional_git_triggers`, and every provider declares whether it has it. Concourse declares it true. The manual provider declares all six of its abilities false, because `genesis pipeline-apply` sets no pipeline at all under it. Nothing fetches, nothing triggers, and there is no `get` for the key to sit on, so an operator runs `genesis <env> deploy` by hand instead. GitHub Actions declares the ability false as well, until the class that emits for it is written.
 
-Where the ability is absent the key is refused at configuration load, by name, and the refusal names the key, the provider, and the capability together. Writing `genesis.pipeline.manual` in an environment file of a repository on the manual provider therefore fails every command rather than only the pipeline ones, because a key that cannot mean anything is better said out loud than accepted and dropped when the pipeline is emitted.
+Where the ability is absent the key is refused at configuration load, by name, and the refusal names the key, the provider, and the capability together. Writing `genesis.pipeline.manual` in an environment file of a repository that has its pipeline enabled and sits on the manual provider therefore fails every command rather than only the pipeline ones, because a key that cannot mean anything is better said out loud than accepted and dropped when the pipeline is emitted. A repository whose `pipeline.enabled` is false is not validated at all, so it carries the key with no refusal.
 
 An environment whose deploy job waits for a person certifies nothing until that person acts, so its descendants stay held meanwhile, and `genesis pipeline-status` prints the reason as `awaiting its trigger` beside the ancestor that holds them.
 
