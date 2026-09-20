@@ -521,7 +521,8 @@ B<Examples:>
   # discards, resets the branches it wrote, returns to control, and dies on $@
 
   $session->abort('the writer could not finish');
-  # dies naming that error and the branch we are stuck on, where the return failed
+  # dies naming that error and the branch we are stuck on, where the
+  # return failed
 
 =head2 discard($branch)
 
@@ -687,9 +688,9 @@ that is already back where the run found it, and for a branch this run cut the
 second pass would answer C<deleted> for a delete it never made.
 
 It restores what the session recorded, so a caller holding a branch name it
-may never have switched to asks L</switched_to($branch)> first. A branch with no
-remote tip and no recorded tip is read here as one this run cut, and one the
-session never stood on is indistinguishable from that.
+may never have switched to asks L</switched_to($branch)> first. A branch with
+no remote tip and no recorded tip is read here as one this run cut, and one
+the session never stood on is indistinguishable from that.
 
 B<Parameters:>
 
@@ -735,12 +736,12 @@ B<Examples:>
 
 Whether this session recorded a switch to one branch. Returns 1 or 0.
 
-L</restore_branch($branch)> puts a branch back to the tip the session read at the
-switch, and takes off a branch neither the remote nor that record has a tip
-for, because such a branch is one this run cut. A branch this session never
-switched to has no record either, so restoring one would take off a local
-branch this run did not make. A caller that reaches for the restore over a
-branch it may never have stood on asks here first.
+L</restore_branch($branch)> puts a branch back to the tip the session read at
+the switch, and takes off a branch neither the remote nor that record has a
+tip for, because such a branch is one this run cut. A branch this session
+never switched to has no record either, so restoring one would take off a
+local branch this run did not make. A caller that reaches for the restore over
+a branch it may never have stood on asks here first.
 
 B<Parameters:>
 
@@ -867,10 +868,10 @@ in it is the PR-mode case.
 
 =item C<changed>, C<deleted>
 
-The caller's diff, both optional. C<changed> is the git-root-relative paths the
-delivered commit itself moved, spelled as C<@set> spells them, and it keeps those paths out of C<overwrote>,
-since an overwrite the delivery was asked for is not a hand edit. C<deleted>
-is accepted and not read yet.
+The caller's diff, both optional. C<changed> is the git-root-relative paths
+the delivered commit itself moved, spelled as C<@set> spells them, and it
+keeps those paths out of C<overwrote>, since an overwrite the delivery was
+asked for is not a hand edit. C<deleted> is accepted and not read yet.
 
 =item C<base>
 
@@ -879,17 +880,18 @@ is the only caller that passes one.  Its whole tree is listed, so C<removed>
 is the paths that ref holds and the set no longer does, exactly as it is for a
 run reading the index.  A listing git refuses is raised rather than answered,
 because git's own complaint split into lines and read back as paths would have
-the preview report a removal of something nobody has.  A run that writes commits the index of
-the branch the session stands on, so an index read off some other ref is one
-the commit could not match, and a C<base> arriving without C<dry_run> is
-therefore raised as a bug before anything is read.  The pre-flight's
-C<assumed> ref is what a preview passes for the first delivery, and the tree
-of the delivery before it for each one after. Where it is absent the writer reads
-the index and diffs against C<HEAD>, which is the branch the session stands
-on and what the commit is made from. Where it is given the writer reads that
-ref's tree and diffs against it instead, so a preview says what a run would
-say rather than what this un-moved branch would. A caller that writes leaves
-it out, since the index is the only thing a commit can be made from.
+the preview report a removal of something nobody has.  A run that writes
+commits the index of the branch the session stands on, so an index read off
+some other ref is one the commit could not match, and a C<base> arriving
+without C<dry_run> is therefore raised as a bug before anything is read.  The
+pre-flight's C<assumed> ref is what a preview passes for the first delivery,
+and the tree of the delivery before it for each one after. Where it is absent
+the writer reads the index and diffs against C<HEAD>, which is the branch the
+session stands on and what the commit is made from. Where it is given the
+writer reads that ref's tree and diffs against it instead, so a preview says
+what a run would say rather than what this un-moved branch would. A caller
+that writes leaves it out, since the index is the only thing a commit can be
+made from.
 
 =item C<dry_run>
 
@@ -999,7 +1001,8 @@ B<Examples:>
 
   my $result = $session->apply_files($sha, env => $env,
       message => Genesis::CI::Marker::build($sha, 'qa'));
-  # returns {commit => $new_sha, delivered => [...], removed => [...], overwrote => [...]}
+  # returns {commit => $new_sha, delivered => [...], removed => [...],
+  #          overwrote => [...]}
 
   my $result = $session->apply_files($sha, env => $env,
       changed => ['bosh/dev/manifest.yml'], message => $message);
