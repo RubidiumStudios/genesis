@@ -158,12 +158,12 @@ subtest 'the two gates keep the child away' => sub {
 	plan tests => 6;
 
 	for my $case (
-		# The automated arm runs the way the pipeline's own job runs it,
-		# with GENESIS_PIPELINE_TASK set, because the provider gate
-		# refuses an automated provider from the command line and a refusal
-		# proves nothing about the gate these rows are about.  Under the task
-		# variable the gate is skipped, the deploy succeeds, and the
-		# question the row asks is whether a child was spawned.
+		# The automated arm runs the way the pipeline's own job runs it, with
+		# GENESIS_PIPELINE_TASK set, because the provider gate refuses an
+		# automated provider from the command line and a refusal proves
+		# nothing about the gate these rows are about.  Under the task
+		# variable the gate is skipped, the deploy succeeds, and the question
+		# the row asks is whether a child was spawned.
 		{name => 'an automated provider',
 			opts => {provider => 'concourse'},
 			run  => {pipeline_task => 'deploy-qa'}},

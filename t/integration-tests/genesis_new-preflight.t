@@ -54,9 +54,9 @@ my @cases = (
 		# safe.directory rows in t/unit-tests/service_git-preflight.t.
 		#
 		# The alternation is to be narrowed to safe.directory alone when
-		# Genesis::Top stops pre-checking is_inside_work_tree and
-		# swallowing git's dubious-ownership reason.  Whoever makes that
-		# change narrows this matcher with it.
+		# Genesis::Top stops pre-checking is_inside_work_tree and swallowing
+		# git's dubious-ownership reason.  Whoever makes that change narrows
+		# this matcher with it.
 		name    => 'a working tree git refuses to touch',
 		kind    => 'safe_directory',
 		matches => qr/safe\.directory|is not a git checkout/i,

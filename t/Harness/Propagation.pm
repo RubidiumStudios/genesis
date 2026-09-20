@@ -3986,10 +3986,10 @@ sub restore_remote {
 # hold_session_lock - take the switch lock in a child process {{{
 #
 # The harness takes the flock the design fixes, on genesis-session.lock in
-# the git directory, and writes the pid and the
-# command inside for the refusal message to read.  The pid is the first line
-# and the command the second, so a reader that splits on newline gets both
-# whatever the command holds.  A row that wants the lock released by the
+# the git directory, and writes the pid and the command inside for the
+# refusal message to read.  The pid is the first line and the command the
+# second, so a reader that splits on newline gets both whatever the command
+# holds.  A row that wants the lock released by the
 # kernel kills the holder rather than letting it finish.
 sub hold_session_lock {
 	my ($self, %opts) = @_;
@@ -4322,11 +4322,11 @@ sub gh_calls {
 #
 # Some rows ask that a run spawn no second genesis process and others ask
 # that it spawn exactly one, so both want the same observer and the harness
-# carries
-# one rather than two.  The wrapper is t/Harness/bin/genesis-recorder, copied
-# onto the directory _path_prefix already names, and GENESIS_CALLBACK_BIN
-# points at it, so a child spawned through the hook helper's genesis function
-# and a child that resolves the bare name on the path are each recorded.
+# carries one rather than two.  The wrapper is t/Harness/bin/genesis-recorder,
+# copied onto the directory _path_prefix already names, and
+# GENESIS_CALLBACK_BIN points at it, so a child spawned through the hook
+# helper's genesis function and a child that resolves the bare name on the
+# path are each recorded.
 #
 # The parent's own path is left exactly as it was.  run_genesis carries the
 # fixture directory to the run under test alone, which is what keeps the

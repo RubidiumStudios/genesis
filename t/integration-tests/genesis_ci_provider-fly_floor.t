@@ -206,10 +206,10 @@ subtest 'the provider the caller asked for is the provider it gets' => sub {
 	plan tests => 3;
 
 	# pipeline-diff names Concourse itself, whatever the block says, so a
-	# repository whose block declares github-actions
-	# tells the two apart: github-actions has no compiling class, and a
-	# compile that read the type off the block would be refused by the
-	# registry and exit CONFIG before any fly was reached.
+	# repository whose block declares github-actions tells the two apart.
+	# github-actions has no compiling class, and a compile that read the type
+	# off the block would be refused by the registry and exit CONFIG before
+	# any fly was reached.
 	my $h = make_harness(envs => ['qa'], provider => 'concourse');
 	load_with($h, automated_config('github-actions'));
 	compilable_pipeline($h);

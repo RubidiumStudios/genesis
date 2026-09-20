@@ -88,10 +88,9 @@ subtest 'one branch landing and another not is a valid state that converges' => 
 		name => 'lab mirrors the set at its own marker');
 
 	# Read off what the run printed, because the fault log carries no per-ref
-	# step and stringifies the ref specs it does hold.  A
-	# publish that pushed the set as one batch and reported the batch would
-	# name both branches on the line it reported, and that is the
-	# implementation this catches.
+	# step and stringifies the ref specs it does hold.  A publish that pushed
+	# the set as one batch and reported the batch would name both branches on
+	# the line it reported, and that is the implementation this catches.
 	my @both = grep {m{\blab/bosh\b} && m{\bprod/bosh\b}} split /\n/, ($err // '');
 	is(scalar(@both), 0, 'no line of the run reports the two branches together');
 

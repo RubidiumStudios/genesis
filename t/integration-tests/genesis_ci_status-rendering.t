@@ -6,9 +6,8 @@
 # The third row settles whether the illegal initial state D96 refuses
 # applies to a command that resolves nothing.  A hand commit the operator's
 # own clone has not published is the state D33 legalises and the state
-# drift_for exists to report, so a
-# report that refused it would refuse to explain the one thing it was written
-# to explain.
+# drift_for exists to report, so a report that refused it would refuse to
+# explain the one thing it was written to explain.
 use strict;
 use warnings;
 use utf8;
