@@ -617,12 +617,18 @@ sub restore_branch {
 			# before it puts any branch back, so a switch here would be refused
 			# on exactly the path that most needs the step, and the delete
 			# would then answer for a branch still standing.  A session begun
-			# on a detached HEAD has no branch to step back to, and the guard
-			# reads the recorded name for that.
-			$self->_through_the_door(
-				sub {$git->checkout($self->{origin}{branch})})
-				if $self->{origin} && defined $self->{origin}{branch}
-				&& ($git->current_branch // '') eq $branch;
+			# on a detached HEAD steps back to the commit begin recorded,
+			# because the name it recorded is the literal string HEAD and a
+			# checkout of that would stay where it is.
+			if ($self->{origin} && defined $self->{origin}{branch}
+				&& ($git->current_branch // '') eq $branch) {
+				my $origin = $self->{origin};
+				$self->_through_the_door(sub {
+					($origin->{branch} // '') eq 'HEAD'
+						? $git->checkout_detached($origin->{head})
+						: $git->checkout($origin->{branch});
+				});
+			}
 			$git->delete_branch($branch) if $git->branch_exists($branch);
 			$put_back = 'deleted';
 		}
@@ -1254,9 +1260,21 @@ sub _restore {
 
 	chdir($git->root)
 		or bail("Unable to enter git root %s: %s", $git->root, $!);
+
+	# current_branch answers the literal string HEAD on a detached head, so
+	# the name begin recorded is not a branch and a checkout of it is a
+	# no-op that leaves the run on the deployment branch.  begin records the
+	# commit too, and that is what puts a detached run back where it was.
+	my $detached = ($origin->{branch} // '') eq 'HEAD';
+	my $home = $detached
+		? sub {($git->sha('HEAD') // '') eq ($origin->{head} // '')}
+		: sub {($git->current_branch // '') eq $origin->{branch}};
+
 	$self->_through_the_door(sub {
-		$git->checkout($origin->{branch});
-	}) unless ($git->current_branch // '') eq $origin->{branch};
+		$detached
+			? $git->checkout_detached($origin->{head})
+			: $git->checkout($origin->{branch});
+	}) unless $home->();
 
 	# The directory begin recorded may not exist on the branch we came back
 	# to, and saying so beats landing somewhere the caller did not choose.
@@ -1269,8 +1287,8 @@ sub _restore {
 	}
 
 	bail("Failed to return to #C{%s}: we are on %s.",
-		$origin->{branch}, $self->_standing_on)
-		unless ($git->current_branch // '') eq $origin->{branch};
+		$detached ? $origin->{head} : $origin->{branch}, $self->_standing_on)
+		unless $home->();
 
 	return $self;
 }
