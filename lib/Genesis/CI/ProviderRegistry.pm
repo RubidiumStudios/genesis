@@ -8,26 +8,26 @@ use Genesis::Exit qw/CONFIG/;
 
 ### The registry {{{
 #
-# The one registry, under D28 and D108.  It sits in neither family
-# because both consult it: the provider side asks it which class answers
-# for a type, and the compiler side asks it which class emits for one.
-# Before D108 the map lived in a compiler module and the provider family
-# reached into that module to find itself, so the provider family
-# depended on the compiler family, which is backwards.
+# The one registry.  It sits in neither family because both consult it.
+# The provider side asks it which class answers for a type, and the
+# compiler side asks it which class emits for one.  The map once lived in
+# a compiler module and the provider family reached into that module to
+# find itself, so the provider family depended on the compiler family,
+# which is backwards.
 #
-# Under D28 the schema's enum, every class lookup, and every "valid
-# types" message read this map, so a provider cannot be spelled one way
-# in the schema and another in the code, which is the drift H26 names.
-# The manual provider has no compiling class, because under D43
-# pipeline-apply sets no pipeline for it, and the github-actions
-# provider has none yet either: the type validates and resolves on the
-# CLI side, and its compiling class arrives with the provider itself.
+# The schema's enum, every class lookup, and every "valid types" message
+# read this map, so a provider cannot be spelled one way in the schema
+# and another in the code, which is the drift H26 names.  The manual
+# provider has no compiling class, because pipeline-apply sets no
+# pipeline for it, and the github-actions provider has none yet either.
+# Its type validates and resolves on the CLI side, and its compiling
+# class arrives with the provider itself.
 #
 # An entry says the classes and nothing else.  Every package under lib
 # now derives its own path, so a path written beside a class would be a
 # second spelling of the same fact, and the two could disagree.  The
 # concourse entry carried both because Genesis::CI::Concourse sat at a
-# path its package did not derive, which D108's rename put right.
+# path its package did not derive, and the rename put that right.
 
 my %_providers = (
 	'concourse' => {
@@ -95,7 +95,7 @@ sub automated_providers {
 # entry with no cli_class is refused because every type has a CLI class
 # and a resolver that finds none behaves like manual instead of saying
 # so.  And a path that disagrees with the class beside it is refused
-# rather than honoured, because that disagreement is the mismatch D108's
+# rather than honoured, because that disagreement is the mismatch the
 # rename removed from lib and there is no reason to let one back in.
 sub register_provider {
 	my ($class, $type, $info) = @_;

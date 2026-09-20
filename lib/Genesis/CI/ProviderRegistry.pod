@@ -24,23 +24,23 @@ holds the one map from a provider type to both of them.
 
 It sits in neither family because both families consult it. The provider
 side asks which class answers for a type, and the compiling side asks
-which class emits for one. Before D108 the map lived in a compiler module
-and the provider family reached into that module to find itself, so the
-provider family depended on the compiler family, which is backwards. The
-registry lifted out here rather than being renamed in place, because a
-rename would have carried that dependency along with it.
+which class emits for one. The map once lived in a compiler module and the
+provider family reached into that module to find itself, so the provider
+family depended on the compiler family, which is backwards. The registry
+lifted out here rather than being renamed in place, because a rename would
+have carried that dependency along with it.
 
-Under D28 the schema's C<pipeline.provider> enum, every class lookup, and
-every "valid types" message read this one map, so a provider cannot be
-spelled one way in the schema and another in the code. Two of the three
-registered types name no compiling class: C<manual> has none by design,
-since under D43 C<pipeline-apply> sets no pipeline for it, and
-C<github-actions> has none yet, so the type validates and resolves on the
-CLI side and its emitter arrives with the provider itself. Asking for a
-compiling class either of them does not have is refused rather than
-answered with C<undef>, because emitting a pipeline and validating a block
-are different questions and a provider may answer the second while having
-nothing to answer the first with.
+The schema's C<pipeline.provider> enum, every class lookup, and every
+"valid types" message read this one map, so a provider cannot be spelled
+one way in the schema and another in the code. Two of the three registered
+types name no compiling class. C<manual> has none by design, since
+C<pipeline-apply> sets no pipeline for it, and C<github-actions> has none
+yet, so the type validates and resolves on the CLI side and its emitter
+arrives with the provider itself. Asking for a compiling class either of
+them does not have is refused rather than answered with C<undef>, because
+emitting a pipeline and validating a block are different questions and a
+provider may answer the second while having nothing to answer the first
+with.
 
 =head1 CLASS METHODS
 
@@ -128,8 +128,8 @@ doing another. An entry with no C<cli_class> is refused because every type
 has a CLI class, and a resolution that found none would behave like manual
 instead of saying so. And an entry that writes a path down alongside a
 class the path does not derive is refused, because that disagreement is
-the mismatch D108 took out of F<lib> and there is no reason to let one
-back in.
+the mismatch the rename took out of F<lib> and there is no reason to let
+one back in.
 
 The entry is copied on the way in, as C<provider_info> copies on the way
 out. A caller that went on writing into the hash it registered would
@@ -174,7 +174,7 @@ B<Examples:>
 
 The class that answers for a type on the operator's side, with its file
 loaded. This is the lookup the provider family used to make by reaching
-into a compiler module, which is the dependency D108 removes.
+into a compiler module, which is the dependency the registry removes.
 
 B<Parameters:>
 
