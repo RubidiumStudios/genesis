@@ -396,12 +396,14 @@ B<Errors:>
 
 =over 4
 
-=item C<< ...was handed the outcome '...' for <env>, which is not one of the words I8 fixes >>
+=item C<< ...was handed the outcome '...' for <env>, which is not one of
+the words I8 fixes >>
 
 An environment's outcome is a word outside the seven the report fixes, which
 means some stage wrote a phrase of its own into a field four stages share.
 
-=item C<< ...was handed the commit outcome '...', which is not one of the words I8 fixes >>
+=item C<< ...was handed the commit outcome '...', which is not one of the
+words I8 fixes >>
 
 A routed commit's outcome is a word outside the two the report fixes.  The
 guard sits in L</_commit_word>, which this sub calls once per routed commit,
@@ -559,8 +561,9 @@ The one command that clears a hold on an environment, as its words alone.
 
 It is composed here and nowhere else, because a command spelled in two places
 is a command the two spellings drift apart on.  Its callers dress it
-differently and share the words: L</hold_detail> puts it in backticks, that
-sentence being printed inside a colour span already, and L</render_run> puts
+differently and share the words. L</hold_detail> puts it in backticks, the
+sentence it sits in being printed inside a colour span already by each of its
+three readers, and L</render_run> puts
 it in the colour every command this report names takes, on the line beneath a
 hold the run has just set, and C<genesis pipeline-hold> says it plainly in
 the line it prints once a hold is set.
