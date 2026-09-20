@@ -10,7 +10,7 @@ use Genesis::Exit qw/CONFIG DATAERR TEMPFAIL/;
 
 # artifacts_branch_for - the artifacts branch of a deployment {{{
 #
-# D63 names it artifacts/<env>/<type>, so it is the deployment slug with one
+# The name is artifacts/<env>/<type>, so it is the deployment slug with one
 # fixed prefix in front of it.  It is composed here rather than in Top,
 # because nothing writes to it and only this gate reads it.
 sub artifacts_branch_for {
@@ -23,8 +23,8 @@ sub artifacts_branch_for {
 #
 # Returns one of control, deployment, pr, artifacts, or feature.  The three
 # derived classes are computed from the environments the repository knows
-# about, because under D66 the branch is per deployment and its name is the
-# deployment slug, so there is nothing to pattern-match against.
+# about, because the branch is per deployment and its name is the deployment
+# slug, so there is nothing to pattern-match against.
 sub classify_branch {
 	my ($top, $branch) = @_;
 	return 'feature' unless defined $branch;
@@ -61,12 +61,12 @@ sub classify_branch {
 
 # refresh_control - bring control from R into T before the ancestry check {{{
 #
-# D40 has every pipeline command refresh unconditionally and fail loudly at
-# pre-flight when it cannot, and it amends D41 so that genesis new refreshes
-# control and nothing else, because its ancestry check has to run against R's
-# tip.  Only the control branch is named: a deployment branch's tip answers a
-# question no pre-deploy command asks, and fetching it was what let the
-# branch-exists check read a ref that is now derived.
+# Every pipeline command refreshes unconditionally and fails loudly at
+# pre-flight when it cannot, and genesis new refreshes control and nothing
+# else, because its ancestry check has to run against R's tip.  Only the
+# control branch is named.  A deployment branch's tip answers a question no
+# pre-deploy command asks, and fetching it was what let the branch-exists
+# check read a ref that is now derived.
 sub refresh_control {
 	my ($top, $git) = @_;
 
@@ -125,7 +125,7 @@ sub refresh_control {
 
 ### The pre-deploy assertion {{{
 
-# permitted_feature_branch - the three conditions of D81 {{{
+# permitted_feature_branch - the three conditions a branch must meet {{{
 #
 # Returns a true first value when all three hold.  Otherwise it returns
 # false with the condition that failed and the fix for it, so the caller
@@ -236,7 +236,7 @@ sub permitted_feature_branch {
 
 	# Its name is not an environment's name, existing or being added, since
 	# a branch named prod2 occupies refs/heads/prod2 and pipeline-apply
-	# could then never create prod2/bosh (D66).
+	# could then never create prod2/bosh.
 	#
 	# The lookup is what finds the collision, and the key it matches on is
 	# an environment name, so the name handed to deployment_slug_for comes
@@ -268,9 +268,9 @@ sub permitted_feature_branch {
 # }}}
 # assert_pre_deploy - refuse a pre-deploy command off a permitted branch {{{
 #
-# D81: a pre-deploy command runs on control or on a permitted feature
-# branch, refuses elsewhere naming the condition it failed, and switches
-# nothing, because the operator chose the branch and the fix is theirs.
+# A pre-deploy command runs on control or on a permitted feature branch,
+# refuses elsewhere naming the condition it failed, and switches nothing,
+# because the operator chose the branch and the fix is theirs.
 sub assert_pre_deploy {
 	my ($top, $git, %opts) = @_;
 
@@ -282,7 +282,7 @@ sub assert_pre_deploy {
 	#
 	# The caller passes refresh => 0 for a command whose registration
 	# declares that its refresh is the operator's to skip or that it never
-	# makes one, which is pipeline-status under --no-refresh (D40) and
+	# makes one, which is pipeline-status under --no-refresh and
 	# pipeline-describe, which answers from the repository's own files.  The
 	# gate reads that declaration; nothing here knows either command's name.
 	refresh_control($top, $git)
@@ -305,19 +305,19 @@ sub assert_pre_deploy {
 
 	my $class = classify_branch($top, $branch);
 	if ($class eq 'control') {
-		# D45: where control requires a pull request, a command that
-		# commits on control expects a feature branch instead, because a
-		# commit made here has no way to reach control through a pull
-		# request.  The expectation follows the key that already decides
-		# the protection, so there is no second key to set.
+		# Where control requires a pull request, a command that commits
+		# on control expects a feature branch instead, because a commit
+		# made here has no way to reach control through a pull request.
+		# The expectation follows the key that already decides the
+		# protection, so there is no second key to set.
 		#
-		# It is asked of the command and not of the class.  D45 is about
-		# a commit, and most pre-deploy commands make none on control:
-		# pipeline-apply is the command that applies the very protection
-		# this key derives, and refusing it here would leave an operator
-		# no way to turn the protection on.  The caller passes commits
-		# from the registration, and create is the only command that
-		# declares it today.
+		# It is asked of the command and not of the class.  The refusal
+		# is about a commit, and most pre-deploy commands make none on
+		# control.  The command pipeline-apply applies the very
+		# protection this key derives, and refusing it here would leave
+		# an operator no way to turn the protection on.  The caller
+		# passes commits from the registration, and create is the only
+		# command that declares it today.
 		bail({exitcode => DATAERR},
 			"#C{%s} requires a pull request, so this command expects to run ".
 			"on a feature branch.\n\n".
