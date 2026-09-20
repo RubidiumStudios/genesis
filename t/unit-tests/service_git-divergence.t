@@ -186,7 +186,7 @@ subtest 'the source of resolve_branch quotes no seventh state' => sub {
 	# nothing about a seventh the fixtures never reach.  This reads the
 	# sub's own text for the states it can name, which is the only place
 	# that decides the set, and it is a tripwire on that text rather than
-	# on the behaviour: moving the ternary into a lookup table or naming
+	# on the behaviour.  Moving the ternary into a lookup table or naming
 	# the states in constants breaks it without the set having changed, and
 	# whoever does that updates it here.
 	my $src = slurp('lib/Service/Git.pm');
