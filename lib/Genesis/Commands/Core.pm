@@ -51,17 +51,16 @@ sub config {
 			join(', ', map {"#Y{$_}"} @contested)
 		) if @contested;
 		# The pairs are applied twice around the schema rebuild, and they stay
-		# that way under D105.  Writing pipeline.provider.type still changes
-		# which keys the block admits, and the block declares that dependency
-		# now rather than having a builder perform it, but a declared
-		# dependency is still a dependency: the second pass is what lets a
-		# pair written after the type meet the schema that type selects.
-		# The first pass puts the new type on the configuration, the rebuild
-		# declares the keys it brings, and the second pass coerces every
-		# value against the schema that is now true.  Without the second
-		# pass a boolean typed as false is stored as the string "false",
-		# which Perl reads as true, and the run saves the operator's own
-		# opposite.
+		# that way.  Writing pipeline.provider.type still changes which keys
+		# the block admits, and the block declares that dependency now rather
+		# than having a builder perform it, but a declared dependency is still
+		# a dependency, and the second pass is what lets a pair written after
+		# the type meet the schema that type selects.  The first pass puts the
+		# new type on the configuration, the rebuild declares the keys it
+		# brings, and the second pass coerces every value against the schema
+		# that is now true.  Without the second pass a boolean typed as false
+		# is stored as the string "false", which Perl reads as true, and the
+		# run saves the operator's own opposite.
 		_apply_pairs($config, \@pairs);
 		$config->schema($top->_current_config_schema) if $config->schema;
 		_apply_pairs($config, \@pairs);
