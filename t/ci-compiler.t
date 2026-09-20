@@ -2037,7 +2037,7 @@ subtest 'Compiler - can_compile' => sub {
 ### Compiler - _apply_provider_overrides
 ### ============================================================ ###
 
-# The override moved beside .genesis/config under D27, so these rows build a
+# The override lives beside .genesis/config, so these rows build a
 # deployment root with a configuration in it and put the override there.
 sub _override_top {
 	my $tmp = tempdir(CLEANUP => 1);
@@ -2273,10 +2273,10 @@ subtest 'Compiler - can_compile_from_genesis_config: detects pipeline: in config
 };
 
 subtest 'Compiler - validate_config_section takes a hash and refuses the rest' => sub {
-	# The method checks the shape and nothing else, because under D105
-	# the per-key rules belong to the configuration schema.  A row that
-	# hands in a hash and asserts nothing was thrown cannot fail, so the
-	# refusal below is what makes this one discriminate.
+	# The method checks the shape and nothing else, because the per-key
+	# rules belong to the configuration schema.  A row that hands in a
+	# hash and asserts nothing was thrown cannot fail, so the refusal
+	# below is what makes this one discriminate.
 	eval { Genesis::CI::Compiler->validate_config_section($_pipeline_data, undef) };
 	ok !$@, "a hash passes" or diag $@;
 
@@ -2474,10 +2474,10 @@ subtest 'Concourse - provider_options_schema has correct structure' => sub {
 	is $schema->{team}{default}, 'main',  "team default is 'main'";
 };
 
-# Every row below builds its compiler the way D108 says a caller does,
-# through the provider, because the option readers resolve against the
-# fragment the held provider declares and a compiler blessed without one
-# has nothing to ask.
+# Every row below builds its compiler the way a caller does, through the
+# provider, because the option readers resolve against the fragment the
+# held provider declares and a compiler blessed without one has nothing
+# to ask.
 sub concourse_compiler {
 	my (%opts) = @_;
 	return Genesis::CI::Provider::Concourse->new(
