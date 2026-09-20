@@ -155,9 +155,9 @@ subtest 'every environment in scope ends with an outcome' => sub {
 	for my $env (qw/lab qa prod/) {
 		like($err, qr/^\s*\Q$env\E\b/m, "$env is in the report");
 	}
-	# The renderer fixes the outcome words, and what is asserted here
-	# is that none of the three falls silent: every one of them carries a
-	# line saying what became of it, in one of those words.
+	# The renderer fixes the outcome words, and what is asserted here is
+	# that none of the three falls silent.  Every one of them carries a line
+	# saying what became of it, in one of those words.
 	my @outcome_lines = grep {
 		/^\s*(?:lab|qa|prod):\s.*(?:propagated|would propagate|idempotent|failed|not attempted|held|not published)/
 	} split /\n/, $err;
