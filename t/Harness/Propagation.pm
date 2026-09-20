@@ -5276,8 +5276,8 @@ sub a_delivery {
 # seeded is one delivered control commit, which is the smallest shape a row
 # reading a marker off a branch can stand on.
 #
-# The commit writes the environment's own file through env_body for the
-# reason chain does.  A body composed here carried neither a genesis.env
+# The commit writes the environment's own file through env_body, for the
+# reason that chain does.  A body composed here carried neither a genesis.env
 # block nor a block mapping of the kit, both of which
 # Genesis::Env::is_valid_env_file reads, so the repository the shape handed
 # back held no environments at all.  The three rows standing on it read
