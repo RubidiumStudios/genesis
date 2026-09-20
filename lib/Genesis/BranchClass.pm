@@ -334,7 +334,12 @@ sub assert_pre_deploy {
 	my %derived = (
 		deployment => "a deployment branch, which holds what was delivered",
 		pr         => "a pull request branch, which a propagate run rewrites",
-		artifacts  => "an artifacts branch, which a deploy writes to",
+		# Nothing on the tree writes an artifacts branch.  The name is
+		# composed so that a command standing on one can be refused, and
+		# the refusal says that rather than naming a writer.
+		artifacts  => "an artifacts branch, which nothing writes yet and ".
+		              "which Genesis knows by name so that it can refuse ".
+		              "a command standing on one",
 	);
 
 	bail({exitcode => DATAERR},

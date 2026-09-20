@@ -112,9 +112,13 @@ subtest 'genesis new refuses from an artifacts branch' => sub {
 
 	is($exit, Genesis::Exit::DATAERR(),
 		'an artifacts branch refuses too');
+	# Nothing on the tree writes an artifacts branch.  Genesis composes the
+	# name so that a command standing on one can be refused, and the
+	# refusal says so rather than naming a writer that does not exist.
 	my $sentence = sprintf(
-		'artifacts/%s is an artifacts branch, which a deploy writes to, '.
-		'and this command changes what will be delivered.',
+		'artifacts/%s is an artifacts branch, which nothing writes yet and '.
+		'which Genesis knows by name so that it can refuse a command '.
+		'standing on one, and this command changes what will be delivered.',
 		$h->slug('qa'));
 	like(unfolded($err), qr/\Q$sentence\E/,
 		'the refusal names the artifacts branch and its class');
