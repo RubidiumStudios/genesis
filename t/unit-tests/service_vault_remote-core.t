@@ -156,11 +156,11 @@ subtest 'authenticate() - already authenticated returns self' => sub {
 
 	my $v = make_remote(name => 'authed-vault');
 
-	# Capture the auth-related queries.  Token introspection queries
-	# (vault token lookup -format=json, issued by start_token_renewer
-	# during the new renewer-arming path) are explicitly excluded — the
-	# invariant we care about is "no credential-based safe auth attempt
-	# happens when we're already authenticated."
+	# Capture the auth-related queries.  Token introspection queries (vault
+	# token lookup -format=json, issued by start_token_renewer during the new
+	# renewer-arming path) are explicitly excluded, because the invariant we
+	# care about is "no credential-based safe auth attempt happens when we're
+	# already authenticated."
 	my @auth_queries;
 	no warnings 'redefine';
 	local *Service::Vault::Remote::authenticated = sub { 1 };

@@ -15,9 +15,9 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-# Build a Service::BOSH::Director without spawning a real bosh or
-# touching the user's safe target — caller stubs the methods we
-# exercise (exodus / configs / get_config) per test.
+# Build a Service::BOSH::Director without spawning a real bosh or touching the
+# user's safe target.  The caller stubs the methods we exercise (exodus /
+# configs / get_config) per test.
 sub make_director {
 	# Override the constructor's default exodus_vault fallback so we
 	# don't hit `safe target --json` against the user's real saferc.
@@ -109,7 +109,7 @@ subtest 'cpis - refresh=>1 forces re-query after upload changes' => sub {
 	is_deeply [$d->cpis], ['alpha'], 'first call: only alpha';
 	is_deeply [$d->cpis], ['alpha'], 'memoized: still alpha despite director state changing';
 	is_deeply [$d->cpis(refresh => 1)], [qw(alpha beta)],
-		'refresh=>1 invalidates and re-queries — both cpis appear';
+		'refresh=>1 invalidates and re-queries, so both cpis appear';
 };
 
 subtest 'cpis - live query aggregates across multiple cpi-config slots' => sub {
