@@ -1101,11 +1101,12 @@ sub propagate {
 	# The preview enters through its own sub because it has a banner and one
 	# verb of its own, and everything under those is the run's.
 	#
-	# The preview's three caveats, gathered here and said by the report.  The
-	# run has already asked git every one of those questions, to decide
-	# whether to refuse the control branch and to decide whether to reset or
-	# to fast-forward a deployment branch, so the answers are read off what
-	# those two stages settled rather than asked again.  The renderer prints them under its banner,
+	# The preview's three caveats, gathered here and said by the report.
+	# The run has already asked git every one of those questions, to
+	# decide whether to refuse the control branch and to decide whether
+	# to reset or to fast-forward a deployment branch, so the answers
+	# are read off what those two stages settled rather than asked
+	# again. The renderer prints them under its banner,
 	# which is the only place a caveat about a preview can stand and still
 	# be read before the report it is about.
 	$record->{warnings} = _preview_warnings($git, $control, $control_state,
@@ -1236,11 +1237,12 @@ sub _write_trailer_holds {
 # }}}
 # _preview_warnings - the three things a preview's answer rests on {{{
 #
-# There are three, and each is a fact one of the run's first two stages has
-# already settled.  Control being ahead of its remote is what require_control
-# would have refused had this been a run that writes, and a deployment branch
-# with an assumed reset or an assumed fast-forward is one the pre-flight would
-# have moved to its tracking ref before the walk.  Both come off those records rather than out of a
+# There are three, and each is a fact one of the run's first two stages
+# has already settled. Control being ahead of its remote is what
+# require_control would have refused had this been a run that writes, and
+# a deployment branch with an assumed reset or an assumed fast-forward is
+# one the pre-flight would have moved to its tracking ref before the walk.
+# Both come off those records rather than out of a
 # second pair of git reads.
 #
 # The pre-flight makes two assumed moves and names each on the record it

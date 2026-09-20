@@ -971,11 +971,11 @@ later commit has released.
 
 B<Returns:> A hashref carrying C<reason>, which is always C<gate-ahead>,
 C<gate>, the gate's own commit, and C<gate_reason>, the trailer's text with
-any C<hold:> prefix taken off it.  A trailer that carried nothing but the
+any C<hold:> prefix taken off it. A trailer that carried nothing but the
 prefix leaves no text, and the hashref then carries no C<gate_reason> at all.
 A gate written in the hold form carries C<hold_trailer_reason> as well,
-holding that same text, and a plain gate carries no such key at all.  Undefined where the commit is no gate or where
-the gate has been passed or released.
+holding that same text, and a plain gate carries no such key at all. Undefined
+where the commit is no gate or where the gate has been passed or released.
 
 B<Examples:>
 

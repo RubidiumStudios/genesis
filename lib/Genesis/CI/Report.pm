@@ -576,10 +576,10 @@ sub preview_warnings {
 
 # _settle - fill the outcome the record left null {{{
 #
-# A hold that stands writes the bare word
-# held with its qualifier beside it, and an environment with nothing at all
-# to show writes idempotent.  Everything else was decided by whoever knew,
-# which is the walk for a failure and the run for a delivery.
+# A hold that stands writes the bare word held with its qualifier beside
+# it, and an environment with nothing at all to show writes idempotent.
+# Everything else was decided by whoever knew, which is the walk for a
+# failure and the run for a delivery.
 #
 # The qualifier is assigned here rather than appended through note_detail,
 # and that is right, because nothing an environment reaching this sub can be
@@ -663,8 +663,9 @@ sub _commits {
 #
 # The placeholder answers a record with no environment on it, which is a
 # record nothing in the tree builds, because the walk keys every record it
-# makes on the environment's name.  It is here so that such a record prints something
-# an operator can see is wrong rather than a command with a gap in it.
+# makes on the environment's name. It is here so that such a record prints
+# something an operator can see is wrong rather than a command with a gap
+# in it.
 sub release_command {
 	my ($env_name) = @_;
 
