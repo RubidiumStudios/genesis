@@ -233,7 +233,7 @@ sub status_records {
 			&& _seeded($git, $ref)) ? JSON::PP::true : JSON::PP::false;
 	}
 
-	$record->{breaches} = [unfetchable_markers($record, $git)];
+	$record->{breaches} = [unfetchable_markers($git, $record)];
 
 	# Last, so that everything the record carries has been filled before the
 	# stale form goes over it.
@@ -320,7 +320,7 @@ sub drift_for {
 # protection; a rewrite that got past it is reported here by name, because
 # nothing else in the command would notice.
 sub unfetchable_markers {
-	my ($record, $git) = @_;
+	my ($git, $record) = @_;
 	my @breaches;
 	# One answer per sha, because a rewrite that dropped a commit dropped it
 	# for every environment whose marker names it, and the reading costs two
