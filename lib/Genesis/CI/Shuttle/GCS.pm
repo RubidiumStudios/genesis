@@ -11,8 +11,9 @@ use base 'Genesis::CI::Shuttle';
 # There is no region and no endpoint here because the resource takes
 # neither, which is the whole reason D105 asked for the block to be
 # declared on its backend.  auth is the vault reference to this backend's
-# credentials, the same key S3 declares and reads differently, and the
-# reading is FWT-1153's question rather than this file's.
+# credentials, the same key S3 declares and reads differently, and how one
+# reference becomes the JSON key the emitted resource takes is the emitter's
+# question rather than this file's.
 sub options_schema {
 	return {
 		bucket    => {type => 'string', required => 1, description => 'The bucket the resources live in'},

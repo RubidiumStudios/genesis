@@ -46,8 +46,8 @@ fixed priority order:
 
 =over 4
 
-=item * B<env> - values injected by C<validate()> from environment variables
-declared in the schema
+=item * B<env> - values injected from environment variables declared in the
+schema, filled by C<validate()> and by C<validate_subtree()>
 
 =item * B<set> - values written programmatically via C<set()> or passed as
 C<$content> to the constructor

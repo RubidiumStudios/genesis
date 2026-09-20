@@ -1354,7 +1354,7 @@ D12, because a number survives a closed pull request and a deleted branch
 where a branch name does not.
 
 The title is composed on every sync and not only when the pull request is
-opened, which is what displaces FWT-1099's criterion that an open pull request
+opened, which is what displaces the earlier rule that an open pull request
 keeps the title it was opened with. A title left alone names whatever control
 commit the first proposal carried, and a branch since rebuilt on a newer one
 would then be described by a marker that is no longer true of it.

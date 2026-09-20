@@ -25,9 +25,9 @@ rule a declaration cannot state.
 The region and the endpoint are declared here rather than on the block
 because S3 is the backend that reads them. C<auth> is the vault reference
 to this backend's credentials, which is what D23 and the configuration
-surface both call it; how one reference becomes the access key and the
-secret key the emitted resource takes is the emitter's question, filed as
-FWT-1153, and not this file's.
+surface both call it. How one reference becomes the access key and the
+secret key the emitted resource takes is the emitter's question and not this
+file's.
 
 =head1 CLASS METHODS
 

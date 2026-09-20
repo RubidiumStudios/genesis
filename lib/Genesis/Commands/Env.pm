@@ -1322,8 +1322,7 @@ sub _deploy_preflight {
 	#
 	# The record is read once and handed to the check.  Two readers want it,
 	# the check for the fact that the predecessor deployed at all and the
-	# due computation for the commit it certified, and one read serves both
-	# (FWT-1141).
+	# due computation for the commit it certified, and one read serves both.
 	my $bare         = Genesis::Env->bare($name, $top);
 	my $prior        = $bare->lookup('genesis.pipeline.prior_env', '');
 	my $prior_record = _prior_env_record($bare, $prior);
@@ -2164,7 +2163,7 @@ sub deploy {
 #
 # Two readers want this record, the prior-env check for the fact that the
 # predecessor deployed at all and the due computation for the commit it
-# certified, so the design gives both one read (FWT-1141).  A post-failed
+# certified, so the design gives both one read.  A post-failed
 # result counts, because the BOSH deploy itself succeeded and the environment
 # is running.
 #
