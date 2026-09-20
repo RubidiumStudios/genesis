@@ -175,10 +175,19 @@ sub upstream_of {
 # The two numbers come back in the order git prints them, ahead first, and the
 # read names the remote-tracking ref outright rather than the upstream, so a
 # row can weigh the refs even where no upstream is configured.
+#
+# The read is stderr-suppressed and its status is checked, the way every
+# neighbour here reads git, because a branch that was never published has no
+# remote-tracking ref for the range to name and git complains about the range
+# instead of answering it.  An empty list is the answer in that case, so a
+# caller reading two numbers is handed nothing rather than two words of a
+# complaint.
 sub counts {
 	my ($dir, $branch) = @_;
-	my ($out) = run({dir => $dir}, 'git', 'rev-list', '--left-right', '--count',
+	my ($out, $rc) = run({dir => $dir, stderr => 0},
+		'git', 'rev-list', '--left-right', '--count',
 		"refs/heads/$branch...refs/remotes/origin/$branch");
+	return () if $rc || !defined $out;
 	chomp $out;
 	return split /\s+/, $out;
 }

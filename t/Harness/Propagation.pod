@@ -220,6 +220,9 @@ branch against its remote-tracking ref, ahead first and behind second.  The
 read names the remote-tracking ref outright rather than the upstream, so it
 answers even where no upstream is configured.
 
+A branch that has no remote-tracking ref at all is answered with an empty
+list, because git complains about the range rather than counting it.
+
 =head2 tip_of($h, $branch, %opts)
 
 Returns the branch's tip in one of the two copies, or undef where that copy has
