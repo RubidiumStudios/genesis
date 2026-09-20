@@ -4,10 +4,10 @@
 # retired routing sense of "entry point", while the ordinary meaning of a
 # command's CLI entry is left untouched.
 #
-# D89 retired the term in its routing sense, because it named the output of a
-# computation the design removed.  The walk visits every environment and each
-# control commit is either delivered or held with a reason, so there is no set
-# of environments picked out ahead of the walk for the term to name.
+# The term was retired in its routing sense, because it named the output of
+# a computation that no longer exists.  The walk visits every environment and
+# each control commit is either delivered or held with a reason, so there is
+# no set of environments picked out ahead of the walk for the term to name.
 #
 # The two senses are told apart by the company the term keeps.  The routing
 # sense always travels with the propagation vocabulary, and the ordinary sense
