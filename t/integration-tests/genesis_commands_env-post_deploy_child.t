@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # The post-deploy propagate child, and whether it runs, where it runs,
-# and what neither process writes.  Proves T248, T249, T250, T254, T255, T257,
-# and T258 of the test matrix.
+# and what neither process writes.  Proves T248, T249, T250, T254, T255,
+# T257, and T258.
 #
 # The fixture is the named shape rather than a bare make_harness.  A
 # harness that stands up no director, no bosh, and no kit deploys nothing,
@@ -247,7 +247,8 @@ subtest 'the move carries the two properties across' => sub {
 		'and the operator was told the child failed, with its status');
 };
 
-# Proves T250 of the test matrix.
+# Proves T250: a lock taken in the deploy's window is reported rather than
+# swallowed.
 #
 # The fixture is this file's own chained shape rather than the bare harness,
 # for the reason the header records, which is that the row below reads the
