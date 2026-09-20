@@ -21,9 +21,9 @@ shuttle resource reads and inherits its validation from the base, having no
 rule a declaration cannot state.
 
 There is no region here and no endpoint, because the GCS resource takes
-neither. That is the whole of what D105 asked for on this block: while the
-block was flat, a GCS configuration could carry a region that nothing would
-ever read, and it was accepted. It is now refused by name.
+neither. That is the whole reason the block is declared on its backend.
+While the block was flat, a GCS configuration could carry a region that
+nothing would ever read, and it was accepted. It is now refused by name.
 
 C<auth> is the vault reference to this backend's credentials, the same key
 S3 declares and reads differently. How one reference becomes the JSON key

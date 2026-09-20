@@ -9,8 +9,8 @@ use base 'Genesis::CI::Shuttle';
 # options_schema - the keys the GCS backend reads, and no others {{{
 #
 # There is no region and no endpoint here because the resource takes
-# neither, which is the whole reason D105 asked for the block to be
-# declared on its backend.  auth is the vault reference to this backend's
+# neither, and that is the whole reason the block is declared on its
+# backend rather than flat.  auth is the vault reference to this backend's
 # credentials, the same key S3 declares and reads differently, and how one
 # reference becomes the JSON key the emitted resource takes is the emitter's
 # question rather than this file's.
