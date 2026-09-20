@@ -131,7 +131,7 @@ class the path does not derive is refused, because that disagreement is
 the mismatch D108 took out of F<lib> and there is no reason to let one
 back in.
 
-The entry is copied on the way in, as L</provider_info> copies on the way
+The entry is copied on the way in, as C<provider_info> copies on the way
 out. A caller that went on writing into the hash it registered would
 otherwise rewrite the entry every later lookup reads.
 
