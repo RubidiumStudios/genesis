@@ -2963,13 +2963,11 @@ fi
 case "\$subcommand" in
 deploy)
   if [ -n "\${GENESIS_HARNESS_BOSH_FAILS:-}" ]; then
-    # Five lines of output before the refusal, because the failure path
-    # reads the last five lines of what bosh said to decide whether the
-    # operator cancelled, and a shorter answer makes it read past the end.
-    echo "Task 1"
-    echo "Task 1 | 00:00:00 | Preparing deployment: Preparing deployment"
+    # Two lines of output before the refusal.  The failure path reads the
+    # last few lines of what bosh said to decide whether the operator
+    # cancelled, and a director that says less than that is what the
+    # reader has to cope with, so the double says less than that.
     echo "Task 1 | 00:00:01 | Error: the harness director refused the deployment"
-    echo "Task 1 Started"
     echo "Task 1 Failed"
     echo >&2 "the harness director refused the deployment"
     exit 1

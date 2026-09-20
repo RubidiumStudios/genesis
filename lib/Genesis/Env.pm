@@ -5380,7 +5380,12 @@ sub _post_deploy {
 			$self->run_hook('post-deploy', rc => $state->{results}[1], interactive => !$noprompt, data => $state->{predeploy_data});
 		}
 		$state->{results}[0] //= '';
-		my $last_bits_of_output = join "\n", map {decolorize($_)} (split(/\r?\n/,$state->{results}[0]))[-5..-1];
+		# The last five lines, or every line there is.  A director that said
+		# less than five hands a bare slice three reads past the end of the
+		# list, once for every line that is not there.
+		my @said = split(/\r?\n/, $state->{results}[0]);
+		splice(@said, 0, @said - 5) if @said > 5;
+		my $last_bits_of_output = join "\n", map {decolorize($_)} @said;
 		my $msg;
 		my $cleanup_cache = 1;
 		if ($last_bits_of_output =~ /Continue\?[^\n]*: [^\n]*[nN]o?\r?\n\s*Stopped\s*Exit code 1/sm) {

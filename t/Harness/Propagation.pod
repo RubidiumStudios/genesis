@@ -999,9 +999,11 @@ answers C<deploy> with a success line, hands C<interpolate> to the real
 C<bosh>, and answers everything else with an empty table, so a reader that
 walks the rows of one answer never reads a config row as a stemcell.  Setting
 C<GENESIS_HARNESS_BOSH_FAILS> in the parent makes the C<deploy> call print
-five lines of task output and exit non-zero, which is what the deploy's own
-failure path reads to tell a refusal from a cancellation, so a row can watch
-the bail path without breaking anything else the deploy asks for.
+two lines of task output and exit non-zero, which the deploy's own failure
+path reads to tell a refusal from a cancellation, so a row can watch the bail
+path without breaking anything else the deploy asks for.  Two lines rather
+than five, because a director that says little is the answer that reader has
+to cope with.
 
 Setting C<GENESIS_HARNESS_SIGINT_BEFORE_BOSH> makes the C<blueprint> hook
 raise C<SIGINT> in the genesis process, which is how a row watches the signal
