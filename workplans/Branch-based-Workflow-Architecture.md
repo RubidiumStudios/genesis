@@ -1,6 +1,6 @@
 # Branch-Based Pipeline Architecture
 
-**Status:** Superseded by the pipeline propagation design set, which decided the routing, the configuration surface, and the branch rules this document sketched. What survives here is the shape of the workflow and the decisions log, kept for the trail.
+**Status:** Superseded by the pipeline propagation design set, which decided the routing, the configuration surface, and the branch rules this document sketched. What survives here is the shape of the workflow and the decisions log, kept for the trail. The design set lives outside this repository, so the shipped surface to read instead is [docs/ci](../docs/ci/README.md).
 **Last Updated:** 2026-09-20
 
 Branch rules this document assumes throughout. Control and every `<env>/<type>` branch on the remote are append-only, so the previous tip is always an ancestor of the new tip and Genesis never force-pushes either, while `<pr_prefix><env>/<type>` is derived and may be rewritten freely against the tip the run read at its refresh. A deployment branch is derived state too, and it never carries a local commit outside a propagation activity, so the run resets a marker-only local commit and refuses a hand commit. The repository's own pipeline settings live in `.genesis/config` under `pipeline`, and each environment's live in its own file under `genesis.pipeline`.
@@ -46,6 +46,20 @@ Parts of this document described a design that was never built, and the built de
 | `pipeline.mode: branch` and `pipeline.branches:` in `ci.yml` | **Superseded**, the repository's settings moved to `.genesis/config` under `pipeline` and the environment's to `genesis.pipeline` | `.genesis/config`, the environment files |
 | A pipeline that runs the propagation itself | **Partly built**, the Concourse provider compiles and sets a pipeline, and the emitted pipeline's own propagate job is not wired | see Open Questions |
 
+### Non-Goals
+
+- <!-- TBD -->
+
+### Out of Scope
+
+#### Dev Kits (`dev/` directory)
+
+Dev kits, which are unpacked kits in the `dev/` directory, were never intended for pipeline use and were never explicitly blocked either. The legacy cache system did not manage what lived under `dev/`, so a change there reached any environment on a dev kit at its next deploy, without travelling through that environment's predecessors first.
+
+**Updated 2026-08-28.** The implementation no longer ignores `dev/`. `Genesis::Env::propagation_files` returns the path `dev/` for any environment whose kit `is_dev`, and it marks that path as one that triggers a deploy, so a change under it is mirrored onto the deployment branch like any other triggering path and it holds the descendants that share it until the ancestor has deployed. A dev kit does not bypass the ordering any more.
+
+What remains out of scope is anything finer-grained than the whole directory. `dev/` propagates as a single path, so every environment on a dev kit receives every dev-kit change, whether or not it uses the changed part.
+
 ---
 
 ## Terms
@@ -54,11 +68,11 @@ Parts of this document described a design that was never built, and the built de
 |------|------------|
 | **Repository** | A git-based hierarchical structure containing versioned files across multiple branches. Branches share a common base but may diverge in content. All changes are tracked in version history. |
 | **`control` branch** | The branch the standard workflow runs on, where developers commit their changes. A commit does not propagate because it was made. Propagation is an act somebody takes, either `genesis propagate` by hand or the child a manual-provider deploy spawns on success. The name defaults to `control` and is read through `Genesis::Top::control_branch`. Control is append-only on the remote, so Genesis never force-pushes it and never rewrites its history. |
-| **Deployment branch** | The branch a deployment's environment is deployed from, named `<env>/<type>`, where `<type>` is the repository's `deployment_type`. It holds only the files that deployment depends on. `genesis pipeline-apply` cuts it as an orphan branch with a single `init` file, and the first delivery replaces that file with the propagation set. It is derived state, so it never carries a local commit outside a propagation activity, and it is append-only on the remote. |
-| **Propagation set** | The git-root-relative paths a deployment depends on, from `Genesis::Env::propagation_files`. This is what a delivery mirrors onto the branch. The set divides into triggering and non-triggering paths, which the "Propagation Set" section below takes apart. |
-| **Ancestral file** | A YAML file whose name is a prefix of an environment's name, based on hyphen-delimited segments. For environment `c-aws-east-prod`, ancestral files include `c.yml`, `c-aws.yml`, and `c-aws-east.yml`. Typically lacks a `genesis.env` key, making it a configuration fragment rather than a deployable environment. Ancestral files are shared across all environments matching their prefix and appear in the propagation set of every environment that inherits them. Ancestry does not require saturation, so intermediate files may be absent. Using a deployable environment as an ancestor of another is possible but discouraged. |
-| **Ops file** | A manifest fragment in the `ops/` directory that extends or customizes kit behavior. Referenced via the `kit.features` array in environment files. May be shared across environments or environment-specific. Unlike ancestral files, an ops file's applicability is explicit, because it is determined by which environments reference it rather than by a naming convention. |
-| **Included file** | A file explicitly inherited via the `genesis.inherits` key in an environment file. Provides direct inheritance independent of hyphen-based naming conventions. Allows environments to share configuration without requiring a common name prefix. |
+| **Deployment Branch** | The branch a deployment's environment is deployed from, named `<env>/<type>`, where `<type>` is the repository's `deployment_type`. It holds only the files that deployment depends on. `genesis pipeline-apply` cuts it as an orphan branch with a single `init` file, and the first delivery replaces that file with the propagation set. It is derived state, so it never carries a local commit outside a propagation activity, and it is append-only on the remote. |
+| **Propagation Set** | The git-root-relative paths a deployment depends on, from `Genesis::Env::propagation_files`. This is what a delivery mirrors onto the branch. The set divides into triggering and non-triggering paths, which the "Propagation Set" section below takes apart. |
+| **Ancestral File** | A YAML file whose name is a prefix of an environment's name, based on hyphen-delimited segments. For environment `c-aws-east-prod`, ancestral files include `c.yml`, `c-aws.yml`, and `c-aws-east.yml`. Typically lacks a `genesis.env` key, making it a configuration fragment rather than a deployable environment. Ancestral files are shared across all environments matching their prefix and appear in the propagation set of every environment that inherits them. Ancestry does not require saturation, so intermediate files may be absent. Using a deployable environment as an ancestor of another is possible but discouraged. |
+| **Ops File** | A manifest fragment in the `ops/` directory that extends or customizes kit behavior. Referenced via the `kit.features` array in environment files. May be shared across environments or environment-specific. Unlike ancestral files, an ops file's applicability is explicit, because it is determined by which environments reference it rather than by a naming convention. |
+| **Included File** | A file explicitly inherited via the `genesis.inherits` key in an environment file. Provides direct inheritance independent of hyphen-based naming conventions. Allows environments to share configuration without requiring a common name prefix. |
 | **Env DAG** | The deployment topology, built from per-environment `genesis.pipeline.prior_env` keys by `Genesis::CI::Compiler::ASTBuilder::_build_from_env_files` and reached by every pipeline command through the single accessor `Genesis::Top::pipeline_topology`. Each environment has at most one parent and any number of children. This is what the walk reads, and the `ci.yml` layouts are not. See "Topology source". |
 | **Layout** | A deployment progression plan defined in legacy `ci.yml` under `pipeline.layout` or `pipeline.layouts`, using arrow notation (`->`) and the `auto <pattern>` directive. Still parsed by the compiler for a legacy configuration, and the walk does not read it, the env DAG having replaced it for that purpose. |
 | **Propagation** | Delivering a control commit to the deployment branches that depend on the files it changed, as one commit per branch, with the subject `[pipeline] control@<short-sha> -> <env>`. |
