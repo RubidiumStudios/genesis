@@ -29,7 +29,7 @@
 # The two green rows stay as guards: the third catches an abort that discards
 # the files without saying which, leaving an operator with no idea what was
 # thrown away, and the fourth catches an abort that names them and keeps
-# them, which is the warning this task replaced.
+# them, which is the warning the abort replaced.
 use strict;
 use warnings;
 use utf8;

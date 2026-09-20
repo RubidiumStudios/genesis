@@ -90,8 +90,8 @@ subtest 'one row carries deployed, drifted, and [manual]' => sub {
 
 	my @classes = classes_in($row);
 	is($classes[0], 'R', "the row's name takes the worst class present, which is red");
-	# A guard.  The record task already gave each component its own class, so
-	# green stood on this word before the drift did, and the row would pass
+	# A guard.  Each component already carries a class of its own, so green
+	# stood on this word before the drift did, and the row would pass
 	# against it.  It is here because the worst-class rule above only means
 	# something if the components beside it kept their own colours.
 	ok(scalar(grep { $_ eq 'G' } @classes),
@@ -102,7 +102,7 @@ subtest 'one row carries deployed, drifted, and [manual]' => sub {
 };
 
 subtest 'the five classes map onto the markup Genesis::Term already has' => sub {
-	# A guard over the class table and the ranking the record task landed.
+	# A guard over the class table and the ranking the record rests on.
 	# The worst-class rule the row above proves rests on both, so an edit
 	# that renamed a class or reordered the ranking would make that row fail
 	# for a reason nothing here named.  These three say the reason.

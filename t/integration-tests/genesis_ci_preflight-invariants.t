@@ -4,10 +4,10 @@
 # names the branch and both counts, and one class's action leaves the
 # other two classes alone.
 #
-# This file asserts across everything the eight tasks before it built and
-# it adds no product code of its own.  Where a row here is green from the
-# day it is written, that is the sweep confirming a claim one of those
-# tasks already landed rather than a row that proves nothing.
+# This file asserts across the whole of the pre-flight and adds no product
+# code of its own.  Where a row here is green from the day it is written,
+# that is the sweep confirming a claim the pre-flight already makes rather
+# than a row that proves nothing.
 #
 # Every phrase is matched across the wrap.  A refusal and an event line are
 # both wrapped to the terminal width before they reach standard error, so a

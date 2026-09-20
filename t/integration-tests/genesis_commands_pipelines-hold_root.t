@@ -7,8 +7,8 @@
 # The two commands were written with their loops already over the environments
 # the argument selects, so every row here reads behaviour that landed with the
 # commands themselves and none of them drove it.  Each subtest says below it
-# which of its rows discriminates and what turns that row red, and the report
-# for this task carries the runs that proved each one.  T320 proves the other
+# which of its rows discriminates and what turns that row red.  T320 proves
+# the other
 # half of the two-root claim, that the two roots compose different slugs and
 # different Exodus paths; what is proved here is that the two commands read one
 # root's topology and write one root's paths.

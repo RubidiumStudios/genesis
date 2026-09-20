@@ -9,8 +9,9 @@
 # those things and leave the operator to guess the rest.
 #
 # Which assertions here discriminate and which guard is said beside each.
-# The hand commit's sha reached the record in the snapshot-flag task rather
-# than in this one, so the two assertions that read it are this file's
+# The hand commit's sha reaches the record through the snapshot flag rather
+# than through anything here, so the two assertions that read it are this
+# file's
 # discriminators and the fold assertions around them are guards: the renderer
 # that folded the two axes into one string was deleted when the read model
 # landed, so nothing in the tree can fail them today.
@@ -131,8 +132,8 @@ subtest 'the drifted cell names every file that differs' => sub {
 	my ($tree) = run_genesis($h, 'pipeline-status');
 	# Half novel and half a guard.  The two files joined into one bracket is
 	# T283's own claim and nothing else asserts it, while the wording round
-	# them, which reads differs: hand commit, is the one the snapshot-flag
-	# task's repairs landed and is green on arrival.  It reads as T281 and
+	# them, which reads differs: hand commit, came in with the snapshot flag
+	# and is green on arrival.  It reads as T281 and
 	# the design's canonical sample quote it.
 	like(env_line($tree, 'lab'),
 		qr/drifted \[ops\/extra\.yml, ops\/shared\.yml differs: hand commit\]/,

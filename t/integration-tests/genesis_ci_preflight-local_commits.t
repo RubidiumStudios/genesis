@@ -190,9 +190,9 @@ subtest 'no option adopts the remote over a hand commit' => sub {
 	# Four rows, and one more for the run's own restoration assertion.
 	#
 	# The claim is read from the product rather than from the absence of
-	# three flags nobody ever wrote: a run that drives three unbuilt
-	# options is green before this task starts, and says nothing about
-	# what the refusal offers.  So the refusal itself is driven, and the
+	# three flags nobody ever wrote.  A run that drives three unbuilt
+	# options is green whatever the refusal says, and says nothing about
+	# what it offers.  So the refusal itself is driven, and the
 	# row reads what it puts in front of the operator.
 	plan tests => 5;
 

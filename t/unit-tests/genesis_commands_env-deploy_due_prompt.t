@@ -14,8 +14,7 @@
 # arm is live for a hyphen-nested environment, whose parent's file is part of
 # its own hierarchy and so does travel to the branch, and it is the walk that
 # decides the reason in either case.  The warning is driven here with the
-# record the walk would hand it, which is what this row is about.  The task
-# report carries the reach of this as a concern.
+# record the walk would hand it, which is what this row is about.
 use strict;
 use warnings;
 

@@ -221,7 +221,7 @@ subtest 'the namespace holds modules and nothing at its root' => sub {
 		         ProviderRegistry.pm Publish.pm PullRequest.pm
 		         Report.pm RunFailure.pm
 		         Shuttle.pm Status.pm Walk.pm/],
-		'and the namespace holds the sixteen modules the step leaves it');
+		'and the namespace holds sixteen modules and no more');
 };
 
 subtest 'the pages name no class the namespace no longer holds' => sub {

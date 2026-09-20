@@ -55,8 +55,8 @@ subtest 'an automated provider refuses without --force' => sub {
 	like($said, qr/locks?\b/, 'and the locks a CLI deploy cannot take');
 
 	# An absence guard, green on arrival, and stated as one.  No wrong
-	# implementation of this task makes it red: this fixture stands up no
-	# director, so a deploy with no gate at all dies at the environment load
+	# implementation of the gate makes it red, because this fixture stands up
+	# no director, so a deploy with no gate at all dies at the environment load
 	# well before anything is written, and a deploy that reaches its end
 	# writes no git either, which is the general fact
 	# genesis_commands_env-deploy_no_git_write.t owns.  What it catches is a
