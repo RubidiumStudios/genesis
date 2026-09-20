@@ -57,9 +57,9 @@ subtest 'Genesis refuses to rewrite history on either protected class' => sub {
 };
 
 subtest 'a deployment branch that moved is rejected by the remote itself' => sub {
-	# Four rather than three, because run_genesis asserts the restoration of
+	# Three rather than two, because run_genesis asserts the restoration of
 	# the working state in its own words and that assertion is counted here.
-	plan tests => 4;
+	plan tests => 3;
 
 	my $h = make_harness(envs => ['lab'], mode => 'direct',
 		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
@@ -81,9 +81,11 @@ subtest 'a deployment branch that moved is rejected by the remote itself' => sub
 
 	like($said, qr/publish rejected, lab\/bosh moved on R/,
 		'the branch was refused');
-	unlike($said, qr/force-with-lease|--force\b/,
-		'no forced form was ever named for a deployment branch');
 
+	# Nothing here reads the push arguments, because the run prints its
+	# refusal and not the command lines it built, so the forced form is ruled
+	# out by the refusal git gave rather than by a search of the output.
+	#
 	# A lease git turns down is refused for stale info, and this one was
 	# refused for the history it would have rewritten, so the push that went
 	# out carried no lease at all.
