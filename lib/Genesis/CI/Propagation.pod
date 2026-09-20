@@ -38,7 +38,7 @@ L<Genesis::CI::PullRequest/sync_pull_request> is the one place that sends
 them.  The idempotent re-run check for a rolling
 C<pr/E<lt>envE<gt>/E<lt>typeE<gt>> branch went with them as well.  It read the
 branch's newest marker and compared it with the commit being propagated, and
-D48 replaced that with the marker walk on both branches and a comparison of
+the marker walk on both branches replaced that, together with a comparison of
 the two trees, which is L<Genesis::CI::PullRequest/settled>.  What is left is
 what other test files still reach for by name, and retiring the module
 outright would take them with it.
