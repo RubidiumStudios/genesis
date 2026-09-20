@@ -36,13 +36,19 @@ subtest 'the three readers print one story' => sub {
 	# a spawned deploy needs, and the delivery below puts the environment
 	# file it writes onto prod's own branch, which is the branch the deploy
 	# stands on.
-	my $h = deployable_prod(delivered => ['prod'], certified => ['prod']);
+	my $domain = 'prod.example.com';
+	my $h = deployable_prod(base_domain => $domain,
+		delivered => ['prod'], certified => ['prod']);
 	run_genesis($h, 'propagate', '-y');
 
 	run_genesis($h, 'prod', 'pipeline-hold', 'waiting on the capacity report');
-	commit_on_control($h,
-		files   => {'prod.yml' => env_body('prod', 1)},
-		message => 'raise the instance count', push => 1);
+	# The due commit is written through the same builder the harness wrote
+	# prod.yml with, so the file keeps the base_domain the environment is
+	# deployed with.  A body composed here would write the file whole and
+	# take that value off it.
+	due_commit($h, 'prod',
+		params  => {base_domain => $domain, instances => 3},
+		message => 'raise the instance count');
 
 	my $record = $h->env_path('prod').'/hold';
 	my $who    = sprintf('%s@%s',
