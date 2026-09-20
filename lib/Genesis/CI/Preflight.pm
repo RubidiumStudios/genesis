@@ -2,7 +2,7 @@ package Genesis::CI::Preflight;
 # The propagate run's first stage, which settles what the run is allowed to
 # find before it writes anything.  Everything here reads the refresh and the
 # divergence query and refuses; the only writes it makes are the reset and
-# the fast-forward the rules permit.
+# the fast-forward.
 use strict;
 use warnings;
 
