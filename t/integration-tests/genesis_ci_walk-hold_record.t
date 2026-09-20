@@ -52,7 +52,7 @@ subtest 'a hold stops a pull request being opened or updated' => sub {
 	plan tests => 3;
 
 	# The walk reads the hold in pull request mode and stops there, so the
-	# rows below discriminate: a run over the same fixture with the hold
+	# rows below discriminate.  A run over the same fixture with the hold
 	# lifted opens a pull request and pushes its branch, and each of these
 	# three would fail on it.
 	my $h = held(mode => 'pr', github => 1);

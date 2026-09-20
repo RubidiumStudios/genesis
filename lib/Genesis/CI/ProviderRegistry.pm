@@ -117,9 +117,9 @@ sub register_provider {
 	}
 
 	# A shallow copy rather than the caller's own hash, for the same reason
-	# provider_info takes one on the way out: a caller that goes on writing
-	# into what it registered would rewrite the entry every later lookup
-	# reads.
+	# provider_info takes one on the way out.  A caller that goes on
+	# writing into what it registered would rewrite the entry every later
+	# lookup reads.
 	$_providers{$type} = {%$info};
 	return 1;
 }
