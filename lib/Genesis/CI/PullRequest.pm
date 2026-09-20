@@ -129,10 +129,15 @@ sub gate_line {
 	my $reason = $commit->{gate_reason} // '';
 	$reason =~ s/\s+$//;
 	$reason =~ s/\.$//;
-	return sprintf('Gate: %s.', $reason) unless $held->{count};
+
+	# A gate whose trailer carried no text still gates, so the line names
+	# the gate and leaves the sentence about why off rather than writing an
+	# empty one.
+	my $why = length $reason ? sprintf('Gate: %s.', $reason) : 'Gate.';
+	return $why unless $held->{count};
 	return sprintf(
-		"Gate: %s. Holding %d later commit%s for %s until this deploys.",
-		$reason, $held->{count}, $held->{count} == 1 ? '' : 's', $held->{env}
+		"%s Holding %d later commit%s for %s until this deploys.",
+		$why, $held->{count}, $held->{count} == 1 ? '' : 's', $held->{env}
 	);
 }
 

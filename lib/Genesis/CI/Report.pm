@@ -106,8 +106,12 @@ sub hold_reason {
 	# The gate's form carries the trailer's own text and no held prefix,
 	# because the gate is a step somebody has to take rather than a state
 	# the pipeline works its own way out of.
-	return sprintf('gate: %s', $held->{gate_reason})
-		if $reason eq 'gate-ahead';
+	if ($reason eq 'gate-ahead') {
+		my $why = $held->{gate_reason};
+		return defined $why && length $why
+			? sprintf('gate: %s', $why)
+			: 'gate';
+	}
 
 	return sprintf('held behind control@%s',
 		substr($held->{behind}, 0, 7)) if $reason eq 'behind-held-commit';
