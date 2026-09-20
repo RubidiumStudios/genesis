@@ -419,8 +419,8 @@ sub pipeline_hold {
 		$env->set_hold(reason => $reason);
 		info(
 			"Propagation to #C{%s} is held: %s\n".
-			"Release it with #C{genesis %s pipeline-release}.",
-			$name, $reason, $name
+			"Release it with #C{%s}.",
+			$name, $reason, Genesis::CI::Report::release_command($name)
 		);
 	}
 	return 0;
@@ -453,10 +453,13 @@ sub pipeline_release {
 		command => 'pipeline-release');
 
 	command_usage(1,
-		"A propagation release takes one environment at most.  Run ".
-		"#C{genesis <env> pipeline-release} to release one environment, or ".
-		"#C{genesis pipeline-release} to release every environment in the ".
-		"deployment root."
+		sprintf(
+			"A propagation release takes one environment at most.  Run ".
+			"#C{%s} to release one environment, or ".
+			"#C{genesis pipeline-release} to release every environment in ".
+			"the deployment root.",
+			Genesis::CI::Report::release_command(undef)
+		)
 	) if @args > 1;
 
 	my $env_name = $args[0];
