@@ -70,24 +70,24 @@ a word.
 One held commit's reason, in the form the design fixes.
 
 The words are exact, so that C<genesis propagate>, its dry run, and the
-routing column of C<genesis pipeline-status> can never disagree about one. The
-overlap form carries the ancestor's own state and the never-certified form
+routing column of C<genesis pipeline-status> can never disagree about one.
+The overlap form carries the ancestor's own state and the never-certified form
 carries no such clause, an environment that has never deployed being already
-clear about why. A commit held behind a gate reads C<< gate: <reason> >> with
+clear about why.  A commit held behind a gate reads C<< gate: <reason> >> with
 the trailer's own text and no held prefix, because the gate is a step somebody
-has to take rather than a state the pipeline works its own way out of. A gate
+has to take rather than a state the pipeline works its own way out of.  A gate
 whose trailer carried no text after the hold prefix leaves no reason at all,
-and the commit then reads the bare word C<gate>. An ancestor this run could
+and the commit then reads the bare word C<gate>.  An ancestor this run could
 not read at all reads C<< held by <ancestor>, which could not be read >>,
-since an ancestor nobody can read is neither certified nor uncertified. A
+since an ancestor nobody can read is neither certified nor uncertified.  A
 commit standing behind one the run has already held reads C<< held behind
-control@<sha> >>, naming that commit in the marker's short form. A commit
+control@<sha> >>, naming that commit in the marker's short form.  A commit
 stopped by the environment's own propagation hold reads C<< held (<reason>) >>
 carrying the reason somebody wrote on the hold record, rather than the word
 C<on-hold>, because what an operator has to clear is that reason and not the
-state's own name. A commit held because the environment's pull request has
+state's own name.  A commit held because the environment's pull request has
 been approved and frozen reads C<< awaiting merge (#<number>) >>, naming the
-pull request an operator merges to release it. An entry carrying that reason
+pull request an operator merges to release it.  An entry carrying that reason
 and no number falls through to the bare C<< held (<reason>) >> form rather
 than printing an empty number, which nothing in the tree produces:
 C<Genesis::CI::PullRequest::freeze> is the only writer of the reason and it
