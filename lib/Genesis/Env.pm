@@ -5292,12 +5292,48 @@ sub _deploy_to_bosh {
 }
 
 # }}}
+# _deploy_option_flags - this run's options, as a command line {{{
+#
+# The options the deploy acted on rather than the ones the operator typed,
+# because --recreate reaches the run from pipeline.recreate_on_deploy as well
+# as from the operator, and the record is about what BOSH was given.
+#
+# Both audit records read it, the one a success writes and the one a failure
+# writes, so the string is composed in one place and the two cannot come to
+# say different things about the same run.
+sub _deploy_option_flags {
+	my ($self, $noprompt, $state, $opts) = @_;
+
+	my @skip_drains = @{$opts->{'skip-drain'} // []};
+	return join(' ', map {'--'.$_} sort grep {$_} (
+		$noprompt ? 'yes' : undef,
+		$state->{disable_reactions} ? 'no-reactions' : undef,
+		$opts->{recreate} ? 'recreate' : undef,
+		scalar(@skip_drains) ?
+			scalar(grep {$_ eq ''} @skip_drains)
+			? 'skip-drain'
+			: 'skip-drain['.join(',',@skip_drains).']' : undef,
+		$opts->{'fix'} ? 'fix' : undef,
+		$opts->{'fix-releases'} ? 'fix-releases' : undef,
+		$opts->{'canaries'} ? "canaries=$opts->{'canaries'}" : undef,
+		$opts->{'max-in-flight'} ? "max-in-flight=$opts->{'max-in-flight'}" : undef,
+	));
+}
+
+# }}}
 # _post_deploy - handle post-deployment activities {{{
 sub _post_deploy {
 	my ($self, %opts) = @_;
 	my $noprompt = delete($opts{noprompt});
 	my $state = $self->{deployment_state};
 	my $deployment_ok = $state->{ok};
+
+	# Composed above both arms, because the record a failed deploy writes
+	# wants the same string the record a successful one writes wants.  It
+	# used to read a flags key off the options, which no caller passes, so
+	# an operator auditing a failure was shown nothing at all where the run
+	# that failed is the one they came to read about.
+	my $deploy_flags = $self->_deploy_option_flags($noprompt, $state, \%opts);
 
 	$self->notify("#G{Deployment successful.}") if $deployment_ok;
 
@@ -5363,7 +5399,7 @@ sub _post_deploy {
 			'deploy'      => Genesis::Env::Deployment::action_failed,
 			reason        => $opts{reason},
 			error         => $msg,
-			flags         => $opts{flags} || '',
+			flags         => $deploy_flags,
 			bails_with    => $msg,
 			cleanup_cache => $cleanup_cache,
 		);
@@ -5398,25 +5434,11 @@ sub _post_deploy {
 	# Update exodus data
 	$self->notify("preparing metadata for export...");
 
-	my @skip_drains = @{$opts{'skip-drain'}//[]};
-	my $opt_flags = join(' ', map {'--'.$_} sort grep {$_} (
-		$noprompt ? 'yes' : undef,
-		$state->{disable_reactions} ? 'no-reactions' : undef,
-		$opts{recreate} ? 'recreate' : undef,
-		scalar(@skip_drains) ?
-			scalar(grep {$_ eq ''} @skip_drains)
-			? 'skip-drain'
-			: 'skip-drain['.join(',',@skip_drains).']' : undef,
-		$opts{'fix'} ? 'fix' : undef,
-		$opts{'fix-releases'} ? 'fix-releases' : undef,
-		$opts{'canaries'} ? "canaries=$opts{'canaries'}" : undef,
-		$opts{'max-in-flight'} ? "max-in-flight=$opts{'max-in-flight'}" : undef,
-	));
 	my $exodus_overrides = $self->_cpi_exodus_overrides;
 	$self->update_deployment_exodus(
 		'deploy' => Genesis::Env::Deployment::action_succeeded,
 		reason => $opts{reason},
-		flags => $opt_flags,
+		flags => $deploy_flags,
 		exodus_overrides => $exodus_overrides
 	);
 
@@ -5444,7 +5466,7 @@ sub _post_deploy {
 		rc => $state->{results}[1],
 		data => $state->{predeploy_data},
 		interactive => !$noprompt,
-		flags => $opt_flags,
+		flags => $deploy_flags,
 	) if $self->has_hook('post-deploy');
 
 	# CI-configured branch finalization: assert the working tree the deploy
