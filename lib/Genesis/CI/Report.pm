@@ -18,7 +18,7 @@ use Genesis qw/info warning bug/;
 
 our @EXPORT_OK = qw/
 	held_qualifier hold_reason hold_detail note_detail
-	render_run render_preview
+	render_run render_preview release_command
 	ENV_OUTCOMES COMMIT_OUTCOMES FILE_OUTCOME AWAITING_APPLY
 /;
 
@@ -268,7 +268,7 @@ sub hold_detail {
 	# gap the reader has to guess at.
 	# In backticks, because it stands mid-sentence and the report has no
 	# colour to spare inside a span it is already printing in.
-	my $release = sprintf('`%s`', _release_command($record->{env}));
+	my $release = sprintf('`%s`', release_command($record->{env}));
 	my $by = sprintf('held by %s@%s at %s',
 		$hold->{user}     // 'an unrecorded user',
 		$hold->{hostname} // 'an unrecorded host',
@@ -406,7 +406,7 @@ sub render_run {
 		if ($env->{hold_set}) {
 			info "    #Y{a hold was set by the commit just delivered}: %s",
 				$env->{hold_set};
-			info "    Release it with #C{%s}", _release_command($env->{env});
+			info "    Release it with #C{%s}", release_command($env->{env});
 		}
 
 		# The commit axis, in control order: what the environment received
@@ -624,7 +624,7 @@ sub _commits {
 }
 
 # }}}
-# _release_command - the one command that clears a hold on an environment {{{
+# release_command - the one command that clears a hold on an environment {{{
 #
 # The command is composed here and nowhere else, because a command
 # spelled in two places is a command the two spellings drift apart on.  The
@@ -636,7 +636,7 @@ sub _commits {
 # record nothing in the tree builds: the walk keys every record it makes on
 # the environment's name.  It is here so that such a record prints something
 # an operator can see is wrong rather than a command with a gap in it.
-sub _release_command {
+sub release_command {
 	my ($env_name) = @_;
 
 	return sprintf('genesis %s pipeline-release', $env_name // '<env>');
