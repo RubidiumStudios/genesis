@@ -29,7 +29,7 @@ subtest 'every written record reads back through one reader' => sub {
 	fixture_applied($h, control => $control, provider => 'manual');
 	my $applied = record_at($h, $h->applied_path);
 	is($applied->{control_commit}, $control,
-		'the applied record reads back at the address D103 fixes');
+		'the applied record reads back at its own address');
 
 	certify($h, 'qa', control_commit => $control,
 		dependencies_read => ['ops/bosh']);
