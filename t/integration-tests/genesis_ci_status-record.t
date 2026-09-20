@@ -22,10 +22,9 @@ $ENV{NOCOLOR} = 1;
 # The environment file the broken row commits by hand.  It names a kit this
 # repository does not hold, which Genesis::Env::is_valid_env_file still reads
 # as an environment and Genesis::Top::load_env cannot load, so the row gets
-# the per-environment failure of D60 rather than a file no YAML reader will
-# take.  The tracked list rides along, because the file it replaces carried
-# one and a row that quietly narrowed the set would be proving something
-# else.
+# a per-environment failure rather than a file no YAML reader will take.  The
+# tracked list rides along, because the file it replaces carried one and a
+# row that quietly narrowed the set would be proving something else.
 sub ghost_env_file {
 	my ($env) = @_;
 	return join("\n",

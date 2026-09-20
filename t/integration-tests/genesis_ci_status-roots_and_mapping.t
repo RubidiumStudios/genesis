@@ -25,10 +25,10 @@ my $SHARED = 'lmelt-vsphere-canwest-1-mgmt';
 # An environment file that parses and cannot be loaded, which is the situation
 # the mapping table's error line names.  It names a kit this repository does
 # not hold, so Genesis::Env::is_valid_env_file still reads it as an
-# environment and Genesis::Top::load_env cannot load it, and the row gets the
-# per-environment failure of D60.  A file no YAML reader will take is a
-# different fault: the command refuses the whole repository before it reads a
-# row, and no line of the mapping table is about that.
+# environment and Genesis::Top::load_env cannot load it, and the row gets a
+# per-environment failure.  A file no YAML reader will take is a different
+# fault.  The command refuses the whole repository before it reads a row, and
+# no line of the mapping table is about that.
 sub ghost_env_file {
 	my ($env) = @_;
 	return join("\n", '---', 'kit:', '  name:    ghost', '  version: 9.9.9',
@@ -37,7 +37,7 @@ sub ghost_env_file {
 }
 
 subtest 'two roots sharing an environment name never share a reading' => sub {
-	# A guard.  D66 settles the per-root reading by construction, since each
+	# A guard.  The per-root reading is settled by construction, since each
 	# root composes its branches from its own deployment slug, so every row
 	# here was green the day it was written and no code landed with it.  It
 	# stands because nothing else in the suite runs one command in each of two
