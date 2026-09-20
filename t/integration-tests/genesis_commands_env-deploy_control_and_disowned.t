@@ -122,7 +122,7 @@ subtest 'a disowned pipeline inside a job errors before BOSH' => sub {
 	like($said, qr/Nothing was deployed\./, 'it says nothing was deployed');
 	# A forward guard rather than a discriminator.  A deploy with the
 	# pipeline disabled is never switched by the gate, so this holds whether
-	# or not the refusal is made, and what it catches is a later step that
+	# or not the refusal is made, and what it catches is a later change that
 	# moves the switch ahead of this check and deploys a branch its own
 	# configuration disowns.
 	is_deeply([grep {$_->[0] eq 'checkout'} step_log($h->git('a'))], [],

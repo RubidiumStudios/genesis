@@ -105,9 +105,9 @@ subtest 'a sibling changed only on control is named as well' => sub {
 	# the working tree.  A deploy stands on the deployment branch, which
 	# carries the deploying environment's hierarchy and no sibling's, so
 	# staging's file is nowhere in front of this command and a roster read
-	# from that tree held one name.  The roster now comes
-	# from control, and this is what that buys: D43 asks the deploy to name
-	# the environments that changed, and staging is one of them.
+	# from that tree held one name.  The roster now comes from control, and
+	# this is what that buys, which is that D43 asks the deploy to name the
+	# environments that changed and staging is one of them.
 	#
 	# bosh => 1 stands the director and the kit up before the seeding, which
 	# is what lets the deploy reach its end and what lets the walk read a

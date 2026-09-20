@@ -132,8 +132,8 @@ subtest 'the drifted cell names every file that differs' => sub {
 	# Half novel and half a guard.  The two files joined into one bracket is
 	# T283's own claim and nothing else asserts it, while the wording round
 	# them, which reads differs: hand commit, came in with the snapshot flag
-	# and is green on arrival.  It reads as T281 and
-	# the design's canonical sample quote it.
+	# and is green on arrival.  T281 and the design's canonical sample both
+	# quote that wording.
 	like(env_line($tree, 'lab'),
 		qr/drifted \[ops\/extra\.yml, ops\/shared\.yml differs: hand commit\]/,
 		'the tree lists both files in the one bracket');

@@ -60,8 +60,8 @@ subtest 'an automated provider refuses without --force' => sub {
 	# well before anything is written, and a deploy that reaches its end
 	# writes no git either, which is the general fact
 	# genesis_commands_env-deploy_no_git_write.t owns.  What it catches is a
-	# later step that gives the deploy a commit or a push of its own, landing
-	# on a path a refusal must never reach.
+	# later change that gives the deploy a commit or a push of its own,
+	# landing on a path a refusal must never reach.
 	#
 	# The switch is not among these.  The branch class stands the tree on
 	# <env>/<type> before the command runs at all and puts it back after, so
@@ -122,7 +122,7 @@ subtest 'a deploy past the gate writes no shuttle event' => sub {
 
 subtest 'the locks the gate stands for are taken nowhere' => sub {
 	# An absence guard, stated as one.  It is green on arrival and it catches
-	# a later step that gives the deploy a locker of its own, which would let
+	# a later change that gives the deploy a locker of its own, which would let
 	# a CLI deploy run beside a pipeline job while each believed it held
 	# something.  The gate exists because there is no lock to take, so the
 	# absence is the claim.

@@ -27,8 +27,8 @@ subtest 'the old spellings are usage errors with no alias' => sub {
 	# halves are worth reading from the product.
 	#
 	# The last of the seven drives a flag nobody has written yet.  It is here
-	# so that a later step cannot introduce --reconcile quietly.  The day it
-	# arrives this row goes red and whoever adds it has to say so.
+	# so that --reconcile cannot arrive quietly.  The day it does this row
+	# goes red and whoever added it has to say so.
 	plan tests => 14;
 
 	my $h = make_harness(envs => ['qa']);

@@ -74,7 +74,7 @@ subtest 'the recorded dependency set is what the deploy actually read' => sub {
 	(undef, $err, $exit) = run_genesis($h,
 		'qa', 'deploy', '--no-propagate', '-y', 'r');
 	# Green when it was written, because this deploy already succeeded
-	# unasserted.  It stays as a guard against a later step breaking the
+	# unasserted.  It stays as a guard against a later change breaking the
 	# second deploy, which the row below would otherwise report as a wrong
 	# dependency set rather than as a deploy that never ran.
 	is($exit, 0, 'the second deploy succeeded')
@@ -142,7 +142,7 @@ subtest 'a failed exodus write after BOSH deployed names its own code' => sub {
 	# The row below and the last row of this subtest were green when they
 	# were written, because the message they replaced already said
 	# "deployed" and already named the vault.  They stay as guards against a
-	# later step dropping either half from a message whose whole job is to
+	# later change dropping either half from a message whose whole job is to
 	# carry both facts at once.  The row between them is the one carrying
 	# D98's own words, and it was red.
 	like(unfolded($out.$err), qr/deployed/i,

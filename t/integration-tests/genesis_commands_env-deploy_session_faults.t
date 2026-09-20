@@ -111,7 +111,7 @@ subtest 'a restore that cannot run dies naming what it could not restore' => sub
 	# land.  A fault that died here would die in the checkout's own words and
 	# the session would never reach the sentence this row is about, and
 	# skipping from the second call rather than at it leaves the row reading
-	# the same sentence if a later step ever checks something out in between.
+	# the same sentence if anything ever checks something out in between.
 	skip_on($git, 'checkout', 2, from => 1);
 
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},

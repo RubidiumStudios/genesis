@@ -11,10 +11,10 @@
 # way to read the record is a commit that leaves the tip where it was, and the
 # row arms exactly that.
 #
-# The last row proves T119, which is the shape of the loss the whole step was
+# The last row proves T119, which is the shape of the loss this whole file is
 # written for, in which a run reported its files and a commit while the branch
-# held neither.  It is the row that proves the step as a whole, because it
-# shows the writer stopping before it can report a success it cannot show.
+# held neither.  It is the row that carries the claim, because it shows the
+# writer stopping before it can report a success it cannot show.
 use strict;
 use warnings;
 use utf8;

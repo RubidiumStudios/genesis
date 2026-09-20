@@ -11,11 +11,11 @@
 # environment exists, which is the whole of the journey that promises to put
 # the operator back where it found them.
 #
-# There are twelve rows here where the sketch this file was written from asks
-# for eleven.  The extra one is the silence row after the final deploy.  T325
-# says that deploy proceeds with no warning it should not have, and no row the
-# sketch lists reads what it said, so the sketch does not assert the half of
-# T325 its own prose names.
+# There are twelve rows here where the test matrix asks for eleven.  The
+# extra one is the silence row after the final deploy.  T325 says that deploy
+# proceeds with no warning it should not have, and no row the matrix lists
+# reads what it said, so the matrix does not assert the half of T325 its own
+# prose names.
 use strict;
 use warnings;
 use utf8;

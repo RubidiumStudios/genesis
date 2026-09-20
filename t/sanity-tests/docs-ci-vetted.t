@@ -47,9 +47,8 @@ sub section_of {
 }
 
 # The reference's opening points the reader at the workplan's "Migration from
-# v2" section, which is written after this page by the step that rewrites the
-# workplan.  No row below reads that pointer, and the workplan's own check is
-# where it resolves.
+# v2" section, which lives in another file.  No row below reads that pointer,
+# and the workplan's own check is where it resolves.
 #
 # D72 made the key provider-conditional and said it was inert rather than an
 # error under a provider that could not honour it, and that it was not refused

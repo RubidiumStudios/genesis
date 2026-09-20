@@ -101,8 +101,9 @@ subtest 'a branch with no marker records no control commit' => sub {
 # brackets bare or escaped, because a site that renders the marker writes it
 # out as it will read on the commit while a site that matches it escapes the
 # brackets for the regex engine, and the escaped form is the one that matters
-# here: three of the four spellers this step retired were written that way,
-# and a guard blind to that shape is blind to the likeliest next one.
+# here, because three of the four spellers that were retired had been written
+# that way and a guard blind to that shape is blind to the likeliest next
+# one.
 #
 # A comment that quotes the format is not a second speller.  Nothing reads
 # it, nothing renders from it, and a prose sentence naming the string it is
