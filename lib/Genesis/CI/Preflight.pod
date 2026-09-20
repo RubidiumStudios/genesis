@@ -504,12 +504,12 @@ fast-forward discards nothing, so it leaves that count unset.
 The reset's assumption is not warned about here.  The preview says it under its
 own banner, through C<Genesis::CI::Report::preview_warnings>, and a caveat
 printed above that banner is one the operator meets before they have been told
-they are reading a preview.  The fast-forward keeps its own warning, because
-that banner names the reset and the unpushed control and nothing else, and it
-takes the caveats' sentence shape, "This preview assumes ... is fast-forwarded
-first", so an operator who meets all three reads one kind of sentence.  The
-event line beside either move is printed under both kinds of run, so nothing
-about what would be done goes unsaid.
+they are reading a preview.  The fast-forward keeps a caveat of its own on that
+banner, beside the reset's and the unpushed control's, and it takes the same
+sentence shape, "This preview assumes ... is fast-forwarded first", so an
+operator who meets all three reads one kind of sentence.  The event line beside
+either move is printed under both kinds of run, so nothing about what would be
+done goes unsaid.
 
 Once the stage has run, a deployment branch in scope is C<in-sync> or it has
 no local ref at all.  That is what lets the walk take its diff base from the
