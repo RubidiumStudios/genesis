@@ -97,8 +97,8 @@ subtest 'a rejected push takes no hold' => sub {
 		delivered => ['lab', 'prod'], certified => ['lab', 'prod']);
 
 	commit_on_control($h,
-		files    => {'lab.yml'  => env_body('lab', 1),
-		             'prod.yml' => env_body('prod', 1)},
+		files    => {'lab.yml'  => env_body($h, 'lab', 1),
+		             'prod.yml' => env_body($h, 'prod', 1)},
 		message  => 'raise both instance counts',
 		trailers => {'Genesis-Stage' => 'hold: run the capacity report'},
 		push     => 1);
@@ -137,7 +137,7 @@ subtest 'a gate control has released takes no hold' => sub {
 	my $h = held_prod_delivered();
 
 	my $gate = commit_on_control($h,
-		files    => {'prod.yml' => env_body('prod', 1)},
+		files    => {'prod.yml' => env_body($h, 'prod', 1)},
 		message  => 'raise the instance count',
 		trailers => {'Genesis-Stage' => 'hold: run the capacity report'},
 		push     => 1);
@@ -146,7 +146,7 @@ subtest 'a gate control has released takes no hold' => sub {
 	# reads, and it names the full sha of the commit it takes back, so this
 	# releases the gate with no deploy and no trailer of its own.
 	my $revert = commit_on_control($h,
-		files   => {'prod.yml' => env_body('prod', 2)},
+		files   => {'prod.yml' => env_body($h, 'prod', 2)},
 		message => "Revert \"raise the instance count\"\n\n".
 		           "This reverts commit $gate.",
 		push    => 1);
@@ -173,7 +173,7 @@ subtest 'a gate without the hold form takes no hold' => sub {
 	my $h = held_prod_delivered();
 
 	my $gate = commit_on_control($h,
-		files    => {'prod.yml' => env_body('prod', 1)},
+		files    => {'prod.yml' => env_body($h, 'prod', 1)},
 		message  => 'raise the instance count',
 		trailers => {'Genesis-Stage' => 'run the capacity report'},
 		push     => 1);

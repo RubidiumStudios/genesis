@@ -147,7 +147,7 @@ subtest 'a hold stops delivery in direct mode' => sub {
 
 	for my $n (1, 2) {
 		commit_on_control($h,
-			files   => {'prod.yml' => env_body('prod', $n)},
+			files   => {'prod.yml' => env_body($h, 'prod', $n)},
 			message => "change prod $n", push => 1);
 	}
 
@@ -250,7 +250,7 @@ subtest 'dry-run shows what waits behind the hold' => sub {
 	my @due;
 	for my $n (1, 2) {
 		push @due, commit_on_control($h,
-			files   => {'prod.yml' => env_body('prod', $n)},
+			files   => {'prod.yml' => env_body($h, 'prod', $n)},
 			message => "change prod $n", push => 1);
 	}
 	run_genesis($h, 'prod', 'pipeline-hold', 'waiting on the capacity report');
