@@ -530,16 +530,26 @@ sub list_prs {
 			or bail("Failed to parse pull request list from GitHub: %s", $@);
 		push @all_prs, @$page if ref($page) eq 'ARRAY';
 
-		# Follow Link: <url>; rel="next" pagination header
-		$url = undef;
-		if ($headers) {
-			my ($link_hdr) = grep { s/^Link:\s*//i } split /[\r\n]+/, $headers;
-			if ($link_hdr) {
-				($url) = grep { s/^<(.*)>; rel="next"$/$1/ } split /,\s*/, $link_hdr;
-			}
-		}
+		$url = _next_page($headers);
 	}
 	return \@all_prs;
+}
+
+# }}}
+# _next_page - the URL the Link header names as the next one, if any {{{
+#
+# GitHub pages every list endpoint and names the next page in a Link header
+# rather than in the body, so a reader that takes the first answer whole acts
+# on a prefix of the truth.  Both list readers walk with this.
+sub _next_page {
+	my ($headers) = @_;
+	return undef unless $headers;
+
+	my ($link_hdr) = grep { s/^Link:\s*//i } split /[\r\n]+/, $headers;
+	return undef unless $link_hdr;
+
+	my ($next) = grep { s/^<(.*)>; rel="next"$/$1/ } split /,\s*/, $link_hdr;
+	return $next;
 }
 
 # }}}
@@ -550,22 +560,34 @@ sub list_prs {
 # branch.  The API answers every review in submission order, and the caller
 # takes the newest decisive one, because a comment-only review neither
 # approves nor asks for changes.
+#
+# Every page is walked, the way the pull request list is walked.  Submission
+# order puts the newest review last, so a reader that took one page whole
+# would act on an older decision than the one that stands.
 sub pr_reviews {
 	my ($self, $owner_repo, $number) = @_;
 	bail("Missing owner/repo for pr_reviews") unless $owner_repo;
 	bail("Missing PR number for pr_reviews")  unless defined $number;
 
 	my $url = $self->pulls_url($owner_repo, $number) . '/reviews?per_page=100';
-	my ($code, $msg, $data) = curl("GET", $url, undef, undef, 0, $self->{creds});
-	bail(
-		"Failed to read the review state of pull request #%d for #C{%s}: ".
-		"HTTP %s - %s", $number, $owner_repo, $code, $msg
-	) unless $code == 200;
 
-	my $reviews;
-	eval { $reviews = load_json($data); 1 }
-		or bail("Failed to parse the review list from GitHub: %s", $@);
-	return ref($reviews) eq 'ARRAY' ? $reviews : [];
+	my @all;
+	while ($url) {
+		my ($code, $msg, $data, $headers) =
+			curl("GET", $url, undef, undef, 0, $self->{creds});
+		bail(
+			"Failed to read the review state of pull request #%d for #C{%s}: ".
+			"HTTP %s - %s", $number, $owner_repo, $code, $msg
+		) unless $code == 200;
+
+		my $page;
+		eval { $page = load_json($data); 1 }
+			or bail("Failed to parse the review list from GitHub: %s", $@);
+		push @all, @$page if ref($page) eq 'ARRAY';
+
+		$url = _next_page($headers);
+	}
+	return \@all;
 }
 
 # }}}

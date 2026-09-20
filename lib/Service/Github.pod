@@ -1058,8 +1058,13 @@ B<Examples:>
 The reviews on one pull request, oldest first, each as the API gives it.
 
 A caller takes the newest review that approved or asked for changes, because a
-comment-only review decides nothing. The whole page is asked for at once, so
-one pull request costs one call however many people looked at it.
+comment-only review decides nothing.
+
+A hundred reviews are asked for at a time and every page is walked, the way
+L</list_prs> walks its own, so one pull request usually costs one call and a
+heavily reviewed one costs as many as it has pages. Submission order puts the
+newest review last, so a reader that took one page whole would act on an older
+decision than the one that stands.
 
 B<Parameters:>
 
