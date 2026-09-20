@@ -18,6 +18,13 @@ use utf8;
 # names a kit nothing carries.  The commit the child carries downstream is
 # laid afterwards and delivered to qa alone, which is the cascade in
 # miniature.
+#
+# Neither row asserts that the operator's branch was put back, and both run
+# from control on purpose.  The hand-off we inherit checks control out after
+# the session has already restored the operator, so a row that started there
+# is standing where that checkout leaves it and cannot tell the two apart.
+# The rows that do read a restoration start somewhere else, and they are in
+# t/integration-tests/genesis_commands_env-post_deploy_child.t.
 
 use lib 'lib';
 use lib 't';
@@ -51,14 +58,7 @@ subtest 'the child asks nothing and finishes' => sub {
 	# One control commit both environments are due, delivered to qa alone,
 	# so the deploy under test certifies it and the child has exactly one
 	# commit to carry to prod.
-	write_env_file($h, 'qa', params => {n => 2}, commit => 0);
-	write_env_file($h, 'prod', genesis => {pipeline => {prior_env => 'qa'}},
-		params => {n => 2}, commit => 0);
-	my $control = commit_on_control($h, push => 1,
-		message => 'A change both environments are due',
-		files   => {map {("$_.yml" => slurp($h->a . "/$_.yml"))} qw/qa prod/});
-	deliver($h, 'qa', control => $control);
-	refresh($h, 'a', $h->control, map {$h->slug($_)} qw/qa prod/);
+	due_on_control($h);
 
 	child_recorder($h);
 	stand_on($h, $h->control);
@@ -70,6 +70,8 @@ subtest 'the child asks nothing and finishes' => sub {
 	# reaches the deploy as the empty input /dev/null would have been.  Under
 	# -y nothing asks for any.
 	set_stdin('');
+	# No restoration row here, because this row starts on control and the
+	# header says why that makes one prove nothing.
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '-y');
 	reset_stdin;
@@ -124,6 +126,8 @@ subtest 'the child publishes one branch at a time' => sub {
 
 	child_recorder($h);
 	stand_on($h, $h->control);
+	# No restoration row here, because this row starts on control and the
+	# header says why that makes one prove nothing.
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0},
 		'qa', 'deploy', '-y');
 	is($exit, 0, 'the deploy command succeeded');

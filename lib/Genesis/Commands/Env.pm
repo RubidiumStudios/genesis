@@ -2141,9 +2141,9 @@ sub deploy {
 		# with no pipeline runs no pre-flight while a deploy that already
 		# stood on its own branch opened no session, which is why an absent
 		# one passes rather than fails.  Where the session went out through
-		# abort the command has already left, so this is a second belt: it
-		# is what stops a later change to the failure path from fanning out
-		# a tree a kit hook has written into.
+		# abort, the command has already left, so this is a second belt.
+		# It is what stops a later change to the failure path from fanning
+		# out a tree a kit hook has written into.
 		my $session = $preflight ? $preflight->{session} : undef;
 		_spawn_propagate_child($env)
 			if (!$session || $session->finished)
