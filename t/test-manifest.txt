@@ -11,7 +11,7 @@
 sanity-tests/modules-compile.t   # Verify all Perl modules compile and load
 sanity-tests/no-private-refs.t   # No references to private resources (skips unless configured)
 sanity-tests/pod-complete.t      # Every module's POD present, complete, filed correctly, and parseable
-sanity-tests/no-retired-vocabulary.t # The retired routing sense of "entry point" stays out of lib/, docs/ci, and workplans/
+sanity-tests/no-retired-vocabulary.t # The retired routing sense of "entry point" stays out of bin/, lib/, docs/ci, and workplans/
 sanity-tests/docs-ci-vetted.t    # docs/ci states the manual key's provider condition and names the shipped surface
 sanity-tests/docs-workplan-superseded.t # The workplan describes the move to v3 by hand and is marked superseded
 

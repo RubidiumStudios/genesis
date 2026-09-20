@@ -695,19 +695,21 @@ A repository with a legacy pipeline `ci.yml` is detected at configuration load, 
 
 ## Migration from v2
 
-A v3 pipeline is never applied on top of a v2 one, and a repository moves to v3 by hand. Genesis translates no v2 branch layout and adopts no v2 pipeline state, so there is nothing to run and nothing to convert, and a pipeline `ci.yml` beside a v3 configuration is refused with the migration named.
+A v3 pipeline is never applied on top of a v2 one, and a repository moves to v3 by hand. Genesis translates no v2 branch layout and adopts no v2 pipeline state, so there is nothing to run and nothing to convert. A repository still carrying a version 2 configuration, or a version 3 configuration with no pipeline enabled, has every pipeline command refused with the migration named, while its other commands run as they always did. A `ci.yml` left beside a version 3 configuration whose pipeline is enabled only warns that it is stale, because the v3 configuration wins.
 
-The move has four parts.
+The move has five parts.
 
 1. `control` is a new orphan branch, cut from the existing branch's HEAD content, so it shares no history with the branch it replaces.
 
-2. The deployment branches are the init branches `genesis pipeline-apply` creates, one orphan root commit per `<env>/<type>` adding a single `init` file, and each environment file gains its `genesis.pipeline` block.
+2. The repository is configured for v3, which means reading the `pipeline:` block of the old `ci.yml` for its provider, git URI, branch, pipeline name, and vault URL, writing them into the `pipeline:` block of `.genesis/config` with `enabled: true`, and removing `ci.yml`. Nothing below runs until this is done, because the topology every later step walks is empty while `pipeline.enabled` is false, and the pipeline commands are refused outright while `ci.yml` still stands.
 
-3. A branch named for an environment alone is deleted, or renamed with `git branch -m lab lab/<type>` where its history is wanted, because such a name blocks every `<env>/<type>` beneath it. A renamed branch stands in place of that environment's init branch, and it is still uncertified.
+3. The deployment branches are the init branches `genesis pipeline-apply` creates, one orphan root commit per `<env>/<type>` adding a single `init` file, and each environment file gains its `genesis.pipeline` block.
 
-4. Every existing clone then fetches once with `--prune`, because `refs/remotes/origin/lab` collides in the same way and a plain fetch reports "unable to update local ref" until it is gone.
+4. A branch named for an environment alone is deleted, or renamed with `git branch -m lab lab/<type>` where its history is wanted, because such a name blocks every `<env>/<type>` beneath it. A renamed branch stands in place of that environment's init branch, and it is still uncertified.
 
-Because control shares no history with the old branch, no exodus record's `git.commit` sits on control or carries a marker, so nothing is backfilled and every environment starts without a certified commit. Each one holds its descendants until it has deployed once, in DAG order, which is the proving run a migration wants and which is a BOSH no-op wherever the branch content matches what is already running. Nothing is assumed about what an environment certified before the pipeline existed.
+5. Every existing clone then fetches once with `--prune`, because `refs/remotes/origin/lab` collides in the same way and a plain fetch reports "unable to update local ref" until it is gone.
+
+Because control shares no history with the old branch, no exodus record carries a `git.control_commit` that names a commit on it, so every environment starts without a certified commit. An environment certifies when it deploys a propagated commit, which is one its branch carries a marker for, so a deploy from an init-only branch leaves it uncertified and its descendants held. The fleet therefore proves itself once, in DAG order, which is the proving run a migration wants and which is a BOSH no-op wherever the branch content matches what is already running. Nothing is assumed about what an environment certified before the pipeline existed.
 
 ---
 
