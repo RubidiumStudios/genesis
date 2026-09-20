@@ -3669,6 +3669,13 @@ sub warn_uncertified_secrets_target {
 
 	require Genesis::CI::Marker;
 	my $ref = $served // $self->top->branch_for($self->name);
+
+	# A clone need not hold the deployment branch at all, and the walk
+	# bails where git cannot resolve what it is handed, so the branch is
+	# asked for before it is walked.  This is a warning and nothing more,
+	# and the returns above say a run that cannot answer says nothing.
+	return 0 unless $git->branch_exists($ref);
+
 	my $served_control = Genesis::CI::Marker::newest($git, $ref) or return 0;
 	return 0 if $served_control eq $certified;
 

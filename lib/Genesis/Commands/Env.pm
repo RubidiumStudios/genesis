@@ -2440,6 +2440,13 @@ sub _warn_drifted {
 	my ($env, $git) = @_;
 
 	my $branch    = $env->deployment_slug;
+
+	# A clone need not hold the deployment branch, and the walk bails where
+	# git cannot resolve what it is handed, so the branch is asked for
+	# before it is walked.  The return below says a run with nothing to
+	# compare against reports no drift rather than refusing.
+	return [] unless $git->branch_exists($branch);
+
 	my $certified = Genesis::CI::Marker::newest($git, $branch) or return [];
 	my $diff  = $git->diff_files($branch, $certified, $env->propagation_files);
 	my @files = sort(@{$diff->{changed}}, @{$diff->{deleted}});
