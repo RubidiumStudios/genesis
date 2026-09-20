@@ -123,7 +123,7 @@ subtest 'the two timestamp forms stay apart' => sub {
 };
 
 subtest 'a failed exodus write after BOSH deployed names its own code' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $h = tracked_harness();
 	# The writes are refused and the reads go on answering, because a deploy
@@ -150,6 +150,15 @@ subtest 'a failed exodus write after BOSH deployed names its own code' => sub {
 	like(unfolded($err), qr/record was not written/i,
 		'it says the record was not written');
 	like(unfolded($err), qr/vault/i, 'and what to do about it');
+	# The remedy names the path as well as the vault.  The errors quoted
+	# above it already name the path, because vault said so, but the
+	# sentence that says what to do about it named the whole vault alone,
+	# and an operator whose token cannot write one path went looking for a
+	# vault that is fine.  The sentence is read on its own rather than the
+	# whole message, so the errors above cannot answer for it.
+	my ($remedy) = unfolded($err) =~ /The environment is running\.(.*)/s;
+	like($remedy // '', qr/\Q@{[$h->env_path('qa')]}\E/,
+		'and the remedy names the path the write was refused at');
 	restore_vault($h);
 };
 
