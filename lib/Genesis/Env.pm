@@ -154,10 +154,10 @@ sub load {
 					push(@errors, "Encountered errors under #Y{bosh-configs:} key:\n  - ".join("\n  - ", @key_errors));
 				}
 
-				# director-cpi.name is the bosh config slot for the upload —
-				# meaningless without director-cpi.cpis. Surface this as a
-				# config error so operators don't silently get unexpected
-				# advertise-only behavior.
+				# director-cpi.name is the bosh config slot for the upload,
+				# and it is meaningless without director-cpi.cpis. Surface
+				# this as a config error so operators don't silently get
+				# unexpected advertise-only behavior.
 				if (ref($bosh_configs->{'director-cpi'}) eq 'HASH'
 					&& defined $bosh_configs->{'director-cpi'}{name}
 					&& !defined $bosh_configs->{'director-cpi'}{cpis}) {
@@ -1439,13 +1439,13 @@ sub _propagation_file_kinds {
 	my ($self) = @_;
 	my %files;
 
-	# Env file hierarchy (ancestors + self) — kit-relative, triggering
+	# Env file hierarchy (ancestors + self), kit-relative and triggering
 	for my $f ($self->actual_environment_files) {
 		$f =~ s{^\./}{};
 		$files{$f} = 1;
 	}
 
-	# Kit source (compiled tarball or dev directory) — triggering
+	# Kit source (compiled tarball or dev directory), triggering
 	if ($self->kit->is_dev) {
 		$files{'dev/'} = 1;
 	} else {
@@ -1468,7 +1468,7 @@ sub _propagation_file_kinds {
 	# prefix below is applied exactly once.
 	$files{$_} = 1 for $self->_blueprint_fragments($git);
 
-	# Config — non-triggering
+	# Config, non-triggering
 	$files{'.genesis/config'} = 0;
 
 	# The embedded genesis Top::embed writes for CI use, which is the eighth
@@ -1482,7 +1482,7 @@ sub _propagation_file_kinds {
 	# triggering.
 	$files{'kit-overrides.yml'} = 1 if -f $self->path('kit-overrides.yml');
 
-	# Reaction scripts — non-triggering
+	# Reaction scripts, non-triggering
 	my $reactions = $self->lookup('genesis.reactions', {});
 	if (ref($reactions) eq 'HASH') {
 		for my $phase (values %$reactions) {
@@ -2346,7 +2346,7 @@ sub iaas {
 
 	# 2. Non-OCFP: silently derive from kit.features.
 	#    Check kit.features directly via lookup (returns from __params
-	#    cache during create) — do NOT call is_ocfp()/has_feature()
+	#    cache during create).  Do NOT call is_ocfp()/has_feature()
 	#    which triggers features() → features hook → get_environment_variables
 	#    → iaas() recursion.
 	my @features = @{$self->lookup('kit.features', [])};
@@ -2363,7 +2363,7 @@ sub iaas {
 		return lc($iaas) if $iaas;
 	}
 
-	# 4. Nothing found — bail with appropriate guidance
+	# 4. Nothing found, so bail with appropriate guidance
 	if ($is_ocfp) {
 		bail(
 			"No IaaS type set for OCFP environment %s. ".
@@ -2701,7 +2701,7 @@ sub default_cpi_name {
 	my $declared = $self->lookup('bosh-configs.director-cpi.default', undef);
 	return $declared if defined $declared;
 
-	# No explicit default — fall back to the single-entry inline shortcut.
+	# No explicit default, so fall back to the single-entry inline shortcut.
 	my $inline = $self->lookup('bosh-configs.director-cpi.cpis', undef);
 	if (ref($inline) eq 'ARRAY' && @$inline == 1 && defined $inline->[0]{name}) {
 		return $inline->[0]{name};
@@ -2721,7 +2721,7 @@ sub _resolve_director_cpi_config {
 	# Use lookup_entombed_self: post-deploy entombment runs against the
 	# deployed director's OWN Credhub (via Manifest::EntombedSelf), so
 	# the uploaded cpis carry ((credhub-var)) references that the new
-	# director can resolve — not plaintext, and not parent-credhub refs
+	# director can resolve, not plaintext and not parent-credhub refs
 	# (which the new director can't resolve).
 	if (defined(my $inline = $self->lookup_entombed_self('bosh-configs.director-cpi.cpis', undef))) {
 		bail(
@@ -3019,7 +3019,7 @@ sub get_environment_variables {
 		$env{GENESIS_KIT_PATH}                 = $self->kit->path;
 		$env{GENESIS_MIN_VERSION_FOR_KIT}      = $self->kit->genesis_version_min();
 		if ($self->exists) {
-			# Skip iaas/scale for the features hook — they're derived
+			# Skip iaas/scale for the features hook, because they're derived
 			# from features and calling them here recurses via bosh.
 			if ($hook ne 'features') {
 				$env{GENESIS_ENV_IAAS}               = $self->iaas();
@@ -5246,7 +5246,7 @@ sub _deploy_create_env {
 		info "[[  - >>no previous deployment of this environment found in the deployment archive.";
 	}
 
-	# Confirm deployment (skip on dry-run — nothing destructive to confirm)
+	# Confirm deployment (skip on dry-run, nothing destructive to confirm)
 	if ($opts{'dry-run'}) {
 		# no confirmation needed
 	} elsif (in_controlling_terminal && !$noprompt) {
@@ -6424,10 +6424,10 @@ sub remove_secrets {
 	my ($self, %opts) = @_;
 
 	# Modes:
-	#   all => 'purge'  — pre-create: wipe vault paths without a
-	#                     secrets plan (env file may not exist yet)
-	#   all => 1        — interactive: wipe with plan-based labeling
-	#   (neither)       — targeted removal by filter
+	#   all => 'purge':  pre-create, wipe vault paths without a
+	#                    secrets plan (env file may not exist yet)
+	#   all => 1:        interactive, wipe with plan-based labeling
+	#   (neither):       targeted removal by filter
 	#
 	# Legacy: all => 1, no_populate => 1 is treated as all => 'purge'
 	if ($opts{all} && $opts{no_populate}) {
