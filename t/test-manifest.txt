@@ -186,9 +186,9 @@ unit-tests/genesis_ci_publish-confirm.t             # the delta is shown three w
 unit-tests/genesis_ci_publish-recheck_control.t     # every refusal the pre-publish control check raises
 unit-tests/genesis_ci_publish-declined.t            # a no at the ask resets every branch and publishes nothing
 unit-tests/genesis_ci_preflight-disowned.t          # the disowned pipeline's arms, each caller wording its own refusal
+unit-tests/genesis_ci_preflight-deploy_gate.t       # the typed acknowledgement --yes cannot answer, and the terminal rule
 unit-tests/genesis_commands_env-deploy_branch_action.t  # the six states a deployment branch can be in, and what the deploy does with each
 unit-tests/genesis_commands_env-prior_env_record.t  # the four answers the predecessor's record reader gives
-unit-tests/genesis_ci_preflight-deploy_gate.t       # the typed acknowledgement --yes cannot answer, and the terminal rule
 unit-tests/genesis_ci_compiler-override_file.t      # the override file beside .genesis/config, and its name
 unit-tests/helper-tree_readers.t                    # the shared readers and guards in t/helper.pm
 unit-tests/genesis_ci_compiler-provider_contract.t   # the registry entry, the declared keys, and the visibility fallback
