@@ -212,7 +212,7 @@ Three consequences worth stating plainly:
 
 ### The `genesis yamls` approach (superseded)
 
-> **Superseded 2026-08-28.** An earlier draft proposed determining applicability by merging ancestry with `genesis yamls --no-kit <env>` and reading `genesis.inherits` and `kit.features` out of the flattened YAML. The implementation instead asks the loaded `Genesis::Env` object directly via `propagation_files`, which reuses the same file-resolution machinery the deploy path uses. The distinction matters mainly because the answer now comes from a live environment load, so an environment that fails to load produces no propagation set at all rather than a wrong one — `propagate` skips it, and `pipeline-status` shows a `load error` row with the reason.
+> **Superseded 2026-08-28.** An earlier draft proposed determining applicability by merging ancestry with `genesis yamls --no-kit <env>` and reading `genesis.inherits` and `kit.features` out of the flattened YAML. The implementation instead asks the loaded `Genesis::Env` object directly via `propagation_files`, which reuses the same file-resolution machinery the deploy path uses. The distinction matters mainly because the answer now comes from a live environment load, so an environment that fails to load produces no propagation set at all rather than a wrong one. `propagate` skips it, and `pipeline-status` shows a `load error` row with the reason.
 
 BOSH config files are named by `genesis.pipeline.track_bosh_configs`, which takes either a boolean that turns every config type on or a list that names the ones this environment cares about. A named type gets a resource of its own in the emitted pipeline and a change to it triggers this environment's redeploy job, and none of them is part of the propagation set.
 
@@ -325,9 +325,9 @@ The audit gap the tag design worried about is closed by the run's report rather 
 > 6. **Env branches updated** with applicable files
 > 7. **Deployments triggered** per layout rules
 >
-> **Stage 1: Control → Kickoff** — the developer runs `genesis push`, a sequence tag is created on control annotated with a file-flow diagram, a pipeline job picks up the tag, and depending on the configured kickoff mode either pushes the tagged commit to `kickoff` (`auto`) or opens a PR against `kickoff` for a human to review and merge (`manual`).
+> **Stage 1: Control → Kickoff.** The developer runs `genesis push`, a sequence tag is created on control annotated with a file-flow diagram, a pipeline job picks up the tag, and depending on the configured kickoff mode either pushes the tagged commit to `kickoff` (`auto`) or opens a PR against `kickoff` for a human to review and merge (`manual`).
 >
-> **Stage 2: Kickoff → Environment Branches** — the pipeline analyzes changed files, classifies each, determines target branches, and for each: creates the branch if missing, or compares sequence numbers and skips when newer changes are already present.
+> **Stage 2: Kickoff → Environment Branches.** The pipeline analyzes changed files, classifies each, determines target branches, and for each: creates the branch if missing, or compares sequence numbers and skips when newer changes are already present.
 >
 > **Kickoff Modes**
 >
@@ -787,10 +787,10 @@ Remembering the trailer is still the author's job. Nothing infers a migration fr
 ## Open Questions
 
 1. ~~**`ci.control_branch` is not honored by the propagation commands.**~~
-   **Resolved 2026-08-28 — not a defect.** `Genesis::Top::ci_control_branch`
+   **Resolved 2026-08-28, not a defect.** `Genesis::Top::ci_control_branch`
    reads the key and `DeploymentManager` uses it, while `propagate` and
    `pipeline-status` call `Genesis::Top::DEFAULT_CONTROL_BRANCH()` directly.
-   That asymmetry is tolerated rather than accidental: the control branch is
+   That asymmetry is tolerated rather than accidental. The control branch is
    `control`, and the key exists only as an escape valve nobody is expected
    to reach for. It is deliberately unpublished, so a repository setting it
    is already outside supported territory. Do not document it as a
@@ -799,8 +799,8 @@ Remembering the trailer is still the author's job. Nothing infers a migration fr
    **Confirmed a code defect 2026-08-28; fix pending.** `pipeline-status`
    matches open PR head refs against `^propagate/([^/]+)/`, the retired
    per-propagation naming, while `Propagation.pm` creates `pr/<env>`.
-   `pr/<env>` is the correct, current form — the status command is what is
-   out of date. As written, status can never find an open propagation PR
+   `pr/<env>` is the correct, current form, and the status command is what
+   is out of date. As written, status can never find an open propagation PR
    and always reports `[PR required]` even when one is open.
 
    Note the test fixtures also encode the retired name, so they pass while
@@ -816,11 +816,11 @@ Remembering the trailer is still the author's job. Nothing infers a migration fr
 4. **`require_pr` and `manual` do not affect the emitted pipeline.** Both are read only for graph labels. Should the emitted Concourse pipeline gate a deploy job on them, or is the branch-level PR gate considered sufficient?
 5. **No audit record of skipped propagations.** The tag design produced a durable record of what was omitted and why. Today a skipped environment produces terminal output only. Is that acceptable, or is a git-visible record needed?
 6. **Access control for environment branches.** The `kickoff` branch existed partly to concentrate write access in a pipeline service account. Without it, that protection has to come from branch protection rules plus `require_pr`. Has that been validated against the access-control goal?
-7. **`--no-push` semantics.** Currently a write kill switch that still permits reads. The alternative — skip all network, degrading the PR decision tree to "always branch locally from `<env>`" — would be a single guard at the top of `_propagate_one_pr_env`. Unresolved.
+7. **`--no-push` semantics.** Currently a write kill switch that still permits reads. The alternative (skip all network, degrading the PR decision tree to "always branch locally from `<env>`") would be a single guard at the top of `_propagate_one_pr_env`. Unresolved.
 8. **BOSH config files** under `ops/` that are not manifest ops files (carried over from File Classification, still open).
-9. **Deploying an older revision than the environment branch holds** — no defined behavior.
-10. **`genesis deploy`'s missing-branch bail names the wrong command.** Propagation's bail was retargeted from `genesis new <env>` to `pipeline-prepare`, on the reasoning that those environments already exist on control and only their branches are missing. Both of `deploy`'s missing-branch bails still say "Create it with `genesis new <env>` on the control branch", which has the same problem the propagate message was fixed for. Whether `deploy` should name `pipeline-prepare`, or offer to create the branch the way propagate now does, is undecided. Recorded as an observation, not a diagnosed defect — nothing in the code says the wording is unintentional.
-11. **Which manifest store a PR-gated environment should use.** `manifest_store` is a repository-wide `.genesis/config` key; `require_pr` is per environment. The compile-time warning therefore fires on the pairing of provider and store without being able to see which environments are PR-gated, and the Limitations note tells operators to set `exodus` on `require_pr` environments — which the key's scope does not permit per environment. `Genesis::Env::manifest_store` reads the repository key and varies per environment in one direction only: an environment whose Genesis compatibility floor is below 3.1.0 is forced to `repository`, because older Genesis cannot update the exodus deployment audit data. That override moves away from `exodus`, not toward it. Either the store needs a genuine per-environment override, or the guidance needs restating repository-wide.
+9. **Deploying an older revision than the environment branch holds.** No defined behavior.
+10. **`genesis deploy`'s missing-branch bail names the wrong command.** Propagation's bail was retargeted from `genesis new <env>` to `pipeline-prepare`, on the reasoning that those environments already exist on control and only their branches are missing. Both of `deploy`'s missing-branch bails still say "Create it with `genesis new <env>` on the control branch", which has the same problem the propagate message was fixed for. Whether `deploy` should name `pipeline-prepare`, or offer to create the branch the way propagate now does, is undecided. Recorded as an observation, not a diagnosed defect. Nothing in the code says the wording is unintentional.
+11. **Which manifest store a PR-gated environment should use.** `manifest_store` is a repository-wide `.genesis/config` key; `require_pr` is per environment. The compile-time warning therefore fires on the pairing of provider and store without being able to see which environments are PR-gated, and the Limitations note tells operators to set `exodus` on `require_pr` environments, which the key's scope does not permit per environment. `Genesis::Env::manifest_store` reads the repository key and varies per environment in one direction only. An environment whose Genesis compatibility floor is below 3.1.0 is forced to `repository`, because older Genesis cannot update the exodus deployment audit data. That override moves away from `exodus`, not toward it. Either the store needs a genuine per-environment override, or the guidance needs restating repository-wide.
 
 ---
 
@@ -878,7 +878,7 @@ Each entry below records a decision on the date it carries and keeps the wording
 
 **Trade-off accepted:** Sequential chains are slower but simpler than implementing fan-in gate logic.
 
-**Still holds (2026-08-28):** The env DAG enforces exactly this shape — `prior_env` gives each environment at most one parent, and any number of children.
+**Still holds (2026-08-28):** The env DAG enforces exactly this shape. `prior_env` gives each environment at most one parent, and any number of children.
 
 ### 2026-02-20: Dispatch Branch Naming (`kickoff`)
 
@@ -904,7 +904,7 @@ Each entry below records a decision on the date it carries and keeps the wording
 **Decision:** Recorded after the fact. Propagation reads files directly out of a control commit and commits them onto environment branches. There is no intermediate branch.
 
 **What the direct design does instead:**
-- The *source* is a specific control SHA — control HEAD for a root run, the ancestor's deploy-certified `git.control_commit` for a cascade. A commit SHA pins the source at least as precisely as a mirrored branch did, without a second branch to keep in sync.
+- The *source* is a specific control SHA, either control HEAD for a root run or the ancestor's deploy-certified `git.control_commit` for a cascade. A commit SHA pins the source at least as precisely as a mirrored branch did, without a second branch to keep in sync.
 - The *review gate* moved from the dispatch branch to the environment branch as `require_pr`, which makes it per-environment rather than repository-wide.
 - The *service-account write barrier* has no replacement inside Genesis; it has to come from branch protection on the environment branches.
 
@@ -916,7 +916,7 @@ Each entry below records a decision on the date it carries and keeps the wording
 
 **Decision:** Recorded after the fact. None of it was built. Ordering comes from three mechanisms instead: the certified control commit as the cascade source, the ancestor-overlap filter in `compute_propagation_targets`, and the at-or-ahead skip in cascade runs.
 
-**Rationale:** The tag scheme required a monotonic counter, a hybrid-tag format, and per-file merge reasoning at each environment. The certified-commit approach gets the same guarantee — a change cannot arrive downstream carrying control state the ancestor never deployed — from data that already exists in the exodus deployment record, with no new artifact to maintain.
+**Rationale:** The tag scheme required a monotonic counter, a hybrid-tag format, and per-file merge reasoning at each environment. The certified-commit approach gets the same guarantee (a change cannot arrive downstream carrying control state the ancestor never deployed) from data that already exists in the exodus deployment record, with no new artifact to maintain.
 
 **Trade-off accepted:** The tag design's audit artifact is gone. There is no durable record of what a propagation deliberately omitted; the commit subject records the source SHA and the diff shows what landed, but a skipped environment leaves only terminal output.
 
@@ -944,7 +944,7 @@ Each entry below records a decision on the date it carries and keeps the wording
 
 **Decision:** Recorded after the fact. Propagation builds its DAG from per-environment `genesis.pipeline.prior_env` keys. Layouts are still parsed by the compiler for legacy configurations, but propagation does not read them.
 
-**Rationale:** Same reasoning as the review-gate entry — an environment's place in the progression is a property of the environment. It also makes adding an environment a single-file change: `genesis new` writes `prior_env` into the new file and the DAG grows, with no second file to keep in sync.
+**Rationale:** Same reasoning as the review-gate entry. An environment's place in the progression is a property of the environment. It also makes adding an environment a single-file change, since `genesis new` writes `prior_env` into the new file and the DAG grows, with no second file to keep in sync.
 
 **Trade-off accepted:** The progression is no longer readable in one place. `genesis pipeline-describe` and `genesis pipeline-graph` exist to reconstruct the view that a layout block used to give directly.
 
@@ -952,17 +952,17 @@ Each entry below records a decision on the date it carries and keeps the wording
 
 ### 2026-08-28: One Accessor for the Topology
 
-**Context:** "Which environments are in this pipeline" had two implementations. `Genesis::Top::pipeline_env_names` globbed `*.yml`, while `ASTBuilder::_build_from_env_files` walked the same directory building a DAG. They agreed on membership — both gate on `has_env` — but by coincidence rather than construction, and nothing kept them agreeing. The DAG one was private, and `Genesis::Commands::Pipelines` called it from four places, each repeating the same edge collection and breadth-first ordering.
+**Context:** "Which environments are in this pipeline" had two implementations. `Genesis::Top::pipeline_env_names` globbed `*.yml`, while `ASTBuilder::_build_from_env_files` walked the same directory building a DAG. They agreed on membership, since both gate on `has_env`, but by coincidence rather than construction, and nothing kept them agreeing. The DAG one was private, and `Genesis::Commands::Pipelines` called it from four places, each repeating the same edge collection and breadth-first ordering.
 
 **Decision:** `Genesis::Top::pipeline_topology` is the single entry point, returning `nodes`, `edges`, `children`, `parent_of`, and a stable order. `pipeline_env_names` became a wrapper over it, so the two can no longer drift, and the four call sites collapsed into it.
 
-**Rationale:** Adding a fifth caller for `pipeline-prepare` would have entrenched the duplication. Membership is defined once, as every environment `has_env` accepts — with or without a `genesis.pipeline` block, since such an environment still has a branch, still appears in `pipeline-status`, and still needs preparing.
+**Rationale:** Adding a fifth caller for `pipeline-prepare` would have entrenched the duplication. Membership is defined once, as every environment `has_env` accepts, with or without a `genesis.pipeline` block, since such an environment still has a branch, still appears in `pipeline-status`, and still needs preparing.
 
 **Trade-off accepted:** Every field comes back empty when CI is not configured, so callers iterate without a guard and each decides for itself whether an empty pipeline is fatal. That is a deliberate shift of the "is this a pipeline repository" judgement out of the accessor and into the commands.
 
 ### 2026-08-28: Branch Creation Gets Its Own Command
 
-**Context:** Propagation refuses to run when an environment in scope has no branch, because an absent branch and an unchanged one produce the same empty diff. Until this branch, the refusal told the operator to run `genesis new <env>` — the wrong verb, since the environment already exists on control and only its branch is missing. It said so because there was no better command to name.
+**Context:** Propagation refuses to run when an environment in scope has no branch, because an absent branch and an unchanged one produce the same empty diff. Until this branch, the refusal told the operator to run `genesis new <env>`, which is the wrong verb, since the environment already exists on control and only its branch is missing. It said so because there was no better command to name.
 
 **Decision:** `genesis pipeline-prepare` creates the branch for any environment that lacks one and reconciles existing branches against their environment's dependency set. It is repo-scoped by default and env-scoped as `genesis <env> pipeline-prepare`. The propagate refusal now names it, offering the env-scoped form when exactly one environment is missing.
 
@@ -974,7 +974,7 @@ Each entry below records a decision on the date it carries and keeps the wording
 
 **Context:** Refusing to propagate against a missing branch was correct but unhelpful. Genesis knows the environment, knows the control branch, and already has the code to build the branch.
 
-**Decision:** `genesis propagate` creates missing branches when authorized — `-y`/`--yes`, or an answered prompt in a controlling terminal. Without either, it still refuses, and the refusal now names both `-y` and `pipeline-prepare`. The refusal exits with `PROPAGATE_NO_BRANCH_EXIT` rather than 1.
+**Decision:** `genesis propagate` creates missing branches when authorized, either by `-y`/`--yes` or by an answered prompt in a controlling terminal. Without either, it still refuses, and the refusal now names both `-y` and `pipeline-prepare`. The refusal exits with `PROPAGATE_NO_BRANCH_EXIT` rather than 1.
 
 **Rationale:** Creating a branch is incidental to propagating, so it is opted into rather than assumed. Outside a terminal there is no one to ask, and creating branches unattended is exactly the silent, hard-to-notice change that should not happen on its own. The distinct exit code exists so a deploy running propagate as a subprocess can tell "refused, and here is the one-command fix" apart from "propagation actually broke", and report accordingly.
 
@@ -988,7 +988,7 @@ Each entry below records a decision on the date it carries and keeps the wording
 
 **Decision:** `Service::Git::resolve_branch` decides, returning `local`, `fetched`, `absent`, or `unverifiable`. A branch the remote already has is fetched rather than forked; only one absent from both is created. `prepare_branch` returns which happened, so an operator is not told a fetched branch was created.
 
-**Rationale:** Forking off local HEAD produces a branch with the right name and the wrong history. The push that follows is either rejected or overwrites the anchor that propagation certifies against — a silent loss of the propagation marker chain.
+**Rationale:** Forking off local HEAD produces a branch with the right name and the wrong history. The push that follows is either rejected or overwrites the anchor that propagation certifies against, which is a silent loss of the propagation marker chain.
 
 **Trade-off accepted:** `--no-fetch` now means offline rather than unguarded. Local branches still reconcile, but an environment whose branch cannot be verified is skipped with a warning instead of created blind, so a fully offline operator cannot prepare a brand-new environment.
 
@@ -996,11 +996,11 @@ Each entry below records a decision on the date it carries and keeps the wording
 
 **Context:** A deploy commits its manifests to the environment branch, which is the branch its own job triggers on, so the commit starts the job again.
 
-**Decision:** The `<alias>-branch` git resource emits `ignore_paths: ["<root/>.genesis/manifests/*"]`, unconditionally — not gated on `manifest_store`.
+**Decision:** The `<alias>-branch` git resource emits `ignore_paths: ["<root/>.genesis/manifests/*"]`, unconditionally, and not gated on `manifest_store`.
 
 **Rationale:** Gating would remove the defence from `hybrid` and `repository`, which are the two stores that actually write there, and from any later regression that reintroduces git writes. Under `exodus` nothing writes to that path and the exclusion costs nothing.
 
-**Trade-off accepted:** It breaks the trigger loop without removing the underlying condition — the deploy is still a git writer on a branch propagation also advances. Only `manifest_store: exodus` removes the second writer, and a compile-time warning now says so rather than the compiler silently accepting the pairing. It is a warning and not a bail so repositories still on `hybrid` keep compiling while the policy question is settled.
+**Trade-off accepted:** It breaks the trigger loop without removing the underlying condition. The deploy is still a git writer on a branch propagation also advances. Only `manifest_store: exodus` removes the second writer, and a compile-time warning now says so rather than the compiler silently accepting the pairing. It is a warning and not a bail so repositories still on `hybrid` keep compiling while the policy question is settled.
 
 ---
 
