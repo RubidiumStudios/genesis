@@ -97,8 +97,9 @@ sub automated_providers {
 # entry with no cli_class is refused because every type has a CLI class
 # and a resolver that finds none behaves like manual instead of saying
 # so.  And a path that disagrees with the class beside it is refused
-# rather than honoured, because that disagreement is the mismatch the
-# rename removed from lib and there is no reason to let one back in.
+# rather than honoured, because a package whose own name says where it
+# lives needs no second spelling, and two spellings of one fact can
+# disagree.
 sub register_provider {
 	my ($class, $type, $info) = @_;
 
