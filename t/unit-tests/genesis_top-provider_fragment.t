@@ -40,8 +40,8 @@ sub concourse {
 }
 
 # Proves that the declaration and the check belong to one class, so the
-# base-class default of D105 has something to validate against, and that
-# the manual provider is in the map like any other.
+# base class's default has something to validate against, and that the
+# manual provider is in the map like any other.
 subtest 'one class carries the fragment and the check' => sub {
 	plan tests => 5;
 
@@ -327,12 +327,12 @@ PAIRC
 		'the layout key is admitted by the provider that declares it';
 	$top = load_with($h, automated_config('pair', 'target: ci'));
 	is $top->config->get('pipeline.provider.output_layout'), 'single',
-		'and D67 fills its default where nobody wrote one';
+		'and its declared default fills in where nobody wrote one';
 
 	# The default asked for directly, rather than through the walk that
-	# reaches it, because a class method is what D105 asks a provider for
-	# and a row that only ever loads a configuration cannot tell the two
-	# apart.  The configuration holds the block and nothing else.
+	# reaches it, because a class method is what a provider has to answer
+	# with and a row that only ever loads a configuration cannot tell the
+	# two apart.  The configuration holds the block and nothing else.
 	my $cfg = Genesis::Config->new();
 	$cfg->set('pipeline.provider.type', 'plain');
 	my @refusals = map {Genesis::Term::decolorize($_)}
@@ -416,10 +416,10 @@ QUIET
 	unlike $refusal, qr/Provider::Boom::validate_config/,
 		'without the frames Carp::Always folded in behind it';
 
-	# Under D105 the provider's rules are not a phase of their own, so
-	# what a provider says is gathered with every other error under the
-	# one sentence a configuration refusal carries, and the wrapper that
-	# announced the provider's half separately is gone.
+	# The provider's rules are not a phase of their own, so what a provider
+	# says is gathered with every other error under the one sentence a
+	# configuration refusal carries, and the wrapper that announced the
+	# provider's half separately is gone.
 	unlike $refusal, qr/Invalid configuration for the/,
 		'and with no second heading of its own in front of it';
 
