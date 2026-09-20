@@ -185,6 +185,14 @@ sub publish_run {
 		# At once, rather than at the end of the run, because everything
 		# after this point can still fail and a branch put back only on the
 		# way out is a branch left standing wherever the run stopped.
+		#
+		# The answer is not read, and the decline path above does not read
+		# what restore_branch says either, so the two paths agree.  The
+		# reset answers false where the repository has no default remote and
+		# where the remote carries no tracking ref for the branch, and the
+		# publish set is the deployment branches alone, every one of which
+		# the pre-flight has already refused the run over if the remote does
+		# not carry it.
 		$session->reset_branch($pushed->{branch}) if $session;
 
 		push @{$result->{rejected}}, $pushed->{branch};

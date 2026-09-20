@@ -608,7 +608,9 @@ Where the branch is the one the repository is standing on, the reset is a hard
 reset rather than a ref write, so the tree and C<HEAD> go back together.
 
 A branch the remote does not carry at all is left alone, since there is
-nothing to put it back to, and the answer says which of the two happened.
+nothing to put it back to, and so is every branch in a repository that has no
+default remote to read a tracking ref from. The answer says whether the branch
+was put back or left alone.
 
 B<Parameters:>
 
@@ -620,8 +622,9 @@ The branch to put back.
 
 =back
 
-B<Returns:> 1 where the branch was put back, and 0 where the remote has no
-tracking ref for it.
+B<Returns:> 1 where the branch was put back, and 0 where it was left alone.
+It is left alone on two conditions, which are a repository with no default
+remote and a remote that carries no tracking ref for the branch.
 
 B<Errors:>
 
