@@ -585,7 +585,7 @@ subtest 'new_prompt_for_choice numbering correct across sequential calls' => sub
 	# not carry over $section_offset from the first call.
 	# Bug: $section_offset was a package global.
 
-	# First call — has a separator
+	# First call, which has a separator
 	set_stdin("1\n");
 	my $r1;
 	combined_from {
@@ -602,7 +602,7 @@ subtest 'new_prompt_for_choice numbering correct across sequential calls' => sub
 
 	is($r1, 'x', 'first call: item 1 selected correctly');
 
-	# Second call — should not be affected by the first
+	# Second call, which should not be affected by the first
 	set_stdin("1\n");
 	my $r2;
 	my $out = combined_from {
