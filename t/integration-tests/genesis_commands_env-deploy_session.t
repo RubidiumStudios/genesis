@@ -6,8 +6,8 @@
 # checkout had left behind.
 #
 # The fifth row is the cleanliness precondition on the path that opens no
-# session, which is the one D84 asserts and the session cannot, because on
-# that path begin never runs.
+# session, which is the one the deploy asserts for itself and the session
+# cannot, because on that path begin never runs.
 #
 # The first three rows assert the restoration in their own words, so each of
 # them passes restore => 0 and no run is asserted twice.  The fourth and the

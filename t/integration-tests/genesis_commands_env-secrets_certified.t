@@ -7,8 +7,8 @@
 # --as-deployed row catches by asking for silence where the run served exactly
 # what the environment is certified at; one that never warned, which the two
 # message rows catch; and one that warned by comparing the deployed commit
-# against the certified commit, which D87 keeps apart and which would warn on
-# every environment ever deployed, including the --as-deployed run.
+# against the certified commit, two facts that are kept apart, which would
+# warn on every environment ever deployed, including the --as-deployed run.
 #
 # Two rows joined the subtest later, which are the check-secrets run's own.
 # The message row among them was red when it was written, red having been
