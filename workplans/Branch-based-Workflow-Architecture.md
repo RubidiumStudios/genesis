@@ -826,6 +826,8 @@ Remembering the trailer is still the author's job. Nothing infers a migration fr
 
 ## Decisions Log
 
+Each entry below records a decision on the date it carries and keeps the wording of that day, so an entry naming a flag or an option Genesis has since dropped is a record of what was decided rather than a description of how the command behaves now.
+
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-02-20 | Fan-out only; no fan-in gates | See below |
