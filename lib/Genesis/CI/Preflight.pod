@@ -189,14 +189,14 @@ either way, since it leaves the command nothing at all to read.
 
 =item C<permit_ahead>
 
-Returns rather than refusing where control is C<ahead> of its remote, which
-is what C<genesis propagate --dry-run> passes under D44.  A preview refuses
-nothing it can warn about instead, and it warns about this one under its own
-banner.  Everything the preview reads is on control itself, and all the push
-settles is whether another machine could resolve the markers a real run
-would write, so C<ahead> is the one divergence a preview can still answer.
-Staleness is not like that, so C<behind> and C<diverged> are refused with it
-set as they are without it.
+Returns rather than refusing where control is C<ahead> of its remote, which is
+what C<genesis propagate --dry-run> passes.  A preview refuses nothing it can
+warn about instead, and it warns about this one under its own banner.
+Everything the preview reads is on control itself, and all the push settles is
+whether another machine could resolve the markers a real run would write, so
+C<ahead> is the one divergence a preview can still answer.  Staleness is not
+like that, so C<behind> and C<diverged> are refused with it set as they are
+without it.
 
 =back
 
@@ -501,11 +501,11 @@ escaped asks rather than inferring it from the counts, and
 C<assumed_commits> says how many local commits a reset would discard.  A
 fast-forward discards nothing, so it leaves that count unset.
 
-The reset's assumption is not warned about here.  D44 says it under the
-preview's own banner, through C<Genesis::CI::Report::preview_warnings>, and a
-caveat printed above that banner is one the operator meets before they have
-been told they are reading a preview.  The fast-forward keeps its own warning,
-because D44 names the reset and the unpushed control and nothing else, and it
+The reset's assumption is not warned about here.  The preview says it under its
+own banner, through C<Genesis::CI::Report::preview_warnings>, and a caveat
+printed above that banner is one the operator meets before they have been told
+they are reading a preview.  The fast-forward keeps its own warning, because
+that banner names the reset and the unpushed control and nothing else, and it
 takes the caveats' sentence shape, "This preview assumes ... is fast-forwarded
 first", so an operator who meets all three reads one kind of sentence.  The
 event line beside either move is printed under both kinds of run, so nothing
@@ -804,7 +804,7 @@ B<Examples:>
     my @paragraphs = Genesis::CI::Preflight::_local_only_refusal(
         $remote, \@offenders);
 
-Composes D48's paragraphs for deployment branches the remote has never had.
+Composes the paragraphs for deployment branches the remote has never had.
 
 One paragraph per branch, so a run with one offender reads exactly as the
 design quotes it and a run with several names them all.  The act the refusal
@@ -843,7 +843,7 @@ B<Examples:>
     my @paragraphs = Genesis::CI::Preflight::_unrelated_refusal(
         $remote, \@branches);
 
-Composes D48's paragraphs for deployment branches that share no ancestor with
+Composes the paragraphs for deployment branches that share no ancestor with
 their counterpart on the remote.
 
 It says that the marker-only reset never applies across unrelated histories,
