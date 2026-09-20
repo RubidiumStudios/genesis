@@ -691,13 +691,14 @@ B<Examples:>
 
     Genesis::CI::ProviderCompiler::_yaml_quoted("a\nb");  # '"a\nb"'
 
-=head2 _yaml_pair($lead, $key, $val, $indent)
+=head2 _yaml_pair($lead, $name, $val, $indent)
 
 One key and its value beneath a list item. The lead is what the key sits
 behind, which is the dash for the item's first key and plain spaces for
 the rest of them, and both take the same writer because that lead is the
-only thing separating them. An empty list or hash is written on the key's
-own line, since a key followed by nothing reads back as null.
+only thing separating them. The key is spelled through C<_yaml_key> on
+the way in. An empty list or hash is written on the key's own line, since
+a key followed by nothing reads back as null.
 
 B<Parameters:>
 
@@ -707,9 +708,9 @@ B<Parameters:>
 
 The indentation and dash the key sits behind.
 
-=item C<$key>
+=item C<$name>
 
-The key.
+The key, as the structure holds it.
 
 =item C<$val>
 
