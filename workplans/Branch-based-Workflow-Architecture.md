@@ -1001,4 +1001,4 @@ Remembering the trailer is still the author's job. Nothing infers a migration fr
 - `lib/Service/Git.pod`, `resolve_branch`, `fetch_branches`, and `remote_branch_exists`
 - `lib/Genesis/CI/Compiler/PipelineDescriptor.pm`, `_env_resources`, the branch resource and its `ignore_paths`
 - `lib/Genesis/CI/Compiler/Validator.pm`, the compile-time checks, with its `Warnings` POD section
-- `lib/Genesis/Env.pod` — `prepare_branch`, `propagation_files`, `_post_deploy`
+- `lib/Genesis/Env.pod`, `propagation_files`, `track_additional_files`, and `hold_record`
