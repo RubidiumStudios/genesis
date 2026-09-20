@@ -129,7 +129,7 @@ subtest 'both callers fail on a repository with no commits' => sub {
 
 	# Catches a session whose begin skipped the pre-flight.  The operator
 	# would meet the empty repository at the commit instead, which is the
-	# late generic failure D80 moved the classification ahead of.
+	# late generic failure the classification now runs ahead of.
 	my ($sout, $serr, $sexit) = run_genesis($h, 'qa', 'info');
 	isnt($sexit, 0, 'the session caller failed too');
 	like($serr, $matches, 'and named the same condition');
