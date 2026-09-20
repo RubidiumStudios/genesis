@@ -60,10 +60,16 @@ subtest 'a registration keeps a copy of what it was handed' => sub {
 		'Genesis::CI::Provider::Concourse',
 		'writing into the registered hash leaves the registry as it was';
 
-	# Registered under its own name, so the rows above and every other file
-	# in the run still see the real entries.
-	ok !Genesis::CI::ProviderRegistry->provider_info('fixture-rewritten'),
-		'and nothing else was registered along the way';
+	# Registered under its own name, so the real entries are untouched by
+	# it and every row after this one still sees them.
+	is Genesis::CI::ProviderRegistry->provider_info('concourse')->{cli_class},
+		'Genesis::CI::Provider::Concourse',
+		'and the real concourse entry still answers its own CLI class';
+
+	# The registry is fixed at compile time and has no way to take an entry
+	# out again, so the fixture stays for the rest of this process.  Nothing
+	# in this file enumerates providers, and a row that came to count them
+	# would have to know it is here.
 };
 
 subtest 'the task block declares privileged beside image and version' => sub {
