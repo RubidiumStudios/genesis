@@ -736,6 +736,31 @@ Four of the five methods above guard on the `config` key, and `generate_descript
 
 The branch, protection, record, and propagation helpers are `_apply_init_branches`, `_protection_rules_for`, `_apply_branch_protection`, `_apply_records`, `_preview_warnings`, `_push_failure`, `_resolve_propagation_base`, `_verify_deployed`, `_describe_source_control`, and `_describe_topology`.
 
+## Genesis::CI::Preflight
+
+**File:** `lib/Genesis/CI/Preflight.pm`
+
+**Purpose:** The first stage of a propagation run, which settles what the repository holds before anything is written, and the two refusals about the pipeline itself that more than one command makes. A violation of the initial state stops the run before it writes, and the refusal names the branch and the way out. Each refusal spends a named exit code rather than a number, which is `CONFIG` for control that exists nowhere, `DATAERR` for an initial state the design calls illegal, and `TEMPFAIL` for a remote this clone cannot reach.
+
+**Public Subroutines:**
+
+- `initial_state($top, $git, %opts)`
+  runs the whole first stage and returns what it found, as the refresh, the control divergence, a classification of every deployment branch in scope, and the events to print. It refuses before it writes anything, then resets a branch whose only local commits are ones a re-run reproduces and fast-forwards a branch that is merely behind. Under `dry_run` it writes nothing and reports each write it would have made as a warning.
+
+- `require_control($top, $git, %opts)`
+  settles the control branch before anything else is read, because the topology is read from it. Control that exists nowhere is refused at `CONFIG`. A caller that passes `on_divergence => 'report'` is handed the divergence instead of being refused on it, which is how `genesis <env> deploy` and `genesis pipeline-status` reach a report where `genesis propagate` refuses.
+
+- `local_only_commits($git, $branch)`
+  lists the commits a branch holds that no remote has, newest first, each classified by the propagation marker it carries. A commit with a marker is one a re-run reproduces and a commit without one is an operator's hand edit, which nothing here may discard. It runs before any prune, because a prune removes the refs that answer it.
+
+- `assert_not_disowned($top, %opts)`
+  refuses a pipeline the configuration has disowned. It lives here because `genesis <env> deploy` asks the same question and is answered with a warning instead of a refusal.
+
+- `assert_provider_gate($top, $opts, %how)`
+  refuses a command-line run of work an automated provider's pipeline owns, because such a run takes none of the locks the pipeline's own jobs take. `--force` at a terminal turns the refusal into an acknowledgement, which `--yes` does not suppress, and outside a terminal the refusal stands even with the flag.
+
+**Internal:** `_shares_history`, `_illegal_state_refusal`, `_local_only_refusal`, `_unrelated_refusal`, `_hand_commit_refusal`, and `_commits`.
+
 ## The Propagation Half
 
 These modules run under `genesis propagate` and `genesis pipeline-status`. None of them compiles anything, and none of them is reached by `genesis pipeline-apply` except through the branch work that command does before it compiles. Each one's `.pod` beside it in `lib/Genesis/CI/` is the reference for its API.
