@@ -11,11 +11,11 @@ use Getopt::Long qw/GetOptionsFromArray/;
 
 # new - build a compiler for one provider {{{
 #
-# Under D108 a compiler holds the provider it emits for rather than a
-# copy of that provider's settings, so DEFAULT_TEAM and check_prereqs
-# have one home each and a change on the provider is visible here with
-# nothing rebuilt.  A caller reaches this through
-# $provider->compiler(ast => $ast) rather than calling it directly.
+# A compiler holds the provider it emits for rather than a copy of that
+# provider's settings, so DEFAULT_TEAM and check_prereqs have one home each
+# and a change on the provider is visible here with nothing rebuilt.  A caller
+# reaches this through $provider->compiler(ast => $ast) rather than calling it
+# directly.
 #
 # The concrete used to define its own new and drop everything but ast,
 # top, and provider_opts, which would have thrown the provider away on
@@ -80,10 +80,10 @@ sub output_files {
 # }}}
 ### Prerequisite Checking is the provider's {{{
 #
-# Nothing here answers for a toolchain any more.  This class carried a
-# default that said yes to everything, and the Concourse compiler
-# overrode it with a check weaker than the provider's, so under D108 the
-# question goes to the provider and the answer comes back from one place.
+# Nothing here answers for a toolchain any more.  This class carried a default
+# that said yes to everything, and the Concourse compiler overrode it with a
+# check weaker than the provider's, so the question goes to the provider now
+# and the answer comes back from one place.
 #
 # }}}
 ### Provider Options Contract {{{
@@ -367,9 +367,9 @@ sub top {
 # }}}
 # provider - the provider this compiler emits for {{{
 #
-# The object rather than a copy of it, which is the whole of D108's
-# composition.  A copy passes every assertion about a value at build
-# time and drifts the moment the provider changes.
+# The object rather than a copy of it, which is the whole of the composition.
+# A copy passes every assertion about a value at build time and drifts the
+# moment the provider changes.
 sub provider {
 	return $_[0]->{provider};
 }

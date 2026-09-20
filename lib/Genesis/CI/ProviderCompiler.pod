@@ -24,12 +24,12 @@ to do, and that half is a class under L<Genesis::CI::Provider>. The other
 half turns a compiled L<Genesis::CI::Compiler::AST> into whatever that
 platform calls a pipeline, and this is the base that half is built on.
 
-Under D108 a compiler holds the provider it emits for rather than a copy
-of that provider's settings. The constructor takes the provider, C</provider>
-answers with it, and a change on the provider is visible here with nothing
-rebuilt. That composition is why the constructor lives on the base alone:
-a concrete that defined its own would bless the keys it knew about and
-drop the provider on the way in.
+A compiler holds the provider it emits for rather than a copy of that
+provider's settings. The constructor takes the provider, C</provider> answers
+with it, and a change on the provider is visible here with nothing rebuilt.
+That composition is why the constructor lives on the base alone, because a
+concrete that defined its own would bless the keys it knew about and drop the
+provider on the way in.
 
 Four methods are the contract a concrete has to answer, and they are
 C</platform_name>, C</provider_type>, C</generate_from_ast>, and
@@ -460,10 +460,9 @@ B<Examples:>
 
 =head2 provider()
 
-The provider this compiler emits for. The object rather than a copy of
-it, which is the whole of D108's composition: a copy passes every
-assertion about a value at build time and drifts the moment the provider
-changes.
+The provider this compiler emits for. The object rather than a copy of it,
+which is the whole of the composition. A copy passes every assertion about a
+value at build time and drifts the moment the provider changes.
 
 B<Returns:> the L<Genesis::CI::Provider> subclass instance, or C<undef>.
 
