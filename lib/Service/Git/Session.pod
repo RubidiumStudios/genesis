@@ -478,12 +478,11 @@ Options. C<named> says the caller has already listed the modified files in
 the error it handed us, so the discard makes no announcement of its own and
 the operator is shown that list once. C<finish> passes it.
 
-C<exitcode> is the status the process exits with, which is how D82's two
-classes of run failure leave through the one abort and still exit
-differently. A caller that asks for none exits 1. The two refusals below
-keep C<SOFTWARE> whatever was asked for, because a working tree nobody
-could put back is a defect in Genesis rather than the failure the run was
-reporting.
+C<exitcode> is the status the process exits with, which is how the two classes
+of run failure leave through the one abort and still exit differently. A
+caller that asks for none exits 1. The two refusals below keep C<SOFTWARE>
+whatever was asked for, because a working tree nobody could put back is a
+defect in Genesis rather than the failure the run was reporting.
 
 =back
 
@@ -529,11 +528,11 @@ B<Examples:>
   $session->discard($env_record->{branch});
 
 Puts one branch back at its remote-tracking ref and leaves the session open,
-which is what D96's second stage asks for when an error is confined to one
-environment. The tree and the index are discarded first, because a delivery
-that died between the checkout and the commit leaves both holding the source
-and every later switch would fail over them, and the branch then goes back to
-T so that nothing of the partial delivery survives.
+which is what an error confined to one environment asks for. The tree and the
+index are discarded first, because a delivery that died between the checkout
+and the commit leaves both holding the source and every later switch would
+fail over them, and the branch then goes back to T so that nothing of the
+partial delivery survives.
 
 It is not C<abort>. C<abort> ends the session and the run with it, so every
 environment below the broken one would go unattempted, which is the shape the
@@ -596,9 +595,9 @@ Puts one branch back where the remote-tracking ref has it, through the same
 reset C<abort> runs over every branch the session committed to.
 
 A publish the remote refused wants exactly that for the one branch it was
-refused on, because a branch left carrying a commit nobody else can see is the
-state D83 refuses to end a run in. Both paths go through one reset, so the two
-cannot come to disagree about what putting a branch back means.
+refused on, because a branch left carrying a commit nobody else can see is a
+state no run may end in. Both paths go through one reset, so the two cannot
+come to disagree about what putting a branch back means.
 
 It is not C<discard>. C<discard> throws the working tree away first and takes
 the branch out of this session's record of what it moved, which is what a
@@ -821,15 +820,15 @@ and before the commit, so a failed check never becomes a commit, and either
 one raises a C<Genesis::CI::RunFailure> of the run-fatal kind, which ends the
 run rather than the environment.
 
-The writes themselves are raised as that same class and for the same reason.
-A path this delivery could not take off the branch, or could not put into
-the index, is the writer failing to produce what it was told to produce, and
+The writes themselves are raised as that same class and for the same reason. A
+path this delivery could not take off the branch, or could not put into the
+index, is the writer failing to produce what it was told to produce, and
 nothing a caller could do differently would have helped, so it ends the run
-under D82 rather than the environment. The commit goes the same way. A commit
-git refuses is the writer failing at the last step of the sequence it was told
-to carry out, so it raises the run-fatal C<Genesis::CI::RunFailure> carrying
-the branch, the source commit, and the paths the delivery was staging, exactly
-as the two halves of the staging do.
+rather than the environment. The commit goes the same way. A commit git
+refuses is the writer failing at the last step of the sequence it was told to
+carry out, so it raises the run-fatal C<Genesis::CI::RunFailure> carrying the
+branch, the source commit, and the paths the delivery was staging, exactly as
+the two halves of the staging do.
 
 The writer records each branch it commits to on the session as it goes, which
 is what lets C<abort> reset every one of them back to its remote-tracking ref
@@ -1060,8 +1059,8 @@ True only where C<finish> completed its clean path. A session that has not
 opened, one that is still open, and one that went out through C<abort> all
 answer false, and so does one that finished and has since been opened again.
 
-The post-deploy child reads it, because D84 makes a finished session the
-precondition for spawning one.
+The post-deploy child reads it, because a finished session is the precondition
+for spawning one.
 
 B<Parameters:> None.
 
@@ -1133,7 +1132,7 @@ B<Examples:>
 
 The tracked paths that are modified or staged right now, sorted, in the words
 C<git status --porcelain> gives them. Untracked files are never listed,
-because D84 says they block nothing.
+because they block nothing.
 
 C<begin>, C<finish>, and C<abort> all read it, so the list an operator is
 shown is the same list wherever they are shown it, and a caller that wants to
@@ -1166,10 +1165,10 @@ C<modified_paths> is this function over the session's own handle, so the two
 answers cannot drift apart.
 
 C<genesis E<lt>envE<gt> deploy> is the caller it exists for. Two arms of the
-branch-class gate open no session at all, and on those the deploy asserts
-D84's precondition itself; the files it names an operator have to be the files
-the session would have named, because one state described twice is a state an
-operator fixes twice.
+branch-class gate open no session at all, and on those the deploy asserts the
+clean-tree precondition itself; the files it names an operator have to be the
+files the session would have named, because one state described twice is a
+state an operator fixes twice.
 
 It is a plain function rather than a method, and callers name it in full,
 since there is no session for it to be a method on.
