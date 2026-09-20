@@ -173,4 +173,29 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		'the retired seeding command is absent from the flag-carrying set');
 };
 
+# The deployed-commit flag on the bosh command is the one flag whose place on
+# the command line decides whether Genesis reads it at all, and nothing said
+# so where a change could be caught.
+subtest 'where --as-deployed has to sit on a bosh command line' => sub {
+	plan tests => 4;
+
+	my $bosh = command_properties('bosh');
+	my %opts = @{$bosh->{options} || []};
+	ok(exists $opts{'as-deployed'},
+		'the bosh command declares the deployed-commit flag');
+
+	# The two properties together are what makes the position matter.  Option
+	# parsing stops at the first argument that is not an option, which is the
+	# bosh subcommand, and everything after it is passed to the bosh cli
+	# untouched, so a flag written after the subcommand reaches bosh rather
+	# than Genesis and bosh refuses an option it does not know.
+	ok($bosh->{option_require_order},
+		'it stops parsing options at the bosh subcommand');
+	ok($bosh->{option_passthrough},
+		'and hands everything after that subcommand to the bosh cli');
+
+	like($bosh->{description}, qr/must come BEFORE any bosh command/,
+		'and the command says so where an operator reads it');
+};
+
 done_testing;
