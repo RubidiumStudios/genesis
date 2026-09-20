@@ -1,6 +1,6 @@
 =head1 NAME
 
-Genesis::CI::Propagation - the pull request half of pipeline propagation
+Genesis::CI::Propagation - the commit a propagation is written with
 
 =head1 SYNOPSIS
 
