@@ -29,10 +29,15 @@ subtest 'one invalid key, three commands, one refusal' => sub {
 	# the row may as well say so.
 	plan tests => 12;
 
+	# Every version 3 configuration this file writes declares a floor, for
+	# the reason the harness's own builders default one: Genesis::Top::create
+	# writes minimum_version for every released build, and a repository that
+	# declares none with an environment that declares none of its own is
+	# refused before the row's own refusal is ever reached.
 	commit_on_control($h, files => {
 		'.genesis/config' => join("\n",
 			'---', 'deployment_type: bosh', 'version: "3"',
-			'creator_version: 3.2.0',
+			'creator_version: 3.2.0', 'minimum_version: 3.2.0',
 			'pipeline:', '  enabled: true', '  frobnicate: yes', ''),
 	});
 
@@ -72,7 +77,7 @@ subtest 'a stale ci.yml beside a version 3 pipeline only warns' => sub {
 	commit_on_control($h, files => {
 		'.genesis/config' => join("\n",
 			'---', 'deployment_type: bosh', 'version: "3"',
-			'creator_version: 3.2.0',
+			'creator_version: 3.2.0', 'minimum_version: 3.2.0',
 			'pipeline:', '  enabled: true',
 			'  provider:', '    type: manual',
 			# Copy A is cloned from a bare repository at a filesystem path,
@@ -102,7 +107,7 @@ subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
 	commit_on_control($h, files => {
 		'.genesis/config' => join("\n",
 			'---', 'deployment_type: bosh', 'version: "3"',
-			'creator_version: 3.2.0',
+			'creator_version: 3.2.0', 'minimum_version: 3.2.0',
 			'pipeline:', '  enabled: true',
 			'  source_control:',
 			'    repository: genesis/bosh-deployments',
@@ -136,7 +141,7 @@ subtest "a provider whose file will not load exits CONFIG" => sub {
 	commit_on_control($h, files => {
 		'.genesis/config' => join("\n",
 			'---', 'deployment_type: bosh', 'version: "3"',
-			'creator_version: 3.2.0',
+			'creator_version: 3.2.0', 'minimum_version: 3.2.0',
 			'pipeline:', '  enabled: true',
 			'  source_control:',
 			'    repository: genesis/bosh-deployments',
