@@ -108,9 +108,9 @@ sub provider_options_schema {
 #
 # Nothing is written here, so the base's default is what runs, and that
 # validates the block against the fragment above and refuses anything
-# else by name.  With an empty fragment that means no provider
-# key is admitted beside this type at all, which is the whole of what
-# this provider has to say about its block today.
+# else by name.  With an empty fragment that means no provider key is
+# admitted beside this type at all, which is the whole of what this
+# provider has to say about its block today.
 #
 # The two rules that stood here both spoke of repo.  The repository a
 # pipeline acts on lives in pipeline.source_control.repository rather

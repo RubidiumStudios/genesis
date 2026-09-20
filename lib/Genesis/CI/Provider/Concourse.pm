@@ -210,9 +210,9 @@ EOF
 # Keys map directly to the pipeline.provider: sub-keys in .genesis/config.
 # This fragment is the only place these keys are declared, and it is the
 # whole of what the block admits beside the type, so a key that is not
-# here is refused by name as the configuration loads.  That is why
-# target, url, team and insecure live here rather than beside the type,
-# where they sat unread under every other provider.
+# here is refused by name as the configuration loads.  That is why target,
+# url, team and insecure live here rather than beside the type, where they
+# sat unread under every other provider.
 #
 # There is no output_layout here.  Concourse emits one pipeline definition
 # and declares multi_file_output false, and a provider offers that key by
