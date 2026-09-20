@@ -565,10 +565,13 @@ sub gate_state {
 	my $reason = $stage;
 	$hold = 1 if $reason =~ s/^hold:\s*//;
 
+	# The length is asked again after the strip, because a trailer written
+	# `hold:` with nothing after it leaves no reason at all, and a key
+	# holding the empty string renders as a colon with nothing behind it.
 	return {
 		reason      => 'gate-ahead',
 		gate        => $commit,
-		gate_reason => $reason,
+		(length $reason ? (gate_reason => $reason) : ()),
 		($hold && length $reason ? (hold_trailer_reason => $reason) : ()),
 	};
 }
