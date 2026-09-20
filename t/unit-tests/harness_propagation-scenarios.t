@@ -254,7 +254,7 @@ subtest 'the pair, and one delivery per environment in one line' => sub {
 };
 
 subtest 'the one-line shapes that stand on a scenario' => sub {
-	plan tests => 11;
+	plan tests => 12;
 
 	my $h = ready_harness();
 	is(a_delivery($h, 'qa'), remote_sha($h, $h->slug('qa')),
@@ -266,12 +266,17 @@ subtest 'the one-line shapes that stand on a scenario' => sub {
 	is($delivered, remote_sha($s, $s->slug('qa')),
 		'and the delivered sha it answers is the branch tip');
 
-	# The file seeded writes has to load as an environment for the reason
-	# chain's does, which is that a run reads the topology out of these files
-	# and a kit written as a flow mapping leaves the root with none.
-	like(files_at($s, $control)->{'qa.yml'},
-		qr/^kit:\n  name:\s+dev\n  version:\s+latest$/m,
-		'seeded writes a control commit that loads as an environment');
+	# The body has to carry both of the blocks
+	# Genesis::Env::is_valid_env_file reads, which are the kit as a block
+	# mapping and the environment's own name, for the reason that chain's
+	# body does.  A run reads the topology out of these files, and a body
+	# missing either block leaves the root with no environments at all.
+	# seeded once wrote one missing both.
+	my $body = files_at($s, $control)->{'qa.yml'};
+	like($body, qr/^kit:\n  name:\s+dev\n  version:\s+latest$/m,
+		"seeded's control commit declares the kit as a block mapping");
+	like($body, qr/^genesis:\n  env:\s+qa$/m,
+		'and names the environment under genesis.env');
 
 	my $due = ready_harness(envs => ['qa']);
 	my $taken = harness_marker($due, $due->slug('qa'));
