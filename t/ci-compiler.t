@@ -2499,8 +2499,8 @@ subtest 'Concourse - provider_config omits default values' => sub {
 		provider_opts => {
 			type   => 'concourse',
 			target => 'my-target',
-			team   => 'main',      # this IS the default — should be omitted
-			public => 0,           # this IS the default — should be omitted
+			team   => 'main',      # this IS the default, so it should be omitted
+			public => 0,           # this IS the default, so it should be omitted
 		},
 	);
 	my $config = $provider->provider_config();
@@ -2745,7 +2745,7 @@ subtest 'Parser - genesis-config: flat vault/source_control lifted into integrat
 subtest 'Parser - genesis-config: nested integrations.* takes precedence over flat' => sub {
 	my $mixed_ci = {
 		targets       => { sandbox => { type => 'bosh-director', connection => { url => 'u' } } },
-		vault         => { url => 'https://flat-vault.example.com' },   # flat — should be ignored
+		vault         => { url => 'https://flat-vault.example.com' },   # flat, so it should be ignored
 		integrations  => {
 			vault          => { url => 'https://nested-vault.example.com' },  # nested wins
 			source_control => { provider => 'github', repository => 'org/repo' },

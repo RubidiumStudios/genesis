@@ -389,7 +389,7 @@ subtest 'check_prereqs: Concourse min_fly_version not satisfied' => sub {
 };
 
 ### ============================================================ ###
-### validate_config — the provider's rules for its own block
+### validate_config, the provider's rules for its own block
 ### ============================================================ ###
 
 # Under D105 a provider validates the block where the operator wrote it,
