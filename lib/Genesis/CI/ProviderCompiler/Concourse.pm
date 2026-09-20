@@ -217,7 +217,7 @@ sub describe_provider {
 		my $descriptor = Genesis::CI::Compiler::PipelineDescriptor->new(ast => $ast);
 
 		# Notification style
-		my $notif_style = $descriptor->_effective_notif_style($ast);
+		my $notif_style = $descriptor->notification_style($ast);
 		push @extras, 'NotifStyle';
 		$desc{NotifStyle} = $notif_style;
 
