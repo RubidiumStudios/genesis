@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
-# What withholds the propagate child, and what catches up afterwards.
-# Proves T252, T256, and T253 of the test matrix.
+# Proves T252, T256, and T253: what withholds the propagate child, and what
+# catches up afterwards.
 #
 # The flag is D35's, and it withholds the child and nothing else.  The gate
 # the hand-off is spawned behind already refuses on it, so nothing here makes

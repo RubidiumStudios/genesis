@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Proves T78's builder half, the one marker builder.  A direct-mode delivery
+# Proves T78's builder half: the one marker builder.  A direct-mode delivery
 # onto qa/bosh writes "[pipeline] control@<sha> -> qa", and it writes it by
 # asking the builder rather than by spelling the subject itself.  The sweep
 # that proves no other site under lib/ or bin/ spells that subject by hand

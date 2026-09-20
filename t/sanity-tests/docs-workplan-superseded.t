@@ -1,6 +1,6 @@
 #!perl
 #
-# Proves T293 and T294.  The workplan describes the move to v3 by hand, it
+# Proves T293 and T294: the workplan describes the move to v3 by hand, it
 # carries the line marking it superseded by the design set, and it no longer
 # claims behaviour the design replaced.  The first subtest reads the migration
 # section, and the second reads the supersession note in the status line,
