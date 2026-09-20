@@ -202,7 +202,8 @@ subtest 'the read is merged and never leaf-only' => sub {
 
 	# Two tokens, so the environment has a site file above it, and the key
 	# is written only there.  A leaf-only read finds it absent and answers
-	# wrongly with no error at all, which is what D79 is about.
+	# wrongly with no error at all, which is why every pipeline key is read
+	# from the merged environment.
 	my $g = make_harness(envs => [], pipeline => 1, vault => 0);
 	write_env_file($g, 'us', site => 'us', pipeline => {manual => 'sometimes'});
 	write_env_file($g, 'us-east');
