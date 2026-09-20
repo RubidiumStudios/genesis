@@ -51,10 +51,15 @@ use Cwd ();
 
 use Genesis;
 
-plan tests => 6;
+plan tests => 7;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
+
+# The repository we were started in, read once here, because a row that has
+# run leaves us wherever its harness put us and the last subtest asks this
+# tree a question.
+my $REPO = Cwd::getcwd();
 
 # qa and prod both deployed and delivered at control's tip, prod downstream of
 # qa, and the director, the fake bosh, and the kit that let a deploy reach its
@@ -307,6 +312,22 @@ subtest 'a lock taken in the window is reported, not swallowed' => sub {
 	refresh($h, 'a', $h->slug('prod'));
 	is($h->git('a')->sha('refs/remotes/origin/'.$h->slug('prod')), $before,
 		'nothing on R moved, so the retry has everything left to do');
+};
+
+# No T row of its own, because the matrix carries none for a constant
+# that nothing raises and nothing reads.  The row is a guard: it cannot
+# go red today, and it catches a change that brings the constant back.
+subtest 'the no-branch refusal code stays gone from the tree' => sub {
+	plan tests => 2;
+
+	require Genesis::Top;
+	ok(!Genesis::Top->can('PROPAGATE_NO_BRANCH_EXIT'),
+		'Genesis::Top declares no no-branch exit code');
+
+	my @named = grep {$_}
+		split(/\n/, qx(git -C $REPO grep -l PROPAGATE_NO_BRANCH_EXIT -- lib/ 2>/dev/null));
+	is_deeply(\@named, [],
+		'no module and no POD under lib/ still names it');
 };
 
 # vim: ts=2 sw=2 sts=2 noet
