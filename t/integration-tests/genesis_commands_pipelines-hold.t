@@ -167,38 +167,61 @@ subtest 'a hold stops delivery in direct mode' => sub {
 };
 
 subtest 'a hold stops the pull request in PR mode' => sub {
-	# Four rows, and one more for each of the two runs' own restoration
+	# Six rows, and one more for each of the two runs' own restoration
 	# assertions.  The double is the one held_prod stood, because a second
 	# one built over it would discard whatever the builder set on the first.
 	#
-	# The last two rows guard the pull-request path until that path exists.
-	# The walk does not reach the hold in PR mode today, because propagate
-	# records `not attempted, because delivery by pull request is not built
-	# yet` and carries on past the environment before it reads the hold, so
-	# what those rows hold true of is a run that opened nothing because it
-	# opened nothing at all.  They say what the hold must go on meaning once
-	# the path lands.  The first two rows are this task's own, and neither
-	# could pass before the command existed: the hold has to be settable in
-	# a repository whose environments deliver by pull request, and the
-	# record it wrote has to still be standing once the run has been past.
-	plan tests => 6;
+	# The last four rows are about the hold and not about a path that is
+	# missing.  The run reaches the pull request arm for this environment
+	# and the arm reads the hold: the walk sends the due commit to held and
+	# leaves nothing pending, Genesis::CI::PullRequest::deliver reads that
+	# held list before it decides whether to retire the branch, and the
+	# idempotent word it answers for an environment with nothing due is set
+	# aside where anything is held, so the report settles the environment as
+	# held instead.  What the four say together is that the hold is what
+	# stopped the pull request, the listings row being what says the arm was
+	# taken at all.  With the walk's own apply_hold taken out the commit
+	# stays pending, the arm opens a pull request and pushes its branch, and
+	# three of the four go red.
+	#
+	# The first two rows are this task's own, and neither could pass before
+	# the command existed: the hold has to be settable in a repository whose
+	# environments deliver by pull request, and the record it wrote has to
+	# still be standing once the run has been past.
+	plan tests => 8;
 
 	my $h  = held_prod_delivered(mode => 'pr', github => 1);
 	my $gh = $h->{gh};
 
-	commit_on_control($h,
-		files   => {'prod.yml' => env_body('prod', 1)},
-		message => 'change prod', push => 1);
+	# Laid through the harness rather than out of a body of this row's own,
+	# because the run reads genesis.pipeline.require_pr out of the very file
+	# the commit writes.  A body composed here drops that key, and the whole
+	# pull request arm goes with it: the run delivers straight to prod/bosh
+	# and every row below is answered by an arm nobody meant to test.
+	due_commit($h, 'prod', params => {instances => 2},
+		message => 'raise the instance count');
 
 	my (undef, undef, $held) = run_genesis($h,
 		'prod', 'pipeline-hold', 'waiting on the capacity report');
 	is($held, 0, 'the hold was recorded in a pull-request repository');
 
-	run_genesis($h, 'propagate', '-y');
+	my ($out, $err) = run_genesis($h, 'propagate', '-y');
 
 	is(secret($h->env_path('prod').'/hold:reason'),
 		'waiting on the capacity report',
 		'the hold still stands once the run has been past');
+	like(unfolded($out, $err),
+		qr/prod: held, needs clearing \(waiting on the capacity report\)/,
+		'the run settles prod as held rather than as an environment it has '.
+		'nothing to say about');
+	# A guard on the arm the two rows below are about.  Only an environment
+	# the run delivers by pull request has its listings read, so a run that
+	# took the direct arm asks nothing here, and without this row the two
+	# below would be answered by an arm that opens no pull request because
+	# it never goes near one.
+	ok(scalar(grep {$_->{method} eq 'GET' && $_->{url} =~ m{/pulls}}
+		gh_calls($gh)),
+		'the run read the pull request listings, so it took that arm');
 	is(scalar(grep {$_->{method} eq 'POST' && $_->{url} =~ m{/pulls}} gh_calls($gh)),
 		0, 'no pull request was opened or updated');
 	# --verify --quiet, because a bare rev-parse echoes the name it could not
