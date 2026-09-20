@@ -23,12 +23,19 @@ sub slurp {
 # that are there today.  The rows that are about one page still name it.
 #
 # A run from anywhere but the repository root lists nothing and would pass,
-# which is a green that proves nothing, so an empty list bails out.
-sub pages {
-	my @found = grep {length} split /\n/, qx(git ls-files docs/ci);
-	BAIL_OUT('git ls-files docs/ci listed no page') unless @found;
-	return sort @found;
+# which is a green that proves nothing, so the list is read once here and an
+# empty one fails and ends this file.  A bail would end the whole run over
+# one file's working directory.
+my @PAGES = sort grep {length} split /\n/, qx(git ls-files docs/ci);
+unless (@PAGES) {
+	# The exit carries no status of its own, because Test::Builder sets one
+	# from the failing row.
+	fail('git ls-files docs/ci listed no page');
+	done_testing();
+	exit;
 }
+
+sub pages { return @PAGES }
 
 # Returns the body of the one section whose heading matches, from the heading
 # to the next heading of the same level or the end of the file.
