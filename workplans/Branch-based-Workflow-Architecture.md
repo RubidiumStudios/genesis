@@ -327,7 +327,7 @@ The audit gap the tag design worried about is closed by the run's report rather 
 >
 > **Stage 1: Control → Kickoff.** The developer runs `genesis push`, a sequence tag is created on control annotated with a file-flow diagram, a pipeline job picks up the tag, and depending on the configured kickoff mode either pushes the tagged commit to `kickoff` (`auto`) or opens a PR against `kickoff` for a human to review and merge (`manual`).
 >
-> **Stage 2: Kickoff → Environment Branches.** The pipeline analyzes changed files, classifies each, determines target branches, and for each: creates the branch if missing, or compares sequence numbers and skips when newer changes are already present.
+> **Stage 2: Kickoff → Environment Branches.** The pipeline analyzes changed files, classifies each, determines target branches, and for each one either creates the branch if it is missing or compares sequence numbers and skips when newer changes are already present.
 >
 > **Kickoff Modes**
 >
