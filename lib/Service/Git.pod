@@ -2954,12 +2954,12 @@ B<Examples:>
 
 Refuses a push that would rewrite the history of an append-only branch.
 
-D31 makes control and every deployment branch append-only on the remote, and
-two commands enforce it. C<pipeline-apply> checks the ancestry before it
-pushes, through L</push_append_only>, and the publish refuses a lease before
-it builds a refspec, in L</_push_one>. The sentence lives here so the two
-cannot come to word one rule differently, since an operator can meet it on
-either command. It always raises, and each caller decides when to call it.
+Control and every deployment branch are append-only on the remote, and two
+commands enforce it. C<pipeline-apply> checks the ancestry before it pushes,
+through L</push_append_only>, and the publish refuses a lease before it builds
+a refspec, in L</_push_one>. The sentence lives here so the two cannot come to
+word one rule differently, since an operator can meet it on either command. It
+always raises, and each caller decides when to call it.
 
 B<Parameters:>
 
