@@ -5273,17 +5273,27 @@ sub a_delivery {
 		control => $opts{control} // $h->git('a')->sha($h->{control}));
 }
 
+# seeded is one delivered control commit, which is the smallest shape a row
+# reading a marker off a branch can stand on.
+#
+# The commit writes the environment's own file through env_body for the
+# reason chain does.  A body composed here carried neither a genesis.env
+# block nor a block mapping of the kit, both of which
+# Genesis::Env::is_valid_env_file reads, so the repository the shape handed
+# back held no environments at all.  The three rows standing on it read
+# markers off commits and never enumerate environments, so nothing has yet
+# asked it for one.
 sub seeded {
 	my (%opts) = @_;
-	my $h = make_harness(envs => $opts{envs} // ['qa'], vault => 0, %opts);
-	$h->init_branch($_, %opts) for @{$opts{envs} // ['qa']};
+	my @envs = @{$opts{envs} // ['qa']};
+	my $h = make_harness(envs => \@envs, vault => 0, %opts);
+	$h->init_branch($_, %opts) for @envs;
 	my $control = $h->commit_on_control(
-		files   => $opts{files} // {'qa.yml' => "---\nkit: dev\n"},
-		message => $opts{message} // 'change qa',
+		files   => $opts{files} // {"$envs[0].yml" => env_body($h, $envs[0], 1)},
+		message => $opts{message} // "change $envs[0]",
 		push    => 1,
 	);
-	my $delivered = $h->deliver(($opts{envs} // ['qa'])->[0], %opts,
-		control => $control);
+	my $delivered = $h->deliver($envs[0], %opts, control => $control);
 	return ($h, $control, $delivered);
 }
 

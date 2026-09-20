@@ -254,7 +254,7 @@ subtest 'the pair, and one delivery per environment in one line' => sub {
 };
 
 subtest 'the one-line shapes that stand on a scenario' => sub {
-	plan tests => 10;
+	plan tests => 11;
 
 	my $h = ready_harness();
 	is(a_delivery($h, 'qa'), remote_sha($h, $h->slug('qa')),
@@ -265,6 +265,13 @@ subtest 'the one-line shapes that stand on a scenario' => sub {
 		"seeded's branch marker names the control commit it answers");
 	is($delivered, remote_sha($s, $s->slug('qa')),
 		'and the delivered sha it answers is the branch tip');
+
+	# The file seeded writes has to load as an environment for the reason
+	# chain's does, which is that a run reads the topology out of these files
+	# and a kit written as a flow mapping leaves the root with none.
+	like(files_at($s, $control)->{'qa.yml'},
+		qr/^kit:\n  name:\s+dev\n  version:\s+latest$/m,
+		'seeded writes a control commit that loads as an environment');
 
 	my $due = ready_harness(envs => ['qa']);
 	my $taken = harness_marker($due, $due->slug('qa'));
