@@ -109,6 +109,21 @@ subtest 'a diverged control is both, and earns both steps' => sub {
 		'and the step that repairs it does both');
 };
 
+subtest 'a state this run does not know is named, not dressed up' => sub {
+	plan tests => 3;
+
+	# The divergence arm used to be the fall-through, so a seventh answer
+	# the query grew would have been rendered as divergence and would have
+	# read its two counts out of a record carrying neither.
+	my $said = refusal_for({state => 'unrelated'});
+	like($said, qr/unrelated/,
+		'the refusal names the state it was given');
+	unlike($said, qr/both unpushed and stale/,
+		'and does not call it divergence');
+	unlike($said, qr/by 0 commits|by  commits/,
+		'and invents no counts for it');
+};
+
 subtest 'every refusal says the same three things about the run' => sub {
 	plan tests => 3;
 	# Whichever answer the query gives, the operator is told that Genesis

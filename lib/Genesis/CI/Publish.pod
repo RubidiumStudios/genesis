@@ -387,6 +387,13 @@ names the corrective step and leaves control where it was found. The sentence
 is returned rather than printed, because the caller closes the session before
 it speaks and a stage that printed for itself would speak first.
 
+Each of those states is tested by name, and a state the query grows later
+falls to a last arm that names it and asks the operator to compare the branch
+by hand. Divergence used to be that last arm, and it read a count of commits
+ahead and a count behind out of a record an unknown state need not carry
+either of, so such a state was told to the operator as a divergence of no
+commits at all.
+
 A fetch that could not reach the remote is passed over. The question asked
 here is about control, and a remote that has gone away is D82's question,
 which the push raises for itself, so a failed refresh leaves the reading to
