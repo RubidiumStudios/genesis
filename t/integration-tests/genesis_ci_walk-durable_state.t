@@ -223,8 +223,8 @@ subtest 'an absent input is read and never guessed at' => sub {
 
 	# A hold is durable state like any other, so it is read for every
 	# environment the run reads.  An environment the pipeline was never applied
-	# to is one the run reads and does not walk, and a hold standing over it
-	# is reported rather than left unsaid.
+	# to is one the run reads and does not walk, and a hold standing over it is
+	# reported rather than left unsaid.
 	#
 	# The qualifier names the hold rather than the apply.  A hold is a
 	# decision somebody made and only a person clears it, so it outranks the

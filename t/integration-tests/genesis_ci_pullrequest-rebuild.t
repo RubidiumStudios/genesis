@@ -15,8 +15,8 @@
 #
 # The two rows below it prove T270 and T276, which are the other side of the
 # same rebuild: what a run does when the branch it would build is the branch
-# that is already there.  The answer is the marker walk on both branches
-# and a comparison of the two trees, so a squash, an amended subject, and a
+# that is already there.  The answer is the marker walk on both branches and a
+# comparison of the two trees, so a squash, an amended subject, and a
 # coincidental short hash in somebody else's subject each get the answer the
 # tip's subject could not give.
 use strict;
