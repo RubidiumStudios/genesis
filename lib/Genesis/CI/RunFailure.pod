@@ -16,7 +16,7 @@ Genesis::CI::RunFailure - the two classes of failure that end a propagate run
         message => 'the remote is unreachable',
         remedy  => 'check the network and run it again');
 
-    my $outcomes = Genesis::CI::RunFailure::abort_outcomes(\@envs, 'dev');
+    my $fields = Genesis::CI::RunFailure::abort_fields(\@envs, 'dev');
 
 =head1 DESCRIPTION
 
@@ -273,54 +273,20 @@ B<Examples:>
   # returns 'the index holds paths outside the propagation set on qa/bosh
   # against a1b2c3d: init'
 
-=head2 abort_outcomes
-
-    my $outcomes = Genesis::CI::RunFailure::abort_outcomes(\@envs, $failed);
-
-The outcome word every environment records when a run ends early.  Both
-classes abort the same way, so the words are the same for both, and nothing
-is left out of the report.
-
-B<Parameters:>
-
-=over 4
-
-=item C<\@envs>
-
-Every environment in scope, in the order the run walks them.
-
-=item C<$failed>
-
-The environment the run was walking when it failed, or undef where the run
-failed before it reached one, in which case every environment records that it
-was not attempted.
-
-=back
-
-B<Returns:> A hashref of environment name to outcome word.
-
-B<Examples:>
-
-  Genesis::CI::RunFailure::abort_outcomes(['dev', 'qa', 'prod'], 'qa');
-  # returns {dev  => 'not published, run aborted',
-  #          qa   => 'not published, run aborted',
-  #          prod => 'not attempted'}
-
-  Genesis::CI::RunFailure::abort_outcomes(['dev', 'qa'], undef);
-  # returns {dev => 'not attempted', qa => 'not attempted'}
-
 =head2 abort_fields
 
     my $fields = Genesis::CI::RunFailure::abort_fields(\@envs, $failed);
 
-The same answer as the two fields an environment's record carries.
+What every environment records when a run ends early, as the two fields an
+environment's record carries.  Both classes abort the same way, so the words
+are the same for both, and nothing is left out of the report.
 
 The bare outcome word C<Genesis::CI::Report> declares stands in C<outcome>
 and the run's own annotation stands beside it in C<detail>, so a caller
 deciding what status the run exits with matches one whole word rather than
-cutting a phrase apart.  L</abort_outcomes> composes its phrase back out of
-these two, so one place decides what an environment records and one place
-spells it.
+cutting a phrase apart.  The phrase an operator reads is composed back out of
+the two by whoever renders it, so one place decides what an environment
+records and one place spells it.
 
 B<Parameters:>
 

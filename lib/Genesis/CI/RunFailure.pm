@@ -148,7 +148,7 @@ sub report_line {
 }
 
 # }}}
-# abort_outcomes - what every environment records when a run ends early {{{
+# abort_fields - what every environment records when a run ends early {{{
 #
 # Both classes abort the same way, so the words are the same for both.  An
 # environment the run had already walked records that nothing of its was
@@ -159,24 +159,13 @@ sub report_line {
 # every environment records that it was not attempted.  Walking the list as
 # though the run had reached them all would tell an operator that a run which
 # never started had published nothing for each of them in turn.
-sub abort_outcomes {
-	my ($envs, $failed) = @_;
-	my $fields = abort_fields($envs, $failed);
-	return {map {
-		($_ => join(', ', grep {defined}
-			$fields->{$_}{outcome}, $fields->{$_}{detail}))
-	} keys %$fields};
-}
-
-# }}}
-# abort_fields - the same answer as the record's two fields {{{
 #
-# Ruling 22 splits the record's outcome from its qualifier, so the bare enum
-# word Genesis::CI::Report declares stands in outcome and the run's own
-# annotation stands in outcome_detail, and the status a run exits with is
-# decided by matching one whole word rather than by cutting a phrase apart.
-# The phrase an operator reads is composed back from the two, so there is one
-# place that decides and one that spells.
+# The record's outcome is split from its qualifier, so the bare enum word
+# Genesis::CI::Report declares stands in outcome and the run's own annotation
+# stands in outcome_detail, and the status a run exits with is decided by
+# matching one whole word rather than by cutting a phrase apart.  The phrase
+# an operator reads is composed back from the two by whoever renders it, so
+# there is one place that decides and one that spells.
 sub abort_fields {
 	my ($envs, $failed) = @_;
 	my %fields;
