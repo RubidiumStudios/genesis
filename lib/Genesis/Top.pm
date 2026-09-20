@@ -5,6 +5,7 @@ use warnings;
 use base 'Genesis::Base';
 
 use Genesis;
+use Genesis qw/without_backtrace/;
 use Scalar::Util ();
 use Genesis::State;
 use Genesis::Term qw/in_controlling_terminal csprintf decolorize/;

@@ -3146,10 +3146,16 @@ B<Examples:>
 
 =head2 without_backtrace
 
+    use Genesis qw/without_backtrace/;
+
     my $message = without_backtrace($@);
 
 A caught message with its trailing C<< at <file> line <n> >> and any
 C<Carp> frames behind it cut away, folded onto one line and trimmed.
+
+It is asked for by name rather than handed to every module that says
+C<use Genesis>, because the name is a general one and a module of its own
+could reasonably want it for something else.
 
 A caught C<$@> ends in the file and line it was raised at, and under
 C<Carp::Always> the calling frames follow it, so a refusal that interpolates
