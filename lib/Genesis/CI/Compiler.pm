@@ -384,9 +384,9 @@ sub _apply_provider_overrides {
 		# today, so this is latent, and a document that did carry one
 		# would come out of here with the key renamed.
 		my ($merged_yaml, $rc) = run('spruce', 'merge', $base_path, $override);
-		# A refusal a caller can act on: the override is the operator's
-		# file, so a merge it cannot survive is a configuration problem
-		# rather than the system one a bare 1 would report.
+		# This refusal is one a caller can act on.  The override is the
+		# operator's file, so a merge it cannot survive is a configuration
+		# problem rather than the system one a bare 1 would report.
 		bail({exitcode => CONFIG},
 			"Failed to apply %s: spruce merge returned non-zero", $override)
 			unless $rc == 0;
