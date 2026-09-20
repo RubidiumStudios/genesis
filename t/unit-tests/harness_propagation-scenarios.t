@@ -285,7 +285,11 @@ subtest 'the one-line shapes that stand on a scenario' => sub {
 
 	my @chain = chain($h);
 	is(scalar(@chain), 2, 'chain writes one control commit per environment');
-	like(files_at($h, $chain[-1])->{'qa.yml'}, qr/kit: \{name: dev\}/,
+	# The file each commit writes has to load as an environment, because a
+	# walk over a tree chain built reads the topology out of these files and
+	# a kit written as a flow mapping leaves the root with none.
+	like(files_at($h, $chain[-1])->{'qa.yml'},
+		qr/^kit:\n  name:\s+dev\n  version:\s+latest$/m,
 		'chain touches one environment per commit, in order');
 };
 

@@ -33,7 +33,10 @@ use_ok 'Genesis::Commands::Env';
 $ENV{NOCOLOR} = 1;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 
-my $h = make_harness(envs => ['lab', 'qa', 'ops']);
+# The kit is named because the environment is loaded here rather than
+# deployed, and an environment whose kit the root does not hold will not load
+# at all.
+my $h = make_harness(envs => ['lab', 'qa', 'ops'], kit => 'omega-v2.7.0');
 fixture_vault($h);
 my $env = top_for($h)->load_env('qa')->with_vault;
 
