@@ -67,10 +67,10 @@ sub provider_type { 'concourse' }
 # }}}
 # check_prereqs is gone from this class {{{
 #
-# Under D108 a provider answers for its toolchain, and this class's copy
-# asked only whether fly was on the path while the provider's asked for a
-# version too.  The weaker one was the live one, because the command
-# called it on whatever the compile handed back.
+# A provider answers for its toolchain, and this class's copy asked only
+# whether fly was on the path while the provider's asked for a version
+# too.  The weaker one was the live one, because the command called it on
+# whatever the compile handed back.
 #
 # }}}
 # cli_opts - Getopt::Long specs for deploy-time command-line flags {{{
