@@ -22,7 +22,7 @@ my %wanted = map { $_ => 1 } @sections;
 # meaningful -- earlier tests should be passable when later ones are
 # broken).  Also track commented-out entries as INTENTIONAL exclusions
 # so the unregistered-warning doesn't fire on them.
-my (@ordered, %registered, %excluded);
+my (@ordered, %registered, %excluded, %listed);
 open my $fh, '<', $manifest or die "Cannot open $manifest: $!\n";
 my $in_section;
 while (<$fh>) {
@@ -31,6 +31,13 @@ while (<$fh>) {
 		$in_section = $wanted{$1} ? $1 : undef;
 		next;
 	}
+
+	# Every entry the manifest carries is remembered, whichever section it
+	# sits in, because the top of t/ is scanned whatever section was asked
+	# for.  A top-level file that another section lists is registered, so a
+	# run of one section does not report the other sections' files.
+	$listed{$1} = 1 if /^\s*#?\s*(\S+\.t(?:\.\w+)?)\s*(?:#.*)?$/;
+
 	next unless $in_section;
 
 	if (my ($path) = /^\s*#\s*(\S+\.t(?:\.\w+)?)\s*(?:#.*)?$/) {
@@ -48,18 +55,26 @@ while (<$fh>) {
 }
 close $fh;
 
-# Warn about tests present on disk that we never mentioned.  Only scans
-# directories that the wanted sections actually use.
-my %seen_dirs;
+# Warn about tests present on disk that we never mentioned.  The directories
+# come from the entries the wanted sections carry, and the top of t/ is read
+# as well, because an entry there has no directory component for the loop
+# below to derive one from and files sitting up there went unseen.
+#
+# A file in a derived directory is measured against the sections that were
+# asked for, which is what the derivation means.  A top-level file is
+# measured against the whole manifest, because the top is read whether or
+# not the sections asked for carry an entry up there.
+my %seen_dirs = ('' => 1);
 for my $p (@ordered) {
 	$seen_dirs{$1}++ if $p =~ m{^([^/]+)/};
 }
 for my $dir (sort keys %seen_dirs) {
-	opendir(my $dh, "t/$dir") or next;
+	opendir(my $dh, length($dir) ? "t/$dir" : 't') or next;
 	for my $f (sort readdir $dh) {
 		next unless $f =~ /\.t$/;
-		my $rel = "$dir/$f";
+		my $rel = length($dir) ? "$dir/$f" : $f;
 		next if $registered{$rel} || $excluded{$rel};
+		next if !length($dir) && $listed{$rel};
 		warn "[manifest] unregistered: $rel\n";
 	}
 	closedir $dh;
