@@ -312,7 +312,7 @@ subtest 'fetch_pipeline_envs - the caller names the act and the outcome' => sub 
 #
 # The single answer to "what environments are in this pipeline, and in
 # what order".  Before this existed the question had two implementations
-# -- Top::envs by glob, and ASTBuilder::_build_from_env_files by DAG --
+# -- Top::envs by glob, and ASTBuilder::build_from_env_files by DAG --
 # which agreed by coincidence rather than by construction, and the DAG
 # one was private and called from four places.
 # ======================================================================

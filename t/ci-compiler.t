@@ -465,7 +465,7 @@ subtest 'ASTBuilder - no auto-population without explicit triggers/resources' =>
 };
 
 ### ============================================================ ###
-### ASTBuilder - _build_from_env_files Tests
+### ASTBuilder - build_from_env_files Tests
 ### ============================================================ ###
 
 # The builder enumerates environments through the repository's own Top,
@@ -484,7 +484,7 @@ sub builder_for {
 	return Genesis::CI::Compiler::ASTBuilder->new(top => $top, %opts);
 }
 
-subtest 'ASTBuilder - _build_from_env_files: basic linear chain' => sub {
+subtest 'ASTBuilder - build_from_env_files: basic linear chain' => sub {
 	my $h = make_harness(envs => [qw/lab nonprod prod/],
 		pipeline => 0, vault => 0);
 
@@ -495,7 +495,7 @@ subtest 'ASTBuilder - _build_from_env_files: basic linear chain' => sub {
 	$h->write_env_file('prod',    pipeline => {prior_env  => 'nonprod',
 	                                           require_pr => 'true'});
 
-	my ($nodes, $edges) = builder_for($h)->_build_from_env_files($h->a);
+	my ($nodes, $edges) = builder_for($h)->build_from_env_files($h->a);
 
 	ok exists $nodes->{lab},     "lab node present";
 	ok exists $nodes->{nonprod}, "nonprod node present";
@@ -512,19 +512,19 @@ subtest 'ASTBuilder - _build_from_env_files: basic linear chain' => sub {
 	is $nodes->{lab}{require_pr},  0, "lab require_pr is 0";
 };
 
-subtest 'ASTBuilder - _build_from_env_files: manual gate flag' => sub {
+subtest 'ASTBuilder - build_from_env_files: manual gate flag' => sub {
 	my $h = make_harness(envs => [qw/sandbox prod/], pipeline => 0, vault => 0);
 	$h->write_env_file('sandbox', pipeline => {manual => 'true'});
 	$h->write_env_file('prod',    pipeline => {prior_env => 'sandbox',
 	                                           manual    => 'false'});
 
-	my ($nodes, $edges) = builder_for($h)->_build_from_env_files($h->a);
+	my ($nodes, $edges) = builder_for($h)->build_from_env_files($h->a);
 
 	is $nodes->{sandbox}{manual}, 1, "sandbox manual flag is 1";
 	is $nodes->{prod}{manual},    0, "prod manual flag is 0";
 };
 
-subtest 'ASTBuilder - _build_from_env_files: a file that is not an environment is ignored' => sub {
+subtest 'ASTBuilder - build_from_env_files: a file that is not an environment is ignored' => sub {
 	# Every environment the repository holds becomes a node, whether or
 	# not it writes a pipeline block, because pipeline-status reads the
 	# whole graph.  What is left out is a YAML file that is no
@@ -532,30 +532,30 @@ subtest 'ASTBuilder - _build_from_env_files: a file that is not an environment i
 	my $h = make_harness(envs => ['infra'], pipeline => 0, vault => 0);
 	helper::put_file($h->a . '/params.yml', "---\nparams:\n  key: value\n");
 
-	my ($nodes, $edges) = builder_for($h)->_build_from_env_files($h->a);
+	my ($nodes, $edges) = builder_for($h)->build_from_env_files($h->a);
 
 	ok exists $nodes->{infra}, "an environment with no pipeline block is a node";
 	ok !exists $nodes->{params}, "and a YAML file that is no environment is not";
 	is scalar(@$edges), 0, "no edges either";
 };
 
-subtest 'ASTBuilder - _build_from_env_files: prior_env referencing unknown env is ignored' => sub {
+subtest 'ASTBuilder - build_from_env_files: prior_env referencing unknown env is ignored' => sub {
 	my $h = make_harness(envs => ['prod'], pipeline => 0, vault => 0);
 	$h->write_env_file('prod', pipeline => {prior_env => 'missing-lab'});
 
-	my ($nodes, $edges) = builder_for($h)->_build_from_env_files($h->a);
+	my ($nodes, $edges) = builder_for($h)->build_from_env_files($h->a);
 
 	ok exists $nodes->{prod}, "prod node still created";
 	is scalar(@$edges), 0, "no edge added for unknown prior_env";
 };
 
-subtest 'ASTBuilder - _build_from_env_files: entrypoint with no pipeline block is included when referenced' => sub {
+subtest 'ASTBuilder - build_from_env_files: entrypoint with no pipeline block is included when referenced' => sub {
 	# lab is the pipeline entrypoint, and the convention writes no
 	# pipeline block on it; nonprod names it as its prior_env.
 	my $h = make_harness(envs => [qw/lab nonprod/], pipeline => 0, vault => 0);
 	$h->write_env_file('nonprod', pipeline => {prior_env => 'lab'});
 
-	my ($nodes, $edges) = builder_for($h)->_build_from_env_files($h->a);
+	my ($nodes, $edges) = builder_for($h)->build_from_env_files($h->a);
 
 	ok exists $nodes->{lab},     "lab node present despite no genesis.pipeline block";
 	ok exists $nodes->{nonprod}, "nonprod node present";
@@ -566,12 +566,12 @@ subtest 'ASTBuilder - _build_from_env_files: entrypoint with no pipeline block i
 	is $nodes->{lab}{manual},     0, "lab manual defaults to 0";
 };
 
-subtest 'ASTBuilder - _build_from_env_files: non-existent dir returns empty' => sub {
+subtest 'ASTBuilder - build_from_env_files: non-existent dir returns empty' => sub {
 	# No repository here.  The directory is opened before the top is
 	# ever consulted, so this row is about that guard and a harness
 	# would stand three git repositories up for nothing.
 	my ($nodes, $edges) = Genesis::CI::Compiler::ASTBuilder->new
-		->_build_from_env_files('/does/not/exist/xyz');
+		->build_from_env_files('/does/not/exist/xyz');
 	is scalar(keys %$nodes), 0, "no nodes for missing dir";
 	is scalar(@$edges),      0, "no edges for missing dir";
 };

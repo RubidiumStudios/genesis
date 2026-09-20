@@ -2040,7 +2040,7 @@ what order".
 Until this existed the question had two implementations that agreed only
 by coincidence: C<pipeline_env_names> globbed F<*.yml> through
 L</envs>, while
-C<Genesis::CI::Compiler::ASTBuilder::_build_from_env_files> walked the
+C<Genesis::CI::Compiler::ASTBuilder::build_from_env_files> walked the
 same directory building a DAG.  The latter was private and called from
 four places in C<Genesis::Commands::Pipelines>, each repeating the same
 edge-collection and breadth-first ordering.  Everything reading pipeline
