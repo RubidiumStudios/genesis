@@ -1204,16 +1204,27 @@ sub _take_lock {
 #
 # The file is emptied before the flock goes, so it never names a holder that
 # has already let go.  The kernel drops the flock either way, but the file
-# outlives it, and a reader that tests a holder's liveness reads the pid line:
-# a file still naming the process that just released would be read as held for
+# outlives it, and a reader that tests a holder's liveness reads the pid line.
+# A file still naming the process that just released would be read as held for
 # the rest of that process's life.  Emptying while the flock is still held is
 # what keeps anybody else from writing a pid we would then truncate away, and
 # the take side truncates before it writes, so an empty file is a shape it
 # already expects.
+#
+# The emptying is read back, because it is what the readers trust and it would
+# otherwise fail in silence.  It is traced rather than raised, because the
+# session is already finishing and the lock itself is going either way, and
+# turning a command that succeeded into one that failed at its last step would
+# say far more than a stale pid line warrants.
 sub _release_lock {
 	my ($self) = @_;
 	my $fh = delete $self->{lock} or return $self;
-	truncate($fh, 0);
+
+	truncate($fh, 0) or trace(
+		"Service::Git::Session: could not empty the switch lock: %s.  ".
+		"It still names this process, which a reader testing the holder ".
+		"will take for a lock that is held.", $!);
+
 	flock($fh, LOCK_UN);
 	close $fh;
 	return $self;
