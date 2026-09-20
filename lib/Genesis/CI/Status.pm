@@ -529,9 +529,9 @@ sub render_tree {
 # warn an operator about.
 #
 # This command never refuses on any of it.  The one refusal pipeline-status
-# keeps is the disowned pipeline, and the column already has to
-# report a proposed record flagged as possibly outdated where no token was
-# there to validate it with.  All three refusals the two subs below raise are
+# keeps is the disowned pipeline, and the column already has to report a
+# proposed record flagged as possibly outdated where no token was there to
+# validate it with.  All three refusals the two subs below raise are
 # therefore rendered that same way, which are an API that will not answer, a
 # repository that resolves no owner and repository pair, and a token GitHub
 # will not name an owner for, and the run says once which of them it met.  A
