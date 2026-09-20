@@ -762,9 +762,12 @@ my $duration = gettimeofday() - $start_time;
 qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',undef,1));
 
 	# Declared and then filled, rather than declared under the modifier.
-	# Perl leaves such a variable holding whatever the last call left in it
-	# on the false branch, so a call that captured no standard error would
-	# answer with the text the call before it captured.
+	# A `my` under a statement modifier is a trap, because Perl may leave
+	# the variable holding what the last call left in it rather than a
+	# fresh undef on the false branch, and this one is returned to the
+	# caller.  This sub is safe from it as it stands, because it carries
+	# closures and Perl gives every call its own pad, so the split is kept
+	# for the next reader rather than for a defect it fixes.
 	my $err;
 	$err = slurp($err_file) if ($err_file && -f $err_file);
 	my $rc = $? >>8;
