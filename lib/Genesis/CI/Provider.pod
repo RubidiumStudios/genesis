@@ -31,7 +31,7 @@ through C</validate_config>. The three live together so that the check
 always has the declaration it is checking against, and so that one class
 answers for the whole of a provider.
 
-C</capabilities> answers with the six booleans D101 names, and every
+C</capabilities> answers with the six capability booleans, and every
 provider has to answer, including the ones Genesis cannot yet compile a
 pipeline for. A provider that can do none of them says so rather than
 staying silent, because a key gated on an ability nobody declared would
@@ -106,11 +106,11 @@ Builds a provider out of what a repository stored under
 C<pipeline.provider>. The C<type> key chooses the class, and it defaults
 to C<manual>.
 
-It builds and nothing more. Under D105 the rules for a provider's block
-are asked of the class, against the configuration the block sits in, so a
-check here would be asking an object assembled out of that block what the
-block says, one step further from what the operator wrote and one phase
-away from every other configuration refusal.
+It builds and nothing more. The rules for a provider's block are asked of
+the class, against the configuration the block sits in, so a check here
+would be asking an object assembled out of that block what the block says,
+one step further from what the operator wrote and one phase away from every
+other configuration refusal.
 
 B<Parameters:>
 
@@ -245,15 +245,15 @@ B<Examples:>
 =head2 provider_options_schema()
 
 The keys an operator may write under C<pipeline.provider> for this
-provider. Mandatory under D86 and still mandatory under D105, because its
-readers are C<pipeline-describe>'s resolved values, the per-key defaults,
-the help text, and the wizard, and none of those is validation. Without it
-the per-key table goes back to being hand-listed beside the classes, which
-is what D86 exists to prevent.
+provider. It is mandatory, because its readers are C<pipeline-describe>'s
+resolved values, the per-key defaults, the help text, and the wizard, and
+none of those is validation. Without it the per-key table goes back to
+being hand-listed beside the classes, and a hand-listed table is what the
+declaration is here to prevent.
 
-It is declared here rather than on the compiler base because D105's
-default C</validate_config> validates against it, and a default cannot
-reach a declaration in another hierarchy.
+It is declared here rather than on the compiler base because the default
+C</validate_config> validates against it, and a default cannot reach a
+declaration in another hierarchy.
 
 B<Returns:> a hash reference of key name to its declaration.
 
@@ -267,9 +267,9 @@ B<Examples:>
 
 =head2 capabilities()
 
-What this provider is able to do, as the six booleans D101 names,
-declared beside the schema so that one class answers for both halves of a
-provider. Mandatory for the same reason the schema is: a provider whose
+What this provider is able to do, as the six capability booleans, declared
+beside the schema so that one class answers for both halves of a provider.
+It is mandatory for the same reason the schema is, because a provider whose
 abilities are unknown cannot have its keys gated, and a gate that stood
 aside for it accepted a key the provider can never honour.
 
@@ -325,7 +325,7 @@ B<Examples:>
 =head2 declared_capabilities($provider)
 
 One provider class's capability declaration, checked against the six
-names D101 fixes and handed back. It is asked once at configuration load,
+capability names and handed back. It is asked once at configuration load,
 where the gates read it, rather than trusted afresh at every gate.
 
 A declaration that answers anything but exactly the six is a bug in the
@@ -364,12 +364,12 @@ Which configuration key each capability gates, for the three of the six
 that gate one.
 
 Two of them gate nothing configurable, since C<deployment_locks> and
-C<cross_pipeline_events> are structural and their absence is D74's "no
-such capability" outcome rather than a refused key. C<multi_file_output>
-gates nothing here either, under D105: the key it used to gate,
-C<output_layout>, is declared by the provider that can use it and by
-nobody else, so a provider that cannot offers no such key and the refusal
-is the ordinary undeclared-key one.
+C<cross_pipeline_events> are structural and their absence is a "no such
+capability" outcome rather than a refused key. C<multi_file_output> gates
+nothing here either. The key it used to gate, C<output_layout>, is declared
+by the provider that can use it and by nobody else, so a provider that
+cannot offers no such key and the refusal is the ordinary undeclared-key
+one.
 
 B<Returns:> a hash reference of capability name to the configuration key
 it gates.
@@ -426,11 +426,11 @@ B<Examples:>
 Whether the section a provider's block sits in is switched on, which is
 what a provider's own rule asks before it refuses anything.
 
-Before D105 the provider walk sat behind the pipeline gate and never had
-to ask. The rules are reached from the configuration walk now, which runs
-whether or not anybody has turned a pipeline on, and an operator writes a
-provider block a key at a time, so a repository with a pipeline nobody has
-enabled must not be refused for a key that pipeline would need.
+The provider walk once sat behind the pipeline gate and never had to ask.
+The rules are reached from the configuration walk now, which runs whether
+or not anybody has turned a pipeline on, and an operator writes a provider
+block a key at a time, so a repository with a pipeline nobody has enabled
+must not be refused for a key that pipeline would need.
 
 The section is the block's own parent, which is all a provider knows about
 where it sits, and a block with no parent is taken to be running, since
@@ -488,12 +488,12 @@ B<Examples:>
 
 =head2 compiler(%opts)
 
-The compiler that emits this provider's artefact, built over the AST it
-is handed and holding this provider. It is D108's composition read from
-the provider's side, and it is what gives C<DEFAULT_TEAM> and
-C</check_prereqs> one home each rather than two. A compiler holds the
-provider itself rather than a copy of its settings, so a change made to
-the provider afterwards is visible without anything being rebuilt.
+The compiler that emits this provider's artefact, built over the AST it is
+handed and holding this provider. It is the composition read from the
+provider's side, and it is what gives C<DEFAULT_TEAM> and C</check_prereqs>
+one home each rather than two. A compiler holds the provider itself rather
+than a copy of its settings, so a change made to the provider afterwards is
+visible without anything being rebuilt.
 
 A provider with no artefact to emit answers with C<undef>, which is what
 C<manual> does honestly and what C<github-actions> does until its

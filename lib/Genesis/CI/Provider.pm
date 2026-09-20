@@ -10,9 +10,9 @@ use Getopt::Long qw/GetOptionsFromArray/;
 # provider_class - load and return the CLI class for a provider type {{{
 #
 # A type becomes a class in Genesis::CI::ProviderRegistry, which owns the
-# lookup under D108 and which both families consult, so this is a
-# delegation and holds no list of its own.  It stays here while the
-# callers outside this file move onto the registry.
+# lookup and which both families consult, so this is a delegation and
+# holds no list of its own.  It stays here while the callers outside this
+# file move onto the registry.
 sub provider_class {
 	my ($class, $type) = @_;
 
@@ -23,11 +23,11 @@ sub provider_class {
 # }}}
 # new - builder for creating new instance of derived class based on config {{{
 #
-# It builds and nothing more.  Under D105 the rules for a provider's block
-# are asked of the class, against the configuration the block sits in, so
-# a check here would be asking an object assembled out of that block what
-# the block says, one step further from what the operator wrote and one
-# phase away from every other configuration refusal.
+# It builds and nothing more.  The rules for a provider's block are asked
+# of the class, against the configuration the block sits in, so a check
+# here would be asking an object assembled out of that block what the
+# block says, one step further from what the operator wrote and one phase
+# away from every other configuration refusal.
 sub new {
 	my ($class, %config) = @_;
 	bug("%s->new is calling %s->new illegally", $class, __PACKAGE__)
@@ -130,13 +130,13 @@ EOF
 # }}}
 # provider_options_schema - the keys this provider reads (abstract) {{{
 #
-# Under D86 this is mandatory and under D105 it stays mandatory, because
-# its readers are pipeline-describe's resolved values, the per-key
-# defaults, the help text, and the post-MVP wizard, and none of those is
-# validation.  Without it the per-provider key table goes back to being
-# hand-listed beside the classes, which is what D86 exists to prevent.
+# This is mandatory, because its readers are pipeline-describe's resolved
+# values, the per-key defaults, the help text, and the post-MVP wizard,
+# and none of those is validation.  Without it the per-provider key table
+# goes back to being hand-listed beside the classes, and a hand-listed
+# table is what the declaration is here to prevent.
 #
-# It sits here rather than on the compiler base because D105's default
+# It sits here rather than on the compiler base because the default
 # validate_config validates against it, and a default cannot reach a
 # declaration in another hierarchy.
 sub provider_options_schema {
@@ -147,18 +147,18 @@ sub provider_options_schema {
 # }}}
 # capabilities - what this provider can do, as six booleans (abstract) {{{
 #
-# D101's six names, declared beside the fragment under D105 so that one
-# class answers for both halves of a provider.  Mandatory for the same
-# reason the fragment is: a provider whose abilities are unknown cannot
-# have its keys gated, and the gate that stood aside for it accepted a
-# key the provider can never honour.
+# The six capability names, declared beside the fragment so that one class
+# answers for both halves of a provider.  They are mandatory for the same
+# reason the fragment is, because a provider whose abilities are unknown
+# cannot have its keys gated, and the gate that stood aside for it
+# accepted a key the provider can never honour.
 sub capabilities {
 	my ($self) = @_;
 	bug("Subclass '%s' must implement capabilities()", ref($self) || $self);
 }
 
 # }}}
-# The six names D101 fixes, held in one place so that the declaration
+# The six capability names, held in one place so that the declaration
 # above and the contract check below cannot drift.  The gate map beneath
 # them still spells the names it gates as literals, so a seventh
 # capability has to be added there by hand, and nothing here will say so
@@ -207,13 +207,13 @@ sub declared_capabilities {
 # capability_gates - which configuration key each capability gates {{{
 #
 # Two of the six gate nothing configurable, since deployment_locks and
-# cross_pipeline_events are structural and their absence is D74's "no
-# such capability" outcome rather than a refused key.
+# cross_pipeline_events are structural and their absence is a "no such
+# capability" outcome rather than a refused key.
 #
-# multi_file_output gates nothing here either, under D105.  The key it
-# gated, output_layout, is declared by the provider that can use it and
-# by nobody else, so a provider that cannot offers no such key and the
-# refusal is the ordinary undeclared-key refusal.
+# multi_file_output gates nothing here either.  The key it gated,
+# output_layout, is declared by the provider that can use it and by nobody
+# else, so a provider that cannot offers no such key and the refusal is
+# the ordinary undeclared-key refusal.
 sub capability_gates {
 	return {
 		optional_git_triggers => 'genesis.pipeline.manual',
@@ -225,11 +225,11 @@ sub capability_gates {
 # }}}
 # validate_config - the provider's rules for its own block {{{
 #
-# Under D105 the provider owns validating the block an operator wrote for
-# it, outright, and it decides how: by declaration, which is what this
-# default does, or programmatically, which is what an override adds.  D86
-# split the two and asked every provider to sort its own rules into the
-# framework's categories, and then checked half of them before the
+# The provider owns validating the block an operator wrote for it,
+# outright, and it decides how: by declaration, which is what this default
+# does, or programmatically, which is what an override adds.  The
+# framework used to split the two and ask every provider to sort its own
+# rules into its categories, and then checked half of them before the
 # provider was called at all.
 #
 # The default validates the block against this provider's own
@@ -237,7 +237,7 @@ sub capability_gates {
 # no validation whatsoever and still gets the generic pass, its type
 # checks, its defaults, and the error text every other block gets.
 # Because the default reads the same fragment the declaration is, the two
-# cannot drift apart in the ordinary case, which is what D86 could not
+# cannot drift apart in the ordinary case, which the older split could not
 # promise.
 #
 # A provider with a rule a declaration cannot state overrides this and
@@ -262,12 +262,12 @@ sub validate_config {
 # section_enabled - whether the section the block sits in is switched on {{{
 #
 # A provider's own rules run only where the section its block sits in is
-# enabled, and this is where a provider asks.  Before D105 the provider
-# walk sat behind the pipeline gate and never had to ask, and now the
-# rules are reached from the configuration walk instead, which runs
-# whether or not anybody has turned a pipeline on.  An operator writes a
-# provider block a key at a time, so a repository with a pipeline nobody
-# has enabled must not be refused for a key that pipeline would need.
+# enabled, and this is where a provider asks.  The provider walk once sat
+# behind the pipeline gate and never had to ask, and now the rules are
+# reached from the configuration walk instead, which runs whether or not
+# anybody has turned a pipeline on.  An operator writes a provider block a
+# key at a time, so a repository with a pipeline nobody has enabled must
+# not be refused for a key that pipeline would need.
 #
 # The section is the block's own parent, which is all a provider knows
 # about where it sits, and a block with no parent is taken to be running,
@@ -304,8 +304,8 @@ sub type {
 # }}}
 # compiler - the compiler that emits this provider's artefact {{{
 #
-# D108's composition, from the provider's side.  A provider hands its
-# compiler out and the compiler holds the provider, which is what gives
+# The provider's side of the composition.  A provider hands its compiler
+# out and the compiler holds the provider, which is what gives
 # DEFAULT_TEAM and check_prereqs one home each rather than two.
 #
 # A provider with no artefact to emit answers with nothing, which is
