@@ -675,8 +675,8 @@ sub switched_to {
 # contract.  The changed and deleted lists a caller passes are the diff it has
 # already computed, and they are there to skip blobs the delivery cannot have
 # moved and to name files in the run's report.  They never decide what is
-# delivered, and changed is read only to keep the paths the delivery was
-# asked to move out of overwrote.
+# delivered, and changed is read only to keep the paths the delivery was asked
+# to move out of overwrote.
 sub apply_files {
 	my ($self, $source_sha, %opts) = @_;
 
