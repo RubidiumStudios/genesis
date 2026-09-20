@@ -100,6 +100,47 @@ subtest 'one row carries deployed, drifted, and [manual]' => sub {
 	is($err, '', 'and the report says nothing on standard error');
 };
 
+subtest 'the row spaces its glyph off the phrase itself' => sub {
+	# Three assertions and one restoration.
+	plan tests => 4;
+
+	# Some of the UTF-8 glyphs carry a trailing space and the rest carry
+	# none, and under GENESIS_NO_UTF8 the plain character that stands in
+	# for one carries none at all.  A row that let the glyph do the spacing
+	# therefore read `+deployed` on one terminal and `= deployed` on
+	# another, so the separator is the row's own.
+	local $ENV{GENESIS_NO_UTF8} = 1;
+
+	# The same tree the first row stands on, because it is the one known to
+	# render an environment row at all, and its class is the red one whose
+	# glyph brings no space of its own under either encoding.
+	my $h = make_harness(envs => ['lab'], provider => 'concourse',
+		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
+	fixture_vault($h);
+	declare_manual($h, 'lab');
+	init_branch($h, 'lab');
+	my $c1 = commit_on_control($h, files => {'ops/shared.yml' => "---\none\n"},
+		push => 1);
+	deliver($h, 'lab', control => $c1);
+	certify($h, 'lab', control_commit => $c1);
+	fixture_applied($h, control => $c1, provider => 'concourse');
+	fixture_pipeline_record($h, 'lab');
+	hand_commit($h, $h->slug('lab'),
+		files => {'ops/shared.yml' => "---\nby hand\n"});
+	refresh($h, 'a');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
+	is($exit, 0, 'the command exits zero');
+
+	my ($row) = grep { plain($_) =~ /^\s+lab\b/ } split(/\n/, $out);
+	my $words = plain($row // '');
+	like($words, qr/\S\s+deployed/,
+		'the glyph and the word beside it are held apart')
+		or diag("the row read:\n$words");
+	unlike($words, qr/[-+*!O]deployed/,
+		'rather than run together where the glyph brought no space');
+};
+
 subtest 'the five classes map onto the markup Genesis::Term already has' => sub {
 	# A guard over the class table and the ranking the record rests on.
 	# The worst-class rule the row above proves rests on both, so an edit

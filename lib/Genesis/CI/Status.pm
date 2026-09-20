@@ -472,11 +472,22 @@ sub render_tree {
 			'  ' x $row->{depth}, $row->{env},
 			' ' x ($width - ($row->{depth} * 2) - length($row->{env})));
 
-		push @out, csprintf("  #%s{%s}  %-7s  %-7s  #%s\@{%s}%s",
+		# The separator after the glyph is the row's own.  Some of the
+		# UTF-8 glyphs carry a trailing space and the rest carry none, and
+		# under GENESIS_NO_UTF8 the plain character that stands in for one
+		# carries none at all, so a row that let the glyph do the spacing
+		# read `+deployed` on one terminal and `= deployed` on another.
+		# Whatever the glyph brought with it comes off first.
+		my $glyph = csprintf("#%s\@{%s}",
+			$CLASS_MARKUP{$class}, $CLASS_GLYPH{$class});
+		$glyph =~ s/ +(\e\[0m)$/$1/;
+		$glyph =~ s/ +$//;
+
+		push @out, csprintf("  #%s{%s}  %-7s  %-7s  %s %s",
 			$CLASS_MARKUP{$class}, $name,
 			_short($row->{merged}) // '-',
 			_short($row->{deployed} ? $row->{deployed}{control_commit} : undef) // '-',
-			$CLASS_MARKUP{$class}, $CLASS_GLYPH{$class},
+			$glyph,
 			join('; ', map { csprintf("#%s{%s}", $CLASS_MARKUP{$_->[0]}, $_->[1]) } @phrase));
 	}
 
