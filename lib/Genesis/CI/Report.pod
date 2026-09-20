@@ -241,7 +241,8 @@ here and not beside each caller, because the run's report, C<pipeline-status>,
 and C<genesis E<lt>envE<gt> deploy> all print this sentence and a sentence
 spelled three times is one the three spellings drift apart on.  A field the
 record is missing is named as unrecorded rather than left to print as a gap,
-since a record older than the four fixed fields can lack any of them.
+since a record older than the hold's four fields, which add the reason to
+those three, can lack any of them.
 
 B<Parameters:>
 
