@@ -2025,6 +2025,9 @@ Builds a harness with no vault fixture, cuts the branch, writes one control
 commit, delivers it, and answers all three, so a row that compares a delivery
 against its source has both shas without reading either back.
 
+The commit writes the environment's own file through C<env_body>, so the
+repository still holds an environment for a run to read a topology out of.
+
 =head2 stale_set_delivery($h, %opts)
 
 Stands up the one shape the writer's removing half needs, which is a branch
