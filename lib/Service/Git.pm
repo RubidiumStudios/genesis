@@ -240,7 +240,7 @@ sub create {
 # DESTROY - evict the flyweight entry {{{
 #
 # The branch restore that used to live here has moved to the session, which
-# registers its last-resort abort through at_exit.  RF12 is why: bail exits
+# registers its last-resort abort through at_exit.  Bail exits
 # when it is not inside an eval, Perl runs END before global destruction,
 # and the order after that is undefined, so a net here fires too late or
 # not at all.

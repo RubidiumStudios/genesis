@@ -176,7 +176,7 @@ PERL
 subtest 'the net is registered through at_exit and not DESTROY' => sub {
 	plan tests => 2;
 
-	# RF12: bail exits outside an eval, Perl runs END before global
+	# bail exits outside an eval, Perl runs END before global
 	# destruction, and the order after that is undefined, so a net in
 	# DESTROY fires too late or not at all.
 	my $session = get_file($helper::TOPDIR . '/lib/Service/Git/Session.pm');

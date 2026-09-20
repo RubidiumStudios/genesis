@@ -1082,7 +1082,7 @@ sub _standing_on {
 # }}}
 # _register_net - the last-resort abort, from an END block {{{
 #
-# RF12 put this here rather than in DESTROY.  bail exits when it is not
+# This lives here rather than in DESTROY.  bail exits when it is not
 # inside an eval, Perl runs END before global destruction, and the order of
 # destruction after that is undefined, so a net hung on DESTROY fires late
 # or never.  at_exit hooks run from END, which is early enough to still
