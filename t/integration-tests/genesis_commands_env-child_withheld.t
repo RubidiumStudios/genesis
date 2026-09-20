@@ -2,25 +2,25 @@
 # Proves T252, T256, and T253: what withholds the propagate child, and what
 # catches up afterwards.
 #
-# The flag is D35's, and it withholds the child and nothing else.  The gate
-# the hand-off is spawned behind already refuses on it, so nothing here makes
-# a row go red against the tree as it stands.  What these rows catch is a
-# later change that drops the clause, whether by removing it or by reordering
-# the gate so that something answers before it.  Such a change would leave the
-# first subtest looking at a child it should never have seen, with R moved
-# beneath it, and it would leave the hand run in the second subtest with
-# nothing left to carry.
+# The flag withholds the child and nothing else.  The gate the hand-off is
+# spawned behind already refuses on it, so nothing here makes a row go red
+# against the tree as it stands.  What these rows catch is a later change
+# that drops the clause, whether by removing it or by reordering the gate so
+# that something answers before it.  Such a change would leave the first
+# subtest looking at a child it should never have seen, with R moved beneath
+# it, and it would leave the hand run in the second subtest with nothing left
+# to carry.
 #
 # The two halves sit in one file because neither can be asserted without the
-# other.  The flag is only half an answer, and the other half is D37's hand
+# other.  The flag is only half an answer, and the other half is the hand
 # run, which has to reach the same branches and the same markers the child
 # would have produced.  A run that spawned the child anyway would leave that
 # hand run nothing to deliver, and a hand run that delivered nothing would say
 # nothing about whether the flag had withheld anything.
 #
-# The third subtest is the other thing that withholds the child, which is the
-# defect D84 names rather than a flag anybody typed.  A kit hook writes into
-# the repository, the session finds the tracked modification when it ends, and
+# The third subtest is the other thing that withholds the child, which is a
+# defect rather than a flag anybody typed.  A kit hook writes into the
+# repository, the session finds the tracked modification when it ends, and
 # the tree it hands back is not one to fan out from.  It belongs beside the
 # other two because it is the same question asked of a run that failed, and
 # because the hand run it ends with is the same catch-up the second subtest
@@ -115,12 +115,12 @@ subtest 'the hand run delivers what the child would have' => sub {
 subtest 'a tracked modification at finish withholds the child' => sub {
 	plan tests => 7;
 
-	# A kit hook that writes into the repository is the defect D84 names,
-	# and it leaves the tracked modification finish will find.  The hook is
-	# handed to the bosh fixture rather than laid by a call of its own,
-	# because that fixture writes the kit itself and commits it on control,
-	# and a second kit written afterwards would take the blueprint hook with
-	# it and stand its commit on whatever branch the row had reached.
+	# A kit hook that writes into the repository is the defect, and it leaves
+	# the tracked modification finish will find.  The hook is handed to the
+	# bosh fixture rather than laid by a call of its own, because that fixture
+	# writes the kit itself and commits it on control, and a second kit written
+	# afterwards would take the blueprint hook with it and stand its commit on
+	# whatever branch the row had reached.
 	my $h = ready_harness(envs => ['qa', 'prod'], chained => 1, bosh => {
 		hooks => {
 			'post-deploy' => 'echo "# tampered" >> "$GENESIS_ROOT/qa.yml"',

@@ -28,8 +28,9 @@
 # The lock-probe hook is installed after that shape rather than through it,
 # because the probe's path is the harness's own and cannot be named before
 # the harness exists.  It is left uncommitted, which leaves it untracked,
-# and D84 ignores untracked files, so the hook the deploy runs is not also
-# a tracked modification that aborts the finish it is watching.
+# and the cleanliness check ignores untracked files, so the hook the deploy
+# runs is not also a tracked modification that aborts the finish it is
+# watching.
 #
 # The second subtest runs from a branch of the operator's own rather than
 # from control, which is the step file's own placement.  The reason is that
@@ -264,7 +265,7 @@ subtest 'a lock taken in the window is reported, not swallowed' => sub {
 
 	# The recorder takes the switch lock from a separate process once the
 	# deploy's session has finished and before the child is run, which is
-	# the window D46 leaves open on purpose.  It writes its own pid and the
+	# a window that is left open on purpose.  It writes its own pid and the
 	# command it was given into the lock file, which is what lock_at_start
 	# reads back.
 	child_recorder($h, probe => 1, hold_lock => 'genesis prod deploy');
@@ -290,7 +291,7 @@ subtest 'a lock taken in the window is reported, not swallowed' => sub {
 	like($report, qr/Deploy itself succeeded/,
 		'the deploy said it is complete itself');
 	# The retry sentence is matched whole rather than the command alone, so
-	# anything standing where the argument D36 retired used to stand breaks
+	# anything standing where the retired argument used to stand breaks
 	# the row, whichever environment it names.  The hand-off notice above
 	# names an environment on purpose and is not what this reads.
 	like($report, qr/Run genesis propagate to retry it/,
