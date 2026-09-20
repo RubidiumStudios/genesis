@@ -155,7 +155,7 @@ subtest 'a deploy with -y leaves the hold standing' => sub {
 	# The last two rows are what makes this subtest discriminate.  Every row
 	# above them passes before `pipeline-release` exists, because the deploy
 	# leaving the record alone is a property the record already had.  The
-	# release that follows is the other half of D50: the record the deploy
+	# release that follows is the other half of it.  The record the deploy
 	# would not touch is cleared the moment a human asks for it, so the two
 	# together say that clearing a hold is something only the release does.
 	#
@@ -163,7 +163,7 @@ subtest 'a deploy with -y leaves the hold standing' => sub {
 	# owns the recipe for.  The pipeline is off, because a pipeline-managed
 	# deploy looks for a branch the harness does not stand up, and the
 	# applied record goes with it, since a disabled pipeline that still
-	# carries one is the state D64 has both hold commands refuse.
+	# carries one is the state both hold commands refuse.
 	plan tests => 7;
 
 	my $h    = deployable_prod(pipeline => 0, applied => 0);

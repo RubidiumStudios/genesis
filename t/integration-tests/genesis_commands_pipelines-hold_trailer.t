@@ -27,14 +27,14 @@ subtest 'a delivered hold trailer writes the record' => sub {
 	# the gated commit and wrote no record reads the reason back as the empty
 	# string.
 	#
-	# The last two rows are D53's own claim, which is that a deploy of the
-	# gated commit leaves the record standing and the record goes on holding
-	# the run after it.  The deploy is the real one, pipeline-enabled and
-	# taken to success, which deployable_prod owns the five things for.  What
-	# the hold is read back through is a run rather than the record itself,
-	# because what the record has to go on meaning is that the next run
-	# delivers nothing, and a record left readable to safe but broken for the
-	# walk would pass a bare read and fail these.
+	# The last two rows carry the claim that a deploy of the gated commit
+	# leaves the record standing and the record goes on holding the run after
+	# it.  The deploy is the real one, pipeline-enabled and taken to success,
+	# which deployable_prod owns the five things for.  What the hold is read
+	# back through is a run rather than the record itself, because what the
+	# record has to go on meaning is that the next run delivers nothing, and a
+	# record left readable to safe but broken for the walk would pass a bare
+	# read and fail these.
 	plan tests => 10;
 
 	my $h = deployable_prod(delivered => ['prod'], certified => ['prod']);
