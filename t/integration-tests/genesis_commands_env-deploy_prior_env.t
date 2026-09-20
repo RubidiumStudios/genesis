@@ -42,11 +42,11 @@ subtest 'the predecessor is named by a site file, and read before the load' => s
 	plan tests => 7;
 
 	# inherited_harness is this shape by name: it writes the pipeline keys at
-	# a site file rather than at the leaf, which is the merged read D79 asks
-	# for, and it writes them before the seeding is finished so the delivery
-	# that follows carries the file onto the deployment branch.  A key
-	# written after the delivery would sit on control alone, and the deploy
-	# reads the file the branch it stands on carries.
+	# a site file rather than at the leaf, which is the merged read the
+	# deploy makes, and it writes them before the seeding is finished so the
+	# delivery that follows carries the file onto the deployment branch.  A
+	# key written after the delivery would sit on control alone, and the
+	# deploy reads the file the branch it stands on carries.
 	my $h = inherited_harness(
 		envs          => ['lab', $LEAF],
 		site          => $SITE,
@@ -151,11 +151,11 @@ subtest 'the three prior-env cases, with L unchanged on each' => sub {
 		certify($h, 'lab', result => 'post-failed', control_commit => $control)
 			if $case eq 'post-failed';
 		# no control: a predecessor that deployed and certified nothing.
-		# Under D43 it holds everything below it and the due set is empty,
-		# which is a state this check passes rather than one it refuses.
-		# What this catches is a check that asked which commit the
-		# predecessor certified rather than whether it had deployed at all,
-		# which would refuse here.
+		# It holds everything below it and the due set is empty, which is
+		# a state this check passes rather than one it refuses.  What this
+		# catches is a check that asked which commit the predecessor
+		# certified rather than whether it had deployed at all, which would
+		# refuse here.
 		#
 		# The two warning rows for this state, that the warning names
 		# the holding ancestor and says nothing is due, are read where

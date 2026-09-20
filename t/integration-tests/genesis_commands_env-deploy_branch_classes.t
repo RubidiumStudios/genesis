@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Proves T214, the three branch states and the one ref move; T216, the two D48
+# Proves T214, the three branch states and the one ref move; T216, the two
 # refusals in the deploy's wording; T217, the awaiting pipeline-apply refusal
 # at DATAERR under both providers; and T329, the divergence refusal printing
 # before the prior-env one.
@@ -117,7 +117,7 @@ subtest 'behind fast-forwards, ahead and diverged refuse' => sub {
 	}
 };
 
-subtest 'the two D48 refusals in the deploy wording' => sub {
+subtest 'the two refusals in the deploy wording' => sub {
 	plan tests => 10;
 
 	my $local_only = seeded_harness();
@@ -353,8 +353,8 @@ subtest "a deploy from the branch makes the move the gate did not" => sub {
 	plan tests => 4;
 
 	# The gate returns before it moves anything where the operator is
-	# already standing on the deployment branch, under D80, so the deploy's
-	# own fast-forward is the one that runs and this is the only state that
+	# already standing on the deployment branch, so the deploy's own
+	# fast-forward is the one that runs and this is the only state that
 	# reaches it.  The branch has to carry a repository before the run, or
 	# the command would meet the refusal about a branch with no deployment
 	# root rather than the delivery behind it, so the clone is brought up to
