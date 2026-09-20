@@ -3324,11 +3324,14 @@ C<hybrid>, naming the value that was configured.
 
 =item *
 
-C<"The environment ... uses a kit whose Genesis floor is below 3.1.0"> -
-raised when an environment's effective floor, the higher of its own merged
+C<"The environment ... has a Genesis floor below 3.1.0"> - raised when an
+environment's effective floor, the higher of its own merged
 C<genesis.min_version>, or C<genesis.minimum_version>, and the
 repository's C<minimum_version>, is older than 3.1.0, naming the
-environment and carrying the remedy.
+environment and carrying the remedy. The remedy names the key as well as
+the kit, because the loop reads the floor out of the merged environment
+parameters and the repository's own setting, and those are usually
+written from the kit but need not be.
 
 =back
 

@@ -2555,6 +2555,12 @@ sub _source_control {
 # same shape and only the host differs.  The host is what says GitHub: any
 # https URL at all carries two path segments, so without a host test every
 # forge on earth would parse and the D102 refusal would never fire.
+#
+# The host test is a substring rather than a label boundary, so it is
+# deliberately loose: it has to admit every Enterprise hostname an operator
+# might run, and those are named freely.  A host that merely contains the
+# word therefore parses too, and the pair it yields then fails against the
+# configured API base, which is a later refusal rather than a wrong answer.
 sub _github_owner_repo {
 	my ($uri) = @_;
 	return undef unless defined $uri && length $uri;
@@ -2852,10 +2858,10 @@ sub _validate_manifest_store {
 		next if new_enough($floor, '3.1.0');
 
 		bail({exitcode => CONFIG},
-			"The environment #C{%s} uses a kit whose Genesis floor is below ".
-			"#C{3.1.0}, which forces the repository store whatever ".
-			"#C{manifest_store} says.\nRaise the kit's floor to #C{3.1.0} or ".
-			"later.",
+			"The environment #C{%s} has a Genesis floor below #C{3.1.0}, ".
+			"which forces the repository store whatever #C{manifest_store} ".
+			"says.\nRaise the kit's floor to #C{3.1.0} or later, or raise ".
+			"#C{genesis.min_version} where it is set by hand.",
 			$env_name
 		);
 	}
