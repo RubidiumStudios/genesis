@@ -7,14 +7,14 @@
 # The holding-ancestor half of the warning is here for a different reason.  A
 # deploy stands on the environment's own deployment branch, which mirrors that
 # environment's hierarchy and carries no sibling's file, so the topology the
-# walk reads there has no node for the
-# predecessor and Genesis::CI::Compiler::ASTBuilder lays no edge to a node it
-# does not have.  The walk therefore finds no ancestor at all on the deploy
-# path, and no spawned deploy can produce an ancestor-uncertified hold.  The
-# arm is live for a hyphen-nested environment, whose parent's file is part of
-# its own hierarchy and so does travel to the branch, and it is the walk that
-# decides the reason in either case.  The warning is driven here with the
-# record the walk would hand it, which is what this row is about.
+# walk reads there has no node for the predecessor and
+# Genesis::CI::Compiler::ASTBuilder lays no edge to a node it does not have.
+# The walk therefore finds no ancestor at all on the deploy path, and no
+# spawned deploy can produce an ancestor-uncertified hold.  The arm is live
+# for a hyphen-nested environment, whose parent's file is part of its own
+# hierarchy and so does travel to the branch, and it is the walk that decides
+# the reason in either case.  The warning is driven here with the record the
+# walk would hand it, which is what this row is about.
 use strict;
 use warnings;
 
