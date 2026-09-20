@@ -201,13 +201,13 @@ subtest 'a git directory that cannot be resolved is refused' => sub {
 subtest 'genesis new, which opens no session, calls the same helper' => sub {
 	plan tests => 2;
 
-	# One helper, two callers.  D80 keeps the pre-flight in begin and shares
-	# it rather than giving genesis new a second copy, so H20 closes in the
-	# session for every switching command and here for the one that does not.
-	# The begin half of this row is asserted where begin lands.
+	# One helper, two callers.  The pre-flight lives in begin and is shared
+	# rather than copied into genesis new, so H20 closes in the session for
+	# every switching command and here for the one that does not.  The begin
+	# half of this row is asserted where begin lands.
 	my $new_pm = get_file('lib/Genesis/Commands/Env.pm');
 	like($new_pm, qr/->preflight\b/,
-		'genesis new calls the shared helper, as D80 says it does');
+		'genesis new calls the shared helper');
 	unlike($new_pm, qr/dubious ownership|safe\.directory/,
 		'and classifies nothing of its own');
 };
