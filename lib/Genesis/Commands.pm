@@ -81,7 +81,7 @@ use constant { # {{{
 	REPO_OPTIONS  => 2,
 	ENV_OPTIONS   => 3,
 
-	# Branch classes (D81)
+	# Branch classes
 	#
 	# Every pipeline-aware command belongs to one of these two, declared at
 	# its registration beside its scope and group.  The one declaration
@@ -100,9 +100,9 @@ use constant BRANCH_TARGETS => ('control'); # {{{
 
 # DEPLOYED_TARGET_HELP - the one sentence both deployed-commit flags print {{{
 #
-# D87 gives the deployed commit two selections and forbids a third spelling,
-# so the two declarations read from one constant rather than each carrying
-# its own wording.
+# The deployed commit has two selections and no third spelling, so the two
+# declarations read from one constant rather than each carrying its own
+# wording.
 use constant DEPLOYED_TARGET_HELP =>
 	"Target the deployed commit, which is the commit recorded in this ".
 	"environment's last successful deployment and so the version it is ".
@@ -113,8 +113,8 @@ use constant DEPLOYED_TARGET_HELP =>
 # }}}
 
 # What a command says about the refresh the branch-class gate would otherwise
-# make on its behalf.  D40 has every pipeline command refresh before it reads
-# anything, and D81 keeps every fact about a command's branch handling at its
+# make on its behalf.  Every pipeline command refreshes before it reads
+# anything, and every fact about a command's branch handling sits at its
 # registration, so the two commands that read and resolve nothing say so here
 # rather than being named inside the gate.
 #
@@ -220,7 +220,7 @@ sub define_command { # {{{
 		function_group     => GENESIS,
 		option_group       => BASE_OPTIONS,
 		option_passthrough => 0,
-		# D87: a deployed-state command declares which commit it means, and
+		# A deployed-state command declares which commit it means, and
 		# every command that says nothing means the branch tip.
 		default_target     => 'tip',
 		branch_class       => undef,
@@ -233,7 +233,7 @@ sub define_command { # {{{
 	$PROPS{$name} = {%$default_props, %$props};
 
 	# A misspelled class would silently gate nothing, which is the failure
-	# mode D81's single declaration exists to rule out, so it is a bug.
+	# mode the single declaration exists to rule out, so it is a bug.
 	bug(
 		"Command #C{$name} declares the branch class #y{%s}; ".
 		"the only classes are #y{%s} and #y{%s}.",
@@ -321,8 +321,9 @@ sub define_command { # {{{
 		$PROPS{$name}{option_passthrough} = 1;
 	}
 
-	# retired and deprecated are mutually exclusive — retired's refuse-to-run
-	# always trumps deprecated's warn-and-run, so declaring both is a bug.
+	# The retired and deprecated flags are mutually exclusive.  A retired
+	# command's refuse-to-run always trumps a deprecated one's warn-and-run,
+	# so declaring both is a bug.
 	bug(
 		"Command #C{$name} declares both #y{retired} and #y{deprecated}; ".
 		"use #y{retired} alone once the command no longer runs."
@@ -580,11 +581,10 @@ sub _gate_pipeline_on_legacy_ci_yml {
 
 # deployed_target - the commit this run targets, or undef for the tip {{{
 #
-# Under D87 a deployed-state command declares its default target at its
-# registration, and the two flags select the deployed commit where the default
-# does not.  Under D88 both flags refuse when the pipeline is not enabled,
-# because the session that makes a detached checkout safe opens only under a
-# pipeline, which is H38.
+# A deployed-state command declares its default target at its registration,
+# and the two flags select the deployed commit where the default does not.
+# Both flags refuse when the pipeline is not enabled, because the session that
+# makes a detached checkout safe opens only under a pipeline, which is H38.
 #
 # The name and the root come in rather than an environment object, because the
 # gate asks this of every classified command and genesis new names an
@@ -649,11 +649,11 @@ sub deployed_target {
 		);
 	}
 
-	# Reading the record and answering the commit is D87's other half.  The
-	# bare environment that reader needs is built here, below the question
-	# and below the refusal, so that a run which named no flag never builds
-	# one and a flagged run under no pipeline is refused before it pays for
-	# one.
+	# Reading the record and answering the commit is the other half of the
+	# job.  The bare environment that reader needs is built here, below the
+	# question and below the refusal, so that a run which named no flag
+	# never builds one and a flagged run under no pipeline is refused
+	# before it pays for one.
 	#
 	# The root the gate keeps carries no vault, because it is loaded with
 	# no_vault so that reading a command's class announces no vault target,
@@ -675,8 +675,8 @@ sub deployed_target {
 	my $record = $env->deployed_record;
 	return undef unless $record && $record->{git} && $record->{git}{commit};
 
-	# The path the commit was read from goes back beside it, because D94 has
-	# the refusal name the record as well as the commit.  The record is the
+	# The path the commit was read from goes back beside it, because the
+	# refusal names the record as well as the commit.  The record is the
 	# input, and an operator told only which commit is missing is not told
 	# which of their records to go and correct.  It is answered here rather
 	# than worked out again by the caller, because this environment is the
@@ -691,8 +691,8 @@ sub deployed_target {
 
 # _gate_branch_class - run a command under its declared class {{{
 #
-# D81 puts the class at the registration so that one declaration drives both
-# the refusal and the help marker, which means the enforcement belongs here,
+# The class sits at the registration so that one declaration drives both the
+# refusal and the help marker, which means the enforcement belongs here,
 # beside the legacy ci.yml gate, and not inside each command.
 #
 # The command's own function comes in as $fn and every path here runs it.  A
@@ -706,10 +706,10 @@ sub _gate_branch_class {
 	return $fn->() unless $class;
 
 	# propagate switches to control inside the session it already has, so
-	# the gate leaves it where it stands (D65, D81).  The exemption is read
-	# before anything is loaded, because loading a Top names the root and
-	# the vault target in the environment and a command the gate never gates
-	# should not be handed those as a side effect.
+	# the gate leaves it where it stands.  The exemption is read before
+	# anything is loaded, because loading a Top names the root and the vault
+	# target in the environment and a command the gate never gates should
+	# not be handed those as a side effect.
 	return $fn->() if (command_properties()->{branch_target} // '') eq 'control';
 
 	# Only meaningful when the command has a repository to read a Top from.
@@ -722,8 +722,8 @@ sub _gate_branch_class {
 	my ($top, $git) = _gate_context();
 	return $fn->() unless $top && $git;
 
-	# D88: the two deployed-commit flags refuse where no session opens, so
-	# the resolver is asked above the return that leaves every other command
+	# The two deployed-commit flags refuse where no session opens, so the
+	# resolver is asked above the return that leaves every other command
 	# alone with the pipeline off.  It answers the commit the run targets,
 	# or undef where the run targets the tip, which is every run that named
 	# neither flag under a registration declaring no deployed default.
@@ -740,9 +740,9 @@ sub _gate_branch_class {
 	#
 	# The record the target came out of comes back with it, in list context,
 	# so that a commit the repository cannot reach is refused by the name of
-	# the record an operator has to go and correct (D94).  The resolver reads
-	# that record already, and this is the only caller that knows which one
-	# this run was answered from.
+	# the record an operator has to go and correct.  The resolver reads that
+	# record already, and this is the only caller that knows which one this
+	# run was answered from.
 	# Genesis writes an environment file as <name>.yml, which is the only
 	# spelling Genesis::Top::_env_file_names globs for, and the command line
 	# tolerates the longer one because an operator may well type it.  The
@@ -756,15 +756,15 @@ sub _gate_branch_class {
 	}
 
 	# Outside a pipeline every command behaves as it always has, on any
-	# branch, which is D80's last sentence and D81's silent premise.
+	# branch.
 	return $fn->() unless $top->pipeline_enabled;
 
-	# D87 makes the secrets family pre-deploy by class and lets
-	# --as-deployed opt it into the deployed commit, so a run that resolved
-	# a target is sent down the deployed-state arm whatever class its
-	# registration declares.  It is read before the class, because the flag
-	# is the operator saying which of the two questions they are asking and
-	# the class is only the default answer.
+	# The secrets family is pre-deploy by class, and --as-deployed opts it
+	# into the deployed commit, so a run that resolved a target is sent
+	# down the deployed-state arm whatever class its registration declares.
+	# It is read before the class, because the flag is the operator saying
+	# which of the two questions they are asking and the class is only the
+	# default answer.
 	return _gate_deployed_state($top, $git, $fn, $name,
 			target => $target, record => $record)
 		if defined($target) || $class eq DEPLOYED_STATE;
@@ -773,9 +773,10 @@ sub _gate_branch_class {
 		# Two pre-deploy commands make no network call of their own, and
 		# the gate makes none for them either.  Each says so at its own
 		# registration rather than by name here, because a list of command
-		# names inside the gate is the second declaration D81 exists to
-		# prevent: it drifts from the help text, from the command's own
-		# reading, and from whatever the next such command declares.
+		# names inside the gate is the second declaration the class rule
+		# exists to prevent.  Such a list drifts from the help text, from
+		# the command's own reading, and from whatever the next such
+		# command declares.
 		#
 		# pipeline-status declares an optional refresh, which is one the
 		# operator skips with --no-refresh and which the gate makes
@@ -790,13 +791,14 @@ sub _gate_branch_class {
 		            : $mode eq 'optional' && get_options()->{'no-refresh'} ? 0
 		            : 1;
 
-		# Whether the command commits goes down too.  D45 speaks of a
-		# commit that cannot reach control through a pull request, and
-		# most pre-deploy commands make none: pipeline-apply writes to
-		# the provider, pipeline-status and pipeline-describe only read,
-		# and the secrets commands write to the vault.  Only create
-		# declares it today, and it is read off the registration for
-		# the same reason the refresh mode above it is.
+		# Whether the command commits goes down too.  The refusal is
+		# about a commit that cannot reach control through a pull
+		# request, and most pre-deploy commands make none:
+		# pipeline-apply writes to the provider, pipeline-status and
+		# pipeline-describe only read, and the secrets commands write to
+		# the vault.  Only create declares it today, and it is read off
+		# the registration for the same reason the refresh mode above it
+		# is.
 		#
 		# genesis new is about to add an environment whose name may be the
 		# branch it stands on, and that collision is one the gate cannot
@@ -819,10 +821,10 @@ sub _gate_branch_class {
 
 # _gate_deployed_state - run a command on the environment's branch {{{
 #
-# D81: a deployed-state command operates on what an environment is running
-# or is about to run, so it reads <env>/<type> inside a session, because
-# that branch holds exactly what was delivered and the hooks need a working
-# tree.  The session is opened here rather than inside each command, so that
+# A deployed-state command operates on what an environment is running or is
+# about to run, so it reads <env>/<type> inside a session, because that
+# branch holds exactly what was delivered and the hooks need a working tree.
+# The session is opened here rather than inside each command, so that
 # deploy, info, and the bosh subcommands share one switch.
 sub _gate_deployed_state {
 	my ($top, $git, $fn, $name, %opts) = @_;
@@ -840,13 +842,13 @@ sub _gate_deployed_state {
 	# already answered that one.
 	my $branch = $top->branch_for($name);
 
-	# D80 settles the trigger as "will switch", so a command already standing
-	# on the branch it would switch to opens no session, takes no switch
-	# lock, and asserts no cleanliness.  A session exists to leave a branch
-	# and come back, and there is nothing here to leave.  That is what lets
-	# an operator edit a file on the deployment branch and deploy it in
-	# place, which is the qualifier I3 carries and the one thing they need in
-	# order to test a change before committing it.
+	# The trigger is "will switch", so a command already standing on the
+	# branch it would switch to opens no session, takes no switch lock, and
+	# asserts no cleanliness.  A session exists to leave a branch and come
+	# back, and there is nothing here to leave.  That is what lets an
+	# operator edit a file on the deployment branch and deploy it in place,
+	# which is the qualifier I3 carries and the one thing they need in order
+	# to test a change before committing it.
 	#
 	# It says so, as the two arms below do, because this is the arm an
 	# operator is likeliest to be in without having meant to be: standing on
@@ -927,16 +929,16 @@ sub _gate_deployed_state {
 	# A command that reads the deployment branch answers a question about
 	# what was delivered and has no business moving anything, so it must not
 	# acquire a ref move by sharing a gate with a command that deploys; the
-	# registration says which is which (D81's single declaration).
+	# registration says which is which.
 	#
 	# The move is made before the question below, because the branch is the
-	# working tree the command reads: the checkout stands the tree on the
+	# working tree the command reads.  The checkout stands the tree on the
 	# commit the local ref names, so a clone that has not pulled would be
 	# stood on the init commit and asked to deploy from it.  It is made on
 	# the one state that promises a fast-forward, so it creates and discards
-	# nothing, which is the ref move D35's span allows and the one the
-	# deploy's own --ff-only pull was the precedent for (D5).  Nothing is
-	# fetched: the refresh is its own step under D40.
+	# nothing, which is the one ref move this span allows and the one the
+	# deploy's own --ff-only pull was the precedent for.  Nothing is
+	# fetched, because the refresh is its own step.
 	if ($behind && command_properties()->{branch_fast_forward}) {
 		info(
 			"Fast-forwarding #C{%s} to #C{%s/%s}, %s behind.",
@@ -947,7 +949,7 @@ sub _gate_deployed_state {
 
 	# The question is asked after begin rather than before it, because it
 	# runs a git command of its own and begin is where the pre-flight
-	# classifies the failures a git command otherwise hides (D80).  Asked
+	# classifies the failures a git command otherwise hides.  Asked
 	# first, a repository git declines to trust would answer with the
 	# listing's complaint instead of the pre-flight's sentence.
 	#
@@ -957,10 +959,9 @@ sub _gate_deployed_state {
 	# onto what the branch carries now.  It switches onto the commit its
 	# record names, and that commit carried the repository when it was
 	# deployed whatever a rewrite has since done to the branch.  A commit
-	# this repository no longer holds is refused by switch under D94, which
-	# names the commit and the record, and that is the refusal such an
-	# operator needs rather than a sentence about a branch waiting for a
-	# delivery.
+	# this repository no longer holds is refused by switch, which names the
+	# commit and the record, and that is the refusal such an operator needs
+	# rather than a sentence about a branch waiting for a delivery.
 	if (!defined($opts{target})
 			&& !branch_carries_repository($top, $git, $branch)) {
 		# Where no move was made, the distance goes into the line instead, so
@@ -982,17 +983,17 @@ sub _gate_deployed_state {
 
 	$BRANCH_SESSION = $session;
 
-	# D94 gives both flags one code path, which is switch on a commit rather
-	# than on a branch, and finish restores the operator's branch either
-	# way.  A run that resolved no target stands on the branch, as every run
-	# did before the flags existed.
+	# Both flags share one code path, which is switch on a commit rather than
+	# on a branch, and finish restores the operator's branch either way.  A
+	# run that resolved no target stands on the branch, as every run did
+	# before the flags existed.
 	#
 	# The record the target was read from goes down with it, because switch
 	# asks whether a commit is here before it moves anything and refuses at
-	# DATAERR where it is not, and D94 has that refusal name the record as
-	# well as the commit.  A run standing on the branch tip carries none,
-	# which is right, because a branch is not read out of a record and switch
-	# asks the question of a commit alone.
+	# DATAERR where it is not, and that refusal names the record as well as
+	# the commit.  A run standing on the branch tip carries none, which is
+	# right, because a branch is not read out of a record and switch asks the
+	# question of a commit alone.
 	$session->switch($opts{target} // $branch, record => $opts{record});
 
 	# The directory now holds another branch's files, so the root the gate
@@ -1246,10 +1247,10 @@ sub append_options { # {{{
 
 # _branch_class_marker - the help marker for a command's declared class {{{
 #
-# D81 asks that an operator reading `genesis help` sees which commands
-# expect control and which expect an environment.  The marker is computed
-# from the same property the gate reads, so the listing and the refusal
-# cannot drift apart.
+# An operator reading `genesis help` sees which commands expect control
+# and which expect an environment.  The marker is computed from the same
+# property the gate reads, so the listing and the refusal cannot drift
+# apart.
 sub _branch_class_marker {
 	my ($cmd) = @_;
 	# Asked through exists, because reading a key of %PROPS for a name this
@@ -1272,7 +1273,7 @@ sub command_help { # {{{
 	# Usage and option errors exit 2, whatever number the caller passed.
 	# Every caller here means the same thing by a non-zero code, and a
 	# caller that cannot tell a usage error from a crash cannot act on
-	# either.  D98 keeps 2 because it is Genesis precedent.
+	# either.  The code stays 2 because it is Genesis precedent.
 	$rc = 2 if $rc;
 
 	$msg ||= ''; # TODO: a summary blurb about genesis
