@@ -140,9 +140,9 @@ environment's C<prior_env> and C<depth> come from the whole topology either
 way, so an environment named on its own still reads its ancestor correctly.
 
 An absent scope and an empty arrayref both plan every environment, which is
-what C<genesis propagate> asks for under D36.  The empty arrayref once meant
-no environment at all, so a caller that narrows by building a list says what
-it means when the list comes out empty rather than handing one in.
+what C<genesis propagate> asks for.  The empty arrayref once meant no
+environment at all, so a caller that narrows by building a list says what it
+means when the list comes out empty rather than handing one in.
 
 =item C<composed>
 
@@ -187,11 +187,11 @@ then make.
 =item C<github>
 
 Optional.  The run's C<Service::Github> client, where it built one.  It is
-read for one thing alone, which is D52's recovery: an environment in pull
-request mode whose deployment branch carries no marker takes one from the
-pull request that merged into it.  A call that leaves it out walks such a
-branch from before the environment was introduced, exactly as this walk
-always did.
+read for one thing alone, which is the squash recovery.  An environment in
+pull request mode whose deployment branch carries no marker takes one from
+the pull request that merged into it.  A call that leaves it out walks
+such a branch from before the environment was introduced, exactly as this
+walk always did.
 
 =item C<state_of>
 
@@ -296,8 +296,8 @@ B<Examples:>
 
 The environments this run walks, in DAG order, each with its deployment
 branch composed through C<< $top->branch_for >>, and with its C<prior_env> and
-its depth.  Under D66 the branch is per deployment, so two roots sharing an
-environment name walk their own branches and read their own markers.
+its depth.  The branch is per deployment, so two roots sharing an environment
+name walk their own branches and read their own markers.
 
 An environment whose own C<genesis.pipeline.require_pr> is true carries its
 pull request branch beside the deployment branch, under C<pr_branch>, composed
@@ -318,8 +318,8 @@ does not know about.
 
 The one option is C<scope>, an arrayref of environment names.  Where it is
 absent, and where it is an empty arrayref, every environment the topology
-gives comes back, which is what C<genesis propagate> asks for under D36.  The
-empty arrayref once meant no environment at all, so a caller that narrows by
+gives comes back, which is what C<genesis propagate> asks for.  The empty
+arrayref once meant no environment at all, so a caller that narrows by
 building a list says what it means when the list comes out empty rather than
 handing one in.  Where it names environments, only those come back, still in
 DAG order and still carrying the C<prior_env> and the depth the whole topology
@@ -446,11 +446,11 @@ need it would read the other somewhere else.  Reading the hold here is also
 what lets an environment the pipeline was never applied to report the hold
 standing over it, which a reader placed at the end of the walk never reached.
 
-This is a per-environment read, so under D60 it reaches exactly one
-environment.  A hold the vault cannot answer for raises a plain message naming
-the environment and the path, every caller runs inside L</walk_one>, and
-C<walk_one> records that environment C<failed> with the message beneath it and
-lets the run walk on to the next.  Nothing here ends the run.
+This is a per-environment read, so it reaches exactly one environment.  A
+hold the vault cannot answer for raises a plain message naming the environment
+and the path, every caller runs inside L</walk_one>, and C<walk_one> records
+that environment C<failed> with the message beneath it and lets the run walk
+on to the next.  Nothing here ends the run.
 
 B<Parameters:>
 
@@ -471,9 +471,9 @@ all, because the environment has already ended.
 
 B<Errors:> Raises a plain message where the hold record cannot be read, naming
 the environment and the path, because the run delivers on that answer and will
-not guess that there is no hold.  It is not a refusal: L</walk_one> catches it,
-records that environment C<failed>, and the run continues, which is what D60
-gives a read that fails for one environment.
+not guess that there is no hold.  It is not a refusal.  L</walk_one> catches
+it, records that environment C<failed>, and the run continues, which is what
+a read that fails for one environment gets.
 
 B<Examples:>
 
@@ -682,8 +682,8 @@ B<Examples:>
 
 Whether one control commit belongs to one environment, and what of it does.
 
-Only triggering content routes a commit, under D68.  L</changed_set> makes
-the split, and a commit whose content for this deployment falls wholly on the
+Only triggering content routes a commit.  L</changed_set> makes the split,
+and a commit whose content for this deployment falls wholly on the
 non-triggering side is skipped exactly as one that touches nothing in the set
 is, and it records no outcome, because the next delivery is a mirror and
 carries that content with it.  That holds behind a hold as well as in front
@@ -785,12 +785,12 @@ B<Examples:>
 
 The files a commit and an ancestor's undeployed set have in common.
 
-Only triggering paths reach it, under D68, because a hold exists to stop
-unproven content moving downstream and a reaction script that takes effect at
-the next deploy is not that.  Both lists arrive triggering already, the
-commit's from L</route_commit> and the ancestor's from L</undeployed_set>, so
-nothing is filtered here.  Without the rule a shared C<.genesis/config>
-change would hold every descendant on the commit that touched it.
+Only triggering paths reach it, because a hold exists to stop unproven
+content moving downstream and a reaction script that takes effect at the
+next deploy is not that.  Both lists arrive triggering already, the commit's
+from L</route_commit> and the ancestor's from L</undeployed_set>, so nothing
+is filtered here.  Without the rule a shared C<.genesis/config> change would
+hold every descendant on the commit that touched it.
 
 B<Parameters:>
 
@@ -1131,8 +1131,8 @@ B<Examples:>
 
 Stops delivery for a held environment and says why.
 
-Under D50, while a propagation hold stands the run delivers nothing new to
-that environment and opens or updates no pull request, in either mode, while
+While a propagation hold stands the run delivers nothing new to that
+environment and opens or updates no pull request, in either mode, while
 everything already on the deployment branch stays deployable.  The walk still
 computes what is due, which is what lets C<genesis propagate --dry-run> show
 what waits behind the hold.
@@ -1253,20 +1253,19 @@ B<Examples:>
 Walks and delivers to one environment, ending at that environment's own
 error.
 
-Under D96 and D60, an error confined to one environment ends that environment
-and nothing else.  Its branches go back so that nothing of a partial delivery
-survives, it records C<failed> with the error it raised, and the run walks on
-to the next environment.  The same call stands around the walk and
-around the delivery, because under D78 a blueprint that raises while one
-environment's fragments are enumerated belongs to the same class as a
-delivery that died halfway.
+An error confined to one environment ends that environment and nothing else.
+Its branches go back so that nothing of a partial delivery survives, it
+records C<failed> with the error it raised, and the run walks on to the next
+environment.  The same call stands around the walk and around the delivery,
+because a blueprint that raises while one environment's fragments are
+enumerated belongs to the same class as a delivery that died halfway.
 
 A run-fatal or unsurvivable error is re-raised for the caller to abort the
 whole run on, which L</is_run_fatal> is the reader for and L</abort_run> is
 the answer to.  Every failure of the writer is one of those, a refused commit
-included, because D82 puts a failure to write a file and a failure to make a
-commit in one class and nothing a caller could do differently would have
-helped with either.
+included, because a failure to write a file and a failure to make a commit
+sit in one class and nothing a caller could do differently would have helped
+with either.
 
 B<Parameters:>
 
@@ -1340,8 +1339,8 @@ B<Examples:>
 
     my $bool = Genesis::CI::Walk::is_run_fatal($error);
 
-Whether an error ends the run rather than the environment, under D82's two
-classes.
+Whether an error ends the run rather than the environment, in one of the
+two classes.
 
 Run-fatal is the writer's own failure, where nothing a caller could do
 differently would have helped.  Unsurvivable is an error no environment
@@ -1380,12 +1379,12 @@ B<Examples:>
       at      => $env_name,
       error   => $err);
 
-Ends the run under either of D82's two classes.  It never returns.
+Ends the run under either of the two classes.  It never returns.
 
 Both classes abort the same way and differ only in the status they exit
 with.  The status is read off the failure rather than decided here, because
-C<Genesis::CI::RunFailure> already carries the one D82 gives each class,
-which is 1 for a run-fatal failure and C<Genesis::Exit::TEMPFAIL> for an
+C<Genesis::CI::RunFailure> already carries the one each class gets, which
+is 1 for a run-fatal failure and C<Genesis::Exit::TEMPFAIL> for an
 unsurvivable one.  Anything that is not one of those two exits 1.
 
 Every environment records an outcome first, in the words
