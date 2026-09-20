@@ -428,8 +428,8 @@ sub create {
 				if ($env->is_bosh_director) {
 					$create_env = 1;
 					warning(
-						"\nNo #C{--bosh-env} specified — defaulting to #C{create-env} deployment ".
-						"for this BOSH director kit."
+						"\nNo #C{--bosh-env} specified, so defaulting to #C{create-env} ".
+						"deployment for this BOSH director kit."
 					);
 				} else {
 					warning(
