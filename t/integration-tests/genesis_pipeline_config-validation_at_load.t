@@ -119,9 +119,9 @@ subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
 	like $err, qr/Configuration validation failed/,
 		'the refusal is the one every configuration refusal carries';
 
-	# The provider's rules are not a phase of their own under D105, so what
-	# it says is gathered with every other error rather than announced
-	# under a heading naming the provider a second time.
+	# The provider's rules are not a phase of their own, so what it says is
+	# gathered with every other error rather than announced under a heading
+	# naming the provider a second time.
 	unlike $err, qr/Invalid configuration for the/,
 		"with no second heading in front of the provider's own words";
 	like $err, qr/'target' is required for the Concourse provider/,

@@ -57,7 +57,7 @@ subtest 'the net discards and resets rather than only changing back' => sub {
 	# branch back out, because they leave nothing behind to clean up.
 	# This one leaves both kinds of debris, a commit on the deployment
 	# branch and a half-written file over it, so it can tell a bare restore
-	# from the abort D32 asks for.
+	# from the abort the net has to make.
 	my $h = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
 	my $git  = $h->git('a');
