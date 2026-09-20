@@ -140,4 +140,20 @@ subtest 'a divergence with no local commits still reads behind' => sub {
 	is($behind, 2, 'and it stands two commits behind what the teammate published');
 };
 
+subtest 'a branch with no remote-tracking ref counts as nothing' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	local_branch_only($h, 'qa');
+	my $branch = $h->slug('qa');
+
+	ok(!ref_in($h->a, "refs/remotes/origin/$branch"),
+		'the branch was never published, so there is no ref to weigh it against');
+
+	# git complains about the range rather than answering it, and a read that
+	# folded the complaint into the answer would split it into two numbers.
+	is_deeply([counts($h->a, $branch)], [],
+		'and the read answers an empty list rather than what git complained');
+};
+
 done_testing;
