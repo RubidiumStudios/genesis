@@ -1,8 +1,8 @@
 package Genesis::CI::Walk;
 # The per-commit walk.  Reads control on R, each branch's newest marker,
 # each environment's certified commit, the applied record, and the hold
-# record, and returns the canonical record D91 fixes.  It writes nothing:
-# the caller delivers what the record says is pending, through the single
+# record, and returns the canonical record.  It writes nothing, and the
+# caller delivers what the record says is pending, through the single
 # writer.
 #
 # Every routing question is answered out of a commit's own tree rather than
@@ -33,11 +33,11 @@ our @EXPORT_OK = qw/
 	READINGS HOLD_REASONS
 /;
 
-# D94 fixes the four readings, and error is the record's own field rather
+# There are four readings, and error is the record's own field rather
 # than a fifth reading.
 use constant READINGS => qw/deployed pending-deploy unseeded not-propagated/;
 
-# D50's five reasons plus the consequence of ordered delivery under D34.
+# The five hold reasons plus the consequence of ordered delivery.
 use constant HOLD_REASONS => qw/
 	ancestor-overlap ancestor-uncertified gate-ahead
 	on-hold awaiting-merge behind-held-commit
@@ -47,10 +47,10 @@ use constant HOLD_REASONS => qw/
 
 # read_durable_state - everything the run is allowed to read, read once {{{
 #
-# I11 names the inputs exactly, and the rule that an input the run cannot
-# read makes it refuse rather than guess is D55's.  Reading them here, in
-# one place, is what makes the rule checkable: a caller that wanted to guess
-# would have to add a reader, and there is only one.
+# I11 names the inputs exactly, and an input the run cannot read makes it
+# refuse rather than guess.  Reading them here, in one place, is what makes
+# the rule checkable, because a caller that wanted to guess would have to
+# add a reader, and there is only one.
 #
 # Control is read off the local ref, and that is control on R.  The refresh
 # brings R into T for every branch in scope before anything is read, and the
@@ -65,10 +65,10 @@ use constant HOLD_REASONS => qw/
 # it renders it.
 #
 # An applied record the vault answers an error for is the whole run's input and
-# not one environment's, so under D55 the run refuses naming the path it could
-# not read.  An absent record is a different thing and stays a reading: D94
-# says the record is legitimately missing until genesis pipeline-apply has run,
-# and every environment then takes the not-propagated reading.
+# not one environment's, so the run refuses naming the path it could not read.
+# An absent record is a different thing and stays a reading, because the record
+# is legitimately missing until genesis pipeline-apply has run, and every
+# environment then takes the not-propagated reading.
 sub read_durable_state {
 	my (%args) = @_;
 
@@ -129,21 +129,20 @@ sub read_durable_state {
 # }}}
 # env_state - one environment's durable state, or the error that ends its turn {{{
 #
-# D55 and I11: the run names the input it could not read and never guesses a
-# value in its place.  D60 decides how far the failure reaches, and this is a
-# per-environment read, so it reaches exactly one environment.  The raise is a
-# plain die rather than a refusal, because every caller runs inside walk_one,
-# which records that environment failed with this message beneath it and walks
-# on to the next.  A refusal spelled here could never fire, and one that read
-# as though it might would have a reader believe an unreadable hold ends the
-# run.
+# Under I11 the run names the input it could not read and never guesses a
+# value in its place.  This is a per-environment read, so the failure reaches
+# exactly one environment.  The raise is a plain die rather than a refusal,
+# because every caller runs inside walk_one, which records that environment
+# failed with this message beneath it and walks on to the next.  A refusal
+# spelled here could never fire, and one that read as though it might would
+# have a reader believe an unreadable hold ends the run.
 #
 # The certified commit and the hold are read together, because they are the
 # two durable facts an environment carries and a caller that read one of them
 # where it happened to need it would read the other somewhere else.  Reading
 # the hold here is also what lets an environment the pipeline was never
-# applied to report the hold standing over it, which D56 asks for and which a
-# reader placed at the end of the walk never reached.
+# applied to report the hold standing over it, which a reader placed at the
+# end of the walk never reached.
 sub env_state {
 	my (%args) = @_;
 
@@ -175,11 +174,11 @@ sub env_state {
 # }}}
 # introducing_commit - E, the control commit that introduced an env file {{{
 #
-# Control is linear under D31, so the oldest commit that added the
-# environment's own file names E exactly, and --diff-filter=A over that path
-# is that question asked directly.  The newest add is not the answer, because
-# a file that was added, removed, and added again belongs to the environment
-# from the first of the three onward.
+# Control is linear, so the oldest commit that added the environment's own
+# file names E exactly, and --diff-filter=A over that path is that question
+# asked directly.  The newest add is not the answer, because a file that was
+# added, removed, and added again belongs to the environment from the first
+# of the three onward.
 #
 # An environment control has never carried has no introducing commit, and the
 # caller reads that as a branch to walk from the whole of control rather than
@@ -219,10 +218,10 @@ sub introducing_commit {
 #
 # The newest marker the branch carries, and for a branch that carries none
 # the commit before E, so that E is the first commit routed and is holdable
-# like any other commit under D61.  An init-only orphan branch shares no
-# history with control, so there is nothing on it for the marker walk to
-# read, and starting from the tip instead would collapse every commit since
-# the environment was added into one baseline and skip all of their holds.
+# like any other commit.  An init-only orphan branch shares no history with
+# control, so there is nothing on it for the marker walk to read, and
+# starting from the tip instead would collapse every commit since the
+# environment was added into one baseline and skip all of their holds.
 #
 # The base and the marker are two different facts and only one of them comes
 # back as the base, which is why the reading comes back beside it.  An
@@ -230,8 +229,8 @@ sub introducing_commit {
 # marker would report a branch standing on a commit it has never carried.
 #
 # The ref is the one the pre-flight settled rather than a remote-tracking ref
-# composed here, because D2 makes the local ref the base every reader takes
-# and a dry run hands over the ref a real run would have moved the branch to.
+# composed here, because the local ref is the base every reader takes and a
+# dry run hands over the ref a real run would have moved the branch to.
 sub walk_base {
 	my (%args) = @_;
 
@@ -247,11 +246,11 @@ sub walk_base {
 # }}}
 # control_commits - the control commits after a base, oldest first {{{
 #
-# Control is linear under D31, so first-parent order is control order and
-# --reverse gives us the oldest due commit first.  An undefined base means
-# the whole of control, which is what walk_base answers for a branch with no
-# marker whose environment was introduced on control's own first commit,
-# since there is no commit before that one to start after, and for one whose
+# Control is linear, so first-parent order is control order and --reverse
+# gives us the oldest due commit first.  An undefined base means the whole
+# of control, which is what walk_base answers for a branch with no marker
+# whose environment was introduced on control's own first commit, since
+# there is no commit before that one to start after, and for one whose
 # environment control has never carried a file for at all.
 sub control_commits {
 	my ($git, $control, $base) = @_;
@@ -276,12 +275,11 @@ sub control_commits {
 # }}}
 # changed_set - one commit's files for one environment, split in two {{{
 #
-# D69: the set is read from the tree at the commit being delivered and never
-# from the working tree, because a restructure moves the prefix that defines
-# the set.  D68: the set divides into triggering paths, whose change means
-# deploy me, and non-triggering ones, which must be current on the branch
-# without meaning that.  What the split then decides is route_commit's to
-# say.
+# The set is read from the tree at the commit being delivered and never from
+# the working tree, because a restructure moves the prefix that defines the
+# set.  The set divides into triggering paths, whose change means deploy me,
+# and non-triggering ones, which must be current on the branch without
+# meaning that.  What the split then decides is route_commit's to say.
 #
 # The marked set is read once and split here rather than asked for twice,
 # because each reading writes the deployment root out into a scratch tree and
@@ -338,15 +336,15 @@ sub changed_set {
 # }}}
 # route_commit - decide whether one commit belongs to one environment {{{
 #
-# D68: only triggering content routes a commit.  changed_set makes the split,
-# and a commit whose content for this deployment falls wholly on the
+# Only triggering content routes a commit.  changed_set makes the split, and
+# a commit whose content for this deployment falls wholly on the
 # non-triggering side is skipped exactly as one that touches nothing in the
 # set is, and it records no outcome, because the next delivery's mirror
 # already carries it.  That holds behind a hold as well as in front of one,
-# so a config change standing behind a held commit is not reported as
-# waiting on anything.  The carried list travels with the routed
-# commit for the report alone, so an operator can see that a script or a
-# config change rode along.
+# so a config change standing behind a held commit is not reported as waiting
+# on anything.  The carried list travels with the routed commit for the
+# report alone, so an operator can see that a script or a config change rode
+# along.
 sub route_commit {
 	my ($git, $env, $commit) = @_;
 
@@ -360,7 +358,7 @@ sub route_commit {
 # undeployed_set - what an environment holds or is about to hold {{{
 #
 # Every file in the environment's propagation set that changed on control
-# between its certified commit and the commit under consideration.  D43: an
+# between its certified commit and the commit under consideration.  An
 # ancestor that has never certified a commit holds everything below it, so
 # with no certified commit the undeployed set is the whole propagation set
 # rather than the empty set the baseline's fallback produces, which is H22.
@@ -399,11 +397,11 @@ sub undeployed_set {
 # }}}
 # overlap - the triggering files an ancestor has not deployed {{{
 #
-# D68 again: a hold exists to stop unproven content reaching a descendant,
-# and a non-triggering path is not content that needs proving, so it never
-# counts here.  Without this rule a shared .genesis/config change would hold
-# every descendant on the commit that touched it.  Both lists arrive
-# triggering already, the commit's from route_commit and the ancestor's from
+# A hold exists to stop unproven content reaching a descendant, and a
+# non-triggering path is not content that needs proving, so it never counts
+# here.  Without this rule a shared .genesis/config change would hold every
+# descendant on the commit that touched it.  Both lists arrive triggering
+# already, the commit's from route_commit and the ancestor's from
 # undeployed_set, so the rule is kept by what is handed in rather than by a
 # second filter of its own.
 sub overlap {
@@ -416,13 +414,13 @@ sub overlap {
 # }}}
 # certified_for - one environment's certified commit, or why there is none {{{
 #
-# D60 gives three ways to fail to read a certified commit and none of them is
+# There are three ways to fail to read a certified commit and none of them is
 # an outage, because an unreachable vault dies at connect_and_validate before
 # any walk.  A with_vault failure is a broken environment and the walk records
 # it as failed.  A readable record with no git.control_commit is an
 # environment the pipeline was never applied to, which is held rather than
 # deployed.  And an environment with no successful deployment at all has
-# certified nothing, which is the state D43 makes hold everything below it.
+# certified nothing, which is the state that holds everything below it.
 #
 # Nothing here ever falls back to control's tip, because that asserts a deploy
 # that did not happen and empties the set that holds the descendants, which is
@@ -455,13 +453,12 @@ sub certified_for {
 # }}}
 # hold_for - the reason one commit is held for one environment, or undef {{{
 #
-# D34: an overlap with any ancestor's undeployed set holds the commit.  D43
-# and D60: an ancestor that has certified nothing holds everything below it,
-# whether or not its own branch already holds the files, which is the closure
-# of H22.  D72: where an overlap is what holds it, the reason also carries the
-# ancestor's own state, so the operator is not left to infer it from another
-# row.  The ancestors are asked nearest first, so the reason names the one
-# closest to the environment.
+# An overlap with any ancestor's undeployed set holds the commit.  An ancestor
+# that has certified nothing holds everything below it, whether or not its own
+# branch already holds the files, which is the closure of H22.  Where an
+# overlap is what holds it, the reason also carries the ancestor's own state,
+# so the operator is not left to infer it from another row.  The ancestors are
+# asked nearest first, so the reason names the one closest to the environment.
 sub hold_for {
 	my (%args) = @_;
 
@@ -523,11 +520,11 @@ sub _automated {
 # }}}
 # gate_state - the gate the walk is standing behind, if any {{{
 #
-# D49: a Genesis-Stage trailer makes a commit a gate.  A gate constrains only
-# what follows it, so it travels with the commits already ahead of it and
-# ends the delivery.  Three things release it.  The environment's own
-# certified commit reaching or passing it releases it; a later commit that
-# reverts it, recognised from git's own body line or from an explicit
+# A Genesis-Stage trailer makes a commit a gate.  A gate constrains only what
+# follows it, so it travels with the commits already ahead of it and ends the
+# delivery.  Three things release it.  The environment's own certified commit
+# reaching or passing it releases it; a later commit that reverts it,
+# recognised from git's own body line or from an explicit
 # Genesis-Release-Stage trailer, releases it with no deploy at all.
 #
 # The trailer is read under the key Genesis::CI::Marker answers it by rather
@@ -550,8 +547,8 @@ sub gate_state {
 		&& $git->is_ancestor($commit, $certified);
 
 	# hold: <reason> is the gate that also sets a propagation hold once the
-	# gated commit is delivered, under D50.  The gate half behaves the same,
-	# so gate_reason carries the text whichever form it arrived in, and
+	# gated commit is delivered.  The gate half behaves the same, so
+	# gate_reason carries the text whichever form it arrived in, and
 	# hold_trailer_reason is present only for the hold form.  A caller
 	# telling the two apart reads a key rather than parsing the trailer
 	# again, and the strip happens here and nowhere else, because this is
@@ -593,8 +590,8 @@ sub gate_state {
 sub released_gates {
 	my ($git, @commits) = @_;
 
-	# Control is linear under D31 and the range comes oldest first, so a
-	# commit's place in the list is its place in control order.
+	# Control is linear and the range comes oldest first, so a commit's
+	# place in the list is its place in control order.
 	my %at;
 	$at{$commits[$_]{sha}} = $_ for 0 .. $#commits;
 
@@ -634,10 +631,10 @@ sub released_gates {
 
 # walk_env - one environment's walk, from its newest marker to control {{{
 #
-# D34: each commit is routed on its own, in control order, and the first
-# hold ends the walk for this environment because a mirror at any later
-# commit would carry the held one.  Everything after the hold is recorded
-# with behind-held-commit so that I8's per-commit axis names every routed
+# Each commit is routed on its own, in control order, and the first hold
+# ends the walk for this environment because a mirror at any later commit
+# would carry the held one.  Everything after the hold is recorded with
+# behind-held-commit so that I8's per-commit axis names every routed
 # commit rather than falling silent at the first hold.
 sub walk_env {
 	my (%args) = @_;
@@ -671,12 +668,12 @@ sub walk_env {
 			next;
 		}
 
-		# D49 and D56: the gate travels with the commits already ahead of it,
-		# so a commit at or before it is delivered and the delivery ends
-		# there.  Everything after it carries the gate's own reason rather
-		# than behind-held-commit, because the gate is the one thing an
-		# operator can clear and naming the commit in front of it instead
-		# would send them to the wrong place.
+		# The gate travels with the commits already ahead of it, so a commit
+		# at or before it is delivered and the delivery ends there.
+		# Everything after it carries the gate's own reason rather than
+		# behind-held-commit, because the gate is the one thing an operator
+		# can clear and naming the commit in front of it instead would send
+		# them to the wrong place.
 		if ($gate && !$git->is_ancestor($commit->{sha}, $gate->{gate})) {
 			push @{$record->{held}}, {
 				%$gate,
@@ -711,13 +708,13 @@ sub walk_env {
 			? (gate => $gate->{gate}, gate_reason => $gate->{gate_reason})
 			: ();
 
-		# D53: the gate's own commit is delivered, and where its trailer
-		# carries the hold form the reason rides out on the entry.  The
-		# question has already been asked about this commit once, above,
-		# with the released set in hand, so the writer downstream reads the
-		# answer rather than reading the trailer a second time.  A second
-		# reading without that set holds an environment over a gate the
-		# control branch itself has already taken back.
+		# The gate's own commit is delivered, and where its trailer carries
+		# the hold form the reason rides out on the entry.  The question
+		# has already been asked about this commit once, above, with the
+		# released set in hand, so the writer downstream reads the answer
+		# rather than reading the trailer a second time.  A second reading
+		# without that set holds an environment over a gate the control
+		# branch itself has already taken back.
 		push @{$record->{pending}}, {
 			%gated,
 			control_commit => $commit->{sha},
@@ -737,11 +734,11 @@ sub walk_env {
 # }}}
 # apply_hold - stop delivery for a held environment and say why {{{
 #
-# D50: while the hold stands the run delivers nothing new and opens or
-# updates no pull request, in either mode, but the walk still computes what
-# is due so that --dry-run can show it.  D56: the hold outranks idempotent,
-# because I8 exists so nothing is silently omitted and idempotent reads as
-# though the environment were fine.
+# While the hold stands the run delivers nothing new and opens or updates
+# no pull request, in either mode, but the walk still computes what is due
+# so that --dry-run can show it.  The hold outranks idempotent, because I8
+# exists so nothing is silently omitted and idempotent reads as though the
+# environment were fine.
 #
 # The pending entries move into the held list rather than being discarded,
 # which is what leaves the preview and the report something to list, and the
@@ -769,18 +766,18 @@ sub apply_hold {
 # }}}
 # walk_one - walk and deliver to one environment, ending at its own error {{{
 #
-# D96's second stage.  An error confined to one environment ends that
-# environment and nothing else: its branch goes back to T so that nothing of
-# a partial delivery survives in L, it records failed with the error it
-# raised, and the run walks on.  This is the closure of H3, where the
-# baseline's loop recorded the first error and stopped, leaving every
-# environment after it neither attempted nor reported.
+# An error confined to one environment ends that environment and nothing
+# else.  Its branch goes back to T so that nothing of a partial delivery
+# survives in L, it records failed with the error it raised, and the run
+# walks on.  This is the closure of H3, where the baseline's loop recorded
+# the first error and stopped, leaving every environment after it neither
+# attempted nor reported.
 #
-# One sub stands around both halves of an environment's turn, because D78
-# puts a blueprint that raises while the run enumerates one environment's
-# fragments in the same class as a delivery that died halfway, and D60 puts
-# a with_vault or a load_env failure there too.  An environment that ends
-# any of those three ways records the one outcome.
+# One sub stands around both halves of an environment's turn, because a
+# blueprint that raises while the run enumerates one environment's
+# fragments is in the same class as a delivery that died halfway, and a
+# with_vault or a load_env failure belongs there too.  An environment that
+# ends any of those three ways records the one outcome.
 #
 # The session is handed in only where something may have been written, and
 # what it is asked for is the per-branch discard rather than abort: abort
@@ -853,8 +850,8 @@ sub walk_one {
 # }}}
 # is_run_fatal - does this error end the run rather than the environment? {{{
 #
-# D82's two classes.  Run-fatal is the writer's own failure, where nothing a
-# caller could do differently would help.  Unsurvivable is an error no
+# There are two classes.  Run-fatal is the writer's own failure, where nothing
+# a caller could do differently would help.  Unsurvivable is an error no
 # environment can survive but a retry may fix, the remote unreachable being
 # the case.  Both end the run, and both are raised as Genesis::CI::RunFailure,
 # whose two constructors bless one package and tell the two apart through the
@@ -877,18 +874,18 @@ sub is_run_fatal {
 # }}}
 # abort_run - end the run, reset every committed branch, and say why {{{
 #
-# D82 and D96: both classes that end a run abort the same way, and they
-# differ only in the status they exit with.  Run-fatal is the writer's own
-# failure and exits 1, because no retry helps.  Unsurvivable is an error a
-# retry may fix, and exits Genesis::Exit::TEMPFAIL, which sysexits calls a
-# temporary failure with a failed connection as its example.  The status is
-# read off the failure rather than decided here, because Genesis::CI::RunFailure
-# already carries the one D82 gives each class.
+# Both classes that end a run abort the same way, and they differ only in the
+# status they exit with.  Run-fatal is the writer's own failure and exits 1,
+# because no retry helps.  Unsurvivable is an error a retry may fix, and exits
+# Genesis::Exit::TEMPFAIL, which sysexits calls a temporary failure with a
+# failed connection as its example.  The status is read off the failure rather
+# than decided here, because Genesis::CI::RunFailure already carries the one
+# each class gets.
 #
-# The outcome words come from that same class, for the reason D54 gives: an
-# environment the run had reached records that nothing of its was published
-# and one it never reached records that it was not attempted, and a phrase
-# living in two places is a phrase the two drift apart on.
+# The outcome words come from that same class, and an environment the run
+# had reached records that nothing of its was published while one it never
+# reached records that it was not attempted, because a phrase living in two
+# places is a phrase the two drift apart on.
 #
 # The abort is the last thing that happens, because it is what resets every
 # branch this session committed to back to T and it ends the process on the
@@ -944,8 +941,8 @@ sub abort_run {
 # }}}
 # scope_for - the environments this run walks, with their branches {{{
 #
-# D66: the branch is per deployment, not per environment, so every name here
-# is composed through branch_for and two roots sharing an environment name
+# The branch is per deployment, not per environment, so every name here is
+# composed through branch_for and two roots sharing an environment name
 # never contend on one branch.  Genesis::Top already roots at the deployment
 # root the command stands in, so a run walks one root's environments and the
 # marker walk needs no pathspec, which closes H32 by construction.
@@ -954,14 +951,13 @@ sub abort_run {
 # it reads, because one fact answered through two readers is how the two come
 # to disagree.
 #
-# D66 and D71: the pull request branch is the prefix joined onto the same
-# deployment slug, so the two names cannot disagree about which deployment a
-# branch belongs to.  It is composed here now that the arm that delivers onto
-# it exists, and only for an environment whose policy asks for one, because
-# composing it rebuilds the unmemoized topology once per environment.  The
-# collision pr_branch_for refuses is asked for in the pre-flight, ahead of the
-# session, so its CONFIG exit survives rather than dying as a string inside
-# the run's own eval.
+# The pull request branch is the prefix joined onto the same deployment slug,
+# so the two names cannot disagree about which deployment a branch belongs to.
+# It is composed here now that the arm that delivers onto it exists, and only
+# for an environment whose policy asks for one, because composing it rebuilds
+# the unmemoized topology once per environment.  The collision pr_branch_for
+# refuses is asked for in the pre-flight, ahead of the session, so its CONFIG
+# exit survives rather than dying as a string inside the run's own eval.
 sub scope_for {
 	my ($top, %opts) = @_;
 
@@ -1009,8 +1005,8 @@ sub scope_for {
 # It writes nothing at all, which is what lets genesis pipeline-status and
 # genesis propagate --dry-run render one record and never disagree.
 #
-# The record is held in memory and never persisted (D91).  Fields a later
-# stage owns are present and null here, because a renderer that has to ask
+# The record is held in memory and never persisted.  Fields a later stage
+# owns are present and null here, because a renderer that has to ask
 # whether a key exists renders two shapes.
 sub plan {
 	my ($top, %opts) = @_;
@@ -1173,11 +1169,11 @@ sub plan {
 		};
 		push @{$record->{environments}}, $env_record;
 
-		# D96's second stage stands around the walk as it stands around the
-		# delivery, because a blueprint that raises while this environment's
-		# fragments are enumerated is D78's error and ends this environment
-		# alone.  No session is handed over, since the walk writes nothing
-		# and there is no branch to put back.
+		# The same confinement stands around the walk as it stands around
+		# the delivery, because a blueprint that raises while this
+		# environment's fragments are enumerated is an error of that class
+		# and ends this environment alone.  No session is handed over, since
+		# the walk writes nothing and there is no branch to put back.
 		walk_one(record => $env_record, deliver => sub {
 
 			my $env = $env_for->($name);
@@ -1187,12 +1183,12 @@ sub plan {
 				return;
 			}
 
-			# D77's mark, which says where the apply could not render a
-			# manifest for this environment.  It belongs to an environment
-			# the applied pipeline knows, and an environment it does not
-			# know has no pipeline subpath at all and carries null rather
-			# than a mark, because the reading is about discovery and not
-			# about membership.
+			# The apply's mark, which says where the apply could not
+			# render a manifest for this environment.  It belongs to an
+			# environment the applied pipeline knows, and an environment
+			# it does not know has no pipeline subpath at all and carries
+			# null rather than a mark, because the reading is about
+			# discovery and not about membership.
 			#
 			# It is read here, off the environment already in hand, for the
 			# reason the marker below is: a reader that asked later would
@@ -1243,8 +1239,8 @@ sub plan {
 			# decides turns on it; it is what a reader of the record is told
 			# about the proposal the environment has open, and it is the
 			# second of the two facts client_for_run reads when it is asked
-			# whether the run needs the API at all (D57).  Asking for it
-			# anywhere else would mean loading every environment again.
+			# whether the run needs the API at all.  Asking for it anywhere
+			# else would mean loading every environment again.
 			#
 			# It costs one vault read per environment in the walk, because the
 			# record lives at its own path and nothing above has already
@@ -1271,11 +1267,11 @@ sub plan {
 			} : undef;
 			$env_record->{deployed} = $deployed;
 
-			# D43: an environment the pre-flight has no branch record for has
-			# no deployment branch on either side, so genesis pipeline-apply
-			# has not cut one for it and what it waits for is that command.
-			# There is nothing here to route a commit onto and no ref to
-			# read a marker off, so the walk ends this environment's turn.
+			# An environment the pre-flight has no branch record for has no
+			# deployment branch on either side, so genesis pipeline-apply has
+			# not cut one for it and what it waits for is that command.
+			# There is nothing here to route a commit onto and no ref to read
+			# a marker off, so the walk ends this environment's turn.
 			#
 			# The state is a word of its own rather than never-applied.  That
 			# one is a reading of the environment's vault record, and this
@@ -1286,18 +1282,18 @@ sub plan {
 			#
 			# It stands below the durable read rather than at the top of the
 			# turn, so that a standing hold is on the record before the turn
-			# closes.  D56 ranks a hold ahead of the apply, and an
-			# environment can be in both states at once, so a branchless
-			# environment with a hold standing against it has to read as
-			# needing that hold cleared.
+			# closes.  A hold ranks ahead of the apply, and an environment
+			# can be in both states at once, so a branchless environment
+			# with a hold standing against it has to read as needing that
+			# hold cleared.
 			unless ($settled) {
 				$env_record->{certified} = {state => 'no-branch'};
 				apply_hold($env_record, $hold);
 				return;
 			}
 
-			# D60: an environment whose record carries no certified commit
-			# is one the pipeline was never applied to, and nothing may be
+			# An environment whose record carries no certified commit is one
+			# the pipeline was never applied to, and nothing may be
 			# delivered to it until genesis pipeline-apply has run.  It is
 			# held rather than walked, so nothing stands pending for it, and
 			# it holds everything below it through the same reading its
@@ -1307,8 +1303,8 @@ sub plan {
 			# for the answer.
 			#
 			# The hold is applied before the return, because a hold is
-			# durable state like any other and D56 asks that an environment
-			# with one standing never read as though it were fine.  Nothing
+			# durable state like any other and an environment with one
+			# standing must never read as though it were fine.  Nothing
 			# stands pending here, so the hold takes nothing; it says that
 			# anything becoming due later stays blocked.
 			if ($certified->{state} eq 'never-applied') {
@@ -1316,11 +1312,11 @@ sub plan {
 				return;
 			}
 
-			# Under D2 the base is the local ref, which the pre-flight has
-			# just settled, and under a dry run it is the ref a real run
-			# would have moved that branch to.  What the walk starts from is
-			# the marker that ref carries, or, where it carries none, the
-			# commit before the one that introduced the environment (D61).
+			# The base is the local ref, which the pre-flight has just
+			# settled, and under a dry run it is the ref a real run would
+			# have moved that branch to.  What the walk starts from is the
+			# marker that ref carries, or, where it carries none, the commit
+			# before the one that introduced the environment.
 			#
 			# The marker is taken back out of the answer rather than read a
 			# second time, because an unseeded branch's base is a commit on
@@ -1338,13 +1334,13 @@ sub plan {
 			);
 			my $marker = $seeding eq 'seeded' ? $base : undef;
 
-			# D52's recovery, which only an environment in pull request mode
-			# can want, because a deployment branch takes a commit it did not
-			# write by merge alone and a merge is the one thing that can drop
-			# the marker on its way in.  The base moves with the marker, because
-			# a run that reported the recovery and then walked from before
-			# the environment existed would propose the whole of control
-			# again with the marker in its hand.
+			# This is the squash recovery, which only an environment in pull
+			# request mode can want, because a deployment branch takes a commit
+			# it did not write by merge alone and a merge is the one thing that
+			# can drop the marker on its way in.  The base moves with the
+			# marker, because a run that reported the recovery and then walked
+			# from before the environment existed would propose the whole of
+			# control again with the marker in its hand.
 			if (!$marker && $env_record->{pr}) {
 				$marker = Genesis::CI::PullRequest::certified_marker(
 					$git, $opts{github}, $env_record,
@@ -1354,9 +1350,8 @@ sub plan {
 
 			$env_record->{merged}  = $marker;
 			# A repository with no applied record keeps the not-propagated
-			# reading D94 gives it, whatever this branch happens to carry,
-			# because nothing has been applied for a marker to be read
-			# against.
+			# reading, whatever this branch happens to carry, because
+			# nothing has been applied for a marker to be read against.
 			$env_record->{reading} = _reading($marker, $deployed) if $applied;
 
 			# The one place walk_env's positional question meets the hold
@@ -1372,7 +1367,7 @@ sub plan {
 			# is a cost this line carries rather than a use.
 			my $ancestors = $ancestors_of->($name);
 
-			# D49: the gate this environment has not passed, read over the
+			# The gate this environment has not passed is read over the
 			# range from its own certified commit to control's tip rather
 			# than over the walk's own range.  A branch already delivered up
 			# to a gate is walked from the gate itself, so a gate read over
@@ -1381,14 +1376,14 @@ sub plan {
 			# waits for the deploy that certifies it.
 			#
 			# An environment that has certified nothing has no such commit
-			# to read from, and its marker will not do in place of one: the
-			# first run delivers up to the gate and leaves the marker
+			# to read from, and its marker will not do in place of one.
+			# The first run delivers up to the gate and leaves the marker
 			# standing on it, so the second run's range would start at the
-			# gate and find no gate at all, and the commit D49 holds would
-			# go out with nobody having deployed anything between.  Its
-			# range starts where its own walk starts on an unseeded branch,
-			# at the commit before the one that introduced it, so the gate
-			# stands until a certification exists.
+			# gate and find no gate at all, and the commit the gate holds
+			# would go out with nobody having deployed anything between.
+			# Its range starts where its own walk starts on an unseeded
+			# branch, at the commit before the one that introduced it, so
+			# the gate stands until a certification exists.
 			my $since = $deployed
 				&& $git->is_ancestor($deployed->{control_commit}, $control_sha)
 				? $deployed->{control_commit}
@@ -1431,12 +1426,12 @@ sub plan {
 				},
 			);
 
-			# D50: the hold is a fact about the walk and not about the
-			# branch, so it is applied once the walk has computed what is
-			# due, which is what leaves the preview and the report something
-			# to show.  A vault that refuses the read ends this environment
-			# rather than answering no hold, because delivering on a hold
-			# nobody could read is the one mistake the record exists to stop.
+			# The hold is a fact about the walk and not about the branch, so
+			# it is applied once the walk has computed what is due, which is
+			# what leaves the preview and the report something to show.  A
+			# vault that refuses the read ends this environment rather than
+			# answering no hold, because delivering on a hold nobody could
+			# read is the one mistake the record exists to stop.
 			apply_hold($env_record, $hold);
 			return;
 		});
@@ -1452,10 +1447,10 @@ sub plan {
 # deliver_pending - hand each pending commit to the single writer {{{
 #
 # One control commit becomes one commit on the deployment branch, carrying
-# the marker D34 fixes and mirroring the set at that commit, and the writer
-# asserts the snapshot invariant on the index before each commit under D82.
-# The assertion therefore runs after every delivery and not once at the end,
-# which is the routing half of I7.
+# the marker and mirroring the set at that commit, and the writer asserts
+# the snapshot invariant on the index before each commit.  The assertion
+# therefore runs after every delivery and not once at the end, which is the
+# routing half of I7.
 sub deliver_pending {
 	my (%args) = @_;
 
@@ -1511,7 +1506,7 @@ sub deliver_pending {
 # }}}
 ### Internals {{{
 
-# _reading - which of D94's four words describes this branch {{{
+# _reading - which of the four words describes this branch {{{
 #
 # A branch with no marker has been cut and never delivered to, which is
 # unseeded.  A branch whose marker names the control commit the environment
