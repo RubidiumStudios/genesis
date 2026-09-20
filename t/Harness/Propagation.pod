@@ -1262,8 +1262,8 @@ refusal is not written against the other's words.
 Disarms the two remote steps C<sever_remote> armed, which are
 C<fetch_branches> and C<push>, and returns the harness.  It reads the plan out
 of the environment and answers without doing anything where no plan was ever
-armed.  A row reaches for it where the remote
-has to come back partway through, so that a later phase can reach it again.
+armed.  A row reaches for it where the remote has to come back partway
+through, so that a later phase can reach it again.
 
 =head2 hold_session_lock($h, %opts)
 
