@@ -329,6 +329,24 @@ subtest 'lookup_az - resolves the short form of a rendered name by AZ index' => 
 		'lookup_az() still bails for a short form with no matching index';
 };
 
+subtest 'lookup_az - a CPI-less hook is not answered by an earlier CPI hook' => sub {
+	plan tests => 2;
+
+	# A hook with a CPI, whose AZ carries a CPI-specific name
+	my $cpi_env  = make_deploy_env(cpi_enabled => 1, cpi_name => 'test-cpi');
+	my $cpi_hook = Genesis::Hook::CloudConfig::Bosh->init(env => $cpi_env);
+	$cpi_hook->network->{azs}{az1}{for_cpi}{'test-cpi'} = 'test-env-cpi-z1';
+	is($cpi_hook->lookup_az('az1'), 'test-env-cpi-z1',
+		'a CPI hook resolves the AZ to its CPI-specific name');
+
+	# A second hook without a CPI, asking for the same AZ afterwards in the
+	# same process, must get the rendered name rather than the value the
+	# previous call left behind
+	my $plain_hook = Genesis::Hook::CloudConfig::Bosh->init(env => make_deploy_env());
+	is($plain_hook->lookup_az('az1'), 'test-env-mgmt-z1',
+		'a CPI-less hook resolves the same AZ to its rendered name');
+};
+
 subtest 'az_cloud_properties - decodes the AZ cloud properties for any AZ identifier' => sub {
 	plan tests => 5;
 

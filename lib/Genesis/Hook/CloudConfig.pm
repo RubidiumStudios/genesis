@@ -666,10 +666,9 @@ sub get_network_security_groups {
 # lookup_az - resolve an availability zone definition by name {{{
 sub lookup_az {
 	my ($self, $az) = @_;
-	my $base_az = $self->_find_az_key($az);
-	my $azs = $self->network->{azs};
-	my $az_name = $azs->{$base_az}{for_cpi}{$self->cpi_name} if $self->cpi_enabled;
-	return $az_name//$azs->{$base_az}{name}; # Director cpi is default
+	my $az_data = $self->network->{azs}{$self->_find_az_key($az)};
+	my $cpi_az  = $self->cpi_enabled ? $az_data->{for_cpi}{$self->cpi_name} : undef;
+	return $cpi_az // $az_data->{name}; # Director cpi is default
 }
 
 # }}}
@@ -953,16 +952,14 @@ sub _add_extended_cloud_config {
 	my ($self, $config) = @_;
 	my $extended_config = $self->env->lookup($self->overrides_base, {});
 	my @groups = grep {$_ !~ m/(^matching_|_defaults$)/} keys %$extended_config;
+	my %type_mapping = (
+		vm_type => {prefix => 'vm' },
+		vm_extension => {prefix => 'vmx', explicit_name => 1 }, # FIXME: See comment in vm_extension_definition
+		disk_type => {prefix => 'disk' },
+		network => {prefix => 'net' }
+	);
+	my %singular = map {(_plural_of($_), $_)} keys %type_mapping;
 	for my $group_label (@groups) {
-		# Map singular type names to their plural config keys and prefixes
-		my %type_mapping = (
-			vm_type => {prefix => 'vm' },
-			vm_extension => {prefix => 'vmx', explicit_name => 1 }, # FIXME: See comment in vm_extension_definition
-			disk_type => {prefix => 'disk' },
-			network => {prefix => 'net' }
-		);
-		my %singular = map {(_plural_of($_), $_)} keys %type_mapping;
-
 		bail(
 			"Invalid cloud config definition '#R{%s}' in #C{%s} environment file",
 			$group_label, $self->env->name
@@ -989,15 +986,12 @@ sub _add_extended_cloud_config {
 
 			# If we haven't processed it, check if we can base it on an existing target
 			if (my $src_target = delete($defn->{'<based-on>'})) {
-				# Check for environment-prefixed and explicit names for the source target
-				my @candidates = ();
-				if ($type_mapping{$type}{explicit_name}) {
-					push(@candidates, $src_target, $self->name_for($prefix, $src_target));
-				} else {
-					push(@candidates, $self->name_for($prefix, $src_target), $src_target);
-				}
-				my (undef, $found) = compare_arrays(\@candidates, [map {$_->{name}} @{$config->{$group_label} // []}]);
-				my $src_name = $found->[0];
+				# The source may be registered under its bare or its prefixed name
+				my @candidates = $type_mapping{$type}{explicit_name}
+					? ($src_target, $self->name_for($prefix, $src_target))
+					: ($self->name_for($prefix, $src_target), $src_target);
+				my @registered = map {$_->{name}} @{$config->{$group_label} // []};
+				my ($src_name) = grep {in_array($_, @registered)} @candidates;
 
 				if (!$src_name) {
 					# FIXME: Check for both explicit and env-prefixed names for the source target?
@@ -1273,12 +1267,9 @@ sub _evaluate_matching_rule {
 	my ($self, $target, $rule, $config) = @_;
 
 	# $config is already flat; OR between condition sets, AND within one
-	my $conditions = $rule->{conditions};
-	my $criteria_met = 0;
-	foreach my $condition_set (@$conditions) {
+	SET: foreach my $condition_set (@{$rule->{conditions}}) {
 		next unless ref($condition_set) eq 'HASH';
 
-		my $failed_match = 0;
 		foreach my $field (keys %$condition_set) {
 			my $patterns = $condition_set->{$field};
 			bail(
@@ -1311,18 +1302,11 @@ sub _evaluate_matching_rule {
 					last;
 				}
 			}
-			$failed_match = 1 unless $field_matches;
-			last if $failed_match;
+			next SET unless $field_matches;
 		}
-
-		if (!$failed_match) {
-			$criteria_met = 1;
-			last;
-		}
+		return $rule->{properties} // {}; # every field in this set matched
 	}
-
-	return {} unless $criteria_met;
-	return $rule->{properties} // {};
+	return {};
 }
 
 # }}}
@@ -1368,8 +1352,7 @@ sub _get_subnet_ranges {
 		sort grep {$_ =~ /^available/ } keys %{$subnet->{'reserved-ips'}}
 	};
 
-	my $explicit_availabiliy = scalar(@available_ip_pairs) > 0;
-	my $explicit_reserved    = scalar(@reserved_ip_pairs) > 0;
+	my $explicit_availability = scalar(@available_ip_pairs) > 0;
 
 	# Defaults when the subnet declares nothing: the whole range is available,
 	# and the first five addresses and the last one are reserved
@@ -1389,7 +1372,7 @@ sub _get_subnet_ranges {
 		while @available_ip_pairs;
 
 	# Explicit availability reserves everything else
-	if ($explicit_availabiliy) {
+	if ($explicit_availability) {
 		$reserved_range += ($range - $available_range);
 	}
 
@@ -1718,8 +1701,7 @@ sub _standardized_subnet_cidr {
 		"Subnet %s for network %s is not a single CIDR block, but has multiple CIDRs: %s",
 		$name, $target, join(', ', map {"$_"} @cidrs)
 	) if @cidrs > 1;
-	my $standardized_range_cidr = $cidrs[0];
-	return $standardized_range_cidr;
+	return $cidrs[0];
 }
 
 # }}}
