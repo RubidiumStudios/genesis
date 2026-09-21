@@ -478,7 +478,6 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			: "no allocation given";
 	}
 	my $statics = $allocation->{statics} // 0; # Excludes the reserved-ips keyed by target name
-	$statics = 2**(32 - $1) if $statics =~ m#^/(\d+)$#;
 
 	# Get existing allocations from exodus data
 	my $existing_allocations = $self->get_allocated_networks;
@@ -519,22 +518,8 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		);
 		$reserved += $full_range->subtract($allocated_range);
 
-		# TODO: We currently just shove statics into the front of the range, but
-		# this doesn't account for ips already in use.  We can either actively
-		# check for ips in the network range against the bosh deployments, or we
-		# allow users to override the statics with a list of offsets to use
-		# rather than just a count or mask.(ie 0-3,9) maybe even negative for
-		# adding to the end? (-1--3)
-		bail(
-			'More static IPs requested (%d) than the allocation for the %s subnet for '.
-			'network %s allows (%d)',
-			$statics, $subnet_name, $target, $vm_count
-		) if ($statics > $vm_count);
-
 		my $static_range = $self->_calculate_static_allocation(
-			$target,
-			$allocated_range,
-			$statics
+			$target, $subnet_name, $allocated_range, $statics, $vm_count
 		);
 
 		# Check for reserved_ips and "unreserve" them from the reserved range
@@ -1439,19 +1424,25 @@ sub _calculate_subnet_allocation {
 }
 
 # }}}
-# _calculate_static_allocation - Calculates the static IP range for a given subnet and network {{{
+# _calculate_static_allocation - Takes the static IPs from the front of a subnet's allocation {{{
 sub _calculate_static_allocation {
-	my ($self, $target, $allocated, $count) = @_;
-	if ($count =~ m#^(\d+)%#) {
-		$count = round($allocated->size() * ($1 / 100));
-	}
+	my ($self, $target, $subnet_name, $allocated, $statics, $vm_count) = @_;
+	my $count = $statics =~ m#^/(\d+)$#  ? 2**(32 - $1)
+	          : $statics =~ m#^(\d+)%$#  ? round($vm_count * $1 / 100)
+	          :                            $statics;
 
-	# TODO: Support offsets for static IPs instead of just a counts
-	my $static_range = IPv4->new();
-	if ($count > 0) {
-		($static_range) = $allocated->slice($count);
-	}
-	return $static_range;
+	# TODO: We currently just shove statics into the front of the range, but
+	# this doesn't account for ips already in use.  We can either actively
+	# check for ips in the network range against the bosh deployments, or we
+	# allow users to override the statics with a list of offsets to use
+	# rather than just a count or mask.(ie 0-3,9) maybe even negative for
+	# adding to the end? (-1--3)
+	bail(
+		'More static IPs requested (%d) than the allocation for the %s subnet for '.
+		'network %s allows (%d)',
+		$count, $subnet_name, $target, $vm_count
+	) if $count > $vm_count;
+	return $allocated->slice($count);
 }
 
 # }}}

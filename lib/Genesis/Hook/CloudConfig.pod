@@ -1590,7 +1590,9 @@ A fixed count per subnet (or a CIDR mask like C<'/26'>).
 
 =item C<statics>
 
-B<(optional)> Number of static IPs per subnet (or a CIDR mask). Defaults to 0.
+B<(optional)> Static IPs per subnet, taken from the front of the subnet's
+allocation: a count, a CIDR mask (C<'/30'>), or a percentage of the
+subnet's allocation (C<'25%'>). Defaults to 0.
 
 =item C<cloud_properties_for_iaas>
 
@@ -2204,11 +2206,17 @@ B<Examples:>
 
 =head2 _calculate_static_allocation
 
-    my $range = $self->_calculate_static_allocation($target, $allocated, $count);
+    my $range = $self->_calculate_static_allocation(
+        $target, $subnet_name, $allocated, $statics, $vm_count
+    );
 
-Calculates the static IP range by slicing the first C<$count> IPs from the
-allocated range. If C<$count> is a percentage string (e.g., C<'25%'>), the
-count is computed as that fraction of the allocated size.
+Takes the static IPs for one subnet from the front of that subnet's
+allocation. C<$statics> is the kit's request in any of its three spellings,
+resolved here to a count: an integer, a CIDR mask such as C<'/30'>, or a
+percentage such as C<'25%'> of C<$vm_count>. The resolved count is checked
+against C<$vm_count> before anything is sliced, so a percentage is never
+compared as its literal digits. Every network model that lets a kit ask for
+statics resolves them through this one method.
 
 B<Parameters:>
 
@@ -2216,25 +2224,48 @@ B<Parameters:>
 
 =item C<$target>
 
-Network target name.
+Network target name, for the error message.
+
+=item C<$subnet_name>
+
+Subnet name, for the error message.
 
 =item C<$allocated>
 
-An C<IPv4> range object of the total allocated range.
+An C<IPv4> range object holding the subnet's allocation for this network.
 
-=item C<$count>
+=item C<$statics>
 
-An integer count, a CIDR mask string (e.g., C<'/26'>), or a percentage
-string (e.g., C<'25%'>).
+An integer count, a CIDR mask string, or a percentage string.
+
+=item C<$vm_count>
+
+The size of the subnet's allocation, the base for a percentage and the
+ceiling for the check.
 
 =back
 
-B<Returns:> A simplified C<IPv4> range object of static IPs.
+B<Returns:> An C<IPv4> range of the first C<$count> addresses of
+C<$allocated>; an empty range when the count is zero.
+
+B<Errors:>
+
+=over 4
+
+=item C<"More static IPs requested (%d) than the allocation for the %s subnet for network %s allows (%d)">
+
+Thrown when the resolved count exceeds C<$vm_count>. The placeholders are
+the count, the subnet name, the target, and C<$vm_count>.
+
+=back
 
 B<Examples:>
 
-    my $statics = $self->_calculate_static_allocation('deployment', $allocated, 8);
-    # Returns: IPv4 range object of the first 8 IPs in the allocated range
+    my $statics = $self->_calculate_static_allocation('deployment', 'ocfp-1', $allocated, 8, 64);
+    # Returns: IPv4 range of the first 8 addresses in $allocated
+
+    my $statics = $self->_calculate_static_allocation('deployment', 'ocfp-1', $allocated, '25%', 64);
+    # Returns: IPv4 range of the first 16 addresses in $allocated
 
 =head2 _get_reserved_allocation
 

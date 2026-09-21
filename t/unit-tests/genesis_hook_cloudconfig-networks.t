@@ -1707,6 +1707,34 @@ subtest '_add_extended_cloud_config - an override keyed by a bare target names t
 		'an override naming no registered entry is still refused as a new network';
 };
 
+subtest 'network_definition - statics take the front of the allocation' => sub {
+	plan tests => 3;
+
+	# ocfp-1 has the director's compilation claim on .37-.40, so an allocation
+	# of four lands on .41-.44.  The target has no reserved-ips records, so
+	# nothing joins the static list from that side.
+	my $subnet_for = sub {
+		my ($statics) = @_;
+		my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => make_deploy_env());
+		my $net = $hook->network_definition('app',
+			strategy => 'ocfp',
+			dynamic_subnets => {
+				subnets    => ['ocfp-1'],
+				allocation => {size => 4, statics => $statics},
+				cloud_properties_for_iaas => {openstack => {'net_id' => 'x'}},
+			},
+		);
+		return $net->{subnets}[0];
+	};
+
+	is_deeply($subnet_for->(2)->{static}, ['10.0.1.41-10.0.1.42'],
+		'a count of statics is the first addresses of the allocation');
+	is_deeply($subnet_for->('50%')->{static}, ['10.0.1.41-10.0.1.42'],
+		'a percentage of statics is that fraction of the allocation');
+	ok(!exists $subnet_for->(0)->{static},
+		'no statics leaves the static key off the subnet');
+};
+
 
 done_testing;
 
