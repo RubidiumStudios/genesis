@@ -21,31 +21,6 @@ use_ok 'Service::Git::Session';
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-subtest 'the baseline swallowed a failed restore' => sub {
-	plan tests => 4;
-
-	# H2's shape, read where it lived.  Once restore_branch is gone there is
-	# nothing left to run, so the evidence is the code itself, which is
-	# passfail set and the result dropped on the floor.
-	#
-	# The read is asked of the repository by name and both halves of its
-	# answer are weighed, because a tree that does not hold the baseline
-	# commit hands back nothing at all, and nothing satisfies the first row
-	# below and fails the second for a reason that has no bearing on what
-	# the baseline actually did.
-	my ($baseline, $rc) = run({dir => $helper::TOPDIR, stderr => 0},
-		'git', 'show', '048a9933:lib/Service/Git.pm');
-	is($rc, 0, 'the baseline commit is in this repository to read');
-	ok(defined $baseline && length $baseline,
-		'and the file it names came back with it');
-
-	my ($sub) = ($baseline // '') =~ /sub restore_branch \{(.*?)\n\}/s;
-	like($sub, qr/passfail\s*=>\s*1/,
-		'the baseline restore ran its checkout with passfail set');
-	unlike($sub, qr/bail|die|onfailure/,
-		'and raised nothing when it failed, which is H2');
-};
-
 subtest 'a failed restore reaches the stuck state and dies naming both' => sub {
 	plan tests => 5;
 

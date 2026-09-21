@@ -155,13 +155,12 @@ sub provider_class {
 # }}}
 # compiler_class - the compiling class for a type, loaded {{{
 #
-# The refusal below is the one b98d60f1 deliberately kept in
-# Genesis::CI, and it outlives the file it was written in.  Emitting a
-# pipeline and validating a block are different questions, and a
-# provider may legitimately answer the second while having nothing to
-# answer the first with.  It exits CONFIG because a repository whose
-# configured provider Genesis cannot compile for is a repository the
-# operator can put right.
+# The refusal below outlives the Genesis::CI module it was first written
+# in.  Emitting a pipeline and validating a block are different
+# questions, and a provider may legitimately answer the second while
+# having nothing to answer the first with.  It exits CONFIG because a
+# repository whose configured provider Genesis cannot compile for is a
+# repository the operator can put right.
 sub compiler_class {
 	my ($class, $type) = @_;
 

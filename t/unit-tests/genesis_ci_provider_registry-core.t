@@ -110,10 +110,10 @@ subtest 'the registry is consulted by both families and owned by neither' => sub
 subtest 'the registry carries the refusal Genesis::CI kept' => sub {
 	plan tests => 3;
 
-	# b98d60f1 kept this refusal deliberately, because emitting a
-	# pipeline and validating a block are different questions and a
-	# provider may answer the second while having nothing to answer the
-	# first with.  It outlives the file it was written in.
+	# The refusal is deliberate, because emitting a pipeline and
+	# validating a block are different questions and a provider may
+	# answer the second while having nothing to answer the first with.
+	# It outlives the Genesis::CI module it was first written in.
 	throws_ok {Genesis::CI::ProviderRegistry->compiler_class('github-actions')}
 		qr/knows\s+the\s+'github-actions'\s+provider\s+but\s+has\s+no\s+compiler/s,
 		'a known type with no compiler class is told it has no compiler';

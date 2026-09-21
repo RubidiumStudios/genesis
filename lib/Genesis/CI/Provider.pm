@@ -315,10 +315,9 @@ sub type {
 # read the answer rather than trapping a bug().
 #
 # A caller that needs a compiler rather than merely asking whether there
-# is one passes required, and the registry refuses with the message
-# b98d60f1 kept: emitting a pipeline and validating a block are
-# different questions, and a provider may answer the second while having
-# nothing to answer the first with.
+# is one passes required, and the registry refuses, because emitting a
+# pipeline and validating a block are different questions, and a provider
+# may answer the second while having nothing to answer the first with.
 sub compiler {
 	my ($self, %opts) = @_;
 

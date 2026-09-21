@@ -190,7 +190,8 @@ subtest 'a switch that removes the current directory lands at the root' => sub {
 	my $git = $h->git('a');
 
 	# The deployment root exists on control and not on the environment
-	# branch, which is the shape the fix 920294c5 was written for.
+	# branch, which is the shape that removes the directory the session
+	# stands in when it switches.
 	mkdir_or_fail($h->a . '/doomsday');
 	put_file($h->a . '/doomsday/env.yml', "---\nkit: {}\n");
 	commit_on_control($h,
