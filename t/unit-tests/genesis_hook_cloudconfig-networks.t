@@ -1735,6 +1735,31 @@ subtest 'network_definition - statics take the front of the allocation' => sub {
 		'no statics leaves the static key off the subnet');
 };
 
+subtest '_calculate_subnet_allocation - growing and shrinking a claim' => sub {
+	plan tests => 6;
+
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => make_deploy_env());
+	my $pool = IPv4->new('10.0.0.10-10.0.0.100');
+	my $calc = sub {
+		my ($existing, $count) = @_;
+		return $hook->_calculate_subnet_allocation('net', $pool, IPv4->new($existing), $count)->range;
+	};
+
+	is($calc->('10.0.0.10-10.0.0.17', 4), '10.0.0.10-10.0.0.13',
+		'shrinking a claim at the front of the pool keeps its lowest addresses');
+	is($calc->('10.0.0.40-10.0.0.47', 4), '10.0.0.40-10.0.0.43',
+		'shrinking a claim that sits after a gap keeps its own lowest addresses, not the pool\'s');
+	is($calc->('10.0.0.40-10.0.0.47', 0), '',
+		'shrinking a claim to nothing yields an empty range');
+	is($calc->('10.0.0.40-10.0.0.43', 8), '10.0.0.10-10.0.0.13,10.0.0.40-10.0.0.43',
+		'growing a claim keeps it and appends from the pool');
+	is($calc->('10.0.0.40-10.0.0.47', 8), '10.0.0.40-10.0.0.47',
+		'a claim already at the requested size is returned unchanged');
+	throws_ok { $calc->('10.0.0.40-10.0.0.47', -1) }
+		qr/allocation for network 'net' must not be negative/,
+		'a negative allocation is refused rather than releasing the claim';
+};
+
 
 done_testing;
 

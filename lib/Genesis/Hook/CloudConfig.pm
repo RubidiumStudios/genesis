@@ -1410,29 +1410,22 @@ sub _calculate_subnet_allocation {
 	# but for MVP, we will assume that the existing allocations are within
 	# the available range.
 
-	if ($needed < 0) {
-		# We remove from the highest end of the existing allocation.
-		my $new_span = IPv4->range($existing)->slice(0,$existing->size+$needed);
-		# See if we removed enough to handle the negative need.
-		$needed = $existing->size - $new_span->size + $needed;
-		bug(
-			"Negative IP allocation for network '%s' allocation - not enough allocated IPs to remove",
-			$target
-		) if $needed < 0;
-		$existing = $new_span->simplify;
-	}
-
-	if ($needed > 0) {
-		bail(
-			'Not enough available IPs in the subnet for the network \'%s\' allocation: '.
-			' (has %d, needs %d)',
-			$target, $available, $needed
-		) if ($available < $needed);
-		my $additional = $available->slice($needed);
-		return IPv4->new($existing)->add($additional)->simplify;
-	}
+	bail(
+		"The allocation for network '%s' must not be negative (got %d)",
+		$target, $count
+	) if $count < 0;
 	return $existing if $needed == 0;
-	return $existing->slice($count)->simplify;
+
+	# Shrink: keep the lowest addresses of the claim, releasing from the top
+	return $existing->slice($count)->simplify if $needed < 0;
+
+	# Grow: keep the claim and take the shortfall from the pool
+	bail(
+		'Not enough available IPs in the subnet for the network \'%s\' allocation: '.
+		' (has %d, needs %d)',
+		$target, $available, $needed
+	) if ($available < $needed);
+	return IPv4->new($existing)->add($available->slice($needed))->simplify;
 }
 
 # }}}

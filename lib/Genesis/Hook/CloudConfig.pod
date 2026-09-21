@@ -2236,10 +2236,10 @@ B<Errors:>
 
 =over 4
 
-=item C<"Negative IP allocation for network '%s' allocation - not enough allocated IPs to remove">
+=item C<"The allocation for network '%s' must not be negative (got %d)">
 
-Thrown when shrinking yields an impossible negative allocation. C<%s> is the
-target name.
+Thrown when C<$count> is below zero. Without this check a negative count
+would read as a shrink and release the whole claim.
 
 =item C<"Not enough available IPs in the subnet for the network '%s' allocation:  (has %d, needs %d)">
 
