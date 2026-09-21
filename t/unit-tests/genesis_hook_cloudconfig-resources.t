@@ -612,6 +612,38 @@ subtest 'override processing' => sub {
 	};
 };
 
+# ===========================================================================
+# 5. _evaluate_matching_rule pattern forms
+# ===========================================================================
+subtest '_evaluate_matching_rule - every pattern form' => sub {
+	plan tests => 9;
+
+	my $hook = make_hook();
+	my $config = {name => 'x.vm-large', 'cloud_properties.instance_type' => 'm1.small'};
+	my $props  = {size => 1};
+	my $rule   = sub { {conditions => [@_], properties => $props} };
+
+	is_deeply($hook->_evaluate_matching_rule('large', $rule->({name => '!~/\.vm-large$/'}), $config), {},
+		'a negated regex does not match a name it would otherwise match');
+	is_deeply($hook->_evaluate_matching_rule('large', $rule->({name => '!~/\.vm-small$/'}), $config), $props,
+		'a negated regex matches a name the regex does not');
+	is_deeply($hook->_evaluate_matching_rule('large', $rule->({'cloud_properties.instance_type' => 'm1.small'}), $config), $props,
+		'a dotted key names a flattened config key and matches a literal');
+	is_deeply($hook->_evaluate_matching_rule('large', $rule->({'cloud_properties.instance_type' => '/^m1\./'}), $config), $props,
+		'a dotted key matches a regex');
+	is_deeply($hook->_evaluate_matching_rule('large', $rule->({'cloud_properties.instance_type' => ['m1.tiny', 'm1.small']}), $config), $props,
+		'a list of literals matches when any literal equals the field');
+	is_deeply($hook->_evaluate_matching_rule('large', $rule->({'cloud_properties.nonexistent' => undef}), $config), $props,
+		'a null pattern matches a field the config does not carry');
+	is_deeply($hook->_evaluate_matching_rule('large', $rule->({name => '/\.vm-large$/', 'cloud_properties.instance_type' => 'm1.huge'}), $config), {},
+		'every field in a condition set must match');
+	is_deeply($hook->_evaluate_matching_rule('large', $rule->({name => '/nope/'}, {name => '/\.vm-large$/'}), $config), $props,
+		'a rule applies when any one of its condition sets matches');
+	throws_ok { $hook->_evaluate_matching_rule('large', $rule->({cloud_properties => {instance_type => 'm1.small'}}), $config) }
+		qr/must name a flattened\s+config key.*cloud_properties\.<subkey>/s,
+		'a nested map as a condition is refused and told the flat form';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

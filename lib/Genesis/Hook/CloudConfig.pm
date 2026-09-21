@@ -1269,16 +1269,20 @@ sub _evaluate_matching_rule {
 	my $criteria_met = 0;
 	foreach my $condition_set (@$conditions) {
 		next unless ref($condition_set) eq 'HASH';
-		$condition_set = flatten($condition_set);
 
 		my $failed_match = 0;
 		foreach my $field (keys %$condition_set) {
 			my $patterns = $condition_set->{$field};
+			bail(
+				"Matching rule condition for %s must name a flattened config key, ".
+				"not a nested map; write it as %s.<subkey>",
+				$field, $field
+			) if ref($patterns) eq 'HASH';
+			my $field_value = $config->{$field};
 			my $field_matches = 0;
 
 			$patterns = [$patterns] unless ref($patterns) eq 'ARRAY';
 			for my $test (@$patterns) {
-				my $field_value = struct_lookup($config, $field);
 				if (!defined($field_value)) {
 					next unless !defined($test); # only a null pattern matches undef
 					$field_matches = 1;

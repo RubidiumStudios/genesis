@@ -2059,7 +2059,17 @@ B<Examples:>
 Evaluates a single conditional override rule against the current config.
 Conditions are evaluated as OR between condition sets and AND within each set.
 Patterns may be literal values, C<undef>, or regex strings in the form
-C<"/pattern/flags"> or C<"!~/pattern/flags">.
+C<"/pattern/flags"> or C<"!~/pattern/flags">, and a field may carry a list of
+patterns, any one of which satisfies that field.
+
+A condition's field names a key of the flattened config exactly, so a nested
+property is written with dots, C<cloud_properties.instance_type>, an element
+of a list property with its index, C<cloud_properties.security_groups[0]>,
+and a property whose own name contains a dot with the C<~> that C<flatten>
+substitutes for it. The field is read from the flat config directly rather
+than resolved as a path, which is what lets a dotted key and a list of
+patterns work; a nested map as a condition value is refused rather than
+silently failing to match.
 
 B<Parameters:>
 
@@ -2081,6 +2091,17 @@ The flattened resource config hashref to evaluate against.
 =back
 
 B<Returns:> The rule's C<properties> hashref if conditions match, or C<{}>.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Matching rule condition for %s must name a flattened config key, not a nested map; write it as %s.<subkey>">
+
+Thrown when a condition's value is a hashref. Both placeholders are the
+field name.
+
+=back
 
 B<Examples:>
 
