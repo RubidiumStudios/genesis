@@ -971,9 +971,9 @@ sub _add_extended_cloud_config {
 
 		my $prefix = $type_mapping{$type}{prefix};
 		my @targets = (keys %{$extended_config->{$group_label}});
-		my %defered_targets = ();
 		while (my $target = shift @targets) {
-			my $defn = $extended_config->{$group_label}{$target} // {};
+			# A copy: the meta-keys come off it, not off the environment's config
+			my $defn = {%{$extended_config->{$group_label}{$target} // {}}};
 			my $explicit_name = delete($defn->{'<explicit-name>'});
 			my $name = ($explicit_name || $type_mapping{$type}{explicit_name}) ? $target : $self->name_for($prefix, $target);
 			# Bare target matches too: a kit may register under that name (see POD)
@@ -1001,23 +1001,24 @@ sub _add_extended_cloud_config {
 
 				if (!$src_name) {
 					# FIXME: Check for both explicit and env-prefixed names for the source target?
-					if (exists($extended_config->{$group_label}{$src_target})) {
+					my $group = $extended_config->{$group_label};
+					bail(
+						"The %s target '%s' depends on '%s' in environment #C{%s} %s ".
+						"definition, but it does not exist",
+						$type, $target, $src_target, $self->env->name, $self->overrides_base
+					) unless exists $group->{$src_target};
+
+					# Walk the <based-on> chain before deferring; a name seen twice is a cycle
+					my %seen = ($target => 1);
+					for (my $link = $src_target; defined($link) && exists $group->{$link}; $link = $group->{$link}{'<based-on>'}) {
 						bail(
 							"Cyclic dependency detected for target '%s' in extended cloud config for type '%s'",
 							$target, $type
-						) if (exists $defered_targets{$target});
-
-						# This target will be based on an extended config target that hasn't been processed yet
-						push(@targets, $src_target);
-						$defered_targets{$target} = 1;
-						next;
-					} else {
-						bail(
-							"The %s target '%s' depends on '%s' in environment #C{%s} %s ".
-							"definition, but it does not exist",
-							$type, $target, $src_target, $self->env->name, $self->overrides_base
-						);
+						) if $seen{$link}++;
 					}
+
+					push(@targets, $target); # retry once the source has been built
+					next;
 				}
 				# Find the source definition and merge with it
 				my ($src_defn) = grep { $_->{name} eq $src_name } @{$config->{$group_label}};
@@ -1254,6 +1255,13 @@ sub _process_config_overrides {
 	# Step 3: specific overrides
 	$overrides = $self->env->lookup("${overrides_base}.${plural_type}.$target");
 	if ($overrides && ref($overrides) eq 'HASH' && scalar(keys %$overrides)) {
+		# Meta-keys declare a new entry; on a kit-defined one they are a contradiction
+		my @meta = grep {exists $overrides->{$_}} ('<based-on>', '<explicit-name>');
+		bail(
+			"The %s '%s' override in #C{%s.%s.%s} carries %s, but the kit already ".
+			"defines '%s'; meta-keys apply only to entries the kit does not define",
+			$type, $target, $overrides_base, $plural_type, $target, join(' and ', @meta), $target
+		) if @meta;
 		$config = { %$config, flatten($overrides)->%* };
 	}
 	return unflatten($config);

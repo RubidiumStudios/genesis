@@ -1675,6 +1675,18 @@ Supports C<< <based-on> >> inheritance (deep-merging from an existing entry)
 and deferred processing to resolve ordering dependencies. Network additions
 are not currently supported and will throw.
 
+A source named by C<< <based-on> >> may be a kit entry already in C<%config>
+or another extended entry in the same group. In the second case the target
+is put back at the end of the queue and retried once its source has been
+built, so a chain of extended entries resolves whatever order the group's
+keys come out in. Before deferring, the C<< <based-on> >> chain is walked
+through the group, and a name met twice is reported as a cycle; a single
+"already deferred" flag cannot do this, since a chain of three visited in the
+wrong order is deferred twice without being cyclic. Each definition is
+processed on a copy, because C<lookup> returns the environment's own
+structure and removing the meta-keys from it would leave a deferred target,
+or a second build in the same process, with no C<< <based-on> >> to follow.
+
 An override is an addition only when nothing in C<%config> already carries
 its name. A kit may register an entry under the bare target name rather
 than the C<name_for> form (C<network_definition> with an empty
@@ -2046,6 +2058,21 @@ The resource definition hashref to process.
 =back
 
 B<Returns:> The processed config as an unflattened hashref.
+
+B<Errors:>
+
+=over 4
+
+=item C<"The %s '%s' override in %s.%s.%s carries %s, but the kit already defines '%s'; meta-keys apply only to entries the kit does not define">
+
+Thrown when the named override for a kit-defined entry carries
+C<< <based-on> >> or C<< <explicit-name> >>. Those keys declare a new entry
+and are consumed by C<_add_extended_cloud_config>; on an entry the kit
+already provides they have nothing to declare and would otherwise be merged
+into the cloud config as properties. The placeholders are the type, the
+target, the three path segments, the meta-keys found, and the target again.
+
+=back
 
 B<Examples:>
 

@@ -644,6 +644,127 @@ subtest '_evaluate_matching_rule - every pattern form' => sub {
 		'a nested map as a condition is refused and told the flat form';
 };
 
+# ===========================================================================
+# 6. _add_extended_cloud_config <based-on>
+# ===========================================================================
+subtest '_add_extended_cloud_config - <based-on> inheritance' => sub {
+	plan tests => 11;
+
+	# The kit defines one vm type, 'base'.  Each case adds extended entries
+	# under bosh-configs.cloud and asserts what reaches the cloud config.
+	my $kit_config = sub {
+		my ($hook) = @_;
+		return {vm_types => [{
+			name => $hook->name_for('vm', 'base'),
+			cloud_properties => {instance_type => 'm1.small', boot_from_volume => 1},
+		}]};
+	};
+	my $hook_with = sub {
+		my (%cloud) = @_;
+		my $env = mock_env(config => {
+			params => {cloud_config_prefix => 'test-env.test'},
+			'bosh-configs' => {cloud => \%cloud},
+		});
+		return Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+	};
+	my $built = sub {
+		my ($hook, $group, $name) = @_;
+		my $config = $hook->_add_extended_cloud_config($kit_config->($hook));
+		my ($entry) = grep {$_->{name} eq $name} @{$config->{$group}};
+		return $entry // {}; # an entry that was never emitted fails its assertion rather than dying
+	};
+
+	# 1. inherit from a kit entry
+	my $hook = $hook_with->(vm_types => {big => {'<based-on>' => 'base', cloud_properties => {instance_type => 'm1.large'}}});
+	is_deeply($built->($hook, 'vm_types', $hook->name_for('vm', 'big'))->{cloud_properties},
+		{instance_type => 'm1.large', boot_from_volume => 1},
+		'a target based on a kit entry inherits its properties and overrides the ones it names');
+
+	# 2. a chain of extended entries resolves whatever order the hash yields
+	$hook = $hook_with->(vm_types => {
+		a => {'<based-on>' => 'b',    cloud_properties => {a => 1}},
+		b => {'<based-on>' => 'c',    cloud_properties => {b => 1}},
+		c => {'<based-on>' => 'base', cloud_properties => {c => 1}},
+	});
+	is_deeply($built->($hook, 'vm_types', $hook->name_for('vm', 'a'))->{cloud_properties},
+		{instance_type => 'm1.small', boot_from_volume => 1, a => 1, b => 1, c => 1},
+		'a chain of extended targets resolves in full, each deferred until its source is built');
+
+	# 3. two entries sharing one deferred source both get it
+	$hook = $hook_with->(vm_types => {
+		x => {'<based-on>' => 'z', cloud_properties => {x => 1}},
+		y => {'<based-on>' => 'z', cloud_properties => {y => 1}},
+		z => {'<based-on>' => 'base', cloud_properties => {z => 1}},
+	});
+	my $config = $hook->_add_extended_cloud_config($kit_config->($hook));
+	my %by_name = map {$_->{name} => $_} @{$config->{vm_types}};
+	is_deeply([map {$by_name{$hook->name_for('vm', $_)}{cloud_properties}{z}} qw(x y)], [1, 1],
+		'two targets based on the same deferred source both inherit from it');
+
+	# 4. the environment's config is left as the operator wrote it
+	$hook = $hook_with->(vm_types => {big => {'<based-on>' => 'base', cloud_properties => {instance_type => 'm1.large'}}});
+	$hook->_add_extended_cloud_config($kit_config->($hook));
+	is($hook->env->config->{'bosh-configs'}{cloud}{vm_types}{big}{'<based-on>'}, 'base',
+		'processing an extended entry does not strip the meta-key from the environment config');
+	is_deeply($built->($hook, 'vm_types', $hook->name_for('vm', 'big'))->{cloud_properties},
+		{instance_type => 'm1.large', boot_from_volume => 1},
+		'a second build in the same process inherits exactly as the first did');
+
+	# 5. missing source
+	$hook = $hook_with->(vm_types => {big => {'<based-on>' => 'nowhere'}});
+	throws_ok { $hook->_add_extended_cloud_config($kit_config->($hook)) }
+		qr/depends on 'nowhere'.*does not exist/s,
+		'a source that is neither a kit entry nor an extended target is refused';
+
+	# 6. cycles of every length
+	$hook = $hook_with->(vm_types => {a => {'<based-on>' => 'b'}, b => {'<based-on>' => 'a'}});
+	throws_ok { $hook->_add_extended_cloud_config($kit_config->($hook)) }
+		qr/Cyclic dependency/,
+		'two targets based on each other are refused';
+	$hook = $hook_with->(vm_types => {a => {'<based-on>' => 'a'}});
+	throws_ok { $hook->_add_extended_cloud_config($kit_config->($hook)) }
+		qr/Cyclic dependency/,
+		'a target based on itself is refused';
+	$hook = $hook_with->(vm_types => {a => {'<based-on>' => 'b'}, b => {'<based-on>' => 'c'}, c => {'<based-on>' => 'a'}});
+	throws_ok { $hook->_add_extended_cloud_config($kit_config->($hook)) }
+		qr/Cyclic dependency/,
+		'a three-link cycle is refused rather than deferred forever';
+
+	# 7. explicit naming
+	$hook = $hook_with->(disk_types => {'shared-storage' => {'<explicit-name>' => 1, disk_size => 1024}});
+	ok($built->($hook, 'disk_types', 'shared-storage'),
+		'an entry with <explicit-name> is emitted under its bare name');
+
+	# 8. a new entry inherits the source as built, overrides and defaults included
+	$hook = $hook_with->(
+		vm_type_defaults => {cloud_properties => {encrypted => 1}},
+		vm_types => {
+			base => {cloud_properties => {instance_type => 'm1.medium'}},
+			big  => {'<based-on>' => 'base', cloud_properties => {boot_from_volume => 0}},
+		},
+	);
+	$config = {vm_types => [$hook->vm_type_definition('base', cloud_properties_for_iaas => {openstack => {instance_type => 'm1.small'}})]};
+	$hook->build_cloud_config($config);
+	my ($big) = grep {$_->{name} eq $hook->name_for('vm', 'big')} @{$config->{vm_types}};
+	is_deeply($big->{cloud_properties}, {instance_type => 'm1.medium', encrypted => 1, boot_from_volume => 0},
+		'a new entry inherits its source as built, with the source\'s own overrides and defaults applied');
+};
+
+subtest '_process_config_overrides - meta-keys on a kit-defined entry are refused' => sub {
+	plan tests => 2;
+
+	for my $meta ('<based-on>', '<explicit-name>') {
+		my $env = mock_env(config => {
+			params => {cloud_config_prefix => 'test-env.test'},
+			'bosh-configs' => {cloud => {vm_types => {web => {$meta => 'base', cloud_properties => {instance_type => 'm1.large'}}}}},
+		});
+		my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+		throws_ok { $hook->vm_type_definition('web', cloud_properties_for_iaas => {openstack => {instance_type => 'm1.small'}}) }
+			qr/vm_type 'web'.*\Q$meta\E.*kit already defines/s,
+			"$meta on an override of a kit-defined vm_type is refused rather than emitted as a property";
+	}
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu
