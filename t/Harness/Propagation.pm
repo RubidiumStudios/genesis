@@ -4599,23 +4599,23 @@ sub _fake_git_dir {
 }
 
 # }}}
-# fixture_fly - a fly of a chosen version on the path, or none at all {{{
+# fixture_fly - a fly of a chosen version, or none at all {{{
 #
-# The Concourse provider asks the shell whether fly is there and then asks
-# fly for its version, so a row that drives the declared floor needs a fly
-# that answers a version the row chose.  The shim goes into the fixture bin
-# directory _path_prefix already names, which is the directory a spawned
-# command sees first and the parent's own path never does.
+# The Concourse provider runs the fly its fly_command names, which is
+# GENESIS_FLY_BIN first, then pipeline.provider.fly_bin_path, then a bare
+# fly on the path.  A row that drives the declared floor needs a fly that
+# answers a version the row chose, so the shim goes into the fixture bin
+# directory and GENESIS_FLY_BIN names it, through the guard that puts every
+# fixture variable back.
 #
 # It answers every other call rather than handing it on, because no row here
 # talks to a real Concourse and a fly that reached one would be doing work
 # nobody asked for.
 #
-# absent takes the fly away instead of standing one up.  The shim is removed,
-# and every directory on the parent's path that holds a real fly goes with
-# it, because an operator who has fly installed would otherwise have a row
-# about not having one answered by their own binary.  The path is put back by
-# the same guard that puts every other fixture variable back.
+# absent names a fly that does not exist instead of standing one up.  Nothing
+# comes off the path, because a directory that holds fly holds credhub on
+# some machines, and a row about having no fly was answered by the credhub
+# check on those.
 sub fixture_fly {
 	my ($self, %opts) = @_;
 
@@ -4624,12 +4624,10 @@ sub fixture_fly {
 	my $path = "$bin/fly";
 
 	# Nothing comes back from this arm, because there is no fly to hand a
-	# path to and a caller that put the returned path on its own path
-	# would put the one file this just took away back within reach.
+	# path to.
 	if ($opts{absent}) {
 		unlink $path;
-		_guard_env(PATH => join(':',
-			grep {!-x "$_/fly"} split(/:/, ($ENV{PATH} // ''))));
+		_guard_env(GENESIS_FLY_BIN => 'fly-does-not-exist');
 		return;
 	}
 
@@ -4643,6 +4641,7 @@ if [ "\$1" = "--version" ]; then
 fi
 exit 0
 EOS
+	_guard_env(GENESIS_FLY_BIN => $path);
 	return $path;
 }
 

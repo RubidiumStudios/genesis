@@ -722,7 +722,7 @@ Four of the five methods above guard on the `config` key, and `generate_descript
 - `_refuse_disabled_pipeline()`
   refuses to apply a pipeline nobody declared, and it reads `.genesis/config` raw so the refusal lands ahead of any vault connection.
 
-- `_concourse_fly_flags($result, $opts, $name)`
+- `_concourse_target($result, $opts, $name)`
   derives the `fly` target and the `-k` flag from the compiled result, reading both through the compiler's `provider_option`.
 
 - `_job_status_label($job)`

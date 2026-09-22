@@ -1511,7 +1511,7 @@ sub diff {
 
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
-	my ($target, $k_flag) = _concourse_fly_flags($result, $opts, $name);
+	my $target = _concourse_target($result, $opts, $name);
 
 	my $compiled = $output->{'pipeline.yml'}
 		or bail("Concourse provider did not produce pipeline.yml");
@@ -1519,7 +1519,8 @@ sub diff {
 	my $dir = workdir;
 	mkfile_or_fail("$dir/compiled.yml", $compiled);
 
-	my ($live, $rc) = run("fly${k_flag} -t \$1 get-pipeline -p \$2", $target, $name);
+	my ($live, $rc) = $result->{provider}->fly({target => $target},
+		'get-pipeline', '-p', $name);
 	if ($rc != 0) {
 		info("#Y{Pipeline '%s' does not exist on target '%s', so there is ".
 			"nothing to diff against.}",
@@ -1554,9 +1555,10 @@ sub status {
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
-	my ($target, $k_flag) = _concourse_fly_flags($result, $opts, $name);
+	my $target = _concourse_target($result, $opts, $name);
 
-	my ($json_out, $rc) = run("fly${k_flag} -t \$1 jobs -p \$2 --json", $target, $name);
+	my ($json_out, $rc) = $result->{provider}->fly({target => $target},
+		'jobs', '-p', $name, '--json');
 	bail("Could not get jobs for pipeline '%s' on target '%s': %s", $name, $target, $json_out)
 		unless $rc == 0;
 
@@ -1613,19 +1615,17 @@ sub pause {
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
-	my ($target, $k_flag) = _concourse_fly_flags($result, $opts, $name);
+	my $target = _concourse_target($result, $opts, $name);
 
 	if ($env) {
-		run({ interactive => 1,
+		$result->{provider}->fly({ interactive => 1, target => $target,
 		      onfailure => "Could not pause job '$env' in pipeline '$name'" },
-			"fly${k_flag} -t \$1 pause-job -p \$2 -j \$3",
-			$target, $name, $env);
+			'pause-job', '-p', $name, '-j', $env);
 		info("Paused job #C{%s} in pipeline #C{%s}", $env, $name);
 	} else {
-		run({ interactive => 1,
+		$result->{provider}->fly({ interactive => 1, target => $target,
 		      onfailure => "Could not pause pipeline '$name'" },
-			"fly${k_flag} -t \$1 pause-pipeline -p \$2",
-			$target, $name);
+			'pause-pipeline', '-p', $name);
 		info("Paused pipeline #C{%s}", $name);
 	}
 	exit 0;
@@ -1642,19 +1642,17 @@ sub resume {
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
-	my ($target, $k_flag) = _concourse_fly_flags($result, $opts, $name);
+	my $target = _concourse_target($result, $opts, $name);
 
 	if ($env) {
-		run({ interactive => 1,
+		$result->{provider}->fly({ interactive => 1, target => $target,
 		      onfailure => "Could not resume job '$env' in pipeline '$name'" },
-			"fly${k_flag} -t \$1 unpause-job -p \$2 -j \$3",
-			$target, $name, $env);
+			'unpause-job', '-p', $name, '-j', $env);
 		info("Resumed job #C{%s} in pipeline #C{%s}", $env, $name);
 	} else {
-		run({ interactive => 1,
+		$result->{provider}->fly({ interactive => 1, target => $target,
 		      onfailure => "Could not resume pipeline '$name'" },
-			"fly${k_flag} -t \$1 unpause-pipeline -p \$2",
-			$target, $name);
+			'unpause-pipeline', '-p', $name);
 		info("Resumed pipeline #C{%s}", $name);
 	}
 	exit 0;
@@ -2367,26 +2365,22 @@ sub _describe_topology {
 }
 
 # }}}
-# _concourse_fly_flags - derive (target, k_flag) from compiled result + CLI opts {{{
+# _concourse_target - the fly target a command talks to {{{
 #
-# Target resolution: explicit --target CLI opt > pipeline.provider.target config > pipeline name.
-# k_flag is ' -k' when insecure is set, '' otherwise.
-sub _concourse_fly_flags {
+# Target resolution: explicit --target CLI opt > pipeline.provider.target
+# config > pipeline name.  The target is the one thing the four commands
+# resolve themselves, because the option is theirs; the binary and the
+# insecure flag are the provider's, and its fly method supplies both.
+sub _concourse_target {
 	my ($result, $opts, $name) = @_;
 	# The resolved options are the compiler's, which is where
-	# provider_option reads them through the provider it holds.  Both
-	# derivations below move together, because the second one becomes the
-	# -k flag and a rewrite that took only the first would drop it for
-	# four commands.  A compile hands back a compiler and every compiler
-	# inherits provider_option from Genesis::CI::ProviderCompiler, so
-	# there is nothing here to ask about first.
-	my $compiler = $result->{compiler};
-	my $target   = $opts->{target}
-		// $compiler->provider_option('target')
+	# provider_option reads them through the provider it holds.  A compile
+	# hands back a compiler and every compiler inherits provider_option
+	# from Genesis::CI::ProviderCompiler, so there is nothing here to ask
+	# about first.
+	return $opts->{target}
+		// $result->{compiler}->provider_option('target')
 		// $name;
-	my $insecure = $compiler->provider_option('insecure') // 0;
-	my $k_flag   = $insecure ? ' -k' : '';
-	return ($target, $k_flag);
 }
 
 # }}}

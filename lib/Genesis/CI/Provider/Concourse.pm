@@ -98,7 +98,47 @@ sub new {
 		team            => $config{team}            || DEFAULT_TEAM,
 		insecure        => $config{insecure}        ? 1 : 0,
 		min_fly_version => $config{min_fly_version} || undef,
+		fly_bin_path    => $config{fly_bin_path}    || undef,
 	}, $class);
+}
+
+# }}}
+# fly_command - the fly this provider runs {{{
+#
+# One home for the name, so the prerequisites check, the login, and the
+# targets read all run the same binary.  A session names one through
+# GENESIS_FLY_BIN and wins, because an override the operator sets for one
+# run should beat the repository's default; the repository names one through
+# pipeline.provider.fly_bin_path, so two repositories on two Concourse
+# installations each keep the fly that matches theirs; and a repository that
+# names none wants whatever fly the path finds.  The class answers too,
+# from the environment alone, for a caller that holds no provider yet.
+sub fly_command {
+	my ($self) = @_;
+	return $ENV{GENESIS_FLY_BIN} || (ref($self) && $self->{fly_bin_path}) || 'fly';
+}
+
+# }}}
+# fly - run one fly command with the flags this provider's answers imply {{{
+#
+# Every fly this provider runs goes through here, so the binary is the one
+# fly_command names and -k follows the insecure setting in one place.  A
+# target is named only where the caller hands one, because fly --version
+# and fly targets take none.  The arguments reach bash as a list and never
+# as a string, so a path with a space in it and a team an operator named
+# both survive.  A leading hashref carries run's own options, plus target
+# and insecure for the caller that knows better than the object, which is
+# the wizard before its answers are stored.
+sub fly {
+	my ($self, @args) = @_;
+	my %opts     = %{ref($args[0]) eq 'HASH' ? shift @args : {}};
+	my $target   = delete $opts{target};
+	my $insecure = exists $opts{insecure} ? delete $opts{insecure} : $self->{insecure};
+	return run(\%opts, '"$@"',
+		$self->fly_command,
+		($insecure ? ('-k') : ()),
+		(defined $target ? ('-t', $target) : ()),
+		@args);
 }
 
 # }}}
@@ -106,19 +146,21 @@ sub new {
 sub check_prereqs {
 	my ($self) = @_;
 
-	my ($fly_path) = run({ stderr => 0 }, 'type -p fly');
+	my $fly = $self->fly_command;
+	my ($fly_path) = run({ stderr => 0 }, 'type -p "$1"', $fly);
 	chomp($fly_path //= '');
 	unless ($fly_path) {
 		error(
-			"Concourse CI provider requires the #C{fly} CLI but it was not found in PATH.\n".
+			"Concourse CI provider requires the #C{%s} CLI but it was not found in PATH.\n".
 			"  Download it from your Concourse server's home page or:\n".
-			"    #C{<concourse-url>/api/v1/cli?arch=amd64&platform=<linux|darwin|windows>}"
+			"    #C{<concourse-url>/api/v1/cli?arch=amd64&platform=<linux|darwin|windows>}",
+			$fly
 		);
 		return 0;
 	}
 
 	if ($self->{min_fly_version}) {
-		my ($ver_out) = run({ stderr => 0 }, 'fly --version');
+		my ($ver_out) = $self->fly({ stderr => 0 }, '--version');
 		chomp($ver_out //= '');
 
 		# A floor that cannot be compared against is a floor that is not
@@ -128,10 +170,10 @@ sub check_prereqs {
 		unless (semver($ver_out)) {
 			error(
 				"Concourse CI provider could not read a fly version from ".
-				"#C{fly --version}, which said #C{%s}.\n".
+				"#C{%s --version}, which said #C{%s}.\n".
 				"  This pipeline declares a minimum of #C{%s}, and a ".
 				"version that cannot be read cannot be checked against it.",
-				($ver_out eq '' ? '(nothing)' : $ver_out),
+				$fly, ($ver_out eq '' ? '(nothing)' : $ver_out),
 				$self->{min_fly_version}
 			);
 			return 0;
@@ -249,6 +291,13 @@ sub provider_options_schema {
 		# that is how a Concourse release names itself.
 		min_fly_version => {type => 'semver', description => 'Lowest fly version this pipeline may be set with'},
 
+		# The fly this repository runs, so two repositories on two Concourse
+		# installations each keep the one that matches theirs.  A session
+		# overrides it through GENESIS_FLY_BIN, and a repository that names
+		# none takes whatever fly the path finds; fly_command is the one
+		# reader of all three.
+		fly_bin_path    => {type => 'string', description => 'Path or name of the fly CLI this pipeline is set with; GENESIS_FLY_BIN overrides it'},
+
 		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
 		tagged   => {type => 'boolean', default => Genesis::Config::FALSE, description => "Pin each environment's containers to workers tagged with its name"},
 
@@ -363,7 +412,7 @@ sub interactive_wizard {
 	my ($target, $url, $team, $insecure);
 
 	# --- Gather existing targets from fly targets + flyrc ---
-	my @fly_targets = _load_fly_targets();
+	my @fly_targets = $self->_load_fly_targets;
 
 	if (@fly_targets) {
 		# Compute column widths for aligned display
@@ -407,11 +456,9 @@ sub interactive_wizard {
 			# Re-authenticate if the token has expired
 			if ($selected->{expired}) {
 				info "\nRe-authenticating expired target #C{%s}...\n", $target;
-				my @cmd = ('fly', '-t', $target, 'login', '-n', $team);
-				push @cmd, '-k' if $insecure;
-				run({ interactive => 1,
+				$self->fly({ interactive => 1, target => $target, insecure => $insecure,
 					  onfailure   => "fly login failed for target '$target'" },
-					@cmd);
+					'login', '-n', $team);
 			}
 		}
 	}
@@ -433,12 +480,9 @@ sub interactive_wizard {
 
 		info "\nLogging in to #C{%s} as team #C{%s} (target: #C{%s})...\n",
 			$url, $team, $target;
-		my @cmd = ('fly', '-t', $target, 'login',
-			'-c', $url, '-n', $team);
-		push @cmd, '-k' if $insecure;
-		run({ interactive => 1,
+		$self->fly({ interactive => 1, target => $target, insecure => $insecure,
 			  onfailure   => "fly login failed for target '$target'" },
-			@cmd);
+			'login', '-c', $url, '-n', $team);
 	}
 
 	return $self->new(
@@ -454,6 +498,7 @@ sub interactive_wizard {
 
 # _load_fly_targets - merge fly targets output with flyrc insecure flags {{{
 sub _load_fly_targets {
+	my ($self) = @_;
 	my @targets;
 
 	my $flyrc = "$ENV{HOME}/.flyrc";
@@ -465,8 +510,8 @@ sub _load_fly_targets {
 		}
 	}
 
-	my ($fly_out) = run({ stderr => '/dev/null' },
-		'fly targets --print-table-headers');
+	my ($fly_out) = $self->fly({ stderr => '/dev/null', insecure => 0 },
+		'targets', '--print-table-headers');
 	if ($fly_out && $fly_out =~ /\S/) {
 		my @lines = split /\n/, $fly_out;
 		my @rows = parse_fixed_width_table(@lines);

@@ -17,6 +17,7 @@ use Harness::Propagation;
 use Test::More;
 
 use File::Find;
+use File::Temp;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -96,8 +97,8 @@ subtest 'a fly that meets the floor is let through' => sub {
 };
 
 subtest 'an absent fly is still refused, by the same check' => sub {
-	# Two rows, and one more for the run's own restoration assertion.
-	plan tests => 3;
+	# Three rows, and one more for the run's own restoration assertion.
+	plan tests => 4;
 
 	my $h = make_harness(envs => ['qa'], provider => 'concourse');
 	compilable_pipeline($h);
@@ -105,8 +106,62 @@ subtest 'an absent fly is still refused, by the same check' => sub {
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
 	is($exit, 86, 'the refusal exits 86');
-	like(flatten($err), qr/requires the .?fly.? CLI but it was not found/,
-		'and it is the provider-side message');
+	like(flatten($err), qr/requires the .?fly-does-not-exist.? CLI but it was not found/,
+		'and it is the provider-side message, naming the fly it looked for');
+	unlike(flatten($err), qr/Missing .?credhub/,
+		'and no other tool answered for it');
+};
+
+subtest 'the repository names the fly it is set with' => sub {
+	# Two rows, and one more for the run's own restoration assertion.
+	plan tests => 3;
+
+	# Two repositories on two Concourse installations each keep the fly
+	# that matches theirs, so the key names a path and the check runs that
+	# one.  The shim sits off the path under its own name, so a check that
+	# ignored the key would find whatever fly this machine has, or none,
+	# and answer for that instead of for the one the repository named.
+	my $h = make_harness(envs => ['qa'], provider => 'concourse');
+	compilable_pipeline($h);
+	my $dir  = File::Temp->newdir();
+	my $shim = "$dir/fly-of-this-repository";
+	put_file($shim, 0755, "#!/usr/bin/env bash\n".
+		"[ \"\$1\" = --version ] && echo 7.4.0\nexit 0\n");
+	$h->set_repo_config('pipeline.provider.fly_bin_path', $shim);
+	$h->set_repo_config('pipeline.provider.min_fly_version', '7.9.0');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
+	is($exit, 86, 'the prerequisites refusal exits 86');
+	like(flatten($err), qr/requires fly >= 7\.9\.0 but found 7\.4\.0/,
+		'and the version it found is the one the repository\'s fly answered');
+};
+
+subtest 'the Concourse half runs the fly the repository named too' => sub {
+	# Two rows, and one more for the run's own restoration assertion.
+	plan tests => 3;
+
+	# The check is one reader of the name and the commands that talk to
+	# Concourse are the others, so a shim that writes down what it was
+	# asked shows the diff reached it rather than whatever fly the path
+	# holds.  It refuses get-pipeline the way fly does for a pipeline the
+	# target has never seen, which the diff reports as one that does not
+	# exist on the target.
+	my $h = make_harness(envs => ['qa'], provider => 'concourse');
+	compilable_pipeline($h);
+	my $dir  = File::Temp->newdir();
+	my $shim = "$dir/fly-of-this-repository";
+	my $log  = "$dir/asked";
+	put_file($shim, 0755, "#!/usr/bin/env bash\n".
+		"echo \"\$*\" >> \"$log\"\n".
+		"[ \"\$1\" = --version ] && echo 7.11.2\n".
+		"case \"\$*\" in *get-pipeline*) exit 1;; esac\nexit 0\n");
+	$h->set_repo_config('pipeline.provider.fly_bin_path', $shim);
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-diff');
+	like(flatten("$out\n$err"), qr/does not exist on target/,
+		'the diff reached a fly and read an absent pipeline');
+	like(slurp($log), qr/get-pipeline/,
+		'and the fly it reached is the one the repository named');
 };
 
 subtest 'a fly whose version cannot be read is refused' => sub {

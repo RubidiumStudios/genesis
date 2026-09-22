@@ -1913,18 +1913,19 @@ B<Examples:>
   my @envs = _root_environments($top);
   # ('lab', 'qa', 'prod'), in the order the walk reads them
 
-=head2 _concourse_fly_flags($result, $opts, $name)
+=head2 _concourse_target($result, $opts, $name)
 
-    my ($target, $k_flag) = _concourse_fly_flags($result, $opts, $name);
+    my $target = _concourse_target($result, $opts, $name);
 
-The C<fly> target this run talks to, and the insecure flag to talk to it
-with, for the four commands that shell out to C<fly>.
+The C<fly> target a command talks to, for the four commands that talk to
+Concourse.  It is the one thing those commands resolve themselves, because
+the C<--target> option is theirs; the binary and the insecure flag are the
+provider's, and L<Genesis::CI::Provider::Concourse/fly(\%opts, @args)>
+supplies both when the command hands it the target.
 
 The target is the C<--target> option where the operator gave one, then the
-configured provider target, and then the pipeline's own name.  Both values are
-read off the compiler the compile handed back, and they are derived together
-because the second becomes the C<-k> flag and a rewrite that took only the
-first would drop it for all four commands.
+configured provider target, read off the compiler the compile handed back,
+and then the pipeline's own name.
 
 B<Parameters:>
 
@@ -1945,14 +1946,14 @@ The pipeline's name, which is the last fallback for the target.
 
 =back
 
-B<Returns:> Two values, the target and either C<' -k'> or the empty string.
+B<Returns:> The target, as a string.
 
 B<Errors:> None.
 
 B<Examples:>
 
-  my ($target, $k) = _concourse_fly_flags($result, {}, 'my-bosh');
-  # ('my-bosh', '')
+  my $target = _concourse_target($result, {}, 'my-bosh');
+  # 'my-bosh'
 
 =head2 _describe_topology($top, $nodes, $edges)
 

@@ -344,9 +344,9 @@ subtest 'check_prereqs: Concourse returns 1 when fly is in PATH' => sub {
 };
 
 subtest 'check_prereqs: Concourse returns 0 when fly is absent' => sub {
-	# The fixture takes its own fly away and takes every directory
-	# holding one off the path, so the row asks the question a machine
-	# with no fly asks.
+	# The fixture names a fly that does not exist through GENESIS_FLY_BIN
+	# and takes nothing off the path, so the row asks the question a
+	# machine with no fly asks without touching the tools beside it.
 	fixture_fly($h, absent => 1);
 
 	my $p = Genesis::CI::Provider::Concourse->new(
@@ -355,7 +355,7 @@ subtest 'check_prereqs: Concourse returns 0 when fly is absent' => sub {
 	my ($said, $result) = ('', undef);
 	$said = stderr_from {$result = $p->check_prereqs()};
 	ok !$result, 'check_prereqs returns 0 when fly is not in PATH';
-	like($said, qr/requires the .?fly.? CLI but it was not found/,
+	like($said, qr/requires the .?fly-does-not-exist.? CLI but it was\s+not\s+found/,
 		'and it says which CLI it wanted');
 };
 

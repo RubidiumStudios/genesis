@@ -380,7 +380,8 @@ B<Examples:>
 
 =head2 deploy(%opts)
 
-Sets the pipeline on a Concourse with the C<fly> CLI, and then pauses,
+Sets the pipeline on a Concourse with the C<fly> CLI, the one the
+provider's C<fly_command> names, and then pauses,
 unpauses, exposes, or hides it according to what was asked for. A dry run
 prints what would be set and stops.
 

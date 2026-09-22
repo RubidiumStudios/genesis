@@ -161,7 +161,7 @@ The keys an operator may write under C<pipeline.provider> beside
 C<type: concourse>, each with its type, its default where it has one, and
 the description C<genesis config> renders as help.
 
-The keys are C<target>, C<url>, C<team>, C<insecure>, C<min_fly_version>,
+The keys are C<target>, C<url>, C<team>, C<insecure>, C<min_fly_version>, C<fly_bin_path>,
 C<public>, C<tagged>, C<task>, C<pause_after_set>, and C<group_commits>.
 
 C<team> is where the Concourse team's default lives, and it is the only
@@ -169,6 +169,13 @@ home that default has. The class that emits the pipeline resolves the
 team through C<provider_option>, which reads the operator's block and
 falls back to what is declared here, so no second copy of C<main> stands
 anywhere.
+
+C<fly_bin_path> names the C<fly> this repository is set with, a path or a
+bare name, so two repositories on two Concourse installations each keep
+the one that matches theirs. It has no default, because a repository
+that names none wants whatever C<fly> the path finds, and
+C<GENESIS_FLY_BIN> in the environment overrides it for one session; see
+L</fly_command()>.
 
 C<min_fly_version> is the floor C<check_prereqs> enforces. It has no
 default, because a repository that names no floor wants any C<fly> that
@@ -283,6 +290,70 @@ B<Examples:>
     $provider->team;               # 'main'
     $provider->team('platform');   # 'platform', and set
 
+=head2 fly_command()
+
+The C<fly> this provider runs, resolved once for the prerequisites check,
+the login, and the targets read, so all three run the same binary.
+
+Three sources, in order. C<GENESIS_FLY_BIN> in the environment wins,
+because an override the operator sets for one session should beat the
+repository's default. Then C<pipeline.provider.fly_bin_path> from the
+repository, so two repositories on two Concourse installations each keep
+the C<fly> that matches theirs. Then the bare name C<fly>, for a
+repository that names none and wants whatever the path finds.
+
+The pipeline scripts the compiler emits keep the bare name, because they
+run on Concourse workers and name the worker's tool, not this one.
+
+B<Returns:> the command as a string, a path or a bare name.
+
+B<Examples:>
+
+    $provider->fly_command;                          # 'fly'
+    local $ENV{GENESIS_FLY_BIN} = '/opt/fly-7.11/fly';
+    $provider->fly_command;                          # '/opt/fly-7.11/fly'
+
+=head2 fly(\%opts, @args)
+
+    my ($out, $rc) = $provider->fly({target => $target},
+        'get-pipeline', '-p', $name);
+
+Runs one C<fly> command. Every C<fly> this provider runs goes through
+here, so the binary is the one L</fly_command()> names and C<-k> follows
+the insecure setting in one place. The arguments reach the shell as a
+list and never as a string, so a path with a space in it and a team an
+operator named both survive.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\%opts>
+
+Optional, and C<run>'s own options otherwise. C<target> names the
+C<fly> target and adds C<-t> for it; left out, no target is named, which
+is what C<--version> and C<targets> want. C<insecure> overrides the
+provider's own setting, for the wizard that knows the answer before it
+is stored.
+
+=item C<@args>
+
+The subcommand and its arguments, as C<fly> takes them.
+
+=back
+
+B<Returns:> what C<run> returns, the output and the exit status.
+
+B<Errors:> none of its own; C<onfailure> in C<\%opts> is honoured as
+C<run> honours it.
+
+B<Examples:>
+
+    $provider->fly({stderr => 0}, '--version');
+    $provider->fly({target => 'lab', interactive => 1,
+                    onfailure => 'Could not pause the pipeline'},
+                   'pause-pipeline', '-p', 'bosh');
+
 =head2 config()
 
 What goes back into the C<ci.provider> section of F<.genesis/config>. The
@@ -299,9 +370,12 @@ B<Examples:>
 
 =head2 check_prereqs()
 
-Whether C<fly> is on the PATH, and whether it meets the floor the
-repository declares as C<pipeline.provider.min_fly_version>. A repository
-that declares no floor is asking only that C<fly> be there.
+Whether the C<fly> that L</fly_command()> names is on the PATH, and whether
+it meets the floor the repository declares as
+C<pipeline.provider.min_fly_version>. A repository that declares no floor
+is asking only that C<fly> be there. A refusal names the command it
+looked for, so an operator who set C<GENESIS_FLY_BIN> or
+C<pipeline.provider.fly_bin_path> sees which one was missing.
 
 A floor is enforced or it is refused, and never quietly neither. A
 C<fly --version> this cannot read as a version is refused by name,
@@ -364,13 +438,14 @@ B<Examples:>
 Every C<fly> target a person could choose, merged from what C<fly
 targets> prints and what F<~/.flyrc> records. The table gives the name,
 the URL, the team, and the expiry, and the file gives the TLS setting,
-which the table does not carry.
+which the table does not carry. The C<fly> it asks is the one
+L</fly_command()> resolves, so a caller names nothing.
 
 B<Returns:> the targets, as a list of hash references.
 
 B<Examples:>
 
-    my @targets = _load_fly_targets();
+    my @targets = $self->_load_fly_targets;
     $targets[0]{expired};    # 1, where its token has run out
 
 =head2 _derive_target_name($url, $team)

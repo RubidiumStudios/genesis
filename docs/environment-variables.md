@@ -146,6 +146,7 @@ Pipeline-related configuration for Continuous Integration and Continuous Deploym
 | Variable | Description | Default/Values | Set By | Used By | Notes |
 |----------|-------------|----------------|--------|---------|-------|
 | `GENESIS_PIPELINE_DEPLOY_BRANCH` | Git branch for pipeline deployments. Used by CI pipeline operations. | - | Genesis::Commands::Pipeline::repipe | Genesis::CI (pipeline configuration)<br />Genesis::Commands::Pipeline (deployment) | - |
+| `GENESIS_FLY_BIN` | The `fly` the Concourse provider runs for its prerequisites check, login, and targets read. Overrides `pipeline.provider.fly_bin_path`; with neither set the bare `fly` on the path is used. | - | User environment | Genesis::CI::Provider::Concourse (`fly_command`) | The pipeline scripts the compiler emits keep the bare `fly`, since they run on Concourse workers. |
 | `GENESIS_CI` | Indicates if Genesis is running in a CI environment. Used to adjust behavior for CI/CD pipelines. | - | CI/CD environment | Genesis::CI::Legacy (pipeline generation) | - |
 | `GENESIS_CI_BASE` | Base path for CI-related secrets and configurations in Vault. Used to organize CI-specific data. | - | Genesis::Env (based on genesis.ci_base lookup) | Genesis::Env (Vault path construction)<br />Genesis::CI::Legacy (pipeline configuration) | - |
 | `GENESIS_CI_DIR` | Directory containing CI-related scripts and configurations. Used to locate CI-specific resources. | - | ci/repipe script | ci/repipe (script execution) | - |

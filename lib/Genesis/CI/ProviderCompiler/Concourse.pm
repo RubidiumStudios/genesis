@@ -380,13 +380,15 @@ sub deploy {
 		return;
 	}
 
-	my $k_flag = $insecure ? ' -k' : '';
+	# Every fly below is the provider's, which names the binary.  The
+	# target and the insecure answer travel with each call because both
+	# were resolved above with the caller's own options ahead of the
+	# repository's.
+	my $provider = $self->provider;
+	my %at       = (target => $target, insecure => $insecure);
 
 	# Pause pipeline before updating (safe to do even when not found yet)
-	my ($out, $rc) = run(
-		"fly${k_flag} -t \$1 pause-pipeline -p \$2",
-		$target, $pipeline_name
-	);
+	my ($out, $rc) = $provider->fly({%at}, 'pause-pipeline', '-p', $pipeline_name);
 	bail("Could not pause pipeline '%s': %s", $pipeline_name, $out)
 		unless $rc == 0 || $out =~ /pipeline '.*' not found/;
 
@@ -395,36 +397,23 @@ sub deploy {
 	mkfile_or_fail("${dir}/pipeline.yml", $yaml);
 
 	# Upload pipeline
-	my $yes_flag  = $yes ? ' -n' : '';
-	my $team_flag = " --team=$team";
-	run({
-		interactive => 1,
-		onfailure => "Could not upload pipeline $pipeline_name",
-	},
-		"fly${k_flag} -t \$1 set-pipeline${yes_flag}${team_flag} -p \$2 -c \$3/pipeline.yml",
-		$target, $pipeline_name, $dir
-	);
+	$provider->fly({%at, interactive => 1,
+		onfailure => "Could not upload pipeline $pipeline_name"},
+		'set-pipeline', ($yes ? ('-n') : ()), '--team', $team,
+		'-p', $pipeline_name, '-c', "$dir/pipeline.yml");
 
 	# Unpause pipeline (unless pipeline.provider.pause_after_set or --ci-pause)
 	unless ($pause) {
-		run({
-			interactive => 1,
-			onfailure => "Could not unpause pipeline $pipeline_name",
-		},
-			"fly${k_flag} -t \$1 unpause-pipeline -p \$2",
-			$target, $pipeline_name
-		);
+		$provider->fly({%at, interactive => 1,
+			onfailure => "Could not unpause pipeline $pipeline_name"},
+			'unpause-pipeline', '-p', $pipeline_name);
 	}
 
 	# Set visibility (expose vs hide)
 	my $action = $expose ? 'expose' : 'hide';
-	run({
-		interactive => 1,
-		onfailure => "Could not $action pipeline $pipeline_name",
-	},
-		"fly${k_flag} -t \$1 ${action}-pipeline -p \$2",
-		$target, $pipeline_name
-	);
+	$provider->fly({%at, interactive => 1,
+		onfailure => "Could not $action pipeline $pipeline_name"},
+		"$action-pipeline", '-p', $pipeline_name);
 
 	return;
 }
