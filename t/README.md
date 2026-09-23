@@ -63,3 +63,20 @@ Pod::Coverage::CountParents (or Pod::Coverage)
 ```
 cpanm -n Devel::Cover Template PPI::HTML Pod::Coverage::CountParents
 ```
+
+---
+
+Profiling a test file:
+
+To see where a test file's time goes, load `Harness::Profile` through
+`PERL5OPT` and name a log in `GENESIS_TEST_PROFILE`, then read the log with
+`t/bin/profile-report`.  It logs every command `Genesis::run` spawns, in the
+test process and in every genesis child, and each process's own CPU.  See
+`t/Harness/Profile.pod`.
+
+```
+GENESIS_TEST_PROFILE=/tmp/profile.log \
+PERL5OPT="-I$PWD/t -I$PWD/lib -MHarness::Profile" \
+  prove -l t/integration-tests/genesis_ci_walk-seed.t < /dev/null
+t/bin/profile-report /tmp/profile.log
+```

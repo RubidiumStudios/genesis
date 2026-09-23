@@ -1,0 +1,111 @@
+=head1 NAME
+
+Harness::Profile - opt-in timing of where a test file's time goes
+
+=head1 SYNOPSIS
+
+  GENESIS_TEST_PROFILE=/tmp/profile.log \
+  PERL5OPT="-I$PWD/t -I$PWD/lib -MHarness::Profile" \
+    prove -l t/integration-tests/genesis_ci_walk-seed.t < /dev/null
+
+  t/bin/profile-report /tmp/profile.log
+
+=head1 DESCRIPTION
+
+Loaded through C<PERL5OPT>, so every genesis child a test spawns loads it
+too, and active only while C<GENESIS_TEST_PROFILE> names a log file.  Without
+the variable it does nothing, so loading it by accident costs nothing.
+
+It wraps C<Genesis::run>, the one door every spawn in genesis goes through,
+and logs each command's program and interval.  At exit it logs the process's
+own CPU.  The harness runs genesis through C<Genesis::run> as well, so one log
+holds the genesis runs a test made, the harness's own spawns, and the spawns
+of the genesis children.
+
+Only a test file (a name ending in C<.t>) and C<bin/genesis> are profiled.
+Every other perl that inherits C<PERL5OPT>, C<prove> and the harness's
+C<curl> double among them, loads the module and does nothing.
+
+Each line names the test file its process descends from, through the
+C<HARNESS_PROFILE_ROOT> variable the test process sets and its children
+inherit.  So a log written by a whole run can be read one file at a time,
+which is what L<t/bin/profile-report> does.
+
+=head2 The log
+
+Tab-separated, one line per event:
+
+  run   ROOT PID START END PROGRAM
+  proc  ROOT PID NAME START END USER SYS CHILD_USER CHILD_SYS
+
+C<ROOT> is C<pid:path> of the test file.  C<PROGRAM> is the first word of the
+command, so a shell string such as C<spruce json E<lt> "$1"> is logged as
+C<spruce>.  Times are epoch seconds with microseconds.
+
+=head2 Why require is overridden
+
+C<Genesis> is wrapped at the moment the program first requires it.  Loading
+it from C<PERL5OPT> would load it before the test's own helper has set up the
+environment Genesis reads as it loads, and the profiled run then behaves
+differently from an unprofiled one.  An C<@INC> hook would not work either,
+since C<use lib> and C<bin/genesis> put the library ahead of it.  Overriding
+C<CORE::GLOBAL::require> catches the load wherever it comes from, and wraps
+C<run> after F<Genesis.pm> has loaded and before C<use Genesis> imports it.
+
+=head1 LIMITATIONS
+
+A command's time includes C<Genesis::run>'s own cost, the bash wrapper and
+the pipe, about 10 ms a call on an M1 Pro.  Spawns that do not go through
+C<Genesis::run> (backticks, C<system>, C<qx> in the harness helpers) are not
+logged, so the time the report leaves for setup includes them.
+
+=head1 FUNCTIONS
+
+=head2 _log
+
+  _log(@fields);
+
+Appends one tab-separated line to the log.
+
+B<Returns:> nothing.
+
+B<Errors:> None.  A log that cannot be opened is skipped rather than failing
+the test being profiled.
+
+B<Examples:>
+
+  _log('run', $ROOT, $$, $start, $end, 'git');
+
+=head2 _program
+
+  my $name = _program(@run_args);
+
+The program a C<Genesis::run> call names: the first word of the first
+argument that is not the options hash, without its directory.
+
+B<Returns:> string.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _program({stderr => 0}, 'spruce json < "$1"', $file);  # 'spruce'
+  _program('/path/to/bin/genesis', 'propagate');         # 'genesis'
+
+=head2 _wrap_run
+
+  _wrap_run();
+
+Replaces C<Genesis::run> with a wrapper that calls the original in the
+caller's context and logs the call.
+
+B<Returns:> nothing.
+
+B<Errors:> None of its own; the wrapped call's errors pass through.
+
+B<Examples:>
+
+  # Called once, from the require override, as Genesis.pm loads.
+  _wrap_run();
+
+=cut

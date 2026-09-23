@@ -1,0 +1,56 @@
+#!/usr/bin/env perl
+# profile-report - where each test file's time went, from a Harness::Profile log
+#
+# Usage: t/bin/profile-report <log>
+#
+# For each test file, slowest first: its wall time, the genesis runs it made
+# and what they cost, the time left over for its own setup, and the commands
+# spawned by the test process and by its genesis children, by program.
+use strict;
+use warnings;
+
+my $log = shift or die "Usage: $0 <log>\n";
+open my $fh, '<', $log or die "Cannot read $log: $!\n";
+
+my %file;
+while (<$fh>) {
+	chomp;
+	my ($kind, $root, $pid, @rest) = split /\t/;
+	next unless defined $root && $root =~ /^(\d+):(.*)$/;
+	my ($root_pid, $name) = ($1, $2);
+	my $f = $file{$root} //= {name => $name, pid => $root_pid};
+	if ($kind eq 'run') {
+		my ($start, $end, $prog) = @rest;
+		my $who = $pid == $root_pid ? 'test' : 'genesis';
+		$f->{spawn}{$who}{$prog}{n}++;
+		$f->{spawn}{$who}{$prog}{t} += $end - $start;
+	} elsif ($kind eq 'proc') {
+		my ($name, $start, $end, $user, $sys) = @rest;
+		if ($pid == $root_pid) {
+			$f->{wall} = $end - $start;
+		} else {
+			$f->{children}++;
+			$f->{child_cpu} += $user + $sys;
+		}
+	}
+}
+
+for my $f (sort {($b->{wall} // 0) <=> ($a->{wall} // 0)} values %file) {
+	my $runs = $f->{spawn}{test}{genesis} // {n => 0, t => 0};
+	my $wall = $f->{wall} // 0;
+	printf "%s\n", $f->{name};
+	printf "  wall %.1f s; %d genesis runs, %.1f s (%.2f s each); %.1f s left for setup\n",
+		$wall, $runs->{n}, $runs->{t}, $runs->{n} ? $runs->{t} / $runs->{n} : 0,
+		$wall - $runs->{t};
+	printf "  genesis children: %.1f s of their own CPU over %d processes\n",
+		$f->{child_cpu} // 0, $f->{children} // 0 if $f->{children};
+	for my $who (qw/test genesis/) {
+		my $by = $f->{spawn}{$who} or next;
+		for my $prog (sort {$by->{$b}{t} <=> $by->{$a}{t}} keys %$by) {
+			next if $who eq 'test' && $prog eq 'genesis';
+			printf "  %-8s %-10s %5d  %7.1f s  %6.1f ms each\n", $who, $prog,
+				$by->{$prog}{n}, $by->{$prog}{t}, 1000 * $by->{$prog}{t} / $by->{$prog}{n};
+		}
+	}
+	print "\n";
+}
