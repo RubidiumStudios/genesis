@@ -161,7 +161,7 @@ subtest 'the provider offers the key and the key decides the layout' => sub {
 		qr/pipeline\.provider\.output_layout: unknown configuration key/s,
 		'the key is refused where the provider declares no such key';
 
-	put_file('t/tmp/lib/Genesis/CI/Provider/Many.pm', <<'MANYCLI');
+	put_file("$helper::TMP/lib/Genesis/CI/Provider/Many.pm", <<'MANYCLI');
 package Genesis::CI::Provider::Many;
 use base 'Genesis::CI::Provider';
 # The base's new is the factory's, and it refuses to build a subclass, so
@@ -190,13 +190,13 @@ sub capabilities {
 }
 1;
 MANYCLI
-	put_file('t/tmp/lib/Genesis/CI/ProviderCompiler/Many.pm', <<'MANY');
+	put_file("$helper::TMP/lib/Genesis/CI/ProviderCompiler/Many.pm", <<'MANY');
 package Genesis::CI::ProviderCompiler::Many;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'many'}
 1;
 MANY
-	local @INC = ('t/tmp/lib', @INC);
+	local @INC = ("$helper::TMP/lib", @INC);
 	Genesis::CI::ProviderRegistry->register_provider('many', {
 		class     => 'Genesis::CI::ProviderCompiler::Many',
 		file      => 'Genesis/CI/ProviderCompiler/Many.pm',

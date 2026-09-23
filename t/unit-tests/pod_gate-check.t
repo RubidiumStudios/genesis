@@ -158,8 +158,7 @@ subtest 'exclusion manifest' => sub {
 
 subtest 'an entry with no reason is a manifest error' => sub {
 	# An exclusion nobody can justify is one nobody will ever remove.
-	my $tmp = "t/tmp/pod-gate-noreason.txt";
-	mkdir 't/tmp' unless -d 't/tmp';
+	my $tmp = "$helper::TMP/pod-gate-noreason.txt";
 	open my $fh, '>', $tmp or die $!;
 	print $fh "[deferred]\nSome::Module\n";
 	close $fh;

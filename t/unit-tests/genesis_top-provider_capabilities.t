@@ -104,7 +104,7 @@ sub provider_with {
 		},
 LAYOUT
 
-	put_file("t/tmp/lib/$cli_rel", <<"CAPCLI");
+	put_file("$helper::TMP/lib/$cli_rel", <<"CAPCLI");
 package $cli_pkg;
 use base 'Genesis::CI::Provider';
 # The base's new is the factory's, and it refuses to build a subclass, so
@@ -121,7 +121,7 @@ sub provider_options_schema {
 }
 1;
 CAPCLI
-	put_file("t/tmp/lib/$rel", <<"CAP");
+	put_file("$helper::TMP/lib/$rel", <<"CAP");
 package $pkg;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'$type'}
@@ -179,7 +179,7 @@ subtest 'GitHub Actions declares the file layout and nothing else' => sub {
 subtest 'a capability that is false refuses the key it gates' => sub {
 	plan tests => 3;
 
-	local @INC = ('t/tmp/lib', @INC);
+	local @INC = ("$helper::TMP/lib", @INC);
 
 	# Each pattern reads the key, then the provider, then the capability,
 	# in the order the refusal names them, because the refusal is required
@@ -207,7 +207,7 @@ subtest 'a capability that is false refuses the key it gates' => sub {
 subtest 'the layout key is offered by the provider that can use it' => sub {
 	plan tests => 3;
 
-	local @INC = ('t/tmp/lib', @INC);
+	local @INC = ("$helper::TMP/lib", @INC);
 
 	# A provider that can emit several files declares the key, so the block
 	# admits what an operator writes there and fills the fragment's default
@@ -234,7 +234,7 @@ subtest 'the layout key is offered by the provider that can use it' => sub {
 subtest 'the gated key is read out of the merged hierarchy' => sub {
 	plan tests => 1;
 
-	local @INC = ('t/tmp/lib', @INC);
+	local @INC = ("$helper::TMP/lib", @INC);
 
 	# The leaf says nothing, and the site file above it carries the gated
 	# key, which is where a key like this usually lives.  A check that read
@@ -254,7 +254,7 @@ subtest 'the gated key is read out of the merged hierarchy' => sub {
 subtest 'a capability that is true admits the key it gates' => sub {
 	plan tests => 3;
 
-	local @INC = ('t/tmp/lib', @INC);
+	local @INC = ("$helper::TMP/lib", @INC);
 
 	# The site file the merged-hierarchy row wrote goes back to saying
 	# nothing, so a row below can only refuse over what it wrote itself.
@@ -292,12 +292,12 @@ subtest 'a capability that is true admits the key it gates' => sub {
 subtest 'the capability declaration is checked at load' => sub {
 	plan tests => 2;
 
-	local @INC = ('t/tmp/lib', @INC);
+	local @INC = ("$helper::TMP/lib", @INC);
 
 	# A provider class with a fragment but no capability declaration,
 	# registered for this test alone.  The base makes both abstract, so the
 	# omission is a bug at load rather than a discovery at run time.
-	put_file('t/tmp/lib/Genesis/CI/Provider/Deaf.pm', <<'DEAF');
+	put_file("$helper::TMP/lib/Genesis/CI/Provider/Deaf.pm", <<'DEAF');
 package Genesis::CI::Provider::Deaf;
 use base 'Genesis::CI::Provider';
 sub provider_options_schema {return {}}
@@ -316,7 +316,7 @@ DEAF
 	# unchecked, the misspelling reads as false and refuses group_commits
 	# as though somebody had meant it to, and the ability the name was
 	# meant to carry is lost with nothing said about it.
-	put_file('t/tmp/lib/Genesis/CI/Provider/Lisp.pm', <<'LISP');
+	put_file("$helper::TMP/lib/Genesis/CI/Provider/Lisp.pm", <<'LISP');
 package Genesis::CI::Provider::Lisp;
 use base 'Genesis::CI::Provider';
 sub provider_options_schema {return {}}

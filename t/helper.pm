@@ -64,6 +64,59 @@ $ENV{GENESIS_OUTPUT_COLUMNS} //= 200;
 
 our $TOPDIR;
 
+# The work area - t/tmp/<pid>, this process's own {{{
+#
+# A test file used to clear the whole of t/tmp and stop every suite vault as
+# helper loaded, so two files at once destroyed each other's HOME and vault.
+# Now each process has t/tmp/<pid>, holding its HOME and a record of the
+# vaults it started.  Starting up sweeps only the areas whose process is gone,
+# stopping the vaults they recorded, and ending removes this process's own.
+our $TMP;
+our $TMP_OWNER = 0;
+
+sub _open_work_area {
+	my $root = "$TOPDIR/t/tmp";
+	mkdir($root) unless -d $root;
+	_sweep_work_areas($root);
+
+	$TMP       = "$root/$$";
+	$TMP_OWNER = $$;
+	`rm -rf "$TMP"`;
+	`mkdir -p "$TMP/home" "$TMP/vaults"`;
+	$? eq "0" or die "Failed to create the test work area $TMP\n";
+	$ENV{GENESIS_TEST_TMP} = $TMP;
+}
+
+# _sweep_work_areas - remove the areas of processes that have gone {{{
+#
+# A process that died without its END leaves its area and its vaults behind.
+# Its vaults are named in its vaults/ directory, so they are stopped by pid
+# rather than found by matching command lines, which once killed an
+# operator's own vault.
+sub _sweep_work_areas {
+	my ($root) = @_;
+	opendir(my $dh, $root) or return;
+	for my $pid (grep {/^\d+$/} readdir($dh)) {
+		next if $pid == $$ || kill(0, $pid) || $!{EPERM};
+		for my $file (glob "$root/$pid/vaults/*.pid") {
+			open(my $fh, '<', $file) or next;
+			chomp(my $vault = <$fh> // '');
+			kill('TERM', $vault) if $vault =~ /^\d+$/;
+		}
+		`rm -rf "$root/$pid"`;
+	}
+	closedir($dh);
+}
+# }}}
+
+END {
+	if ($TMP_OWNER && $TMP_OWNER == $$) {
+		teardown_vault();
+		`rm -rf "$TMP"` unless $ENV{GENESIS_TEST_KEEP_TMP};
+	}
+}
+# }}}
+
 sub import {
 	my ($class, @args) = @_;
 	$TOPDIR = Cwd::getcwd();
@@ -73,30 +126,11 @@ sub import {
 		exit 2
 	}
 
-	# Kill orphaned vaults from prior test runs -- but only ones this
-	# suite started.  Matching the command line alone also matches an
-	# operator's own `safe local -m`, which runs as
-	#   vault server -config /var/folders/.../kazoo...
-	# so importing helper anywhere killed a vault the suite never owned.
-	# t/bin/vault puts its binary under t/vaults, so requiring the
-	# executable to live there is what distinguishes ours.
-	my $vault_dir = "${TOPDIR}/t/vaults/";
-	for my $line (`ps -eo pid=,command= 2>/dev/null`) {
-		my ($pid, $exe) = $line =~ /^\s*(\d+)\s+(\S+)/ or next;
-		next unless index($exe, $vault_dir) == 0;
-		next unless $line =~ /vault.*server.*-config|vault-.*listen/;
-		kill 'TERM', $pid;
-	}
+	# Each test process works in t/tmp/<pid>, so files can run side by side.
+	# It is set up once per process, though import runs on every `use helper`.
+	_open_work_area() unless defined $TMP && $TMP_OWNER == $$;
 
-	# Clear out t/tmp each test
-	if ( -d "${TOPDIR}/t/tmp") {
-		`rm -rf ${TOPDIR}/t/tmp`;
-		$? eq "0" or die "Failed to clear test work directory";
-	}
-	`mkdir -p ${TOPDIR}/t/tmp/home`;
-	$? eq "0" or die "Failed to create test work and home directory";
-
-	$ENV{HOME} = "${TOPDIR}/t/tmp/home";
+	$ENV{HOME} = "$TMP/home";
 	$ENV{GENESIS_TOPDIR} = $TOPDIR;
 	$ENV{PATH} = "${TOPDIR}/bin:$ENV{PATH}";
 
@@ -852,6 +886,13 @@ sub vault_start {
 	kill(-0, $pid)
 		or die "failed to spin a vault server: couldn't signal pid $pid.\n";
 	$VAULT_PID{$target} = $pid;
+
+	# Named in the work area, so a sweep can stop it if this process dies
+	# without reaching its END.
+	if (open(my $fh, '>', "$TMP/vaults/$target.pid")) {
+		print $fh "$pid\n";
+		close $fh;
+	}
 	chomp($VAULT_URL = `SAFE_TARGET=$target safe env --json | jq -r '.VAULT_ADDR'`);
 	$VAULT_URL{$target} = $VAULT_URL;  # track the latest
 	return $target;

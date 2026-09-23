@@ -22,7 +22,7 @@ use_ok 'Genesis::Config';
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-put_file('t/tmp/lib/Probe/Loud.pm', <<'LOUD');
+put_file("$helper::TMP/lib/Probe/Loud.pm", <<'LOUD');
 package Probe::Loud;
 our @CALLS;
 sub validate_config {
@@ -32,7 +32,7 @@ sub validate_config {
 }
 1;
 LOUD
-put_file('t/tmp/lib/Probe/Quiet.pm', <<'QUIET');
+put_file("$helper::TMP/lib/Probe/Quiet.pm", <<'QUIET');
 package Probe::Quiet;
 sub validate_config {return ()}
 1;
@@ -40,7 +40,7 @@ QUIET
 # A module that answers with a bare undef and an empty string beside one
 # real complaint, which is what a rule that fell through its own branches
 # hands back.
-put_file('t/tmp/lib/Probe/Mumble.pm', <<'MUMBLE');
+put_file("$helper::TMP/lib/Probe/Mumble.pm", <<'MUMBLE');
 package Probe::Mumble;
 sub validate_config {
 	my ($class, $config, $path) = @_;
@@ -50,20 +50,20 @@ sub validate_config {
 MUMBLE
 # A module whose rule falls over, which is a fault in somebody else's
 # code reached from the middle of a configuration load.
-put_file('t/tmp/lib/Probe/Boom.pm', <<'BOOM');
+put_file("$helper::TMP/lib/Probe/Boom.pm", <<'BOOM');
 package Probe::Boom;
 sub validate_config {die "the boom probe fell over\n"}
 1;
 BOOM
 # And one that raises a Genesis fatal, which says the module is broken
 # rather than that the operator wrote the block wrongly.
-put_file('t/tmp/lib/Probe/Broken.pm', <<'BROKEN');
+put_file("$helper::TMP/lib/Probe/Broken.pm", <<'BROKEN');
 package Probe::Broken;
 use Genesis;
 sub validate_config {bug("the broken probe is broken")}
 1;
 BROKEN
-local @INC = ('t/tmp/lib', @INC);
+local @INC = ("$helper::TMP/lib", @INC);
 
 my $schema = {
 	block => {

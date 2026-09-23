@@ -121,18 +121,18 @@ subtest 'a provider that omits its fragment fails at load' => sub {
 	# A provider whose CLI class declares no fragment, registered for this
 	# test alone.  The omission has to be on the CLI side, because that is
 	# where the declaration lives and where the base raises on its absence.
-	put_file('t/tmp/lib/Genesis/CI/Provider/Mute.pm', <<'MUTECLI');
+	put_file("$helper::TMP/lib/Genesis/CI/Provider/Mute.pm", <<'MUTECLI');
 package Genesis::CI::Provider::Mute;
 use base 'Genesis::CI::Provider';
 1;
 MUTECLI
-	put_file('t/tmp/lib/Genesis/CI/ProviderCompiler/Mute.pm', <<'MUTE');
+	put_file("$helper::TMP/lib/Genesis/CI/ProviderCompiler/Mute.pm", <<'MUTE');
 package Genesis::CI::ProviderCompiler::Mute;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'mute'}
 1;
 MUTE
-	local @INC = ('t/tmp/lib', @INC);
+	local @INC = ("$helper::TMP/lib", @INC);
 	Genesis::CI::ProviderRegistry->register_provider('mute', {
 		class     => 'Genesis::CI::ProviderCompiler::Mute',
 		file      => 'Genesis/CI/ProviderCompiler/Mute.pm',
@@ -164,7 +164,7 @@ subtest 'a required fragment key is refused by name when it is absent' => sub {
 
 	# A provider whose fragment declares one key it cannot work without,
 	# registered for this test alone.
-	put_file('t/tmp/lib/Genesis/CI/Provider/Terse.pm', <<'TERSECLI');
+	put_file("$helper::TMP/lib/Genesis/CI/Provider/Terse.pm", <<'TERSECLI');
 package Genesis::CI::Provider::Terse;
 use base 'Genesis::CI::Provider';
 # The base's new is the factory's, and it refuses to build a subclass, so
@@ -189,13 +189,13 @@ sub capabilities {
 }
 1;
 TERSECLI
-	put_file('t/tmp/lib/Genesis/CI/ProviderCompiler/Terse.pm', <<'TERSE');
+	put_file("$helper::TMP/lib/Genesis/CI/ProviderCompiler/Terse.pm", <<'TERSE');
 package Genesis::CI::ProviderCompiler::Terse;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'terse'}
 1;
 TERSE
-	local @INC = ('t/tmp/lib', @INC);
+	local @INC = ("$helper::TMP/lib", @INC);
 	Genesis::CI::ProviderRegistry->register_provider('terse', {
 		class     => 'Genesis::CI::ProviderCompiler::Terse',
 		file      => 'Genesis/CI/ProviderCompiler/Terse.pm',
@@ -218,7 +218,7 @@ subtest 'the base default validates against the declaration' => sub {
 
 	# A provider that writes no validation at all, so everything refused
 	# below it is refused by the default the base gives every provider.
-	put_file('t/tmp/lib/Genesis/CI/Provider/Plain.pm', <<'PLAIN');
+	put_file("$helper::TMP/lib/Genesis/CI/Provider/Plain.pm", <<'PLAIN');
 package Genesis::CI::Provider::Plain;
 use base 'Genesis::CI::Provider';
 sub provider_options_schema {
@@ -237,7 +237,7 @@ sub capabilities {
 PLAIN
 	# And one that has a rule a declaration cannot state, which it adds on
 	# top of the pass it calls up for.
-	put_file('t/tmp/lib/Genesis/CI/Provider/Pair.pm', <<'PAIR');
+	put_file("$helper::TMP/lib/Genesis/CI/Provider/Pair.pm", <<'PAIR');
 package Genesis::CI::Provider::Pair;
 use base 'Genesis::CI::Provider';
 sub provider_options_schema {
@@ -275,19 +275,19 @@ PAIR
 	# provider that can be compiled.  Both halves of what a provider
 	# declares, the fragment and the capabilities, sit on the CLI class
 	# above, so there is nothing for these two to say beyond their type.
-	put_file('t/tmp/lib/Genesis/CI/ProviderCompiler/Plain.pm', <<'PLAINC');
+	put_file("$helper::TMP/lib/Genesis/CI/ProviderCompiler/Plain.pm", <<'PLAINC');
 package Genesis::CI::ProviderCompiler::Plain;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'plain'}
 1;
 PLAINC
-	put_file('t/tmp/lib/Genesis/CI/ProviderCompiler/Pair.pm', <<'PAIRC');
+	put_file("$helper::TMP/lib/Genesis/CI/ProviderCompiler/Pair.pm", <<'PAIRC');
 package Genesis::CI::ProviderCompiler::Pair;
 use parent 'Genesis::CI::ProviderCompiler';
 sub provider_type {'pair'}
 1;
 PAIRC
-	local @INC = ('t/tmp/lib', @INC);
+	local @INC = ("$helper::TMP/lib", @INC);
 	for my $type (qw/plain pair/) {
 		(my $pkg = ucfirst $type) =~ s/\W//g;
 		Genesis::CI::ProviderRegistry->register_provider($type, {
@@ -378,7 +378,7 @@ subtest 'a provider that will not load is refused without its stack' => sub {
 subtest 'a provider that goes wrong is still a configuration refusal' => sub {
 	plan tests => 5;
 
-	put_file('t/tmp/lib/Genesis/CI/Provider/Boom.pm', <<'BOOM');
+	put_file("$helper::TMP/lib/Genesis/CI/Provider/Boom.pm", <<'BOOM');
 package Genesis::CI::Provider::Boom;
 sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
 sub validate_config {die "the provider fell over\n"}
@@ -386,7 +386,7 @@ sub validate_config {die "the provider fell over\n"}
 BOOM
 	# Quiet is the one of the pair whose load runs to the end, so it is
 	# the one that reaches the capability gates and has to answer them.
-	put_file('t/tmp/lib/Genesis/CI/Provider/Quiet.pm', <<'QUIET');
+	put_file("$helper::TMP/lib/Genesis/CI/Provider/Quiet.pm", <<'QUIET');
 package Genesis::CI::Provider::Quiet;
 sub new {my ($c, %cfg) = @_; bless {%cfg}, $c}
 sub validate_config {return (undef)}
@@ -397,7 +397,7 @@ sub capabilities {
 }
 1;
 QUIET
-	local @INC = ('t/tmp/lib', @INC);
+	local @INC = ("$helper::TMP/lib", @INC);
 	Genesis::CI::ProviderRegistry->register_provider('boom', {
 		cli_class => 'Genesis::CI::Provider::Boom',
 		cli_file  => 'Genesis/CI/Provider/Boom.pm',

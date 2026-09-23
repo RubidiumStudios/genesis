@@ -10,7 +10,10 @@ bail() {
 
 [[ -n "$GENESIS_TOPDIR" ]] || bail "No GENESIS_TOPDIR defined -- cannot start vault"
 
-export HOME="${GENESIS_TOPDIR}/t/tmp/home"
+# The calling test's own work area, t/tmp/<pid>, which helper exports; a run
+# by hand falls back to t/tmp.
+work="${GENESIS_TEST_TMP:-${GENESIS_TOPDIR}/t/tmp}"
+export HOME="${work}/home"
 export VAULTS_DIR="${GENESIS_TOPDIR}/t/vaults"
 [[ -d $HOME ]] || mkdir -p "$HOME"
 [[ -d $VAULTS_DIR ]] || mkdir -p "$VAULTS_DIR"
@@ -33,21 +36,31 @@ cmd="${VAULTS_DIR}/vault-${version}-${platform}"
 
 if [[ ! -f "$cmd" ]]; then
 	printf >&2 "\rDownloading Vault ${version} CLI for $platform ..."
-	curl --fail -sLk > t/tmp/archive.zip \
+	# Unpacked in this process's own area and moved into place in one step,
+	# so two files downloading at once never read a half-written binary.
+	curl --fail -sLk > "$work/archive.zip" \
 		https://releases.hashicorp.com/vault/${version}/vault_${version}_${platform}_${arch}.zip \
 		|| bail "\nFAILED - could not download of vault ${version}"
 
-	unzip -d t/tmp t/tmp/archive.zip > /dev/null 2>&1
-	mv t/tmp/vault "$cmd"
+	unzip -d "$work" "$work/archive.zip" > /dev/null 2>&1
+	mv "$work/vault" "$cmd"
 	printf >&2 "DONE\n\n"
 fi
 
+# A port the kernel says is free, and a check that the vault answers on it,
+# both in perl rather than lsof, which a stock Linux image may not carry.  A
+# file starting beside this one can take the port between the check and the
+# bind, so a vault that dies before it answers is started again on another.
+free_port() {
+	perl -MIO::Socket::INET -e 'print IO::Socket::INET->new(Listen => 1, LocalAddr => "127.0.0.1", LocalPort => 0)->sockport'
+}
+answers() {
+	perl -MIO::Socket::INET -e 'exit(IO::Socket::INET->new(PeerAddr => "127.0.0.1:$ARGV[0]", Timeout => 1) ? 0 : 1)' "$1"
+}
 
-port=8200
-while lsof -nP -i ":$port" | grep ":$port\s*(LISTEN)" >/dev/null 2>&1 ; do
-  [[ $((++port)) -gt 8300 ]] && bail "No free ports available for dev vault server"
-done
-$cmd server -config <(cat <<EOF
+for attempt in 1 2 3; do
+	port=$(free_port)
+	$cmd server -config <(cat <<EOF
 disable_mlock = 1
 listener "tcp" {
   address     = "127.0.0.1:$port"
@@ -56,17 +69,21 @@ listener "tcp" {
 storage "inmem" {}
 EOF
 ) >$HOME/log 2>&1 &
-vault_pid=$!
-[ -n "${DEBUG_TESTS:-}" ] && printf >&2 "\rStarting Vault ${version} CLI on port $port as '$target' (pid: $vault_pid)..."
-waitfor=600
-while ! lsof -a -p $vault_pid -i tcp:$port -s TCP:listen -nP >/dev/null 2>&1; do
-	if [[ $waitfor -gt 0 ]]; then
-		waitfor=$((waitfor - 1))
-		sleep 0.1
-	else
-		bail "\nFAILED - timed out waiting for vault server to start\n"
-	fi
+	vault_pid=$!
+	[ -n "${DEBUG_TESTS:-}" ] && printf >&2 "\rStarting Vault ${version} CLI on port $port as '$target' (pid: $vault_pid)..."
+	waitfor=600
+	while kill -0 $vault_pid 2>/dev/null && ! answers $port; do
+		if [[ $waitfor -gt 0 ]]; then
+			waitfor=$((waitfor - 1))
+			sleep 0.1
+		else
+			bail "\nFAILED - timed out waiting for vault server to start\n"
+		fi
+	done
+	kill -0 $vault_pid 2>/dev/null && break
+	vault_pid=""
 done
+[[ -n "$vault_pid" ]] || bail "\nFAILED - vault server would not start on a free port\n"
 safe target "$target" http://127.0.0.1:$port --no-strongbox >/dev/null 2>&1
 safe auth token <<<"dummy" > /dev/null 2>&1 # Another Hack around safe init issue
 root_token=$(safe init --json | jq -r '.root_token')
