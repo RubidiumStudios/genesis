@@ -7,20 +7,6 @@ use Getopt::Long qw/GetOptionsFromArray/;
 
 ### Class Methods {{{
 
-# provider_class - load and return the CLI class for a provider type {{{
-#
-# A type becomes a class in Genesis::CI::ProviderRegistry, which owns the
-# lookup and which both families consult, so this is a delegation and
-# holds no list of its own.  It stays here while the callers outside this
-# file move onto the registry.
-sub provider_class {
-	my ($class, $type) = @_;
-
-	require Genesis::CI::ProviderRegistry;
-	return Genesis::CI::ProviderRegistry->provider_class($type);
-}
-
-# }}}
 # new - builder for creating new instance of derived class based on config {{{
 #
 # It builds and nothing more.  The rules for a provider's block are asked

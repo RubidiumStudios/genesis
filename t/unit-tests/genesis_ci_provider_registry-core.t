@@ -208,7 +208,7 @@ subtest 'one resolver answers for every caller' => sub {
 	is $info->{cli_class}, 'Genesis::CI::Provider::Concourse',
 		'the CLI class comes from the same entry';
 
-	is Genesis::CI::Provider->provider_class('manual'),
+	is Genesis::CI::ProviderRegistry->provider_class('manual'),
 		'Genesis::CI::Provider::Manual',
 		'manual resolves to its CLI class and has no compiler class';
 

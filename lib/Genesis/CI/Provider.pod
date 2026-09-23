@@ -74,32 +74,6 @@ Concrete subclasses: Concourse, GithubActions, Manual.
 
 =head1 CLASS METHODS - BUILDING A PROVIDER
 
-=head2 provider_class($type)
-
-The class that answers for a provider type, with its file loaded. The
-lookup itself is L<Genesis::CI::ProviderRegistry>'s, which both families
-consult, so this holds no list of its own.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$type>
-
-The provider type to resolve.
-
-=back
-
-B<Returns:> the class name, with the class loaded.
-
-B<Errors:> raises "Unknown CI provider type '...'. Valid types: ...", at
-C<Genesis::Exit::CONFIG>, for a type the registry does not hold.
-
-B<Examples:>
-
-    Genesis::CI::Provider->provider_class('concourse');
-    # 'Genesis::CI::Provider::Concourse'
-
 =head2 new(%config)
 
 Builds a provider out of what a repository stored under

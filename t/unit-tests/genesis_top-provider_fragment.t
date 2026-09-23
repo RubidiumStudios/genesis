@@ -54,7 +54,7 @@ subtest 'one class carries the fragment and the check' => sub {
 	# abstract one, so every subclass can it, and a class that declared
 	# nothing whatsoever would satisfy a row that only asked that.
 	for my $type (qw/concourse github-actions manual/) {
-		my $class = Genesis::CI::Provider->provider_class($type);
+		my $class = Genesis::CI::ProviderRegistry->provider_class($type);
 		isnt $class->can('provider_options_schema'),
 			Genesis::CI::Provider->can('provider_options_schema'),
 			"the $type provider declares its own keys";

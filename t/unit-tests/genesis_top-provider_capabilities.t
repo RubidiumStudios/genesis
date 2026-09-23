@@ -50,7 +50,7 @@ subtest 'every provider declares its abilities' => sub {
 	plan tests => 1 + scalar(@providers);
 
 	for my $type (@providers) {
-		my $class = Genesis::CI::Provider->provider_class($type);
+		my $class = Genesis::CI::ProviderRegistry->provider_class($type);
 		lives_ok {
 			Genesis::CI::Provider->declared_capabilities($class)
 		} "the $type provider answers the capability contract";
@@ -143,7 +143,7 @@ subtest 'the declaration carries six names' => sub {
 	# used to answer through a forwarder of its own, and now a compiler
 	# asks the provider it holds, so the class that declares the six is
 	# the only one to ask.
-	my $caps = Genesis::CI::Provider->provider_class('concourse')->capabilities;
+	my $caps = Genesis::CI::ProviderRegistry->provider_class('concourse')->capabilities;
 	is_deeply [sort keys %$caps], [@NAMES],
 		'the six names every provider declares, and no others';
 	is_deeply [grep {$caps->{$_}} sort keys %$caps],
@@ -161,7 +161,7 @@ subtest 'the declaration carries six names' => sub {
 subtest 'GitHub Actions declares the file layout and nothing else' => sub {
 	plan tests => 3;
 
-	my $class = Genesis::CI::Provider->provider_class('github-actions');
+	my $class = Genesis::CI::ProviderRegistry->provider_class('github-actions');
 	my $caps  = $class->capabilities;
 
 	ok $caps->{multi_file_output},

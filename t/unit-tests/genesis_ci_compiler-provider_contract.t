@@ -81,8 +81,7 @@ subtest 'the task block declares privileged beside image and version' => sub {
 	#
 	# Asked of the provider that declares it, since the compiler side no
 	# longer answers for a declaration it does not own.
-	require Genesis::CI::Provider;
-	my $schema = Genesis::CI::Provider->provider_class('concourse')
+	my $schema = Genesis::CI::ProviderRegistry->provider_class('concourse')
 		->provider_options_schema();
 	ok exists $schema->{task}{schema}{privileged},
 		'privileged is declared in the nested task schema';
