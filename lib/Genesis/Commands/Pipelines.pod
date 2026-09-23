@@ -2100,47 +2100,6 @@ B<Examples:>
   _job_status_label({finished_build => {status => 'ok'}}); # 'ok'
   _job_status_label({});                                   # 'pending'
 
-=head2 _verify_deployed($env_name, $env, $git)
-
-    _verify_deployed('qa', $env, $git);
-
-Refuses a cascade from an environment whose branch carries work nobody has
-deployed, by reading the commit the newest successful deployment recorded and
-comparing it with the branch's own tip.
-
-Two states are warned about rather than refused.  A repository whose vault
-cannot be reached cannot be asked at all, and an environment deployed before
-pipeline tracking existed recorded no commit to compare, so in both cases the
-operator is told what could not be checked and the cascade goes on.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$env_name>
-
-The environment's name, which is also its branch.
-
-=item C<$env>
-
-The environment, which the deployment record is read through.
-
-=item C<$git>
-
-The handle the branch tip is read off.
-
-=back
-
-B<Returns:> Nothing.
-
-B<Errors:> Bails where the environment has never deployed successfully, and
-where the commit it deployed is not the commit its branch now holds.
-
-B<Examples:>
-
-  _verify_deployed('qa', $env, $git);
-  # [FATAL] Environment qa has been propagated but not yet deployed
-
 =head2 _write_trailer_holds($top, $run)
 
 Writes the propagation hold record for each environment whose delivery in this

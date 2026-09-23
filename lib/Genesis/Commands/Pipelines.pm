@@ -1381,52 +1381,6 @@ sub _push_failure {
 }
 
 # }}}
-# _verify_deployed - check that an env's propagated state was deployed {{{
-#
-# Compares the env branch HEAD against the git.commit field in the
-# latest successful deployment's exodus audit data.  Requires vault.
-# Warns and allows cascade if vault is unavailable.
-sub _verify_deployed {
-	my ($env_name, $env, $git) = @_;
-
-	my $branch_head = $git->sha($env_name);
-
-	# Vault access is required, and this soft-fails if it is unavailable
-	my $env_with_vault = eval { $env->with_vault };
-	unless ($env_with_vault) {
-		warning(
-			"Could not verify deployment status for #C{%s} (vault unavailable).\n".
-			"Ensure it has been deployed before cascading.",
-			$env_name
-		);
-		return;
-	}
-
-	my $deployment = $env_with_vault->deployments->latest_successful;
-	bail(
-		"Environment #C{%s} has never been successfully deployed.\n".
-		"Deploy it before cascading to downstream environments.",
-		$env_name
-	) unless $deployment;
-
-	my $deployed_commit = $deployment->lookup('git.commit') || '';
-	if ($deployed_commit && $deployed_commit ne $branch_head) {
-		bail(
-			"Environment #C{%s} has been propagated but not yet deployed\n".
-			"with the latest changes.  Deploy it before cascading to\n".
-			"downstream environments.",
-			$env_name
-		);
-	} elsif (!$deployed_commit) {
-		# Pre-pipeline deployment (no git context in exodus), so warn only
-		warning(
-			"Environment #C{%s} was deployed before pipeline tracking was enabled.\n".
-			"Cannot verify deployment state.  Ensure it has been deployed.",
-			$env_name
-		);
-	}
-}
-# }}}
 # }}}
 # pipeline_graph - write pipeline.md with Mermaid flowchart {{{
 sub pipeline_graph {
