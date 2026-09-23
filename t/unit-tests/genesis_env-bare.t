@@ -129,4 +129,37 @@ subtest 'the merged read is the same from either branch' => sub {
 	}
 };
 
+subtest 'bare reads of the same files share one merge' => sub {
+	plan tests => 4;
+
+	# The walk reads an environment afresh at every commit it crosses, each
+	# time from a new checkout of the commit's tree.  The merged manifest is
+	# cached by a file name the files' content decides, so a read whose
+	# files match an earlier read's takes that merge rather than repeating
+	# it, and a read whose parent file differs gets a merge of its own.
+	my $checkout = sub {
+		my ($region) = @_;
+		my $top = make_top(name => 'thing', no_vault => 1);
+		put_file($top->path('us.yml'), "---\nparams:\n  region: $region\n");
+		put_file($top->path('us-west.yml'), "---\ngenesis:\n  env: us-west\n");
+		return Genesis::Top->new($top->path, no_vault => 1);
+	};
+
+	my $merges = 0;
+	my $merge  = \&Genesis::Env::ManifestProvider::merge;
+	no warnings 'redefine';
+	local *Genesis::Env::ManifestProvider::merge = sub {$merges++; goto &$merge};
+
+	is(Genesis::Env->bare('us-west', $checkout->('one'))->lookup('params.region'),
+		'one', 'the first read answers from its own merge');
+	my $after_first = $merges;
+
+	is(Genesis::Env->bare('us-west', $checkout->('one'))->lookup('params.region'),
+		'one', 'a read of the same files in another checkout answers the same');
+	is($merges, $after_first, 'and takes the first merge rather than merging again');
+
+	is(Genesis::Env->bare('us-west', $checkout->('two'))->lookup('params.region'),
+		'two', 'while a changed parent file is merged afresh, never served stale');
+};
+
 done_testing;

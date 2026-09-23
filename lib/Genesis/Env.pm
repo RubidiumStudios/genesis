@@ -607,14 +607,11 @@ sub bare {
 	# rather than in the half is_valid_env_file also runs, which would make
 	# every validation pay for a directory it never opens.
 	#
-	# The scratch directory is this object's own rather than the process-wide
-	# one new takes, because a manifest there is named for the environment
-	# and its signature, and that signature covers the leaf file alone.  Two
-	# bare reads of one environment across two checkouts carry the same name
-	# and the same signature while their ancestors differ, so a shared
-	# directory would answer the second read with the first one's merge.
+	# The scratch directory is the process-wide one new takes, so a read of
+	# the same files from another checkout finds the merge an earlier read
+	# left there, since the signature in its name covers every file merged.
 	$env->{file}  = "$env->{name}.yml";
-	$env->{__tmp} = workdir();
+	$env->{__tmp} = workdir('ENV');
 
 	return $env;
 }
