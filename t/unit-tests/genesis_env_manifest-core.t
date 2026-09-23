@@ -22,6 +22,7 @@ use_ok 'Genesis::Env::Manifest::Redacted';
 use_ok 'Genesis::Env::Manifest::Entombed';
 use_ok 'Genesis::Env::Manifest::VaultifiedEntombed';
 use_ok 'Genesis::Env::Manifest::PartialEnvironment';
+use_ok 'Genesis::Env::Manifest::UnevaluatedEnvironment';
 use_ok 'Genesis::Env::Manifest::Vaultified';
 
 $ENV{GENESIS_OUTPUT_COLUMNS}=80;
@@ -32,11 +33,15 @@ $ENV{GENESIS_OUTPUT_COLUMNS}=80;
 
 sub _make_mocks {
 	my $wdir = workdir('manifests');
+	# One checkout per mock, since a manifest that merges the kit signs the
+	# checkout it reads from.
+	my $root = workdir();
 	my $mock_env = Mock->new(
 		name      => 'test-env',
 		signature => 'abc123',
+		has_kit   => 0,
 		workpath  => sub { workdir('manifests') },
-		path      => sub { workdir() },
+		path      => sub { $root },
 		notify    => sub {},
 	);
 	my $mock_builder = Mock->new(
@@ -72,12 +77,13 @@ subtest 'new() loads cached file if one exists at _generate_file_name path' => s
 	my ($mock_env, $mock_builder) = _make_mocks();
 	my $wdir = workdir('manifests');
 
-	# Determine the expected file name by hand (type=unredacted, no subset)
+	# Determine the expected file name by hand (type=unredacted, no subset).
+	# The type merges the kit's files, so the name carries its own signature.
 	my $cached = sprintf(
 		"%s/manifest-%s-%s-%s.yml",
 		$wdir,
 		$mock_env->name,
-		$mock_env->signature,
+		Genesis::Env::Manifest::Unredacted->new($mock_builder, undef)->signature,
 		'unredacted'
 	);
 	put_file($cached, "---\nfoo: bar\n");
@@ -288,9 +294,22 @@ subtest '_generate_file_name produces correct format' => sub {
 	my $wdir = workdir('manifests');
 
 	my $manifest = Genesis::Env::Manifest::Unredacted->new($mock_builder, undef);
-	my $expected = "$wdir/manifest-test-env-abc123-unredacted.yml";
+	my $sig      = $manifest->signature;
+	my $expected = "$wdir/manifest-test-env-$sig-unredacted.yml";
 	is($manifest->_generate_file_name, $expected,
 		'_generate_file_name produces expected path');
+	isnt($sig, 'abc123',
+		'and a type that merges the kit signs more than the environment does');
+};
+
+subtest '_generate_file_name for an environment-only type' => sub {
+	my ($mock_env, $mock_builder) = _make_mocks();
+	my $wdir = workdir('manifests');
+
+	my $manifest = Genesis::Env::Manifest::UnevaluatedEnvironment->new($mock_builder, undef);
+	is($manifest->_generate_file_name,
+		"$wdir/manifest-test-env-abc123-unevaluated_environment.yml",
+		"carries the environment's own signature, as the environment's files are all it reads");
 };
 
 subtest '_generate_file_name with transient flag' => sub {
@@ -298,7 +317,8 @@ subtest '_generate_file_name with transient flag' => sub {
 	my $wdir = workdir('manifests');
 
 	my $manifest = Genesis::Env::Manifest::Unredacted->new($mock_builder, undef);
-	my $expected = "$wdir/transient-manifest-test-env-abc123-unredacted.yml";
+	my $sig      = $manifest->signature;
+	my $expected = "$wdir/transient-manifest-test-env-$sig-unredacted.yml";
 	is($manifest->_generate_file_name(1), $expected,
 		'_generate_file_name with transient flag prefixes "transient-"');
 };
@@ -308,7 +328,8 @@ subtest '_generate_file_name with subset' => sub {
 	my $wdir = workdir('manifests');
 
 	my $manifest = Genesis::Env::Manifest::Unredacted->new($mock_builder, 'mysub');
-	my $expected = "$wdir/manifest-test-env-abc123-unredacted-mysub.yml";
+	my $sig      = $manifest->signature;
+	my $expected = "$wdir/manifest-test-env-$sig-unredacted-mysub.yml";
 	is($manifest->_generate_file_name, $expected,
 		'_generate_file_name appends subset suffix');
 };

@@ -8,6 +8,7 @@ use base "Genesis::Base";
 use Genesis;
 use Genesis::Term;
 use POSIX qw/strftime/;
+use Digest::SHA qw/sha1_hex/;
 
 # Constructors
 sub new {
@@ -190,11 +191,29 @@ sub _generate_file_name {
 		$path,
 		$transient,
 		$self->env->name,
-		$self->env->signature,
+		$self->signature,
 		$type,
 		$subset
 	);
 }
+
+# signature - what this manifest's merge reads, for its cached file's name {{{
+#
+# The default is for the types that merge the kit's files.  The blueprint
+# picks those, local ops files among them, and only running it names them, so
+# the kit's fingerprint and the checkout the files are read from are signed as
+# well, and such a manifest is cached per checkout.  A type that reads the
+# environment's files alone overrides this with the environment's signature.
+sub signature {
+	my ($self) = @_;
+	my $env = $self->env;
+	return substr(sha1_hex(join("\0",
+		$env->signature,
+		($env->has_kit ? $env->kit->fingerprint : ''),
+		$env->path,
+	)), 0, 12);
+}
+# }}}
 
 sub get_vault_paths {
 	shift->builder->vault_paths(@_);

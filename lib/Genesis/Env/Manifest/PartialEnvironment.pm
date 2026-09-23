@@ -14,6 +14,9 @@ sub source_files {
 	]
 }
 
+# The environment's files are all this merge reads.
+sub signature { $_[0]->env->signature }
+
 sub merge_options {
 	return {
 		eval => 'adaptive'

@@ -60,6 +60,25 @@ C<environment_files> method.
   print ref($files);   # prints 'ARRAY'
   print $files->[0];   # prints the path to the first environment file
 
+=head2 signature
+
+  my $sig = $manifest->signature();
+
+The environment's own L<signature|Genesis::Env/signature>, since the
+environment's files are all this merge reads.  It overrides
+L<Genesis::Env::Manifest/signature>, which also signs the kit and the
+checkout, so this manifest is shared by every checkout holding the same
+environment files.
+
+B<Returns:> string (12 hex characters).
+
+B<Errors:> None of its own.
+
+B<Examples:>
+
+  print $manifest->signature();
+  # prints the same value as $manifest->env->signature
+
 =head2 merge_options
 
   my $opts = $manifest->merge_options();

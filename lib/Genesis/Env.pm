@@ -933,6 +933,7 @@ sub _env_name_errors {
 sub name   { $_[0]->{name};   }
 sub file   { $_[0]->{file};   }
 sub kit    { $_[0]->{kit}    || bug("Incompletely initialized environment '".$_[0]->name."': no kit specified"); }
+sub has_kit { defined($_[0]->{kit}) }
 sub top    { $_[0]->{top}    || bug("Incompletely initialized environment '".$_[0]->name."': no top specified"); }
 
 # }}}
@@ -942,15 +943,13 @@ sub path   { shift->top->path(@_); }
 # }}}
 
 # Information Lookup
-# signature - unique 12-character id for everything the environment's merge reads {{{
+# signature - unique 12-character id for the environment files a merge reads {{{
 #
-# A cached manifest is found by a file name carrying this, so it covers what
-# the merge reads and nothing about where the checkout sits.  The kit is
-# asked each time rather than memoized with the files, because load reads
-# the kit's name through a merge before the kit is set.
+# A cached manifest is found by a file name carrying this, so it covers the
+# hierarchy files and nothing about where the checkout sits.  A manifest type
+# that merges more than these signs the rest itself.
 sub signature {
-	my ($self) = @_;
-	my $files = $self->_memoize('__signature_files', sub {
+	return $_[0]->_memoize( sub {
 		my ($self) = @_;
 		my $sha = Digest::SHA->new(1);
 		$sha->add(join("\0", $self->name, $self->type, ''));
@@ -959,10 +958,8 @@ sub signature {
 			$sha->add(($file =~ m{^/} ? '' : $file), "\0",
 				(-f $path ? slurp($path) : ''), "\0");
 		}
-		return $sha->hexdigest;
+		return substr($sha->hexdigest, 0, 12);
 	});
-	my $kit = $self->{kit} ? $self->{kit}->fingerprint : '';
-	return substr(sha1_hex("$files\0$kit"), 0, 12);
 }
 # }}}
 # deployment_slug - this environment's deployment slug {{{

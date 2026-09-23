@@ -641,6 +641,47 @@ entirely to C<< $manifest->builder->vault_paths() >>.
   my @paths = $manifest->get_vault_paths();
   print scalar @paths; # prints the number of Vault paths
 
+=head2 signature
+
+  my $sig = $manifest->signature();
+
+Returns the 12-character hexadecimal signature this manifest's cached file
+is named by (see L</_generate_file_name>).  It covers what this type's merge
+reads, so a cached file is taken only by a merge that would read the same
+inputs.
+
+This base implementation is for the types that merge the kit's files.  The
+kit's blueprint picks those, local ops files among them, and only running it
+names them.  So the signature hashes, beyond the environment's own
+L<signature|Genesis::Env/signature>:
+
+=over 4
+
+=item * the kit's L<fingerprint|Genesis::Kit/fingerprint>, when a kit is
+loaded, and
+
+=item * the checkout the files are read from (C<< $env->path >>).
+
+=back
+
+Such a manifest is therefore cached per checkout, and a changed local ops
+file in another checkout is never answered with this one's merge.  The
+environment-only types (L<Genesis::Env::Manifest::PartialEnvironment>,
+L<Genesis::Env::Manifest::UnevaluatedEnvironment>) override this with the
+environment's signature alone, so they are shared across checkouts.
+
+The default is the conservative one, so a new type that merges more than
+the environment's files is signed safely without overriding anything.
+
+B<Returns:> string (12 hex characters).
+
+B<Errors:> None of its own.
+
+B<Examples:>
+
+  print $env->manifest_provider->unevaluated->signature;
+  # prints e.g. '9ded6e1d9226'
+
 =head1 ABSTRACT METHODS
 
 Methods that derived classes B<must> implement. The base class dies (via
@@ -728,8 +769,8 @@ notice and should not be called directly.
   my $path = $manifest->_generate_file_name($transient_flag);
 
 Constructs the canonical on-disk path for this manifest's YAML file. The path
-is built from the environment's work directory, the environment name, a
-signature hash, the manifest type, and optionally a subset suffix.
+is built from the environment's work directory, the environment name, this
+manifest's L</signature>, the manifest type, and optionally a subset suffix.
 
 When C<$transient_flag> is true, prepends C<"transient-"> to the filename to
 indicate a temporary build artifact.

@@ -119,8 +119,8 @@ EOF
 		'same env name in different types has different signature');
 };
 
-subtest 'the signature covers everything the merge reads' => sub {
-	plan tests => 4;
+subtest 'the signature covers every environment file the merge reads' => sub {
+	plan tests => 3;
 
 	# A cached manifest is found by its file name, and the name carries the
 	# signature, so the signature has to change whenever the merge would read
@@ -149,14 +149,9 @@ subtest 'the signature covers everything the merge reads' => sub {
 	isnt($sig->($top), $first,
 		'a changed parent file changes it, though the leaf is untouched');
 
-	# Each of these compares one checkout before and after, so the path the
-	# checkout sits at cannot be what tells the two apart.
-	my $kit_top    = $site->(%files);
-	my $kit_before = $sig->($kit_top);
-	put_file($kit_top->path('dev/manifest.yml'),
-		slurp($kit_top->path('dev/manifest.yml'))."\n# edited\n");
-	isnt($sig->($kit_top), $kit_before, 'and so does a changed dev kit file');
-
+	# Compared in one checkout before and after, so the path the checkout
+	# sits at cannot be what tells the two apart.  The kit is signed by the
+	# manifest types that merge it, in genesis_env_manifest-signature.t.
 	my $leaf_top    = $site->(%files);
 	my $leaf_before = $sig->($leaf_top);
 	put_file($leaf_top->path('us-west.yml'),
