@@ -66,6 +66,34 @@ cpanm -n Devel::Cover Template PPI::HTML Pod::Coverage::CountParents
 
 ---
 
+Test tiers:
+
+The manifest sorts every test into a tier, and `make test` runs them in order:
+the sanity tier, then the unit tier side by side (`TEST_JOBS`, one per
+processor by default), then the integration and e2e tiers one at a time.
+Every tier reads stdin from `/dev/null`.
+
+- A **unit** test calls the code under test directly, with record fixtures and
+  stubs.  It starts no vault server and no listener, spawns no `bin/genesis`,
+  and writes nothing outside its own temporary directory, though a private
+  local git repository is allowed.  Unit tests run in parallel, so one that
+  breaks these rules races the others.  Some files under `unit-tests/` still
+  start a vault or run the CLI; each one's work area keeps them apart for
+  now, and they move to the integration tier, or drop the vault, as they
+  are reworked.
+- An **integration** test uses the harness with the vault and the CLI.
+- An **e2e** test is a scenario story: several commands over one setup,
+  asserting everything its states show.
+
+Each test process works in `t/tmp/<pid>`, which `helper` sets up as it loads
+and removes as the process ends; its HOME, its vaults' pid files and anything
+else it writes go there.  A process that dies without ending cleanly leaves
+its directory behind, and the next test to start removes it and stops the
+vaults it recorded.  Set `GENESIS_TEST_KEEP_TMP=1` to keep the directory
+for inspection.
+
+---
+
 Profiling a test file:
 
 To see where a test file's time goes, load `Harness::Profile` through

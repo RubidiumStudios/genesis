@@ -4,6 +4,16 @@
 TEST_MANIFEST ?= t/test-manifest.txt
 TESTS ?= t/*/*.t
 
+# Unit tests run side by side, one per processor unless told otherwise;
+# integration and e2e tests run one at a time.  getconf answers on macOS
+# and Linux alike.
+TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+
+# Every tier reads stdin from /dev/null, so a run started from a background
+# shell or CI behaves as one started in a terminal: fake_tty's script call
+# cannot query a socket, and a kit hook that prompts would wait on one.
+TEST_STDIN = < /dev/null
+
 # Coverage report format (html, json, text)
 COVERAGE_REPORT_FORMAT ?= html
 
@@ -50,7 +60,9 @@ coverage:
 test: sanity-test
 	@echo "Running all tests from manifest..."
 	@t/bin/test-state begin
-	@prove -lf $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests unit-tests integration-tests e2e-tests)
+	@prove -lf $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests) $(TEST_STDIN)
+	@prove -lf -j$(TEST_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
+	@prove -lf $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests e2e-tests) $(TEST_STDIN)
 	@t/bin/test-state commit
 
 # Point git at the tracked hooks.  Hooks live in .git/hooks by default,
@@ -73,15 +85,15 @@ end-testing:
 
 unit-tests: sanity-test
 	@echo "Running unit tests (library/module level)..."
-	@SKIP_SECRETS_TESTS=yes prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests)
+	@SKIP_SECRETS_TESTS=yes prove -l -j$(TEST_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
 
 integration-tests: sanity-test
 	@echo "Running integration tests (multi-component)..."
-	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests)
+	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests) $(TEST_STDIN)
 
 e2e-tests: sanity-test
 	@echo "Running e2e tests (full workflows)..."
-	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests)
+	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests) $(TEST_STDIN)
 
 test-quick: unit-tests
 
@@ -92,7 +104,7 @@ test-fail-fast: sanity-test
 	@echo "Running all tests from manifest (fail-fast)..."
 	@for t in $$(t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests unit-tests integration-tests e2e-tests); do \
 		echo "+ $$t"; \
-		prove -l $$t || { echo "STOP: $$t failed; bailing per fail-fast policy"; exit 1; }; \
+		prove -l $$t $(TEST_STDIN) || { echo "STOP: $$t failed; bailing per fail-fast policy"; exit 1; }; \
 	done
 
 test-secrets: sanity-test
