@@ -898,6 +898,14 @@ sub is_dev {
 	return 0;
 }
 # }}}
+# fingerprint - what changes whenever the kit's content does {{{
+#
+# A compiled kit is an immutable tarball, so its name and version are its
+# content.
+sub fingerprint {
+	return $_[0]->id;
+}
+# }}}
 # }}}
 
 1;

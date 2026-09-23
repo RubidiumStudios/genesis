@@ -119,6 +119,51 @@ EOF
 		'same env name in different types has different signature');
 };
 
+subtest 'the signature covers everything the merge reads' => sub {
+	plan tests => 4;
+
+	# A cached manifest is found by its file name, and the name carries the
+	# signature, so the signature has to change whenever the merge would read
+	# something different and stay put whenever it would read the same.
+	my $site = sub {
+		my (%files) = @_;
+		my $top = make_top(name => 'thing', no_vault => 1);
+		cp_kit('t/src/simple', $top);
+		put_file($top->path($_), $files{$_}) for keys %files;
+		return $top;
+	};
+	my %files = (
+		'us.yml'      => "---\nparams:\n  region: one\n",
+		'us-west.yml' => "---\nkit:\n  name: dev\n  version: latest\n"
+		               . "genesis:\n  env: us-west\n",
+	);
+	my $sig = sub {Genesis::Top->new($_[0]->path, no_vault => 1)
+		->load_env('us-west')->signature};
+
+	my $top   = $site->(%files);
+	my $first = $sig->($top);
+	is($sig->($site->(%files)), $first,
+		'the same files in another checkout give the same signature');
+
+	put_file($top->path('us.yml'), "---\nparams:\n  region: two\n");
+	isnt($sig->($top), $first,
+		'a changed parent file changes it, though the leaf is untouched');
+
+	# Each of these compares one checkout before and after, so the path the
+	# checkout sits at cannot be what tells the two apart.
+	my $kit_top    = $site->(%files);
+	my $kit_before = $sig->($kit_top);
+	put_file($kit_top->path('dev/manifest.yml'),
+		slurp($kit_top->path('dev/manifest.yml'))."\n# edited\n");
+	isnt($sig->($kit_top), $kit_before, 'and so does a changed dev kit file');
+
+	my $leaf_top    = $site->(%files);
+	my $leaf_before = $sig->($leaf_top);
+	put_file($leaf_top->path('us-west.yml'),
+		$files{'us-west.yml'}."params:\n  extra: yes\n");
+	isnt($sig->($leaf_top), $leaf_before, 'as a changed leaf always did');
+};
+
 subtest 'deployment_name' => sub {
 	plan tests => 2;
 

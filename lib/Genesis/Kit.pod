@@ -1225,6 +1225,29 @@ B<Examples:>
   print $kit->is_dev();
   # prints '0' for compiled kits; '1' for dev kits
 
+=head2 fingerprint
+
+  my $fp = $kit->fingerprint();
+
+Returns a string that changes whenever the kit's content does.
+L<Genesis::Env/signature> folds it into the name its cached manifests are
+found by.  A compiled kit is an immutable tarball, so this base
+implementation returns L</id>, its name and version.
+L<Genesis::Kit::Dev> overrides it with a hash of the directory's files.
+
+B<Returns:>
+
+A string: C<"name/version"> for a compiled kit.
+
+B<Errors:>
+
+None.
+
+B<Examples:>
+
+  print $kit->fingerprint();
+  # prints 'cf/2.8.0' for a compiled kit
+
 =head1 ABSTRACT METHODS
 
 Concrete subclasses must implement the following methods. Calling them on a

@@ -140,6 +140,36 @@ B<Examples:>
       print "Running from dev/ directory\n";
   }
 
+=head2 fingerprint
+
+  my $fp = $kit->fingerprint();
+
+Returns a SHA-1 hash of every file under the kit's C<dev/> directory, by
+relative path and content, in path order. It overrides
+L<Genesis::Kit/fingerprint>, since a dev kit is edited in place and its
+name and version (always C<dev>/C<latest>) say nothing about its content.
+L<Genesis::Env/signature> folds it into the name cached manifests are found
+by, so an edited kit file is never answered with a merge from before the
+edit.
+
+The hash is taken once per object, as L</extract> copies the directory
+once per object, so it describes the kit the process actually uses.
+Symbolic links are followed.
+
+B<Returns:>
+
+A 40-character hexadecimal string.
+
+B<Errors:>
+
+Dies through L<Digest::SHA> if a file under the directory cannot be read.
+
+B<Examples:>
+
+  my $kit = Genesis::Kit::Dev->new('/path/to/dev');
+  print $kit->fingerprint();
+  # prints e.g. 'b6e7a4ccac87205da5216f8f2e0f5604f263bf49'
+
 =head2 kit_bug
 
   $kit->kit_bug(@msg);
@@ -226,6 +256,32 @@ B<Examples:>
   # Subsequent calls are safe and do nothing:
   $kit->extract();
   $kit->extract();
+
+=head1 INTERNAL METHODS
+
+These methods are internal to the implementation. They may change without
+notice and should not be called directly.
+
+=head2 _fingerprint
+
+  my $fp = $kit->_fingerprint();
+
+Computes the hash L</fingerprint> memoizes: walks the source directory,
+following symbolic links, and hashes each file's path relative to the
+directory and its content, in sorted path order.
+
+B<Returns:>
+
+A 40-character hexadecimal string.
+
+B<Errors:>
+
+Dies through L<Digest::SHA> if a file cannot be read.
+
+B<Examples:>
+
+  # Internal; call fingerprint instead.
+  my $fp = $kit->_fingerprint();
 
 =head1 SEE ALSO
 

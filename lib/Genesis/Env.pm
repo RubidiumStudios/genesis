@@ -945,19 +945,27 @@ sub path   { shift->top->path(@_); }
 # }}}
 
 # Information Lookup
-# signature - unique 12-character id for the environment based on name, type and file {{{
+# signature - unique 12-character id for everything the environment's merge reads {{{
+#
+# A cached manifest is found by a file name carrying this, so it covers what
+# the merge reads and nothing about where the checkout sits.  The kit is
+# asked each time rather than memoized with the files, because load reads
+# the kit's name through a merge before the kit is set.
 sub signature {
-	return $_[0]->_memoize( sub {
+	my ($self) = @_;
+	my $files = $self->_memoize('__signature_files', sub {
 		my ($self) = @_;
-		my $absfile = $self->path($self->file);
-		my $sig_string = sprintf("%s/%s@%s:%s",
-			$self->name,
-			$self->type,
-			$absfile,
-			(-f $absfile ? slurp($absfile) : '')
-		);
-		return substr(sha1_hex($sig_string),0,12)
+		my $sha = Digest::SHA->new(1);
+		$sha->add(join("\0", $self->name, $self->type, ''));
+		for my $file ($self->actual_environment_files) {
+			my $path = $file =~ m{^/} ? $file : $self->path($file);
+			$sha->add(($file =~ m{^/} ? '' : $file), "\0",
+				(-f $path ? slurp($path) : ''), "\0");
+		}
+		return $sha->hexdigest;
 	});
+	my $kit = $self->{kit} ? $self->{kit}->fingerprint : '';
+	return substr(sha1_hex("$files\0$kit"), 0, 12);
 }
 # }}}
 # deployment_slug - this environment's deployment slug {{{
