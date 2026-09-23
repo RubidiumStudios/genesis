@@ -150,7 +150,7 @@ subtest 'exclusion manifest' => sub {
 		"placeholder entry read");
 	like($x->{'UUID::Tiny'}{reason}, qr/\S/, "reasons are captured");
 
-	ok(!exists $x->{'Genesis::CI::Propagation'},
+	ok(!exists $x->{'Genesis::CI::Walk'},
 		"a clean module in a deferred namespace is not excluded");
 	ok(!exists $x->{'Genesis::CI::Legacy'},
 		"nor one that was fixed rather than deferred");

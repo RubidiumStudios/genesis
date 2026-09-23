@@ -217,8 +217,7 @@ subtest 'the source of resolve_branch quotes no seventh state' => sub {
 subtest 'the retired helper\'s forced overwrite has not come back' => sub {
 	plan tests => 1;
 
-	my $src = join('', map { slurp($_) }
-		qw(lib/Service/Git.pm lib/Genesis/CI/Propagation.pm));
+	my $src = slurp('lib/Service/Git.pm');
 	my @forced = ($src =~ m{(\+refs/heads/[^:\s]+:refs/heads/\$branch)}g);
 	cmp_deeply(\@forced, [],
 		'no forced overwrite of a named local head is written anywhere');

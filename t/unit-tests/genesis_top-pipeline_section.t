@@ -57,7 +57,7 @@ subtest 'the pipeline section loads and the ci section does not' => sub {
 subtest 'the code namespace is unchanged' => sub {
 	plan tests => 3;
 
-	for my $module (qw/Genesis::CI::Compiler Genesis::CI::Propagation
+	for my $module (qw/Genesis::CI::Compiler Genesis::CI::Walk
 	                   Genesis::CI::ProviderCompiler/) {
 		(my $path = "$module.pm") =~ s{::}{/}g;
 		ok -f "lib/$path", "$module is on disk at the path its name derives";

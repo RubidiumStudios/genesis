@@ -54,7 +54,7 @@ subtest 'the forced single-branch helper is gone' => sub {
 		'no forced refspec writes a named local branch');
 
 	my $callers = join('', map { slurp($_) }
-		qw(lib/Genesis/CI/Propagation.pm lib/Genesis/Env.pm
+		qw(lib/Genesis/CI/Walk.pm lib/Genesis/Env.pm
 		   lib/Genesis/Commands/Pipelines.pm lib/Genesis/Commands/Env.pm));
 	unlike($callers, qr{->fetch_branch\(}, 'no caller reaches the helper');
 };

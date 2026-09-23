@@ -3216,7 +3216,7 @@ only when unset.
 
 =head1 SEE ALSO
 
-L<Genesis::Top>, L<Genesis::Commands::Env>, L<Genesis::CI::Propagation>
+L<Genesis::Top>, L<Genesis::Commands::Env>, L<Genesis::CI::Walk>
 
 =head1 AUTHOR
 
