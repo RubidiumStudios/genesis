@@ -1,0 +1,56 @@
+=head1 NAME
+
+Harness::Deps - record which of the repository's files each test really loads
+
+=head1 SYNOPSIS
+
+  GENESIS_TEST_DEPS=t/tmp/deps.log \
+  PERL5OPT="-I$PWD/t -MHarness::Deps" \
+    prove -l t/unit-tests/genesis_kit-core.t < /dev/null
+
+  # t/tmp/deps.log:
+  #   t/unit-tests/genesis_kit-core.t    lib/Genesis/Kit.pm
+  #   t/unit-tests/genesis_kit-core.t    t/helper.pm
+  #   ...
+
+=head1 DESCRIPTION
+
+Loaded through C<PERL5OPT>, so every genesis child a test runs loads it too,
+and active only while C<GENESIS_TEST_DEPS> names a log file.  At exit, each
+test file and each genesis child appends one line for each file under
+F<lib/> and F<t/> it loaded, tagged with the test file it belongs to.  A
+child inherits the tag through C<HARNESS_DEPS_ROOT>, which the test process
+sets.
+
+F<t/bin/affected-tests> reads the log to choose the tests a change can reach.
+A static reading of C<use> and C<require> cannot do that for the CLI, which
+loads its commands by name at run time; this records what was really loaded,
+by the test and by every genesis it ran.
+
+Only a test file (a name ending in C<.t>) and C<bin/genesis> record anything.
+Every other perl that inherits C<PERL5OPT>, C<prove> among them, loads this
+and does nothing.
+
+=head2 The log
+
+Tab-separated, one line per test file and loaded file:
+
+  TEST  FILE
+
+C<TEST> is the test file as it was run.  C<FILE> is relative to the
+repository and always under F<lib/> or F<t/>.  A file is named by the module
+name it was required as, looked for under F<lib/> and then F<t/>, so a
+module from elsewhere is never named and a path relative to a directory the
+test has since left is never trusted.  The recorder does not name itself.
+
+Lines from files running side by side are written under an exclusive lock,
+so they never interleave.
+
+=head1 LIMITATIONS
+
+Only Perl files are recorded.  A test that reads a fixture, a kit, or a
+script under F<t/bin> is not tied to it by this record, so
+F<t/bin/affected-tests> treats a change outside F<lib/> and the test files
+as reaching every test.
+
+=cut
