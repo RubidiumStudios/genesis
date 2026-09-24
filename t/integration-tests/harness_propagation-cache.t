@@ -90,13 +90,15 @@ subtest 'what a build armed is armed again on restore' => sub {
 subtest 'a build the cache cannot key is built afresh' => sub {
 	plan tests => 2;
 
-	# Counted rather than compared by commit: two builds of the same
-	# arguments in the same second make the same commits either way.
-	my $entries = sub {my @e = glob("$helper::TOPDIR/t/tmp/fixture-cache/*"); scalar @e};
-	my $before = $entries->();
+	# Asked of this build's own entry rather than by comparing commits, since
+	# two builds of the same arguments in the same second make the same
+	# commits either way, or by counting entries, since files running beside
+	# this one keep entries of their own meanwhile.
+	my @args = (envs => ['uncached'], vault => 0);
 	local $ENV{GENESIS_HARNESS_NO_CACHE} = 1;
-	make_harness(envs => ['uncached'], vault => 0) for 1 .. 2;
-	is($entries->(), $before, 'with the cache turned off, nothing is kept to restore from');
+	make_harness(@args) for 1 .. 2;
+	ok(!-e Harness::Propagation::_cache_dir('make_harness', @args),
+		'with the cache turned off, nothing is kept to restore from');
 
 	delete local $ENV{GENESIS_HARNESS_NO_CACHE};
 	my $c = make_harness(envs => ['qa'], vault => 0, answers => sub {1});

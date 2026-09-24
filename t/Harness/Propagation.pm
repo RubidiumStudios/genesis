@@ -5627,6 +5627,16 @@ sub _plain {
 	return 0;
 }
 
+# _cache_dir - where the cache keeps one builder call's harness
+sub _cache_dir {
+	my ($name, @args) = @_;
+	require Digest::SHA;
+	my $key = Digest::SHA::sha1_hex(join("\0", $name,
+		JSON::PP->new->canonical->encode(@args % 2 ? \@args : {@args}),
+		_source_fingerprint()));
+	return "$helper::TOPDIR/t/tmp/fixture-cache/$key";
+}
+
 sub _cached {
 	my ($name, $build, @args) = @_;
 	require Scalar::Util;
@@ -5636,11 +5646,7 @@ sub _cached {
 		|| !_plain(\@args);
 
 	local $CACHE_DEPTH = 1;
-	require Digest::SHA;
-	my $key = Digest::SHA::sha1_hex(join("\0", $name,
-		JSON::PP->new->canonical->encode(@args % 2 ? \@args : {@args}),
-		_source_fingerprint()));
-	my $dir = "$helper::TOPDIR/t/tmp/fixture-cache/$key";
+	my $dir = _cache_dir($name, @args);
 	return _restore_harness($dir) if -f "$dir/harness.json";
 
 	my $armed = @ARMED;
