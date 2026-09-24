@@ -176,7 +176,6 @@ EOF
 	is($bosh, undef, 'from_exodus() returns undef when exodus data is not for BOSH');
 
 };
-teardown_vault($vault_target);
 
 subtest 'Director constructor from_alias with BOSH config' => sub {
 	plan tests => 5;
