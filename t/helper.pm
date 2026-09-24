@@ -110,6 +110,9 @@ sub _sweep_work_areas {
 # }}}
 
 END {
+	# $? is the test's exit status by now, and the backticks below set it, so
+	# a cleanup that fails would otherwise fail a test that passed.
+	local $?;
 	if ($TMP_OWNER && $TMP_OWNER == $$) {
 		teardown_vault();
 		`rm -rf "$TMP"` unless $ENV{GENESIS_TEST_KEEP_TMP};
