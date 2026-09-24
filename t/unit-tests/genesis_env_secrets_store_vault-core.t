@@ -286,4 +286,42 @@ subtest 'validate() skips read when secret already has value' => sub {
 	is($result[0], 'ok', "validate() returns validate_value result");
 };
 
+subtest 'an export with nothing under the base warns, whatever the KV version' => sub {
+	# KV v1 fails the export of a path whose secrets were deleted, and KV v2
+	# answers it with an empty object, since a deleted secret keeps its path.
+	# An environment that exists and finds nothing under its base is the case
+	# the warning is for, in either answer.
+	{
+		package MockLiveEnv;
+		our @ISA = ('MockEnv');
+		sub exists { 1 }
+	}
+	require Test::Output;
+
+	my $export = '{}';
+	my $store_with = sub {
+		my ($json) = @_;
+		$export = $json;
+		make_store(env => MockLiveEnv->new(), service => Mock->new(
+			query => sub { ($export, 0, '') },
+		));
+	};
+
+	my $store = $store_with->('{}');
+	my $base  = $store->base =~ s{^/}{}r;
+	like(Test::Output::stderr_from(sub {$store->store_data}),
+		qr/Vault export returned no data for \Q${\ $store->base}\E/,
+		'an empty export warns, as a failed one does');
+
+	$store = $store_with->(qq({"${base}fixed/ca":{"certificate":"x"}}));
+	unlike(Test::Output::stderr_from(sub {$store->store_data}),
+		qr/returned no data/, 'an export holding a secret under the base does not');
+
+	$store = $store_with->('{"secret/root/ca":{"certificate":"x"}}');
+	my $data;
+	like(Test::Output::stderr_from(sub {$data = $store->store_data}),
+		qr/returned no data/, 'nor does the root CA alone count as data under the base');
+	ok(exists $data->{'secret/root/ca'}, 'though the root CA it found is still returned');
+};
+
 done_testing;

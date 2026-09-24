@@ -121,9 +121,15 @@ sub store_data {
 				grep {$_} ($self->base, $self->root_ca_path)
 			)
 		);
-		if (defined $data) {
-			$self->{__data} = $data;
-		} else {
+		$self->{__data} = $data if defined $data;
+
+		# Nothing under the base is the same case however it arrives: KV v1
+		# fails the export of a path whose secrets were deleted, and KV v2
+		# answers it with an empty object, because a deleted secret keeps its
+		# path.  Root CA data found beside it is kept, but is not the
+		# environment's own.
+		my $base = $self->base =~ s{^/}{}r;
+		unless (defined $data && grep {index(s{^/}{}r, $base) == 0} keys %$data) {
 			# Default behaviour: warn when an existing env's vault
 			# unexpectedly returns nothing.  Callers that already
 			# know the store should be empty (fresh env's purge or
