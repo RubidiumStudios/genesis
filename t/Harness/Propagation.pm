@@ -3565,19 +3565,31 @@ sub snapshot_w {
 	my $cwd = Cwd::getcwd();
 	chdir $dir or die "cannot return to $dir: $!\n" unless defined $cwd;
 
-	my ($branch) = run({dir => $dir}, 'git', 'rev-parse', '--abbrev-ref', 'HEAD');
-	my $head     = ref_in($dir, 'HEAD');
-	my ($status) = run({dir => $dir}, 'git', 'status', '--porcelain');
-	my ($index)  = run({dir => $dir}, 'git', 'diff-index', '--cached', '--name-status', 'HEAD');
-	chomp for grep {defined} ($branch, $status, $index);
+	# One status call answers all four, where four git calls did before, and
+	# the snapshot is taken on either side of every command a row runs.  The
+	# headers name the branch and HEAD, every entry line is the tree, and an
+	# entry whose first status letter is not '.' is staged against HEAD,
+	# which is what the index part asks.
+	my ($report) = run({dir => $dir}, 'git', 'status', '--porcelain=v2', '--branch');
+	my ($branch, $head, @tree, @index);
+	for my $line (split /\n/, ($report // '')) {
+		if ($line =~ /^# branch\.head (.+)$/) {
+			$branch = $1 eq '(detached)' ? 'HEAD' : $1;
+		} elsif ($line =~ /^# branch\.oid (.+)$/) {
+			$head = $1 eq '(initial)' ? undef : $1;
+		} elsif ($line !~ /^#/) {
+			push @tree, $line;
+			push @index, $line if $line =~ /^[12u] [^.]/;
+		}
+	}
 
 	return {
 		dir    => $dir,
 		cwd    => $cwd,
 		branch => $branch,
 		head   => $head,
-		status => $status // '',
-		index  => $index  // '',
+		status => join("\n", @tree),
+		index  => join("\n", @index),
 	};
 }
 

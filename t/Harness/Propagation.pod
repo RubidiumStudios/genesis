@@ -1126,7 +1126,10 @@ because a command that switched away can leave the process standing in a
 directory the switch removed, and the git reads below run through C<pushd>,
 which cannot return to a directory that is gone.  Where that has happened the
 snapshot steps back into the copy and still answers the directory as
-undefined.
+undefined.  The branch, HEAD, status and index all come from one C<git status
+--porcelain=v2 --branch>, since the snapshot is taken on either side of
+every command a row runs: the index is the status entries staged against
+HEAD, a detached HEAD reads as C<HEAD>, and an unborn branch has no HEAD sha.
 
 =head2 assert_w_restored($w, $name)
 
