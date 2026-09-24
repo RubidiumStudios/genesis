@@ -5,8 +5,9 @@
 #
 # Asks t/bin/affected-tests for each tier's tests that the change since BASE
 # (HEAD by default: what is uncommitted) reaches, and runs them as make test
-# would: the unit tier side by side on JOBS processes, the others one at a
-# time, every tier reading stdin from /dev/null.  Stops at the first tier
+# would: the unit tier side by side on JOBS processes, the integration tier
+# on JOBS up to eight, the others one at a time, every tier reading stdin
+# from /dev/null.  Stops at the first tier
 # that fails, and says so when no test is reached at all.
 set -u
 cd "$(dirname "$0")/../.." || exit 2
@@ -22,6 +23,8 @@ for tier in sanity-tests unit-tests integration-tests e2e-tests; do
 	echo "== $tier: $(wc -w <<<"$tests" | tr -d ' ') test file(s) reached"
 	if [[ "$tier" == unit-tests ]]; then
 		prove -l --state=slow,save -j"$jobs" $tests < /dev/null || exit 1
+	elif [[ "$tier" == integration-tests ]]; then
+		prove -l --state=slow,save -j"$(( jobs < 8 ? jobs : 8 ))" $tests < /dev/null || exit 1
 	else
 		prove -l --state=save $tests < /dev/null || exit 1
 	fi

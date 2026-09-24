@@ -70,8 +70,10 @@ Test tiers:
 
 The manifest sorts every test into a tier, and `make test` runs them in order:
 the sanity tier, then the unit tier side by side (`TEST_JOBS`, one per
-processor by default), then the integration and e2e tiers one at a time.
-Every tier reads stdin from `/dev/null`.
+processor by default), then the integration tier side by side
+(`INTEGRATION_JOBS`, `TEST_JOBS` up to eight), then the e2e tier one file at
+a time, since several e2e files work in the same fixture repository under
+`t/repos`.  Every tier reads stdin from `/dev/null`.
 
 - A **unit** test calls the code under test directly, with record fixtures and
   stubs.  It starts no vault server and no listener, spawns no `bin/genesis`,
@@ -81,7 +83,10 @@ Every tier reads stdin from `/dev/null`.
   start a vault or run the CLI; each one's work area keeps them apart for
   now, and they move to the integration tier, or drop the vault, as they
   are reworked.
-- An **integration** test uses the harness with the vault and the CLI.
+- An **integration** test uses the harness with the vault and the CLI.  It
+  runs beside other integration tests, so it keeps to what is its own: its
+  work area, the vault it started, the director port it was given, and the
+  harness directories it built.
 - An **e2e** test is a scenario story: several commands over one setup,
   asserting everything its states show.
 

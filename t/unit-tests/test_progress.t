@@ -60,9 +60,9 @@ EOS
 	like($said, qr/unit-tests\s+2 \/ 3\s+running/, 'a failed file counts as done in its tier');
 	like($said, qr/failed so far:\n\s+t\/unit-tests\/b\.t/, 'and is named among the failures');
 	like($said, qr/integration-tests\s+0 \/ 2\s*\n/, 'a tier not started shows none done');
-	# c.t's 60 s is shared by the two unit jobs, and the rest run one at a
-	# time: 30 + 120 + 180 + 60 = 390 s, about 7 minutes.
-	like($said, qr/about 7 min left/, "the time left comes from the last run's times");
+	# c.t's 60 s and x.t and y.t's 300 s are each shared by the two jobs,
+	# and e2e runs one at a time: 30 + 150 + 60 = 240 s, about 4 minutes.
+	like($said, qr/about 4 min left/, "the time left comes from the last run's times");
 };
 
 subtest 'a tier a later tier has followed is over' => sub {

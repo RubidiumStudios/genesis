@@ -4,10 +4,13 @@
 TEST_MANIFEST ?= t/test-manifest.txt
 TESTS ?= t/*/*.t
 
-# Unit tests run side by side, one per processor unless told otherwise;
-# integration and e2e tests run one at a time.  getconf answers on macOS
+# Unit tests run side by side, one per processor unless told otherwise, and
+# integration tests side by side too, on at most eight, the most they have
+# been proved at.  e2e tests run one at a time, since several of them work
+# in the same fixture repository under t/repos.  getconf answers on macOS
 # and Linux alike.
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+INTEGRATION_JOBS ?= $(shell n=$(TEST_JOBS); [ $$n -gt 8 ] && n=8; echo $$n)
 
 # Every tier reads stdin from /dev/null, so a run started from a background
 # shell or CI behaves as one started in a terminal: fake_tty's script call
@@ -75,7 +78,8 @@ test: sanity-test
 	@mkdir -p t/tmp && : > $(TEST_LOG)
 	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests) $(TEST_STDIN)
 	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=slow,save -j$(TEST_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
-	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests e2e-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=slow,save -j$(INTEGRATION_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests) $(TEST_STDIN)
 	@sort -u t/.test-deps.new > t/.test-deps && rm -f t/.test-deps.new
 	@t/bin/test-state commit
 
@@ -126,7 +130,7 @@ unit-tests: sanity-test
 
 integration-tests: sanity-test
 	@echo "Running integration tests (multi-component)..."
-	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests) $(TEST_STDIN)
+	@prove -l -j$(INTEGRATION_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests) $(TEST_STDIN)
 
 e2e-tests: sanity-test
 	@echo "Running e2e tests (full workflows)..."
