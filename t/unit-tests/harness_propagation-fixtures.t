@@ -211,7 +211,9 @@ subtest 'the fixture answers the two vault addresses' => sub {
 subtest 'a broken read refuses rather than answering stale' => sub {
 	plan tests => 4;
 
-	my $h = make_harness(envs => ['qa']);
+	# Asked for at once, since the first read below goes straight to the
+	# vault rather than through the harness, which would have started it.
+	my $h = make_harness(envs => ['qa'], vault => 1);
 	no_secret($h->env_path('qa') . ':git.commit',
 		'a fresh harness starts on an empty exodus mount');
 

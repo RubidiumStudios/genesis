@@ -346,6 +346,7 @@ unit-tests/pod_gate-check.t                  # the checks, and what stays adviso
 integration-tests/helper-secrets_engine.t   # the suite's vault runs the engine asked for, installed, never fetched
 integration-tests/helper-teardown_vault.t   # teardown_vault stops the vaults a caller names
 integration-tests/harness_propagation-cache.t   # a restored harness is the build it was kept from
+integration-tests/harness_propagation-lazy_vault.t   # a harness starts its vault when something first needs it
 # Genesis.pm tests requiring filesystem/network:
 integration-tests/genesis-command.t  # Command execution (run, curl, lines, fake_tty)
 integration-tests/genesis-data.t     # Data file operations (YAML/JSON load/save)

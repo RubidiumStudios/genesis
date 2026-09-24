@@ -738,6 +738,18 @@ sub make_harness {
 	die "a harness is chained or fanned, not both\n"
 		if $opts{chained} && defined $opts{fanned};
 
+	# The mount is cleared whole as the vault fixture attaches, so a mount
+	# shorter than the harness's own default is refused.  A row that named
+	# /secret/ would take every record the fixture vault holds with it,
+	# including the ones another harness in the same file is standing on.
+	# Refused here, as the harness is built, whether or not it ever starts a
+	# vault, since the vault now starts when first needed.
+	my $mount = $opts{exodus_mount} // $DEFAULT_EXODUS_MOUNT;
+	die sprintf("make_harness will not clear the exodus mount %s, because "
+		. "it is shorter than the default %s and the clearing takes the "
+		. "whole subtree\n", $mount, $DEFAULT_EXODUS_MOUNT)
+		if length($mount) < length($DEFAULT_EXODUS_MOUNT);
+
 	# Nothing in the environment gets to say which repository the git below
 	# runs against.  This is the harness's one entry point, so a scrub here
 	# covers every helper a row reaches for afterwards.
@@ -803,7 +815,12 @@ sub make_harness {
 	$self->_clone('b');
 	$self->_seed_control;
 
-	$self->fixture_vault if (defined $opts{vault} ? $opts{vault} : 1);
+	# The vault starts when something first needs it: a record written, a
+	# record read, or a command run.  A harness built for its repositories
+	# alone, as most unit tests build one, then starts no server.  Asked for,
+	# it starts now; refused, a command runs with none.
+	$self->{vault_off} = 1 if defined $opts{vault} && !$opts{vault};
+	$self->fixture_vault if $opts{vault};
 	$self->github_double if $opts{github};
 
 	return $self;
@@ -2522,15 +2539,6 @@ sub fixture_vault {
 	my ($self) = @_;
 	return $self->{vault_target} if $self->{vault_target};
 
-	# The mount is cleared whole as the fixture attaches, so a mount shorter
-	# than the harness's own default is refused.  A row that named /secret/
-	# would take every record the fixture vault holds with it, including the
-	# ones another harness in the same file is standing on.
-	die sprintf("make_harness will not clear the exodus mount %s, because "
-		. "it is shorter than the default %s and the clearing takes the "
-		. "whole subtree\n", $self->exodus_mount, $DEFAULT_EXODUS_MOUNT)
-		if length($self->exodus_mount) < length($DEFAULT_EXODUS_MOUNT);
-
 	my $target = helper::vault_start('genesis-propagation-harness');
 	$self->{vault_target} = $target;
 	$self->{vault_url}    = $helper::VAULT_URL{$target};
@@ -3757,6 +3765,10 @@ sub run_genesis {
 	$dir .= "/$opts{dir}" if $opts{dir};
 
 	my $w = $self->snapshot_w(copy => $copy);
+
+	# A command reads the vault, so it is started now if nothing has yet,
+	# unless the harness was built with it refused.
+	$self->fixture_vault unless $self->{vault_target} || $self->{vault_off};
 
 	# vault_read_log answers for the last run, so the log starts every run
 	# empty and nothing the harness read before this one is counted in it.

@@ -90,12 +90,13 @@ subtest 'what a build armed is armed again on restore' => sub {
 subtest 'a build the cache cannot key is built afresh' => sub {
 	plan tests => 2;
 
+	# Counted rather than compared by commit: two builds of the same
+	# arguments in the same second make the same commits either way.
+	my $entries = sub {my @e = glob("$helper::TOPDIR/t/tmp/fixture-cache/*"); scalar @e};
+	my $before = $entries->();
 	local $ENV{GENESIS_HARNESS_NO_CACHE} = 1;
-	my $a = make_harness(envs => ['qa'], vault => 0);
-	my $b = make_harness(envs => ['qa'], vault => 0);
-	my ($ta) = run({dir => $a->{r}}, 'git', 'rev-parse', 'control');
-	my ($tb) = run({dir => $b->{r}}, 'git', 'rev-parse', 'control');
-	isnt($ta, $tb, 'with the cache turned off, two builds are two builds');
+	make_harness(envs => ['uncached'], vault => 0) for 1 .. 2;
+	is($entries->(), $before, 'with the cache turned off, nothing is kept to restore from');
 
 	delete local $ENV{GENESIS_HARNESS_NO_CACHE};
 	my $c = make_harness(envs => ['qa'], vault => 0, answers => sub {1});

@@ -126,9 +126,8 @@ C<exodus_mount> names the vault subtree the harness's records hang off, and it
 defaults to C</secret/exodus/>.  A mount below that default is taken, and one
 above it is refused by name, because the vault fixture clears the mount whole
 as it attaches and a wider mount would take records the harness does not own.
-The refusal comes when the fixture attaches rather than when the option is
-read, so a harness built with C<vault =E<gt> 0> and a short mount is refused
-by the first call to C<fixture_vault> instead.
+The refusal comes as the harness is built, whether or not it ever starts a
+vault.
 
 C<Genesis::Top-E<gt>create> writes no pipeline section at all, and every row
 that reads a provider reads it out of that file, so the harness writes the
@@ -174,9 +173,14 @@ goes through a pull request is a per-environment question and there is no
 repository-wide key for it.  A harness declared as C<mode =E<gt> 'pr'> gets
 C<genesis.pipeline.require_pr> on each of its environment files instead.
 
-C<vault> defaults on, and the harness spins the suite's own vault through
-C<fixture_vault> when it does.  A row that wants no vault at all passes
-C<vault =E<gt> 0>.
+The vault starts when something first needs it, through C<fixture_vault>:
+a record written or read through the harness, or a command run through
+C<run_genesis>.  A harness built for its repositories alone, as most unit
+tests build one, starts no vault server.  C<vault =E<gt> 1> starts it as the
+harness is built, which a row needs when it reads the vault other than
+through the harness, as one that calls C<Genesis::Top-E<gt>new> on a copy
+does, since Genesis connects to the vault as it loads.  C<vault =E<gt> 0>
+keeps C<run_genesis> from starting one, so a command runs with none.
 
 C<embed =E<gt> 1> writes an executable stub at C<.genesis/bin/genesis> and
 commits it with the deployment root, which is where C<Genesis::Top::embed>

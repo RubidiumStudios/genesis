@@ -25,7 +25,7 @@ subtest 'the embedded genesis is the eighth kind and it triggers' => sub {
 
 	my $h = make_harness(
 		envs  => ['qa'], type => 'bosh',
-		kit   => 't/src/ops-blueprint', embed => 1,
+		kit   => 't/src/ops-blueprint', embed => 1, vault => 1,
 	);
 	commit_on_control($h,
 		files   => {'ops/extra.yml' => "---\nextra: fragment\n"},
@@ -50,7 +50,7 @@ subtest 'the file reaches a deployment branch' => sub {
 
 	my $h = make_harness(
 		envs  => ['qa'], type => 'bosh',
-		kit   => 't/src/ops-blueprint', embed => 1,
+		kit   => 't/src/ops-blueprint', embed => 1, vault => 1,
 	);
 	my $control = commit_on_control($h,
 		files   => {'ops/extra.yml' => "---\nextra: fragment\n"},
@@ -69,7 +69,7 @@ subtest 'the file reaches a deployment branch' => sub {
 subtest 'the set says which paths do not mean deploy me' => sub {
 	plan tests => 8;
 
-	my $h = make_harness(envs => ['qa'], type => 'bosh', kit => 't/src/ops-blueprint');
+	my $h = make_harness(envs => ['qa'], type => 'bosh', kit => 't/src/ops-blueprint', vault => 1);
 	# write_env_file renders a hash of scalars and flat lists and no deeper,
 	# and a reaction is a list of maps, so this one file is written by hand.
 	put_file($h->a . '/qa.yml', <<'EOF');
@@ -125,7 +125,7 @@ subtest 'a tracked extra path joins the set in one form' => sub {
 
 	my $h = make_harness(
 		envs => ['qa'], type => 'bosh', root => 'bosh',
-		kit  => 't/src/ops-blueprint',
+		kit  => 't/src/ops-blueprint', vault => 1,
 	);
 	write_env_file($h, 'qa',
 		root     => 'bosh',

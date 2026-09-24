@@ -51,7 +51,7 @@ sub staleness_for {
 subtest 'an applied pipeline that nothing has changed is not stale' => sub {
 	plan tests => 2;
 
-	my $h = make_harness(envs => ['lab', 'prod'], type => 'bosh');
+	my $h = make_harness(envs => ['lab', 'prod'], type => 'bosh', vault => 1);
 	my $control = commit_on_control($h,
 		files => {'ops/shared.yml' => "---\nshared: 1\n"},
 		message => 'publish', push => 1,
@@ -65,7 +65,7 @@ subtest 'an applied pipeline that nothing has changed is not stale' => sub {
 
 	# With no applied record there is nothing to be stale against, and the
 	# awaiting pipeline-apply outcome is a different read.
-	my $fresh = make_harness(envs => ['lab'], type => 'bosh');
+	my $fresh = make_harness(envs => ['lab'], type => 'bosh', vault => 1);
 	commit_on_control($fresh,
 		files => {'ops/shared.yml' => "---\nshared: 1\n"},
 		message => 'publish', push => 1,
@@ -77,7 +77,7 @@ subtest 'an applied pipeline that nothing has changed is not stale' => sub {
 subtest 'a changed pipeline-defining path names its environment' => sub {
 	plan tests => 3;
 
-	my $h = make_harness(envs => ['lab', 'prod'], type => 'bosh');
+	my $h = make_harness(envs => ['lab', 'prod'], type => 'bosh', vault => 1);
 	my $applied = commit_on_control($h,
 		files => {'ops/shared.yml' => "---\nshared: 1\n"},
 		message => 'publish', push => 1,
@@ -134,7 +134,7 @@ subtest 'the roster comes from control, not from the tree in front of us' => sub
 subtest 'a compiled set that differs from the last-read set is stale' => sub {
 	plan tests => 2;
 
-	my $h = make_harness(envs => ['lab'], type => 'bosh');
+	my $h = make_harness(envs => ['lab'], type => 'bosh', vault => 1);
 	my $applied = commit_on_control($h,
 		files => {'ops/shared.yml' => "---\nshared: 1\n"},
 		message => 'publish', push => 1,
@@ -155,7 +155,7 @@ subtest 'a compiled set that differs from the last-read set is stale' => sub {
 subtest "the last-read set is read through the environment's own vault" => sub {
 	plan tests => 2;
 
-	my $h = make_harness(envs => ['lab'], type => 'bosh');
+	my $h = make_harness(envs => ['lab'], type => 'bosh', vault => 1);
 	my $env = Genesis::Env->bare('lab', Genesis::Top->new($h->a));
 
 	# An environment that sets genesis.vault keeps its exodus record in a
@@ -190,11 +190,11 @@ subtest 'a repository with no pipeline is not stale' => sub {
 	# repository has a pipeline and no environment to resolve the mount
 	# from, which is a sentence that contradicts the repository in front of
 	# the operator.
-	my $none = make_harness(envs => ['lab'], pipeline => 'none');
+	my $none = make_harness(envs => ['lab'], pipeline => 'none', vault => 1);
 	is_deeply(staleness_for($none), [],
 		'a repository with no pipeline section reports no staleness');
 
-	my $off = make_harness(envs => ['lab'], pipeline => 0);
+	my $off = make_harness(envs => ['lab'], pipeline => 0, vault => 1);
 	is_deeply(staleness_for($off), [],
 		'and so does one whose pipeline is switched off');
 };
@@ -202,7 +202,7 @@ subtest 'a repository with no pipeline is not stale' => sub {
 subtest 'a diff git cannot take is refused, not called clean' => sub {
 	plan tests => 4;
 
-	my $h = make_harness(envs => ['lab'], type => 'bosh');
+	my $h = make_harness(envs => ['lab'], type => 'bosh', vault => 1);
 	my $missing = '0' x 40;
 	fixture_applied($h, control => $missing, provider => 'manual');
 

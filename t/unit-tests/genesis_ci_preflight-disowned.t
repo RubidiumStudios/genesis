@@ -36,7 +36,7 @@ $ENV{NOCOLOR} = 1;
 # can read it back.
 sub disowned_top {
 	my (%opts) = @_;
-	my $h = make_harness(envs => ['qa'], pipeline => $opts{pipeline} // 0);
+	my $h = make_harness(envs => ['qa'], pipeline => $opts{pipeline} // 0, vault => 1);
 	fixture_applied($h,
 		control => $h->git('a')->sha($h->control),
 		at      => '2026-09-12 14:02:11 -0400')

@@ -23,7 +23,7 @@ $ENV{NOCOLOR} = 1;
 subtest 'the two records have two paths' => sub {
 	plan tests => 5;
 
-	my $h = make_harness(envs => ['qa'], type => 'bosh');
+	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
 	my $top = Genesis::Top->new($h->a);
 	my $env = Genesis::Env->bare('qa', $top);
 
@@ -44,7 +44,7 @@ subtest 'the two records have two paths' => sub {
 subtest 'each accessor reads its own path' => sub {
 	plan tests => 6;
 
-	my $h = make_harness(envs => ['qa'], type => 'bosh');
+	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
 	my $control = commit_on_control($h,
 		files => {'ops/shared.yml' => "---\nshared: 1\n"},
 		message => 'publish', push => 1,
@@ -81,7 +81,7 @@ subtest 'no environment can claim the applied record address' => sub {
 	like($err, qr{must start with a lowercase letter},
 		'because a name must start with a lowercase letter');
 
-	my $h = make_harness(envs => ['qa'], type => 'bosh');
+	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
 	put_file($h->a . '/_pipelines.yml', "---\ngenesis:\n  env: _pipelines\n");
 	my $top = Genesis::Top->new($h->a);
 
@@ -97,7 +97,7 @@ subtest 'no environment can claim the applied record address' => sub {
 subtest "the environment reads its record through its own vault" => sub {
 	plan tests => 3;
 
-	my $h = make_harness(envs => ['qa'], type => 'bosh');
+	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
 	fixture_pipeline_record($h, 'qa', dependencies => ['lab/bosh']);
 
 	my $top = Genesis::Top->new($h->a);
@@ -132,7 +132,7 @@ subtest "the environment reads its record through its own vault" => sub {
 subtest 'a write with no value for any field refuses before the vault' => sub {
 	plan tests => 3;
 
-	my $h = make_harness(envs => ['qa'], type => 'bosh');
+	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
 	my $top = Genesis::Top->new($h->a);
 
 	# The vault is stood in for by a sub that records being reached and
@@ -166,7 +166,7 @@ subtest 'the record stage refuses a control commit that is not a sha' => sub {
 
 	require Genesis::Commands::Pipelines;
 
-	my $h = make_harness(envs => ['qa'], type => 'bosh');
+	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
 	my $top = Genesis::Top->new($h->a);
 
 	# Service::Git resolves a ref through git rev-parse, and that command
