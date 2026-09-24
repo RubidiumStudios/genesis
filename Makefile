@@ -109,7 +109,7 @@ test-fail-fast: sanity-test
 
 test-secrets: sanity-test
 	@echo 'Running secrets e2e test...'
-	@prove -l t/e2e-tests/secrets.t ; rc=$$? ; for pid in $$(ps | grep '[\.]/t/vaults/vault-' | awk '{print $$1}') ; do kill -TERM $$pid; done ; exit $$rc
+	@prove -l t/e2e-tests/secrets.t $(TEST_STDIN)
 
 test-isolated: sanity-test
 	@echo "Running all tests in isolation..."

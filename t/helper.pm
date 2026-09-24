@@ -46,6 +46,7 @@ use File::Basename qw/dirname/;
 use File::Find ();
 use IO::Handle;
 use JSON::PP;
+use Time::HiRes ();
 unified_diff;
 
 $ENV{GENESIS_TESTING} = "yes";
@@ -872,14 +873,16 @@ sub vault_start {
 	my $target = shift || "genesis-ci-unit-tests";
 	return $target if defined $VAULT_PID{$target};
 
-	my $pid = qx(SAFE_TARGET= $ENV{GENESIS_TOPDIR}/t/bin/vault $target);
+	# Both streams, so a refusal such as an engine that is not installed
+	# reaches the error with the command that fixes it.
+	my $out = qx(SAFE_TARGET= $ENV{GENESIS_TOPDIR}/t/bin/vault $target 2>&1);
 	my $rc = $? >> 8;
-	die "failed to spin a vault server: pid='$pid' rc=$rc\n"
-		if $rc > 0 || $pid eq "";
-	die "expected numeric value for Vault pid, but got this:\n$pid\n"
-		unless $pid =~ /^[0-9]+$/;
-
-	chomp($pid);
+	chomp($out);
+	die "failed to spin a vault server (rc=$rc): $out\n"
+		if $rc > 0 || $out eq "";
+	my ($pid) = $out =~ /(\d+)\s*\z/;
+	die "expected numeric value for Vault pid, but got this:\n$out\n"
+		unless defined $pid;
 
 	# The pid is recorded only once the process answers a signal.  Recorded
 	# first, it outlived the vault it named.  A vault that reported a start
@@ -931,7 +934,16 @@ sub teardown_vault {
 		if (defined $VAULT_PID{$target}) {
 			print STDERR "\nShutting down vault '$target' (pid: $VAULT_PID{$target})\n"
 			if defined $ENV{DEBUG_TESTS} and $ENV{DEBUG_TESTS} =~ m/^(1|y|yes|true)$/i;
-			kill 'TERM', $VAULT_PID{$target};
+			my $pid = $VAULT_PID{$target};
+			kill 'TERM', $pid;
+
+			# safe local tidies its own files as it stops, and the work area
+			# is removed straight after this, so it is given the moment it
+			# needs.  It is not this process's child, so there is nothing to
+			# wait on, and its going is watched for instead.
+			my $deadline = Time::HiRes::time() + 10;
+			Time::HiRes::sleep(0.05)
+				while kill(0, $pid) && Time::HiRes::time() < $deadline;
 			$VAULT_PID{$target} = undef;
 			$VAULT_URL{$target} = undef;
 			$VAULT_URL = undef;

@@ -1,97 +1,94 @@
 #!/bin/bash
+# vault - start a secrets engine for a test file, through safe local
+#
+# Usage: t/bin/vault [target]
+#
+# Starts an in-memory engine with `safe local`, targets it as <target> in the
+# calling test's HOME, and prints the pid that stops it.  safe local
+# initialises, unseals and authenticates the engine itself.
+#
+# GENESIS_TEST_SECRETS_ENGINE names the engine, as <engine> or
+# <engine>@<version>, and is vault@1.14.4 unless set.  A version runs the copy
+# installed under t/engines, which this never downloads: a missing one stops
+# here, naming `make install-secrets-engine`.  A bare name runs whichever copy
+# is on PATH.
 set -ue
 
-vault_pid=""
+pid=""
 bail() {
-	printf >&2 $*
-	[[ -n "$vault_pid" ]] && kill $vault_pid 2>/dev/null
+	printf >&2 '%s\n' "$*"
+	[[ -n "$pid" ]] && kill "$pid" 2>/dev/null
 	exit 2
 }
 
-[[ -n "$GENESIS_TOPDIR" ]] || bail "No GENESIS_TOPDIR defined -- cannot start vault"
+[[ -n "${GENESIS_TOPDIR:-}" ]] || bail "No GENESIS_TOPDIR defined -- cannot start vault"
 
 # The calling test's own work area, t/tmp/<pid>, which helper exports; a run
 # by hand falls back to t/tmp.
 work="${GENESIS_TEST_TMP:-${GENESIS_TOPDIR}/t/tmp}"
 export HOME="${work}/home"
-export VAULTS_DIR="${GENESIS_TOPDIR}/t/vaults"
-[[ -d $HOME ]] || mkdir -p "$HOME"
-[[ -d $VAULTS_DIR ]] || mkdir -p "$VAULTS_DIR"
-touch "$HOME/.vault_token"  # Hack around safe init issue
-cd "${GENESIS_TOPDIR}" >/dev/null 2>&1
-
-version="${GENESIS_TEST_VAULT_VERSION:-1.0.2}"
-platform=
+mkdir -p "$HOME"
 target="${1:-genesis-ci-unit-tests}"
-arch=amd64
-case $OSTYPE in
-(darwin*) platform=darwin ;;
-(linux*)  platform=linux  ;;
-(*)
-	bail "UNRECOGNIZED OSTYPE '$OSTYPE'"
-	;;
+log="$HOME/log-$target"
+
+spec="${GENESIS_TEST_SECRETS_ENGINE:-vault@1.14.4}"
+engine="${spec%%@*}"
+version=""
+[[ "$spec" == *@* ]] && version="${spec#*@}"
+case "$engine" in
+	(vault|bao) ;;
+	(*) bail "Unknown secrets engine '$engine' in GENESIS_TEST_SECRETS_ENGINE: expected vault or bao" ;;
 esac
 
-cmd="${VAULTS_DIR}/vault-${version}-${platform}"
+if [[ -n "$version" ]]; then
+	dir="$GENESIS_TOPDIR/t/engines/$engine/$version"
+	[[ -x "$dir/$engine" ]] ||
+		bail "$engine $version is not installed; run: make install-secrets-engine ENGINE=$engine VERSION=$version"
+	export PATH="$dir:$PATH"
+fi
+command -v "$engine" >/dev/null 2>&1 ||
+	bail "No $engine on PATH; install one, or run: make install-secrets-engine ENGINE=$engine VERSION=<version>"
 
-if [[ ! -f "$cmd" ]]; then
-	printf >&2 "\rDownloading Vault ${version} CLI for $platform ..."
-	# Unpacked in this process's own area and moved into place in one step,
-	# so two files downloading at once never read a half-written binary.
-	curl --fail -sLk > "$work/archive.zip" \
-		https://releases.hashicorp.com/vault/${version}/vault_${version}_${platform}_${arch}.zip \
-		|| bail "\nFAILED - could not download of vault ${version}"
-
-	unzip -d "$work" "$work/archive.zip" > /dev/null 2>&1
-	mv "$work/vault" "$cmd"
-	printf >&2 "DONE\n\n"
+# safe local takes the first vault on PATH, which the line above arranged.
+# Only an older safe lacks --engine, and it can run vault that way but never
+# OpenBao.
+engine_flag=()
+if safe local --help 2>&1 | grep -q -- '--engine'; then
+	engine_flag=(--engine "$engine")
+elif [[ "$engine" != vault ]]; then
+	bail "$engine needs a safe whose 'local' takes --engine, and this safe's does not"
 fi
 
-# A port the kernel says is free, and a check that the vault answers on it,
-# both in perl rather than lsof, which a stock Linux image may not carry.  A
-# file starting beside this one can take the port between the check and the
-# bind, so a vault that dies before it answers is started again on another.
+# A port the kernel says is free.  A file starting beside this one can take
+# it between the check and the bind, so an engine that exits before it
+# answers is started again on another.
 free_port() {
 	perl -MIO::Socket::INET -e 'print IO::Socket::INET->new(Listen => 1, LocalAddr => "127.0.0.1", LocalPort => 0)->sockport'
-}
-answers() {
-	perl -MIO::Socket::INET -e 'exit(IO::Socket::INET->new(PeerAddr => "127.0.0.1:$ARGV[0]", Timeout => 1) ? 0 : 1)' "$1"
 }
 
 for attempt in 1 2 3; do
 	port=$(free_port)
-	$cmd server -config <(cat <<EOF
-disable_mlock = 1
-listener "tcp" {
-  address     = "127.0.0.1:$port"
-  tls_disable = 1
-}
-storage "inmem" {}
-EOF
-) >$HOME/log 2>&1 &
-	vault_pid=$!
-	[ -n "${DEBUG_TESTS:-}" ] && printf >&2 "\rStarting Vault ${version} CLI on port $port as '$target' (pid: $vault_pid)..."
-	waitfor=600
-	while kill -0 $vault_pid 2>/dev/null && ! answers $port; do
-		if [[ $waitfor -gt 0 ]]; then
-			waitfor=$((waitfor - 1))
-			sleep 0.1
-		else
-			bail "\nFAILED - timed out waiting for vault server to start\n"
-		fi
+	safe local --memory --as "$target" --port "$port" ${engine_flag[@]+"${engine_flag[@]}"} \
+		> "$log" 2>&1 < /dev/null &
+	pid=$!
+	waitfor=400
+	while kill -0 "$pid" 2>/dev/null &&
+	      ! SAFE_TARGET="$target" safe exists secret/handshake >/dev/null 2>&1; do
+		[[ $((waitfor--)) -gt 0 ]] || bail "Timed out waiting for $engine to start; see $log"
+		sleep 0.05
 	done
-	kill -0 $vault_pid 2>/dev/null && break
-	vault_pid=""
+	kill -0 "$pid" 2>/dev/null && break
+	pid=""
 done
-[[ -n "$vault_pid" ]] || bail "\nFAILED - vault server would not start on a free port\n"
-safe target "$target" http://127.0.0.1:$port --no-strongbox >/dev/null 2>&1
-safe auth token <<<"dummy" > /dev/null 2>&1 # Another Hack around safe init issue
-root_token=$(safe init --json | jq -r '.root_token')
-safe auth token <<<${root_token} >/dev/null 2>&1
-if ! safe exists "secret/handshake" ;  then
-  bail "\nFAILED - failed to unseal vault\n"
-fi
+[[ -n "$pid" ]] || bail "$engine would not start on a free port; see $log"
 
-[ -n "${DEBUG_TESTS:-}" ] && printf >&2 "done.\n"
-echo $vault_pid
-exit 0
+# safe local leaves strongbox unset in .saferc, and the suite has always run
+# with it off, so the target is written again with it off and the token safe
+# local issued is handed back to it.
+token=$(SAFE_TARGET="$target" safe env --json | jq -r .VAULT_TOKEN)
+safe target "$target" "http://127.0.0.1:$port" --no-strongbox >/dev/null 2>&1
+SAFE_TARGET="$target" safe auth token <<<"$token" >/dev/null 2>&1
+SAFE_TARGET="$target" safe exists secret/handshake >/dev/null 2>&1 ||
+	bail "$engine started, but the target could not read it after strongbox was turned off; see $log"
+
+echo "$pid"

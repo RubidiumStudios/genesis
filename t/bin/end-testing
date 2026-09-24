@@ -22,9 +22,9 @@ DRY_RUN="${DRY_RUN:-}"
 # Repository root, from this script's own location (t/bin/end-testing).
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
-# Where t/bin/vault puts the versioned binary it downloads.  Only vaults
-# started from here belong to the test suite.
-VAULT_DIR="$ROOT/t/vaults/"
+# Where make install-secrets-engine puts the engines the suite runs.  Only
+# servers started from here belong to the test suite.
+VAULT_DIR="$ROOT/t/engines/"
 
 # Test scripts, and the Test::TCP forks that share their command line.
 # Matched on the manifest's directory layout rather than on "perl", which
@@ -34,14 +34,13 @@ TEST_PATTERN='t/(sanity|unit|integration|e2e)-tests/.*\.t'
 # The runner itself, so it stops scheduling new files.
 RUNNER_PATTERN='prove .*(sanity|unit|integration|e2e)-tests'
 
-# helper.pm reaps orphaned vaults on import using these patterns alone.
-# That is too broad: an operator's own `safe local -m` runs as
+# A command-line match alone is too broad: an operator's own `safe local -m`
+# runs as
 #   vault server -config /var/folders/.../kazoo…
-# which matches, so a test run kills a vault it did not start.  These are
-# kept for the command-line match but are ALWAYS paired with the
-# executable living under t/vaults (see reap_vaults), which is what makes
-# the distinction.
-VAULT_PATTERNS=('vault.*server.*-config' 'vault-.*listen')
+# which matches, so a test run would kill a vault it did not start.  These
+# are ALWAYS paired with the executable living under t/engines (see
+# reap_vaults), which is what makes the distinction.
+VAULT_PATTERNS=('(vault|bao) server')
 
 # pids_for <pattern> [exe-regex] -- pids whose command line matches the
 # pattern AND whose executable matches exe-regex (default: any).
@@ -52,7 +51,7 @@ VAULT_PATTERNS=('vault.*server.*-config' 'vault-.*listen')
 # command line alone will happily kill the caller.
 #
 # It compares argv[0] rather than `ps -o comm=`, which macOS truncates to
-# 16 characters: long enough to render t/vaults/vault-1.0.2-darwin as
+# 16 characters: long enough to render t/engines/vault/1.14.4/vault as
 # "/Users/dennis.be", which matches nothing and reaps no vaults.
 pids_for() {
 	local pattern=$1 exe_re=${2:-.} exe_prefix=${3:-}
@@ -99,10 +98,10 @@ any=0
 # prove is itself a perl script, so both run as perl.
 PERL_EXE='(perl|prove)$'
 
-# Unanchored: t/bin/vault downloads a versioned binary, so the executable
-# is t/vaults/vault-1.0.2-darwin rather than plain "vault".  Matching the
-# executable path (never a shell's) keeps this from catching callers.
-VAULT_EXE='(vault|safe)'
+# The engine server's own executable, under t/engines/<engine>/<version>/.
+# Matching the executable path (never a shell's) keeps this from catching
+# callers.
+VAULT_EXE='(vault|bao)$'
 
 echo "test runners:"
 reap TERM "$PERL_EXE" "" "$RUNNER_PATTERN" && any=1 || echo "  none"
@@ -110,7 +109,21 @@ reap TERM "$PERL_EXE" "" "$RUNNER_PATTERN" && any=1 || echo "  none"
 echo "test processes and their forks:"
 reap TERM "$PERL_EXE" "" "$TEST_PATTERN" && any=1 || echo "  none"
 
-echo "vault servers (only those under t/vaults):"
+# Each test's work area names the `safe local` it started, whichever engine
+# that ran, including one taken from PATH rather than t/engines.
+echo "vaults the test work areas recorded:"
+recorded=0
+for file in "$ROOT"/t/tmp/*/vaults/*.pid; do
+	[[ -f "$file" ]] || continue
+	vpid=$(cat "$file")
+	[[ "$vpid" =~ ^[0-9]+$ ]] && kill -0 "$vpid" 2>/dev/null || continue
+	recorded=1
+	ps -p "$vpid" -o pid=,command= 2>/dev/null | cut -c1-110 | sed 's/^/  /'
+	[[ -n "$DRY_RUN" ]] || kill -TERM "$vpid" 2>/dev/null
+done
+[[ $recorded -eq 1 ]] && any=1 || echo "  none"
+
+echo "engine servers (only those under t/engines):"
 reap TERM "$VAULT_EXE" "$VAULT_DIR" "${VAULT_PATTERNS[@]}" && any=1 \
 	|| echo "  none"
 
@@ -135,9 +148,9 @@ fi
 # A held port is the symptom that sends people looking for a code bug, so
 # report it rather than leaving it to surface as four failing files.
 #
-# Reported by ownership, not by port number: t/bin/vault scans upward from
-# 8200 for a free port, and an operator's own vault sits in the same
-# range, so the number alone cannot say whose it is.
+# Reported by ownership, not by port number: t/bin/vault takes any free
+# port, and an operator's own vault may sit on one nearby, so the number
+# alone cannot say whose it is.
 echo "ports still held by this repository:"
 held=0
 
@@ -147,7 +160,7 @@ if lsof -nP -iTCP:25555 -sTCP:LISTEN >/dev/null 2>&1; then
 	lsof -nP -iTCP:25555 -sTCP:LISTEN 2>/dev/null | tail -n +2 | sed 's/^/  /'
 fi
 
-# Any listener whose executable came out of t/vaults.
+# Any listener whose executable came out of t/engines.
 for pid in $(lsof -nP -iTCP -sTCP:LISTEN -t 2>/dev/null | sort -u); do
 	exe=$(ps -p "$pid" -o command= 2>/dev/null | awk '{print $1}')
 	[[ -n "$exe" && "$exe" == "$VAULT_DIR"* ]] || continue
