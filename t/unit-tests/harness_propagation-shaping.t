@@ -270,6 +270,10 @@ subtest 'a root creation that dies leaves no scratch root named' => sub {
 	require Genesis::Top;
 	local $ENV{GENESIS_ROOT} = 'the-root-this-row-set';
 
+	# The create below is replaced, which the fixture cache cannot see, so
+	# the build is made afresh rather than restored.
+	local $ENV{GENESIS_HARNESS_NO_CACHE} = 1;
+
 	# The create points GENESIS_ROOT at the scratch directory it is building
 	# in, and the harness points it at the real root only once the move is
 	# done, so a create that dies leaves the scratch name standing.
@@ -291,6 +295,10 @@ subtest 'a root creation that dies puts the vault names back' => sub {
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	require Genesis::Top;
 	local $ENV{SAFE_TARGET} = 'the-target-this-row-set';
+
+	# The create below is replaced, which the fixture cache cannot see, so
+	# the build is made afresh rather than restored.
+	local $ENV{GENESIS_HARNESS_NO_CACHE} = 1;
 
 	# A create that dies after it has pointed the two names at the root it
 	# was building, which is the path a save and a restore written either

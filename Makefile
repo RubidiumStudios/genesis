@@ -65,7 +65,7 @@ coverage:
 test: sanity-test
 	@echo "Running all tests from manifest..."
 	@t/bin/test-state begin
-	@rm -f t/.test-deps.new
+	@rm -rf t/.test-deps.new t/tmp/fixture-cache
 	@$(TEST_DEPS) prove -lf --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests) $(TEST_STDIN)
 	@$(TEST_DEPS) prove -lf --state=slow,save -j$(TEST_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
 	@$(TEST_DEPS) prove -lf --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests e2e-tests) $(TEST_STDIN)

@@ -33,6 +33,36 @@ environment they were handed, through C<scrub_git_env> in
 L<Harness::GitEnv>, and C<t/unit-tests/harness_propagation-git_env.t> holds
 them to it.
 
+=head2 The fixture cache
+
+The builders C<make_harness>, C<ready_harness>, C<seeded_harness>,
+C<held_prod>, C<held_prod_delivered> and C<ready> build the same harness from
+the same arguments every time, and rows build the same ones over and over.
+So the first build of a set of arguments is kept under
+F<t/tmp/fixture-cache>, and a later build of the same arguments is restored
+from it: the base directory is copied to one of its own, every path naming
+the old base is moved to the new one (git's objects excepted, since their
+names are their content), the vault records under the mount are imported,
+and what the build armed is armed again.  A restored harness has the same
+repositories, commits, records and fields as the build it was kept from,
+which C<t/integration-tests/harness_propagation-cache.t> holds it to, and
+takes about a tenth of a second where a build takes seconds.
+
+The key covers the builder, its arguments, and the size and time of every
+file under F<lib/>, F<t/Harness>, F<t/kits> and F<t/src>, F<bin/genesis> and
+F<t/helper.pm>, so an edit to anything a build reads builds afresh.  Only the
+outermost builder a row calls is cached, since the builders call one
+another.  A cache entry is written beside its final name and renamed into
+place, so files running side by side never read half of one.  C<make test>
+empties the cache as it starts.
+
+A build is made afresh, never restored, when its arguments hold code or
+objects, when it asks for a BOSH director (whose listener is a process no
+copy can keep), and whenever C<GENESIS_HARNESS_NO_CACHE> is set.  The key
+cannot see code a row has replaced, so a row that replaces something a
+builder calls while it builds, as the rows that make C<Genesis::Top::create>
+fail do, sets C<GENESIS_HARNESS_NO_CACHE> for that build.
+
 =head1 FUNCTIONS
 
 =head2 scrub_git_env()

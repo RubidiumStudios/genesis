@@ -107,14 +107,21 @@ our $DEFAULT_MINIMUM_VERSION = '3.2.0';
 # then reads the first harness's, and a file that armed anything at all hands
 # the next file an environment it never asked for.
 our @ENV_GUARDS;
+
+# What each guard armed, in order, so the fixture cache can keep what a build
+# armed and arm it again when it restores that build.
+our @ARMED;
+
 sub _guard_env {
 	my (%vars) = @_;
 	push @ENV_GUARDS, helper::local_env(%vars);
+	push @ARMED, {%vars};
 	return;
 }
 
 sub _release_env {
 	pop(@ENV_GUARDS)->restore while @ENV_GUARDS;
+	@ARMED = ();
 	return;
 }
 
@@ -5553,6 +5560,211 @@ sub _write_whole_config {
 	return $path;
 }
 
+# }}}
+
+# The fixture cache - a builder's harness kept once and restored after {{{
+#
+# A builder builds the same harness from the same arguments every time, and
+# rows build the same ones over and over, each build costing seconds of git and
+# safe.  The first build of a set of arguments is kept under
+# t/tmp/fixture-cache: its base directory, the vault records under its mount,
+# its fields and what it armed.  A later build of the same arguments copies the
+# base to a directory of its own, moves every path from the old base to the
+# new one, imports the records and arms the same variables, which takes a
+# fraction of the time and gives the same repositories, commits and all.
+#
+# The key covers the builder, its arguments, and the size and time of every
+# file under lib/, t/Harness, t/kits and t/src, bin/genesis and t/helper.pm,
+# so an edit to anything a build reads builds afresh.  Only the outermost
+# builder a row calls is cached, since the builders call one another.  A call
+# whose arguments hold code or objects, one that asks for a BOSH director,
+# whose listener is a process no copy can keep, and any call while
+# GENESIS_HARNESS_NO_CACHE is set, is built afresh.
+our $CACHE_DEPTH = 0;
+my $FINGERPRINT;
+
+my @CACHED_BUILDERS = qw/
+	make_harness ready_harness seeded_harness held_prod held_prod_delivered ready
+/;
+
+sub _source_fingerprint {
+	return $FINGERPRINT //= do {
+		require Digest::SHA;
+		require File::Find;
+		my $top = $helper::TOPDIR;
+		my @files;
+		File::Find::find({no_chdir => 1, wanted => sub {push @files, $_ if -f $_}},
+			grep {-e} map {"$top/$_"} qw(lib t/Harness t/kits t/src bin/genesis t/helper.pm));
+		my $sha = Digest::SHA->new(1);
+		for my $file (sort @files) {
+			my @st = stat($file);
+			$sha->add("$file\0$st[7]\0$st[9]\0");
+		}
+		$sha->hexdigest;
+	};
+}
+
+# _plain - true when a value is plain data a key can be made of
+sub _plain {
+	my ($v) = @_;
+	my $type = ref($v);
+	return 1 unless $type;
+	return 0 if Scalar::Util::blessed($v);
+	return !grep {!_plain($_)} @$v        if $type eq 'ARRAY';
+	return !grep {!_plain($_)} values %$v if $type eq 'HASH';
+	return 0;
+}
+
+sub _cached {
+	my ($name, $build, @args) = @_;
+	require Scalar::Util;
+	my %opts = @args % 2 ? () : @args;
+	return $build->(@args)
+		if $CACHE_DEPTH || $ENV{GENESIS_HARNESS_NO_CACHE} || $opts{bosh}
+		|| !_plain(\@args);
+
+	local $CACHE_DEPTH = 1;
+	require Digest::SHA;
+	my $key = Digest::SHA::sha1_hex(join("\0", $name,
+		JSON::PP->new->canonical->encode(@args % 2 ? \@args : {@args}),
+		_source_fingerprint()));
+	my $dir = "$helper::TOPDIR/t/tmp/fixture-cache/$key";
+	return _restore_harness($dir) if -f "$dir/harness.json";
+
+	my $armed = @ARMED;
+	my $h = $build->(@args);
+	_keep_harness($dir, $h, [@ARMED[$armed .. $#ARMED]])
+		if Scalar::Util::blessed($h) && $h->isa(__PACKAGE__);
+	return $h;
+}
+
+# _keep_harness - put a built harness in the cache {{{
+#
+# Written beside its final name and renamed into place, so a file running
+# beside this one never reads half a harness, and the one that loses a race
+# to keep the same key discards its copy.
+sub _keep_harness {
+	my ($dir, $h, $armed) = @_;
+	my $building = "$dir.building.$$";
+	system('rm', '-rf', $building);
+	helper::mkdir_or_fail($building);
+	system('cp', '-a', $h->{base}, "$building/base") == 0
+		or return system('rm', '-rf', $building);
+
+	my $records;
+	($records) = run({env => {SAFE_TARGET => $h->{vault_target}}, stderr => 0},
+		_real_safe(), 'export', $h->{mount}) if $h->{vault_target};
+
+	my %fields = %$h;
+	delete $fields{vault_url};
+	my $state = eval {
+		JSON::PP->new->canonical->encode({
+			base => $h->{base}, fields => \%fields, armed => $armed,
+			root => $ENV{GENESIS_ROOT}, records => $records,
+		});
+	} or return system('rm', '-rf', $building);
+	helper::put_file("$building/harness.json", $state);
+
+	rename($building, $dir) or system('rm', '-rf', $building);
+	return;
+}
+# }}}
+
+# _restore_harness - build a harness from what the cache kept {{{
+sub _restore_harness {
+	my ($dir) = @_;
+	my $state = do {
+		open my $fh, '<', "$dir/harness.json" or die "cannot read $dir/harness.json: $!\n";
+		local $/;
+		JSON::PP->new->decode(<$fh>);
+	};
+	my $old = $state->{base};
+
+	# As make_harness starts, so nothing the last harness armed or left in the
+	# environment is read through this one.
+	scrub_git_env();
+	_release_env();
+
+	my $base = helper::workdir() . sprintf('/ph-%d-%06d', $$, int(rand(1_000_000)));
+	system('cp', '-a', "$dir/base", $base) == 0
+		or die "could not restore a cached harness from $dir\n";
+	_move_base($base, $old);
+
+	my $move = sub {my ($v) = @_; defined $v ? $v =~ s/\Q$old\E/$base/gr : $v};
+	my $h = bless _map_strings($state->{fields}, $move), __PACKAGE__;
+	$ENV{GENESIS_ROOT} = $move->($state->{root}) if defined $state->{root};
+	_guard_env(%{_map_strings($_, $move)}) for @{$state->{armed} || []};
+
+	if ($h->{vault_target}) {
+		my $target = helper::vault_start($h->{vault_target});
+		$h->{vault_url} = $helper::VAULT_URL{$target};
+		run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
+			_real_safe(), 'rm', '-rf', $h->{mount});
+		if (defined $state->{records} && $state->{records} =~ /\S/) {
+			my $file = "$h->{tmp}/cached-records.json";
+			helper::put_file($file, $state->{records});
+			run({env => {SAFE_TARGET => $target},
+			     onfailure => "Failed to restore the cached harness's vault records"},
+				_real_safe() . ' import < "$1"', $file);
+		}
+	}
+	return $h;
+}
+# }}}
+
+# _map_strings - a copy of a structure with every string passed through $fn
+sub _map_strings {
+	my ($v, $fn) = @_;
+	return [map {_map_strings($_, $fn)} @$v] if ref($v) eq 'ARRAY';
+	return {map {($_ => _map_strings($v->{$_}, $fn))} keys %$v} if ref($v) eq 'HASH';
+	return $fn->($v);
+}
+
+# _move_base - rewrite a restored copy's own paths to its new base {{{
+#
+# Git configs, the wrappers the fixtures write, their state and logs name the
+# base they were built in.  Git's objects are never rewritten, since their
+# names are their content, and a symbolic link into the old base is pointed
+# into the new one.
+sub _move_base {
+	my ($base, $old) = @_;
+	require File::Find;
+	File::Find::find({no_chdir => 1, wanted => sub {
+		if (-d $_) {
+			$File::Find::prune = 1 if m{/objects$};
+			return;
+		}
+		if (-l $_) {
+			my $to = readlink($_);
+			if (index($to, $old) == 0) {
+				unlink($_);
+				symlink($to =~ s/\Q$old\E/$base/r, $_);
+			}
+			return;
+		}
+		return unless -f $_ && -s _ < 2 * 1024 * 1024 && -T $_;
+		open(my $in, '<:raw', $_) or return;
+		my $text = do {local $/; <$in>};
+		close $in;
+		return if index($text, $old) < 0;
+		my $mode = (stat($_))[2] & 07777;
+		open(my $out, '>:raw', $_) or die "cannot rewrite $_: $!\n";
+		print $out $text =~ s/\Q$old\E/$base/gr;
+		close $out;
+		chmod($mode, $_);
+	}}, $base);
+	return;
+}
+# }}}
+
+{
+	no strict 'refs';
+	no warnings 'redefine';
+	for my $name (@CACHED_BUILDERS) {
+		my $build = \&{$name};
+		*{$name} = sub {_cached($name, $build, @_)};
+	}
+}
 # }}}
 
 1;
