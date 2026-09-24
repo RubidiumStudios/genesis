@@ -340,6 +340,8 @@ unit-tests/pod_gate-check.t                  # the checks, and what stays adviso
 [integration-tests]
 # Multi-component interaction tests that require system interaction
 # Naming: {lib-path}_{module}-{context}.t (e.g., genesis_command.t, genesis_yaml.t)
+# helper's own vault handling comes first: every vault-using file below depends on it
+integration-tests/helper-teardown_vault.t   # teardown_vault stops the vaults a caller names
 # Genesis.pm tests requiring filesystem/network:
 integration-tests/genesis-command.t  # Command execution (run, curl, lines, fake_tty)
 integration-tests/genesis-data.t     # Data file operations (YAML/JSON load/save)

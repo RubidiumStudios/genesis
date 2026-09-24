@@ -923,7 +923,7 @@ sub vault_ok {
 }
 
 sub teardown_vault {
-	my @targets = @_ || keys %VAULT_PID;
+	my @targets = @_ ? @_ : keys %VAULT_PID;
 	for my $target (@targets) {
 		if (defined $VAULT_PID{$target}) {
 			print STDERR "\nShutting down vault '$target' (pid: $VAULT_PID{$target})\n"
