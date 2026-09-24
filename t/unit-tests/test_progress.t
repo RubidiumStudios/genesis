@@ -65,6 +65,21 @@ EOS
 	like($said, qr/about 7 min left/, "the time left comes from the last run's times");
 };
 
+subtest 'a tier a later tier has followed is over' => sub {
+	plan tests => 2;
+	# The manifest lists c.t, which this run never ran: a file added after
+	# the run started.  Once integration has begun, the unit tier is over
+	# however its count reads.
+	my $said = progress(<<'EOS');
+[10:00:01] t/unit-tests/a.t ........ ok      10 ms
+[10:00:02] t/unit-tests/b.t ........ ok      10 ms
+[10:00:03] t/integration-tests/x.t ........ ok      10 ms
+EOS
+	like($said, qr/unit-tests\s+2 \/ 3\s+done, 1 not in this run/,
+		'it reads done, and counts the file the run did not include');
+	like($said, qr/integration-tests\s+1 \/ 2\s+running/, 'while the later tier runs');
+};
+
 subtest 'no estimate without a time for every file left' => sub {
 	plan tests => 1;
 	put_file("$dir/state", "---\ntests:\n  t/unit-tests/c.t:\n    elapsed: 60\n");

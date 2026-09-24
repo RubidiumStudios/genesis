@@ -49,13 +49,15 @@ if (open my $fh, '<', $state) {
 
 sub report {
 	open my $fh, '<', $log or die "Cannot read $log: $!\n";
-	my (%done, %failed, $first, $last, $ended);
+	my (%done, %failed, $first, $last, $ended, $last_file);
 	my $pending;
+	my %tier_of = map {my $t = $_; map {($_ => $t)} @{$files{$t}}} @TIERS;
 	while (<$fh>) {
 		if (/^\[(\d\d:\d\d:\d\d)\] (t\/\S+\.t) \.+\s*(.*)$/) {
 			$first //= $1;
 			$last = $1;
 			my ($file, $said) = ($2, $3);
+			$last_file = $file;
 			if ($said =~ /^(ok|skipped)/) {
 				$done{$file} = 1;
 			} else {
@@ -65,26 +67,37 @@ sub report {
 			$done{$pending} = $failed{$pending} = 1;
 			undef $pending;
 		}
-		# make test stops at the first tier that fails.
+		# make test stops at the first tier that fails, and ends with the
+		# summary of the prove that ran the last tier.
 		$ended = 1 if /^Result: FAIL/;
+		$ended = 1 if /^Result: / && ($tier_of{$last_file // ''} // '') eq $TIERS[-1];
 	}
 	close $fh;
 	$ended = 1 unless grep {!$done{$_}} map {@{$files{$_}}} @TIERS;
 
 	my $now = strftime('%H:%M:%S', localtime);
 	my @lines = sprintf("%s  started %s", $now, $first // '-');
+	# A tier a later tier has followed is over, whatever its count says: the
+	# manifest read here is the tree's as it is now, and a file added to it
+	# after the run started is one this run never ran.
+	my %started = map {my $t = $_; ($t => scalar grep {$done{$_}} @{$files{$t}})} @TIERS;
 	my ($left, $unknown) = (0, 0);
-	for my $tier (@TIERS) {
-		my @all = @{$files{$tier}};
-		my $n = grep {$done{$_}} @all;
+	for my $i (0 .. $#TIERS) {
+		my $tier = $TIERS[$i];
+		my @all  = @{$files{$tier}};
+		my $n    = grep {$done{$_}} @all;
 		my @todo = grep {!$done{$_}} @all;
+		my $over = grep {$started{$_}} @TIERS[$i + 1 .. $#TIERS];
+		my $state = !@todo ? '  done'
+		          : $over  ? sprintf('  done, %d not in this run', scalar @todo)
+		          : $n     ? '  running' : '';
+		@todo = () if $over;
 		$unknown += grep {!defined $took{$_}} @todo;
 		my $rest = 0;
 		$rest += $took{$_} // 0 for @todo;
 		$rest /= $jobs if $tier eq 'unit-tests';
 		$left += $rest;
-		push @lines, sprintf("  %-18s %4d / %-4d%s", $tier, $n, scalar(@all),
-			!@todo ? '  done' : ($n ? '  running' : ''));
+		push @lines, sprintf("  %-18s %4d / %-4d%s", $tier, $n, scalar(@all), $state);
 	}
 	my @fails = sort keys %failed;
 	push @lines, @fails
