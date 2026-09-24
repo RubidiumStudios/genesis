@@ -1,0 +1,93 @@
+#!/usr/bin/env perl
+# affected-tests - the tests a change can reach, in manifest order
+#
+# Usage: t/bin/affected-tests [--tier SECTION] [--base REF | --changed FILE...]
+#                             [--manifest FILE] [--map FILE]
+#
+# Reads the record Harness::Deps writes during `make test` of which files
+# under lib/ and t/ each test, and every genesis it ran, really loaded, and
+# prints the manifest's tests a change reaches:
+#
+#   - a changed test file reaches itself;
+#   - a changed module under lib/ or t/ reaches the tests the record says
+#     loaded it, and every test the record has never seen;
+#   - a changed POD under lib/ reaches the sanity tier, where the POD gate is;
+#   - any other change, and any change at all without a record, reaches
+#     every test.
+#
+# The change is --changed's files, or else what differs from --base (HEAD by
+# default: what is uncommitted, untracked files included).  --tier limits the
+# answer to one manifest section.
+use strict;
+use warnings;
+
+use Cwd qw/abs_path/;
+use File::Basename qw/dirname/;
+use Getopt::Long;
+
+my $root = dirname(dirname(dirname(abs_path(__FILE__))));
+chdir $root or die "Cannot change to $root: $!\n";
+
+my ($tier, $base, $changed_given, @changed);
+my $manifest = 't/test-manifest.txt';
+my $map      = 't/.test-deps';
+GetOptions(
+	'tier=s'     => \$tier,
+	'base=s'     => \$base,
+	'manifest=s' => \$manifest,
+	'map=s'      => \$map,
+	'changed'    => \$changed_given,
+) or die "Usage: $0 [--tier SECTION] [--base REF | --changed FILE...]\n";
+
+if ($changed_given) {
+	@changed = @ARGV;
+} else {
+	$base //= 'HEAD';
+	@changed = (
+		split(/\n/, qx(git diff --name-only $base --)),
+		split(/\n/, qx(git ls-files --others --exclude-standard)),
+	);
+}
+
+# The manifest's tests by section, in order, as paths from the repository.
+my (@tests, %section_of);
+{
+	open my $fh, '<', $manifest or die "Cannot read $manifest: $!\n";
+	my $section = '';
+	while (<$fh>) {
+		if (/^\[(.+?)\]/) { $section = $1; next }
+		next if /^\s*#/ || !/\S/;
+		my ($path) = /^\s*(\S+\.t)\b/ or next;
+		push @tests, "t/$path";
+		$section_of{"t/$path"} = $section;
+	}
+}
+
+# What each test loaded, and whether there is a record at all.
+my (%loaded_by, %recorded);
+if (open my $fh, '<', $map) {
+	while (<$fh>) {
+		chomp;
+		my ($test, $file) = split /\t/;
+		next unless defined $file;
+		$recorded{$test} = 1;
+		$loaded_by{$file}{$test} = 1;
+	}
+}
+
+my %is_test = map {$_ => 1} @tests;
+my %selected;
+for my $file (@changed) {
+	if ($is_test{$file}) {
+		$selected{$file} = 1;
+	} elsif ($file =~ m{^(?:lib|t)/.*\.pm$} && %recorded) {
+		$selected{$_} = 1 for keys %{$loaded_by{$file} || {}};
+		$selected{$_} = 1 for grep {!$recorded{$_}} @tests;
+	} elsif ($file =~ m{^lib/.*\.pod$}) {
+		$selected{$_} = 1 for grep {$section_of{$_} eq 'sanity-tests'} @tests;
+	} else {
+		$selected{$_} = 1 for @tests;
+	}
+}
+
+print "$_\n" for grep {$selected{$_} && (!$tier || $section_of{$_} eq $tier)} @tests;
