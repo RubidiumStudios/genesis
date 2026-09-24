@@ -2869,9 +2869,15 @@ if [ -n "${GENESIS_HARNESS_SIGINT_BEFORE_BOSH:-}" ]; then
   kill -INT "$target"
   # Held open with this hook's own output closed, so genesis reads the end of
   # the hook and takes the signal rather than being handed a hook that merely
-  # failed, and so nothing waits on a process genesis has already left.
+  # failed, and so nothing waits on a process genesis has already left.  Held
+  # until genesis has gone, up to five seconds, rather than for the five
+  # seconds whatever genesis does.
   exec >/dev/null 2>&1
-  sleep 5
+  i=0
+  while kill -0 "$target" 2>/dev/null && [ "$i" -lt 50 ]; do
+    sleep 0.1
+    i=$((i + 1))
+  done
   exit 1
 fi
 EOS
