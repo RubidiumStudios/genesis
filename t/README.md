@@ -101,8 +101,9 @@ Each test process works in `t/tmp/<pid>`, which `helper` sets up as it loads
 and removes as the process ends; its HOME, its vaults' pid files and anything
 else it writes go there.  A process that dies without ending cleanly leaves
 its directory behind, and the next test to start removes it and stops the
-vaults it recorded.  Set `GENESIS_TEST_KEEP_TMP=1` to keep the directory
-for inspection.
+vaults it recorded.  Set `GENESIS_TEST_KEEP_TMP=1` to keep every test's
+directory for inspection; the next test to start then leaves them alone
+too, so remove `t/tmp` by hand once done.
 
 ---
 

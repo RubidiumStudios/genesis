@@ -40,6 +40,10 @@ sub stop_file {
 	waitpid($file->{pid}, 0);
 }
 
+# These rows are about the areas coming and going, so an area kept for
+# inspection is not what they run under.
+delete $ENV{GENESIS_TEST_KEEP_TMP};
+
 subtest 'this process works in a directory of its own' => sub {
 	plan tests => 2;
 	is($ENV{HOME}, "$TMP_ROOT/$$/home", 'HOME sits under t/tmp, named for this process');
@@ -77,6 +81,20 @@ subtest 'a work area whose process is gone is swept' => sub {
 	stop_file(start_file());
 	ok(!-e $stale, 'the next file to start removes it');
 	ok(-d "$TMP_ROOT/$$", 'and leaves the running one alone');
+};
+
+subtest 'an area kept for inspection survives the next file' => sub {
+	plan tests => 2;
+
+	local $ENV{GENESIS_TEST_KEEP_TMP} = 1;
+	my $kept = start_file();
+	stop_file($kept);
+	my $area = $kept->{home} =~ s{/home$}{}r;
+	ok(-d $area, 'a file that ends leaves its area when asked to keep it');
+
+	stop_file(start_file());
+	ok(-d $area, 'and the next file to start leaves it too, rather than sweeping it');
+	`rm -rf "$area"`;
 };
 
 done_testing;

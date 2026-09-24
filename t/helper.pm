@@ -96,6 +96,10 @@ sub _open_work_area {
 # operator's own vault.
 sub _sweep_work_areas {
 	my ($root) = @_;
+
+	# Areas kept for inspection are kept from the files that start after them
+	# too, or nothing of a run would be left to inspect.
+	return if $ENV{GENESIS_TEST_KEEP_TMP};
 	opendir(my $dh, $root) or return;
 	for my $pid (grep {/^\d+$/} readdir($dh)) {
 		next if $pid == $$ || kill(0, $pid) || $!{EPERM};
