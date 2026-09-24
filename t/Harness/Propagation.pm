@@ -2600,12 +2600,14 @@ sub real_tool { return _real_tool($_[0]) }
 sub _write_record {
 	my ($self, $path, %fields) = @_;
 	$self->fixture_vault;
-	for my $key (sort keys %fields) {
-		next unless defined $fields{$key};
-		run({env => {SAFE_TARGET => $self->{vault_target}},
-		     onfailure => "Failed to write $path:$key"},
-			_real_safe(), 'set', $path, "$key=$fields{$key}");
-	}
+
+	# One safe set for the whole record rather than one per field: a record
+	# of twenty fields cost twenty safe processes, and a harness writes
+	# several records per environment.
+	my @pairs = map {"$_=$fields{$_}"} grep {defined $fields{$_}} sort keys %fields;
+	run({env => {SAFE_TARGET => $self->{vault_target}},
+	     onfailure => "Failed to write $path"},
+		_real_safe(), 'set', $path, @pairs) if @pairs;
 	return $path;
 }
 
