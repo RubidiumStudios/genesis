@@ -1,4 +1,4 @@
-.PHONY: sanity-test compile-check pod-gate pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage install-secrets-engine
+.PHONY: sanity-test compile-check pod-gate pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage install-secrets-engine test-changed test-failed
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
@@ -13,6 +13,11 @@ TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 # shell or CI behaves as one started in a terminal: fake_tty's script call
 # cannot query a socket, and a kit hook that prompts would wait on one.
 TEST_STDIN = < /dev/null
+
+# A full run records which files under lib/ and t/ each test, and every
+# genesis it ran, really loaded (see t/Harness/Deps.pod), so make
+# test-changed can choose the tests a change reaches.
+TEST_DEPS = GENESIS_TEST_DEPS=$(CURDIR)/t/.test-deps.new PERL5OPT="-I$(CURDIR)/t -MHarness::Deps $$PERL5OPT"
 
 # Coverage report format (html, json, text)
 COVERAGE_REPORT_FORMAT ?= html
@@ -60,10 +65,27 @@ coverage:
 test: sanity-test
 	@echo "Running all tests from manifest..."
 	@t/bin/test-state begin
-	@prove -lf $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests) $(TEST_STDIN)
-	@prove -lf -j$(TEST_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
-	@prove -lf $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests e2e-tests) $(TEST_STDIN)
+	@rm -f t/.test-deps.new
+	@$(TEST_DEPS) prove -lf --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) prove -lf --state=slow,save -j$(TEST_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) prove -lf --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests e2e-tests) $(TEST_STDIN)
+	@sort -u t/.test-deps.new > t/.test-deps && rm -f t/.test-deps.new
 	@t/bin/test-state commit
+
+# Run only the tests a change reaches, by tier, from the record the last full
+# run left (see t/bin/affected-tests).  The change is what is uncommitted, or
+# everything since BASE:
+#   make test-changed
+#   make test-changed BASE=v3.2.x-dev
+# A test file never recorded, or a change outside lib/ and the tests, runs as
+# if everything were reached.  This is the loop while working; make test
+# stays the gate before a push.
+test-changed:
+	@t/bin/test-changed $(or $(BASE),HEAD) $(TEST_JOBS)
+
+# Run again only the test files that failed in the last run of any tier.
+test-failed:
+	@prove -l --state=failed,save $(TEST_STDIN)
 
 # Point git at the tracked hooks.  Hooks live in .git/hooks by default,
 # which is neither tracked nor cloned, so this is what makes them apply

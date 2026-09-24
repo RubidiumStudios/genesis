@@ -1,6 +1,9 @@
 t/tmp
 t/vaults
 t/engines
+t/.test-deps
+t/.test-deps.new
+.prove
 t/repos/vault-test/*.yml
 t/repos/*/tmp.yml
 t/repos/summary-test/.genesis/cached/*/last

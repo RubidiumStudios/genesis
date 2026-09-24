@@ -85,6 +85,18 @@ Every tier reads stdin from `/dev/null`.
 - An **e2e** test is a scenario story: several commands over one setup,
   asserting everything its states show.
 
+While working, run only what a change reaches:
+
+- `make test-changed` runs the tests that uncommitted changes reach, tier by
+  tier (`BASE=<ref>` for everything since a ref).  The choice comes from the
+  record the last full `make test` left in `t/.test-deps` of which files
+  under `lib/` and `t/` each test, and every genesis it ran, really loaded.
+  A test never recorded, or a change outside `lib/` and the test files,
+  counts as reached.
+- `make test-failed` runs again only the files that failed last time.
+
+`make test` stays the gate before a push, and refreshes the record.
+
 Each test process works in `t/tmp/<pid>`, which `helper` sets up as it loads
 and removes as the process ends; its HOME, its vaults' pid files and anything
 else it writes go there.  A process that dies without ending cleanly leaves
