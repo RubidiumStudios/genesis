@@ -1415,23 +1415,26 @@ sub deliver {
 	my $index = "$self->{tmp}/idx-" . int(rand(1_000_000));
 	local $ENV{GIT_INDEX_FILE} = $index;
 
+	# Every change to the index goes in one update-index call, fed from a
+	# file: a path removed is a mode-0 entry, a path written names its mode
+	# and blob.  One call per path cost two git processes for each file the
+	# set holds.
+	my @info;
+	my $null = '0' x 40;
 	if ($parent && %keep) {
 		run({dir => $dir}, 'git', 'read-tree', $parent);
 		my ($held) = run({dir => $dir}, 'git', 'ls-files');
 		chomp $held if defined $held;
-		for my $path (split /\n/, ($held // '')) {
-			next if $keep{$path};
-			run({dir => $dir}, 'git', 'update-index', '--force-remove', '--', $path);
-		}
+		push @info, map {"0 $null\t$_"} grep {!$keep{$_}} split /\n/, ($held // '');
 	} else {
 		run({dir => $dir}, 'git', 'read-tree', '--empty');
 	}
 
-	# The mode each path carries on control, so the mirror is a mirror.  A
-	# delivery written at a fixed 100644 flipped the bit on every executable
-	# file the set holds, which a kit's hooks are, and the branch then
-	# differed from control in the one way no row had asked it to.
-	my %mode = $self->_modes_at($dir, $control);
+	# The mode and blob each path carries on control, so the mirror is a
+	# mirror.  A delivery written at a fixed 100644 flipped the bit on every
+	# executable file the set holds, which a kit's hooks are, and the branch
+	# then differed from control in the one way no row had asked it to.
+	my %entry = $self->_tree_at($dir, $control);
 
 	my $corrupt = $opts{corrupt} || {};
 	my $files   = $opts{files}   || {};
@@ -1444,12 +1447,19 @@ sub deliver {
 			my $tmp = "$self->{tmp}/blob-" . int(rand(1_000_000));
 			helper::put_file($tmp, $content);
 			($blob) = run({dir => $dir}, 'git', 'hash-object', '-w', $tmp);
+			chomp $blob;
 		} else {
-			($blob) = run({dir => $dir}, 'git', 'rev-parse', "$control:$path");
+			$blob = $entry{$path}{blob}
+				or die "deliver: $path is in the set but not in control at $control\n";
 		}
-		chomp $blob;
-		run({dir => $dir}, 'git', 'update-index', '--add', '--cacheinfo',
-			sprintf('%s,%s,%s', $mode{$path} // '100644', $blob, $path));
+		push @info, sprintf("%s %s\t%s", $entry{$path}{mode} // '100644', $blob, $path);
+	}
+	if (@info) {
+		my $info = "$self->{tmp}/index-info-" . int(rand(1_000_000));
+		helper::put_file($info, join("\n", @info) . "\n");
+		run({dir => $dir, onfailure => "Failed to stage the delivery"},
+			'git update-index --index-info < "$1"', $info);
+		unlink $info;
 	}
 
 	my ($tree) = run({dir => $dir}, 'git', 'write-tree');
@@ -1475,23 +1485,23 @@ sub deliver {
 }
 
 # }}}
-# _modes_at - every path's file mode in one commit's tree {{{
+# _tree_at - every path's file mode and blob in one commit's tree {{{
 #
 # A delivery mirrors the set at a control commit, so it has to carry each
 # file's mode across as well as its contents.  Writing every entry at 100644
 # strips the executable bit off a kit's hooks, and the branch then differs
 # from control in a way no row asked for, which shows up as files the walk
 # says it would propagate.
-sub _modes_at {
+sub _tree_at {
 	my ($self, $dir, $commit) = @_;
 	my ($listing) = run({dir => $dir}, 'git', 'ls-tree', '-r', $commit);
 	chomp $listing if defined $listing;
-	my %mode;
+	my %entry;
 	for my $line (split /\n/, ($listing // '')) {
-		next unless $line =~ m{^(\d{6})\s+\S+\s+\S+\t(.+)$};
-		$mode{$2} = $1;
+		next unless $line =~ m{^(\d{6})\s+\S+\s+(\S+)\t(.+)$};
+		$entry{$3} = {mode => $1, blob => $2};
 	}
-	return %mode;
+	return %entry;
 }
 
 # }}}
