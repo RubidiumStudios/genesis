@@ -1,0 +1,106 @@
+#!/usr/bin/env perl
+# test-progress - how far a test run has got, read from its log
+#
+# Usage: t/bin/test-progress [-w SECONDS] [-j JOBS] [LOG]
+#                            [--manifest FILE] [--state FILE]
+#
+# Reads the output of `make test` (t/tmp/last-run.log unless LOG is given)
+# and prints each tier's files done out of its total, the failures so far,
+# the time elapsed, and an estimate of the time left from each remaining
+# file's duration in the last run that prove saved to .prove.  The unit
+# tier's estimate is divided by JOBS (one per processor by default), since
+# it runs side by side.  With -w it refreshes every SECONDS until the run
+# ends: every file is done, or a tier has failed, which ends make test.
+#
+# It only reads the log and .prove, so watching a run costs the run nothing.
+use strict;
+use warnings;
+
+use Cwd qw/abs_path/;
+use File::Basename qw/dirname/;
+use Getopt::Long;
+use POSIX qw/strftime/;
+
+my $root = dirname(dirname(dirname(abs_path(__FILE__))));
+my ($watch, $jobs);
+my $manifest = "$root/t/test-manifest.txt";
+my $state    = "$root/.prove";
+GetOptions('w=i' => \$watch, 'j=i' => \$jobs,
+           'manifest=s' => \$manifest, 'state=s' => \$state)
+	or die "Usage: $0 [-w SECONDS] [-j JOBS] [LOG]\n";
+my $log = shift // "$root/t/tmp/last-run.log";
+$jobs ||= (qx(getconf _NPROCESSORS_ONLN 2>/dev/null) =~ /(\d+)/)[0] || 4;
+
+my @TIERS = qw/sanity-tests unit-tests integration-tests e2e-tests/;
+my %files = map {
+	my $tier = $_;
+	($tier => [split ' ', qx($root/t/bin/parse-manifest $manifest $tier 2>/dev/null)]);
+} @TIERS;
+
+# The last run's duration of each file, from prove's saved state.
+my %took;
+if (open my $fh, '<', $state) {
+	my $test;
+	while (<$fh>) {
+		$test = $1 if /^  (t\/\S+\.t):\s*$/;
+		$took{$test} = $1 if $test && /^\s+elapsed:\s*([\d.]+)/;
+	}
+}
+
+sub report {
+	open my $fh, '<', $log or die "Cannot read $log: $!\n";
+	my (%done, %failed, $first, $last, $ended);
+	my $pending;
+	while (<$fh>) {
+		if (/^\[(\d\d:\d\d:\d\d)\] (t\/\S+\.t) \.+\s*(.*)$/) {
+			$first //= $1;
+			$last = $1;
+			my ($file, $said) = ($2, $3);
+			if ($said =~ /^(ok|skipped)/) {
+				$done{$file} = 1;
+			} else {
+				$pending = $file;
+			}
+		} elsif ($pending && /^(Dubious|Failed|Parse errors|No subtests run)/) {
+			$done{$pending} = $failed{$pending} = 1;
+			undef $pending;
+		}
+		# make test stops at the first tier that fails.
+		$ended = 1 if /^Result: FAIL/;
+	}
+	close $fh;
+	$ended = 1 unless grep {!$done{$_}} map {@{$files{$_}}} @TIERS;
+
+	my $now = strftime('%H:%M:%S', localtime);
+	my @lines = sprintf("%s  started %s", $now, $first // '-');
+	my ($left, $unknown) = (0, 0);
+	for my $tier (@TIERS) {
+		my @all = @{$files{$tier}};
+		my $n = grep {$done{$_}} @all;
+		my @todo = grep {!$done{$_}} @all;
+		$unknown += grep {!defined $took{$_}} @todo;
+		my $rest = 0;
+		$rest += $took{$_} // 0 for @todo;
+		$rest /= $jobs if $tier eq 'unit-tests';
+		$left += $rest;
+		push @lines, sprintf("  %-18s %4d / %-4d%s", $tier, $n, scalar(@all),
+			!@todo ? '  done' : ($n ? '  running' : ''));
+	}
+	my @fails = sort keys %failed;
+	push @lines, @fails
+		? ("  failed so far:", map {"    $_"} @fails)
+		: "  no failures so far";
+	# An estimate from some of the files would read as one for all of them,
+	# so none is given until every file left has a time from a past run.
+	push @lines, !$unknown
+		? sprintf("  about %d min left, from the last run's times", int($left / 60 + 0.5))
+		: sprintf("  no estimate: %d file(s) left have no time in .prove from a past run", $unknown);
+	return (join("\n", @lines) . "\n", $ended);
+}
+
+while (1) {
+	my ($text, $ended) = report();
+	print $watch ? "\e[H\e[J$text" : $text;
+	last if !$watch || $ended;
+	sleep $watch;
+}

@@ -1,4 +1,4 @@
-.PHONY: sanity-test compile-check pod-gate pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage install-secrets-engine test-changed test-failed
+.PHONY: sanity-test compile-check pod-gate pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage install-secrets-engine test-changed test-failed test-progress
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
@@ -18,6 +18,12 @@ TEST_STDIN = < /dev/null
 # genesis it ran, really loaded (see t/Harness/Deps.pod), so make
 # test-changed can choose the tests a change reaches.
 TEST_DEPS = GENESIS_TEST_DEPS=$(CURDIR)/t/.test-deps.new PERL5OPT="-I$(CURDIR)/t -MHarness::Deps $$PERL5OPT"
+
+# A full run's output also goes to this log, which make test-progress reads.
+# Each tier runs under bash with pipefail, so the tee never hides prove's
+# own exit status.
+TEST_LOG = t/tmp/last-run.log
+LOGGED = bash -o pipefail -c '"$$@" 2>&1 | tee -a $(TEST_LOG)' --
 
 # Coverage report format (html, json, text)
 COVERAGE_REPORT_FORMAT ?= html
@@ -66,9 +72,10 @@ test: sanity-test
 	@echo "Running all tests from manifest..."
 	@t/bin/test-state begin
 	@rm -rf t/.test-deps.new t/tmp/fixture-cache
-	@$(TEST_DEPS) prove -lf --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests) $(TEST_STDIN)
-	@$(TEST_DEPS) prove -lf --state=slow,save -j$(TEST_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
-	@$(TEST_DEPS) prove -lf --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests e2e-tests) $(TEST_STDIN)
+	@mkdir -p t/tmp && : > $(TEST_LOG)
+	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=slow,save -j$(TEST_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests e2e-tests) $(TEST_STDIN)
 	@sort -u t/.test-deps.new > t/.test-deps && rm -f t/.test-deps.new
 	@t/bin/test-state commit
 
@@ -82,6 +89,14 @@ test: sanity-test
 # stays the gate before a push.
 test-changed:
 	@t/bin/test-changed $(or $(BASE),HEAD) $(TEST_JOBS)
+
+# How far the running (or last) make test has got, refreshed every EVERY
+# seconds until it ends; it only reads the run's log, so it costs the run
+# nothing.  Run it in a second terminal:
+#   make test-progress
+#   make test-progress EVERY=30
+test-progress:
+	@t/bin/test-progress -w $(or $(EVERY),15) -j $(TEST_JOBS) $(TEST_LOG)
 
 # Run again only the test files that failed in the last run of any tier.
 test-failed:

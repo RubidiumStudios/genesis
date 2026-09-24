@@ -95,7 +95,11 @@ While working, run only what a change reaches:
   counts as reached.
 - `make test-failed` runs again only the files that failed last time.
 
-`make test` stays the gate before a push, and refreshes the record.
+`make test` stays the gate before a push, and refreshes the record.  It also
+writes its output to `t/tmp/last-run.log`, and `make test-progress`, run in a
+second terminal, reports from that log how far the run has got: each tier's
+files done, the failures so far, and the time left, estimated from each
+file's time in the last run.
 
 Each test process works in `t/tmp/<pid>`, which `helper` sets up as it loads
 and removes as the process ends; its HOME, its vaults' pid files and anything
