@@ -100,6 +100,9 @@ While working, run only what a change reaches:
   counts as reached.
 - `make test-failed` runs again only the files that failed last time.
 
+Every tier runs through `t/bin/prove-tier`, which starts the slowest files
+first by their times in `.prove` and runs only the files it is given.
+
 `make test` stays the gate before a push, and refreshes the record.  It also
 writes its output to `t/tmp/last-run.log`, and `make test-progress`, run in a
 second terminal, reports from that log how far the run has got: each tier's

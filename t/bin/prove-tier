@@ -1,0 +1,49 @@
+#!/usr/bin/env perl
+# prove-tier - run one tier's test files, slowest first
+#
+# Usage: t/bin/prove-tier [--failed] TIER JOBS [PROVE-OPTION...] [FILE...]
+#
+# Runs prove on JOBS processes over exactly the FILEs given, ordered by
+# their durations in the last run that prove saved to .prove, slowest
+# first and files it has no time for before those, so a side-by-side run
+# is not left waiting on a long file started last.  Options starting with
+# a dash go to prove as they are.
+#
+# With --failed it runs instead the files under t/TIER that failed in the
+# last run, and says so and succeeds when there are none.
+#
+# prove's own --state=slow would order the files, but it also adds every
+# file .prove has ever recorded, whatever the tier and whatever was named;
+# so this only ever asks prove to save.
+use strict;
+use warnings;
+
+use App::Prove::State;
+
+my $failed = @ARGV && $ARGV[0] eq '--failed' ? shift : undef;
+my ($tier, $jobs) = splice @ARGV, 0, 2;
+die "Usage: $0 [--failed] TIER JOBS [PROVE-OPTION...] [FILE...]\n"
+	unless defined $jobs && $jobs =~ /^\d+$/;
+my @options = grep { /^-/ } @ARGV;
+my @files   = grep { !/^-/ } @ARGV;
+
+my %tests = map { ($_->name => $_) }
+	App::Prove::State->new({store => '.prove'})->results->tests;
+
+if ($failed) {
+	@files = grep { m{^t/\Q$tier\E/} && $tests{$_}->result != 0 } sort keys %tests;
+	unless (@files) {
+		print "No $tier file failed in the last run.\n";
+		exit 0;
+	}
+}
+exit 0 unless @files;
+
+my %elapsed = map {
+	my $test = $tests{$_};
+	($_ => $test && defined $test->elapsed ? $test->elapsed : 9**9**9);
+} @files;
+@files = sort { $elapsed{$b} <=> $elapsed{$a} } @files;
+
+exec 'prove', @options, '--state=save', "-j$jobs", @files
+	or die "Cannot run prove: $!\n";

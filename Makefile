@@ -76,10 +76,10 @@ test: sanity-test
 	@t/bin/test-state begin
 	@rm -rf t/.test-deps.new t/tmp/fixture-cache
 	@mkdir -p t/tmp && : > $(TEST_LOG)
-	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests) $(TEST_STDIN)
-	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=slow,save -j$(TEST_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
-	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=slow,save -j$(INTEGRATION_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests) $(TEST_STDIN)
-	@$(TEST_DEPS) $(LOGGED) prove -lf --timer --state=save $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) $(LOGGED) t/bin/prove-tier sanity-tests 1 -lf --timer $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) $(LOGGED) t/bin/prove-tier unit-tests $(TEST_JOBS) -lf --timer $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) $(LOGGED) t/bin/prove-tier integration-tests $(INTEGRATION_JOBS) -lf --timer $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) $(LOGGED) t/bin/prove-tier e2e-tests 1 -lf --timer $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests) $(TEST_STDIN)
 	@sort -u t/.test-deps.new > t/.test-deps && rm -f t/.test-deps.new
 	@t/bin/test-state commit
 
@@ -102,9 +102,13 @@ test-changed:
 test-progress:
 	@t/bin/test-progress -w $(or $(EVERY),15) -j $(TEST_JOBS) $(TEST_LOG)
 
-# Run again only the test files that failed in the last run of any tier.
+# Run again only the test files that failed in the last run of any tier,
+# each tier as make test runs it.
 test-failed:
-	@prove -l --state=failed,save $(TEST_STDIN)
+	@t/bin/prove-tier --failed sanity-tests 1 -l $(TEST_STDIN)
+	@t/bin/prove-tier --failed unit-tests $(TEST_JOBS) -l $(TEST_STDIN)
+	@t/bin/prove-tier --failed integration-tests $(INTEGRATION_JOBS) -l $(TEST_STDIN)
+	@t/bin/prove-tier --failed e2e-tests 1 -l $(TEST_STDIN)
 
 # Point git at the tracked hooks.  Hooks live in .git/hooks by default,
 # which is neither tracked nor cloned, so this is what makes them apply

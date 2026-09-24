@@ -21,13 +21,12 @@ for tier in sanity-tests unit-tests integration-tests e2e-tests; do
 	[[ -n "$tests" ]] || continue
 	ran=1
 	echo "== $tier: $(wc -w <<<"$tests" | tr -d ' ') test file(s) reached"
-	if [[ "$tier" == unit-tests ]]; then
-		prove -l --state=slow,save -j"$jobs" $tests < /dev/null || exit 1
-	elif [[ "$tier" == integration-tests ]]; then
-		prove -l --state=slow,save -j"$(( jobs < 8 ? jobs : 8 ))" $tests < /dev/null || exit 1
-	else
-		prove -l --state=save $tests < /dev/null || exit 1
-	fi
+	case "$tier" in
+		unit-tests)        n="$jobs" ;;
+		integration-tests) n=$(( jobs < 8 ? jobs : 8 )) ;;
+		*)                 n=1 ;;
+	esac
+	t/bin/prove-tier "$tier" "$n" -l $tests < /dev/null || exit 1
 done
 
 [[ $ran -eq 1 ]] || echo "No test reaches the change since $base."
