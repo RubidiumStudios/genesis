@@ -3,14 +3,13 @@
 # Terminate a test run and everything it spawned.
 #
 # An interrupted `make test` leaves children behind: fake BOSH directors
-# are Test::TCP forks of the test script, and vault servers are
-# backgrounded by t/bin/vault, so neither dies with the runner.  An
-# orphan holding port 25555 makes the next run fail in four unrelated
-# files with "Address already in use", which reads as a code regression
-# rather than a stale process.
+# are Test::TCP forks of the test script, and vault servers are started
+# in the background through safe local by t/bin/vault, so neither dies
+# with the runner.
 #
-# helper.pm reaps orphaned vaults on import but nothing reaps the test
-# processes themselves.  This does both.
+# helper.pm sweeps the work areas of tests that have gone, stopping the
+# vaults they recorded, but only when the next test starts, and nothing
+# reaps the test processes themselves.  This does both at once.
 #
 # Usage:
 #   make end-testing            terminate
@@ -153,12 +152,6 @@ fi
 # alone cannot say whose it is.
 echo "ports still held by this repository:"
 held=0
-
-# 25555 is the fake BOSH director's fixed port -- always ours.
-if lsof -nP -iTCP:25555 -sTCP:LISTEN >/dev/null 2>&1; then
-	held=1
-	lsof -nP -iTCP:25555 -sTCP:LISTEN 2>/dev/null | tail -n +2 | sed 's/^/  /'
-fi
 
 # Any listener whose executable came out of t/engines.
 for pid in $(lsof -nP -iTCP -sTCP:LISTEN -t 2>/dev/null | sort -u); do

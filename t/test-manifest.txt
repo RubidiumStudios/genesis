@@ -345,6 +345,7 @@ unit-tests/pod_gate-check.t                  # the checks, and what stays adviso
 # helper's own vault handling comes first: every vault-using file below depends on it
 integration-tests/helper-secrets_engine.t   # the suite's vault runs the engine asked for, installed, never fetched
 integration-tests/helper-teardown_vault.t   # teardown_vault stops the vaults a caller names
+integration-tests/helper-fake_director.t    # a fake director takes a port of its own, named in the bosh config
 integration-tests/harness_propagation-cache.t   # a restored harness is the build it was kept from
 integration-tests/harness_propagation-lazy_vault.t   # a harness starts its vault when something first needs it
 # Genesis.pm tests requiring filesystem/network:

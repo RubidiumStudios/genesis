@@ -45,7 +45,7 @@ subtest 'bosh connect_and_validate' => sub {
 	my $director = fake_bosh_director('the-target');
 	# `bosh env --json` transposes its table: one row, keys snake_cased from
 	# the column titles.  Shape taken verbatim from a live 280.0.23 director.
-	bosh_runs_as('env --json',<<EOF,BOSH_ENVIRONMENT => "https://127.0.0.1:25555", BOSH_CA_CERT => 'ca_cert', BOSH_CLIENT => 'admin', BOSH_CLIENT_SECRET => 'password', BOSH_DEPLOYMENT => '');
+	bosh_runs_as('env --json',<<EOF,BOSH_ENVIRONMENT => "https://127.0.0.1:".$director->port, BOSH_CA_CERT => 'ca_cert', BOSH_CLIENT => 'admin', BOSH_CLIENT_SECRET => 'password', BOSH_DEPLOYMENT => '');
 {
     "Tables": [
         {
@@ -80,7 +80,8 @@ subtest 'bosh connect_and_validate' => sub {
     ]
 }
 EOF
-	my $bosh = get_bosh_director('the-target');
+	my $bosh = get_bosh_director('the-target',
+		url => 'https://127.0.0.1:'.$director->port);
 	ok $bosh->connect_and_validate(), "bosh env on alias should ping ok";
 
 	# The director summary is retained, not discarded after the reachability
@@ -454,7 +455,8 @@ OUTPUT
 esac
 SCRIPT
 
-	my $bosh = get_bosh_director('test-env');
+	my $bosh = get_bosh_director('test-env',
+		url => 'https://127.0.0.1:'.$director->port);
 	my $status = $bosh->status();
 
 	is($status->{status}, 'ok', 'status() returns ok for successful connection');

@@ -563,20 +563,22 @@ sub write_bosh_config {
 
 
 sub fake_bosh_directors {
-	write_bosh_config(@_);
+	# Each director takes a free port unless it names one, and the bosh config
+	# is written with that port, so files starting directors side by side
+	# never take one another's and every command dials its own test's
+	# director.
+	my @args = map {
+		my $info = ref($_) eq 'HASH' ? {%$_} : {alias => $_};
+		$info->{port} ||= Test::TCP::empty_port();
+		$info;
+	} @_;
+	write_bosh_config(@args);
 	my @directors = ();
-	my @args = (@_);
-	my $last_port=25555;
 	for my $info (@args) {
-		if (ref($info) ne "HASH") {
-			$info = {
-				alias => $info
-			};
-		}
 		push @directors, Test::TCP->new(
 			listen => 0,
 			auto_start => 1,
-			port => $info->{port} || ($last_port++),
+			port => $info->{port},
 			code => sub {
 				my $port = shift;
 				my $sock =  IO::Socket::IP->new(
