@@ -1,4 +1,4 @@
-.PHONY: sanity-test compile-check pod-gate pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage
+.PHONY: sanity-test compile-check pod-gate pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage install-secrets-engine
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
@@ -155,6 +155,14 @@ endif
 
 pod-validate-changed:
 	@t/bin/pod-validate-ai --changed --base $(or $(BASE),main)
+
+# Install a secrets engine for the test suite to run, into t/engines.  Tests
+# never download one; they name this target when the engine they ask for is
+# missing.
+#   make install-secrets-engine ENGINE=vault VERSION=1.14.4
+#   make install-secrets-engine ENGINE=bao VERSION=2.7.0
+install-secrets-engine:
+	@t/bin/install-secrets-engine $(ENGINE) $(VERSION)
 
 # Install test dependencies via Homebrew and cpanm
 test-deps:
