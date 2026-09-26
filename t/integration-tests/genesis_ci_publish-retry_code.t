@@ -6,6 +6,11 @@
 # nobody's mistake, so the run exits TEMPFAIL and the job's next run publishes
 # with nobody having repaired anything first.
 #
+# The second story also proves T180: control is re-checked against the remote
+# before the first push, a control that moved refuses the publish naming
+# behind as stale, nothing is pushed, every branch the run wrote is put back,
+# and control is never among the branches the run publishes.
+#
 # The retry is the assertion that matters.  Both refusals name a branch, say
 # what moved, and say that nothing was pushed, so an implementation that chose
 # each code by reading that prose passes every row about the message and parts
@@ -76,8 +81,8 @@ subtest 'a hand commit refuses, and refuses again on an unaided retry' => sub {
 };
 
 subtest 'a control a teammate moved refuses once, and the retry publishes' => sub {
-	# Six rows, and one more for each run's own restoration assertion.
-	plan tests => 8;
+	# Nine rows, and one more for each run's own restoration assertion.
+	plan tests => 11;
 
 	my $h = make_harness(envs => ['lab'], mode => 'direct',
 		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
@@ -110,6 +115,9 @@ subtest 'a control a teammate moved refuses once, and the retry publishes' => su
 		'and the refusal names behind as stale');
 	is(ref_in($h->r, 'refs/heads/lab/bosh'), $before,
 		'nothing reached the remote');
+	is(ref_in($h->a, 'refs/heads/lab/bosh'),
+		ref_in($h->a, 'refs/remotes/origin/lab/bosh'),
+		'every branch the run wrote was reset to T');
 	is(ref_in($h->r, 'refs/heads/'.$h->control), $theirs,
 		'and control is where the teammate left it');
 
@@ -120,12 +128,20 @@ subtest 'a control a teammate moved refuses once, and the retry publishes' => su
 	# operator rebases it.  A clone made after the teammate pushed starts on
 	# what R holds, so it needs nobody to repair anything first.
 	my $copy = clone_copy($h);
-	my (undef, undef, $again) =
+	my ($out_again, $err_again, $again) =
 		run_genesis_in($h, $copy, {answers => ['y']}, 'propagate');
 
 	is($again, 0, 'the unaided retry publishes');
 	isnt(ref_in($h->r, 'refs/heads/lab/bosh'), $before,
 		'because the branch went out on the second run');
+
+	# The publish names each branch it pushed, one line apiece, so the
+	# absence of control's own line is the absence of control from the set.
+	my $said_again = unfolded($out_again, $err_again);
+	like($said_again, qr{lab/bosh: published},
+		'the publish names the branch it pushed');
+	unlike($said_again, qr/\Q@{[$h->control]}\E: published/,
+		'control was not among the branches the run published');
 };
 
 done_testing;

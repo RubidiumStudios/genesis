@@ -415,10 +415,9 @@ integration-tests/genesis_ci_report-preview_warnings.t        # the preview warn
 integration-tests/genesis_ci_report-totals.t                  # the totals line counts the commits the run published, and no others
 integration-tests/genesis_ci_publish-outcomes.t               # one push per branch, and a refused branch's rejection as its outcome
 integration-tests/genesis_ci_publish-independence.t           # a partial publish leaves every branch true, and the next run converges
-integration-tests/genesis_ci_publish-control.t                # control is re-checked before the first push, and never pushed
 integration-tests/genesis_ci_publish-confirm.t                # the verified delta is shown whether or not there is anyone to ask
 integration-tests/genesis_ci_publish-status.t                 # a clean publish exits zero and a rejected branch makes the run partial
-integration-tests/genesis_ci_publish-retry_code.t             # the exit code says whether an unaided retry fixes the refusal
+integration-tests/genesis_ci_publish-retry_code.t             # the exit code says whether an unaided retry fixes the refusal; control is re-checked and never pushed
 integration-tests/genesis_ci_pullrequest-aggregate.t          # two due commits become one aggregate whose body says what it carries
 integration-tests/genesis_ci_pullrequest-align.t              # the pull request branch is levelled with what the remote carries now
 integration-tests/genesis_ci_pullrequest-branch_lifecycle.t   # nothing due takes the branch off R and out of the clone together
