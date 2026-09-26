@@ -12,9 +12,10 @@
 # Two more things this command does with the API are proved here.  An API it
 # cannot read degrades the column and warns rather than ending the report,
 # because the command's one refusal on this path is the disowned pipeline,
-# and the client the report hands the walk lets a squash-merged marker come
-# back, which both says where the marker came from and says aloud where a
-# merged pull request names another environment.
+# and the client the report hands the walk says aloud where a merged pull
+# request names another environment.  That the same client lets a
+# squash-merged marker come back is proved beside the run's own recovery,
+# in genesis_ci_pullrequest-recovery.t.
 #
 # Which assertions discriminate and which guard is said beside each.
 use strict;
@@ -27,7 +28,6 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
-use JSON::PP qw/decode_json/;
 
 use Genesis;
 
@@ -122,58 +122,12 @@ subtest 'an API that will not answer degrades rather than refusing' => sub {
 		'and no refusal about a pull request branch is printed');
 };
 
-subtest 'a squash-merged branch reads the same in both commands' => sub {
-	# Four assertions and one restoration for each of the three commands.
-	plan tests => 7;
-
-	# The site could not be given the rebase-only merge method, so the
-	# aggregate went in as a squash, which means the subject on the deployment
-	# branch is the merger's own and the marker the aggregate carried is
-	# nowhere on the branch.  The pull request Genesis opened still says which
-	# control commit went in, and that is what both commands read it back out
-	# of, so a report that was handed no client would read the whole of
-	# control as still due while the run read the branch as caught up.
-	my $h  = ready(kit => 'omega-v2.7.0', admin => 0, delivered => []);
-	my $gh = $h->{gh};
-
-	my $due = due_commit($h, 'prod', params => {instances => 2},
-		message => 'Raise the prod instance count');
-	my $number = gh_pull_request($gh, env => 'prod',
-		head   => $h->pr_branch('prod'),
-		base   => $h->slug('prod'),
-		review => 'none',
-		title  => sprintf('[pipeline] control@%s -> prod', substr($due, 0, 12)));
-	gh_merge_pr($gh, $number, method => 'squash');
-	squash_merge($h, 'prod', keep_marker => 0,
-		subject => sprintf('Raise the prod instance count (#%d)', $number));
-
-	my ($status, undef, $exit) = run_genesis($h, 'pipeline-status');
-	is($exit, 0, 'the report reads the repository');
-	unlike(env_line($status, 'prod'), qr/\d+ pending/,
-		'and nothing is due, the marker having come back from the merge');
-
-	# The recovery writes its own line onto the record through note_detail,
-	# so what --json carries is the account of where that marker came from.
-	# The row goes red against a report that hands the walk no client, which
-	# recovers nothing and leaves the field null.
-	my ($json) = run_genesis($h, 'pipeline-status', '--json');
-	my ($row) = grep {$_->{env} eq 'prod'}
-		@{decode_json($json)->{environments}};
-	is($row->{outcome_detail},
-		"recovered the marker for prod from #$number",
-		'and --json says which pull request the marker came back from');
-
-	my ($out, $err) = run_genesis($h, 'propagate', '-y');
-	like(unfolded($out, $err), qr/prod.*idempotent/,
-		'and the run reads that same branch the same way');
-};
-
 subtest 'a merged marker naming another environment is said aloud' => sub {
 	# Two assertions and one restoration.
 	plan tests => 3;
 
-	# The same squash, with the pull request Genesis wrote naming qa where
-	# this branch is prod's.  A marker for another environment is not this
+	# A squash-merged branch, with the pull request Genesis wrote naming qa
+	# where this branch is prod's.  A marker for another environment is not this
 	# one's, and saying so is the difference between a branch that lost its
 	# marker in a squash and a branch somebody merged the wrong pull request
 	# into.  The report reads it through the client it now hands the walk,

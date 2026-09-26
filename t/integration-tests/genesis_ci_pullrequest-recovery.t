@@ -5,6 +5,10 @@
 # recovery.  The last subtest is the drifted marker, which is why the marker
 # is read twice.
 #
+# The squash subtest also reads the branch through pipeline-status, which
+# hands the walk the same client, so the report and the run read a squashed
+# branch the same way and --json says where the marker came from.
+#
 # The first subtest is green before the recovery exists, and it is here as a
 # guard rather than as a proof.  A rebase merge must go on answering off the
 # branch, so nothing in the recovery may reach an environment that never lost
@@ -25,6 +29,7 @@ use helper;
 use Harness::Propagation;
 
 use Test::More;
+use JSON::PP qw/decode_json/;
 
 use Genesis;
 
@@ -66,7 +71,8 @@ subtest 'a rebase merge keeps the marker on the branch' => sub {
 };
 
 subtest 'a squash-merged tip recovers its marker from the pull request' => sub {
-	plan tests => 6;
+	# Eight assertions and one restoration for each of the three commands.
+	plan tests => 11;
 
 	my $h  = ready(kit => 'omega-v2.7.0', admin => 0, delivered => []);
 	my $gh = $h->{gh};
@@ -85,6 +91,29 @@ subtest 'a squash-merged tip recovers its marker from the pull request' => sub {
 	gh_merge_pr($gh, $number, method => 'squash');
 	squash_merge($h, 'prod', keep_marker => 0,
 		subject => sprintf('Raise the cf instance count (#%d)', $number));
+
+	# The report reads the branch before the run does, and writes nothing, so
+	# the run below meets the same branch.  A report handed no client would
+	# read the whole of control as still due while the run read the branch
+	# as caught up.
+	{
+		local $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
+		my ($status, undef, $exit) = run_genesis($h, 'pipeline-status');
+		is($exit, 0, 'the report reads the repository');
+		unlike(env_line($status, 'prod'), qr/\d+ pending/,
+			'and nothing is due, the marker having come back from the merge');
+
+		# The recovery writes its own line onto the record through
+		# note_detail, so what --json carries is the account of where that
+		# marker came from; a report that hands the walk no client recovers
+		# nothing and leaves the field null.
+		my ($json) = run_genesis($h, 'pipeline-status', '--json');
+		my ($row) = grep {$_->{env} eq 'prod'}
+			@{decode_json($json)->{environments}};
+		is($row->{outcome_detail},
+			"recovered the marker for prod from #$number",
+			'and --json says which pull request the marker came back from');
+	}
 
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
 	my $said = unfolded($out, $err);
