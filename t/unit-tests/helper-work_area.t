@@ -83,17 +83,17 @@ subtest 'a work area whose process is gone is swept' => sub {
 	ok(-d "$TMP_ROOT/$$", 'and leaves the running one alone');
 };
 
-subtest 'an area kept for inspection survives the next file' => sub {
-	plan tests => 2;
+# Only the ending is proved.  Whether a later file sweeps a kept area depends
+# on that file's own setting, and in the parallel unit tier files without it
+# start beside this one, so that half cannot be asserted here.
+subtest 'an area kept for inspection outlives its file' => sub {
+	plan tests => 1;
 
 	local $ENV{GENESIS_TEST_KEEP_TMP} = 1;
 	my $kept = start_file();
 	stop_file($kept);
 	my $area = $kept->{home} =~ s{/home$}{}r;
 	ok(-d $area, 'a file that ends leaves its area when asked to keep it');
-
-	stop_file(start_file());
-	ok(-d $area, 'and the next file to start leaves it too, rather than sweeping it');
 	`rm -rf "$area"`;
 };
 

@@ -97,8 +97,9 @@ sub _open_work_area {
 sub _sweep_work_areas {
 	my ($root) = @_;
 
-	# Areas kept for inspection are kept from the files that start after them
-	# too, or nothing of a run would be left to inspect.
+	# A process that keeps its own area sweeps no one else's, so a whole run
+	# under the setting leaves every area to inspect.  A process started
+	# without it sweeps kept areas like any other.
 	return if $ENV{GENESIS_TEST_KEEP_TMP};
 	opendir(my $dh, $root) or return;
 	for my $pid (grep {/^\d+$/} readdir($dh)) {
