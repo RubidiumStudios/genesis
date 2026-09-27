@@ -86,7 +86,10 @@ subtest 'the rebuild reports what it discards' => sub {
 	refresh($h, 'a', $pr);
 	my @files = $git->ls_tree("origin/$pr", '.');
 
-	# A guard, for the reason the exit row above gives.
+	# A guard, for the reason the exit row above gives.  It is also T276's
+	# hand-edit shape: an edited pull request branch is discarded and rebuilt,
+	# never read as settled, which the outcome above says by reading
+	# propagated.
 	ok(!(grep {m{^prod/}} @files), 'the rebuild discarded them');
 
 	# A guard, for the reason the exit row above gives.  The set is read
@@ -112,10 +115,11 @@ subtest 'the rebuild reports what it discards' => sub {
 
 
 # Proves T270: a repeated run with nothing changed pushes nothing and touches
-# no pull request, and a branch whose tip subject was rewritten by a merge
-# still reads its marker from the body.
+# no pull request.  Its second fixture, a tip subject edited by hand that
+# still reads its marker from the body, is the reader's alone and is proved
+# with the reader in genesis_ci_marker-newest.t.
 subtest 'a repeated run is idempotent by marker and tree' => sub {
-	plan tests => 9;
+	plan tests => 7;
 
 	my $h   = ready(kit => 'omega-v2.7.0');
 	my $gh  = $h->{gh};
@@ -152,17 +156,6 @@ subtest 'a repeated run is idempotent by marker and tree' => sub {
 		@calls[$calls_before .. $#calls];
 	is(scalar @writes, 0, 'and no pull request was touched');
 	cmp_ok(scalar @calls, '>', $calls_before, 'though the state was read');
-
-	# A merge that rewrites the subject keeps the marker in the body, so the
-	# walk still finds it where a subject match would not.
-	my $h2  = ready(kit => 'omega-v2.7.0');
-	my $due = due_commit($h2, 'prod', params => {instances => 2},
-		message => 'Raise the cf instance count');
-	run_genesis($h2, 'propagate', '-y');
-	squash_merge($h2, 'prod', subject => 'Merge the proposal', keep_marker => 1);
-	refresh($h2, 'a', $h2->slug('prod'));
-	is(harness_marker($h2, 'origin/'.$h2->slug('prod')), $due,
-		'a rewritten subject still reads its marker from the body');
 };
 
 # Proves T276: the three shapes that broke idempotency by commit subject, each
@@ -173,12 +166,12 @@ subtest 'a repeated run is idempotent by marker and tree' => sub {
 # merge does to a message, so the control commit is still due, the whole arm
 # runs, and the run reads idempotent only because settled compared the marker
 # on R's copy of the branch against the tree the writer had just built.  The
-# other two shapes are end-to-end guards for the hazard rather than tests of
-# that sub: the hand edit goes through the discard report, and the coincidence
-# goes through the walk's base reader and the marker's own rule about what
-# counts as a marker at all.
-subtest 'the three subject-match shapes give the right answer now' => sub {
-	plan tests => 10;
+# coincidence is an end-to-end guard for the hazard rather than a test of that
+# sub: it goes through the walk's base reader and the marker's own rule about
+# what counts as a marker at all.  The third shape, a hand edit on the pull
+# request branch, goes through the discard report and is the first subtest's.
+subtest 'the subject-match shapes give the right answer now' => sub {
+	plan tests => 6;
 
 	# A rewritten subject on the aggregate itself, which is what a squash
 	# merge does to a message, because the subject a reader would walk is
@@ -218,31 +211,6 @@ subtest 'the three subject-match shapes give the right answer now' => sub {
 	unlike($squash_said, qr/prod: propagated/, 'and nothing is delivered again')
 		or diag($squash_said);
 
-	# A hand edit on the pull request branch itself, which is a divergence to
-	# report and rebuild rather than a state to skip.
-	my $edited    = ready(kit => 'omega-v2.7.0');
-	my $edited_pr = $edited->pr_branch('prod');
-	due_commit($edited, 'prod', params => {instances => 2},
-		message => 'Raise the cf instance count');
-	run_genesis($edited, 'propagate', '-y');
-	hand_commit($edited, $edited_pr, copy => 'b',
-		files => {'prod/note.md' => "a note\n"}, message => 'tidy up');
-
-	# The publish leases the branch against the tip this clone last saw, and
-	# the run's own refresh fetches control and the deployment branches and
-	# no pull request branch, so the clone is shown the hand commit here.
-	# Without it the push is refused once and the row reads a refusal where
-	# it means to read a rebuild.
-	refresh($edited, 'a', $edited_pr);
-
-	my ($ed_out, $ed_err) = run_genesis($edited, 'propagate', '-y');
-	my $edited_said = unfolded($ed_out, $ed_err);
-	like($edited_said, qr/did not write/,
-		'an edited branch is discarded and rebuilt rather than skipped')
-		or diag($edited_said);
-	unlike($edited_said, qr/prod: idempotent/, 'and never reads as settled')
-		or diag($edited_said);
-
 	# A coincidental short hash in an unrelated subject, which suppressed a
 	# real propagation at the baseline.  The subject is not marker-shaped,
 	# because one that was would be a marker by the reader's own rule.
@@ -261,8 +229,10 @@ subtest 'the three subject-match shapes give the right answer now' => sub {
 		files   => {'prod/note.md' => "a note\n"},
 		message => "see $short for the context of this change");
 
-	# Here for the reason the refresh in the shape above carries: the clone
-	# has to have seen the branch move before the publish leases it.
+	# The publish leases the branch against the tip this clone last saw, and
+	# the run's own refresh fetches no pull request branch, so the clone is
+	# shown the hand commit here; without it the push is refused once and
+	# the row reads a refusal where it means to read a propagation.
 	refresh($coincidence, 'a', $co_pr);
 
 	my ($co_out, $co_err) = run_genesis($coincidence, 'propagate', '-y');

@@ -2,7 +2,8 @@
 # Proves T77, the hand commit the walk skips; T79, the squash whose marker
 # survives in the body alone; T84, the marker read from R and resolved
 # against it; and T85, the same answer after a squash, after an amend, and
-# under a coincidental short sha.
+# under a coincidental short sha.  The amend is also T270's second fixture, a
+# tip subject edited by hand that still reads its marker from the body.
 use strict;
 use warnings;
 use utf8;
