@@ -232,7 +232,21 @@ sub assert_not_disowned {
 	my ($top, %opts) = @_;
 
 	return 1 if $top->pipeline_enabled;
-	my $applied = $top->applied_record or return 1;
+
+	# A record the vault would not give cannot say whether the disabled
+	# pipeline is still live, and this check is not what decides whether the
+	# vault is fit to use, so it says what it could not read and carries on.
+	my $applied = eval {$top->applied_record};
+	if (my $unread = $@) {
+		warning(
+			"Could not read the applied record at #C{%s}: %s\n\n".
+			"Whether this repository's disabled pipeline is still live could ".
+			"not be checked.",
+			$top->applied_record_path, $unread =~ s/\s+$//r
+		);
+		return 1;
+	}
+	return 1 unless $applied;
 
 	my $command = $opts{command} // 'propagate';
 	my $outcome = $opts{outcome} // 'Nothing was written.';

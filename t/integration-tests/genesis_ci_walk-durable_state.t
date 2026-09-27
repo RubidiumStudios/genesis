@@ -5,10 +5,11 @@
 # read rather than guessed at, and two overlapping runs read only durable
 # state.
 #
-# T144's other half, which is a whole-run input the vault answers an error for
-# rather than an absence, is not here.  The harness can take a record away and
-# cannot make the vault refuse a read, so the refusal that guards the applied
-# record has no row of its own until a builder for that exists.
+# It proves T144's error half too: a whole-run input the vault answers an
+# error for, rather than an absence, refuses the run at UNAVAILABLE naming the
+# path and what the vault said, and a repository with no vault to read says
+# that rather than failing inside Perl.  break_vault_reads makes the vault
+# refuse the read.
 #
 # Genesis accounts for itself on standard error, which is where info writes,
 # so every report a row reads comes out of the second value run_genesis
@@ -198,6 +199,50 @@ subtest 'two copies and two identities agree' => sub {
 
 	my (undef, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
 	like($err, qr/^\s*qa: idempotent/m, 'copy A finds nothing left to do');
+};
+
+subtest 'an applied record the vault errors on refuses the run' => sub {
+	# Four rows, and one for the run's own restoration assertion.
+	plan tests => 5;
+
+	# T144's error half.  The vault answers the read at the applied record's
+	# path with an error rather than with nothing, which is neither of D109's
+	# two absences, so the run refuses naming the path and what the vault
+	# said, where a reader that took the error for an absence would go on to
+	# read the pipeline as never applied.
+	my $h = two_stage();
+	my $due = commit_on_control($h,
+		files => {'qa.yml' => env_file(env => 'qa', prior => 'lab', n => 5)},
+		message => 'Tune qa', push => 1);
+	certify($h, 'lab', control_commit => $due);
+	my $before = ref_in($h->r, 'refs/heads/'.$h->slug('qa'));
+	break_vault_reads($h, $h->applied_path);
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+	my $said = unfolded($err);
+	is($exit, Genesis::Exit::UNAVAILABLE, 'the run refuses as the vault being unavailable');
+	like($said, qr/\Q@{[$h->applied_path]}\E/, 'naming the path it could not read');
+	like($said, qr/permission denied/, 'and what the vault answered');
+	is(ref_in($h->r, 'refs/heads/'.$h->slug('qa')), $before,
+		'and nothing was delivered');
+};
+
+subtest 'a repository with no vault to read says so' => sub {
+	# Two rows, and one for the run's own restoration assertion.
+	plan tests => 3;
+
+	# With no secrets_provider.url configured the repository reads safe's
+	# current target, and with that target gone there is no vault at all.
+	# The operator is told that, rather than handed a Perl error about a
+	# method called on nothing.
+	my $h = two_stage();
+	teardown_vault($h->{vault_target});
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+	my $said = unfolded($err);
+	is($exit, Genesis::Exit::UNAVAILABLE, 'the run refuses');
+	like($said, qr/no vault is available for this repository/,
+		'saying there is no vault to read') or diag($said);
 };
 
 subtest 'an absent input is read and never guessed at' => sub {

@@ -127,6 +127,30 @@ subtest 'a sibling changed only on control is named as well' => sub {
 		or diag("what the deploy said:\n$err");
 };
 
+subtest 'an applied record the vault errors on skips its warnings aloud' => sub {
+	# Four rows, and one for the run's own restoration assertion.
+	plan tests => 5;
+
+	# The pre-flight's warnings only ever warn, so a vault that answers an
+	# error at the applied record's path does not stop the deploy.  It is not
+	# taken for "never applied" either: the deploy says it could not read the
+	# record, what the vault said, and which warnings it therefore skipped.
+	my $h = seeded_harness();
+	fixture_bosh($h);
+	break_vault_reads($h, $h->applied_path);
+
+	my (undef, $err, $exit) = run_genesis($h,
+		'qa', 'deploy', '--no-propagate', '-y', 'r');
+	my $said = unfolded($err);
+
+	is($exit, 0, 'the deploy proceeded');
+	like($said, qr/Could not read the applied record at \Q@{[$h->applied_path]}\E/,
+		'it says which record it could not read') or diag($said);
+	like($said, qr/permission denied/, 'and what the vault answered');
+	like($said, qr/stale-pipeline, standing-hold, commits-due and drift warnings, which read it, were skipped/,
+		'and which warnings it could not give');
+};
+
 subtest 'an applied pipeline that nothing has changed warns nothing' => sub {
 	plan tests => 3;
 

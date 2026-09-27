@@ -309,9 +309,15 @@ job.
 
 =back
 
+Where the pipeline is disabled and the vault answers an error for the applied
+record, whether the pipeline is still live cannot be told, and this check is
+not what decides whether the vault is fit to use: a propagate run refuses on
+the same read a step later.  So it warns naming the record and what the vault
+said, and carries on, for every caller and inside a job alike.
+
 B<Returns:> the applied record, where the state was warned about; 1, where
-the pipeline is enabled or no applied record stands.  It does not return
-where it refuses.
+the pipeline is enabled, no applied record stands, or the record could not be
+read.  It does not return where it refuses.
 
 B<Errors:>
 

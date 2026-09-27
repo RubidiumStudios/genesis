@@ -43,7 +43,7 @@ our @EXPORT = qw/
 
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed fixture_director fixture_bosh
-	break_vault break_vault_writes restore_vault
+	break_vault break_vault_writes break_vault_reads restore_vault
 	record_at record_keys proposed_for vault_read_log bosh_runs fixture_preflight fixture_kit
 	fixture_command install_compiled_kit shimmed_git real_tool
 	fixture_fly
@@ -2548,6 +2548,7 @@ sub fixture_vault {
 
 	$self->{vault_log}    = "$self->{tmp}/vault-reads.log";
 	$self->{vault_refuse} = "$self->{tmp}/vault-refused-writes";
+	$self->{vault_refuse_reads} = "$self->{tmp}/vault-refused-reads";
 	my $bin = "$self->{tmp}/bin";
 	helper::mkdir_or_fail($bin) unless -d $bin;
 	helper::put_file("$bin/safe", 0755, <<"EOS");
@@ -2559,8 +2560,24 @@ sub fixture_vault {
 # than handed on, which is the one way a row can make a vault write fail while
 # every read still answers.  Nothing writes the refusal file until a row arms
 # it, so an unarmed harness pays one file test and hands the call straight on.
+#
+# A read at a path break_vault_reads named answers an error, which is not
+# safe's "no secret exists" and so is not an absence either.
 case "\$1" in
-	get|read|export) echo "\$2" >> "$self->{vault_log}" ;;
+	get|read|export)
+		echo "\$2" >> "$self->{vault_log}"
+		if [ -s "$self->{vault_refuse_reads}" ]; then
+			while IFS= read -r refused; do
+				[ -n "\$refused" ] || continue
+				case "\$2" in
+					"\$refused"|"\$refused"/*|"\$refused":*)
+						echo >&2 "!! the harness vault refuses to read \$2: permission denied"
+						exit 1
+						;;
+				esac
+			done < "$self->{vault_refuse_reads}"
+		fi
+		;;
 	set|rm|delete|move)
 		if [ -s "$self->{vault_refuse}" ]; then
 			# A move is refused by either end, because a move whose
@@ -3240,12 +3257,30 @@ sub break_vault_writes {
 }
 
 # }}}
+# break_vault_reads - make every read at or below a path answer an error {{{
+#
+# break_vault takes a record away, which a reader sees as an absence.  A row
+# about a vault that answers an error needs the other thing, a read that fails
+# with a message that is not safe's "no secret exists", and it is armed the way
+# break_vault_writes is, in a file the recording wrapper consults.
+# restore_vault disarms it.
+sub break_vault_reads {
+	my ($self, @paths) = @_;
+	$self->fixture_vault;
+	helper::put_file($self->{vault_refuse_reads},
+		join('', map {"$_\n"} @paths));
+	return $self;
+}
+
+# }}}
 # restore_vault - put back what break_vault moved aside {{{
 sub restore_vault {
 	my ($self) = @_;
 	die "restore_vault needs a vault fixture, and this harness has none\n"
 		unless $self->{vault_target};
 	helper::put_file($self->{vault_refuse}, '') if $self->{vault_refuse};
+	helper::put_file($self->{vault_refuse_reads}, '')
+		if $self->{vault_refuse_reads};
 	for my $pair (@{delete($self->{broken}) || []}) {
 		my ($said, $rc) = run({env => {SAFE_TARGET => $self->{vault_target}},
 				stderr => 0},

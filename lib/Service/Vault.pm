@@ -488,6 +488,35 @@ sub get {
 }
 
 # }}}
+# get_if_present - the key/value pairs at a path, undef where there are none {{{
+#
+# get answers {} for an absent path and for a vault that answered an error
+# alike, and a caller that must refuse on the one and read on the other
+# cannot tell them apart through it.  safe exits 1 for both and says which in
+# its message, so the message decides: its "no secret exists", and under KV v2
+# a latest version that "has been deleted" or "destroyed", is an absence, and
+# anything else, a silent failure included, dies with what safe said.
+sub get_if_present {
+	my ($self, $path) = @_;
+	$path =~ s/\/{2,}/\//g;
+	my ($yaml, $rc, $err) = $self->query(
+		{stderr => 0, redact_output => 1}, 'get', $path
+	);
+	$err //= '';
+	if ($rc) {
+		return undef if $err =~ /no secret exists at path/
+		             || $err =~ /version \d+ of secret .* has been (?:deleted|destroyed)/;
+		die(($err =~ s/^\s*!!\s*//r =~ s/\s+$//r)
+			|| "safe exited $rc reading $path and said nothing", "\n");
+	}
+	my $values = load_yaml($yaml);
+	die "Expected $path to hold key/value pairs, but it held a "
+	  . (ref($values) || 'scalar') . "\n"
+		unless ref($values) eq 'HASH';
+	return $values;
+}
+
+# }}}
 # get_path - get all the keys under a given path, including subpaths {{{
 sub get_path {
 	my ($self, $path) = @_;

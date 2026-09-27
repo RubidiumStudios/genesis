@@ -1141,10 +1141,20 @@ the deployment record written under it too, and a C<move> is matched at both
 ends, so a move whose destination lands under a refused path refuses as well.
 C<restore_vault> disarms it.
 
+=head2 break_vault_reads($h, @paths)
+
+Makes every C<safe> read (C<get>, C<read>, C<export>) at or below each path
+answer an error, exiting 1 with a permission-denied message rather than
+C<safe>'s "no secret exists".  C<break_vault> takes a record away, which a
+reader sees as an absence; this is the other failure, a vault that answers
+and refuses, which a reader must not take for an absence.  It is armed like
+C<break_vault_writes>, in a file the recording C<safe> consults, and
+C<restore_vault> disarms it.
+
 =head2 restore_vault($h)
 
 Puts back everything C<break_vault> moved aside and disarms whatever
-C<break_vault_writes> refused, so the same row can assert the run succeeding
+C<break_vault_writes> and C<break_vault_reads> refused, so the same row can assert the run succeeding
 once its vault answers again.  It refuses a harness with no vault fixture for
 the reason C<break_vault> does, and it checks each move back and refuses a
 failed one by name for the same reason again.

@@ -1300,8 +1300,8 @@ sub applied_record_path {
 #
 # This is the owner of the pipeline's own facts, so pipeline-apply writes
 # through here and never spells the address for itself.  Called with no
-# arguments it reads the three flat fields, and answers undef where the
-# path is absent.  Called with a field list it writes those fields and
+# arguments it reads the three flat fields, answers undef where the path is
+# absent, and dies with what the vault said where the read failed.  Called with a field list it writes those fields and
 # returns what it wrote.  The deploy rewrites its own exodus record every
 # run, which is why these live at their own path rather than beside the
 # deployments.
@@ -1314,7 +1314,16 @@ sub applied_record {
 	my $path = $self->applied_record_path;
 
 	unless (%fields) {
-		my $data = $self->vault->get($path);
+		# An absent record and a vault that answered an error are different
+		# things, and the run refuses differently on each, so the read tells
+		# them apart and an error dies for the caller to name.  A repository
+		# that names no secrets_provider.url reads safe's current target, and
+		# where safe has none there is no vault at all, which is said as such.
+		my $vault = $self->vault
+			or die "no vault is available for this repository: it configures ".
+			       "no secrets_provider.url, and safe has no current target to ".
+			       "read instead\n";
+		my $data = $vault->get_if_present($path);
 		return undef unless ref($data) eq 'HASH' && keys %$data;
 		return {
 			map  {($_ => $data->{$_})}

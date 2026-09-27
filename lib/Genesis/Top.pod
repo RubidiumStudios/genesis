@@ -1875,9 +1875,23 @@ B<Returns:> A hashref of C<control_commit>, C<provider>, and C<at>. A read
 answers C<undef> where the path is absent, and a write answers the fields it
 wrote.
 
+A read tells an absent record from a vault that answered an error, through
+L<Service::Vault/get_if_present>, because the two mean different things to a
+propagate run: the absence is a pipeline never applied, and the error is an
+input it cannot read.
+
 B<Errors:>
 
 =over 4
+
+=item *
+
+A read dies with what the vault said where the read failed for any reason
+other than an absence, and with
+C<"no vault is available for this repository: ..."> where the repository
+configures no C<secrets_provider.url> and C<safe> has no current target.
+C<Genesis::CI::Walk::read_durable_state> turns either into a refusal at
+C<Genesis::Exit::UNAVAILABLE> naming the path.
 
 =item *
 

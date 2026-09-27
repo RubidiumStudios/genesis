@@ -1391,25 +1391,42 @@ sub _deploy_preflight {
 	# walk reads the ref off this record and nothing else off it, so the one
 	# field it reads is the one field given, and the classification four
 	# steps above is where the branch was already resolved.
-	require Genesis::CI::Walk;
-	my $walk = Genesis::CI::Walk::plan($top,
-		git      => $git,
-		scope    => [$name],
-		branches => {$name => {branch => $branch}},
-	);
-	# The walk was asked about one environment, so it answers about one, and
-	# a list with nothing in it is the walk disagreeing with its own scope.
-	# The read below would hand undef on and every warning would then read as
-	# nothing due, which is the one wrong answer this step can give.
-	my ($due_record) = @{$walk->{environments} || []};
-	bug("The walk answered no environment for #C{%s}.", $name)
-		unless $due_record;
+	#
+	# Every one of the four reads the applied record, and a deploy does not
+	# stop over warnings.  So where the vault answers an error for the record,
+	# the deploy says so once, names the warnings it could not give, and goes
+	# on.  An absent record is not that: it reads as absent below.
+	my $tip;
+	if (defined(my $unread = _unread_applied_record($top))) {
+		warning(
+			"\nCould not read the applied record at #C{%s}: %s\n\n".
+			"The stale-pipeline, standing-hold, commits-due and drift ".
+			"warnings, which read it, were skipped.",
+			$top->applied_record_path, $unread
+		);
+		$tip = {due => [], drifted => []};
+	} else {
+		require Genesis::CI::Walk;
+		my $walk = Genesis::CI::Walk::plan($top,
+			git      => $git,
+			scope    => [$name],
+			branches => {$name => {branch => $branch}},
+		);
+		# The walk was asked about one environment, so it answers about one,
+		# and a list with nothing in it is the walk disagreeing with its own
+		# scope.  The read below would hand undef on and every warning would
+		# then read as nothing due, which is the one wrong answer this step
+		# can give.
+		my ($due_record) = @{$walk->{environments} || []};
+		bug("The walk answered no environment for #C{%s}.", $name)
+			unless $due_record;
 
-	my $tip = _warn_about_the_tip($top, $name, $git,
-		bare   => $bare,
-		record => $due_record,
-		target => $target,
-	);
+		$tip = _warn_about_the_tip($top, $name, $git,
+			bare   => $bare,
+			record => $due_record,
+			target => $target,
+		);
+	}
 
 	# The one prompt --yes answers, asked once every warning has printed.
 	_confirm_commits_due($name, $tip->{due}, $options);
@@ -2268,6 +2285,22 @@ sub _warn_stale_pipeline {
 	);
 
 	return scalar(@$changed);
+}
+
+# }}}
+# _unread_applied_record - what the vault said, where it would not give the record {{{
+#
+# The pre-flight's warnings all read the applied record, and the reader
+# refuses on an error, which is right for a propagate run and wrong for a
+# deploy, where the record only ever feeds a warning.  So the deploy asks
+# first, and hears back the vault's own words where the read failed.  A
+# repository with no pipeline has no record to address, and one whose record
+# is merely absent reads it as absent, so both answer undef.
+sub _unread_applied_record {
+	my ($top) = @_;
+	return undef unless $top->pipeline_enabled;
+	return undef if eval {$top->applied_record; 1};
+	return $@ =~ s/\s+$//r;
 }
 
 # }}}

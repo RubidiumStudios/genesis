@@ -911,6 +911,60 @@ B<Examples:>
   my $data = $vault->get('secret/myapp');
   # Returns: { password => 'hunter2', user => 'admin' }
 
+=head2 get_if_present
+
+  my $values = $vault->get_if_present($path);
+
+Reads all key/value pairs at C<$path>, telling a path that holds nothing
+from a vault that answered an error.  C<get> returns C<{}> for both, which
+leaves a caller that must refuse on the one and read on the other unable to
+tell them apart.
+
+C<safe> exits non-zero for both and says which in its message, so the message
+decides.  C<"no secret exists at path">, and under KV v2 a latest version that
+C<"has been deleted"> or C<"has been destroyed">, are absences.  Anything
+else, a failure C<safe> gave no message for included, is an error.
+
+B<Limitations:> the absence is recognised by C<safe>'s wording, so a change to
+that wording would turn an absence into an error.  A distinct exit code from
+C<safe get> for an absent path would remove the dependency.
+
+B<Parameters:>
+
+=over 4
+
+=item $path
+
+The vault secret path.  Repeated slashes are collapsed.
+
+=back
+
+B<Returns:> A hash reference of the key/value pairs, or C<undef> where the
+path holds nothing.
+
+B<Errors:>
+
+Dies with C<safe>'s own message, its C<!!> prefix removed, when the read fails
+for any reason other than an absence, or with
+C<"safe exited N reading PATH and said nothing"> when it fails silently.
+
+Dies with C<"Expected PATH to hold key/value pairs, but it held a TYPE"> when
+the read succeeds and the payload is not a hash.
+
+B<Examples:>
+
+  # A record that is there
+  my $applied = $vault->get_if_present('secret/exodus_pipelines/bosh');
+  # Returns: { control_commit => '1a2b3c', provider => 'manual', ... }
+
+  # A record that is not
+  my $none = $vault->get_if_present('secret/exodus_pipelines/bosh');
+  # Returns: undef
+
+  # A vault that refuses the read
+  eval { $vault->get_if_present('secret/exodus_pipelines/bosh') };
+  # $@: "permission denied\n"
+
 =head2 get_path
 
   my $data = $vault->get_path($path);

@@ -143,6 +143,35 @@ subtest 'the deploy warns where it is told to warn' => sub {
 		'and it is a warning rather than a refusal');
 };
 
+subtest 'a record the vault errors on is warned about, not refused over' => sub {
+	# Whether a disabled pipeline is still live cannot be told from a record
+	# the vault would not give, and the check is not the thing that decides
+	# whether the vault is fit to use: a propagate run refuses on the same
+	# read a step later.  So it says what it could not read and carries on.
+	plan tests => 4;
+
+	my $top = disowned_top();
+	my ($answer, $said, $code);
+	{
+		no warnings qw/once redefine/;
+		local *Genesis::Top::applied_record = sub {die "permission denied\n"};
+		my ($out, $err) = output_from {
+			($said, $code) = refusal_from(sub {
+				$answer = Genesis::CI::Preflight::assert_not_disowned($top,
+					command => 'propagate')
+			});
+		};
+		$said = $out.$err if !defined($code);
+	}
+
+	is($code, undef, 'nothing is refused');
+	is($answer, 1, 'and the caller carries on');
+	like($said, qr/Could not read the applied record at .*permission denied/,
+		'naming the record and what the vault said');
+	like($said, qr/disabled pipeline is still live could not be checked/,
+		'and the check it could not make');
+};
+
 subtest 'inside a job every caller is refused' => sub {
 	# The sentence about what a job must not do is the caller's, because the
 	# sub cannot know what the caller was about to do.  A run told that a job
