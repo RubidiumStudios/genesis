@@ -258,6 +258,26 @@ sub workdir {
 	return $path;
 }
 
+# fixture_repo - this process's own copy of a repository under t/repos {{{
+#
+# e2e files chdir into a fixture repository and write there, so each takes a
+# copy in its work area rather than sharing the checkout's, which is what
+# lets them run side by side.  The copy is made once per process, because a
+# file's later subtests read what its earlier ones wrote.
+my %FIXTURE_REPO;
+sub fixture_repo {
+	my ($name) = @_;
+	return $FIXTURE_REPO{$name} if $FIXTURE_REPO{$name};
+
+	my $from = "$TOPDIR/t/repos/$name";
+	die "There is no fixture repository $name under t/repos\n" unless -d $from;
+	my $copy = "$TMP/repos/$name";
+	`mkdir -p "$TMP/repos" && cp -a "$from" "$copy"`;
+	$? eq "0" or die "Failed to copy the fixture repository $name to $copy\n";
+	return $FIXTURE_REPO{$name} = $copy;
+}
+# }}}
+
 my ($stdin_r, $stdin_w, $stdin_orig);
 sub set_stdin {
 	my $input = shift;

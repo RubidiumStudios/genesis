@@ -8,8 +8,8 @@ use helper;
 my $tmp = workdir;
 vault_ok;
 local $ENV{GENESIS_LEGACY}=1; # Allow env name mismatches
-ok -d "t/repos/pipeline-test", "pipeline-test repo exists" or die;
-chdir "t/repos/pipeline-test" or die;
+ok -d fixture_repo('pipeline-test'), "pipeline-test repo exists" or die;
+chdir fixture_repo('pipeline-test') or die;
 
 bosh2_cli_ok;
 

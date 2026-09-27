@@ -5,10 +5,10 @@ TEST_MANIFEST ?= t/test-manifest.txt
 TESTS ?= t/*/*.t
 
 # Unit tests run side by side, one per processor unless told otherwise, and
-# integration tests side by side too, on at most eight, the most they have
-# been proved at.  e2e tests run one at a time, since several of them work
-# in the same fixture repository under t/repos.  getconf answers on macOS
-# and Linux alike.
+# integration and e2e tests side by side too, on at most eight, the most they
+# have been proved at.  An e2e file works in its own copy of the fixture
+# repository it uses (helper's fixture_repo), not in t/repos itself.
+# getconf answers on macOS and Linux alike.
 TEST_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 INTEGRATION_JOBS ?= $(shell n=$(TEST_JOBS); [ $$n -gt 8 ] && n=8; echo $$n)
 
@@ -79,7 +79,7 @@ test: sanity-test
 	@$(TEST_DEPS) $(LOGGED) t/bin/prove-tier sanity-tests 1 -lf --timer $(shell t/bin/parse-manifest $(TEST_MANIFEST) sanity-tests) $(TEST_STDIN)
 	@$(TEST_DEPS) $(LOGGED) t/bin/prove-tier unit-tests $(TEST_JOBS) -lf --timer $(shell t/bin/parse-manifest $(TEST_MANIFEST) unit-tests) $(TEST_STDIN)
 	@$(TEST_DEPS) $(LOGGED) t/bin/prove-tier integration-tests $(INTEGRATION_JOBS) -lf --timer $(shell t/bin/parse-manifest $(TEST_MANIFEST) integration-tests) $(TEST_STDIN)
-	@$(TEST_DEPS) $(LOGGED) t/bin/prove-tier e2e-tests 1 -lf --timer $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests) $(TEST_STDIN)
+	@$(TEST_DEPS) $(LOGGED) t/bin/prove-tier e2e-tests $(INTEGRATION_JOBS) -lf --timer $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests) $(TEST_STDIN)
 	@sort -u t/.test-deps.new > t/.test-deps && rm -f t/.test-deps.new
 	@t/bin/test-state commit
 
@@ -108,7 +108,7 @@ test-failed:
 	@t/bin/prove-tier --failed sanity-tests 1 -l $(TEST_STDIN)
 	@t/bin/prove-tier --failed unit-tests $(TEST_JOBS) -l $(TEST_STDIN)
 	@t/bin/prove-tier --failed integration-tests $(INTEGRATION_JOBS) -l $(TEST_STDIN)
-	@t/bin/prove-tier --failed e2e-tests 1 -l $(TEST_STDIN)
+	@t/bin/prove-tier --failed e2e-tests $(INTEGRATION_JOBS) -l $(TEST_STDIN)
 
 # Point git at the tracked hooks.  Hooks live in .git/hooks by default,
 # which is neither tracked nor cloned, so this is what makes them apply
@@ -138,7 +138,7 @@ integration-tests: sanity-test
 
 e2e-tests: sanity-test
 	@echo "Running e2e tests (full workflows)..."
-	@prove -l $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests) $(TEST_STDIN)
+	@prove -l -j$(INTEGRATION_JOBS) $(shell t/bin/parse-manifest $(TEST_MANIFEST) e2e-tests) $(TEST_STDIN)
 
 test-quick: unit-tests
 

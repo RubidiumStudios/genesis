@@ -9,8 +9,9 @@
 # the time elapsed, and an estimate of the time left from each remaining
 # file's duration in the last run that prove saved to .prove.  The unit
 # tier's estimate is divided by JOBS (one per processor by default) and the
-# integration tier's by JOBS up to eight, since both run side by side.  With -w it refreshes every SECONDS until the run
-# ends: every file is done, or a tier has failed, which ends make test.
+# integration and e2e tiers' by JOBS up to eight, since they run side by
+# side.  With -w it refreshes every SECONDS until the run ends: every file
+# is done, or a tier has failed, which ends make test.
 #
 # It only reads the log and .prove, so watching a run costs the run nothing.
 use strict;
@@ -95,10 +96,11 @@ sub report {
 		$unknown += grep {!defined $took{$_}} @todo;
 		my $rest = 0;
 		$rest += $took{$_} // 0 for @todo;
-		# The unit tier runs on every job, integration on at most eight, and
-		# the rest one at a time, as make test runs them.
+		# The unit tier runs on every job, integration and e2e on at most
+		# eight, and sanity one at a time, as make test runs them.
 		$rest /= $jobs              if $tier eq 'unit-tests';
-		$rest /= ($jobs < 8 ? $jobs : 8) if $tier eq 'integration-tests';
+		$rest /= ($jobs < 8 ? $jobs : 8)
+			if $tier eq 'integration-tests' || $tier eq 'e2e-tests';
 		$left += $rest;
 		push @lines, sprintf("  %-18s %4d / %-4d%s", $tier, $n, scalar(@all), $state);
 	}

@@ -39,7 +39,7 @@ tests:
   t/integration-tests/y.t:
     elapsed: 180
   t/e2e-tests/z.t:
-    elapsed: 60
+    elapsed: 120
 EOS
 
 sub progress {
@@ -60,8 +60,8 @@ EOS
 	like($said, qr/unit-tests\s+2 \/ 3\s+running/, 'a failed file counts as done in its tier');
 	like($said, qr/failed so far:\n\s+t\/unit-tests\/b\.t/, 'and is named among the failures');
 	like($said, qr/integration-tests\s+0 \/ 2\s*\n/, 'a tier not started shows none done');
-	# c.t's 60 s and x.t and y.t's 300 s are each shared by the two jobs,
-	# and e2e runs one at a time: 30 + 150 + 60 = 240 s, about 4 minutes.
+	# c.t's 60 s, x.t and y.t's 300 s and z.t's 120 s are each shared by
+	# the two jobs: 30 + 150 + 60 = 240 s, about 4 minutes.
 	like($said, qr/about 4 min left/, "the time left comes from the last run's times");
 };
 

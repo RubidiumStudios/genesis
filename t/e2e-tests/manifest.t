@@ -10,8 +10,8 @@ $ENV{GENESIS_CONFIG_AUTOMATIC_UPGRADE} = 'silent';
 vault_ok();
 
 my $tmp = workdir;
-ok -d "t/repos/manifest-test", "manifest-test repo exists" or die;
-chdir "t/repos/manifest-test" or die;
+ok -d fixture_repo('manifest-test'), "manifest-test repo exists" or die;
+chdir fixture_repo('manifest-test') or die;
 bosh2_cli_ok;
 write_bosh_config "us-common";
 $ENV{NOCOLOR} = 1;
@@ -166,7 +166,7 @@ EOF
 my $alt_dir =  $tmp."/elsewhere";
 mkdir $alt_dir;
 chdir $alt_dir;
-my $configdir = "$TOPDIR/t/repos/manifest-test";
+my $configdir = fixture_repo('manifest-test');
 
 runs_ok "genesis -C $configdir manifest -c init-cloud.yml -t unredacted -s pruned create-env-sandbox >manifest.yml 2>error.txt";
 eq_or_diff get_file("error.txt"), <<EOF, "manifest for bosh-init/create-env scenario warns that a cloud config file was provided (-C option) ";

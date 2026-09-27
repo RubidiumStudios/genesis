@@ -14,8 +14,8 @@ vault_ok();
 bosh2_cli_ok;
 
 my $tmp = workdir;
-ok -d "t/repos/manifest-test", "manifest-test repo exists" or die;
-chdir "t/repos/manifest-test" or die;
+ok -d fixture_repo('manifest-test'), "manifest-test repo exists" or die;
+chdir fixture_repo('manifest-test') or die;
 
 # Use fake_bosh_directors so deploy() can connect via with_bosh()
 my @directors = fake_bosh_directors("us-common");

@@ -46,9 +46,9 @@ subtest 'create-kit without --name fails with usage error' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'decompile-kit latest decompiles into dev/' => sub {
-	ok -d "t/repos/compiled-kit-test",
+	ok -d fixture_repo('compiled-kit-test'),
 		"compiled-kit-test repo exists" or return;
-	chdir "t/repos/compiled-kit-test" or die;
+	chdir fixture_repo('compiled-kit-test') or die;
 
 	# Remove any leftover dev/ from a prior run
 	qx(rm -rf dev/);
@@ -69,9 +69,9 @@ subtest 'decompile-kit latest decompiles into dev/' => sub {
 };
 
 subtest 'decompile-kit --force overwrites existing dev/' => sub {
-	ok -d "t/repos/compiled-kit-test",
+	ok -d fixture_repo('compiled-kit-test'),
 		"compiled-kit-test repo exists" or return;
-	chdir "t/repos/compiled-kit-test" or die;
+	chdir fixture_repo('compiled-kit-test') or die;
 
 	# Create an existing dev/ with kit.yml so --force is required
 	qx(rm -rf dev/ && mkdir -p dev);
@@ -90,9 +90,9 @@ subtest 'decompile-kit --force overwrites existing dev/' => sub {
 };
 
 subtest 'decompile-kit fails when dev/ exists and --force not given' => sub {
-	ok -d "t/repos/compiled-kit-test",
+	ok -d fixture_repo('compiled-kit-test'),
 		"compiled-kit-test repo exists" or return;
-	chdir "t/repos/compiled-kit-test" or die;
+	chdir fixture_repo('compiled-kit-test') or die;
 
 	# Create dev/ with kit.yml so it is recognised as an existing dev kit
 	qx(rm -rf dev/ && mkdir -p dev);
@@ -117,9 +117,9 @@ subtest 'decompile-kit fails when dev/ exists and --force not given' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'list-kits shows locally compiled kit' => sub {
-	ok -d "t/repos/compiled-kit-test",
+	ok -d fixture_repo('compiled-kit-test'),
 		"compiled-kit-test repo exists" or return;
-	chdir "t/repos/compiled-kit-test" or die;
+	chdir fixture_repo('compiled-kit-test') or die;
 
 	my ($pass, undef, $out) = runs_ok
 		"genesis list-kits 2>&1",
@@ -137,9 +137,9 @@ subtest 'list-kits shows locally compiled kit' => sub {
 # ---------------------------------------------------------------------------
 
 subtest 'fetch-kit --as-dev with multiple kits fails' => sub {
-	ok -d "t/repos/compiled-kit-test",
+	ok -d fixture_repo('compiled-kit-test'),
 		"compiled-kit-test repo exists" or return;
-	chdir "t/repos/compiled-kit-test" or die;
+	chdir fixture_repo('compiled-kit-test') or die;
 
 	my (undef, undef, $out) = run_fails
 		"genesis fetch-kit kit1 kit2 --as-dev 2>&1",

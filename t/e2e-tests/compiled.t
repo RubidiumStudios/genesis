@@ -12,8 +12,8 @@ my $vault_target = vault_ok;
 write_bosh_config qw/test-env test-env-upgrade new-env/;
 
 my $tmp = workdir;
-ok -d "t/repos/compiled-kit-test", "compiled-kit-test repo exists" or die;
-chdir "t/repos/compiled-kit-test" or die;
+ok -d fixture_repo('compiled-kit-test'), "compiled-kit-test repo exists" or die;
+chdir fixture_repo('compiled-kit-test') or die;
 
 bosh2_cli_ok;
 
