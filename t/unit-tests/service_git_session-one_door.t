@@ -148,6 +148,8 @@ subtest 'the propagate run drives a session end to end' => sub {
 	# branch, and an environment that has none is reported as awaiting
 	# genesis pipeline-apply and delivered nothing.
 	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	# A pipeline never applied refuses the run (D109), so this one stands applied.
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	my $qa = $h->slug('qa');
 	Harness::Propagation::run(
 		{dir => $h->a, onfailure => "Failed to cut the $qa branch"},

@@ -1,15 +1,19 @@
 #!/usr/bin/env perl
 # Proves T140, T141, T142, T143, and T321: a second run writes nothing, a
 # later run releases a hold by itself, the hand run covers the abnormal cases,
-# two copies produce the same trees and the same markers, an absent input is
-# read rather than guessed at, and two overlapping runs read only durable
-# state.
+# two copies produce the same trees and the same markers, and two overlapping
+# runs read only durable state.
 #
-# It proves T144's error half too: a whole-run input the vault answers an
-# error for, rather than an absence, refuses the run at UNAVAILABLE naming the
-# path and what the vault said, and a repository with no vault to read says
-# that rather than failing inside Perl.  break_vault_reads makes the vault
-# refuse the read.
+# It proves T144 as D109 rules it.  A whole-run input the vault answers an
+# error for refuses the run at UNAVAILABLE naming the path and what the vault
+# said, and a repository with no vault to read says that rather than failing
+# inside Perl; break_vault_reads makes the vault refuse the read.  An applied
+# record that is absent refuses the run and a dry run at CONFIG, before any
+# environment is walked, naming genesis pipeline-apply, while pipeline-status
+# renders every environment not-propagated.  T144's contrast, an environment
+# the stored applied record does not know, is not here: the walk decides that
+# from an empty git.control_commit rather than from the pipeline subpath D103
+# names, and that gap is its own item.
 #
 # Genesis accounts for itself on standard error, which is where info writes,
 # so every report a row reads comes out of the second value run_genesis
@@ -245,26 +249,57 @@ subtest 'a repository with no vault to read says so' => sub {
 		'saying there is no vault to read') or diag($said);
 };
 
-subtest 'an absent input is read and never guessed at' => sub {
-	# Six rows, and one for each run's own restoration assertion.
-	plan tests => 8;
+subtest 'a pipeline never applied refuses the run and not the report' => sub {
+	# Eleven rows, and one for each of the three runs' restoration assertions.
+	plan tests => 14;
 
-	# An applied record that is absent is not an input the run cannot read.
-	# The absence has a reading of its own, which is that the pipeline awaits
-	# genesis pipeline-apply, so the run takes that reading, says which one it
-	# took, and carries on rather than refusing over it.
+	# T144's absent half, as D109 rules it.  With no applied record there is
+	# nothing to route from, so the run refuses before it walks, naming
+	# genesis pipeline-apply as the remedy, and a dry run refuses the same
+	# way.  pipeline-status only reads, so it renders the state instead.
 	my $h = two_stage();
 	my $due = commit_on_control($h,
 		files => {'qa.yml' => env_file(env => 'qa', prior => 'lab', n => 4)},
 		message => 'Tune qa', push => 1);
 	certify($h, 'lab', control_commit => $due);
+	my $slug = $h->slug('qa');
+	my $on_r = ref_in($h->r, "refs/heads/$slug");
 	break_vault($h, envs => [], applied => 1);
 
 	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
-	is($exit, 0, 'an absent applied record is read rather than refused');
-	like($err, qr/not-propagated/, 'the run says which reading it took');
-	like($err, qr/pipeline-apply/, 'and names the command that records one');
-	like($err, qr/^\s*qa: propagated/m, 'while still delivering what was due');
+	my $said = unfolded($err);
+	is($exit, Genesis::Exit::CONFIG, 'the run refuses as a configuration it cannot act on');
+	like($said, qr/genesis pipeline-apply.*never been run against this repository/,
+		'saying the apply has never been run here') or diag($said);
+	like($said, qr/Run genesis pipeline-apply/, 'and naming it as the remedy');
+	# Read off the raw stream, because a line's start is what marks an
+	# environment's outcome and unfolding joins the lines.
+	unlike($err, qr/^\s*(?:lab|qa): /m, 'before any environment is walked');
+	# The pre-flight ahead of the refusal fast-forwards a clone branch that
+	# is behind R, as it does ahead of every refusal after it, so the clone's
+	# branch is read against R rather than against where it stood: the run
+	# wrote nothing of its own, and the clone holds only what R holds.
+	is(ref_in($h->r, "refs/heads/$slug"), $on_r, 'and nothing reaches R');
+	is(ref_in($h->a, "refs/heads/$slug"), $on_r,
+		'nor is anything committed in the clone');
+
+	my (undef, $dry_err, $dry_exit) =
+		run_genesis($h, {answers => ['y']}, 'propagate', '--dry-run');
+	is($dry_exit, Genesis::Exit::CONFIG, 'a dry run refuses the same way');
+	like(unfolded($dry_err), qr/never been run against this repository/,
+		'with the same account');
+
+	local $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
+	my ($status, undef, $status_exit) = run_genesis($h, 'pipeline-status');
+	is($status_exit, 0, 'pipeline-status does not refuse');
+	# The report renders the not-propagated reading in words.
+	like(env_line($status, 'lab'), qr/not propagated/, 'and lab reads not-propagated');
+	like(env_line($status, 'qa'), qr/not propagated/, 'as does qa');
+};
+
+subtest 'a hold answers ahead of the apply it also waits for' => sub {
+	# Two rows, and one for the run's own restoration assertion.
+	plan tests => 3;
 
 	# A hold is durable state like any other, so it is read for every
 	# environment the run reads.  An environment the pipeline was never applied

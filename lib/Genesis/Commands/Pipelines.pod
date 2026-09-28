@@ -815,6 +815,12 @@ refused before anything was written.
 
 =item *
 
+C<Genesis::Exit/CONFIG> (78), where the vault holds no applied record, so
+C<genesis pipeline-apply> has never been run against the repository and there
+is nothing to route from.
+
+=item *
+
 C<Genesis::Exit/UNAVAILABLE> (69), where the vault answered an error for the
 applied record, or GitHub could not say what a reviewer decided about a pull
 request, both of which the run reads ahead of the walk.
@@ -844,10 +850,19 @@ Exits C<Genesis::Exit/UNAVAILABLE> where the vault answers an error for the
 applied record, naming the path it could not read.  The record says which
 commit the pipeline was applied from, which is a whole-run input rather than
 one environment's, so a run that could not read it refuses ahead of the walk
-and writes nothing.  A record that is merely absent is not that, and it comes
-back null with every environment taking the C<not-propagated> reading.  The
-refusal closes the session first, so the operator is back on the branch they
-started from before they read why the run stopped.
+and writes nothing.  A record that is merely absent is not that, and is the
+next refusal.  The refusal closes the session first, so the operator is back
+on the branch they started from before they read why the run stopped.
+
+Exits C<Genesis::Exit/CONFIG> where the vault holds no applied record at all,
+saying C<genesis pipeline-apply> has never been run against the repository,
+naming the path it looked at, and naming the apply as the remedy.  The
+pipeline was never applied, or the mount that held its record is gone, and
+either way the run has nothing to route from, so it refuses before it walks
+any environment, and C<--dry-run> refuses the same way, since a preview of a
+run that could deliver nothing says nothing.  C<pipeline-status> reads the
+same absence and renders every environment C<not-propagated> rather than
+refusing.  The refusal closes the session first, as the one above does.
 
 Exits C<Genesis::Exit/UNAVAILABLE> as well where GitHub could not say what a
 reviewer decided about an environment's pull request, naming the review state

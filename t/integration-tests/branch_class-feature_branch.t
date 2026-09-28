@@ -22,6 +22,8 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], type => 'bosh', kit => 'omega-v2.7.0');
+# A pipeline never applied refuses the run (D109), so this one stands applied.
+fixture_applied($h, control => $h->git('a')->sha($h->control));
 init_branch($h, 'qa');
 refresh($h, 'a');
 my $git = $h->git('a');

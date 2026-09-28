@@ -76,6 +76,8 @@ subtest 'a dry run reports the reset and moves nothing' => sub {
 	plan tests => 4;
 
 	my $h  = make_harness(envs => ['qa']);
+	# A pipeline never applied refuses the run (D109), so this one stands applied.
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');

@@ -66,9 +66,10 @@ use constant HOLD_REASONS => qw/
 #
 # An applied record the vault answers an error for is the whole run's input and
 # not one environment's, so the run refuses naming the path it could not read.
-# An absent record is a different thing and stays a reading, because the record
-# is legitimately missing until genesis pipeline-apply has run, and every
-# environment then takes the not-propagated reading.
+# An absent record is a different thing and comes back as a reading, with every
+# environment taking not-propagated, because pipeline-status renders that state
+# rather than refusing over it.  A propagate run refuses on the absence itself,
+# before it walks, in the command that asked.
 sub read_durable_state {
 	my (%args) = @_;
 

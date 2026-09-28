@@ -37,6 +37,8 @@ subtest 'a branch that is behind is fast-forwarded before the walk' => sub {
 	plan tests => 5;
 
 	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	# A pipeline never applied refuses the run (D109), so this one stands applied.
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -67,6 +69,8 @@ subtest 'the fast-forward discards no commit anywhere' => sub {
 	plan tests => 4;
 
 	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	# A pipeline never applied refuses the run (D109), so this one stands applied.
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -91,6 +95,8 @@ subtest 'a teammate delivery already on the branch is not delivered twice' => su
 	plan tests => 5;
 
 	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	# A pipeline never applied refuses the run (D109), so this one stands applied.
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -129,6 +135,8 @@ subtest 'the diff base names what control still has to deliver' => sub {
 	# nothing at all.  Here control carries a change nobody has delivered,
 	# and only a base that names a real ref can find it.
 	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	# A pipeline never applied refuses the run (D109), so this one stands applied.
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -167,6 +175,8 @@ subtest 'a dry run assumes the fast-forward and moves nothing' => sub {
 	plan tests => 5;
 
 	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	# A pipeline never applied refuses the run (D109), so this one stands applied.
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -206,6 +216,8 @@ subtest 'an environment with no branch is reported as awaiting the apply' => sub
 	# reports on it, and an environment whose kit cannot be resolved never
 	# reaches the report these rows read.
 	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	# A pipeline never applied refuses the run (D109), so this one stands applied.
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	my $qa = $h->slug('qa');
 
 	# No branch for qa on either side, which is the one state the pre-flight

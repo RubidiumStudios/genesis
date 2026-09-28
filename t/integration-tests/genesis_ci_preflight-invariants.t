@@ -204,6 +204,8 @@ subtest 'one class action leaves the other two classes alone' => sub {
 	# every one of them skipped, so the row about the branch with nothing due
 	# would rest on a walk that considered nothing.
 	my $h    = make_harness(envs => ['qa', 'prod'], kit => 'omega-v2.7.0');
+	# A pipeline never applied refuses the run (D109), so this one stands applied.
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	my $qa   = $h->slug('qa');
 	my $prod = $h->slug('prod');
 	my $pr   = $h->pr_branch('qa');

@@ -30,6 +30,8 @@ $ENV{NOCOLOR} = 1;
 # file the command asks for, because create bails when it finds no kit and
 # the last row here runs the command through to a write.
 my $h = make_harness(envs => ['qa'], type => 'bosh', kit => 'omega-v2.7.0');
+# A pipeline never applied refuses the run (D109), so this one stands applied.
+fixture_applied($h, control => $h->git('a')->sha($h->control));
 my $git = $h->git('a');
 
 # The three derived branches are delivered rather than seeded, so each one

@@ -684,15 +684,20 @@ sub propagate {
 	my $control_sha   = $state->{control}{commit};
 	my $control_short = $git->sha($control_sha, short => 1);
 
-	# The fourth reading, said once for the repository.  An applied record
-	# that is absent is legitimately absent until genesis pipeline-apply has
-	# run, so the run reads it rather than refusing over it, and it says which
-	# reading it took, because a reading nobody prints is one the operator
-	# cannot act on.
-	warning(
-		"The pipeline has never been applied to this repository, so every ".
-		"environment reads #C{not-propagated}.  Run #C{genesis ".
-		"pipeline-apply} to record the commit it was applied from."
+	# With no applied record the pipeline has never been applied here, or the
+	# mount that held its record is gone, and either way the run has nothing
+	# to route from.  So it refuses before it walks, and a dry run with it,
+	# since a preview of a run that could deliver nothing says nothing.  The
+	# refusal goes through the run's closure, so the operator is back where
+	# they started before they read why.  pipeline-status reads the same
+	# absence and renders it rather than refusing, being read-only.
+	$refuse->({exitcode => CONFIG},
+		"#C{genesis pipeline-apply} has never been run against this ".
+		"repository: the vault holds no applied record at #C{%s}, so there is ".
+		"no pipeline to propagate through.\n\n".
+		"Run #C{genesis pipeline-apply} to apply the pipeline and record the ".
+		"commit it was applied from, then run this again.  Nothing was written.",
+		$top->applied_record_path
 	) unless $state->{applied};
 
 	info "\n#G{Propagating from} #C{%s} #G{@} #C{%s}",

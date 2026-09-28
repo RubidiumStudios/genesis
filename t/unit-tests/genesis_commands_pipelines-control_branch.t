@@ -100,6 +100,8 @@ subtest 'the bare run measures every read against the configured branch' => sub 
 
 	my $c = make_harness(envs => ['qa', 'prod'], control => 'trunk',
 		kit => 'omega-v2.7.0');
+	# A pipeline never applied refuses the run (D109), so this one stands applied.
+	fixture_applied($c, control => $c->git('a')->sha($c->control));
 	$c->write_env_file('prod', pipeline => {prior_env => 'qa'});
 
 	# The env file is committed on trunk and the run reads trunk against the
