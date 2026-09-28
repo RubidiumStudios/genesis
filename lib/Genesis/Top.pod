@@ -1816,22 +1816,10 @@ a lowercase letter, so no environment can ever occupy this address.
 
 B<Parameters:> None.
 
-B<Returns:> The path, as a string.
+B<Returns:> The path, as a string. The mount is C<pipeline.exodus_mount>
+(L</_pipeline_exodus_mount>), so no environment is loaded to compose it.
 
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"This repository has a pipeline but no environment to resolve
-genesis.exodus_mount from, so the pipeline's own record has no address."> -
-raised (via L</_pipeline_exodus_mount>) at C<Genesis::Exit::CONFIG> when the
-repository holds no environment file at all. A repository that declares a
-pipeline, names no pipeline environment, and holds environment files reads
-the mount from one of those and is answered.
-
-=back
+B<Errors:> None.
 
 B<Examples:>
 
@@ -3078,15 +3066,17 @@ B<Examples:>
 
     $top->_validate_one_exodus_mount();
 
-Refuses, at C<Genesis::Exit::CONFIG>, a pipeline whose environments resolve
-C<genesis.exodus_mount> to more than one value, naming every mount and the
-environments that resolved it.
+Refuses, at C<Genesis::Exit::CONFIG>, a pipeline environment that resolves
+C<genesis.exodus_mount> to anything other than C<pipeline.exodus_mount>
+(L</_pipeline_exodus_mount>), naming each environment off the key with the
+mount it resolved, beside the key's own value.
 
-The pipeline's applied record lives at
-C<< <exodus mount>_pipelines/<type> >>, so two mounts would leave it with
-no single home. The merged hierarchy makes a file the environments inherit
-the natural place to set the mount once, and that is the remedy the refusal
-carries.
+Every pipeline record lives under C<pipeline.exodus_mount>, and an
+environment's own exodus record, with its C<pipeline> subpath, lives under
+the mount the environment resolves, so the two must be one mount or the
+environment's records live apart from the pipeline's. The remedy the refusal
+carries is to set the key to the mount the environments use, or their mount
+to the key.
 
 Each environment is read merged through L</_merged_env_params> and one that
 does not carry a C<genesis.pipeline> key at all is passed over, membership
@@ -3109,63 +3099,57 @@ B<Errors:>
 
 =item *
 
-C<"Every environment of a pipeline must resolve one genesis.exodus_mount">
-- raised when the environments of the pipeline resolve two or more mounts,
-listing each mount with the environments that resolved it and carrying the
-remedy of setting the mount once in a file they all inherit.
+C<"Every environment of a pipeline must resolve genesis.exodus_mount to the
+pipeline's own mount"> - raised when any pipeline environment resolves
+another mount, naming each such environment and its mount, the key's value,
+and the key to set.
 
 =back
 
 B<Examples:>
 
     $top->_validate_one_exodus_mount;
-    # returns 1 where every environment resolves /secret/exodus/
+    # returns 1 where every environment resolves /secret/exodus/ and the
+    # key is unset
 
     $top->_validate_one_exodus_mount;
-    # exits CONFIG (78) where qa resolves /secret/exodus/ and prod
-    # resolves /other/exodus/
+    # exits CONFIG (78) where prod resolves /other/exodus/ and
+    # pipeline.exodus_mount is unset, so /secret/exodus/
 
 =head2 _pipeline_exodus_mount
 
     my $mount = $top->_pipeline_exodus_mount();
 
-The one exodus mount the pipeline's environments share, which is what
+The one exodus mount every pipeline record lives under, which is what
 L</applied_record_path> hangs the pipeline's own record under.
 
-It is read from the first environment the pipeline names, through the merged
-hierarchy, because L</_validate_one_exodus_mount> has already refused a
-repository whose environments resolve the mount differently. Where the
-pipeline names none, the first of the root's own environment files answers
-instead. That fallback is what keeps the record readable while
-C<pipeline.enabled> is false, since L</pipeline_env_names> answers nothing at
-all for a disabled pipeline and a disowned repository is precisely one whose
-key is off while the record still stands. The value comes back normalised with
-a trailing slash, so a caller appends to it directly. The answer is memoized,
-since it is the same for every read in a run.
+It is C<pipeline.exodus_mount> from C<.genesis/config>, defaulting to
+C</secret/exodus/>, the pipeline's own key under D116. No environment is
+loaded to learn it, so a command standing on a deployment branch, which
+carries only its own environment's file, can address every pipeline record.
+It is read whether or not C<pipeline.enabled> is true, because a disowned
+repository is precisely one whose key is off while the record still stands,
+and the refusal that exists to find that record has to address it. The value
+comes back normalised to one leading and one trailing slash, as an
+environment's C<exodus_mount> is, so a caller appends to it directly.
+
+B<Limitations:> the key is read from the configuration in front of the
+command. D112 moves every key that says what the pipeline is onto control's
+copy, and this read moves with them when that reader lands.
 
 B<Parameters:> None.
 
 B<Returns:> The mount, as a string ending in a slash.
 
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"This repository has a pipeline but no environment to resolve
-genesis.exodus_mount from, so the pipeline's own record has no address."> -
-raised at C<Genesis::Exit::CONFIG> when the repository holds no environment
-file at all, carrying the remedy of adding an environment file or disabling
-the pipeline.
-
-=back
+B<Errors:> None.
 
 B<Examples:>
 
     my $mount = $top->_pipeline_exodus_mount;
-    # returns '/secret/exodus/' where the environments set no mount of
-    # their own
+    # returns '/secret/exodus/' where the key is unset
+
+    my $mount = $top->_pipeline_exodus_mount;
+    # returns '/secret/other/' where the key is 'secret/other'
 
 =head2 _validate_pipeline_config
 

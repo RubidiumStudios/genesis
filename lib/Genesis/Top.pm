@@ -34,6 +34,7 @@ use Time::Piece;
 # exposed to end users.
 use constant DEFAULT_CONTROL_BRANCH  => 'control';
 use constant DEFAULT_PR_PREFIX       => 'pr/';
+use constant DEFAULT_PIPELINE_EXODUS_MOUNT => '/secret/exodus/';
 use constant CI_PIPELINE_CONTROL_KEY => 'control'; # key in pipeline.branches{} hash for the control branch
 use constant LATEST_CONFIG_VERSION   => 3;
 
@@ -1248,37 +1249,20 @@ sub source_control_resolved {
 # }}}
 # _pipeline_exodus_mount - the one exodus mount the pipeline shares {{{
 #
-# The applied record lives at <exodus mount>_pipelines/<type>, so a
-# pipeline whose environments kept separate mounts would have no single
-# home for it.  Configuration load already refuses a repository whose
-# environments resolve the mount differently, in
-# _validate_one_exodus_mount, so reading it from the first pipeline
-# environment through the merged hierarchy is enough, and exodus_mount
-# normalises to a trailing slash.
-#
-# The pipeline's environments are asked first and the root's environment
-# files second, because the record has to stay readable when
-# pipeline.enabled reads false.  pipeline_env_names answers nothing at all
-# for a disabled pipeline, and a disowned repository is exactly one whose
-# key is off while the record still stands, so an address that only a live
-# pipeline could spell would put that record out of reach of the refusal
-# that exists to find it.  The mount is a repository-wide fact either way,
-# and configuration load refuses a repository whose environments disagree
-# about it.
+# pipeline.exodus_mount, the pipeline's own key under D116, normalised to one
+# leading and one trailing slash the way an environment's exodus_mount is.
+# No environment is loaded to learn it, so a command standing on a
+# deployment branch, which carries only its own environment's file, can
+# address every pipeline record.  It is read whether or not the pipeline is
+# enabled, because a disowned repository is exactly one whose key is off
+# while the record still stands, and the refusal that exists to find that
+# record has to be able to address it.
 sub _pipeline_exodus_mount {
 	my ($self) = @_;
-	return $self->_memoize(sub {
-		my ($self) = @_;
-		my ($first) = ($self->pipeline_env_names, $self->_env_file_names);
-		bail(
-			{exitcode => CONFIG},
-			"This repository has a pipeline but no environment to resolve ".
-			"#C{genesis.exodus_mount} from, so the pipeline's own record ".
-			"has no address.\n".
-			"Add an environment file, or disable the pipeline."
-		) unless $first;
-		return Genesis::Env->bare($first, $self)->exodus_mount;
-	});
+	(my $mount = $self->config->get(
+		'pipeline.exodus_mount', DEFAULT_PIPELINE_EXODUS_MOUNT
+	)) =~ s#^/?(.*?)/?$#/$1/#;
+	return $mount;
 }
 
 # }}}
@@ -2205,6 +2189,15 @@ sub _pipeline_config_schema {
 				description => "The pipeline's name in its provider (defaults to deployment_type)"
 			},
 
+			# The one mount every pipeline record lives under, the
+			# applied record included, so it is the pipeline's own key
+			# rather than recovered from an environment (D116).
+			exodus_mount => {
+				type        => 'string',
+				default     => DEFAULT_PIPELINE_EXODUS_MOUNT,
+				description => "The vault mount the pipeline's records live under"
+			},
+
 			# A BOSH flag rather than a provider feature, so no
 			# capability gates it.  Repository-wide, because a key that
 			# changes how a deployment progresses must be uniform or the
@@ -2636,17 +2629,18 @@ sub _validate_slug_components {
 }
 
 # }}}
-# _validate_one_exodus_mount - every environment resolves the same mount {{{
+# _validate_one_exodus_mount - every environment resolves the pipeline's mount {{{
 #
-# The applied record lives at <exodus mount>_pipelines/<type>, so a
-# pipeline whose environments kept separate mounts would have no single
-# home for it.  The merged hierarchy makes the root file the natural place
-# to set it, and the uniformity rule for repository-wide keys already
-# argues for it, so the load refuses two mounts by name.
+# Every pipeline record lives under pipeline.exodus_mount (D116), and an
+# environment's own exodus record, with its pipeline subpath, lives under the
+# mount the environment resolves, so the two must be one mount or the
+# environment's records live apart from the pipeline's.  The load refuses
+# each environment off the key by name, beside the key's own value.
 sub _validate_one_exodus_mount {
 	my ($self) = @_;
 
-	my %by_mount;
+	my $want = $self->_pipeline_exodus_mount;
+	my %off;
 	for my $env_name ($self->_env_file_names) {
 		my $genesis = $self->_merged_env_params($env_name)->{genesis};
 		next unless ref($genesis) eq 'HASH' && exists $genesis->{pipeline};
@@ -2666,17 +2660,18 @@ sub _validate_one_exodus_mount {
 			$mount = $secrets.'exodus/';
 		}
 		$mount =~ s{^/?(.*?)/?$}{/$1/};
-		push @{$by_mount{$mount}}, $env_name;
+		$off{$env_name} = $mount unless $mount eq $want;
 	}
-	return 1 if keys(%by_mount) < 2;
+	return 1 unless %off;
 
 	bail({exitcode => CONFIG},
-		"Every environment of a pipeline must resolve one #C{genesis.exodus_mount}, ".
-		"because the pipeline's applied record lives at ".
-		"#C{<exodus mount>_pipelines/<type>}.\nThis repository resolves %s.\n".
-		"Set the mount once, in the root environment file the others inherit.",
-		join('; ', map {sprintf("#R{%s} for %s", $_, join(', ', sort @{$by_mount{$_}}))}
-			sort keys %by_mount)
+		"Every environment of a pipeline must resolve #C{genesis.exodus_mount} ".
+		"to the pipeline's own mount, because its records live beside the ".
+		"pipeline's.\n%s, but #C{pipeline.exodus_mount} is #C{%s}.\n".
+		"Set #C{pipeline.exodus_mount} in #C{.genesis/config} to the mount the ".
+		"environments use, or set their #C{genesis.exodus_mount} to it.",
+		join('; ', map {sprintf("%s resolves #R{%s}", $_, $off{$_})} sort keys %off),
+		$want
 	);
 }
 

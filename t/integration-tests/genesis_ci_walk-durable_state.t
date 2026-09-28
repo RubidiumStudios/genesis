@@ -50,6 +50,7 @@ sub env_file {
 		sprintf('  version: %s', $opts{version} // 'latest'),
 		'  features: []', 'genesis:', "  env: $opts{env}",
 	);
+	push @lines, "  exodus_mount: $opts{mount}" if $opts{mount};
 	push @lines, '  pipeline:', "    prior_env: $opts{prior}" if $opts{prior};
 	push @lines, '    track_additional_files:', '      - ops/shared.yml';
 	push @lines, "n: " . ($opts{n} // 1);
@@ -295,6 +296,43 @@ subtest 'a pipeline never applied refuses the run and not the report' => sub {
 	# The report renders the not-propagated reading in words.
 	like(env_line($status, 'lab'), qr/not propagated/, 'and lab reads not-propagated');
 	like(env_line($status, 'qa'), qr/not propagated/, 'as does qa');
+};
+
+subtest 'moving the pipeline mount after an apply reads as never applied' => sub {
+	# T351's move.  Four rows, and one for each run's own restoration
+	# assertion.
+	plan tests => 6;
+
+	# The record stays where the apply wrote it, and the pipeline's mount now
+	# names somewhere else, so the pipeline reads as never applied and the
+	# run refuses under D109.  A move is the key and the environments' own
+	# mount together, since the load refuses an environment left off the key.
+	# The apply then writes the record at the new mount, and once lab's
+	# deployment record stands there too the run proceeds.
+	my $h = two_stage();
+	set_repo_config($h, 'pipeline.exodus_mount', '/secret/moved/');
+	write_env_file($h, $_, genesis => {exodus_mount => '/secret/moved/'},
+		pipeline => ($_ eq 'qa' ? {prior_env => 'lab'} : {}))
+		for qw/lab qa/;
+	my $due = commit_on_control($h,
+		files => {'qa.yml' => env_file(env => 'qa', prior => 'lab', n => 7,
+			mount => '/secret/moved/')},
+		message => 'Tune qa', push => 1);
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+	is($exit, Genesis::Exit::CONFIG, 'the run refuses, the pipeline read as never applied');
+	like(unfolded($err), qr{no applied record at /secret/moved/_pipelines/}s,
+		'naming the address the moved key gives');
+
+	# The harness writes its records under its own mount, which the move has
+	# left behind, so it is told where the records now live.
+	$h->{mount} = '/secret/moved/';
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
+	certify($h, 'lab', control_commit => $due);
+	my (undef, $again_err, $again) =
+		run_genesis($h, {answers => ['y']}, 'propagate');
+	is($again, 0, 'once the record stands at the new mount, the run proceeds');
+	like($again_err, qr/^\s*qa: propagated/m, 'and delivers what was due');
 };
 
 subtest 'a hold answers ahead of the apply it also waits for' => sub {

@@ -936,7 +936,8 @@ C<safe> underneath and are never counted as reads a run made.
 Writes the applied record at C<< $h->applied_path >>, carrying the control
 commit the apply applied from, the provider, and the time, and returns that
 path.  Takes C<control>, C<provider>, which defaults to the harness's own,
-C<type>, and C<at>.
+C<type>, C<at>, and C<mount>, which writes the record under another
+C<pipeline.exodus_mount> than the harness's own, for a row that moves the key.
 
 =head2 fixture_pipeline_record($h, $env, %opts)
 
@@ -2211,7 +2212,8 @@ return the declared values.  C<git> answers the C<Service::Git> handle for a
 copy and has an entry of its own above, because it takes options and the one
 handle per copy is worth a paragraph.  C<slug> and C<pr_branch> render the
 deployment slug and its pull request branch.  C<exodus_mount>,
-C<applied_path>, and C<env_path> render the vault addresses.  C<gh> returns
+C<applied_path>, and C<env_path> render the vault addresses, C<applied_path>
+under another mount where it is given one as C<mount>.  C<gh> returns
 the GitHub double once C<github_double> has stood one up, and undef before
 that.  C<deliver_all> writes one delivery per environment at control's tip and
 answers the harness, and it is a method rather than an exported name because

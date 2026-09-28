@@ -1,8 +1,9 @@
 #!perl
 # Proves T35 and T42: the deployment type and every environment name are
 # validated at load as git ref components, a failing value bails naming
-# the value and the branch it would have composed, and a pipeline whose
-# environments resolve two exodus mounts is refused naming both, at
+# the value and the branch it would have composed, and, for T351, a pipeline
+# environment resolving an exodus mount other than pipeline.exodus_mount is
+# refused naming the environment, both mounts and the key, at
 # Genesis::Exit::CONFIG.
 use strict;
 use warnings;
@@ -39,10 +40,11 @@ my $h = make_harness(envs => ['qa'], pipeline => 1, vault => 0);
 # owner/repo pair, and the derivation's own refusal belongs to the
 # source-control rows rather than to these.
 sub load_with_type {
-	my ($type) = @_;
+	my ($type, %opts) = @_;
 	return load_with($h, join("\n",
 		'manifest_store: exodus',
 		'pipeline:', '  enabled: true',
+		(defined $opts{mount} ? ("  exodus_mount: $opts{mount}") : ()),
 		'  source_control:', '    repository: genesis/bosh-deployments'),
 		deployment_type => $type);
 }
@@ -85,11 +87,11 @@ subtest 'every environment name is checked too' => sub {
 	unlink $h->a . "/$path";
 };
 
-subtest 'one exodus mount serves the whole pipeline' => sub {
-	# Six explicit rows and one for the run's own restoration assertion,
-	# because a command that refuses at configuration load has touched
-	# nothing and run_genesis says so for itself.
-	plan tests => 7;
+subtest 'every pipeline environment resolves pipeline.exodus_mount' => sub {
+	# T351's load half.  Seven explicit rows and one for the run's own
+	# restoration assertion, because a command that refuses at configuration
+	# load has touched nothing and run_genesis says so for itself.
+	plan tests => 8;
 
 	write_env_file($h, 'qa',
 		genesis => {exodus_mount => '/secret/exodus/'},
@@ -98,38 +100,47 @@ subtest 'one exodus mount serves the whole pipeline' => sub {
 		genesis => {exodus_mount => '/other/exodus/'},
 		pipeline => {require_pr => 'false'});
 
+	# No key, so the pipeline's mount is the default, and prod resolving
+	# another is prod out of step with the pipeline.
 	my $refusal = '';
 	eval {load_with_type('bosh'); 1} or $refusal = $@;
-	like $refusal, qr{/secret/exodus/\s+for\s+qa}s,
-		'the load names the mount qa resolved';
-	like $refusal, qr{/other/exodus/\s+for\s+prod}s,
-		'and the mount prod resolved';
+	like $refusal, qr{prod\s+resolves\s+/other/exodus/}s,
+		'the load names the environment and the mount it resolved';
+	like $refusal, qr{pipeline\.exodus_mount\s+is\s+/secret/exodus/}s,
+		"and the pipeline's own mount, defaulted";
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
 	is $exit, Genesis::Exit::CONFIG, 'and the refusal exits CONFIG';
 	# The exit code alone is satisfied by any other CONFIG refusal on the
 	# path, so the row reads what the run said as well.
-	like $err, qr{must\s+resolve\s+one\s+genesis\.exodus_mount}s,
-		'and the run refuses over the mounts rather than anything else';
+	like $err, qr{Set\s+pipeline\.exodus_mount}s,
+		'and names the key to set rather than anything else';
 
-	write_env_file($h, 'prod',
-		genesis => {exodus_mount => '/secret/exodus/'},
+	# The key names the mount prod resolves, and now qa is the one out of
+	# step, so the mount is the key's and not whichever environment's.
+	my $keyed = '';
+	eval {load_with_type('bosh', mount => '/other/exodus/'); 1} or $keyed = $@;
+	like $keyed, qr{qa\s+resolves\s+/secret/exodus/}s,
+		'the key decides the mount, and the environment off it is named';
+
+	write_env_file($h, 'qa',
+		genesis => {exodus_mount => '/other/exodus/'},
 		pipeline => {require_pr => 'false'});
-	lives_ok {load_with_type('bosh')} 'one shared mount passes';
+	lives_ok {load_with_type('bosh', mount => '/other/exodus')}
+		'environments on the key pass, the key normalised like any mount';
 
 	# An environment that names no exodus mount derives one from its secrets
 	# mount, with exodus/ under it, and the secrets mount is normalised
 	# before anything is appended to it.  So a secrets mount written without
-	# its slashes has to land on the same mount the environment beside it
-	# names in full, or the two are two mounts and the load is refused.
+	# its slashes has to land on the key named in full.
 	write_env_file($h, 'qa',
 		genesis => {secrets_mount => 'foo'},
 		pipeline => {require_pr => 'false'});
 	write_env_file($h, 'prod',
 		genesis => {exodus_mount => '/foo/exodus/'},
 		pipeline => {require_pr => 'false'});
-	lives_ok {load_with_type('bosh')}
-		'a derived mount meets a named one, so the two are one mount';
+	lives_ok {load_with_type('bosh', mount => '/foo/exodus/')}
+		'a derived mount meets the key, so the two are one mount';
 
 	write_env_file($h, 'qa',
 		genesis => {exodus_mount => '/secret/exodus/'},
@@ -152,10 +163,10 @@ subtest 'an empty exodus mount is the mount it names' => sub {
 
 	my $refusal = '';
 	eval {load_with_type('bosh'); 1} or $refusal = $@;
-	like $refusal, qr{//\s+for\s+qa}s,
+	like $refusal, qr{qa\s+resolves\s+//}s,
 		'an empty mount normalises the way the run time normalises it';
-	like $refusal, qr{/secret/exodus/\s+for\s+prod}s,
-		'rather than collapsing into the mount prod resolved';
+	unlike $refusal, qr{prod\s+resolves}s,
+		'rather than collapsing into the default, which prod resolves';
 
 	write_env_file($h, 'qa',
 		genesis => {exodus_mount => '/secret/exodus/'},

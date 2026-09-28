@@ -1,6 +1,8 @@
 #!/usr/bin/env perl
-# Proves T50, the two records having two paths and two owners, and T51,
-# the applied record's address being unreachable from any environment.
+# Proves T50, the two records having two paths and two owners, T51, the
+# applied record's address being unreachable from any environment, and
+# T351's address half, the mount read from pipeline.exodus_mount with no
+# environment loaded to learn it.
 use strict;
 use warnings;
 use utf8;
@@ -193,33 +195,31 @@ subtest 'the record stage refuses a control commit that is not a sha' => sub {
 	is_deeply(\@reached, [], 'and the vault was never reached');
 };
 
-subtest 'a pipeline with no environment cannot address its record' => sub {
+subtest 'the address needs no environment' => sub {
+	# T351's address half.  The mount is pipeline.exodus_mount, a key of the
+	# pipeline itself, so the record's address is read off the configuration
+	# and no environment is loaded to learn it, which is what lets a deploy
+	# standing on a deployment branch address it with only its own file there.
 	plan tests => 3;
 
 	my $h = make_harness(envs => [], vault => 0);
+	my $bare_loads = 0;
+	no warnings 'redefine';
+	my $bare = \&Genesis::Env::bare;
+	local *Genesis::Env::bare = sub {$bare_loads++; goto &$bare};
 
-	local $ENV{GENESIS_IGNORE_EVAL} = '';
-	my $path = eval {
-		Genesis::Top->new($h->a, no_vault => 1)->applied_record_path
-	};
-	my $err = $@;
+	is(Genesis::Top->new($h->a, no_vault => 1)->applied_record_path,
+		'/secret/exodus/_pipelines/'.$h->{type},
+		'a pipeline with no environment addresses its record at the default mount');
 
-	is($path, undef, 'the address does not answer');
-	like($err, qr{no environment to resolve},
-		'and the refusal says there is nothing to read the mount from');
+	load_with($h, join("\n",
+		'pipeline:', '  enabled: true', '  exodus_mount: /secret/other',
+		'  source_control:', '    repository: genesis/bosh-deployments'));
+	is(Genesis::Top->new($h->a, no_vault => 1)->applied_record_path,
+		'/secret/other/_pipelines/'.$h->{type},
+		'and at the mount the key names, normalised with its trailing slash');
 
-	# An exit code only exists in a process that exits, and bail dies rather
-	# than exiting whenever it is reached from inside an eval, which a test
-	# file always is.  So the refusal is provoked in a process of its own and
-	# its status is read back from there.
-	my $cmd = sprintf(
-		q{%s -I%s/lib -MGenesis::Top -e '}.
-		q{Genesis::Top->new($ARGV[0], no_vault => 1)->applied_record_path}.
-		q{' %s},
-		$^X, $helper::TOPDIR, $h->a
-	);
-	run_fails($cmd, Genesis::Exit::CONFIG,
-		'the refusal exits Genesis::Exit::CONFIG');
+	is($bare_loads, 0, 'without loading an environment to learn it');
 };
 
 done_testing;

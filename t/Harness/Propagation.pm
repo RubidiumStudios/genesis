@@ -1149,7 +1149,8 @@ sub exodus_mount { $_[0]->{mount} }
 
 sub applied_path {
 	my ($self, %opts) = @_;
-	return sprintf('%s_pipelines/%s', $self->{mount}, $opts{type} // $self->{type});
+	return sprintf('%s_pipelines/%s',
+		$opts{mount} // $self->{mount}, $opts{type} // $self->{type});
 }
 
 sub env_path {

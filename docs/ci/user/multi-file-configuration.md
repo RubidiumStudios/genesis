@@ -11,6 +11,7 @@ pipeline:
   enabled:             # Whether this repository has a pipeline
   provider:            # The automation that owns the pipeline, and its own keys
   name:                # The pipeline's name in its provider
+  exodus_mount:        # The vault mount the pipeline's records live under
   recreate_on_deploy:  # Which runs pass --recreate to the BOSH deploy
   source_control:      # What the pipeline needs to know about the repository
   vault:               # The vault a pipeline task writes exodus through
@@ -24,6 +25,12 @@ How much of this a repository needs is a question about its provider. A reposito
 Where an environment sits in the topology is a fact about that environment rather than about the repository, so it is not in this section at all. It lives in each environment's own file under `genesis.pipeline`, and the [Configuration Reference](configuration-reference.md) is the table for those keys.
 
 Genesis reads `.genesis/config` through `spruce json`, which converts the YAML and evaluates no spruce operator at all, so every value in the `pipeline:` section reaches the compiler exactly as you wrote it. Write credential references in the form your CI provider resolves, such as Concourse's `((credential))`, and keep `(( vault ... ))` and the other spruce operators for a legacy `ci.yml`, which the parser does load through `spruce merge`.
+
+## The exodus_mount Key
+
+`pipeline.exodus_mount` is the vault mount every record the pipeline keeps lives under, and it defaults to `/secret/exodus/`. The record `genesis pipeline-apply` writes, saying which control commit the pipeline was applied from, is at `<exodus_mount>_pipelines/<deployment type>`, and each environment's own exodus record sits under the same mount. Every environment of the pipeline must resolve its own `genesis.exodus_mount` to this value, and a repository where one does not is refused when its configuration loads, naming the environment, both mounts, and this key. A repository whose environments move their secrets mount, and with it their default exodus mount, sets this key once to match.
+
+Changing the key after an apply moves where the pipeline looks for its record. The record stays where the apply wrote it, so `genesis propagate` reads the pipeline as never applied and says to run `genesis pipeline-apply`, which writes the record at the new mount.
 
 ## The provider Block
 
