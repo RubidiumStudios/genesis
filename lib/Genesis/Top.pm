@@ -128,6 +128,11 @@ sub new {
 	my $self = $class->_build($root, %opts);
 	$self->{__config_validated} = 1 if $opts{materialised_tree};
 
+	# A materialised tree is the pipeline's shape as one commit holds it, so
+	# it reads its shape off itself rather than off control, which is what
+	# stops the read of control from reading control again.
+	$self->{__materialised_tree} = 1 if $opts{materialised_tree};
+
 	# Initialize vault connection and set environment variables
 	$self->_set_vault_env(%opts) unless $opts{materialised_tree};
 
@@ -1097,7 +1102,114 @@ sub pr_branch_for {
 # with no pipeline and one with a manual pipeline read alike.
 sub pipeline_enabled {
 	my ($self) = @_;
-	return $self->config->get('pipeline.enabled') ? 1 : 0;
+	return $self->_shape->config->get('pipeline.enabled') ? 1 : 0;
+}
+
+# }}}
+# _shape - the Top the pipeline's shape is read from {{{
+#
+# The shape is control's fact under D112: the environment files' pipeline
+# blocks and every pipeline key that says what the pipeline is, read from
+# control as R holds it when the command starts, whatever branch the clone
+# stands on and whatever its own control carries unpublished.  The keys that
+# say where control is, its name and its remote, are read from the tree in
+# front of the command, since they are needed before control can be read.
+#
+# Control is the remote-tracking ref where the clone has one, and the local
+# control branch where it has no remote.  The ref is resolved every time, and
+# the tree is written out of git once per commit it resolves to and kept on
+# this Top, so every read at one commit is one read.  A tree this command
+# cannot read control out of at all, which is a directory that is no git
+# checkout or a clone with no control branch anywhere, reads its own files,
+# and the refusals that concern control are asked where they always were.
+sub _shape {
+	my ($self) = @_;
+	return $self if $self->{__materialised_tree};
+	return $self->{__shape} //= $self->_read_shape;
+}
+
+# }}}
+# _read_shape - resolve control once and write its tree out {{{
+#
+# Control is read as R holds it when the command starts, so this runs once
+# per Top and _shape keeps its answer, a failure to read control included.
+# Control moving on R after that is guarded where it matters, by the
+# publish's leases and control re-check, and the next command reads it anew.
+#
+# A deployment root under no git control can hold no pipeline, so it reads its
+# own files and asks git nothing more.  A clone with no control ref at all
+# reads its own files too, so the refusals about a missing control branch are
+# met where they always were.  A control that carries no root for this
+# deployment type has no pipeline for it, whatever the branch in front of the
+# command declares, so the shape is empty rather than the branch's.
+sub _read_shape {
+	my ($self) = @_;
+
+	require Service::Git;
+	return $self unless Service::Git->is_inside_work_tree($self->path);
+	my $git = Service::Git->new($self->path);
+	my $ref = $self->_control_ref($git) or return $self;
+	my $sha = $git->rev_parse("$ref^{commit}") or return $self;
+
+	# Opening a Top sets GENESIS_ROOT, and this read must leave the command's
+	# own repository where it stands.
+	local %ENV = %ENV;
+	my (undef, $at) = $self->_topology_at($git, $sha);
+	$self->{__shape_commit} = $sha;
+	return $at // $self->_no_pipeline_shape;
+}
+
+# }}}
+# _no_pipeline_shape - the shape of a deployment type control has no root for {{{
+#
+# A tree holding nothing but a configuration that names the type and no
+# pipeline, so every shape key reads as a repository with no pipeline: not
+# enabled, no environments, every default.
+sub _no_pipeline_shape {
+	my ($self) = @_;
+	require File::Temp;
+	my $scratch = File::Temp->newdir();
+	CORE::mkdir("$scratch/.genesis");
+	open my $fh, '>', "$scratch/.genesis/config"
+		or bug("Could not write a scratch configuration under %s: %s", "$scratch", $!);
+	print $fh "---\ndeployment_type: ".$self->type."\n";
+	close $fh;
+
+	my $at = Genesis::Top->new("$scratch", materialised_tree => 1);
+	$at->{__scratch_tree} = $scratch;
+	return $at;
+}
+
+# }}}
+# _control_ref - the ref control is read from {{{
+#
+# The remote is derived as source control derives it, but without its
+# refusal: a clone whose remote cannot be derived reads its local control
+# branch, and the commands that need the remote refuse over it where they
+# always did.  It does not go through _source_control, which reads the pull
+# request prefix, a key this reader answers.
+sub _control_ref {
+	my ($self, $git) = @_;
+	my $control = $self->control_branch;
+	my $remote  = $self->_remote_named($git, $control);
+	for my $ref (($remote ? ("refs/remotes/$remote/$control") : ()),
+	             "refs/heads/$control") {
+		return $ref if defined $git->rev_parse("$ref^{commit}");
+	}
+	return undef;
+}
+
+# }}}
+# _remote_named - the remote control lives on, or undef where none is {{{
+#
+# The configured key, else the control branch's upstream, else origin where
+# the clone has one.  Read from the tree in front of the command, because it
+# says where control is.
+sub _remote_named {
+	my ($self, $git, $control) = @_;
+	return $self->config->get('pipeline.source_control.remote')
+		// $git->branch_upstream_remote($control)
+		// ($git->has_remote('origin') ? 'origin' : undef);
 }
 
 # }}}
@@ -1111,7 +1223,7 @@ sub pipeline_enabled {
 sub pipeline_provider_type {
 	my ($self) = @_;
 	return undef unless $self->pipeline_enabled;
-	return $self->config->get('pipeline.provider.type', 'manual') // 'manual';
+	return $self->_shape->config->get('pipeline.provider.type', 'manual') // 'manual';
 }
 
 # }}}
@@ -1135,7 +1247,7 @@ sub manual_pipeline {
 # provider feature.
 sub recreate_on_deploy {
 	my ($self) = @_;
-	return $self->config->get('pipeline.recreate_on_deploy') // 'never';
+	return $self->_shape->config->get('pipeline.recreate_on_deploy') // 'never';
 }
 
 # }}}
@@ -1160,7 +1272,7 @@ sub control_branch {
 # turns the protection on never has to find a second switch.
 sub control_requires_pr {
 	my ($self) = @_;
-	return $self->config->get('pipeline.source_control.control_requires_pr', 0)
+	return $self->_shape->config->get('pipeline.source_control.control_requires_pr', 0)
 		? 1 : 0;
 }
 
@@ -1172,9 +1284,32 @@ sub control_requires_pr {
 # joined onto the deployment slug to name the pull request branch.
 sub pr_prefix {
 	my ($self) = @_;
-	return $self->config->get(
+	return $self->_shape->config->get(
 		'pipeline.source_control.pr_prefix', DEFAULT_PR_PREFIX
 	);
+}
+
+# }}}
+# pipeline_name - the name the configuration gives the pipeline, or undef {{{
+#
+# A key that says what the pipeline is, so it is control's, through the one
+# reader of the shape.
+sub pipeline_name {
+	my ($self) = @_;
+	return $self->_shape->config->get('pipeline.name');
+}
+
+# }}}
+# pipeline_section - the pipeline section of the configuration, as control holds it {{{
+#
+# For a reader that takes the whole block, such as the compiler's parser, so
+# it reads control's block through the one reader of the shape rather than
+# the configuration in front of the command.  The keys that say where control
+# is are in it as control holds them too, and their readers stay the
+# accessors that read them locally.
+sub pipeline_section {
+	my ($self) = @_;
+	return $self->_shape->config->get('pipeline');
 }
 
 # }}}
@@ -1369,35 +1504,26 @@ sub pipeline_staleness {
 	my $applied = $self->applied_record;
 	return [] unless $applied && $applied->{control_commit};
 
-	my %changed = map {($_ => 1)} $git->diff_names(
-		$applied->{control_commit}, $self->control_branch
-	);
-
-	# The roster and the environment files come from control rather than from
-	# the working tree, because two of this comparison's three inputs used to
-	# be read out of whatever tree the caller was standing in while only the
-	# diff was read from refs.  The propagate pre-flight and pipeline-status
-	# stand on control, so the two agreed and the mismatch never showed.  The
-	# deploy is the first caller that asks from somewhere else: it stands on
-	# a deployment branch, which carries one environment's hierarchy, so the
-	# roster was a list of one and an environment added to control since the
-	# apply was invisible to it.
+	# The roster, the environment files and the diff all come from control
+	# through the one reader of the shape, at the one commit it read, because
+	# a deploy asks this standing on a deployment branch, which carries one
+	# environment's hierarchy, and a roster read from that tree was a list of
+	# one.
 	#
-	# Only this comparison reads control's tree.  pipeline_topology and
-	# pipeline_env_names still read the working tree, because the branch
-	# class, the walk, and the pipeline commands all read them and every one
-	# of those wants the tree in front of it.
+	# The nothing answer is for a control this clone cannot read a deployment
+	# root out of at all, which is a question about control that the caller's
+	# own control check has already asked.
 	#
-	# The nothing answer is for a control branch this clone cannot read a
-	# deployment root out of at all, which is a question about control that
-	# the caller's own control check has already asked.
-	#
-	# Opening a Top sets GENESIS_ROOT and lending it a vault sets the vault's
-	# own variables, so the whole read is localised and this query leaves the
-	# process as it found it.
+	# Lending the tree a vault sets the vault's own variables, so the read is
+	# localised and this query leaves the process as it found it.
 	local %ENV = %ENV;
-	my ($topology, $at) = $self->_topology_at($git, $self->control_branch);
-	return [] unless $topology;
+	my $at = $self->_shape;
+	return [] if $at == $self;
+	my $topology = $at->pipeline_topology;
+
+	my %changed = map {($_ => 1)} $git->diff_names(
+		$applied->{control_commit}, $self->{__shape_commit}
+	);
 
 	# The environments' own records are read through the vault this
 	# repository has, lent to the materialised tree, which carries none of
@@ -1465,8 +1591,14 @@ sub _topology_at {
 
 	my $config = $prefix.'.genesis/config';
 	return () unless $tree{$config};
+
+	# The dev kit's declaration comes too, where the ref carries one, because
+	# an environment file naming the dev kit and no version is valid only in
+	# a root that has a dev kit, and without it the tree would drop from the
+	# pipeline an environment the ref itself holds in it.
+	my $dev_kit = $prefix.'dev/kit.yml';
 	my @want = grep {
-		$_ eq $config || m{^\Q$prefix\E[^/]+\.ya?ml$}
+		$_ eq $config || $_ eq $dev_kit || m{^\Q$prefix\E[^/]+\.ya?ml$}
 	} sort keys %tree;
 
 	require File::Temp;
@@ -1542,6 +1674,22 @@ sub pipeline_env_names {
 # Empty in every field where the repository declares no pipeline, so
 # callers can iterate unconditionally.
 sub pipeline_topology {
+	my ($self) = @_;
+
+	# Control's shape rather than the tree in front of the command, through
+	# the one reader.  A materialised tree is that shape already, and its
+	# files cannot change, so it keeps the answer it built.
+	my $shape = $self->_shape;
+	return $shape->pipeline_topology unless $shape == $self;
+	return $self->{__topology} if $self->{__topology};
+	return $self->{__topology} = $self->_topology_here
+		if $self->{__materialised_tree};
+	return $self->_topology_here;
+}
+
+# }}}
+# _topology_here - the topology the files of this tree declare {{{
+sub _topology_here {
 	my ($self) = @_;
 
 	my %empty = (nodes => {}, edges => [], children => {}, parent_of => {}, order => []);
@@ -1918,10 +2066,12 @@ sub _validate_config {
 		#     pipeline commands gate on migration; other commands run.
 		#
 		# The configuration is memoized before _validate_config runs, so
-		# the accessor reads it back rather than re-entering the load.
+		# the read gets it back rather than re-entering the load.  It is
+		# this file's own key rather than control's, because the question
+		# is about the ci.yml sitting beside it.
 		my $ci_yml = $self->path('ci.yml');
 		if (-f $ci_yml && _is_legacy_ci_file($ci_yml)) {
-			if ($self->pipeline_enabled) {
+			if ($self->config->get('pipeline.enabled')) {
 				warning(
 					"Legacy #C{%s} present alongside a v3 CI configuration; ".
 					"the v3 config wins.  Remove #C{%s} to clear this warning.",
@@ -2518,9 +2668,7 @@ sub _source_control {
 
 	my $git = Service::Git->new($self->path);
 
-	$sc{remote} = $config->get('pipeline.source_control.remote')
-		// $git->branch_upstream_remote($sc{control_branch})
-		// ($git->has_remote('origin') ? 'origin' : undef);
+	$sc{remote} = $self->_remote_named($git, $sc{control_branch});
 	bail({exitcode => CONFIG},
 		"#C{pipeline.source_control.remote} could not be derived.\n".
 		"The control branch #C{%s} has no configured upstream and there is ".
@@ -2736,13 +2884,12 @@ sub _validate_capability_gates {
 
 	# Every provider declares its abilities, so there is a declaration to
 	# gate against for each of them and nothing here asks whether a
-	# provider has a class.  The type comes through the accessor rather
-	# than off the key, because the gates are reached only from
-	# _validate_pipeline_config, which has already returned for a
-	# repository with no pipeline, so the accessor always has an answer.
+	# provider has a class.  The type is the one in the file being
+	# validated, not the one control holds, because validation checks the
+	# configuration in front of it, and its default is the accessor's.
 	require Genesis::CI::Provider;
 	require Genesis::CI::ProviderRegistry;
-	my $type  = $self->pipeline_provider_type;
+	my $type  = $self->config->get('pipeline.provider.type', 'manual') // 'manual';
 	my $class = Genesis::CI::ProviderRegistry->provider_class($type);
 	my $caps  = Genesis::CI::Provider->declared_capabilities($class);
 	my $gates = Genesis::CI::Provider->capability_gates;

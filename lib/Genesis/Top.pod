@@ -117,6 +117,12 @@ caller that materialised the tree has already had those answers from the
 repository it is running in.  L<Genesis::Env/propagation_files_at> is the
 reader this exists for.
 
+It also marks the object as already being its own shape: L</_shape> and
+L</pipeline_topology> answer for such a tree's own files rather than reading
+control out of it, since a tree written out of one control commit has
+nothing further to read and reading it that way is what stops a read of
+control from reading control again.
+
 =back
 
 B<Returns:> A new C<Genesis::Top> object.
@@ -1495,9 +1501,15 @@ B<Examples:>
 
 Whether this repository declares a pipeline.
 
-Reads C<pipeline.enabled> and nothing else. It replaces C<ci_configured> and
-C<ci_enabled>, which paired an enabled check with a provider check and so
-could not tell a repository with no pipeline from one with a manual pipeline.
+Reads C<pipeline.enabled> off L</_shape> and nothing else. It replaces
+C<ci_configured> and C<ci_enabled>, which paired an enabled check with a
+provider check and so could not tell a repository with no pipeline from one
+with a manual pipeline.
+
+Reading off L</_shape> rather than off L</config> directly means this
+answers for control's fact -- what control held as C<R> when the command
+started -- rather than for whatever the tree in front of the command happens
+to carry. See L</_shape> for what that means and its limits.
 
 B<Parameters:> None.
 
@@ -1519,6 +1531,8 @@ caller needs a guard beside it. The default is C<manual>, which means
 C<pipeline.enabled> on its own is a manual pipeline rather than a
 half-configured one. The name is qualified because Genesis classifies
 providers of several kinds and a bare name would not say which is meant.
+
+Reads C<pipeline.provider.type> off L</_shape>, the same as L</pipeline_enabled>.
 
 B<Parameters:> None.
 
@@ -1566,6 +1580,10 @@ The deploy reads it after it has checked the options against one another, so
 the answer is never mistaken for a second thing the operator asked for and a
 repository that always recreates can still be asked for a dry run.
 
+Reads C<pipeline.recreate_on_deploy> off L</_shape>, so a redeploy honours
+the setting control has published rather than one edited locally and not yet
+on control.
+
 B<Parameters:> None.
 
 B<Returns:> The configured C<pipeline.recreate_on_deploy>, or C<never> where
@@ -1602,6 +1620,9 @@ command that commits on control expects to run on a feature branch instead.
 There is no second key for the expectation, so a site that turns the
 protection on gets the expectation with it.
 
+Reads C<pipeline.source_control.control_requires_pr> off L</_shape>, so the
+answer is what control declares rather than a local edit not yet on it.
+
 B<Parameters:> None.
 
 B<Returns:> 1 where C<pipeline.source_control.control_requires_pr> is set,
@@ -1619,6 +1640,9 @@ B<Examples:>
 The prefix every pull request branch carries, which is joined onto the
 deployment slug to name that branch.
 
+Reads C<pipeline.source_control.pr_prefix> off L</_shape>, so a renamed
+prefix takes hold once control has it and not before.
+
 B<Parameters:> None.
 
 B<Returns:> The configured C<pipeline.source_control.pr_prefix>, or the
@@ -1628,6 +1652,63 @@ B<Examples:>
 
     my $prefix = $top->pr_prefix();
     # returns 'pr/' unless the repository configured otherwise
+
+=head2 pipeline_name
+
+    my $name = $top->pipeline_name();
+
+The name the configuration gives the pipeline, or C<undef>.
+
+A key that says what the pipeline is, so, like L</pipeline_enabled> and its
+neighbours, it is read off L</_shape> rather than off L</config>.
+C<Genesis::CI::Walk::read_durable_state> uses it to label the applied
+record's address where the repository names one, and leaves it null where it
+does not.
+
+B<Parameters:> None.
+
+B<Returns:> The configured C<pipeline.name>, or C<undef> where the key is
+unset.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $name = $top->pipeline_name();
+    # returns 'lmelt-control' where the repository names its pipeline
+
+    my $name = $top->pipeline_name();
+    # returns undef where pipeline.name is unset
+
+=head2 pipeline_section
+
+    my $section = $top->pipeline_section();
+
+The whole C<pipeline> section of the configuration, as control holds it.
+
+For a reader that wants the block rather than one key of it --
+L<Genesis::CI::Compiler::Parser/parse> builds the pipeline definition from
+the section as a whole, and L<Genesis::CI::Compiler/_apply_provider_overrides>
+reads the provider's C<output_layout> out of it. Read off L</_shape>, so
+such a reader builds from the same commit every other shape key answers
+from, rather than from the tree in front of the command.
+
+The keys that say where control is are present in the returned block as
+control holds them too, but their own readers -- L</control_branch>,
+L</source_control_remote>, and the rest -- stay local and never read this
+section; they are needed before control can be found at all.
+
+B<Parameters:> None.
+
+B<Returns:> A hash reference of the C<pipeline> section, or C<undef> where
+the repository declares none.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $section = $top->pipeline_section();
+    # returns {enabled => 1, provider => {type => 'concourse', ...}, ...}
 
 =head2 source_control_remote
 
@@ -1913,31 +1994,32 @@ pre-flight, and C<pipeline-status> all ask it, because three copies of a
 comparison drift three ways.
 
 It reads three things. The applied commit comes from L</applied_record>. A
-path diff between that commit and the control branch covers
+path diff between that commit and the commit L</_shape> resolved covers
 C<.genesis/config> and every file of each environment's hierarchy, which is
 what the pipeline's definition is made of. And each environment's compiled
 dependency set is compared with the set its last deploy recorded reading.
 
 The roster it walks, and the environment files it compares, both come from
-control rather than from the working tree the caller is standing in. That
-matters to one caller. The propagate pre-flight and C<pipeline-status> stand
-on control, so for them the tree and the ref say the same thing, but the
-deploy stands on a deployment branch, which carries one environment's
-hierarchy and no sibling's. Read from that tree the roster would be a list of
-one, and an environment added to control since the apply would be invisible to
-every deploy, which is the case this comparison exists to catch.
+L</_shape> -- control as C<R> held it when the command started, under D112
+-- rather than from the working tree the caller is standing in. That matters
+to one caller. The propagate pre-flight and C<pipeline-status> stand on
+control, so for them the shape and the tree in front of them say the same
+thing, but the deploy stands on a deployment branch, which carries one
+environment's hierarchy and no sibling's. Read from that tree the roster
+would be a list of one, and an environment added to control since the apply
+would be invisible to every deploy, which is the case this comparison exists
+to catch.
 
-Only this comparison reads control's tree that way. L</pipeline_topology>
-and L</pipeline_env_names> still answer for the tree in front of them,
-because the branch class, the propagation walk, and the pipeline commands all
-read them and every one of those wants that tree.
-
-Both halves read the local control branch, and the same one: the diff takes
-its far side from L</control_branch> and the roster is read at that same ref.
-Neither reads the remote-tracking ref. A commit made on control and not yet
-pushed is part of what this repository calls control, so a roster read from
-the remote would describe a different commit from the one the diff compares
-against, and the two halves would disagree about what the pipeline is.
+Both halves are read off the one shape, at the one commit it resolved to and
+kept as C<< $self->{__shape_commit} >>: the diff's far side is that commit
+and the roster is that shape's own L</pipeline_topology>. They can never
+disagree about which commit "control" meant, because neither asks git a
+second time. A clone with a remote for control compares against the
+remote-tracking ref -- a local commit on control not yet pushed is not part
+of what this reads as control -- and a clone with no remote compares against
+the local branch instead; see L</_control_ref> for which of the two applies.
+Control moving again after the command started is not seen here; the next
+command opens a fresh L</_shape> and reads it anew.
 
 The environment files come from C<potential_environment_files>, which is pure
 name derivation and touches no disk, so a defining path that exists only on
@@ -1945,16 +2027,20 @@ control is compared rather than skipped. What that gives up is explicitly
 inherited files, which are named inside file contents and so need a tree to
 be found at all.
 
-A repository C<pipeline-apply> has never run against reports nothing, because
-there is no commit to be stale against. So does a control branch this clone
-holds no deployment root on, which is a question about control the caller's
-own control check has already asked.
-
-A repository with no pipeline reports nothing as well, and it answers before
-the applied record's address is composed. The deploy pre-flight asks this on
+A repository with no pipeline reports nothing, and it answers before the
+applied record's address is composed. The deploy pre-flight asks this on
 every deploy, and addressing that record where there is no pipeline reaches
 the refusal in L</_pipeline_exodus_mount>, which would stop an ordinary
 deploy with a sentence about a pipeline the operator does not have.
+
+A repository C<pipeline-apply> has never run against also reports nothing,
+because there is no commit to be stale against. So does a repository whose
+shape is itself -- a deployment root not under git at all, or a clone whose
+control ref cannot be found anywhere -- which is a question about control
+the caller's own control check has already asked. A control that carries no
+root for this deployment type resolves to L</_no_pipeline_shape> instead,
+whose empty topology leaves nothing to iterate and so answers nothing here
+too.
 
 B<Parameters:> A C<Service::Git> for the repository.
 
@@ -1967,10 +2053,11 @@ B<Errors:>
 
 =item *
 
-C<< "Cannot compare <commit> against <branch>" >> - raised (via
+C<< "Cannot diff <commit> against <commit> in <root>: <reason>. Fetch the
+missing commit or branch, then try again." >> - raised (via
 C<Service::Git::diff_names>) when git cannot take the path diff, because the
-applied commit is not in the local repository or the control branch has no
-local ref. A clean answer there would be a wrong answer, so the query
+applied commit or the commit L</_shape> resolved is not in the local
+repository. A clean answer there would be a wrong answer, so the query
 refuses instead.
 
 =back
@@ -2053,8 +2140,20 @@ whether or not it declares a C<genesis.pipeline> block -- an environment
 with no pipeline metadata still has a branch, still appears in
 C<pipeline-status>, and still needs preparing.
 
-B<Parameters:> None.  The environment directory is always the
-repository root.
+Reads through L</_shape>. Where control can be resolved, this delegates to
+the topology L</_shape> built for control's own tree, so under D112 the
+roster is control's declaration rather than whatever the branch in front of
+the command happens to carry -- a deploy standing on one deployment branch
+still sees every sibling environment control knows about. A tree that is its
+own shape -- a deployment root not under git at all, a clone whose control
+ref cannot be found anywhere, or a materialised tree opened over one commit
+-- answers through L</_topology_here> instead: a materialised tree's answer
+is cached the first time, since such a tree's files cannot change, while a
+live checkout with no resolvable control is read fresh on every call, since
+its files can.
+
+B<Parameters:> None.  The environment directory is the root of whichever
+tree answers -- L</_shape>'s, where control could be resolved.
 
 B<Returns:> A hashref:
 
@@ -2104,6 +2203,12 @@ B<Examples:>
 
     # Roots are the environments with no parent
     my @roots = grep {!$topo->{parent_of}{$_}} @{$topo->{order}};
+
+    # Called from a clone standing on the qa deployment branch, which
+    # carries only qa/bosh.yml, this still lists every sibling, because
+    # the roster comes from control rather than from qa's own tree.
+    my $topo = $top->pipeline_topology();
+    # {order => ['mgmt', 'lab', 'qa'], ...}
 
 =head2 fetch_pipeline_envs
 
@@ -2192,6 +2297,245 @@ B<Examples:>
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
 
+=head2 _shape
+
+    my $shape = $top->_shape();
+
+The C<Genesis::Top> the pipeline's shape is read from.
+
+Every key that says what the pipeline is -- L</pipeline_enabled>,
+L</pipeline_provider_type>, L</recreate_on_deploy>, L</control_requires_pr>,
+L</pr_prefix>, L</pipeline_name>, L</pipeline_section>, and
+L</pipeline_topology> -- reads through here rather than off L</config>
+directly, because under D112 the shape is control's fact: what control held
+as C<R> when the command started, not what the tree in front of the command
+happens to carry. The keys that say where control is -- L</control_branch>
+and the C<pipeline.source_control> block -- are read from the tree in front
+of the command instead, because control cannot be found without them first.
+
+Resolved once per C<Genesis::Top> and kept, through L</_read_shape>, so every
+shape key one command asks is one read of control, and every caller within
+that command sees the same commit however long the command runs. A
+materialised tree, already opened over one commit, is its own shape: reading
+control out of a tree that already is one commit of control is what would
+let a read of control read control again.
+
+Control moving on the remote after this resolves is not seen by the command
+that already resolved it. The next command opens a new C<Genesis::Top> and
+reads control anew.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self> for a materialised tree. Otherwise, the C<Genesis::Top>
+L</_read_shape> resolved, which may also be C<$self> where control could not
+be read from at all.
+
+B<Errors:> None directly; whatever L</_read_shape> raises propagates.
+
+B<Examples:>
+
+    my $enabled = $top->_shape->config->get('pipeline.enabled');
+    # reads control's pipeline.enabled, not the tree in front of the command
+
+=head2 _read_shape
+
+    my $shape = $top->_read_shape();
+
+Resolves control as C<R> holds it when the command starts and writes its
+tree out once, so L</_shape> can keep the answer for the rest of the
+command.
+
+Where this deployment root is not under git at all, there is nothing to read
+control from, so this returns C<$self> and the shape is the tree in front of
+the command. Where the root is under git but L</_control_ref> finds no ref
+for L</control_branch> anywhere -- no local branch and no remote-tracking one
+-- this returns C<$self> for the same reason: a clone with no control ref has
+no fact to read but its own. Where control has a ref but carries no
+deployment root of this type at all, L</_topology_at> answers nothing and
+this returns L</_no_pipeline_shape> instead of the branch in front of the
+command, so a repository control does not carry a pipeline for is not
+reported as having one merely because the local branch is.
+
+Opening the materialised tree through L</_topology_at> sets C<GENESIS_ROOT>
+to it, so the read is localised around this call and leaves the command's
+own repository's environment as it found it.
+
+The commit the shape was read at is kept on C<< $self->{__shape_commit} >>,
+so L</pipeline_staleness>, which needs the commit as well as the tree, does
+not resolve L</_control_ref> a second time.
+
+B<Parameters:> None.
+
+B<Returns:> A C<Genesis::Top>: a materialised tree at control's commit, or
+C<$self> where there is no control to read from, or L</_no_pipeline_shape>
+where control carries no root for this deployment type.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Whatever L</_topology_at> raises when it cannot read or unpack control's
+tree -- C<< "Failed to read the deployment root at <ref>" >> and
+C<< "Failed to write out the deployment root at <ref>" >> -- propagates
+uncaught.
+
+=back
+
+B<Examples:>
+
+    my $shape = $top->_read_shape();
+    # a materialised Top over control's tree, or $self for a root git
+    # knows nothing about
+
+=head2 _no_pipeline_shape
+
+    my $shape = $top->_no_pipeline_shape();
+
+The shape of a deployment type control carries no root for.
+
+Writes a scratch C<.genesis/config> naming this repository's L</type> and
+nothing else, and opens a materialised C<Genesis::Top> over it. Every shape
+key read through it then answers as a repository with no pipeline:
+L</pipeline_enabled> false, L</pipeline_topology> empty, every other key its
+default.
+
+B<Parameters:> None.
+
+B<Returns:> A materialised C<Genesis::Top> over a scratch tree holding only
+a C<deployment_type> key.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Could not write a scratch configuration under <path>: <reason>" >> -
+raised through C<Genesis::bug> when the scratch config file cannot be
+written.
+
+=back
+
+B<Examples:>
+
+    my $shape = $top->_no_pipeline_shape();
+    $shape->pipeline_enabled;
+    # false, for a deployment type control's branch carries no root for
+
+=head2 _control_ref
+
+    my $ref = $top->_control_ref($git);
+
+The ref control is read from.
+
+Tries the remote-tracking ref first, where L</_remote_named> can name a
+remote, then the local branch; the first of the two git can resolve to a
+commit is the answer. A clone with a remote for control is read off the
+remote-tracking ref even while its local branch carries commits not yet
+pushed, because under D112 control means what C<R> holds, not what the local
+checkout does.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> for the repository.
+
+=back
+
+B<Returns:> The ref name, as C<refs/remotes/E<lt>remoteE<gt>/E<lt>branchE<gt>>
+or C<refs/heads/E<lt>branchE<gt>>, or C<undef> where neither resolves to a
+commit.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $ref = $top->_control_ref($git);
+    # returns 'refs/remotes/origin/control' for a clone tracking origin
+
+    my $ref = $top->_control_ref($git);
+    # returns 'refs/heads/control' for a clone with no remote at all
+
+    my $ref = $top->_control_ref($git);
+    # returns undef where control exists neither locally nor on the remote
+
+=head2 _remote_named
+
+    my $remote = $top->_remote_named($git, $control);
+
+The remote control lives on, or C<undef> where none is.
+
+The configured C<pipeline.source_control.remote>, else the control branch's
+configured upstream, else C<origin> where the clone has one. Read from the
+tree in front of the command, because it says where control is rather than
+what the pipeline is.
+
+Shared by L</_control_ref>, which resolves the shape's ref and treats
+C<undef> as "no remote-tracking ref to try", and by L</_source_control>,
+which refuses by name where no remote can be found. Neither goes looking for
+a remote any other way, so a repository holding several remotes is never
+resolved by C<git remote>'s alphabetical listing.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> for the repository.
+
+=item C<$control>
+
+The control branch's name.
+
+=back
+
+B<Returns:> The remote's name, or C<undef> where none can be derived.
+
+B<Errors:> None. L</_source_control> is what turns C<undef> into a refusal;
+this reader only names what it finds.
+
+B<Examples:>
+
+    my $remote = $top->_remote_named($git, 'control');
+    # returns 'origin' for a clone with an origin remote and no override
+
+    my $remote = $top->_remote_named($git, 'control');
+    # returns undef for a clone with no configured remote, no upstream on
+    # control, and no origin
+
+=head2 _topology_here
+
+    my $topo = $top->_topology_here();
+
+The topology the files of this tree declare, with no reference to control.
+
+The topology this tree's own files declare, which is the answer for the two
+kinds of tree that read for themselves: a materialised tree, which already is
+the answer for one commit, and a live checkout whose control cannot be
+resolved, which has nothing else to read from.
+
+Walks C<.genesis/config> and the environment files the same way regardless
+of caller, building the C<nodes>, C<edges>, C<children>, C<parent_of>, and
+C<order> sets L</pipeline_topology> documents.
+
+B<Parameters:> None.
+
+B<Returns:> The same hashref shape as L</pipeline_topology>, every field
+empty where this tree has no pipeline enabled or no environment files.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $topo = $top->_topology_here();
+    # the topology this tree's own files declare, regardless of control
+
 =head2 _topology_at
 
     my ($topology, $at) = $top->_topology_at($git, 'control');
@@ -2206,12 +2550,20 @@ answer for a clone standing on that ref. Nothing else under the root is
 written out: no kit hook runs against this tree, so the kit source would be
 extraction paid for and never read.
 
-L</pipeline_staleness> is the only caller, and it reads its environments
-through the C<Genesis::Top> that comes back, so the scratch directory is held
-on that object rather than taken down when this returns. It passes
-L</control_branch>, which is the local branch and the same ref its own diff
-compares against. The ref is an argument rather than a fixed name so that a
-later caller can ask the same question of another one.
+The dev kit's own declaration, F<dev/kit.yml>, is written out too where the
+ref carries one, alongside C<.genesis/config> and the environment files.
+Without it, an environment file at that ref naming the dev kit and no
+version -- valid only where a dev kit exists -- would drop out of the
+topology the moment it was read through here, even though the ref itself
+holds the dev kit that makes it valid.
+
+L</_read_shape> is the only caller, and it reads C<$self>'s shape through the
+C<Genesis::Top> that comes back, so the scratch directory is held on that
+object rather than taken down when this returns. It passes the commit
+L</_control_ref> resolved rather than a branch name, so the tree it writes
+out never moves under the caller mid-command. The ref is an argument rather
+than a fixed name so that a later caller can ask the same question of
+another one.
 
 Opening a C<Genesis::Top> sets C<GENESIS_ROOT>, so the caller localises the
 environment around this call and around the reads it makes afterwards.
@@ -2459,9 +2811,11 @@ F<ci.yml>; it records what it found, and two other places act on the
 record. It sets the flag that L</has_legacy_ci_yml> reports, which
 C<Genesis::Commands::_gate_pipeline_on_legacy_ci_yml> reads to error for
 every pipeline command, naming the migration. And where a C<ci.yml> sits
-beside a version 3 configuration that already enables a pipeline, it
-warns here that the file is a stale leftover and lets the command
-through.
+beside a version 3 configuration that already enables a pipeline, it warns
+here that the file is a stale leftover and lets the command through. That
+check reads C<pipeline.enabled> off L</config> directly rather than through
+L</pipeline_enabled>'s shape, because the question is about the C<ci.yml>
+sitting beside this file, not about what control declares.
 
 B<Returns:> C<1> on success. Raises on invalid or unsupported config versions.
 
@@ -2864,9 +3218,10 @@ Returns the resolved source-control values as a hash reference, whose keys
 are C<remote>, C<uri>, C<repository>, C<control_branch>, and C<pr_prefix>.
 Precedence is explicit over derived over default.
 
-The remote is the control branch's configured upstream, else C<origin>
-where it exists, and otherwise refused by name; it is never the first
-C<git remote>, which is alphabetical order. The repository is the GitHub
+The remote is L</_remote_named>'s answer -- the configured override, else the
+control branch's configured upstream, else C<origin> where it exists -- and
+otherwise refused by name; it is never the first C<git remote>, which is
+alphabetical order. The repository is the GitHub
 C<owner/repo> the remote's URL carries, github.com or GitHub Enterprise
 alike, and any other host must name it explicitly. An empty C<pr_prefix>
 is refused, because it would give the pull request branch the deployment
@@ -3212,8 +3567,11 @@ rather than quietly accepted. Each declaration is checked against the six
 names through L<Genesis::CI::Provider/declared_capabilities> before any gate
 reads it.
 
-The type comes from L</pipeline_provider_type> rather than off the key, and
-the declaration comes from the class
+The type is read as C<pipeline.provider.type>, defaulting to C<manual>,
+directly off L</config> rather than through L</pipeline_provider_type>'s
+shape, because validation checks the configuration in front of it and not
+what control declares; the default matches the accessor's. The declaration
+comes from the class
 L<Genesis::CI::ProviderRegistry/provider_class> names for it, which is the
 class the provider block was already dispatched to.
 

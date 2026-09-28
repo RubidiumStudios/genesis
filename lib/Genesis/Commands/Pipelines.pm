@@ -2277,7 +2277,7 @@ sub _describe_source_control {
 sub _describe_topology {
 	my ($top, $nodes, $edges) = @_;
 
-	my $name = $top->config->get('pipeline.name') || $top->type;
+	my $name = $top->pipeline_name || $top->type;
 	my $provider_type = $top->pipeline_provider_type // 'manual';
 	output "\n#G{Pipeline}: #C{%s}", $name;
 	output "  #Yi{Provider}: %s", $provider_type;

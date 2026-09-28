@@ -41,6 +41,8 @@ use_ok 'Genesis::CI::Compiler::Parser';
 			type => $opts{type} || 'bosh'}, $class;
 	}
 	sub config { $_[0]->{config} }
+	# The section as control holds it, which for this stand-in is its own.
+	sub pipeline_section { $_[0]->{config}->get('pipeline') }
 	sub type   { $_[0]->{type} }
 	sub path {
 		my ($self, $rel) = @_;

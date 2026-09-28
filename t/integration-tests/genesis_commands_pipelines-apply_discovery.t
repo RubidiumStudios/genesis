@@ -168,7 +168,9 @@ subtest 'an environment joins the set at the next apply and not before' => sub {
 	# The membership test is the subpath's absence, so an environment added
 	# after an apply carries none until an apply reaches it, and the two
 	# halves of that statement are the two rows below.
+	# Published, because the apply reads control as R holds it (D112).
 	write_env_file($h, 'staging');
+	push_from($h, 'a', $h->control);
 	no_secret($h->env_path('staging') . '/pipeline:discovery',
 		'an environment added after the apply has none of its own yet');
 

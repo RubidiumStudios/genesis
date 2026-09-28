@@ -43,8 +43,8 @@ sub parse {
 	# complain about a ci.yml nobody is meant to have any more.
 	if ($self->{ci_dir} && -d $self->{ci_dir}) {
 		return $self->_parse_multi_file($self->{ci_dir});
-	} elsif ($self->{top} && eval { $self->{top}->config->has('pipeline') }) {
-		return $self->_parse_genesis_config($self->{top}->config->get('pipeline'));
+	} elsif ($self->{top} && eval { $self->{top}->pipeline_section }) {
+		return $self->_parse_genesis_config($self->{top}->pipeline_section);
 	} elsif ($self->{file} && -f $self->{file}) {
 		return $self->_parse_legacy_file($self->{file});
 	} elsif ($self->{ci_dir}) {

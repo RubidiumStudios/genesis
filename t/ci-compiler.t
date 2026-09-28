@@ -2206,6 +2206,8 @@ subtest 'Validator - multi-file without pipeline.yml passes validation' => sub {
 			type => $opts{type} || 'cf' }, $class;
 	}
 	sub config { $_[0]->{config} }
+	# The section as control holds it, which for this stand-in is its own.
+	sub pipeline_section { $_[0]->{config}->get('pipeline') }
 	# The parse reads pipeline.name with the deployment type as its
 	# fallback, so a top that stands in for Genesis::Top answers for one.
 	sub type   { $_[0]->{type} }

@@ -41,7 +41,9 @@ subtest 'a new environment file makes the pipeline stale' => sub {
 	# init branches itself, so this row writes none of them again.  The kit
 	# is named because an environment the walk loads needs one.
 	my $h = staged(envs => ['lab'], kit => 'omega-v2.7.0');
+	# Published, because the report reads control as R holds it (D112).
 	write_env_file($h, 'dev');
+	push_from($h, 'a', $h->control);
 	refresh($h, 'a');
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');

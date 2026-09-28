@@ -313,7 +313,9 @@ sub _apply_provider_overrides {
 	my ($self, $output, $provider_type) = @_;
 
 	my $top    = $self->{top} or bug("The compiler has no Genesis::Top");
-	my $layout = $top->config->get('pipeline.provider.output_layout', 'single');
+	# The layout says what the pipeline is, so it is control's.
+	my $layout = (($top->pipeline_section || {})->{provider} || {})->{output_layout}
+		// 'single';
 	my @files  = sort keys %$output;
 	my @names  = $self->override_file_names($provider_type, \@files, $layout);
 

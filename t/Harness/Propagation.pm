@@ -1283,6 +1283,21 @@ sub push_from {
 }
 
 # }}}
+# _publish_control - push control from copy A where A stands on it {{{
+#
+# The pipeline's shape is read from control as R holds it (D112), so a
+# configuration a builder commits on control is published there, or the
+# command under test reads the commit before it.  A builder standing
+# elsewhere, on a feature branch a row is building, publishes nothing, and a
+# row that pointed origin somewhere unreachable has the push fail quietly,
+# which push_from's pass-or-fail answer allows.
+sub _publish_control {
+	my ($self) = @_;
+	return unless (branch_of($self->{a}) // '') eq $self->{control};
+	$self->push_from('a', $self->{control});
+}
+
+# }}}
 # refresh - fetch in one copy, so T moves and L does not {{{
 sub refresh {
 	my ($self, $copy, @branches) = @_;
@@ -2202,6 +2217,7 @@ sub set_repo_config {
 		run({dir => $self->{a}}, 'git', 'add', '--', $path);
 		run({dir => $self->{a}, onfailure => "Failed to write $path"},
 			'git', 'commit', '-q', '-m', "set $key");
+		$self->_publish_control;
 	}
 
 	return $path;
@@ -4833,6 +4849,7 @@ sub load_with {
 			$body, ''),
 		'.load-count' => sprintf("%d\n", ++$h->{loads}),
 	});
+	$h->_publish_control;
 
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
 	$top->config;
@@ -5603,6 +5620,7 @@ sub _write_whole_config {
 	if (defined $opts{commit} ? $opts{commit} : 1) {
 		run({dir => $h->{a}, onfailure => "Failed to write $path"},
 			'git', 'commit', '-q', '-m', "write $path");
+		$h->_publish_control;
 	}
 
 	return $path;

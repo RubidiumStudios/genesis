@@ -104,6 +104,8 @@ subtest 'a pull request is required exactly where the state says so' => sub {
 	# file, so the value reaches the reader as a string rather than as a YAML
 	# boolean.
 	write_env_file($h, 'staging', pipeline => {require_pr => '"no"'});
+	# Published, because the apply reads control as R holds it (D112).
+	push_from($h, 'a', $h->control);
 
 	run_genesis($h, 'pipeline-apply');
 
@@ -142,6 +144,8 @@ subtest 'a deployment branch in PR mode merges by rebase only' => sub {
 		source_control => {control_requires_pr => 1});
 	my $gh = $h->gh;
 	write_env_file($h, 'qa', pipeline => {require_pr => 'true'});
+	# Published, because the apply reads control as R holds it (D112).
+	push_from($h, 'a', $h->control);
 
 	run_genesis($h, 'pipeline-apply');
 

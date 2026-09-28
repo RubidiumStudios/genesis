@@ -113,7 +113,7 @@ sub read_durable_state {
 		# applied record is addressed under.  A repository that names no
 		# label leaves the first null, and the renderer chooses
 		# which of the two to print.
-		pipeline  => $top->config->get('pipeline.name'),
+		pipeline  => $top->pipeline_name,
 		type      => $top->type,
 		# Defaulted here and nowhere else.  The accessor answers undef for a
 		# repository whose pipeline is switched off, and every reader of this

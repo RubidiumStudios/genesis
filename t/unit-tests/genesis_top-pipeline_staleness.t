@@ -90,7 +90,9 @@ subtest 'a changed pipeline-defining path names its environment' => sub {
 	# Any pipeline key the schema declares will move the file, and this one
 	# is gated by no capability, so the row stands whatever provider the
 	# repository names.
+	# Published, because staleness is measured against control as R holds it.
 	write_env_file($h, 'prod', pipeline => {require_pr => 'true'});
+	push_from($h, 'a', $h->control);
 
 	my $changes = staleness_for($h);
 	is(scalar(@$changes), 1, 'one environment changed');
