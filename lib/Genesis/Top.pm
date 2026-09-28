@@ -1142,21 +1142,30 @@ sub _shape {
 # met where they always were.  A control that carries no root for this
 # deployment type has no pipeline for it, whatever the branch in front of the
 # command declares, so the shape is empty rather than the branch's.
+#
+# The tree one commit writes out is the same for every command that reads it,
+# so it is kept for the life of the process under the root and the commit,
+# and a later command in the process at that commit resolves control and
+# reads nothing more.
+my %SHAPE_AT;
 sub _read_shape {
 	my ($self) = @_;
 
-	require Service::Git;
-	return $self unless Service::Git->is_inside_work_tree($self->path);
-	my $git = Service::Git->new($self->path);
-	my $ref = $self->_control_ref($git) or return $self;
-	my $sha = $git->rev_parse("$ref^{commit}") or return $self;
-
-	# Opening a Top sets GENESIS_ROOT, and this read must leave the command's
-	# own repository where it stands.
-	local %ENV = %ENV;
-	my (undef, $at) = $self->_topology_at($git, $sha);
+	my $sha = $self->_control_commit or return $self;
 	$self->{__shape_commit} = $sha;
-	return $at // $self->_no_pipeline_shape;
+
+	require Cwd;
+	my $key = join("\0", Cwd::abs_path($self->path) // $self->path, $sha);
+	return $SHAPE_AT{$key} //= do {
+		require Service::Git;
+		my $git = Service::Git->new($self->path);
+
+		# Opening a Top sets GENESIS_ROOT, and this read must leave the
+		# command's own repository where it stands.
+		local %ENV = %ENV;
+		my (undef, $at) = $self->_topology_at($git, $sha);
+		$at // $self->_no_pipeline_shape;
+	};
 }
 
 # }}}
@@ -1181,20 +1190,36 @@ sub _no_pipeline_shape {
 }
 
 # }}}
-# _control_ref - the ref control is read from {{{
+# _control_commit - the commit control stands at, in one git call {{{
 #
-# The remote is derived as source control derives it, but without its
-# refusal: a clone whose remote cannot be derived reads its local control
-# branch, and the commands that need the remote refuse over it where they
-# always did.  It does not go through _source_control, which reads the pull
-# request prefix, a key this reader answers.
-sub _control_ref {
-	my ($self, $git) = @_;
+# One for-each-ref reads the local control branch, its upstream, and every
+# remote's copy of it, and the remote is chosen from that as source control
+# chooses it, but without its refusal: the configured remote, else the local
+# branch's upstream, else origin.  A clone with no remote copy of control
+# reads its local branch, and one with no control at all, or a directory
+# under no git control, where the call itself fails, answers undef.
+sub _control_commit {
+	my ($self) = @_;
 	my $control = $self->control_branch;
-	my $remote  = $self->_remote_named($git, $control);
-	for my $ref (($remote ? ("refs/remotes/$remote/$control") : ()),
-	             "refs/heads/$control") {
-		return $ref if defined $git->rev_parse("$ref^{commit}");
+	my ($out, $rc) = run({stderr => 0},
+		'git', '-C', $self->path, 'for-each-ref',
+		'--format=%(refname)%09%(objectname)%09%(upstream)',
+		"refs/heads/$control", "refs/remotes/*/$control");
+	return undef if $rc || !defined $out;
+
+	my (%sha, $upstream);
+	for (split /\n/, $out) {
+		my ($ref, $object, $up) = split /\t/;
+		$sha{$ref} = $object;
+		$upstream = $up if $ref eq "refs/heads/$control";
+	}
+	my $remote = $self->config->get('pipeline.source_control.remote');
+	($remote) = ($upstream // '') =~ m{^refs/remotes/([^/]+)/}
+		unless defined $remote;
+	$remote //= 'origin';
+
+	for my $ref ("refs/remotes/$remote/$control", "refs/heads/$control") {
+		return $sha{$ref} if $sha{$ref};
 	}
 	return undef;
 }
@@ -2636,11 +2661,16 @@ sub _source_control {
 	# validation that is still on the stack above them.
 	my $config = $self->config;
 
-	# Through the accessors, because each of those two keys has one reader
-	# and a second read here would make that untrue.
+	# The control branch through its accessor, which reads the file in front
+	# of the command.  The pull request prefix is read off that file too
+	# rather than through its accessor, which answers control's value under
+	# D112: what this validates is the file being loaded, and reading control
+	# here would make every command in a pipeline repository pay for a read
+	# of control as it loads.
 	my %sc = (
 		control_branch => $self->control_branch,
-		pr_prefix      => $self->pr_prefix,
+		pr_prefix      => $config->get(
+			'pipeline.source_control.pr_prefix', DEFAULT_PR_PREFIX),
 	);
 
 	bail({exitcode => CONFIG},

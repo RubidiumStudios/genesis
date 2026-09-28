@@ -173,6 +173,34 @@ subtest "an environment on control's dev kit is in the shape" => sub {
 		'qa, naming the dev kit and no version, is in the pipeline');
 };
 
+subtest 'loading the configuration reads nothing of control' => sub {
+	# Validation checks the file in front of it, so a command pays for the
+	# read of control only when it asks for the shape, and one that never
+	# does, a secrets command in a pipeline repository, never pays at all.
+	plan tests => 2;
+
+	my $h = three_stage();
+	my $reads = 0;
+	my $top;
+	{
+		no warnings 'redefine';
+		my $real = \&Genesis::Top::_read_shape;
+		local *Genesis::Top::_read_shape = sub {$reads++; goto &$real};
+		$top = top_in($h);
+		$top->config;
+	}
+	is($reads, 0, 'the load and its validation read no shape from control');
+
+	# The validation it runs is the file's own: an empty pull request prefix
+	# on the branch in front of the command is refused as it loads.
+	local_branch($h, 'feature/no-prefix', at => $h->control);
+	stand_on($h, 'feature/no-prefix');
+	set_config_key($h, 'pipeline.source_control.pr_prefix', '');
+	my $refused = eval {top_in($h)->config; 0} // 1;
+	like($@, qr/pr_prefix.*must not be empty/s,
+		'an empty prefix in the file being loaded is refused');
+};
+
 subtest 'control is read once per command' => sub {
 	# D112 reads control as R holds it when the command starts, so a Top
 	# resolves control's ref once and keeps what it found.  Every shape key a
@@ -188,9 +216,9 @@ subtest 'control is read once per command' => sub {
 	{
 		no warnings 'redefine';
 		my $read    = \&Genesis::Top::_topology_at;
-		my $resolve = \&Genesis::Top::_control_ref;
+		my $resolve = \&Genesis::Top::_control_commit;
 		local *Genesis::Top::_topology_at = sub {$reads++; goto &$read};
-		local *Genesis::Top::_control_ref = sub {$resolves++; goto &$resolve};
+		local *Genesis::Top::_control_commit = sub {$resolves++; goto &$resolve};
 		$top = top_in($h);
 		$top->pipeline_topology for 1 .. 3;
 		$top->pipeline_enabled for 1 .. 3;
@@ -212,6 +240,51 @@ subtest 'control is read once per command' => sub {
 	my $next = top_in($h);
 	$next->pipeline_topology;
 	is($next->{__shape_commit}, $moved, 'and the next command reads the new one');
+};
+
+# git_calls - how many git processes a block starts, from Top and Service::Git
+sub git_calls {
+	my ($code) = @_;
+	my $calls = 0;
+	no warnings qw/redefine once/;
+	my %real = map {($_ => \&{"${_}::run"})} qw/Genesis::Top Service::Git/;
+	local *Genesis::Top::run = sub {
+		$calls++ if grep {defined && !ref && $_ eq 'git'} @_;
+		goto &{$real{'Genesis::Top'}};
+	};
+	local *Service::Git::run = sub {
+		$calls++ if grep {defined && !ref && $_ eq 'git'} @_;
+		goto &{$real{'Service::Git'}};
+	};
+	$code->();
+	return $calls;
+}
+
+subtest 'control is resolved in one git call, and a commit written out once' => sub {
+	# Every command resolves control when it starts, so that read is one git
+	# call.  The tree a commit writes out is the same for every command that
+	# reads it, so a process writes it out once and every later command in it
+	# at that commit reuses it.
+	plan tests => 3;
+
+	# Each Top is built outside the count, because loading a configuration
+	# resolves source control for its validation, which is not this read.
+	my $h = three_stage();
+	my $one = top_in($h);
+	my $first = git_calls(sub {$one->pipeline_topology});
+	cmp_ok($first, '<=', 5,
+		'the first read resolves control and writes its tree out in at most five');
+
+	my $two = top_in($h);
+	my $second = git_calls(sub {$two->pipeline_topology});
+	is($second, 1, 'a second command at the same commit resolves control and no more');
+
+	commit_on_control($h, files => {'ops/moved.yml' => "---\nmoved: 1\n"},
+		message => 'move control', push => 1);
+	my $moved = top_in($h);
+	$moved->pipeline_topology;
+	is($moved->{__shape_commit}, $h->git('a')->sha('origin/'.$h->control),
+		'and control moving is still read by the next command');
 };
 
 done_testing;

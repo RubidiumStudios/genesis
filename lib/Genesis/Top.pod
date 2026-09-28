@@ -2017,7 +2017,7 @@ disagree about which commit "control" meant, because neither asks git a
 second time. A clone with a remote for control compares against the
 remote-tracking ref -- a local commit on control not yet pushed is not part
 of what this reads as control -- and a clone with no remote compares against
-the local branch instead; see L</_control_ref> for which of the two applies.
+the local branch instead; see L</_control_commit> for which of the two applies.
 Control moving again after the command started is not seen here; the next
 command opens a fresh L</_shape> and reads it anew.
 
@@ -2347,7 +2347,7 @@ command.
 
 Where this deployment root is not under git at all, there is nothing to read
 control from, so this returns C<$self> and the shape is the tree in front of
-the command. Where the root is under git but L</_control_ref> finds no ref
+the command. Where the root is under git but L</_control_commit> finds no ref
 for L</control_branch> anywhere -- no local branch and no remote-tracking one
 -- this returns C<$self> for the same reason: a clone with no control ref has
 no fact to read but its own. Where control has a ref but carries no
@@ -2362,7 +2362,14 @@ own repository's environment as it found it.
 
 The commit the shape was read at is kept on C<< $self->{__shape_commit} >>,
 so L</pipeline_staleness>, which needs the commit as well as the tree, does
-not resolve L</_control_ref> a second time.
+not resolve L</_control_commit> a second time.
+
+The tree a commit writes out is the same for every command that reads it, so
+it is kept for the life of the process under the deployment root and the
+commit. A later command in the same process, such as another C<Genesis::Top>
+a command builds for the same root, resolves control in one git call and, at
+the same commit, reads nothing more. A command that finds control moved
+resolves the new commit and writes that tree out.
 
 B<Parameters:> None.
 
@@ -2424,45 +2431,40 @@ B<Examples:>
     $shape->pipeline_enabled;
     # false, for a deployment type control's branch carries no root for
 
-=head2 _control_ref
+=head2 _control_commit
 
-    my $ref = $top->_control_ref($git);
+    my $sha = $top->_control_commit();
 
-The ref control is read from.
+The commit control stands at, resolved in one git call.
 
-Tries the remote-tracking ref first, where L</_remote_named> can name a
-remote, then the local branch; the first of the two git can resolve to a
-commit is the answer. A clone with a remote for control is read off the
-remote-tracking ref even while its local branch carries commits not yet
-pushed, because under D112 control means what C<R> holds, not what the local
-checkout does.
+One C<git for-each-ref> reads the local control branch, its upstream, and
+every remote's copy of control. The remote is chosen as L</_remote_named>
+chooses it, but without a git call of its own and without a refusal: the
+configured C<pipeline.source_control.remote>, else the local branch's
+upstream, else C<origin>. That remote's copy answers where the clone holds
+one, and the local branch otherwise. A clone with a remote copy of control is
+read off it even while its local branch carries commits not yet pushed,
+because under D112 control means what C<R> holds, not what the local checkout
+does. A directory under no git control fails the call itself, which is how
+that case is told apart without a separate check.
 
-B<Parameters:>
+B<Parameters:> None.
 
-=over 4
-
-=item C<$git>
-
-A C<Service::Git> for the repository.
-
-=back
-
-B<Returns:> The ref name, as C<refs/remotes/E<lt>remoteE<gt>/E<lt>branchE<gt>>
-or C<refs/heads/E<lt>branchE<gt>>, or C<undef> where neither resolves to a
-commit.
+B<Returns:> The commit's full sha, or C<undef> where the root is under no git
+control or control exists neither locally nor on any remote.
 
 B<Errors:> None.
 
 B<Examples:>
 
-    my $ref = $top->_control_ref($git);
-    # returns 'refs/remotes/origin/control' for a clone tracking origin
+    my $sha = $top->_control_commit;
+    # returns origin/control's sha for a clone that fetched it
 
-    my $ref = $top->_control_ref($git);
-    # returns 'refs/heads/control' for a clone with no remote at all
+    my $sha = $top->_control_commit;
+    # returns the local control branch's sha where no remote copy is held
 
-    my $ref = $top->_control_ref($git);
-    # returns undef where control exists neither locally nor on the remote
+    my $sha = $top->_control_commit;
+    # returns undef in a directory that is not a git checkout
 
 =head2 _remote_named
 
@@ -2475,9 +2477,9 @@ configured upstream, else C<origin> where the clone has one. Read from the
 tree in front of the command, because it says where control is rather than
 what the pipeline is.
 
-Shared by L</_control_ref>, which resolves the shape's ref and treats
-C<undef> as "no remote-tracking ref to try", and by L</_source_control>,
-which refuses by name where no remote can be found. Neither goes looking for
+Used by L</_source_control>, which refuses by name where no remote can be
+found; L</_control_commit> applies the same order to what its one git call
+has already read, rather than calling this. Neither goes looking for
 a remote any other way, so a repository holding several remotes is never
 resolved by C<git remote>'s alphabetical listing.
 
@@ -2560,7 +2562,7 @@ holds the dev kit that makes it valid.
 L</_read_shape> is the only caller, and it reads C<$self>'s shape through the
 C<Genesis::Top> that comes back, so the scratch directory is held on that
 object rather than taken down when this returns. It passes the commit
-L</_control_ref> resolved rather than a branch name, so the tree it writes
+L</_control_commit> resolved rather than a branch name, so the tree it writes
 out never moves under the caller mid-command. The ref is an argument rather
 than a fixed name so that a later caller can ask the same question of
 another one.
@@ -3225,7 +3227,11 @@ alphabetical order. The repository is the GitHub
 C<owner/repo> the remote's URL carries, github.com or GitHub Enterprise
 alike, and any other host must name it explicitly. An empty C<pr_prefix>
 is refused, because it would give the pull request branch the deployment
-branch's own name, and an empty C<control_branch> is refused beside it,
+branch's own name. The prefix checked is the one in the configuration being
+loaded, not L</pr_prefix>'s answer from control, because this runs as that
+configuration's validation and reading control there would make every
+command in a pipeline repository pay for a read of control as it loads. An
+empty C<control_branch> is refused beside it,
 because nothing can be read from a branch with no name. Every refusal exits
 C<Genesis::Exit::CONFIG>.
 
