@@ -7,7 +7,7 @@ use Genesis::State;
 use Genesis::Term qw/csprintf/;
 
 use Genesis::UI;
-use JSON::PP qw/decode_json/;
+use JSON::PP qw/decode_json encode_json/;
 use Time::HiRes qw/gettimeofday/;
 use UUID::Tiny ();
 
@@ -1051,7 +1051,7 @@ sub unseal {
 	my ($out, $rc, $err);
 	my ($tries, $max_tries) = (0, 3);
 	while ($tries++ < $max_tries) {
-		($out, $rc, $err) = $self->query({stdin => $keys_input, redact_stdin => 1}, 'unseal');
+		($out, $rc, $err) = $self->query({stdin => $keys_input, redact_stdin => 1, redact_output => 1}, 'unseal');
 		if (($rc == 0) || ($out =~ /Vault is already unsealed/)) {
 			# A success here may only cover one node.  The caller checks
 			# status next, which also sees only that node, so nothing
@@ -1059,25 +1059,102 @@ sub unseal {
 			# member of a sealed one.
 			my @caveat = $self->_strongbox_unseal_caveat;
 			warning(@caveat) if @caveat;
-			return ($out, 0, '');
+			return ($self->_redact_unseal_keys($out), 0, '');
 		}
 
-		# RISK: If the unseal fails, we log all available keys for recovery purposes
-		# This is a security risk, as it exposes the unseal keys in logs, but is
-		# necessary to prevent irrevocable sealing of the vault.
+		# Seal material never goes to a trace or a log.  Anyone who has to
+		# finish by hand still has the keys at <secrets_mount>vault/seal/keys.
 		trace(
-			"[Attempt %s] Failed to unseal vault cluster at #M{%s} - all available keys (first three used):\n%s",
-			$tries, $self->{url}, join("\n", map {sprintf("#C{%s}", $_)} @{$self->{unseal_keys}})
+			"[Attempt %s] Failed to unseal vault cluster at #M{%s}",
+			$tries, $self->{url}
 		);
-		sleep(2) if $tries < $max_tries; # nothing to wait for before giving up
+		$self->_pause(2) if $tries < $max_tries; # nothing to wait for before giving up
 	}
 
-	# If we reach here, all attempts failed
-	my @reason = ($out || "Failed to unseal vault cluster");
-	unshift(@reason, $err) if $err;
+	# If we reach here, all attempts failed.  safe's own words go back to the
+	# caller, who prints them, so any key it echoed is struck out first.
+	my @reason = ($self->_redact_unseal_keys($out) || "Failed to unseal vault cluster");
+	unshift(@reason, $self->_redact_unseal_keys($err)) if $err;
 	my @caveat = $self->_strongbox_unseal_caveat;
 	push(@reason, csprintf(@caveat)) if @caveat;
 	return ('', $rc // 1, join("\n\n", @reason));
+}
+
+# }}}
+# unseal_nodes - unseal each listed node through its own sys/unseal {{{
+#
+# A Raft cluster's safe target reaches only one node, which cannot elect a
+# leader on its own, and with standby reads disabled nothing authenticated
+# works until a quorum is open.  Keys go to curl on stdin, one at a time,
+# until the node opens; they never appear in an argument, a trace, or a
+# result.  Returns one {address, unsealed, message} hashref per node.
+sub unseal_nodes {
+	my ($self, @addresses) = @_;
+	my @keys = @{$self->{unseal_keys} // []};
+
+	my @results;
+	for my $address (@addresses) {
+		my $result = {address => $address, unsealed => 0};
+		push @results, $result;
+
+		my $state = $self->_node_request($address, 'GET', 'sys/seal-status');
+		unless ($state && exists($state->{sealed})) {
+			$result->{message} = 'unreachable';
+			next;
+		}
+		unless ($state->{sealed}) {
+			@$result{qw/unsealed message/} = (1, 'already unsealed');
+			next;
+		}
+		unless (@keys) {
+			$result->{message} = 'sealed, and no unseal keys were fetched';
+			next;
+		}
+
+		# Key shares left over from an interrupted attempt would count
+		# towards the threshold alongside ours, so start the round afresh.
+		$self->_node_request($address, 'PUT', 'sys/unseal', {reset => JSON::PP::true})
+			if $state->{progress};
+
+		my $sealed = 1;
+		for my $key (@keys) {
+			my $reply = $self->_node_request($address, 'PUT', 'sys/unseal', {key => $key});
+			next unless $reply && exists($reply->{sealed}); # a rejected key
+			last unless ($sealed = $reply->{sealed} ? 1 : 0);
+		}
+		if ($sealed) {
+			$state = $self->_node_request($address, 'GET', 'sys/seal-status');
+			$sealed = !($state && exists($state->{sealed}) && !$state->{sealed});
+		}
+		@$result{qw/unsealed message/} = $sealed
+			? (0, 'still sealed after every unseal key was tried')
+			: (1, 'unsealed');
+	}
+	return @results;
+}
+
+# }}}
+# wait_for_active_node - wait, within a bound, for a cluster to elect a leader {{{
+#
+# Unsealing a quorum is not the end of it, because a Raft cluster then has to elect
+# an active node before an authenticated request can succeed.  Polls each
+# node's unauthenticated sys/health every few seconds for up to $timeout
+# seconds.  Returns the active node's address, or undef when none emerged.
+sub wait_for_active_node {
+	my ($self, $timeout, @addresses) = @_;
+	my ($waited, $interval) = (0, 3);
+	while (1) {
+		for my $address (@addresses) {
+			my $health = $self->_node_request($address, 'GET', 'sys/health');
+			return $address
+				if $health && exists($health->{standby})
+				&& !$health->{sealed} && !$health->{standby};
+		}
+		last if $waited >= $timeout;
+		$self->_pause($interval);
+		$waited += $interval;
+	}
+	return undef;
 }
 
 # }}}
@@ -1102,6 +1179,59 @@ sub _strongbox_unseal_caveat {
 }
 
 # }}}
+# _node_request - one unseal-related API call to a single node {{{
+#
+# Reaches the node at $address with the target's scheme and port.  A target
+# named by hostname keeps that name, pinned to the node with --resolve, so a
+# certificate issued for the name still verifies.  A $payload goes to curl as
+# a JSON body on stdin, and the reply is kept out of the trace.  Returns the
+# decoded reply, or undef when the node did not answer with JSON.
+sub _node_request {
+	my ($self, $address, $method, $path, $payload) = @_;
+
+	my ($scheme, $host, $port) = $self->url =~ m{^(https?)://([^:/]+)(?::([0-9]+))?};
+	return undef unless $scheme;
+	$port ||= $scheme eq 'https' ? 443 : 80;
+
+	my @args = ('-s', '--connect-timeout', 5, '-m', 10, '-X', $method);
+	push @args, '-k' unless $self->verify;
+	my $url;
+	if ($host =~ /^[0-9]+(?:\.[0-9]+){3}$/) {
+		$url = "$scheme://$address:$port/v1/$path";
+	} else {
+		push @args, '--resolve', "$host:$port:$address";
+		$url = "$scheme://$host:$port/v1/$path";
+	}
+
+	my $opts = {stderr => 0, redact_output => 1};
+	if (defined($payload)) {
+		$opts->{stdin} = encode_json($payload);
+		push @args, '-H', 'Content-Type: application/json', '--data-binary', '@-';
+	}
+
+	my ($out, $rc) = run($opts, 'curl', @args, $url);
+	return undef if $rc || !$out;
+	my $reply = eval {decode_json($out)};
+	return CORE::ref($reply) eq 'HASH' ? $reply : undef;
+}
+
+# }}}
+# _redact_unseal_keys - strike any fetched unseal key out of a message {{{
+sub _redact_unseal_keys {
+	my ($self, $text) = @_;
+	return $text unless defined($text);
+	for my $key (grep {defined($_) && length($_)} @{$self->{unseal_keys} // []}) {
+		$text =~ s/\Q$key\E/<redacted>/g;
+	}
+	return $text;
+}
+
+# }}}
+# _pause - sleep between attempts; a seam for tests {{{
+sub _pause {
+	sleep($_[1]);
+}
+
 # }}}
 
 ### Private helper functions {{{

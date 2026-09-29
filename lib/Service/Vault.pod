@@ -1660,11 +1660,83 @@ B<Examples:>
   }
   # Returns: ($output, 0, '') on success
 
-B<Security note:> when every retry has failed, the unseal keys are written to
-the trace log so the vault can still be recovered by hand.  This deliberately
-exposes them in logs.  The alternative -- failing quietly -- risks sealing a
-vault irrecoverably, so the trade is made in favour of recoverability.  Treat
-trace logs from a failed unseal as sensitive material.
+B<Security note:> The keys reach C<safe> on stdin and nowhere else. A failed
+attempt is traced by address only, and any key that C<safe> echoes is replaced
+with C<E<lt>redactedE<gt>> in both C<$output> and C<$error> before either is
+returned. The keys stay at C<E<lt>secrets_mountE<gt>vault/seal/keys> for anyone
+who has to finish the unseal by hand.
+
+=head2 unseal_nodes
+
+  my @results = $vault->unseal_nodes(@addresses);
+
+Unseals each node in C<@addresses> through that node's own C<sys/unseal>
+endpoint, using the keys previously fetched by C<fetch_unseal_keys>. This is
+the way to open a Raft cluster whose safe target reaches only one node,
+because that node cannot elect a leader on its own.
+
+Each node's seal status is read first. A node that is already open is left
+alone, and one that does not answer is reported as unreachable. For a sealed
+node, any progress left by an interrupted attempt is reset, and then the keys
+are submitted one at a time until the node reports itself unsealed. A node
+that is still sealed once every key has been tried is reported as still sealed.
+
+Every request goes through L</_node_request>, so the keys travel on curl's
+stdin, never in its arguments, and no key appears in a trace, a log line, or a
+result.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@addresses>
+
+The IPv4 addresses of the cluster's nodes.
+
+=back
+
+B<Returns:> One hashref per node, in the order given, with C<address>,
+C<unsealed> (C<1> or C<0>), and C<message> (C<already unsealed>,
+C<unsealed>, C<unreachable>, C<still sealed after every unseal key was tried>,
+or C<sealed, and no unseal keys were fetched>).
+
+B<Examples:>
+
+  $vault->fetch_unseal_keys($env);
+  my @results = $vault->unseal_nodes(qw/10.0.0.5 10.0.0.6 10.0.0.7/);
+  # Returns: ({address => '10.0.0.5', unsealed => 1, message => 'unsealed'}, ...)
+
+=head2 wait_for_active_node
+
+  my $active = $vault->wait_for_active_node($timeout, @addresses);
+
+Waits for a Raft cluster to elect an active node. Opening a quorum is not the
+last step, because the cluster then has to elect a leader before any
+authenticated request can succeed. This asks each node's unauthenticated
+C<sys/health> endpoint every three seconds, and gives up once C<$timeout>
+seconds of waiting have passed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$timeout>
+
+The longest time to wait, in seconds.
+
+=item C<@addresses>
+
+The IPv4 addresses of the cluster's nodes.
+
+=back
+
+B<Returns:> The address of the active node, or C<undef> when none became
+active within C<$timeout> seconds.
+
+B<Examples:>
+
+  my $active = $vault->wait_for_active_node(90, qw/10.0.0.5 10.0.0.6 10.0.0.7/);
+  # Returns: '10.0.0.6' once that node leads, or undef after 90 seconds
 
 =head1 INTERNAL METHODS
 
@@ -1699,6 +1771,98 @@ B<Examples:>
   # Strongbox enabled
   my @none = $vault->_strongbox_unseal_caveat();
   # Returns: ()
+
+=head2 _node_request
+
+  my $reply = $vault->_node_request($address, $method, $path, $payload);
+
+Makes one API call to a single node of the cluster, for L</unseal_nodes> and
+L</wait_for_active_node>. The node is reached with the target's scheme and
+port. When the target is named by hostname, the name is kept and pinned to the
+node with curl's C<--resolve>, so a certificate issued for the name still
+verifies. C<-k> is passed only when the target itself skips verification.
+
+A C<$payload> is encoded as JSON and handed to curl on stdin. It never appears
+among curl's arguments, and the reply is kept out of the trace.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$address>
+
+The node's IPv4 address.
+
+=item C<$method>
+
+The HTTP method, such as C<GET> or C<PUT>.
+
+=item C<$path>
+
+The API path below C</v1/>, such as C<sys/seal-status>.
+
+=item C<$payload>
+
+Optional. A hashref sent as the JSON request body.
+
+=back
+
+B<Returns:> The decoded reply as a hashref, or C<undef> when the node did not
+answer with a JSON object.
+
+B<Examples:>
+
+  my $state = $vault->_node_request('10.0.0.6', 'GET', 'sys/seal-status');
+  # Returns: {sealed => 1, t => 3, progress => 0, ...}
+
+=head2 _redact_unseal_keys
+
+  my $safe_text = $vault->_redact_unseal_keys($text);
+
+Replaces every occurrence of a fetched unseal key in C<$text> with
+C<E<lt>redactedE<gt>>, so a message from C<safe> can be passed on without
+carrying seal material.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$text>
+
+The message to clean. C<undef> is returned unchanged.
+
+=back
+
+B<Returns:> The cleaned text.
+
+B<Examples:>
+
+  my $clean = $vault->_redact_unseal_keys("bad key $key");
+  # Returns: 'bad key <redacted>'
+
+=head2 _pause
+
+  $vault->_pause($seconds);
+
+Sleeps between unseal attempts and leadership polls. It exists so that tests
+can replace it and run without waiting.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$seconds>
+
+How long to sleep.
+
+=back
+
+B<Returns:> What C<sleep> returns.
+
+B<Examples:>
+
+  $vault->_pause(3);
+  # Returns: 3, after three seconds
 
 =head2 _target_is_url
 
