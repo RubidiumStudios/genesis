@@ -3554,7 +3554,8 @@ sub proposed_record_path {
 sub proposed_record {
 	my ($self) = @_;
 	my $record = eval { $self->vault->get_path($self->proposed_record_path) };
-	return undef unless $record && ref($record) eq 'HASH';
+	# get_path answers {} for a path holding nothing, which is no record.
+	return undef unless $record && ref($record) eq 'HASH' && %$record;
 	return {map {($_ => $record->{$_})} qw/control_commit number url at/};
 }
 
