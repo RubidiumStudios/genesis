@@ -744,6 +744,11 @@ sub run {
 	};
 	my $eval_err = $@;
 
+	# Take the exit status before anything else runs.  The trace calls below
+	# run code of their own, and under GENESIS_TRACE that resets $?, which
+	# made every failed command look like it had exited 0.
+	my $exit_status = $?;
+
 	# Always reset STDIN if it was redirected
 	reset_stdin() if ($opts{stdin});
 
@@ -754,7 +759,7 @@ my $duration = gettimeofday() - $start_time;
 qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',undef,1));
 
 	my $err = slurp($err_file) if ($err_file && -f $err_file);
-	my $rc = $? >>8;
+	my $rc = $exit_status >> 8;
 	if (defined($out)) {
 		if ($out =~ m/[\x00-\x08\x0b-\x0c\x0e\x1f\x7f-\xff]/) {
 			qtrace "[%sb of binary data omitted from debug]", length($out);
@@ -771,7 +776,7 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 		     defined($err) ? "\n\nSTDERR:\n$err" : '',
 		     defined($out) ? "\n\nSTDOUT:\n".($opts{redact_output}?"<redacted>":$out) : ''
 		) if ($opts{onfailure});
-		trace("command exited with status %x (rc %d)", $?, $rc);
+		trace("command exited with status %x (rc %d)", $exit_status, $rc);
 	} else {
 		trace("command exited #G{0}");
 	}
