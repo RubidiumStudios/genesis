@@ -167,6 +167,7 @@ unit-tests/genesis_env-cpi_config.t                       # cpi_config()/directo
 unit-tests/genesis_env-cpis.t                             # multi-cpi accessors
 unit-tests/genesis_env-stop_renewer_for_self_deploy.t     # vault token-renewer pause during self-deploy
 unit-tests/genesis_env-cpi_az_map_exodus_fallback.t       # cpi_az_map falling back to exodus data
+unit-tests/genesis_env-deployment_may_affect_secrets_vault.t  # self-hosted vault gate matches names, IPv6, and ranges
 unit-tests/genesis_env-ensure_vault_ready_for_exodus.t    # vault unseal before an exodus write
 unit-tests/genesis_env_deployment-artifact_chunking.t     # exodus artifact chunking
 unit-tests/genesis_env_deployment-core.t                  # Deployment core

@@ -4062,24 +4062,20 @@ sub _deployment_may_affect_secrets_vault {
 	if ($self->kit->provides_service('vault')) {
 		debug("Vault service kit detected - deployment may affect secrets vault");
 
-		# Check for static IPs in the vault kit
+		# Check for static IPs in the vault kit.  Addresses are compared in
+		# canonical form, ranges are expanded, and a hostname or IPv6 target
+		# is matched as readily as an IPv4 one.
 		my @kit_ips =
-			map {IPv4->address($_)}
-			grep {$_} map { ($_->{static_ips}//[])->@* }
-			grep {$_} map { ($_->{networks}//[])->@* }
-			@{scalar $self->manifest_lookup('instance_groups')};
+			map {_expand_static_ips($_)}
+			map {@{$_->{static_ips} // []}}
+			grep {CORE::ref($_) eq 'HASH'} map {@{$_->{networks} // []}}
+			grep {CORE::ref($_) eq 'HASH'} @{scalar($self->manifest_lookup('instance_groups', [])) // []};
 		debug("Vault kit has static IPs: ".join(", ", @kit_ips)) if (@kit_ips);
 
-		# Get ips from `safe status`
-		my @vault_ips =
-			map {IPv4->address($_)}
-			grep {$_} map {$_ =~ m{https?://([^: ]*)} && $1}
-			grep {$_ =~ /^http/}
-			lines($self->vault->query('status'));
-		debug("Active vault using IPs: ".join(", ", @vault_ips)) if (@vault_ips);
+		my %vault_port = $self->_secrets_vault_addresses;
+		debug("Active vault using IPs: ".join(", ", sort CORE::keys(%vault_port))) if (%vault_port);
 
-		my (undef, $shared_ips) = compare_arrays(\@kit_ips, \@vault_ips);
-		return scalar(@$shared_ips) ? 1 : 0;
+		return (grep {exists($vault_port{$_})} @kit_ips) ? 1 : 0;
 	}
 
 	# Check if vault domain matches any external domain in the deployment
@@ -4848,18 +4844,7 @@ sub _unseal_secrets_vault_cluster {
 sub _secrets_vault_cluster_nodes {
 	my $self = shift;
 	return () unless $self->kit->provides_service('vault');
-	my $vault = $self->vault;
-
-	# Every address the vault answers on, with the port it answers on there.
-	# Ports that safe status reports for each node win over the target's.
-	my %vault_port;
-	my @urls = map {decolorize($_) =~ m{(https?://\S+)} ? $1 : ()} lines($vault->query('status'));
-	for my $url (@urls, $vault->url) {
-		my ($scheme, $v6, $name, $port) =
-			$url =~ m{^(https?)://(?:\[([^\]]+)\]|([^:/\[\]]+))(?::([0-9]+))?} or next;
-		$port ||= $scheme eq 'https' ? 443 : 80;
-		$vault_port{$_} //= $port for $self->_resolve_host_addresses($v6 // $name);
-	}
+	my %vault_port = $self->_secrets_vault_addresses;
 
 	my (@nodes, %seen);
 	my @groups = grep {ref($_) eq 'HASH'} @{scalar($self->manifest_lookup('instance_groups', [])) // []};
@@ -4897,6 +4882,28 @@ sub _secrets_vault_cluster_nodes {
 	) if !@nodes && grep {($_->{instances} // '') =~ /^[0-9]+$/ && $_->{instances} > 1} @groups;
 
 	return @nodes;
+}
+
+# }}}
+# _secrets_vault_addresses - every address the secrets vault answers on {{{
+#
+# Maps each address to the port the vault answers on there.  safe status
+# lists every node with its port when Strongbox is on, and only the target
+# otherwise, so the target URL always counts too.  Ports that safe status
+# reports for a node win over the target's.  Hostnames are resolved, and
+# every address is in canonical form.
+sub _secrets_vault_addresses {
+	my $self = shift;
+	my $vault = $self->vault;
+	my %vault_port;
+	my @urls = map {decolorize($_) =~ m{(https?://\S+)} ? $1 : ()} lines($vault->query('status'));
+	for my $url (@urls, $vault->url) {
+		my ($scheme, $v6, $name, $port) =
+			$url =~ m{^(https?)://(?:\[([^\]]+)\]|([^:/\[\]]+))(?::([0-9]+))?} or next;
+		$port ||= $scheme eq 'https' ? 443 : 80;
+		$vault_port{$_} //= $port for $self->_resolve_host_addresses($v6 // $name);
+	}
+	return %vault_port;
 }
 
 # }}}
