@@ -1641,6 +1641,57 @@ B<Examples:>
   my $content = $git->show_file('control', 'ops/thing.yml');
   # returns the file as it is on control, whatever is checked out
 
+=head2 read_blobs
+
+  my $blobs = $git->read_blobs($ref, @paths);
+
+What a commit holds at a set of paths, read by one C<git cat-file --batch>
+out of the object database. HEAD, the index and the working tree are never
+touched, and no tree is written out anywhere.
+
+The ref's tree is asked for first, in the same process. Every path of a ref
+git cannot resolve reads as missing, which is also what a commit holding none
+of the paths answers, so the ref is checked rather than the two being left to
+look alike.
+
+The output is framed by byte counts and read with C<run>'s C<trim> off, so
+each content comes back byte for byte, trailing whitespace included.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+The commit to read, as any name git resolves: a sha, a branch, a
+remote-tracking ref.
+
+=item C<@paths>
+
+The paths to read, relative to the git root.
+
+=back
+
+B<Returns:> A hashref keyed by path, each value carrying C<sha>, the blob sha
+the commit holds the path at, and C<content>. A path the commit does not hold
+as a file, absent or a directory, is left out. No paths answer an empty
+hashref without asking git.
+
+B<Errors:> Refuses at C<DATAERR>, naming the ref, where git cannot resolve the
+ref to a tree or C<git cat-file> itself fails.
+
+B<Limitations:> The requests are written to git's standard input before git
+is started to read them, so a request list larger than the pipe's buffer,
+64 KiB on macOS and on Linux by default, blocks rather than fails. A request
+line is the ref and a path, about seventy bytes, so the limit is around nine
+hundred paths; the callers ask for one deployment root's environment files,
+well within it.
+
+B<Examples:>
+
+  my $blobs = $git->read_blobs($control_sha, 'us-east.yml', 'us-east-qa.yml');
+  # returns {'us-east.yml' => {sha => '3b18e5...', content => "---\n..."}, ...}
+
 =head2 checkout_file
 
   $git->checkout_file($ref, $file);

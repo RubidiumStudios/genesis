@@ -1109,6 +1109,55 @@ sub show_file {
 }
 
 # }}}
+# read_blobs - what a commit holds at a set of paths, in one git process {{{
+#
+# Read out of the object database, so HEAD, the index and the working tree
+# are never touched and no tree is written out anywhere.  The ref's own tree
+# is asked for first in the same process: every path of a ref git cannot
+# resolve reads as missing, which is also what a commit holding none of them
+# answers, and the two must not be told apart by silence.
+#
+# The output is framed by byte counts, so it is taken untrimmed; the last
+# blob's trailing whitespace is part of its content.
+sub read_blobs {
+	my ($self, $ref, @paths) = @_;
+	return {} unless @paths;
+
+	my ($out, $rc, $err) = run(
+		{dir => $self->{root}, stderr => 0, trim => 0,
+		 stdin => join('', map {"$_\n"} "$ref^{tree}", map {"$ref:$_"} @paths)},
+		'git', 'cat-file', '--batch');
+	bail({exitcode => DATAERR}, "Cannot read #C{%s} in #C{%s}:\n%s",
+		$ref, $self->{root}, ($err // 'git gave no reason')) if $rc;
+
+	# One answer for the tree and one for each path, in the order asked.
+	my ($pos, @answers) = (0);
+	for (0 .. @paths) {
+		my $eol    = index($out, "\n", $pos);
+		my $header = substr($out, $pos, $eol - $pos);
+		$pos = $eol + 1;
+		my ($sha, $type, $size) = $header =~ /^([0-9a-f]{40,64}) (\w+) (\d+)$/;
+		my $content;
+		if (defined $size) {
+			$content = substr($out, $pos, $size);
+			$pos += $size + 1;
+		}
+		push @answers, {sha => $sha, type => $type // '', content => $content};
+	}
+
+	my $tree = shift @answers;
+	bail({exitcode => DATAERR}, "Cannot read #C{%s} in #C{%s}: git cannot resolve it to a tree.",
+		$ref, $self->{root}) unless $tree->{type} eq 'tree';
+
+	my %blobs;
+	for my $i (0 .. $#paths) {
+		next unless $answers[$i]{type} eq 'blob';
+		$blobs{$paths[$i]} = {sha => $answers[$i]{sha}, content => $answers[$i]{content}};
+	}
+	return \%blobs;
+}
+
+# }}}
 # }}}
 
 ### Working Tree Operations {{{
