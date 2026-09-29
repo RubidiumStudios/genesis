@@ -68,21 +68,23 @@ subtest 'the refusal names the branch it would have composed' => sub {
 		'so the operator can see what the name would have made';
 };
 
-subtest 'every environment name is checked too' => sub {
-	plan tests => 2;
+subtest 'a name no environment can carry is no environment' => sub {
+	plan tests => 3;
 
-	# The bad name goes on an environment of its own, written into the
-	# working tree and taken out again below, so the row that follows sees
-	# a repository whose names are all well formed again.
+	# The bad name goes on a file of its own, written into the working tree
+	# and taken out again below, so the row that follows sees a repository
+	# whose names are all well formed again.  The file declares itself, but
+	# the environment naming rules refuse the name, so it is left out the
+	# way Top::envs leaves it out, and no branch is ever composed from it.
 	my $path = write_env_file($h, 'qa..bad',
 		pipeline => {require_pr => 'false'}, commit => 0);
 
-	throws_ok {load_with_type('bosh')}
-		qr{environment name\s+qa\.\.bad\s+.*is\s+not\s+a\s+git\s+ref\s+component}s,
-		'a bad environment name is refused by name';
-	throws_ok {load_with_type('bosh')}
-		qr{qa\.\.bad/bosh},
-		'and the branch it would have composed is named with it';
+	my $top;
+	lives_ok {$top = load_with_type('bosh')} 'the load passes over it';
+	ok !(grep {$_ eq 'qa..bad'} $top->_env_file_names),
+		'it is not among the names the checks walk';
+	ok !exists $top->pipeline_topology->{nodes}{'qa..bad'},
+		'and the pipeline has no node for it';
 
 	unlink $h->a . "/$path";
 };
@@ -177,17 +179,18 @@ subtest 'an empty exodus mount is the mount it names' => sub {
 subtest 'a block switched off still joins the pipeline' => sub {
 	plan tests => 2;
 
-	# The block loop decides membership with exists, so the two readers
-	# above it have to agree, or an environment that turns its block off
-	# escapes both of them.
-	my $path = $h->a . '/qa..off.yml';
+	# The block loop decides membership with exists, so the readers beside
+	# it have to agree, or an environment that turns its block off escapes
+	# them.  Its mount is off the pipeline's, so the mount check is seen to
+	# walk it by refusing it.
+	my $path = $h->a . '/qa-off.yml';
 	put_file($path, join("\n",
 		'---', 'kit:', '  name:    dev', '  version: latest',
-		'  features: []', 'genesis:', '  env: qa..off',
-		'  pipeline: false', ''));
+		'  features: []', 'genesis:', '  env: qa-off',
+		'  exodus_mount: /other/exodus/', '  pipeline: false', ''));
 
 	throws_ok {load_with_type('bosh')}
-		qr{environment name\s+qa\.\.off\s+.*is\s+not\s+a\s+git\s+ref\s+component}s,
+		qr{qa-off\s+resolves\s+/other/exodus/}s,
 		'an environment whose block is off is read like any other';
 
 	unlink $path;

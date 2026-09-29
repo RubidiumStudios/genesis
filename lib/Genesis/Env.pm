@@ -647,6 +647,22 @@ sub _bare_with_errors {
 }
 
 # }}}
+# declared_env_names - the genesis.env values a file's text declares {{{
+#
+# Read off the text with no parse, so a caller can tell an environment file
+# from an ancestor or anything else at the root before paying for a merge.
+# An environment file declares exactly one, equal to its own name.
+sub declared_env_names {
+	my ($yaml_src) = @_;
+	# Block format: genesis:\n  env: name
+	my @env_names = $yaml_src =~ /^genesis: *\r?\n\r?  (?:.*\r?\n\r?  )*env:\s+(\S*)/mg;
+	# Inline format: {genesis: {env: 'name'}} or {genesis: {env: name}}
+	@env_names = $yaml_src =~ /\bgenesis:\s*\{[^}]*\benv:\s*'?([a-zA-Z0-9_][a-zA-Z0-9_-]*)'?/mg
+		unless @env_names;
+	return @env_names;
+}
+
+# }}}
 # is_valid_env_file - check if a named environment file is valid without instantiation {{{
 sub is_valid_env_file {
 	my ($class, $name, $top) = @_;
@@ -690,12 +706,7 @@ sub is_valid_env_file {
 			last;
 		}
 
-		# Block format: genesis:\n  env: name
-		my @env_names = $yaml_src =~ /^genesis: *\r?\n\r?  (?:.*\r?\n\r?  )*env:\s+(\S*)/mg;
-		# Inline format: {genesis: {env: 'name'}} or {genesis: {env: name}}
-		unless (@env_names) {
-			@env_names = $yaml_src =~ /\bgenesis:\s*\{[^}]*\benv:\s*'?([a-zA-Z0-9_][a-zA-Z0-9_-]*)'?/mg;
-		}
+		my @env_names = declared_env_names($yaml_src);
 		unless (scalar(@env_names) == 1 && ($env_names[0] eq $name || envset("GENESIS_LEGACY"))) {
 			if (scalar(@env_names) == 0) {
 				push @errors, sprintf(

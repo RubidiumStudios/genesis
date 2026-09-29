@@ -3367,11 +3367,15 @@ B<Examples:>
 
     $top->_validate_slug_components();
 
-Refuses, at C<Genesis::Exit::CONFIG>, a C<deployment_type> or an
-environment name that is not a git ref component.
+Refuses, at C<Genesis::Exit::CONFIG>, a C<deployment_type> that is not a
+git ref component.
 
 The deployment branch is the deployment slug C<< <env>/<type> >>, so both
-halves become ref components and neither is trusted over the other. A value
+halves become ref components and neither is trusted over the other. The
+environment half needs no check here: a name the environment naming rules
+accept, lowercase letters, digits, underscores and single hyphens, starting
+with a letter, is always a ref component, and a name they refuse is no
+environment, left out of L</_env_file_names> and of L</envs>. A value
 must match C<^[A-Za-z0-9][A-Za-z0-9._-]*$> and must not end in a dot or in
 C<.lock> or contain C<..>, which is what L</_ref_component_errors> decides.
 The refusal names the branch the value would have composed, because that is
@@ -3382,18 +3386,9 @@ Both halves already reach vault through the exodus slug and BOSH through
 the deployment name, so the check is narrow in practice and it catches a
 value that was never safe in those places either.
 
-The environment names are the ones the deployment root holds, read merged
-through L</_merged_env_params>, and a file that does not carry a
-C<genesis.pipeline> key at all is passed over, so a legacy C<ci.yml> beside
-the environments is not read as one. Membership is the key being there and
-not what it holds, which is how L</_validate_pipeline_config> reads it too,
-so an environment that switches its block off with C<false> still belongs to
-the pipeline and is still checked. A key written as a YAML null is the one
-spelling no reader can see, because L</_merged_env_params> deep-merges the
-hierarchy and a key whose value is undef is dropped in that merge, before any
-of the three is asked about it. It does not read C<pipeline.enabled> itself,
-because L</_validate_pipeline_config> is its only caller and has already
-returned where the section is off.
+It does not read C<pipeline.enabled> itself, because
+L</_validate_pipeline_config> is its only caller and has already returned
+where the section is off.
 
 B<Returns:> 1.
 
@@ -3407,18 +3402,12 @@ C<"The deployment type ... is not a git ref component"> - raised when
 C<deployment_type> cannot compose a ref, naming the value, the reason, and
 the branch C<< <env>/<type> >> it would have named for every environment.
 
-=item *
-
-C<"The environment name ... is not a git ref component"> - raised when an
-environment of the pipeline cannot compose a ref, naming the environment,
-the reason, and the branch it would have composed.
-
 =back
 
 B<Examples:>
 
     $top->_validate_slug_components;
-    # returns 1 where the type and every environment name compose a ref
+    # returns 1 where the type composes a ref
 
     $top->_validate_slug_components;
     # exits CONFIG (78) where .genesis/config says deployment_type: bosh.lock
@@ -3728,19 +3717,22 @@ the read every C<genesis.pipeline.*> key gets: an inherited key is absent
 from the leaf file, so a leaf-only read answers wrongly and says nothing
 about it.
 
-The hierarchy comes from C<< Genesis::Env::relate_by_name >>, which is given
-the deployment root as both of its bases, because with no other environment
-to relate to every token of the name is unique. Files that are not there are
-skipped, so the merge is over what the root actually holds, but a file that
-is there and will not parse is refused rather than skipped: a key can live
-anywhere in the hierarchy, so a file nobody can read is a key nobody can
-see. No C<Genesis::Env> is built and no kit is needed, which is what lets
-the check run as the configuration loads.
+The read is the environment's own: a bare C<Genesis::Env>, its
+C<unevaluated_environment> manifest, which is C<spruce merge --skip-eval>
+over the hierarchy C<actual_environment_files> gives, the name-based
+ancestors and any C<genesis.inherits>. Spruce's merge operators,
+C<(( append ))>, C<(( prune ))> and the rest, apply exactly as they do when
+the environment is deployed, and its value operators are left as written. No
+kit is needed, which is what lets the check run as the configuration loads,
+and the manifest is cached for the process under the environment's
+signature.
 
-The answer is kept on the object, one entry per environment name. Five call
-sites walk every environment, and without the memo each pass spawned one
-C<spruce> run per file in the hierarchy, so an ancestor was parsed once per
-descendant per pass.
+A file in the hierarchy that will not merge is refused rather than skipped:
+a key can live anywhere in the hierarchy, so a file nobody can read is a key
+nobody can see.
+
+The answer is also kept on the object, one entry per environment name, so
+the five call sites that walk every environment are handed the same hash.
 
 Nothing invalidates that memo and nothing wants to yet. All five callers run
 from L</_validate_pipeline_config>, which L</config> runs once behind its own
@@ -3759,8 +3751,7 @@ The environment's name, which is also the stem of its leaf file.
 
 =back
 
-B<Returns:> A hash reference of the merged parameters, empty where the
-environment has no files at all.
+B<Returns:> A hash reference of the merged parameters.
 
 B<Errors:>
 
@@ -3768,9 +3759,15 @@ B<Errors:>
 
 =item *
 
+C<"Invalid environment name ...">, from L<Genesis::Env/bare>, when handed a
+name the naming rules refuse, which no caller walking L</_env_file_names>
+ever does.
+
+=item *
+
 C<"An environment file could not be read as YAML."> - raised at
-C<Genesis::Exit::CONFIG>, naming the file on the line below and carrying what
-the parser said, when a file in the hierarchy is there and will not parse.
+C<Genesis::Exit::CONFIG>, naming the hierarchy's files on the lines below and
+carrying what the merge said, when a file in the hierarchy will not merge.
 
 =back
 
@@ -3784,17 +3781,22 @@ B<Examples:>
 
     my @names = $top->_env_file_names();
 
-Returns the environment names the deployment root holds, as the stems of its
-top-level C<.yml> files, sorted. It is what the load can see without building
-a C<Genesis::Env>, and it is enough for a check that only reads the merged
-parameters.
+Returns the environment names the deployment root holds, sorted: the stems
+of its top-level C<.yml> files that declare a C<genesis.env> equal to their
+own name, found off the text by L<Genesis::Env/declared_env_names> with no
+parse, under a name the environment naming rules accept, the same filter
+L</envs> applies. A name the rules refuse is no environment, so it is left
+out rather than refused, and no branch is ever composed from it.
 
-Only plain files are counted. A directory whose own name ends in C<.yml> is
-not an environment file however much it looks like one, and three later
-checks read this list and open whatever it hands them.
+An ancestor is not one. Its keys are checked where they take effect, on each
+environment whose merged hierarchy carries them, so a site file is never
+refused as though it were an environment of its own. Anything else at the
+root, a legacy C<ci.yml> among them, is never read. Only plain files are
+counted: a directory whose own name ends in C<.yml> is not an environment
+file however much it looks like one.
 
-B<Returns:> A sorted list of names, empty where the root holds no C<.yml>
-files.
+B<Returns:> A sorted list of names, empty where the root holds no
+environment files.
 
 =head2 _validate_env_pipeline_block
 

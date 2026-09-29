@@ -186,15 +186,19 @@ subtest 'a refusal with no bullets in it is still a refusal' => sub {
 subtest 'an environment file that will not parse is refused' => sub {
 	plan tests => 1;
 
+	# The broken file is the ancestor of an environment, because a file no
+	# environment's hierarchy reaches is not read at all.
 	throws_ok {
-		commit_on_control($h, files => {'broken.yml' =>
-			"genesis:\n  pipeline:\n    manual: [unclosed\n"});
+		commit_on_control($h, files => {
+			'broken.yml'    => "genesis:\n  pipeline:\n    manual: [unclosed\n",
+			'broken-qa.yml' => "---\ngenesis:\n  env: broken-qa\n",
+		});
 		Genesis::Top->new($h->a, no_vault => 1)->config;
 	} qr/An environment file could not be read as YAML.*broken\.yml/s,
 		'a file nobody can read is a key nobody can see';
 
 	# Out again, because the rows below load the same repository.
-	commit_on_control($h, files => {'broken.yml' => undef});
+	commit_on_control($h, files => {'broken.yml' => undef, 'broken-qa.yml' => undef});
 };
 
 subtest 'the read is merged and never leaf-only' => sub {
@@ -208,13 +212,15 @@ subtest 'the read is merged and never leaf-only' => sub {
 	write_env_file($g, 'us', site => 'us', pipeline => {manual => 'sometimes'});
 	write_env_file($g, 'us-east');
 
-	my $top = Genesis::Top->new($g->a, no_vault => 1);
-	is $top->_merged_env_params('us-east')->{genesis}{pipeline}{manual},
-		'sometimes', 'the leaf reads a key only its site file declares';
-	throws_ok {$top->_validate_env_pipeline_block('us-east',
-			$top->_merged_env_params('us-east')->{genesis}{pipeline})}
-		qr/environment us-east.*genesis\.pipeline\.manual: expected a boolean/s,
-		'and the refusal names the leaf that never wrote the key';
+	# The load reads the merged hierarchy and refuses the value, so its
+	# refusal is where the leaf is seen to carry the site file's key.  The
+	# site file is no environment of its own and is never named.
+	eval {Genesis::Top->new($g->a, no_vault => 1)->config};
+	my $refusal = $@;
+	like $refusal, qr/genesis\.pipeline\.manual in us-east/,
+		'the leaf reads a key only its site file declares';
+	unlike $refusal, qr/genesis\.pipeline\.manual in us:/,
+		'and the refusal never names the site file as an environment';
 };
 
 subtest 'the reader promotes a bare string the way the validator does' => sub {

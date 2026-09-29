@@ -2769,12 +2769,13 @@ sub _ref_component_errors {
 # _validate_slug_components - both halves of the deployment slug {{{
 #
 # The deployment branch is <env>/<type>, so both halves become git ref
-# components and neither is trusted over the other.  Both already reach
-# vault through the exodus slug and BOSH through the deployment name, so
-# the check is narrow in practice and catches a value that was never safe
-# in those places either.  The message names the branch the value would
-# have composed, because that is what makes it obvious why a name that
-# was fine before this release is not fine now.
+# components and neither is trusted over the other; the environment half
+# is held by the environment naming rules, and the type is checked here.
+# Both already reach vault through the exodus slug and BOSH through the
+# deployment name, so the check is narrow in practice and catches a value
+# that was never safe in those places either.  The message names the
+# branch the value would have composed, because that is what makes it
+# obvious why a name that was fine before this release is not fine now.
 sub _validate_slug_components {
 	my ($self) = @_;
 
@@ -2788,21 +2789,9 @@ sub _validate_slug_components {
 		);
 	}
 
-	# The same guard every other load-time read of the merged hierarchy
-	# uses, so a legacy ci.yml sitting beside the environments is not read
-	# as an environment and a genesis key that is not a hash at all cannot
-	# blow the check up on its way past.
-	for my $env_name ($self->_env_file_names) {
-		my $genesis = $self->_merged_env_params($env_name)->{genesis};
-		next unless ref($genesis) eq 'HASH' && exists $genesis->{pipeline};
-		my $why = _ref_component_errors($env_name) or next;
-		bail({exitcode => CONFIG},
-			"The environment name #R{%s} is not a git ref component: %s.\n".
-			"It names the branch #C{%s/%s}.",
-			$env_name, $why, $env_name, $type
-		);
-	}
-
+	# The environment half needs no check here: a name the environment's own
+	# rules accept is always a ref component, and a name they refuse is no
+	# environment at all, left out of every list of them.
 	return 1;
 }
 
@@ -3075,10 +3064,10 @@ sub _validate_manifest_store {
 #
 # Genesis resolves an environment by merging its ancestral hierarchy, with
 # the nearer file winning, and every genesis.pipeline.* read follows that
-# rule.  This is the load-time form of that read.  It works from the name
-# through Genesis::Env::relate_by_name, loads the files that exist, and
-# deep-merges them.  It builds no Genesis::Env and needs no kit, so
-# validation at load stays a read of the files on disk.
+# rule.  This is the load-time form of that read, and it is the environment's
+# own: a bare Genesis::Env's unevaluated_environment manifest, spruce's merge
+# with the value operators left alone, so the merge operators apply exactly as
+# they do at deploy time and no kit is needed (D117).
 sub _merged_env_params {
 	my ($self, $env_name) = @_;
 
@@ -3098,52 +3087,52 @@ sub _merged_env_params {
 
 	require Genesis::Env;
 
-	# The deployment root is handed over as both bases, because with no
-	# other environment to relate to every token of the name is unique and
-	# the whole hierarchy comes back off the unique base.  Naming the root
-	# once would leave those files relative to the working directory.
-	my %merged;
-	for my $file (Genesis::Env::relate_by_name(
-			$env_name, undef, $self->path, $self->path)) {
-		next unless -f $file;
+	my $env = Genesis::Env->bare($env_name, $self);
 
-		# A file that will not parse is refused rather than skipped.  A
-		# key can live anywhere in the hierarchy, so a file nobody could
-		# read is a key nobody can see, which is the silent wrong answer
-		# this read exists to prevent.
-		my ($params, $rc, $err) = load_yaml_file($file);
-		bail({exitcode => CONFIG},
-			"An environment file could not be read as YAML.\n".
-			"  #C{%s}%s\n".
-			"Every environment file has to parse before anything can be ".
-			"said about what the pipeline reads from it.",
-			humanize_path($file), ($err ? "\n$err" : '')
-		) if $rc;
-		next unless ref($params) eq 'HASH';
+	# A file that will not merge is refused rather than skipped.  A key can
+	# live anywhere in the hierarchy, so a file nobody could read is a key
+	# nobody can see, which is the silent wrong answer this read exists to
+	# prevent.  The refusal names the files by name alone, because listing
+	# the hierarchy in full parses every file for what it inherits and would
+	# fall over the same file again.
+	my ($merged, $err);
+	eval {$merged = $env->manifest_provider->unevaluated_environment->data; 1}
+		or $err = $@;
+	bail({exitcode => CONFIG},
+		"An environment file could not be read as YAML.\n%s\n%s\n".
+		"Every environment file has to parse before anything can be ".
+		"said about what the pipeline reads from it.",
+		join("\n", map {"  #C{".humanize_path($env->path($_))."}"}
+			grep {-f $env->path($_)} $env->potential_environment_files),
+		($err // 'the merge answered no document') =~ s/\s+\z//r
+	) unless ref($merged) eq 'HASH';
 
-		%merged = %{deep_merge(\%merged, $params)};
-	}
-	return $self->{__merged_env_params}{$env_name} = \%merged;
+	return $self->{__merged_env_params}{$env_name} = $merged;
 }
 
 # }}}
 # _env_file_names - the environment names the deployment root holds {{{
 #
-# A glob of the root's *.yml files, which is what the load can see without
-# building a Genesis::Env, and which is enough for a check that only reads
-# the merged parameters.
+# The root's *.yml files that declare themselves an environment, a
+# genesis.env equal to their own name, found off the text with no parse, under
+# a name the environment naming rules accept, the filter Top::envs applies.  An
+# ancestor is not one: its keys are checked where they take effect, on each
+# environment whose merged hierarchy carries them.  Anything else at the root,
+# a legacy ci.yml among them, is never read.
 sub _env_file_names {
 	my ($self) = @_;
 	my @names;
 	require File::Glob;
+	require Genesis::Env;
 	for my $path (File::Glob::bsd_glob($self->path('*.yml'))) {
-		# Three later checks read this list and every one of them opens what
-		# it is handed, and a directory whose name ends in .yml is not an
-		# environment file however much it looks like one.
+		# A directory whose name ends in .yml is not an environment file
+		# however much it looks like one.
 		next unless -f $path;
 		my $name = (split m{/}, $path)[-1];
 		$name =~ s/\.yml$//;
-		push @names, $name;
+		next if Genesis::Env::_env_name_errors($name);
+		my @declared = Genesis::Env::declared_env_names(slurp($path) // '');
+		push @names, $name if @declared == 1 && $declared[0] eq $name;
 	}
 	return sort @names;
 }
