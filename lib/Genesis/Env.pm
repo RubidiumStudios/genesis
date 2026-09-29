@@ -22,6 +22,7 @@ use Service::Vault::Remote;
 use Service::Vault::Local;
 use Service::Vault::None;
 use IPv4;
+use Socket ();
 
 use Archive::Tar;
 use Data::Dumper;
@@ -4219,7 +4220,7 @@ sub _pre_deploy {
 		# Find the vault's nodes now, while it still answers.  After the deploy
 		# they may all be sealed, and _ensure_vault_ready_for_exodus needs every
 		# one of them to bring a Raft cluster back.
-		$self->{deployment_state}{secrets_vault_nodes} = [$self->_secrets_vault_cluster_ips];
+		$self->{deployment_state}{secrets_vault_nodes} = [$self->_secrets_vault_cluster_nodes];
 	} else {
 		debug("Skipping unseal key check - deployment does not appear to affect secrets vault");
 	}
@@ -4754,11 +4755,13 @@ sub _ensure_vault_ready_for_exodus {
 	# _pre_deploy.  More than one means a Raft cluster, where a single-target
 	# unseal opens one node that cannot elect a leader alone.
 	my @nodes = @{($self->{deployment_state} // {})->{secrets_vault_nodes} // []};
+	my $cluster = @nodes > 1;
 
+	# With Strongbox on, safe unseal walks every node itself, so it stays the
+	# first resort there.  The cluster pass below still finishes the job if
+	# the vault is not ready afterwards, for instance while no leader exists.
 	my $status = $self->vault->status;
-	if (@nodes > 1 && $status ne 'ok') {
-		$status = $self->_unseal_secrets_vault_cluster(@nodes);
-	} elsif ($status eq 'sealed') {
+	if ($status eq 'sealed' && (!$cluster || $self->vault->strongbox)) {
 		$self->notify("vault is sealed - attempting to unseal...");
 		my ($out, $rc, $err) = $self->vault->unseal;
 		if ($rc) {
@@ -4771,6 +4774,8 @@ sub _ensure_vault_ready_for_exodus {
 		}
 		$status = $self->vault->status;
 	}
+	$status = $self->_unseal_secrets_vault_cluster(@nodes)
+		if $cluster && $status ne 'ok';
 	return 1 if $status eq 'ok';
 
 	bail(
@@ -4788,76 +4793,159 @@ sub _ensure_vault_ready_for_exodus {
 # }}}
 # _unseal_secrets_vault_cluster - unseal every node, then wait for a leader {{{
 #
-# Each node is unsealed through its own address.  When a quorum is open the
-# cluster still needs a moment to elect an active node, so this waits for one,
-# up to GENESIS_VAULT_LEADER_WAIT seconds (90 by default).  Without a quorum no
-# leader can be elected and waiting would only delay the failure.  Returns the
-# vault's status afterwards.
+# Service::Vault::unseal_cluster does the work within GENESIS_VAULT_LEADER_WAIT
+# seconds (90 by default) of wall-clock time: it unseals each node through its
+# own address, retries nodes that are still starting, and waits for an active
+# node once a quorum is open.  This reports the outcome node by node.  Returns
+# the vault's status afterwards.
 sub _unseal_secrets_vault_cluster {
 	my ($self, @nodes) = @_;
 	my $vault = $self->vault;
 
-	$self->notify("vault is not ready - checking all %d nodes of its cluster...", scalar(@nodes));
-	my @results = $vault->unseal_nodes(@nodes);
+	my $limit = $ENV{GENESIS_VAULT_LEADER_WAIT} // '';
+	$limit = 90 unless $limit =~ /^[0-9]+$/;
+	$self->notify(
+		"vault is not ready - unsealing each of the %d nodes in its cluster, ".
+		"and allowing up to %ds for them to elect a leader...",
+		scalar(@nodes), $limit
+	);
+	my $outcome = $vault->unseal_cluster($limit, @nodes);
 	info(
 		'[[  %s >>%s: %s',
 		$_->{unsealed} ? '#g@{+}' : '#r@{x}', $_->{address}, $_->{message}
-	) for @results;
+	) for @{$outcome->{nodes}};
 
-	my $open = scalar(grep {$_->{unsealed}} @results);
-	if ($open * 2 <= scalar(@nodes)) {
+	if ($outcome->{active}) {
+		info('[[  #g@{+} >>%s is the active node', $outcome->{active});
+	} elsif ($outcome->{open} < $outcome->{quorum}) {
 		error(
-			"Only %d of %d vault nodes are unsealed, which is not a quorum, so the ".
-			"cluster cannot elect an active node.",
-			$open, scalar(@nodes)
+			"Only %d of %d vault nodes are unsealed, short of the %d that a quorum ".
+			"needs, so the cluster cannot elect an active node.",
+			$outcome->{open}, scalar(@nodes), $outcome->{quorum}
 		);
-		return $vault->status;
-	}
-
-	my $limit = $ENV{GENESIS_VAULT_LEADER_WAIT} // '';
-	$limit = 90 unless $limit =~ /^[0-9]+$/;
-	info('[[  >>waiting up to %ds for the cluster to elect an active node...', $limit);
-	if (my $active = $vault->wait_for_active_node($limit, @nodes)) {
-		info('[[  #g@{+} >>%s is the active node', $active);
 	} else {
 		error(
 			"No active node emerged within %ds, although %d of %d nodes are unsealed.",
-			$limit, $open, scalar(@nodes)
+			$limit, $outcome->{open}, scalar(@nodes)
 		);
 	}
 	return $vault->status;
 }
 
 # }}}
-# _secrets_vault_cluster_ips - the addresses of the secrets vault's own nodes {{{
+# _secrets_vault_cluster_nodes - the addresses of the secrets vault's own nodes {{{
 #
 # When this deployment runs the vault used for secrets, its nodes are the
-# static IPs of every instance group that shares an address with that vault.
-# The vault's addresses come from `safe status` and from the target URL, so
-# this must run before the deploy, while the vault still answers.  Returns an
-# empty list for a kit that does not provide vault, or for a vault that lives
-# elsewhere.
-sub _secrets_vault_cluster_ips {
+# static IPs on the network that carries one of that vault's addresses, one
+# node per instance.  The vault's addresses come from `safe status`, which
+# lists every node with its port when Strongbox is on, and from the target
+# URL, whose host is resolved when it is a name.  Static IPs may be written
+# as ranges.  This must run before the deploy, while the vault still answers.
+# Each node comes back as address:port, with an IPv6 address in brackets.
+# When the manifest clearly holds a cluster but its nodes cannot all be
+# found, this says so loudly, because the deploy will then end with only the
+# targeted node unsealed.
+sub _secrets_vault_cluster_nodes {
 	my $self = shift;
 	return () unless $self->kit->provides_service('vault');
+	my $vault = $self->vault;
 
-	my $dotted_quad = qr/^[0-9]+(?:\.[0-9]+){3}$/;
-	my %vault_ips =
-		map {$_ => 1}
-		grep {$_ =~ $dotted_quad}
-		map {m{https?://([^:/ ]+)} ? $1 : ()}
-		(lines($self->vault->query('status')), $self->vault->url);
-
-	my (@ips, %seen);
-	for my $group (@{scalar($self->manifest_lookup('instance_groups', [])) // []}) {
-		my @group_ips =
-			grep {$_ =~ $dotted_quad}
-			map {@{$_->{static_ips} // []}}
-			grep {ref($_) eq 'HASH'} @{$group->{networks} // []};
-		push @ips, grep {!$seen{$_}++} @group_ips
-			if grep {$vault_ips{$_}} @group_ips;
+	# Every address the vault answers on, with the port it answers on there.
+	# Ports that safe status reports for each node win over the target's.
+	my %vault_port;
+	my @urls = map {decolorize($_) =~ m{(https?://\S+)} ? $1 : ()} lines($vault->query('status'));
+	for my $url (@urls, $vault->url) {
+		my ($scheme, $v6, $name, $port) =
+			$url =~ m{^(https?)://(?:\[([^\]]+)\]|([^:/\[\]]+))(?::([0-9]+))?} or next;
+		$port ||= $scheme eq 'https' ? 443 : 80;
+		$vault_port{$_} //= $port for $self->_resolve_host_addresses($v6 // $name);
 	}
-	return @ips;
+
+	my (@nodes, %seen);
+	my @groups = grep {ref($_) eq 'HASH'} @{scalar($self->manifest_lookup('instance_groups', [])) // []};
+	for my $group (@groups) {
+		for my $network (grep {ref($_) eq 'HASH'} @{$group->{networks} // []}) {
+			my @ips = map {_expand_static_ips($_)} @{$network->{static_ips} // []};
+			my ($match) = grep {exists($vault_port{$_})} @ips;
+			next unless defined($match);
+
+			# The network holding a vault address carries the API.  The same
+			# instances on any other network would count each of them twice.
+			push @nodes, grep {!$seen{$_}++} map {
+				sprintf('%s:%s', /:/ ? "[$_]" : $_, $vault_port{$_} // $vault_port{$match})
+			} @ips;
+			my $instances = $group->{instances} // '';
+			warning(
+				"Instance group #C{%s} runs %d instances of the vault that holds this ".
+				"deployment's secrets, but only %d of them have static IPs on its ".
+				"network.  After the deploy Genesis can unseal only those nodes.",
+				$group->{name} // '?', $instances, scalar(@ips)
+			) if $instances =~ /^[0-9]+$/ && $instances > @ips;
+			last;
+		}
+	}
+
+	warning(
+		"This deployment runs the vault that holds its own secrets, but none of ".
+		"that vault's addresses (%s) matches a static IP in the manifest, so ".
+		"Genesis cannot find the other nodes of the cluster.  After the deploy it ".
+		"can unseal only the targeted node, and one node of a Raft cluster cannot ".
+		"elect a leader alone, so the deploy may stop with the vault unusable.  ".
+		"Target the vault by one of its nodes' static IPs, or turn Strongbox on ".
+		"for the target, so that every node can be found.",
+		join(', ', sort CORE::keys(%vault_port)) || 'none could be resolved'
+	) if !@nodes && grep {($_->{instances} // '') =~ /^[0-9]+$/ && $_->{instances} > 1} @groups;
+
+	return @nodes;
+}
+
+# }}}
+# _resolve_host_addresses - the IP addresses a vault host stands for {{{
+#
+# An IP address comes back in its canonical form, and a name is resolved to
+# every address it has.  Returns the empty list when nothing resolves.
+sub _resolve_host_addresses {
+	my ($self, $host) = @_;
+	my $ip = _canonical_ip($host);
+	return ($ip) if defined($ip);
+
+	my ($err, @found) = Socket::getaddrinfo($host, undef, {socktype => Socket::SOCK_STREAM()});
+	return () if $err;
+	my %seen;
+	return grep {defined($_) && !$seen{$_}++} map {
+		my ($name_err, $address) = Socket::getnameinfo($_->{addr}, Socket::NI_NUMERICHOST());
+		$name_err ? undef : _canonical_ip($address);
+	} @found;
+}
+
+# }}}
+# _canonical_ip - an IPv4 or IPv6 address in canonical form, or undef {{{
+sub _canonical_ip {
+	my ($ip) = @_;
+	return undef unless defined($ip);
+	$ip =~ s/^\s+|\s+$//g;
+	for my $family (Socket::AF_INET(), Socket::AF_INET6()) {
+		my $packed = Socket::inet_pton($family, $ip);
+		return Socket::inet_ntop($family, $packed) if defined($packed);
+	}
+	return undef;
+}
+
+# }}}
+# _expand_static_ips - the addresses in one static_ips entry {{{
+#
+# BOSH accepts a single address or an IPv4 range such as
+# "10.0.0.5 - 10.0.0.7".  Anything unparsable yields nothing.
+sub _expand_static_ips {
+	my ($entry) = @_;
+	return () unless defined($entry) && !CORE::ref($entry);
+	if ($entry =~ /^\s*([0-9.]+)\s*-\s*([0-9.]+)\s*$/) {
+		my ($from, $to) = (_canonical_ip($1), _canonical_ip($2));
+		return () unless defined($from) && defined($to);
+		return map {"$_"} eval {IPv4->span("$from-$to")->addresses};
+	}
+	my $ip = _canonical_ip($entry);
+	return defined($ip) ? ($ip) : ();
 }
 
 # }}}
