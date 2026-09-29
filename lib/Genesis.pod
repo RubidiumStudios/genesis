@@ -1385,6 +1385,12 @@ Redirect stdin for the command.
 
 If true, suppresses output from trace/debug logs.
 
+=item C<redact_stderr>
+
+If true, keeps the command's captured stderr out of trace and debug logs, and
+out of the C<onfailure> message, in the same way C<redact_output> does for its
+output. The caller still receives the stderr unchanged.
+
 =item C<redact_env>
 
 If true, redacts environment variable values in trace/debug logs.

@@ -8,6 +8,7 @@ use Genesis::Term qw/csprintf/;
 
 use Genesis::UI;
 use JSON::PP qw/decode_json encode_json/;
+use List::Util qw/min max/;
 use Time::HiRes qw/gettimeofday/;
 use UUID::Tiny ();
 
@@ -1012,7 +1013,17 @@ sub fetch_unseal_keys {
 	# Clear any previously stored keys
 	my $secrets_mount = $env->secrets_mount;
 	my $keys_path = "${secrets_mount}vault/seal/keys";
-	$self->{unseal_keys} = [values(($self->get($keys_path)//{})->%*)];
+	# key1..keyN in numeric order, then anything else by name, so every run
+	# offers the keys in the same order.
+	my $stored = $self->get($keys_path) // {};
+	my @names = sort {
+		my ($x) = $a =~ /^key([0-9]+)$/;
+		my ($y) = $b =~ /^key([0-9]+)$/;
+		(defined($x) ? 0 : 1) <=> (defined($y) ? 0 : 1)
+			|| ($x // 0) <=> ($y // 0)
+			|| $a cmp $b
+	} CORE::keys(%$stored);
+	$self->{unseal_keys} = [map {$stored->{$_}} @names];
 	my $key_count = scalar(@{$self->{unseal_keys}});
 
 	# Check if the keys path exists
@@ -1046,12 +1057,13 @@ sub unseal {
 	my $keys_input = join("\n", @keys_to_use) . "\n";
 
 	# Use the stdin option with query to pass keys to safe unseal.  safe's
-	# stderr is kept: it is where safe reports that Strongbox was off and
-	# only the targeted address was reached.
+	# stderr is kept, because it is where safe reports that Strongbox was off
+	# and only the targeted address was reached.  Its output and stderr stay
+	# out of the trace, in case safe ever echoes a key.
 	my ($out, $rc, $err);
 	my ($tries, $max_tries) = (0, 3);
 	while ($tries++ < $max_tries) {
-		($out, $rc, $err) = $self->query({stdin => $keys_input, redact_stdin => 1, redact_output => 1}, 'unseal');
+		($out, $rc, $err) = $self->query({stdin => $keys_input, redact_output => 1, redact_stderr => 1}, 'unseal');
 		if (($rc == 0) || ($out =~ /Vault is already unsealed/)) {
 			# A success here may only cover one node.  The caller checks
 			# status next, which also sees only that node, so nothing
@@ -1085,19 +1097,23 @@ sub unseal {
 #
 # A Raft cluster's safe target reaches only one node, which cannot elect a
 # leader on its own, and with standby reads disabled nothing authenticated
-# works until a quorum is open.  Keys go to curl on stdin, one at a time,
-# until the node opens; they never appear in an argument, a trace, or a
-# result.  Returns one {address, unsealed, message} hashref per node.
+# works until a quorum is open.  Each node is given the fetched keys a
+# threshold's worth at a time.  A well-formed but wrong key, such as one left
+# over from a rekey, is only found out once the threshold is reached, when
+# the node throws the whole round away, so each round starts from a reset and
+# the next combination of keys is tried after a failed one.  Keys go to curl
+# on stdin and never appear in an argument, a trace, or a result.  Returns
+# one {address, unsealed, message} hashref per node.
 sub unseal_nodes {
-	my ($self, @addresses) = @_;
+	my ($self, @nodes) = @_;
 	my @keys = @{$self->{unseal_keys} // []};
 
 	my @results;
-	for my $address (@addresses) {
-		my $result = {address => $address, unsealed => 0};
+	for my $node (@nodes) {
+		my $result = {address => $node, unsealed => 0};
 		push @results, $result;
 
-		my $state = $self->_node_request($address, 'GET', 'sys/seal-status');
+		my $state = $self->_node_request($node, 'GET', 'sys/seal-status');
 		unless ($state && exists($state->{sealed})) {
 			$result->{message} = 'unreachable';
 			next;
@@ -1110,49 +1126,121 @@ sub unseal_nodes {
 			$result->{message} = 'sealed, and no unseal keys were fetched';
 			next;
 		}
-
-		# Key shares left over from an interrupted attempt would count
-		# towards the threshold alongside ours, so start the round afresh.
-		$self->_node_request($address, 'PUT', 'sys/unseal', {reset => JSON::PP::true})
-			if $state->{progress};
-
-		my $sealed = 1;
-		for my $key (@keys) {
-			my $reply = $self->_node_request($address, 'PUT', 'sys/unseal', {key => $key});
-			next unless $reply && exists($reply->{sealed}); # a rejected key
-			last unless ($sealed = $reply->{sealed} ? 1 : 0);
+		my $threshold = ($state->{t} // '') =~ /^[1-9][0-9]*$/ ? $state->{t} : 3;
+		if ($threshold > @keys) {
+			$result->{message} = sprintf(
+				'sealed, and it needs %d unseal keys where only %d were fetched',
+				$threshold, scalar(@keys)
+			);
+			next;
 		}
-		if ($sealed) {
-			$state = $self->_node_request($address, 'GET', 'sys/seal-status');
-			$sealed = !($state && exists($state->{sealed}) && !$state->{sealed});
+
+		my ($opened, $answering) = (0, 1);
+		for my $round (_combinations($threshold, @keys)) {
+			# Each round starts afresh.  That discards any progress someone else
+			# is building on this node at the same moment, such as an operator
+			# unsealing by hand, which is the price of never mixing their key
+			# shares, or a stale one of ours, into this round.
+			$self->_node_request($node, 'PUT', 'sys/unseal', {reset => JSON::PP::true});
+			my $reply;
+			for my $key (@$round) {
+				$reply = $self->_node_request($node, 'PUT', 'sys/unseal', {key => $key});
+				last unless $reply && exists($reply->{sealed}) && $reply->{sealed};
+			}
+			unless ($reply) {
+				$answering = 0;
+				last;
+			}
+			if (exists($reply->{sealed}) && !$reply->{sealed}) {
+				$opened = 1;
+				last;
+			}
 		}
-		@$result{qw/unsealed message/} = $sealed
-			? (0, 'still sealed after every unseal key was tried')
-			: (1, 'unsealed');
+		unless ($opened) {
+			$state = $self->_node_request($node, 'GET', 'sys/seal-status');
+			$opened = $state && exists($state->{sealed}) && !$state->{sealed};
+		}
+		@$result{qw/unsealed message/} = $opened
+			? (1, 'unsealed')
+			: $answering
+				? (0, 'still sealed after every combination of unseal keys was tried')
+				: (0, 'stopped answering while it was being unsealed');
 	}
 	return @results;
 }
 
 # }}}
+# unseal_cluster - unseal a Raft cluster and wait for it to elect a leader {{{
+#
+# Everything here happens within $timeout seconds of wall-clock time.  Nodes
+# that are still starting when first asked are asked again every few seconds
+# until a quorum is open.  With a quorum, this waits for an active node and
+# then gives any node that is still closed one more try, so the cluster ends
+# fully unsealed when every node can be reached.  Without a quorum no leader
+# can be elected, so it does not wait for one.  Returns a hashref with the
+# per-node results, the active node's address (undef when none emerged), the
+# number of open nodes, and the quorum size.
+sub unseal_cluster {
+	my ($self, $timeout, @nodes) = @_;
+	my $deadline = $self->_now + $timeout;
+	my $quorum = int(scalar(@nodes) / 2) + 1;
+
+	my %result = map {$_->{address} => $_} $self->unseal_nodes(@nodes);
+	my $open = sub {scalar(grep {$result{$_}{unsealed}} @nodes)};
+	my $closed = sub {grep {!$result{$_}{unsealed}} @nodes};
+
+	while ($open->() < $quorum) {
+		my $left = $deadline - $self->_now;
+		last if $left <= 0;
+		$self->_pause(min(3, $left));
+		$result{$_->{address}} = $_ for $self->unseal_nodes($closed->());
+	}
+
+	my $active;
+	if ($open->() >= $quorum) {
+		$active = $self->wait_for_active_node(max(0, $deadline - $self->_now), @nodes);
+		my @late = $closed->();
+		$result{$_->{address}} = $_ for (@late ? $self->unseal_nodes(@late) : ());
+	}
+
+	return {
+		nodes  => [map {$result{$_}} @nodes],
+		active => $active,
+		open   => $open->(),
+		quorum => $quorum,
+	};
+}
+
+# }}}
 # wait_for_active_node - wait, within a bound, for a cluster to elect a leader {{{
 #
-# Unsealing a quorum is not the end of it, because a Raft cluster then has to elect
-# an active node before an authenticated request can succeed.  Polls each
-# node's unauthenticated sys/health every few seconds for up to $timeout
-# seconds.  Returns the active node's address, or undef when none emerged.
+# Unsealing a quorum is not the end of it, because a Raft cluster then has to
+# elect an active node before an authenticated request can succeed.  Asks
+# each node's unauthenticated sys/health every few seconds until $timeout
+# seconds of wall-clock time have passed.  Each request is capped at the time
+# that remains, so a node that never answers cannot stretch the wait.  Every
+# node is asked at least once, even when $timeout is zero.  Returns the active
+# node's address, or undef when none emerged.
 sub wait_for_active_node {
-	my ($self, $timeout, @addresses) = @_;
-	my ($waited, $interval) = (0, 3);
+	my ($self, $timeout, @nodes) = @_;
+	my $deadline = $self->_now + $timeout;
+	my $interval = 3;
+	my $first_round = 1;
 	while (1) {
-		for my $address (@addresses) {
-			my $health = $self->_node_request($address, 'GET', 'sys/health');
-			return $address
+		for my $node (@nodes) {
+			my $left = $deadline - $self->_now;
+			return undef if $left <= 0 && !$first_round;
+			my $health = $self->_node_request(
+				$node, 'GET', 'sys/health', undef, max(1, min(10, $left))
+			);
+			return $node
 				if $health && exists($health->{standby})
 				&& !$health->{sealed} && !$health->{standby};
 		}
-		last if $waited >= $timeout;
-		$self->_pause($interval);
-		$waited += $interval;
+		$first_round = 0;
+		my $left = $deadline - $self->_now;
+		last if $left <= 0;
+		$self->_pause(min($interval, $left));
 	}
 	return undef;
 }
@@ -1181,35 +1269,49 @@ sub _strongbox_unseal_caveat {
 # }}}
 # _node_request - one unseal-related API call to a single node {{{
 #
-# Reaches the node at $address with the target's scheme and port.  A target
-# named by hostname keeps that name, pinned to the node with --resolve, so a
-# certificate issued for the name still verifies.  A $payload goes to curl as
-# a JSON body on stdin, and the reply is kept out of the trace.  Returns the
-# decoded reply, or undef when the node did not answer with JSON.
+# $node is an address with an optional port, as in 10.0.0.5:8200 or
+# [fd00::5]:8200, and a missing port means the target's.  The request goes to
+# the target's own URL, and --connect-to sends the connection to the node, so
+# TLS is verified against the name safe verifies, and -k is passed only when
+# the target skips verification.  -q comes first so that no curlrc can add a
+# trace or a key log, and CURL_HOME and SSLKEYLOGFILE are cleared for the
+# same reason.  A $payload goes to curl as a JSON body on stdin, and the reply
+# is kept out of the trace.  $max_time caps the whole request in seconds.
+# Returns the decoded reply, or undef when the node did not answer with JSON.
 sub _node_request {
-	my ($self, $address, $method, $path, $payload) = @_;
+	my ($self, $node, $method, $path, $payload, $max_time) = @_;
 
-	my ($scheme, $host, $port) = $self->url =~ m{^(https?)://([^:/]+)(?::([0-9]+))?};
+	my ($scheme, $host, $port) = _split_url($self->url);
 	return undef unless $scheme;
-	$port ||= $scheme eq 'https' ? 443 : 80;
+	my ($address, $node_port) = $node =~ /^\[([^\]]+)\](?::([0-9]+))?$/
+		? ($1, $2)
+		: $node =~ /^([^:]+)(?::([0-9]+))?$/ ? ($1, $2) : ($node, undef);
+	$node_port ||= $port;
+	my $bracket = sub {$_[0] =~ /:/ ? "[$_[0]]" : $_[0]};
 
-	my @args = ('-s', '--connect-timeout', 5, '-m', 10, '-X', $method);
+	$max_time = 10 unless defined($max_time) && $max_time > 0;
+	my @args = (
+		'-q', '-s',
+		'--connect-timeout', sprintf('%.1f', min(5, $max_time)),
+		'-m', sprintf('%.1f', $max_time),
+		'-X', $method,
+		'--connect-to', join(':', $bracket->($host), $port, $bracket->($address), $node_port),
+	);
 	push @args, '-k' unless $self->verify;
-	my $url;
-	if ($host =~ /^[0-9]+(?:\.[0-9]+){3}$/) {
-		$url = "$scheme://$address:$port/v1/$path";
-	} else {
-		push @args, '--resolve', "$host:$port:$address";
-		$url = "$scheme://$host:$port/v1/$path";
-	}
 
-	my $opts = {stderr => 0, redact_output => 1};
+	my $opts = {
+		stderr => 0,
+		redact_output => 1,
+		env => {CURL_HOME => undef, SSLKEYLOGFILE => undef},
+	};
 	if (defined($payload)) {
 		$opts->{stdin} = encode_json($payload);
 		push @args, '-H', 'Content-Type: application/json', '--data-binary', '@-';
 	}
 
-	my ($out, $rc) = run($opts, 'curl', @args, $url);
+	my ($out, $rc) = run($opts, 'curl', @args, sprintf(
+		'%s://%s:%s/v1/%s', $scheme, $bracket->($host), $port, $path
+	));
 	return undef if $rc || !$out;
 	my $reply = eval {decode_json($out)};
 	return CORE::ref($reply) eq 'HASH' ? $reply : undef;
@@ -1227,6 +1329,12 @@ sub _redact_unseal_keys {
 }
 
 # }}}
+# _now - the current time in seconds; a seam for tests {{{
+sub _now {
+	return scalar(gettimeofday());
+}
+
+# }}}
 # _pause - sleep between attempts; a seam for tests {{{
 sub _pause {
 	sleep($_[1]);
@@ -1236,6 +1344,38 @@ sub _pause {
 
 ### Private helper functions {{{
 
+# _split_url - scheme, bare host, and port of a vault URL {{{
+# The port defaults by scheme, and an IPv6 host loses its brackets.  Returns
+# the empty list for anything that is not an http or https URL.
+sub _split_url {
+	my ($url) = @_;
+	return () unless ($url // '') =~ m{^(https?)://(?:\[([^\]]+)\]|([^:/\[\]]+))(?::([0-9]+))?(?:/|$)};
+	return ($1, $2 // $3, $4 || ($1 eq 'https' ? 443 : 80));
+}
+
+# }}}
+# _combinations - every way to choose $size items from a list, in order {{{
+# Lexicographic by position, so the first combination is the first $size
+# items.  Stops at 64 combinations, which covers every choice of 3 from 8.
+sub _combinations {
+	my ($size, @items) = @_;
+	my @found;
+	my $walk;
+	$walk = sub {
+		my ($from, @picked) = @_;
+		return if @found >= 64;
+		return push(@found, [@picked]) if @picked == $size;
+		for my $i ($from .. $#items) {
+			last if @items - $i < $size - @picked;
+			$walk->($i + 1, @picked, $items[$i]);
+		}
+	};
+	$walk->(0);
+	undef $walk;
+	return @found;
+}
+
+# }}}
 # _target_is_url - determine if target is in valid URL form {{{
 sub _target_is_url {
 	my $target = lc(shift);

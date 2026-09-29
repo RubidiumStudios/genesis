@@ -1589,7 +1589,9 @@ B<Examples:>
 
 Fetches vault unseal keys from C<E<lt>secrets_mountE<gt>vault/seal/keys>
 and stores them at C<$self-E<gt>{unseal_keys}> for use by C<unseal>.
-At least 3 keys must be present.
+At least 3 keys must be present. The keys are stored in a fixed order, with
+C<key1> to C<keyN> in numeric order first and any other fields after them by
+name, so that every run offers them in the same order.
 
 B<Parameters:>
 
@@ -1660,9 +1662,10 @@ B<Examples:>
   }
   # Returns: ($output, 0, '') on success
 
-B<Security note:> The keys reach C<safe> on stdin and nowhere else. A failed
-attempt is traced by address only, and any key that C<safe> echoes is replaced
-with C<E<lt>redactedE<gt>> in both C<$output> and C<$error> before either is
+B<Security note:> The keys reach C<safe> on stdin, and never as an argument.
+C<safe>'s output and stderr are kept out of the trace, a failed attempt is
+traced by address only, and any key that C<safe> echoes is replaced with
+C<E<lt>redactedE<gt>> in both C<$output> and C<$error> before either is
 returned. The keys stay at C<E<lt>secrets_mountE<gt>vault/seal/keys> for anyone
 who has to finish the unseal by hand.
 
@@ -1676,14 +1679,19 @@ the way to open a Raft cluster whose safe target reaches only one node,
 because that node cannot elect a leader on its own.
 
 Each node's seal status is read first. A node that is already open is left
-alone, and one that does not answer is reported as unreachable. For a sealed
-node, any progress left by an interrupted attempt is reset, and then the keys
-are submitted one at a time until the node reports itself unsealed. A node
-that is still sealed once every key has been tried is reported as still sealed.
+alone, and one that does not answer is reported as unreachable. A sealed node
+is given the keys a threshold's worth at a time, where the threshold is what
+the node reports. OpenBao counts a well-formed but wrong key, such as one left
+over from a rekey, like any other, and only throws the round away once the
+threshold is reached. So each round starts with a reset, and after a failed
+round the next combination of keys is tried, up to 64 combinations. The reset
+also discards any progress someone else is making on the node at that moment,
+such as an operator unsealing it by hand. A node that stays sealed through
+every combination, or stops answering, is reported as such.
 
 Every request goes through L</_node_request>, so the keys travel on curl's
-stdin, never in its arguments, and no key appears in a trace, a log line, or a
-result.
+stdin, never in its arguments, and no key appears in a trace, a log line, a
+curl configuration file's output, or a result.
 
 B<Parameters:>
 
@@ -1691,14 +1699,17 @@ B<Parameters:>
 
 =item C<@addresses>
 
-The IPv4 addresses of the cluster's nodes.
+The cluster's nodes, each an address with an optional port, as in
+C<10.0.0.5:8200> or C<[fd00::5]:8200>. A node without a port is reached on
+the target's port.
 
 =back
 
 B<Returns:> One hashref per node, in the order given, with C<address>,
-C<unsealed> (C<1> or C<0>), and C<message> (C<already unsealed>,
-C<unsealed>, C<unreachable>, C<still sealed after every unseal key was tried>,
-or C<sealed, and no unseal keys were fetched>).
+C<unsealed> (C<1> or C<0>), and C<message>, which says whether the node was
+already unsealed, was unsealed, was unreachable, stopped answering, stayed
+sealed through every combination of keys, needed more keys than were fetched,
+or had no keys fetched at all.
 
 B<Examples:>
 
@@ -1714,7 +1725,9 @@ Waits for a Raft cluster to elect an active node. Opening a quorum is not the
 last step, because the cluster then has to elect a leader before any
 authenticated request can succeed. This asks each node's unauthenticated
 C<sys/health> endpoint every three seconds, and gives up once C<$timeout>
-seconds of waiting have passed.
+seconds of wall-clock time have passed. Each request is capped at the time
+that remains, so a node that never answers cannot stretch the wait. Every
+node is asked at least once, even when C<$timeout> is zero.
 
 B<Parameters:>
 
@@ -1722,11 +1735,11 @@ B<Parameters:>
 
 =item C<$timeout>
 
-The longest time to wait, in seconds.
+The longest time to wait, in seconds of wall-clock time.
 
 =item C<@addresses>
 
-The IPv4 addresses of the cluster's nodes.
+The cluster's nodes, written as for L</unseal_nodes>.
 
 =back
 
@@ -1737,6 +1750,43 @@ B<Examples:>
 
   my $active = $vault->wait_for_active_node(90, qw/10.0.0.5 10.0.0.6 10.0.0.7/);
   # Returns: '10.0.0.6' once that node leads, or undef after 90 seconds
+
+=head2 unseal_cluster
+
+  my $outcome = $vault->unseal_cluster($timeout, @addresses);
+
+Unseals a Raft cluster and waits for it to elect a leader, all within
+C<$timeout> seconds of wall-clock time. It runs L</unseal_nodes> over every
+node, and while fewer than a quorum are open it pauses a few seconds and asks
+the closed nodes again, since a node may still be starting. Once a quorum is
+open it waits for an active node with L</wait_for_active_node> and then gives
+any node that is still closed one more try, so the cluster ends fully
+unsealed whenever every node can be reached. Without a quorum no leader can
+be elected, so it does not wait for one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$timeout>
+
+The longest time to spend, in seconds of wall-clock time.
+
+=item C<@addresses>
+
+The cluster's nodes, written as for L</unseal_nodes>.
+
+=back
+
+B<Returns:> A hashref with C<nodes>, the per-node results from
+L</unseal_nodes> in the order given, C<active>, the active node's address or
+C<undef> when none emerged, C<open>, the number of unsealed nodes, and
+C<quorum>, the number a majority needs.
+
+B<Examples:>
+
+  my $outcome = $vault->unseal_cluster(90, qw/10.0.0.5:443 10.0.0.6:443 10.0.0.7:443/);
+  # Returns: {nodes => [...], active => '10.0.0.6:443', open => 3, quorum => 2}
 
 =head1 INTERNAL METHODS
 
@@ -1774,24 +1824,28 @@ B<Examples:>
 
 =head2 _node_request
 
-  my $reply = $vault->_node_request($address, $method, $path, $payload);
+  my $reply = $vault->_node_request($node, $method, $path, $payload, $max_time);
 
 Makes one API call to a single node of the cluster, for L</unseal_nodes> and
-L</wait_for_active_node>. The node is reached with the target's scheme and
-port. When the target is named by hostname, the name is kept and pinned to the
-node with curl's C<--resolve>, so a certificate issued for the name still
-verifies. C<-k> is passed only when the target itself skips verification.
+L</wait_for_active_node>. The request goes to the target's own URL, and
+curl's C<--connect-to> sends the connection to the node's address and port.
+TLS is therefore verified against the same name or address that C<safe>
+verifies, whether the target is an IP address or a hostname, and C<-k> is
+passed only when the target itself skips verification.
 
-A C<$payload> is encoded as JSON and handed to curl on stdin. It never appears
-among curl's arguments, and the reply is kept out of the trace.
+C<-q> comes first, so curl reads no configuration file that could add a trace
+or a key log, and C<CURL_HOME> and C<SSLKEYLOGFILE> are cleared for the same
+reason. A C<$payload> is encoded as JSON and handed to curl on stdin. It never
+appears among curl's arguments, and the reply is kept out of the trace.
 
 B<Parameters:>
 
 =over 4
 
-=item C<$address>
+=item C<$node>
 
-The node's IPv4 address.
+The node's address with an optional port, as in C<10.0.0.5:8200> or
+C<[fd00::5]:8200>. Without a port, the target's port is used.
 
 =item C<$method>
 
@@ -1804,6 +1858,10 @@ The API path below C</v1/>, such as C<sys/seal-status>.
 =item C<$payload>
 
 Optional. A hashref sent as the JSON request body.
+
+=item C<$max_time>
+
+Optional. The most seconds the whole request may take, 10 by default.
 
 =back
 
@@ -1839,6 +1897,70 @@ B<Examples:>
 
   my $clean = $vault->_redact_unseal_keys("bad key $key");
   # Returns: 'bad key <redacted>'
+
+=head2 _now
+
+  my $seconds = $vault->_now;
+
+Returns the current time in seconds, with a fractional part. The wall-clock
+bounds in L</wait_for_active_node> and L</unseal_cluster> are measured with it,
+and tests replace it with a clock they control.
+
+B<Returns:> The current time as a number of seconds.
+
+=head2 _split_url
+
+  my ($scheme, $host, $port) = Service::Vault::_split_url($url);
+
+Splits a vault URL into its scheme, its host with any IPv6 brackets removed,
+and its port, which defaults to 443 for C<https> and 80 for C<http>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$url>
+
+The URL to split.
+
+=back
+
+B<Returns:> The three parts, or the empty list when C<$url> is not an http or
+https URL.
+
+B<Examples:>
+
+  my @parts = Service::Vault::_split_url('https://[fd00::5]:8200');
+  # Returns: ('https', 'fd00::5', 8200)
+
+=head2 _combinations
+
+  my @rounds = Service::Vault::_combinations($size, @items);
+
+Lists every way to choose C<$size> items from C<@items>, keeping their order,
+so the first combination is the first C<$size> items. It stops at 64
+combinations, which covers every choice of three keys from eight.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$size>
+
+How many items each combination holds.
+
+=item C<@items>
+
+The items to choose from.
+
+=back
+
+B<Returns:> A list of array references.
+
+B<Examples:>
+
+  my @rounds = Service::Vault::_combinations(2, qw/a b c/);
+  # Returns: (['a','b'], ['a','c'], ['b','c'])
 
 =head2 _pause
 

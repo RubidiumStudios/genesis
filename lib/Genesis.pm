@@ -769,11 +769,17 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 			dump_var -1, run_output => $out;
 		}
 	}
-	dump_var -1, run_stderr => $err if (defined($err));
+	if (defined($err)) {
+		if ($opts{redact_stderr}) {
+			qtrace "[%sb of redacted stderr omitted from debug]", length($err);
+		} else {
+			dump_var -1, run_stderr => $err;
+		}
+	}
 	if ($rc) {
 		bail({raw => 1}, "#R{%s} (run failed)%s%s",
 		     $opts{onfailure},
-		     defined($err) ? "\n\nSTDERR:\n$err" : '',
+		     defined($err) ? "\n\nSTDERR:\n".($opts{redact_stderr}?"<redacted>":$err) : '',
 		     defined($out) ? "\n\nSTDOUT:\n".($opts{redact_output}?"<redacted>":$out) : ''
 		) if ($opts{onfailure});
 		trace("command exited with status %x (rc %d)", $exit_status, $rc);
