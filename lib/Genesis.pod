@@ -1381,6 +1381,16 @@ Change to this directory before executing the command.
 
 Redirect stdin for the command.
 
+=item C<trim>
+
+Defaults to true, which strips trailing whitespace from the captured output,
+the answer a caller reading a line or a value wants. Pass C<0> to have the
+output handed back byte for byte, as a caller reading output framed by byte
+counts needs: C<git cat-file --batch> ends every object with a newline, and
+the last object's own trailing whitespace is part of its content.
+
+    my $exact = run({trim => 0}, 'git', 'cat-file', '--batch');
+
 =item C<redact_output>
 
 If true, suppresses output from trace/debug logs.

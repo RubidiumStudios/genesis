@@ -746,7 +746,7 @@ sub run {
 			open my $pipe, "-|", @cmd
 				or bail("Could not open pipe to run #C{%s}", join(' ',@cmd));
 			$out = do { local $/; <$pipe> };
-			$out =~ s/\s+$//;
+			$out =~ s/\s+$// if $opts{trim} // 1;
 			close $pipe;
 		}
 	};
