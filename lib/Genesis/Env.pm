@@ -4215,6 +4215,11 @@ sub _pre_deploy {
 		} else {
 			info('[[  #g@{+}>>%s', $message);
 		}
+
+		# Find the vault's nodes now, while it still answers.  After the deploy
+		# they may all be sealed, and _ensure_vault_ready_for_exodus needs every
+		# one of them to bring a Raft cluster back.
+		$self->{deployment_state}{secrets_vault_nodes} = [$self->_secrets_vault_cluster_ips];
 	} else {
 		debug("Skipping unseal key check - deployment does not appear to affect secrets vault");
 	}
@@ -4745,8 +4750,15 @@ sub _post_deploy {
 sub _ensure_vault_ready_for_exodus {
 	my ($self, $noprompt) = @_;
 
+	# Nodes of the secrets vault that this deployment runs, recorded by
+	# _pre_deploy.  More than one means a Raft cluster, where a single-target
+	# unseal opens one node that cannot elect a leader alone.
+	my @nodes = @{($self->{deployment_state} // {})->{secrets_vault_nodes} // []};
+
 	my $status = $self->vault->status;
-	if ($status eq 'sealed') {
+	if (@nodes > 1 && $status ne 'ok') {
+		$status = $self->_unseal_secrets_vault_cluster(@nodes);
+	} elsif ($status eq 'sealed') {
 		$self->notify("vault is sealed - attempting to unseal...");
 		my ($out, $rc, $err) = $self->vault->unseal;
 		if ($rc) {
@@ -4771,6 +4783,81 @@ sub _ensure_vault_ready_for_exodus {
 	) if $noprompt || !in_controlling_terminal;
 
 	return 0;
+}
+
+# }}}
+# _unseal_secrets_vault_cluster - unseal every node, then wait for a leader {{{
+#
+# Each node is unsealed through its own address.  When a quorum is open the
+# cluster still needs a moment to elect an active node, so this waits for one,
+# up to GENESIS_VAULT_LEADER_WAIT seconds (90 by default).  Without a quorum no
+# leader can be elected and waiting would only delay the failure.  Returns the
+# vault's status afterwards.
+sub _unseal_secrets_vault_cluster {
+	my ($self, @nodes) = @_;
+	my $vault = $self->vault;
+
+	$self->notify("vault is not ready - checking all %d nodes of its cluster...", scalar(@nodes));
+	my @results = $vault->unseal_nodes(@nodes);
+	info(
+		'[[  %s >>%s: %s',
+		$_->{unsealed} ? '#g@{+}' : '#r@{x}', $_->{address}, $_->{message}
+	) for @results;
+
+	my $open = scalar(grep {$_->{unsealed}} @results);
+	if ($open * 2 <= scalar(@nodes)) {
+		error(
+			"Only %d of %d vault nodes are unsealed, which is not a quorum, so the ".
+			"cluster cannot elect an active node.",
+			$open, scalar(@nodes)
+		);
+		return $vault->status;
+	}
+
+	my $limit = $ENV{GENESIS_VAULT_LEADER_WAIT} // '';
+	$limit = 90 unless $limit =~ /^[0-9]+$/;
+	info('[[  >>waiting up to %ds for the cluster to elect an active node...', $limit);
+	if (my $active = $vault->wait_for_active_node($limit, @nodes)) {
+		info('[[  #g@{+} >>%s is the active node', $active);
+	} else {
+		error(
+			"No active node emerged within %ds, although %d of %d nodes are unsealed.",
+			$limit, $open, scalar(@nodes)
+		);
+	}
+	return $vault->status;
+}
+
+# }}}
+# _secrets_vault_cluster_ips - the addresses of the secrets vault's own nodes {{{
+#
+# When this deployment runs the vault used for secrets, its nodes are the
+# static IPs of every instance group that shares an address with that vault.
+# The vault's addresses come from `safe status` and from the target URL, so
+# this must run before the deploy, while the vault still answers.  Returns an
+# empty list for a kit that does not provide vault, or for a vault that lives
+# elsewhere.
+sub _secrets_vault_cluster_ips {
+	my $self = shift;
+	return () unless $self->kit->provides_service('vault');
+
+	my $dotted_quad = qr/^[0-9]+(?:\.[0-9]+){3}$/;
+	my %vault_ips =
+		map {$_ => 1}
+		grep {$_ =~ $dotted_quad}
+		map {m{https?://([^:/ ]+)} ? $1 : ()}
+		(lines($self->vault->query('status')), $self->vault->url);
+
+	my (@ips, %seen);
+	for my $group (@{scalar($self->manifest_lookup('instance_groups', [])) // []}) {
+		my @group_ips =
+			grep {$_ =~ $dotted_quad}
+			map {@{$_->{static_ips} // []}}
+			grep {ref($_) eq 'HASH'} @{$group->{networks} // []};
+		push @ips, grep {!$seen{$_}++} @group_ips
+			if grep {$vault_ips{$_}} @group_ips;
+	}
+	return @ips;
 }
 
 # }}}

@@ -26,6 +26,8 @@ use Genesis;
 			statuses  => $opts{statuses} || ['ok'],
 			unseal_rc => $opts{unseal_rc} // 0,
 			unseals   => 0,
+			node_states => $opts{node_states} || {},
+			active      => $opts{active},
 		}, $class;
 	}
 	sub status {
@@ -40,6 +42,25 @@ use Genesis;
 		return ('unseal output', $self->{unseal_rc}, 'unseal error');
 	}
 	sub unseals { $_[0]->{unseals} }
+
+	# The per-node path.  node_states maps each address to what
+	# unseal_nodes reports for it; active is what wait_for_active_node
+	# returns once the cluster has a leader, or undef when it never does.
+	sub unseal_nodes {
+		my ($self, @addresses) = @_;
+		push @{$self->{node_unseals}}, [@addresses];
+		return map {
+			my $state = $self->{node_states}{$_} // 'unsealed';
+			{address => $_, unsealed => ($state =~ /unsealed$/ ? 1 : 0), message => $state}
+		} @addresses;
+	}
+	sub wait_for_active_node {
+		my ($self, $timeout, @addresses) = @_;
+		push @{$self->{waits}}, [$timeout, @addresses];
+		return $self->{active};
+	}
+	sub node_unseals { $_[0]->{node_unseals} // [] }
+	sub waits { $_[0]->{waits} // [] }
 }
 
 # ===========================================================================
@@ -65,6 +86,7 @@ use Genesis;
 sub make_env_stub {
 	my (%opts) = @_;
 	my $env = bless { __vault => $opts{vault} }, 'Genesis::Env';
+	$env->{deployment_state}{secrets_vault_nodes} = $opts{nodes} if $opts{nodes};
 	return $env;
 }
 
@@ -166,6 +188,165 @@ with_env_stubs {
 			'and what that means for the exodus write';
 		is $out, '', 'nothing on stdout';
 	};
+
+	# --- self-hosted cluster: every node, then a leader ----------------------
+	#
+	# The deploying vault is this deployment, a three-node Raft cluster, and
+	# the rolling update left every node sealed.  A lone unsealed node cannot
+	# elect a leader, so the single-target unseal is not used at all.
+	without_terminal {
+		my @nodes = qw/10.0.0.5 10.0.0.6 10.0.0.7/;
+		my $vault = Test::FakeVault->new(
+			statuses => ['sealed', 'ok'], active => '10.0.0.6',
+		);
+		my $env = make_env_stub(vault => $vault, nodes => [@nodes]);
+		my $rc;
+		my ($out, $err) = output_from {
+			$rc = $env->_ensure_vault_ready_for_exodus(1);
+		};
+		is $rc, 1, 'sealed cluster under --yes: ready for exodus';
+		is $vault->unseals, 0, 'the single-target unseal is never used on a cluster';
+		is_deeply $vault->node_unseals, [[@nodes]],
+			'every node of the cluster is unsealed, in one pass';
+		is scalar(@{$vault->waits}), 1, 'then it waits for a leader';
+		is_deeply [@{$vault->waits->[0]}[1..3]], [@nodes],
+			'asking every node which one is active';
+		like $vault->waits->[0][0], qr/^[0-9]+$/, 'and the wait is bounded';
+		like $err, qr/10\.0\.0\.6.*active/i, 'the operator is told which node leads';
+		is $out, '', 'nothing on stdout';
+	};
+
+	# --- the wait bound comes from GENESIS_VAULT_LEADER_WAIT -----------------
+	without_terminal {
+		local $ENV{GENESIS_VAULT_LEADER_WAIT} = 17;
+		my $vault = Test::FakeVault->new(statuses => ['sealed', 'ok'], active => '10.0.0.5');
+		my $env = make_env_stub(vault => $vault, nodes => [qw/10.0.0.5 10.0.0.6 10.0.0.7/]);
+		output_from { $env->_ensure_vault_ready_for_exodus(1) };
+		is $vault->waits->[0][0], 17, 'GENESIS_VAULT_LEADER_WAIT sets the bound';
+	};
+
+	# --- quorum open but no leader in time: fail, but only after waiting -----
+	without_terminal {
+		my $vault = Test::FakeVault->new(statuses => ['sealed', 'unauthenticated']);
+		my $env = make_env_stub(vault => $vault, nodes => [qw/10.0.0.5 10.0.0.6 10.0.0.7/]);
+		my ($out, $err) = output_from {
+			throws_ok { $env->_ensure_vault_ready_for_exodus(1) }
+				qr/re-run this deploy/i,
+				'no leader within the bound, under --yes: bails with re-run guidance';
+		};
+		is scalar(@{$vault->waits}), 1, 'but only after waiting for a leader';
+		like $err, qr/no active node/i, 'and says that no leader emerged';
+	};
+
+	# --- no quorum: waiting cannot help, so it does not wait -----------------
+	without_terminal {
+		my $vault = Test::FakeVault->new(
+			statuses => ['sealed'],
+			node_states => {
+				'10.0.0.6' => 'unreachable',
+				'10.0.0.7' => 'still sealed after every unseal key was tried',
+			},
+		);
+		my $env = make_env_stub(vault => $vault, nodes => [qw/10.0.0.5 10.0.0.6 10.0.0.7/]);
+		my ($out, $err) = output_from {
+			throws_ok { $env->_ensure_vault_ready_for_exodus(1) }
+				qr/re-run this deploy/i,
+				'one of three nodes open, under --yes: bails';
+		};
+		is scalar(@{$vault->waits}), 0, 'without a futile wait for a leader that cannot be elected';
+		like $err, qr/10\.0\.0\.6.*unreachable/, 'naming each node that is still closed';
+		like $err, qr/1 of 3/, 'and how far short of a quorum the cluster is';
+	};
+
+	# --- a cluster that is unsealed but unauthenticated ----------------------
+	#
+	# The cluster is not sealed at all, and the token is the problem.  The per-node check costs
+	# one status call per node, finds nothing to do, and the interactive
+	# fallback is unchanged.
+	with_terminal {
+		my $vault = Test::FakeVault->new(
+			statuses => ['unauthenticated'], active => '10.0.0.5',
+			node_states => {map {$_ => 'already unsealed'} qw/10.0.0.5 10.0.0.6 10.0.0.7/},
+		);
+		my $env = make_env_stub(vault => $vault, nodes => [qw/10.0.0.5 10.0.0.6 10.0.0.7/]);
+		my $rc;
+		output_from { $rc = $env->_ensure_vault_ready_for_exodus(0) };
+		is $rc, 0, 'unauthenticated cluster with a terminal: proceeds to the auth prompt';
+		is $vault->unseals, 0, 'no single-target unseal';
+	};
+
+	# --- single-node vault: exactly the old path ------------------------------
+	without_terminal {
+		my $vault = Test::FakeVault->new(statuses => ['sealed', 'ok'], unseal_rc => 0);
+		my $env = make_env_stub(vault => $vault, nodes => ['10.0.0.5']);
+		my $rc;
+		output_from { $rc = $env->_ensure_vault_ready_for_exodus(1) };
+		is $rc, 1, 'single-node self-hosted vault: ready for exodus';
+		is $vault->unseals, 1, 'through the single-target unseal, as before';
+		is_deeply $vault->node_unseals, [], 'with no per-node pass';
+		is_deeply $vault->waits, [], 'and no leader wait';
+	};
 };
+
+# ===========================================================================
+# Genesis::Env::_secrets_vault_cluster_ips
+#
+# Read in _pre_deploy while the vault still answers.  The cluster is every
+# static IP of each instance group that shares an address with the vault
+# being used for secrets; anything else in the manifest is left out.
+# ===========================================================================
+{
+	package Test::FakeStatusVault;
+	sub new { my ($c, %o) = @_; bless {%o}, $c }
+	sub url { $_[0]->{url} }
+	sub query { return ($_[0]->{status_out} // '', 0, '') }
+}
+{
+	package Test::FakeKit;
+	sub new { my ($c, @s) = @_; bless {services => {map {$_ => 1} @s}}, $c }
+	sub provides_service { $_[0]->{services}{$_[1]} }
+}
+
+sub cluster_ips_for {
+	my (%opts) = @_;
+	my $env = bless {
+		__vault => Test::FakeStatusVault->new(%{$opts{vault}}),
+		__kit   => Test::FakeKit->new(@{$opts{services} // ['vault']}),
+		__igs   => $opts{instance_groups},
+	}, 'Genesis::Env';
+	no warnings 'redefine', 'once';
+	local *Genesis::Env::vault = sub { $_[0]->{__vault} };
+	local *Genesis::Env::kit   = sub { $_[0]->{__kit} };
+	local *Genesis::Env::manifest_lookup = sub { $_[0]->{__igs} };
+	return [$env->_secrets_vault_cluster_ips];
+}
+
+my $openbao_igs = [
+	{name => 'openbao', networks => [{name => 'default', static_ips => [qw/10.0.0.5 10.0.0.6 10.0.0.7/]}]},
+	{name => 'smoke',   networks => [{name => 'default', static_ips => ['10.0.0.9']}]},
+];
+
+is_deeply cluster_ips_for(
+	vault => {url => 'https://10.0.0.5', status_out => "https://10.0.0.5 is unsealed\n"},
+	instance_groups => $openbao_igs,
+), [qw/10.0.0.5 10.0.0.6 10.0.0.7/],
+	'the instance group holding the vault address is the cluster, and nothing else is';
+
+is_deeply cluster_ips_for(
+	vault => {url => 'https://10.0.0.6:8200', status_out => ''},
+	instance_groups => $openbao_igs,
+), [qw/10.0.0.5 10.0.0.6 10.0.0.7/],
+	'the target address alone identifies the cluster when safe status is silent';
+
+is_deeply cluster_ips_for(
+	vault => {url => 'https://10.1.0.5', status_out => "https://10.1.0.5 is unsealed\n"},
+	instance_groups => $openbao_igs,
+), [], 'a vault kit deploying some other vault: no cluster';
+
+is_deeply cluster_ips_for(
+	services => [],
+	vault => {url => 'https://10.0.0.5', status_out => "https://10.0.0.5 is unsealed\n"},
+	instance_groups => $openbao_igs,
+), [], 'a kit that does not provide vault: no cluster';
 
 done_testing;
