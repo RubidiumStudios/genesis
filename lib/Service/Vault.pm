@@ -1100,22 +1100,40 @@ sub unseal {
 # works until a quorum is open.  Each node is given the fetched keys a
 # threshold's worth at a time.  A well-formed but wrong key, such as one left
 # over from a rekey, is only found out once the threshold is reached, when
-# the node throws the whole round away, so each round starts from a reset and
-# the next combination of keys is tried after a failed one.  Keys go to curl
-# on stdin and never appear in an argument, a trace, or a result.  Returns
-# one {address, unsealed, message} hashref per node.
+# the node throws the whole round away, so the next combination of keys is
+# tried after a failed one.  Keys go to curl on stdin and never appear in an
+# argument, a trace, or a result.
+#
+# An optional leading hashref carries a deadline, past which no request
+# starts and against which every request is capped, and a record of the
+# rounds that already failed on each node, so a later pass never repeats
+# them.  Returns one {address, unsealed, message} hashref per node.
 sub unseal_nodes {
-	my ($self, @nodes) = @_;
+	my $self = shift;
+	my $opts = CORE::ref($_[0]) eq 'HASH' ? shift : {};
+	my @nodes = @_;
 	my @keys = @{$self->{unseal_keys} // []};
+	my $failed = $opts->{failed_rounds} // {};
+
+	# One request to a node, capped at the time left before the deadline.
+	my $ask = sub {
+		my ($node, $method, $path, $payload) = @_;
+		my $time = 10;
+		if (defined($opts->{deadline})) {
+			$time = min($time, $opts->{deadline} - $self->_now);
+			return (undef, 'not reached before the time allowed ran out') if $time <= 0;
+		}
+		return $self->_node_request($node, $method, $path, $payload, $time);
+	};
 
 	my @results;
 	for my $node (@nodes) {
 		my $result = {address => $node, unsealed => 0};
 		push @results, $result;
 
-		my $state = $self->_node_request($node, 'GET', 'sys/seal-status');
+		my ($state, $problem) = $ask->($node, 'GET', 'sys/seal-status');
 		unless ($state && exists($state->{sealed})) {
-			$result->{message} = 'unreachable';
+			$result->{message} = $problem // 'unreachable';
 			next;
 		}
 		unless ($state->{sealed}) {
@@ -1135,36 +1153,50 @@ sub unseal_nodes {
 			next;
 		}
 
-		my ($opened, $answering) = (0, 1);
-		for my $round (_combinations($threshold, @keys)) {
-			# Each round starts afresh.  That discards any progress someone else
-			# is building on this node at the same moment, such as an operator
-			# unsealing by hand, which is the price of never mixing their key
-			# shares, or a stale one of ours, into this round.
-			$self->_node_request($node, 'PUT', 'sys/unseal', {reset => JSON::PP::true});
-			my $reply;
-			for my $key (@$round) {
-				$reply = $self->_node_request($node, 'PUT', 'sys/unseal', {key => $key});
+		my $progress = $state->{progress};
+		my ($opened, $failure);
+		for my $round (_combinations($threshold, 0 .. $#keys)) {
+			my $id = join(',', @$round);
+			next if $failed->{$node}{$id};
+
+			# Progress this round did not make belongs to someone else, such as
+			# an operator unsealing by hand, or to an earlier round of ours that
+			# a malformed key cut short.  Mixing it into this round would spoil
+			# the round, so it is cleared, but only now that a round is about to
+			# be submitted.
+			if (!defined($progress) || $progress > 0) {
+				my ($reset, $why) = $ask->($node, 'PUT', 'sys/unseal', {reset => JSON::PP::true});
+				unless ($reset && exists($reset->{sealed}) && !($reset->{progress} // 0)) {
+					$failure = $why // 'would not reset its unseal progress, so no keys were sent to it';
+					last;
+				}
+				$progress = 0;
+			}
+
+			my ($reply, $why);
+			for my $index (@$round) {
+				($reply, $why) = $ask->($node, 'PUT', 'sys/unseal', {key => $keys[$index]});
 				last unless $reply && exists($reply->{sealed}) && $reply->{sealed};
 			}
 			unless ($reply) {
-				$answering = 0;
+				$failure = $why // 'stopped answering while it was being unsealed';
 				last;
 			}
 			if (exists($reply->{sealed}) && !$reply->{sealed}) {
 				$opened = 1;
 				last;
 			}
+			$failed->{$node}{$id} = 1;
+			$progress = $reply->{progress};
 		}
-		unless ($opened) {
-			$state = $self->_node_request($node, 'GET', 'sys/seal-status');
+		unless ($opened || $failure) {
+			($state, $problem) = $ask->($node, 'GET', 'sys/seal-status');
 			$opened = $state && exists($state->{sealed}) && !$state->{sealed};
+			$failure = $problem unless $state;
 		}
 		@$result{qw/unsealed message/} = $opened
 			? (1, 'unsealed')
-			: $answering
-				? (0, 'still sealed after every combination of unseal keys was tried')
-				: (0, 'stopped answering while it was being unsealed');
+			: (0, $failure // 'still sealed after every combination of unseal keys was tried');
 	}
 	return @results;
 }
@@ -1172,35 +1204,37 @@ sub unseal_nodes {
 # }}}
 # unseal_cluster - unseal a Raft cluster and wait for it to elect a leader {{{
 #
-# Everything here happens within $timeout seconds of wall-clock time.  Nodes
-# that are still starting when first asked are asked again every few seconds
-# until a quorum is open.  With a quorum, this waits for an active node and
-# then gives any node that is still closed one more try, so the cluster ends
-# fully unsealed when every node can be reached.  Without a quorum no leader
-# can be elected, so it does not wait for one.  Returns a hashref with the
-# per-node results, the active node's address (undef when none emerged), the
-# number of open nodes, and the quorum size.
+# Everything here happens within $timeout seconds of wall-clock time.  No
+# request starts after the deadline, and each one is capped at the time left.
+# Nodes that are still starting when first asked are asked again every few
+# seconds until a quorum is open, and a round of keys that failed on a node
+# is never sent to it again.  With a quorum, this waits for an active node
+# and then, if time remains, gives any node that is still closed one more
+# try.  Without a quorum no leader can be elected, so it does not wait for
+# one.  Returns a hashref with the per-node results, the active node's
+# address (undef when none emerged), the number of open nodes, and the
+# quorum size.
 sub unseal_cluster {
 	my ($self, $timeout, @nodes) = @_;
-	my $deadline = $self->_now + $timeout;
+	my $pass = {deadline => $self->_now + $timeout, failed_rounds => {}};
 	my $quorum = int(scalar(@nodes) / 2) + 1;
+	my $left = sub {$pass->{deadline} - $self->_now};
 
-	my %result = map {$_->{address} => $_} $self->unseal_nodes(@nodes);
+	my %result = map {$_->{address} => $_} $self->unseal_nodes($pass, @nodes);
 	my $open = sub {scalar(grep {$result{$_}{unsealed}} @nodes)};
 	my $closed = sub {grep {!$result{$_}{unsealed}} @nodes};
 
-	while ($open->() < $quorum) {
-		my $left = $deadline - $self->_now;
-		last if $left <= 0;
-		$self->_pause(min(3, $left));
-		$result{$_->{address}} = $_ for $self->unseal_nodes($closed->());
+	while ($open->() < $quorum && $left->() > 0) {
+		$self->_pause(min(3, $left->()));
+		last if $left->() <= 0;
+		$result{$_->{address}} = $_ for $self->unseal_nodes($pass, $closed->());
 	}
 
 	my $active;
 	if ($open->() >= $quorum) {
-		$active = $self->wait_for_active_node(max(0, $deadline - $self->_now), @nodes);
+		$active = $self->wait_for_active_node(max(0, $left->()), @nodes);
 		my @late = $closed->();
-		$result{$_->{address}} = $_ for (@late ? $self->unseal_nodes(@late) : ());
+		$result{$_->{address}} = $_ for (@late && $left->() > 0 ? $self->unseal_nodes($pass, @late) : ());
 	}
 
 	return {
@@ -1273,16 +1307,21 @@ sub _strongbox_unseal_caveat {
 # [fd00::5]:8200, and a missing port means the target's.  The request goes to
 # the target's own URL, and --connect-to sends the connection to the node, so
 # TLS is verified against the name safe verifies, and -k is passed only when
-# the target skips verification.  -q comes first so that no curlrc can add a
-# trace or a key log, and CURL_HOME and SSLKEYLOGFILE are cleared for the
-# same reason.  A $payload goes to curl as a JSON body on stdin, and the reply
-# is kept out of the trace.  $max_time caps the whole request in seconds.
-# Returns the decoded reply, or undef when the node did not answer with JSON.
+# the target skips verification.  The rule leaves its first host empty, which
+# matches whatever curl makes of the URL's host, so a target written in a
+# non-canonical form still reaches the node rather than itself.  -q comes
+# first so that no curlrc can add a trace or a key log, and CURL_HOME and
+# SSLKEYLOGFILE are cleared for the same reason.  A $payload goes to curl as
+# a JSON body on stdin, and the reply is kept out of the trace.  $max_time
+# caps the whole request in seconds.  Returns the decoded reply, or undef
+# when the node did not answer with JSON; in list context, a second value
+# says why not, naming the node when its certificate fails verification.
 sub _node_request {
 	my ($self, $node, $method, $path, $payload, $max_time) = @_;
+	my $give = sub {wantarray ? @_ : $_[0]};
 
 	my ($scheme, $host, $port) = _split_url($self->url);
-	return undef unless $scheme;
+	return $give->(undef, 'the target is not an http or https URL') unless $scheme;
 	my ($address, $node_port) = $node =~ /^\[([^\]]+)\](?::([0-9]+))?$/
 		? ($1, $2)
 		: $node =~ /^([^:]+)(?::([0-9]+))?$/ ? ($1, $2) : ($node, undef);
@@ -1295,7 +1334,7 @@ sub _node_request {
 		'--connect-timeout', sprintf('%.1f', min(5, $max_time)),
 		'-m', sprintf('%.1f', $max_time),
 		'-X', $method,
-		'--connect-to', join(':', $bracket->($host), $port, $bracket->($address), $node_port),
+		'--connect-to', join(':', '', $port, $bracket->($address), $node_port),
 	);
 	push @args, '-k' unless $self->verify;
 
@@ -1312,9 +1351,22 @@ sub _node_request {
 	my ($out, $rc) = run($opts, 'curl', @args, sprintf(
 		'%s://%s:%s/v1/%s', $scheme, $bracket->($host), $port, $path
 	));
-	return undef if $rc || !$out;
+	if ($rc) {
+		# Verification stays on, and fails closed.  These are the ways curl
+		# says the node's certificate did not check out.
+		return $give->(undef, sprintf(
+			'TLS verification failed: the certificate that %s presented does not '.
+			'verify against the target name %s (curl exit %d)',
+			$node, $host, $rc
+		)) if grep {$rc == $_} (35, 51, 58, 60);
+		return $give->(undef, $rc == 28
+			? 'unreachable (timed out)'
+			: sprintf('unreachable (curl exit %d)', $rc));
+	}
+	return $give->(undef, 'unreachable (no answer)') unless $out;
 	my $reply = eval {decode_json($out)};
-	return CORE::ref($reply) eq 'HASH' ? $reply : undef;
+	return $give->(undef, 'answered, but not with JSON') unless CORE::ref($reply) eq 'HASH';
+	return $give->($reply, undef);
 }
 
 # }}}
@@ -1337,7 +1389,7 @@ sub _now {
 # }}}
 # _pause - sleep between attempts; a seam for tests {{{
 sub _pause {
-	sleep($_[1]);
+	Time::HiRes::sleep($_[1]);
 }
 
 # }}}

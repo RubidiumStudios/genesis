@@ -1672,6 +1672,7 @@ who has to finish the unseal by hand.
 =head2 unseal_nodes
 
   my @results = $vault->unseal_nodes(@addresses);
+  my @results = $vault->unseal_nodes(\%pass, @addresses);
 
 Unseals each node in C<@addresses> through that node's own C<sys/unseal>
 endpoint, using the keys previously fetched by C<fetch_unseal_keys>. This is
@@ -1683,11 +1684,14 @@ alone, and one that does not answer is reported as unreachable. A sealed node
 is given the keys a threshold's worth at a time, where the threshold is what
 the node reports. OpenBao counts a well-formed but wrong key, such as one left
 over from a rekey, like any other, and only throws the round away once the
-threshold is reached. So each round starts with a reset, and after a failed
-round the next combination of keys is tried, up to 64 combinations. The reset
-also discards any progress someone else is making on the node at that moment,
-such as an operator unsealing it by hand. A node that stays sealed through
-every combination, or stops answering, is reported as such.
+threshold is reached. So after a failed round the next combination of keys is
+tried, up to 64 combinations, and a round that failed is recorded so that it is
+never sent to that node again. A node is reset only just before a round is
+submitted to it, and only when it shows progress that the round did not make,
+whether that is an operator unsealing it by hand or an earlier round of ours
+that a malformed key cut short. A node that refuses the reset gets no keys,
+and is reported as refusing. A node that stays sealed through every
+combination, or stops answering, is reported as such.
 
 Every request goes through L</_node_request>, so the keys travel on curl's
 stdin, never in its arguments, and no key appears in a trace, a log line, a
@@ -1696,6 +1700,14 @@ curl configuration file's output, or a result.
 B<Parameters:>
 
 =over 4
+
+=item C<\%pass>
+
+Optional. A hashref that ties this call to a larger pass, as
+L</unseal_cluster> uses it. Its C<deadline> is a time from L</_now>, after
+which no request starts, and against which every request is capped. Its
+C<failed_rounds> is a hashref in which the rounds that failed on each node are
+recorded, so that a later call with the same hashref skips them.
 
 =item C<@addresses>
 
@@ -1707,9 +1719,10 @@ the target's port.
 
 B<Returns:> One hashref per node, in the order given, with C<address>,
 C<unsealed> (C<1> or C<0>), and C<message>, which says whether the node was
-already unsealed, was unsealed, was unreachable, stopped answering, stayed
-sealed through every combination of keys, needed more keys than were fetched,
-or had no keys fetched at all.
+already unsealed, was unsealed, was unreachable, presented a certificate that
+failed verification, refused to reset, stopped answering, was not reached
+before the deadline, stayed sealed through every combination of keys, needed
+more keys than were fetched, or had no keys fetched at all.
 
 B<Examples:>
 
@@ -1756,13 +1769,15 @@ B<Examples:>
   my $outcome = $vault->unseal_cluster($timeout, @addresses);
 
 Unseals a Raft cluster and waits for it to elect a leader, all within
-C<$timeout> seconds of wall-clock time. It runs L</unseal_nodes> over every
-node, and while fewer than a quorum are open it pauses a few seconds and asks
-the closed nodes again, since a node may still be starting. Once a quorum is
-open it waits for an active node with L</wait_for_active_node> and then gives
-any node that is still closed one more try, so the cluster ends fully
-unsealed whenever every node can be reached. Without a quorum no leader can
-be elected, so it does not wait for one.
+C<$timeout> seconds of wall-clock time. No request starts after the deadline,
+and each one is capped at the time that remains. It runs L</unseal_nodes> over
+every node, and while fewer than a quorum are open it pauses a few seconds and
+asks the closed nodes again, since a node may still be starting. A round of
+keys that failed on a node is never sent to it again. Once a quorum is open it
+waits for an active node with L</wait_for_active_node> and then, if time
+remains, gives any node that is still closed one more try, so the cluster ends
+fully unsealed whenever every node can be reached in time. Without a quorum
+no leader can be elected, so it does not wait for one.
 
 B<Parameters:>
 
@@ -1831,7 +1846,11 @@ L</wait_for_active_node>. The request goes to the target's own URL, and
 curl's C<--connect-to> sends the connection to the node's address and port.
 TLS is therefore verified against the same name or address that C<safe>
 verifies, whether the target is an IP address or a hostname, and C<-k> is
-passed only when the target itself skips verification.
+passed only when the target itself skips verification. The rule's first host
+is left empty, as in C<:443:10.0.0.6:8200>, because curl compares it with the
+URL's host only after normalising the URL, and an empty host matches whatever
+that comes to. A target written in a non-canonical form therefore still
+reaches the node rather than itself.
 
 C<-q> comes first, so curl reads no configuration file that could add a trace
 or a key log, and C<CURL_HOME> and C<SSLKEYLOGFILE> are cleared for the same
@@ -1866,7 +1885,11 @@ Optional. The most seconds the whole request may take, 10 by default.
 =back
 
 B<Returns:> The decoded reply as a hashref, or C<undef> when the node did not
-answer with a JSON object.
+answer with a JSON object. In list context a second value says why there is
+no reply. A certificate that fails verification (curl exits 35, 51, 58, or 60)
+is reported as not verifying against the target name, naming the node, rather
+than as the node being unreachable. Verification itself stays on, so such a
+node is never unsealed.
 
 B<Examples:>
 
@@ -1966,7 +1989,9 @@ B<Examples:>
 
   $vault->_pause($seconds);
 
-Sleeps between unseal attempts and leadership polls. It exists so that tests
+Sleeps between unseal attempts and leadership polls, using
+C<Time::HiRes::sleep> so that a fraction of a second, such as the time left
+before a deadline, is honoured rather than truncated. It exists so that tests
 can replace it and run without waiting.
 
 B<Parameters:>
@@ -1975,11 +2000,11 @@ B<Parameters:>
 
 =item C<$seconds>
 
-How long to sleep.
+How long to sleep, in seconds, fractions included.
 
 =back
 
-B<Returns:> What C<sleep> returns.
+B<Returns:> What C<Time::HiRes::sleep> returns.
 
 B<Examples:>
 

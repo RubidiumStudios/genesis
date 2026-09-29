@@ -59,11 +59,11 @@ sub fake_cluster {
 		my $opts = ref($_[0]) eq 'HASH' ? shift : {};
 		my ($prog, @args) = @_;
 		my $stdin = $opts->{stdin};
-		push @calls, {opts => {%$opts}, args => [@args], stdin => $stdin, env => {%{$opts->{env} // {}}}};
+		push @calls, {opts => {%$opts}, args => [@args], stdin => $stdin, env => {%{$opts->{env} // {}}}, at => $CLOCK};
 		my ($url) = grep {m{^https?://}} @args;
 		my %flag = map {$args[$_] => $args[$_+1]} grep {$args[$_] =~ /^-/ && $args[$_] ne '-q' && $args[$_] ne '-s' && $args[$_] ne '-k'} 0..$#args-1;
 		my ($path) = $url =~ m{/v1/(.*)$};
-		my ($ip) = $flag{'--connect-to'} =~ /^(?:\[[^\]]+\]|[^:]+):[0-9]+:(\[[^\]]+\]|[^:]+):[0-9]+$/;
+		my ($ip) = $flag{'--connect-to'} =~ /^:[0-9]+:(\[[^\]]+\]|[^:]+):[0-9]+$/;
 		my $node = $nodes{$ip};
 		$CLOCK += $node && $node->{latency} ? $node->{latency} : 0.01;
 		return ('', 7, '') unless $node && !$node->{down};
@@ -71,6 +71,7 @@ sub fake_cluster {
 			$CLOCK += $flag{'-m'};
 			return ('', 28, '');
 		}
+		return ('', 60, '') if $node->{tls_fail};
 		if ($node->{answers_after} && ++$node->{calls_seen} <= $node->{answers_after}) {
 			return ('', 7, '');
 		}
@@ -89,6 +90,7 @@ sub fake_cluster {
 		}
 		if ($path eq 'sys/unseal') {
 			if ($body->{reset}) {
+				return (encode_json({errors => ['reset refused']}), 0, '') if $node->{reset_fails};
 				$node->{given} = [];
 				$node->{resets}++;
 				return ($state->(), 0, '');
@@ -174,6 +176,8 @@ subtest 'every sealed node is unsealed through its own address' => sub {
 		'as is SSLKEYLOGFILE');
 	ok(!(grep {!$_->{opts}{redact_output}} @$calls),
 		'every node call redacts its output from the trace');
+	ok(!(grep {$_->{resets}} values %nodes),
+		'and no node with nothing in progress is reset');
 	ok(!mentions_a_key($stderr), 'no key reaches the trace or stderr');
 	ok(!(grep {mentions_a_key($_->{message})} @$results), 'no key in any result message');
 };
@@ -185,8 +189,8 @@ subtest "an IP target is asked for by its own address, and each node's port is k
 	});
 	ok(!(grep {!$_->{unsealed}} @$results), 'both nodes unsealed');
 	my ($to_6) = calls_to($calls, '10.0.0.6');
-	ok((grep {$_ eq '10.0.0.5:443:10.0.0.6:8200'} @{$to_6->{args}}),
-		"the target's address and port are sent to the node's own address and port");
+	ok((grep {$_ eq ':443:10.0.0.6:8200'} @{$to_6->{args}}),
+		"the target's port, whatever its host, is sent to the node's own address and port");
 	ok((grep {m{^https://10\.0\.0\.5:443/v1/}} @{$to_6->{args}}),
 		'while the URL stays the one safe uses');
 	ok((grep {$_ eq '-k'} @{$to_6->{args}}), '-k is passed for a target that does not verify');
@@ -199,8 +203,10 @@ subtest 'a named target keeps its hostname, so the certificate still matches' =>
 	});
 	ok(!(grep {!$_->{unsealed}} @$results), 'both nodes unsealed');
 	my @args = map {@{$_->{args}}} @$calls;
-	ok((grep {$_ eq 'vault.example.com:443:10.0.0.6:443'} @args),
-		'the hostname is connected to each node in turn');
+	ok((grep {$_ eq ':443:10.0.0.6:443'} @args),
+		'each node is connected to in turn');
+	ok((grep {m{^https://vault\.example\.com:443/v1/}} @args),
+		'while the URL, and so the name TLS is checked against, stays the hostname');
 	ok(!(grep {$_ eq '-k'} @args), 'and TLS verification stays on when the target verifies');
 };
 
@@ -211,7 +217,7 @@ subtest 'IPv6 targets and nodes keep their brackets' => sub {
 	});
 	ok(!(grep {!$_->{unsealed}} @$results), 'both nodes unsealed');
 	my @args = map {@{$_->{args}}} @$calls;
-	ok((grep {$_ eq '[fd00::5]:8200:[fd00::6]:8200'} @args), 'the IPv6 node is reached on its own port');
+	ok((grep {$_ eq ':8200:[fd00::6]:8200'} @args), 'the IPv6 node is reached on its own port');
 	ok((grep {m{^https://\[fd00::5\]:8200/v1/}} @args), 'and the URL keeps the bracketed target');
 };
 
@@ -238,6 +244,40 @@ subtest 'a stale key cannot wedge a node' => sub {
 	});
 	ok(!$results->[0]{unsealed}, 'with no good combination the node stays sealed');
 	like($results->[0]{message}, qr/every combination/, 'and says every combination was tried');
+};
+
+subtest 'a non-canonical target still reaches each node' => sub {
+	# curl compares the rule's host with the URL's host after normalising the
+	# URL, so a rule naming [0:0::1] would never match and every request
+	# would land on the target.  An empty first host matches any host.
+	my %nodes = ('[::2]' => sealed_node());
+	my ($results, $calls) = with_cluster(\%nodes, sub {
+		vault_at('https://[0:0::1]:9')->unseal_nodes('[::2]:9')
+	});
+	ok($results->[0]{unsealed}, 'the node behind the rule is unsealed');
+	ok(!(grep {my @a = @{$_->{args}}; grep {$a[$_] eq '--connect-to' && $a[$_+1] !~ /^:9:/} 0..$#a} @$calls),
+		'every rule leaves its first host empty');
+};
+
+subtest 'a certificate that fails verification is named as such' => sub {
+	my %nodes = ('10.0.0.6' => sealed_node(tls_fail => 1));
+	my ($results) = with_cluster(\%nodes, sub {
+		vault_at('https://vault.example.com', verify => 1)->unseal_nodes('10.0.0.6:443')
+	});
+	ok(!$results->[0]{unsealed}, 'the node is not unsealed');
+	like($results->[0]{message},
+		qr/certificate that 10\.0\.0\.6:443 presented does not verify against the target name vault\.example\.com \(curl exit 60\)/,
+		'and the message names the node and the target name instead of calling it unreachable');
+};
+
+subtest 'a node that will not reset is a failure for that round, with no keys sent' => sub {
+	my %nodes = ('10.0.0.5' => sealed_node(given => ['c3RhbGUtc2hhcmU='], reset_fails => 1));
+	my ($results, $calls) = with_cluster(\%nodes, sub {
+		vault_at('https://10.0.0.5')->unseal_nodes('10.0.0.5')
+	});
+	ok(!$results->[0]{unsealed}, 'the node stays sealed');
+	like($results->[0]{message}, qr/would not reset its unseal progress/, 'and says why');
+	is(scalar(key_calls($calls)), 0, 'no key was sent on top of the progress it kept');
 };
 
 subtest 'a half-finished unseal from an earlier attempt is reset first' => sub {
@@ -329,6 +369,49 @@ subtest 'unseal_cluster retries late nodes, waits for a leader, and finishes the
 	ok($out->{nodes}[1]{unsealed}, 'the node that answered late was retried and unsealed');
 	ok(!$out->{nodes}[2]{unsealed}, 'a node still not answering at the end is reported');
 	is($out->{open}, 2, 'and the open count says two of three');
+};
+
+subtest 'unseal_cluster never repeats a round that already failed on a node' => sub {
+	# The other nodes stay down, so the cluster keeps retrying for its whole
+	# bound.  The node whose keys are all wrong is sent each combination once.
+	my %nodes = (
+		'10.0.0.5' => sealed_node(accepts => []),
+		'10.0.0.6' => sealed_node(down => 1),
+		'10.0.0.7' => sealed_node(down => 1),
+	);
+	my ($result, $calls, undef, $pauses) = with_cluster(\%nodes, sub {
+		vault_at('https://10.0.0.5')->unseal_cluster(30, qw/10.0.0.5 10.0.0.6 10.0.0.7/)
+	});
+	cmp_ok($pauses, '>', 2, 'the cluster was retried several times');
+	is(scalar(key_calls([calls_to($calls, '10.0.0.5')])), 30,
+		'yet the ten combinations of three keys were each sent once');
+	cmp_ok($nodes{'10.0.0.5'}{resets} // 0, '<=', 10, 'and the node was reset only ahead of a round');
+};
+
+subtest 'unseal_cluster starts nothing after its deadline' => sub {
+	my %nodes = map {$_ => sealed_node(latency => 4)} qw/10.0.0.5 10.0.0.6 10.0.0.7/;
+	my $start = $CLOCK;
+	my ($result, $calls) = with_cluster(\%nodes, sub {
+		vault_at('https://10.0.0.5')->unseal_cluster(20, qw/10.0.0.5 10.0.0.6 10.0.0.7/)
+	});
+	my $deadline = $start + 20;
+	ok(!(grep {$_->{at} >= $deadline} @$calls), 'no request started after the deadline');
+	my @late = grep {
+		my @a = @{$_->{args}};
+		my ($m) = map {$a[$_+1]} grep {$a[$_] eq '-m'} 0..$#a;
+		$m > $deadline - $_->{at} + 0.1
+	} @$calls;
+	is(scalar(@late), 0, 'and none was allowed to run past it');
+	ok((grep {$_->{message} =~ /time allowed ran out/} @{$result->[0]{nodes}}),
+		'a node the time did not reach says so');
+};
+
+subtest '_pause sleeps for fractions of a second' => sub {
+	require Time::HiRes;
+	my $vault = vault_at('https://10.0.0.5');
+	my $start = Time::HiRes::time();
+	$vault->_pause(0.3);
+	cmp_ok(Time::HiRes::time() - $start, '>=', 0.25, 'a 0.3-second pause is not truncated to nothing');
 };
 
 subtest 'unseal_cluster does not wait for a leader without a quorum' => sub {
