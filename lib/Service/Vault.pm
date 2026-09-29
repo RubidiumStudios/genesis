@@ -9,6 +9,7 @@ use Genesis::Term qw/csprintf/;
 use Genesis::UI;
 use JSON::PP qw/decode_json encode_json/;
 use List::Util qw/min max/;
+use POSIX ();
 use Time::HiRes qw/gettimeofday/;
 use UUID::Tiny ();
 
@@ -1116,12 +1117,14 @@ sub unseal_nodes {
 	my $failed = $opts->{failed_rounds} // {};
 
 	# One request to a node, capped at the time left before the deadline.
+	# Under a tenth of a second counts as no time at all, because curl reads
+	# a limit that rounds to zero as no limit.
 	my $ask = sub {
 		my ($node, $method, $path, $payload) = @_;
 		my $time = 10;
 		if (defined($opts->{deadline})) {
 			$time = min($time, $opts->{deadline} - $self->_now);
-			return (undef, 'not reached before the time allowed ran out') if $time <= 0;
+			return (undef, 'not reached before the time allowed ran out') if $time < 0.1;
 		}
 		return $self->_node_request($node, $method, $path, $payload, $time);
 	};
@@ -1154,7 +1157,7 @@ sub unseal_nodes {
 		}
 
 		my $progress = $state->{progress};
-		my ($opened, $failure);
+		my ($opened, $failure, $cut_short);
 		for my $round (_combinations($threshold, 0 .. $#keys)) {
 			my $id = join(',', @$round);
 			next if $failed->{$node}{$id};
@@ -1174,8 +1177,10 @@ sub unseal_nodes {
 			}
 
 			my ($reply, $why);
+			my $sent = 0;
 			for my $index (@$round) {
 				($reply, $why) = $ask->($node, 'PUT', 'sys/unseal', {key => $keys[$index]});
+				$sent++;
 				last unless $reply && exists($reply->{sealed}) && $reply->{sealed};
 			}
 			unless ($reply) {
@@ -1186,7 +1191,15 @@ sub unseal_nodes {
 				$opened = 1;
 				last;
 			}
-			$failed->{$node}{$id} = 1;
+
+			# Only a round the node judged in full is known to be wrong.  One cut
+			# short by an error, such as a new Raft node that is not ready yet,
+			# says nothing about its keys, so a later pass may send it again.
+			if ($sent == @$round) {
+				$failed->{$node}{$id} = 1;
+			} else {
+				$cut_short++;
+			}
 			$progress = $reply->{progress};
 		}
 		unless ($opened || $failure) {
@@ -1196,7 +1209,9 @@ sub unseal_nodes {
 		}
 		@$result{qw/unsealed message/} = $opened
 			? (1, 'unsealed')
-			: (0, $failure // 'still sealed after every combination of unseal keys was tried');
+			: (0, $failure // ($cut_short
+				? 'still sealed, and it refused keys before a round was complete, so it will be tried again'
+				: 'still sealed after every combination of unseal keys was tried'));
 	}
 	return @results;
 }
@@ -1220,12 +1235,17 @@ sub unseal_cluster {
 	my $quorum = int(scalar(@nodes) / 2) + 1;
 	my $left = sub {$pass->{deadline} - $self->_now};
 
-	my %result = map {$_->{address} => $_} $self->unseal_nodes($pass, @nodes);
+	# A bound of zero still makes one full pass, with each request allowed its
+	# usual time, so that setting it to zero means "do not wait" rather than
+	# "do nothing".
+	my %result = map {$_->{address} => $_}
+		$self->unseal_nodes($timeout > 0 ? $pass : {failed_rounds => $pass->{failed_rounds}}, @nodes);
 	my $open = sub {scalar(grep {$result{$_}{unsealed}} @nodes)};
 	my $closed = sub {grep {!$result{$_}{unsealed}} @nodes};
 
 	while ($open->() < $quorum && $left->() > 0) {
-		$self->_pause(min(3, $left->()));
+		my $wait = max(0, min(3, $left->()));
+		$self->_pause($wait) if $wait > 0;
 		last if $left->() <= 0;
 		$result{$_->{address}} = $_ for $self->unseal_nodes($pass, $closed->());
 	}
@@ -1328,11 +1348,14 @@ sub _node_request {
 	$node_port ||= $port;
 	my $bracket = sub {$_[0] =~ /:/ ? "[$_[0]]" : $_[0]};
 
+	# curl takes a limit that rounds to zero as no limit at all, so every
+	# limit is rounded up to the next tenth of a second, and never below one.
 	$max_time = 10 unless defined($max_time) && $max_time > 0;
+	my $tenths = sub {sprintf('%.1f', max(1, POSIX::ceil($_[0] * 10 - 1e-9)) / 10)};
 	my @args = (
 		'-q', '-s',
-		'--connect-timeout', sprintf('%.1f', min(5, $max_time)),
-		'-m', sprintf('%.1f', $max_time),
+		'--connect-timeout', $tenths->(min(5, $max_time)),
+		'-m', $tenths->($max_time),
 		'-X', $method,
 		'--connect-to', join(':', '', $port, $bracket->($address), $node_port),
 	);
@@ -1352,13 +1375,20 @@ sub _node_request {
 		'%s://%s:%s/v1/%s', $scheme, $bracket->($host), $port, $path
 	));
 	if ($rc) {
-		# Verification stays on, and fails closed.  These are the ways curl
-		# says the node's certificate did not check out.
+		# Verification stays on, and fails closed.  Exit 35 is any failed
+		# handshake, which includes a node still starting that resets the
+		# connection, so it is worded more loosely than the exits that can
+		# only mean the certificate did not check out.
+		return $give->(undef, sprintf(
+			'the TLS handshake with %s failed, which can mean its certificate does '.
+			'not match the target name %s or that the node is still starting (curl exit 35)',
+			$node, $host
+		)) if $rc == 35;
 		return $give->(undef, sprintf(
 			'TLS verification failed: the certificate that %s presented does not '.
 			'verify against the target name %s (curl exit %d)',
 			$node, $host, $rc
-		)) if grep {$rc == $_} (35, 51, 58, 60);
+		)) if grep {$rc == $_} (51, 58, 60);
 		return $give->(undef, $rc == 28
 			? 'unreachable (timed out)'
 			: sprintf('unreachable (curl exit %d)', $rc));

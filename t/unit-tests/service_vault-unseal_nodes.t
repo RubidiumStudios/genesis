@@ -71,7 +71,7 @@ sub fake_cluster {
 			$CLOCK += $flag{'-m'};
 			return ('', 28, '');
 		}
-		return ('', 60, '') if $node->{tls_fail};
+		return ('', $node->{tls_rc} // 60, '') if $node->{tls_fail};
 		if ($node->{answers_after} && ++$node->{calls_seen} <= $node->{answers_after}) {
 			return ('', 7, '');
 		}
@@ -97,6 +97,8 @@ sub fake_cluster {
 			}
 			return (encode_json({errors => ['invalid key']}), 0, '')
 				unless $body->{key} =~ /^[A-Za-z0-9+\/]+=*$/;
+			return (encode_json({errors => ['Vault is not initialized']}), 0, '')
+				if $node->{errors_first} && $node->{errors_first}-- > 0;
 			push @{$node->{given} //= []}, $body->{key};
 			if (@{$node->{given}} >= $node->{threshold}) {
 				my %good = map {$_ => 1} @{$node->{accepts} // \@KEYS};
@@ -270,6 +272,16 @@ subtest 'a certificate that fails verification is named as such' => sub {
 		'and the message names the node and the target name instead of calling it unreachable');
 };
 
+subtest 'a failed handshake is not blamed on the certificate alone' => sub {
+	my %nodes = ('10.0.0.6' => sealed_node(tls_fail => 1, tls_rc => 35));
+	my ($results) = with_cluster(\%nodes, sub {
+		vault_at('https://vault.example.com', verify => 1)->unseal_nodes('10.0.0.6:443')
+	});
+	like($results->[0]{message},
+		qr/TLS handshake with 10\.0\.0\.6:443 failed, which can mean its certificate does not match the target name vault\.example\.com or that the node is still starting \(curl exit 35\)/,
+		'exit 35 names both a certificate mismatch and a node still starting');
+};
+
 subtest 'a node that will not reset is a failure for that round, with no keys sent' => sub {
 	my %nodes = ('10.0.0.5' => sealed_node(given => ['c3RhbGUtc2hhcmU='], reset_fails => 1));
 	my ($results, $calls) = with_cluster(\%nodes, sub {
@@ -404,6 +416,69 @@ subtest 'unseal_cluster starts nothing after its deadline' => sub {
 	is(scalar(@late), 0, 'and none was allowed to run past it');
 	ok((grep {$_->{message} =~ /time allowed ran out/} @{$result->[0]{nodes}}),
 		'a node the time did not reach says so');
+};
+
+subtest 'no request goes out with a limit curl would read as none' => sub {
+	# curl takes -m 0.0 and --connect-timeout 0.0 as no limit, so a node
+	# that accepts the connection and never replies would hang the deploy.
+	my %nodes = map {$_ => sealed_node()} qw/10.0.0.5 10.0.0.6/;
+	my ($result, $calls) = with_cluster(\%nodes, sub {
+		my $vault = vault_at('https://10.0.0.5');
+		my @out = $vault->unseal_nodes({deadline => $CLOCK + 0.04}, qw/10.0.0.5 10.0.0.6/);
+		$vault->_node_request('10.0.0.6', 'GET', 'sys/seal-status', undef, 0.04);
+		$vault->_node_request('10.0.0.6', 'GET', 'sys/seal-status', undef, 0.12);
+		@out;
+	});
+	like($result->[0]{message}, qr/time allowed ran out/,
+		'with under a tenth of a second left, no request starts');
+	is(scalar(@$calls), 2, 'so only the two direct requests reached curl');
+	my @limits = map {
+		my @a = @{$_->{args}};
+		map {$a[$_+1]} grep {$a[$_] eq '-m' || $a[$_] eq '--connect-timeout'} 0..$#a
+	} @$calls;
+	ok(!(grep {$_ < 0.1} @limits), 'and every limit curl was given is at least a tenth of a second');
+	is_deeply([@limits[2,3]], ['0.2', '0.2'], 'rounded up, never down, to the next tenth');
+};
+
+subtest 'a round cut short by an error is not written off' => sub {
+	# A new Raft node can answer "not initialized" for a moment.  With three
+	# keys and a threshold of three there is only one round, and marking it
+	# failed would leave the node sealed for good.
+	my %nodes = (
+		'10.0.0.5' => sealed_node(errors_first => 1),
+		'10.0.0.6' => sealed_node(active_after => 1),
+		'10.0.0.7' => sealed_node(),
+	);
+	my ($result) = with_cluster(\%nodes, sub {
+		vault_at('https://10.0.0.5', keys => [@KEYS[0..2]])->unseal_cluster(30, qw/10.0.0.5 10.0.0.6 10.0.0.7/)
+	});
+	ok($result->[0]{nodes}[0]{unsealed}, 'the node is unsealed on a later pass');
+	is($result->[0]{open}, 3, 'and the whole cluster is open');
+};
+
+subtest 'the pause between passes is never negative' => sub {
+	# The deadline can pass between checking the time left and pausing, and
+	# Time::HiRes::sleep dies on a negative number.
+	my %nodes = map {$_ => sealed_node(down => 1)} qw/10.0.0.5 10.0.0.6 10.0.0.7/;
+	my @pauses;
+	my ($result) = with_cluster(\%nodes, sub {
+		no warnings 'redefine';
+		local *Service::Vault::_now = sub { $CLOCK += 2.2; $CLOCK };
+		local *Service::Vault::_pause = sub { push @pauses, $_[1]; $CLOCK += $_[1] if $_[1] > 0 };
+		vault_at('https://10.0.0.5')->unseal_cluster(10, qw/10.0.0.5 10.0.0.6 10.0.0.7/)
+	});
+	ok($result->[0], 'the retries ran out their bound without dying');
+	ok(!(grep {$_ < 0} @pauses), 'and never with a negative duration');
+};
+
+subtest 'a bound of zero still makes one full pass' => sub {
+	my %nodes = map {$_ => sealed_node(active_after => 1)} qw/10.0.0.5 10.0.0.6 10.0.0.7/;
+	my ($result, $calls, undef, $pauses) = with_cluster(\%nodes, sub {
+		vault_at('https://10.0.0.5')->unseal_cluster(0, qw/10.0.0.5 10.0.0.6 10.0.0.7/)
+	});
+	is($result->[0]{open}, 3, 'every node is unsealed');
+	ok($result->[0]{active}, 'and each node is asked once for a leader');
+	is($pauses, 0, 'without any waiting');
 };
 
 subtest '_pause sleeps for fractions of a second' => sub {

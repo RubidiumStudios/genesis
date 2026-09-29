@@ -1685,8 +1685,11 @@ is given the keys a threshold's worth at a time, where the threshold is what
 the node reports. OpenBao counts a well-formed but wrong key, such as one left
 over from a rekey, like any other, and only throws the round away once the
 threshold is reached. So after a failed round the next combination of keys is
-tried, up to 64 combinations, and a round that failed is recorded so that it is
-never sent to that node again. A node is reset only just before a round is
+tried, up to 64 combinations. A round that the node judged in full, with every
+key sent, is recorded so that it is never sent to that node again. A round
+that an error cut short, such as a new Raft node answering that it is not
+initialized yet, says nothing about its keys, so it is not recorded and a
+later pass may send it again. A node is reset only just before a round is
 submitted to it, and only when it shows progress that the round did not make,
 whether that is an operator unsealing it by hand or an earlier round of ours
 that a malformed key cut short. A node that refuses the reset gets no keys,
@@ -1704,8 +1707,9 @@ B<Parameters:>
 =item C<\%pass>
 
 Optional. A hashref that ties this call to a larger pass, as
-L</unseal_cluster> uses it. Its C<deadline> is a time from L</_now>, after
-which no request starts, and against which every request is capped. Its
+L</unseal_cluster> uses it. Its C<deadline> is a time from L</_now>, against
+which every request is capped. No request starts once less than a tenth of a
+second remains, because curl would read a smaller limit as no limit at all. Its
 C<failed_rounds> is a hashref in which the rounds that failed on each node are
 recorded, so that a later call with the same hashref skips them.
 
@@ -1779,6 +1783,11 @@ remains, gives any node that is still closed one more try, so the cluster ends
 fully unsealed whenever every node can be reached in time. Without a quorum
 no leader can be elected, so it does not wait for one.
 
+A C<$timeout> of zero means "do not wait" rather than "do nothing". It still
+makes one full pass over every node, with each request allowed its usual ten
+seconds, and asks each node once for a leader, but it does not retry, pause,
+or give late nodes another try.
+
 B<Parameters:>
 
 =over 4
@@ -1846,7 +1855,11 @@ L</wait_for_active_node>. The request goes to the target's own URL, and
 curl's C<--connect-to> sends the connection to the node's address and port.
 TLS is therefore verified against the same name or address that C<safe>
 verifies, whether the target is an IP address or a hostname, and C<-k> is
-passed only when the target itself skips verification. The rule's first host
+passed only when the target itself skips verification. Every time limit
+handed to curl is rounded up to the next tenth of a second and is never below
+one tenth, because curl reads a limit that rounds to zero as no limit, and a
+node that accepts the connection but never replies would then hang the
+deploy. The rule's first host
 is left empty, as in C<:443:10.0.0.6:8200>, because curl compares it with the
 URL's host only after normalising the URL, and an empty host matches whatever
 that comes to. A target written in a non-canonical form therefore still
@@ -1886,10 +1899,12 @@ Optional. The most seconds the whole request may take, 10 by default.
 
 B<Returns:> The decoded reply as a hashref, or C<undef> when the node did not
 answer with a JSON object. In list context a second value says why there is
-no reply. A certificate that fails verification (curl exits 35, 51, 58, or 60)
-is reported as not verifying against the target name, naming the node, rather
-than as the node being unreachable. Verification itself stays on, so such a
-node is never unsealed.
+no reply. A certificate that fails verification (curl exits 51, 58, or 60) is
+reported as not verifying against the target name, naming the node, rather
+than as the node being unreachable. A failed handshake (curl exit 35) is
+reported as either a certificate mismatch or a node that is still starting,
+since a node that resets the connection while it starts looks the same to
+curl. Verification itself stays on, so such a node is never unsealed.
 
 B<Examples:>
 
