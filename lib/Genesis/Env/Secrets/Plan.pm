@@ -345,7 +345,7 @@ sub generate_secrets {
 					$self->notify(@update_args, 'done-item', result => 'ok')
 				}
 			} else {
-				$self->notify(@update_args, 'done-item', result => 'error', msg => $out);
+				$self->notify(@update_args, 'done-item', result => 'error', msg => join("\n", grep {defined($_) && length($_)} ($out, $err)));
 			}
 			last if ($rc);
 		}
@@ -487,7 +487,7 @@ sub regenerate_secrets {
 			} elsif ($rc == '0') {
 				$self->notify(@update_args, 'done-item', result => 'ok', msg => $out||undef)
 			} else {
-				$self->notify(@update_args, 'done-item', result => 'error', msg => $out);
+				$self->notify(@update_args, 'done-item', result => 'error', msg => join("\n", grep {defined($_) && length($_)} ($out, $err)));
 			}
 			last if ($rc);
 		}
@@ -1312,7 +1312,7 @@ sub _remove_secrets {
 			}
 		}
 
-		my ($result, $msg, $out, $rc, @command) = ();
+		my ($result, $msg, $out, $rc, $err, @command) = ();
 		if ($source eq 'credhub') {
 			# Credhub - to be implemented
 			my $credhub = $self->env->credhub;
@@ -1321,14 +1321,14 @@ sub _remove_secrets {
 		} elsif (!ref($secret)) {
 			# Raw vault path string
 			@command = ('delete', $self->store->base.$secret);
-			($out, $rc) = $self->store->service->query(@command);
+			($out, $rc, $err) = $self->store->service->query(@command);
 		} elsif (ref($secret) =~ /^Genesis::Secret(::|$)/) {
 			@command = $secret->get_safe_command_for('remove', %opts);
 			my $cmd_interactive = $secret->is_command_interactive('remove', %opts);
 			bug (
 				"Interactive removal of secrets is not yet supported"
 			) if $cmd_interactive;
-			($out, $rc) = $secret->process_command_output('remove', $self->store->service->query(@command));
+			($out, $rc, $err) = $secret->process_command_output('remove', $self->store->service->query(@command));
 			$secret->reset;
 		} else {
 			bug "Unknown secret type for removal";
@@ -1337,7 +1337,7 @@ sub _remove_secrets {
 		if ($rc == '0') {
 			$self->notify('remove', 'done-item', result => 'ok', msg => $out||undef)
 		} else {
-			$self->notify('remove', 'done-item', result => 'error', msg => $out);
+			$self->notify('remove', 'done-item', result => 'error', msg => join("\n", grep {defined($_) && length($_)} ($out, $err)));
 		}
 		last if ($rc);
 	}
