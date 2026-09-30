@@ -383,4 +383,40 @@ subtest 'a clear that leaves keys behind is caught' => sub {
 	ok $err, 'a path that will not empty is reported rather than written over';
 };
 
+subtest 'a failed write reports safe\'s errors and not its echo' => sub {
+	plan tests => 4;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	# safe echoes every key it sets to stderr, secret values included, and
+	# prints its errors there too, leaving stdout empty.
+	my $v = make_vault(name => 'failing');
+	stub_query($v, '', 1,
+		"k1: secretval\n".
+		"!! gave up writing secret/failing after 5 attempts against ".
+		"concurrent writers: 400 Bad Request: check-and-set parameter ".
+		"did not match the current version\n");
+	my $err = '';
+	eval {$v->set('secret/failing', k1 => 'secretval'); 1} or $err = $@;
+
+	like $err, qr/Could not write .*secret\/failing/, 'the write is reported failed';
+	like $err, qr/!! gave up writing secret\/failing after 5 attempts/,
+		'with the error safe printed on stderr';
+	unlike $err, qr/secretval/, 'and without the value it echoed';
+	unlike $err, qr/^k1:/m, 'or the echoed key line';
+};
+
+subtest 'a failed write with no safe error line falls back to stdout' => sub {
+	plan tests => 3;
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	my $v = make_vault(name => 'failing2');
+	stub_query($v, 'stdout complaint', 1, "k1: secretval\n");
+	my $err = '';
+	eval {$v->set('secret/failing2', k1 => 'secretval'); 1} or $err = $@;
+
+	like $err, qr/Could not write .*secret\/failing2/, 'the write is reported failed';
+	like $err, qr/stdout complaint/, 'with what safe printed on stdout';
+	unlike $err, qr/secretval/, 'and no secret echoed on stderr';
+};
+
 done_testing;

@@ -595,10 +595,13 @@ sub _write_batch {
 	my ($self, $path, $batch, $written) = @_;
 	return unless @$batch;
 
-	my ($out,$rc) = $self->query('set', $path, @$batch);
+	my ($out,$rc,$err) = $self->query('set', $path, @$batch);
+	# safe reports its errors on stderr, alongside an echo of every key it
+	# set -- values included -- so only its "!! " lines are safe to show.
+	my @errors = grep {/^!! /} split(/\n/, $err // '');
 	bail(
 		"Could not write #C{%s} to vault at #M{%s}:\n%s",
-		$path,$self->{url},$out
+		$path,$self->{url},@errors ? join("\n", @errors) : $out
 	) unless $rc == 0;
 
 	# Confirm everything written so far, not just this batch: a batch that
