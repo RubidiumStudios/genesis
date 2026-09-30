@@ -345,7 +345,7 @@ sub generate_secrets {
 					$self->notify(@update_args, 'done-item', result => 'ok')
 				}
 			} else {
-				$self->notify(@update_args, 'done-item', result => 'error', msg => join("\n", grep {defined($_) && length($_)} ($out, $err)));
+				$self->notify(@update_args, 'done-item', result => 'error', msg => join("\n", grep {defined($_) && length($_)} ($out, _safe_errors($err))));
 			}
 			last if ($rc);
 		}
@@ -487,7 +487,7 @@ sub regenerate_secrets {
 			} elsif ($rc == '0') {
 				$self->notify(@update_args, 'done-item', result => 'ok', msg => $out||undef)
 			} else {
-				$self->notify(@update_args, 'done-item', result => 'error', msg => join("\n", grep {defined($_) && length($_)} ($out, $err)));
+				$self->notify(@update_args, 'done-item', result => 'error', msg => join("\n", grep {defined($_) && length($_)} ($out, _safe_errors($err))));
 			}
 			last if ($rc);
 		}
@@ -843,6 +843,16 @@ sub notify {
 # }}}
 
 ### Private Instance Methods {{{
+# _safe_errors - safe's error lines from its stderr {{{
+# safe set echoes every key and value it writes to stderr, so only the
+# lines carrying its error prefix are fit to show.
+sub _safe_errors {
+	my ($err) = @_;
+	return undef unless defined($err);
+	return join("\n", grep {/^!! /} split(/\n/, $err));
+}
+
+# }}}
 # _order_secrets - determine signing changes, add defaults and specify build order {{{
 sub _order_secrets {
 	my $self = shift;
@@ -1337,7 +1347,7 @@ sub _remove_secrets {
 		if ($rc == '0') {
 			$self->notify('remove', 'done-item', result => 'ok', msg => $out||undef)
 		} else {
-			$self->notify('remove', 'done-item', result => 'error', msg => join("\n", grep {defined($_) && length($_)} ($out, $err)));
+			$self->notify('remove', 'done-item', result => 'error', msg => join("\n", grep {defined($_) && length($_)} ($out, _safe_errors($err))));
 		}
 		last if ($rc);
 	}
