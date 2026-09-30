@@ -106,6 +106,16 @@ subtest 'add reports stdout alone without a blank line' => sub {
 	is $done->{msg}, "some output", "message is only stdout";
 };
 
+subtest 'add keeps safe set value echo out of the message' => sub {
+	# safe set echoes each key and value it writes to stderr before any
+	# error, so only its error lines may reach the message.
+	my $plan = plan_with(['', 1, "uuid: 0f1e2d3c-secret-value\n$missing"]);
+	$plan->generate_secrets;
+	my ($done) = grep {$_->{result} eq 'error'} @{$plan->{done}};
+	is $done->{msg}, $missing, "message carries only the error line";
+	unlike $done->{msg}, qr/secret-value/, "written value is not shown";
+};
+
 subtest 'rotate reports stderr on failure' => sub {
 	my $plan = plan_with(['', 1, $missing]);
 	$plan->regenerate_secrets(no_prompt => 1);
