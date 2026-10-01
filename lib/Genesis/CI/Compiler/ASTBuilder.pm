@@ -393,17 +393,11 @@ sub _build_workflow_graph {
 
 # build_from_env_files - build workflow graph nodes+edges from genesis.pipeline.* {{{
 #
-# Scans *.yml files in $dir.  For each file that contains a
-#
-#   genesis:
-#     pipeline:
-#       prior_env:  <upstream-env>
-#       require_pr: true|false
-#       manual:     true|false
-#
-# block, a graph node is created (keyed by the file stem) and, when
-# prior_env names another env that is also present, a directed edge
-# is added: prior_env -> this_env.
+# Scans *.yml files in $dir.  Every environment Top::has_env accepts is a
+# graph node, keyed by the file stem, with its genesis.pipeline keys read
+# from its merged hierarchy through Top::_merged_env_params, and where its
+# prior_env names another environment also present, a directed edge is
+# added: prior_env -> this_env.
 #
 # Returns: (\%nodes, \@edges)
 #
@@ -420,15 +414,20 @@ sub build_from_env_files {
 
 	# Pass 1: enumerate valid environments (Top::has_env filters out
 	# shared parent config files like lmelt.yml that lack `genesis.env`
-	# and kit info) and collect their genesis.pipeline data.
+	# and kit info) and collect their genesis.pipeline data, read through
+	# the environment's merged hierarchy (D117), so a key a site file
+	# carries reaches every environment beneath it.
 	my $top = $self->{top};
 	my (%pipeline_data, %file_exists);
 	for my $file (@files) {
 		(my $env = $file) =~ s/\.ya?ml$//i;
 		next unless $top && $top->has_env($env);
 		$file_exists{$env} = 1;
-		my $data = _read_genesis_pipeline_keys("$dir/$file");
-		$pipeline_data{$env} = $data if %$data;
+		my $genesis = $top->_merged_env_params($env)->{genesis};
+		$genesis = {} unless ref($genesis) eq 'HASH';
+		my %data = ref($genesis->{pipeline}) eq 'HASH' ? %{$genesis->{pipeline}} : ();
+		$data{_bosh_env} = $genesis->{bosh_env} if defined $genesis->{bosh_env};
+		$pipeline_data{$env} = \%data if %data;
 	}
 
 	# Identify every environment that another environment names as its
@@ -587,92 +586,6 @@ sub _normalize_slack_config {
 		# style: set by caller based on legacy notifications: flag
 	};
 	return 0;
-}
-
-# }}}
-# _read_genesis_pipeline_keys - extract genesis-level and genesis.pipeline.* keys {{{
-#
-# Reads a YAML file line-by-line capturing:
-#   genesis:
-#     bosh_env: <value>      (genesis-level, stored as _bosh_env)
-#     pipeline:
-#       key: value           (pipeline sub-keys, stored directly)
-#       locks:
-#         bosh_upgrade: val  (stored as locks->{bosh_upgrade})
-#
-# Returns a hashref (may be empty).  No external YAML parser needed.
-sub _read_genesis_pipeline_keys {
-	my ($file) = @_;
-
-	open(my $fh, '<', $file) or return {};
-	my @lines = <$fh>;
-	close $fh;
-
-	my %result;
-	my ($in_genesis, $in_pipeline, $in_locks) = (0, 0, 0);
-
-	for my $line (@lines) {
-		chomp $line;
-		next if $line =~ /^\s*#/ || $line =~ /^\s*---/;
-
-		# Top-level key resets context
-		if ($line =~ /^([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/) {
-			my $key = $1;
-			$in_genesis  = $key eq 'genesis' ? 1 : 0;
-			$in_pipeline = 0;
-			$in_locks    = 0;
-			next;
-		}
-
-		# 'pipeline:' under genesis (2-space indent)
-		if ($in_genesis && $line =~ /^  pipeline:\s*$/) {
-			$in_pipeline = 1;
-			$in_locks    = 0;
-			next;
-		}
-
-		# Other 2-space keys under genesis: capture selected ones, reset pipeline context
-		if ($in_genesis && $line =~ /^  ([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/) {
-			my ($k, $v) = ($1, $2);
-			$in_pipeline = 0;
-			$in_locks    = 0;
-			if ($k eq 'bosh_env') {
-				$v =~ s/\s*#.*$//;
-				$v =~ s/^\s+|\s+$//g;
-				$v =~ s/^(["'])(.*)\1$/$2/;
-				$result{_bosh_env} = $v;
-			}
-			next;
-		}
-
-		# 'locks:' sub-section under genesis.pipeline (4-space, no inline value)
-		if ($in_pipeline && $line =~ /^    locks:\s*$/) {
-			$in_locks = 1;
-			next;
-		}
-
-		# 6-space keys under genesis.pipeline.locks
-		if ($in_locks && $line =~ /^      ([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/) {
-			my ($k, $v) = ($1, $2);
-			$v =~ s/\s*#.*$//;
-			$v =~ s/^\s+|\s+$//g;
-			$v =~ s/^(["'])(.*)\1$/$2/;
-			$result{locks}{$k} = $v;
-			next;
-		}
-
-		# 4-space keys under genesis.pipeline (non-locks)
-		if ($in_pipeline && $line =~ /^    ([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/) {
-			my ($k, $v) = ($1, $2);
-			$in_locks = 0;
-			$v =~ s/\s*#.*$//;    # strip inline comment
-			$v =~ s/^\s+|\s+$//g; # trim
-			$v =~ s/^(["'])(.*)\1$/$2/; # unquote surrounding quotes
-			$result{$k} = $v;
-		}
-	}
-
-	return \%result;
 }
 
 # }}}

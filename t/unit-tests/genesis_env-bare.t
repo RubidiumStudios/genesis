@@ -1,8 +1,8 @@
 #!/usr/bin/env perl
 # Proves T55, an environment read without a deployment behind it, T56, an
-# inherited pipeline key found through the merged read where the
-# compiler's leaf-only reader misses it, and T312, the same merged read
-# from whichever branch the checkout stands on.
+# inherited pipeline key found through the merged read, which the load and
+# the topology share now the compiler's leaf-only reader is gone, and T312,
+# the same merged read from whichever branch the checkout stands on.
 use strict;
 use warnings;
 use utf8;
@@ -18,7 +18,6 @@ use Test::Exception;
 use Genesis;
 use Genesis::Top;
 use Genesis::Env;
-use Genesis::CI::Compiler::ASTBuilder;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -88,14 +87,11 @@ subtest 'the merged read finds an inherited key the leaf lacks' => sub {
 		leaf_keys => {prior_env => 'lmelt-vsphere-canwest-1-lab'});
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
 
-	# The hazard's shape, which the compiler fixes and the reader below
-	# does not.  The baseline reader opens the leaf alone, finds the key
-	# absent, and says nothing about it.
-	my $leaf_only = Genesis::CI::Compiler::ASTBuilder::_read_genesis_pipeline_keys(
-		$top->path("$LEAF.yml")
-	);
-	is($leaf_only->{track_additional_files}, undef,
-		'the leaf-only reader finds the inherited key absent, with no error');
+	# The compiler's leaf-only reader, the hazard's shape, is gone (D117):
+	# the topology and the load read the same merged hierarchy, so the
+	# load-time read answers what lookup answers.
+	is_deeply($top->_merged_env_params($LEAF)->{genesis}{pipeline}{track_additional_files},
+		$TRACKED, 'the load-time read finds the inherited key');
 
 	my $env = Genesis::Env->bare($LEAF, $top);
 	is_deeply(scalar($env->lookup('genesis.pipeline.track_additional_files')), $TRACKED,

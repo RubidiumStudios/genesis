@@ -371,6 +371,32 @@ subtest 'pipeline_topology - prior_env becomes an edge' => sub {
 	is_deeply $topo->{children}{mgmt}, ['lab'], 'children resolves downward';
 };
 
+subtest 'pipeline_topology - inherited keys are read merged (T352)' => sub {
+	plan tests => 3;
+
+	# The site file east.yml names the predecessor and asks for a pull
+	# request, and the leaf east-qa.yml says neither.  A topology read off
+	# the leaf alone draws no edge and asks for nothing.
+	my $top = make_ci_top();
+	put_env($top, 'lab');
+	put_env($top, 'east-qa');
+	put_file($top->path('east.yml'), <<'EOF');
+---
+genesis:
+  pipeline:
+    prior_env:  lab
+    require_pr: true
+EOF
+
+	my $topo = $top->pipeline_topology;
+	is $topo->{parent_of}{'east-qa'}, 'lab',
+		"the site file's prior_env draws the leaf's edge";
+	is $topo->{nodes}{'east-qa'}{require_pr}, 1,
+		"and the site file's require_pr reaches the leaf's node";
+	ok !exists $topo->{nodes}{east},
+		'while the site file is no node of its own';
+};
+
 subtest 'pipeline_topology - order is topological, roots first' => sub {
 	plan tests => 1;
 
