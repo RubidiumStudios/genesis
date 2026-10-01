@@ -301,6 +301,7 @@ sub bosh_configs_upload {
 		my @runtime_builds = ();
 		my @runtime_skipped = ();
 		my $failures = 0;
+		my $compare_failures = 0;
 		for my $config (@$configs) {
 			_bosh_configs_status($config);
 			my $label = _bosh_configs_label($config);
@@ -308,6 +309,14 @@ sub bosh_configs_upload {
 			if ($config->{status} eq 'unsynthesized') {
 				error("[[  - >>%s could not be synthesized; see the errors above.", $label);
 				$failures++;
+				next;
+			}
+			if ($config->{status} eq 'error') {
+				# Excluded from the runtime-config hook's upload as well, which
+				# would otherwise upload every enabled build.
+				error("[[  - >>%s could not be compared with the director's copy:\n\n%s\n", $label, $config->{diff});
+				push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
+				$compare_failures++;
 				next;
 			}
 			if ($config->{status} eq 'identical') {
@@ -362,6 +371,11 @@ sub bosh_configs_upload {
 			"%d bosh config%s could not be synthesized, so %s not uploaded.",
 			$failures, $failures == 1 ? '' : 's', $failures == 1 ? 'it was' : 'they were'
 		) if $failures;
+		bail(
+			"%d bosh config%s could not be compared with the director's cop%s, so %s not uploaded.",
+			$compare_failures, $compare_failures == 1 ? '' : 's',
+			$compare_failures == 1 ? 'y' : 'ies', $compare_failures == 1 ? 'it was' : 'they were'
+		) if $compare_failures;
 		1;
 	};
 	my $err = $@;
@@ -482,6 +496,8 @@ sub bosh_configs_compare {
 		my $label = _bosh_configs_label($config);
 		if ($config->{status} eq 'unsynthesized') {
 			error("[[  - >>%s could not be synthesized; see the errors above.", $label);
+		} elsif ($config->{status} eq 'error') {
+			error("[[  - >>%s could not be compared with the director's copy:\n\n%s\n", $label, $config->{diff});
 		} elsif ($config->{status} eq 'missing') {
 			info(
 				"[[  - >>%s is #R{missing} from the director; the synthesized config is:\n\n%s",
@@ -678,13 +694,20 @@ sub _bosh_configs_status {
 	}
 
 	my $uploaded = $bosh->get_config($config->{type}, $config->{name});
-	my ($diff, $is_diff) = spruce_diff(
+	my ($diff, $rc) = spruce_diff(
 		{content => $uploaded,          label => 'uploaded'},
 		{content => $config->{content}, label => 'synthesized'}
 	);
 	$config->{uploaded} = $uploaded;
+	# spruce exits 2 or more when it cannot compare the two, and its output
+	# is then the reason, not a diff.
+	if ($rc > 1) {
+		$config->{diff}   = $diff || "spruce diff exited $rc with no output";
+		$config->{status} = 'error';
+		return $config->{status};
+	}
 	$config->{diff}     = $diff;
-	$config->{status}   = $is_diff ? 'different' : 'identical';
+	$config->{status}   = $rc ? 'different' : 'identical';
 	return $config->{status};
 }
 
@@ -697,6 +720,7 @@ sub _bosh_configs_status_label {
 		different     => '#Y{different}',
 		missing       => '#R{missing}',
 		unsynthesized => '#R{not synthesized}',
+		error         => '#R{could not compare}',
 	);
 	return $labels{$config->{status} // ''} // '#R{unknown}';
 }

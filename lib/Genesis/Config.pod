@@ -672,7 +672,11 @@ and prints the differences using C<spruce_diff>. Output goes to the Genesis
 info log.
 
 If no differences are found, prints a message saying so. If differences
-exist, prints a formatted diff showing what changed.
+exist, prints a formatted diff showing what changed.  The outcome comes from
+the exit code C<spruce_diff> returns.  When spruce exits 2 or higher because
+it could not compare the two, a warning carrying spruce's output is printed
+instead, and the method still returns normally, because the comparison is
+only informational.
 
 B<Parameters:>
 

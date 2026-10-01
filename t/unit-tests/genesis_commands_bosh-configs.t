@@ -146,6 +146,16 @@ sub plain_diff {
 	return ("--- $first->{label}\n+++ $second->{label}\n", 1, '');
 }
 
+# broken_diff - plain_diff, except that synthesized content holding BROKEN
+# makes spruce fail the way it does on YAML it cannot parse, with rc 2 and
+# its error as the output.
+sub broken_diff {
+	my ($first, $second) = @_;
+	return ("unable to parse data from $second->{label}: yaml: line 1: did not find expected node content", 2, undef)
+		if $second->{content} =~ /BROKEN/;
+	return plain_diff(@_);
+}
+
 # ---------------------------------------------------------------------------
 # Ownership of director config names
 # ---------------------------------------------------------------------------
@@ -228,6 +238,26 @@ subtest '_bosh_configs_status - identical, different, missing, unsynthesized' =>
 		'undefined content is unsynthesized');
 };
 
+subtest '_bosh_configs_status - a spruce failure is an error, not a difference' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&broken_diff;
+	my $director = make_director('parent',
+		{cloud => {'test-env.cf' => entry(3)}},
+		contents => {'cloud|test-env.cf' => "azs:\n- name: z1\n"},
+	);
+
+	my $broken = {type => 'cloud', name => 'test-env.cf', bosh => $director, content => "azs: [BROKEN\n"};
+	is(Genesis::Commands::Bosh::_bosh_configs_status($broken), 'error',
+		'a config spruce cannot compare has the error status');
+	like($broken->{diff}, qr/unable to parse data from synthesized/,
+		'spruce\'s output is kept as the diff');
+	is(Genesis::Commands::Bosh::_bosh_configs_status_label($broken), '#R{could not compare}',
+		'the summary label says the comparison failed');
+	isnt(Genesis::Commands::Bosh::_bosh_configs_status_label($broken), '#R{unknown}',
+		'the error status has a label of its own');
+};
+
 # ---------------------------------------------------------------------------
 # summary
 # ---------------------------------------------------------------------------
@@ -268,6 +298,24 @@ subtest 'bosh_configs_summary - one row per provided config with its director st
 	my ($collect) = grep {$_->[0] eq 'runtime-config'} @hook_calls;
 	ok($collect && $collect->[1]{collect},
 		'runtime configs were synthesized through the hook in collect mode');
+};
+
+subtest 'bosh_configs_summary - a config spruce cannot compare is not reported different' => sub {
+	plan tests => 3;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&broken_diff;
+	my $director = make_director('parent',
+		{cloud => {'test-env.cf' => entry(3)}},
+		contents => {'cloud|test-env.cf' => "azs: []\n"},
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: [BROKEN\n");
+
+	my ($out, $err) = output_from { Genesis::Commands::Bosh::bosh_configs_summary($env, $director) };
+	my $all = $out.$err;
+	like($all, qr/^.*cloud.*test-env\.cf\b.*parent.*could not compare/m,
+		'the row says the comparison failed');
+	unlike($all, qr/\b(different|identical)\b/, 'the row says neither different nor identical');
+	unlike($all, qr/unknown/, 'the row does not fall back to unknown');
 };
 
 subtest 'bosh_configs_summary - nothing provided' => sub {
@@ -359,6 +407,24 @@ subtest 'bosh_configs_compare - reports identical, different, and missing' => su
 	like($all, qr/cloud config test-env\.cf on parent is identical/, 'identical config reported');
 	like($all, qr/runtime config test-env\.cf\.dns on parent is different/, 'different config reported with a diff');
 	like($all, qr/runtime config test-env\.cf\.ops on parent is missing.*addons: \[\]/s, 'missing config reported with its content');
+};
+
+subtest 'bosh_configs_compare - a spruce failure is reported as an error with its output' => sub {
+	plan tests => 3;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&broken_diff;
+	my $director = make_director('parent',
+		{cloud => {'test-env.cf' => entry(3)}},
+		contents => {'cloud|test-env.cf' => "azs: []\n"},
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: [BROKEN\n");
+
+	my ($out, $err) = output_from { Genesis::Commands::Bosh::bosh_configs_compare($env, $director) };
+	my $all = $out.$err;
+	like($all, qr/cloud config test-env\.cf on parent could not be compared with the director's copy/,
+		'the config is reported as not compared');
+	like($all, qr/unable to parse data from synthesized/, 'spruce\'s output is shown');
+	unlike($all, qr/\b(different|identical)\b/, 'it is not reported as different or identical');
 };
 
 # ---------------------------------------------------------------------------
@@ -492,6 +558,48 @@ subtest 'bosh_configs_upload - cloud under the network lock, runtime through the
 	is($runtime_upload->[1]{interactive}, 0, 'without prompting, since confirmation already happened');
 	is_deeply($runtime_upload->[1]{args}, {dns => {}, ops => JSON::PP::false},
 		'only the changed build is requested; the identical one is excluded');
+};
+
+subtest 'bosh_configs_upload - a config spruce cannot compare is never uploaded' => sub {
+	plan tests => 6;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&broken_diff;
+	my $director = make_director('parent',
+		{
+			cloud   => {'test-env.cf' => entry(3)},
+			runtime => {'test-env.cf.dns' => entry(7), 'test-env.cf.ops' => entry(8)},
+		},
+		contents => {
+			'cloud|test-env.cf'       => "azs: []\n",
+			'runtime|test-env.cf.dns' => "releases: []\n",
+			'runtime|test-env.cf.ops' => "addons: []\n",
+		},
+	);
+	my $env = make_env(
+		hooks       => {'cloud-config' => 1, 'runtime-config' => 1},
+		cloud       => "azs: [BROKEN\n",
+		network_map => {subnets => {'ocfp-0' => {claims => {}}}},
+		runtime     => [
+			{build => 'dns', name => 'test-env.cf.dns', description => 'Dns', content => "releases: [BROKEN\n"},
+			{build => 'ops', name => 'test-env.cf.ops', description => 'Ops', content => "addons:\n- name: ops\n"},
+		],
+		lookups     => {'bosh-configs.runtime' => {dns => {}, ops => {}}},
+	);
+
+	@director_calls = ();
+	@hook_calls = ();
+	my ($out, $err);
+	throws_ok {
+		($out, $err) = output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1) }
+	} qr/2 bosh configs could not be compared with the director's copies, so they were not uploaded/,
+		'the upload fails and counts the configs it could not compare';
+	ok(!grep({$_->[0] eq 'upload_config'} @director_calls), 'the cloud config spruce could not compare is not uploaded');
+	ok(!grep({$_->[0] eq 'set_path'} @director_calls), 'and no network map is submitted for it');
+	my ($runtime_upload) = grep {$_->[0] eq 'runtime-config' && !$_->[1]{collect}} @hook_calls;
+	ok($runtime_upload, 'the runtime config that compared cleanly is still uploaded');
+	is_deeply($runtime_upload->[1]{args}, {dns => JSON::PP::false, ops => {}},
+		'the runtime config spruce could not compare is excluded from the upload');
+	ok(grep({$_->[0] eq 'clear_network_lock'} @director_calls), 'the network claims lock is released');
 };
 
 subtest 'bosh_configs_upload - --name on a runtime config leaves the network lock alone' => sub {

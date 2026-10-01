@@ -865,6 +865,56 @@ YAML
 	is $upload_called, 1, 'upload was invoked exactly once';
 };
 
+# ======================================================================
+# _check_cpi_config - comparing with the director's copy
+# ======================================================================
+
+# cpi_check_env - just enough of an env for _check_cpi_config to reach the
+# comparison: a director holding a CPI config and a cpi-config hook that
+# synthesizes one with no secrets.
+sub cpi_check_env {
+	my $director = mock 'Test::Mock::CpiCheck::Director' => {
+		alias      => 'parent',
+		get_config => sub { "cpis:\n- name: current\n" },
+	};
+	return mock 'Test::Mock::CpiCheck::Env' => {
+		use_create_env   => 0,
+		cpi_name         => 'test-env.aws.cf',
+		bosh             => $director,
+		has_hook         => 1,
+		cpi_credhub_base => '/test/credhub/',
+		is_ocfp          => 1,
+		run_hook         => sub { return {content => "cpis:\n- name: new\n", credhub_secrets => {}} },
+	};
+}
+
+subtest '_check_cpi_config - a spruce failure is fatal, never a change' => sub {
+	plan tests => 4;
+	no warnings qw(redefine once);
+	local *Genesis::Env::spruce_diff = sub {
+		return ("unable to parse data from new: yaml: line 1: did not find expected node content", 2, undef);
+	};
+
+	my $result;
+	stderr_from { $result = Genesis::Env::_check_cpi_config(cpi_check_env()) };
+	is $result->{state}, 'error', 'the state is error';
+	ok $result->{fatal}, 'the error is fatal';
+	like $result->{msg}, qr/could not be compared.*unable to parse data from new/s,
+		'the message carries what spruce said';
+	ok !exists $result->{fix_data}, 'no fix is offered for a config that could not be compared';
+};
+
+subtest '_check_cpi_config - a difference is still a change' => sub {
+	plan tests => 2;
+	no warnings qw(redefine once);
+	local *Genesis::Env::spruce_diff = sub { return ("cpis\n  - name: current\n  + name: new", 1, undef) };
+
+	my $result;
+	stderr_from { $result = Genesis::Env::_check_cpi_config(cpi_check_env()) };
+	is $result->{state}, 'changed', 'the state is changed';
+	ok !$result->{fatal}, 'a change is not fatal';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

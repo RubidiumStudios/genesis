@@ -690,6 +690,37 @@ EOF
 		"show_diff(other) emits either the diff or the no-diff banner");
 };
 
+# show_diff used to call spruce_diff in scalar context, which yields the last
+# element of its return list (stderr, usually undef), so every comparison
+# reported no differences.
+subtest 'show_diff() reports what spruce_diff found' => sub {
+	plan tests => 7;
+	my $config = Genesis::Config->new();
+	$config->set('foo', 'modified');
+	my $other = Genesis::Config->new();
+	$other->set('foo', 'original');
+
+	no warnings qw(redefine once);
+	my @result;
+	local *Genesis::Config::spruce_diff = sub { return @result };
+
+	@result = ('', 0, undef);
+	my $out = stderr_from { $config->show_diff($other) };
+	like($out, qr/No differences found between existing and updated configuration/,
+		'rc 0 says there are no differences');
+
+	@result = ("foo\n  ± value change\n  - original\n  + modified", 1, undef);
+	$out = stderr_from { $config->show_diff($other) };
+	like($out, qr/Differences between existing and updated configuration:/, 'rc 1 says there are differences');
+	like($out, qr/\+ modified/, 'and shows them');
+	unlike($out, qr/No differences found/, 'and does not claim there are none');
+
+	@result = ("unable to parse data from saved: yaml: line 1: did not find expected node content", 2, undef);
+	lives_ok { $out = stderr_from { $config->show_diff($other) } } 'a spruce failure does not die';
+	like($out, qr/could not compare.*unable to parse data from saved/si, 'it warns with what spruce said');
+	unlike($out, qr/No differences found|Differences between/, 'and reports neither outcome');
+};
+
 subtest 'get() with default parameter' => sub {
 	my $config = Genesis::Config->new();
 	$config->set('existing', 'value');

@@ -6099,12 +6099,26 @@ sub _check_cpi_config {
 	);
 	info("[[  - >>CPI config synthesized.");
 
-	my ($diff,$is_diff) = spruce_diff(
+	my ($diff,$rc) = spruce_diff(
 		{content => $current_config,        label => 'current'},
 		{content => $cpi_config->{content}, label => 'new'}
 	);
 
-	if ($is_diff) {
+	# spruce exits 2 or more when it cannot compare the two configs, and its
+	# output is then the reason rather than a diff, so nothing is uploaded.
+	if ($rc > 1) {
+		info("[[  - >>CPI config comparison #R{failed}");
+		return {
+			state => 'error',
+			fatal => 1,
+			msg   => sprintf(
+				"CPI config #m{%s} could not be compared with the one on the BOSH director:\n\n%s",
+				$cpi_name, $diff || "spruce diff exited $rc with no output"
+			),
+		};
+	}
+
+	if ($rc) {
 		info(
 			"[[  - >>required CPI config #m{%s} is different from the one currently on the BOSH director:\n\n%s",
 			$cpi_name, $diff

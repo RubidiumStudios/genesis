@@ -437,8 +437,9 @@ director), and the parsed command options.
 Synthesizes every config the environment provides (honoring C<--type> and
 C<--name>), compares each with the director's copy, and prints a table of
 type, name, director, and status.  The status is C<identical>, C<different>,
-C<missing> (the director holds no copy), or C<not synthesized> (the hook
-reported a failure for it).  Config types the kit does not provide, or that
+C<missing> (the director holds no copy), C<not synthesized> (the hook
+reported a failure for it), or C<could not compare> (spruce failed to
+compare the config with the director's copy).  Config types the kit does not provide, or that
 do not apply to the environment, are explained in notes after the table.
 
 B<Parameters:>
@@ -475,7 +476,10 @@ Synthesizes the provided configs and uploads those that differ from, or are
 missing on, the director.  For each such config it shows the diff (or the
 whole content when the director has none) and asks for confirmation unless
 C<--yes> was given; outside a controlling terminal C<--yes> is required.
-Configs that are already identical are reported and skipped.
+Configs that are already identical are reported and skipped.  A config
+that spruce could not compare with the director's copy is reported with
+spruce's output and never uploaded, and a runtime config in that state is
+excluded from the C<runtime-config> hook's upload.
 
 Cloud configs are handled the way the deploy path handles them: the network
 claims lock is taken on the director before the cloud config is synthesized,
@@ -517,6 +521,11 @@ B<Errors:>
 
 Raised (via C<bail()>) after the other configs have been handled, when one
 or more hooks failed to produce a config.
+
+=item C<"%d bosh config%s could not be compared with the director's cop%s, so %s not uploaded.">
+
+Raised (via C<bail()>) after the other configs have been handled, when
+spruce could not compare one or more configs with the director's copies.
 
 =back
 
@@ -635,8 +644,9 @@ B<Examples:>
   bosh_configs_compare($env, $bosh, %options)
 
 Synthesizes the provided configs and reports, for each, whether the
-director's copy is identical, different (with the C<spruce diff> output), or
-missing (with the synthesized content).  Honors C<--type> and C<--name>.
+director's copy is identical, different (with the C<spruce diff> output),
+missing (with the synthesized content), or could not be compared (with
+spruce's output, reported as an error).  Honors C<--type> and C<--name>.
 Nothing is changed on the director.
 
 B<Parameters:>
@@ -819,8 +829,10 @@ B<Examples:>
 Compares a config record with the director's copy and records the outcome
 on it: C<unsynthesized> when C<content> is undefined, C<missing> when the
 director has no current config of that type and name, otherwise
-C<identical> or C<different> from C<spruce_diff>.  Sets C<uploaded> and
-C<diff> on the record when a comparison was made.
+C<identical> or C<different> from C<spruce_diff>, or C<error> when spruce
+exits 2 or higher because it could not compare the two.  Sets C<uploaded>
+and C<diff> on the record when a comparison was made; for C<error>, C<diff>
+holds spruce's output rather than a diff.
 
 B<Parameters:>
 
@@ -839,11 +851,15 @@ B<Examples:>
   _bosh_configs_status($config);
   # Returns: 'different'; $config->{diff} holds the spruce diff output
 
+  _bosh_configs_status($unparseable);
+  # Returns: 'error'; $unparseable->{diff} holds spruce's error
+
 =head2 _bosh_configs_status_label($config)
 
   my $label = _bosh_configs_status_label($config);
 
-The colored status word for the summary table.
+The colored status word for the summary table.  The C<error> status reads
+C<could not compare>, and a status with no label reads C<unknown>.
 
 B<Parameters:>
 
@@ -861,6 +877,9 @@ B<Examples:>
 
   _bosh_configs_status_label({status => 'missing'});
   # Returns: '#R{missing}'
+
+  _bosh_configs_status_label({status => 'error'});
+  # Returns: '#R{could not compare}'
 
 =head2 _bosh_configs_label($config)
 

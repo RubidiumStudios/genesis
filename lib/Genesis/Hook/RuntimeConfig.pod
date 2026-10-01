@@ -792,6 +792,19 @@ The fully-qualified BOSH runtime config name to look up on the director.
 B<Returns:> C<1> if an upload is needed (new config or differences found),
 C<undef> if the config is already up to date.
 
+B<Errors:>
+
+=over 4
+
+=item C<"Could not compare the existing and generated %s runtime config:\n\n%s">
+
+Raised (via C<bail()>) when spruce exits 2 or higher because it could not
+compare the two configs.  The first C<%s> is the build's description and the
+second is spruce's output.  Nothing is shown as changes and nothing is
+uploaded.
+
+=back
+
 B<Examples:>
 
     my $needs_upload = $hook->compare_configs('dns', $yaml, 'us-east-1-bosh.dns');

@@ -745,6 +745,47 @@ subtest 'collect_configs - returns the synthesized configs without touching the 
 };
 
 # ---------------------------------------------------------------------------
+# compare_configs - spruce's exit code
+# ---------------------------------------------------------------------------
+# compare_hook - a hook whose director already holds the dns runtime config.
+sub compare_hook {
+	my $hook = make_hook();
+	$hook->{builds} = {dns => {description => 'BOSH DNS'}};
+	$hook->{bosh} = mock 'Mock::RuntimeConfig::CompareBosh' => {
+		alias      => 'mock-bosh',
+		has_config => 1,
+		get_config => sub { "releases: []\n" },
+	};
+	return $hook;
+}
+
+subtest 'compare_configs - a spruce failure bails before anything is shown as changes' => sub {
+	plan tests => 2;
+	no warnings 'redefine';
+	local *Genesis::Hook::RuntimeConfig::spruce_diff = sub {
+		return ("unable to parse data from generated: yaml: line 1: did not find expected node content", 2, undef);
+	};
+	my $hook = compare_hook();
+	my $err = '';
+	throws_ok {
+		$err = stderr_from { $hook->compare_configs('dns', "releases: [\n", 'test-env-bosh.dns') };
+	} qr/could not compare.*BOSH DNS.*unable to parse data from generated/si,
+		'the hook bails with what spruce said';
+	unlike($err, qr/found the following changes/, 'nothing is shown as changes');
+};
+
+subtest 'compare_configs - differences still ask for an upload' => sub {
+	plan tests => 2;
+	no warnings 'redefine';
+	local *Genesis::Hook::RuntimeConfig::spruce_diff = sub { return ("releases\n  + name: bosh-dns", 1, undef) };
+	my $hook = compare_hook();
+	my $result;
+	my $err = stderr_from { $result = $hook->compare_configs('dns', "releases:\n- name: bosh-dns\n", 'test-env-bosh.dns') };
+	is($result, 1, 'a difference needs an upload');
+	like($err, qr/found the following changes/, 'the differences are shown');
+};
+
+# ---------------------------------------------------------------------------
 # done testing
 # ---------------------------------------------------------------------------
 done_testing;
