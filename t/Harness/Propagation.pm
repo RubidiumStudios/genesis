@@ -5701,6 +5701,11 @@ sub _cached {
 
 	local $CACHE_DEPTH = 1;
 	my $dir = _cache_dir($name, @args);
+
+	# A build seeds the global configuration as it creates the repository,
+	# and a restore creates nothing, so it is seeded here for both, or a file
+	# whose first harness comes from the cache runs without one.
+	helper::provide_rc() unless defined do {no warnings 'once'; $Genesis::RC};
 	return _restore_harness($dir) if -f "$dir/harness.json";
 
 	my $armed = @ARMED;

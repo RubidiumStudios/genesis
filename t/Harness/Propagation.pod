@@ -46,7 +46,9 @@ names are their content), the vault records under the mount are imported,
 and what the build armed is armed again.  A restored harness has the same
 repositories, commits, records and fields as the build it was kept from,
 which C<t/integration-tests/harness_propagation-cache.t> holds it to, and
-takes about a tenth of a second where a build takes seconds.
+takes about a tenth of a second where a build takes seconds.  The global
+configuration, C<$Genesis::RC>, is seeded before either, because a build
+seeds it as it creates the repository and a restore creates nothing.
 
 The key covers the builder, its arguments, and the size and time of every
 file under F<lib/>, F<t/Harness>, F<t/kits> and F<t/src>, F<bin/genesis> and
