@@ -923,7 +923,12 @@ sub curl {
 	return $status, $status_line, $file ? $file : join($/, @data), join($/, @header_data), join($/, @err_data);
 }
 
-# spruce_diff - diff two yaml files, and return the diff as a colored string.
+# spruce_diff - diff two yaml files, and return the diff as a colored string,
+# along with spruce's own exit code: 0 for no differences, 1 for differences,
+# and 2 or more when spruce could not compare the files, in which case the
+# output holds spruce's error.  Always use this instead of running
+# `spruce diff` under fake_tty directly, because script(1) only passes the
+# exit code through on macOS.
 sub spruce_diff {
 	my ($first, $second) = @_;
 	bug("spruce diff requires two files") unless @_ == 2;
@@ -982,12 +987,25 @@ sub spruce_diff {
 	my $out_file = "$scratchdir/out.diff";
 	my (undef,$rc,$err) = run({redact => 1}, fake_tty($out_file, "spruce", "diff", $first, $second));
 	my $out = slurp($out_file);
-	if ($out =~ s/\nScript done.*\[COMMAND_EXIT_CODE="(.*)"]$//m) {
-		$rc = $1;  # Linux stores command exit code in the script output
-	}
-	$out =~ s/^Script [^\n]+\n//m; # remove script header (linux)
 
-	# FIXME: diff between failed diff vs diff with differences
+	# util-linux script(1) exits 0 whatever the command did, and records the
+	# command's exit code in a "Script done" trailer instead.  When the
+	# trailer carries a reason in place of a code, the command did not exit
+	# on its own (`[<terminated by signal 15>]`, for example); that is a
+	# failure, and the reason is kept in the output so the caller can report
+	# it.  Releases older than 2.35 write a bare date, which is removed and
+	# leaves the exit code as script(1) gave it.
+	if ($out =~ s/\n?^Script done on ([^\n]*)\n?\z//m) {
+		my $trailer = $1;
+		if ($trailer =~ /\[COMMAND_EXIT_CODE="(\d+)"\]/) {
+			$rc = $1;
+		} elsif ($trailer =~ /\[<(.*)>\]/) {
+			$out .= "\n$1";
+			$rc = 2 unless $rc && $rc > 1;
+		}
+	}
+	$out =~ s/\A\s*Script started on [^\n]*\n//; # remove script header (linux)
+
 	$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/smr;
 	return ($out, $rc, $err);
 }

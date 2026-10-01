@@ -726,25 +726,18 @@ sub compare_kits {
 				}	else {
 					my $added = $added_specs->{jobs}{$job};
 					my $removed = $removed_specs->{jobs}{$job};
-					my ($diff, $rc, $error) = run({interactive => 0},
-						fake_tty(workdir('spec-diffs').'/diff', 'spruce', 'diff', $removed, $added)
-					);
-					if ($rc > 1) { # Error
+					my ($status, $diff) = _diff_job_specs($removed, $added);
+					if ($status eq 'error') {
 						output(
 							"\n[#m{%s/job/%s}] #Ri{Error comparing job spec between v%s and v%s - cannot compare:}\n\n#y{%s}",
 							$name, $job, $removed_version, $added_version, $diff
 						);
-					} elsif ($diff eq '') {
+					} elsif ($status eq 'unchanged') {
 						output(
 							"\n[#m{%s/job/%s}] #Gi{Job spec is unchanged between v%s and v%s}",
 							$name, $job, $removed_version, $added_version
 						) if (get_options->{show_unchanged_jobs});
 					} else {
-						# for some reason, the output from script is utf-8 encoded, but
-						# prints out as ascii
-						utf8::decode($diff);
-						$diff =~ s/\A\s+//;
-						$diff =~ s/\s+\z//;
 						output(
 							"\n[#m{%s/job/%s}] #Yi{Job spec changes between v%s and v%s}:\n\n%s",
 							$name, $job, $removed_version, $added_version, $diff
@@ -818,6 +811,19 @@ sub compare_kits {
 	success("Comparison complete.\n");
 
 	exit 0;
+}
+
+# Compares two job spec files, and says whether they are unchanged, changed,
+# or could not be compared.  The diff, or spruce's error, comes back with the
+# status.  This goes through spruce_diff because script(1) only passes
+# spruce's exit code through on macOS, so a spruce failure on Linux used to
+# be shown as a set of spec changes.
+sub _diff_job_specs {
+	my ($removed, $added) = @_;
+	my ($diff, $rc) = spruce_diff($removed, $added);
+	return ('error', $diff || "spruce diff exited $rc with no output") if $rc > 1;
+	return ('unchanged', '') unless $rc;
+	return ('changed', $diff);
 }
 
 sub _get_kit_releases {

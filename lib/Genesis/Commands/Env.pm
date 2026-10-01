@@ -10,7 +10,6 @@ use Genesis::Term;
 use Genesis::Commands;
 use Genesis::Top;
 use Genesis::UI;
-use Encode qw(decode_utf8);
 
 sub create {
 
@@ -1295,14 +1294,8 @@ sub deploy {
 						my $old_path = "$cloud_config_dir/current-${cloud_config_name}.yml";
 						info "[[  - >>comparing generated cloud config with existing cloud config...";
 						$env->bosh->download_configs($old_path,'cloud',$cloud_config_name);
-						my ($out, $rc, $err) = run(
-							fake_tty("$cloud_config_dir/spruce-out.txt",'spruce','diff',$old_path, $new_path_diff)
-						);
-						bail "Error comparing cloud configs: %s", $err if $rc;
-
-						$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/mrs;
+						my $out = _deploy_cloud_config_diff($old_path, $new_path_diff);
 						if ($out) {
-							$out =~ s/\(root level\)/<root>/m;
 							info "[[  - >>#yui{found the following differences:}\n\n%s", $out;
 							if ($dryrun) {
 								_deploy_dryrun_cloud_config_warning($env, $cloud_config_name, 'outdated');
@@ -1815,6 +1808,25 @@ sub _format_deploy_feature_opt_in {
 	);
 }
 
+# _deploy_cloud_config_diff - the differences between the director's cloud config and the generated one {{{
+#
+# Returns '' when they match, and the diff when they differ.  A spruce
+# failure aborts the deploy with spruce's own message.  This goes through
+# spruce_diff because script(1) only passes spruce's exit code through on
+# macOS.  When this ran spruce under fake_tty directly, any change aborted a
+# deploy on macOS with an empty message, and on Linux a spruce failure read
+# as a difference.
+sub _deploy_cloud_config_diff {
+	my ($old_path, $new_path) = @_;
+	my ($out, $rc) = spruce_diff($old_path, $new_path);
+	bail("Error comparing cloud configs: %s", $out || "spruce diff exited $rc with no output")
+		if $rc > 1;
+	return '' unless $rc;
+	$out =~ s/\(root level\)/<root>/m;
+	return $out;
+}
+
+# }}}
 # _deploy_dryrun_cloud_config_warning - say that a dry run validates against the director's copy of the cloud config {{{
 sub _deploy_dryrun_cloud_config_warning {
 	my ($env, $cloud_config_name, $state) = @_;

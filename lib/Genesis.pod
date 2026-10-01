@@ -1721,6 +1721,19 @@ B<Examples:>
 Runs C<spruce diff> against two YAML sources and returns the coloured diff
 output, exit code, and any stderr.
 
+The exit code is spruce's own on both platforms: 0 when the sources match, 1
+when they differ, and 2 or higher when spruce could not compare them, in
+which case the output holds spruce's error.  On macOS C<script -e> passes the
+code through.  On Linux C<script(1)> always exits 0, so the code is read
+from the C<[COMMAND_EXIT_CODE="N"]> trailer of the typescript.  A trailer
+that carries a reason instead of a code, such as
+C<< [<terminated by signal 15>] >>, is reported as rc 2 with the reason
+appended to the output.  The typescript's header and trailer never appear in
+the returned output.
+
+Call this rather than running C<spruce diff> under C<fake_tty> directly,
+which loses the exit code on Linux.
+
 Each argument can be:
 
 =over 4
@@ -1786,7 +1799,9 @@ ref type.
 B<Examples:>
 
     my ($diff, $rc) = spruce_diff($before_file, $after_file);
-    # Returns: (diff string, 0) on success; (diff string, 1) on differences found
+    # Returns: ('', 0) when the files match; (diff string, 1) when they differ;
+    #          (spruce's error, 2) when spruce cannot compare them
+    bail("Cannot compare: %s", $diff) if $rc > 1;
     print $diff if $rc;
 
 =head2 slurp
