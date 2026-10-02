@@ -892,13 +892,16 @@ An arrayref of the commit's triggering paths for this environment.
 =item C<ancestors>
 
 An arrayref of the environment's ancestors, nearest first, each a hashref of
-C<name>, C<env>, and the C<certified> record L</certified_for> answers.
+C<name>, C<env>, C<manual>, and the C<certified> record L</certified_for>
+answers.  C<manual> is the ancestor's topology node's flag, read with every
+other shape key from the merged hierarchy, so nothing here reads a pipeline
+key off C<env>.
 
 =item C<provider>
 
 The pipeline provider that owns propagation here.  Only an automated one lets
-an ancestor's C<genesis.pipeline.manual> read as awaiting its trigger, since
-the key is inert under the manual provider.
+an ancestor's C<manual> flag read as awaiting its trigger, since the key is
+inert under the manual provider.
 
 =back
 

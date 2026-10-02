@@ -185,6 +185,7 @@ unit-tests/genesis_ci_marker-recovery.t              # the marker recovered from
 unit-tests/genesis_ci_walk-routing.t                # what routes a commit, and what the overlap counts
 unit-tests/genesis_ci_walk-base.t                   # where a walk starts, seeded and unseeded
 unit-tests/genesis_ci_walk-run_ending.t             # which errors end the run and which end one environment
+unit-tests/genesis_ci_walk-hold_for.t               # an ancestor's manual flag is the topology node's, read off no environment
 unit-tests/genesis_ci_runfailure-one_line.t         # one line out of a failure, and the width a caller may ask it to fit
 unit-tests/genesis_ci_report-render_run.t           # an error prints whole, and the commit axis reads the enum
 unit-tests/genesis_ci_status-pull_request_state.t   # the report degrades where no owner and repository pair resolves

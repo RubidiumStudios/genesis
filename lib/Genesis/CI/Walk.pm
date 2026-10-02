@@ -487,10 +487,9 @@ sub hold_for {
 
 		# The key is inert under the manual provider, where an environment
 		# waits for a person rather than for a trigger, so both conditions
-		# are required before the reason reads awaiting its trigger.
-		my $automated = _automated($provider);
-		my $waits_for_trigger = $automated
-			&& $ancestor->{env}->lookup('genesis.pipeline.manual', 0);
+		# are required before the reason reads awaiting its trigger.  The
+		# flag is the topology node's, read with every other shape key.
+		my $waits_for_trigger = _automated($provider) && $ancestor->{manual};
 
 		return {
 			reason         => 'ancestor-overlap',
@@ -1112,6 +1111,7 @@ sub plan {
 			push @chain, {
 				name      => $up,
 				env       => $env_for->($up),
+				manual    => $topo->{nodes}{$up}{manual},
 				certified => $durable_for_env->($up),
 			};
 			$up = $topo->{parent_of}{$up};
@@ -1203,9 +1203,9 @@ sub plan {
 				? $pipeline_record->{discovery} : undef;
 
 			# Whether a person rather than a trigger starts this
-			# environment's deploy.  It is read here, off the environment
-			# already in hand, because nothing below holds one and a reader
-			# that asked later would load every environment a second time.
+			# environment's deploy, the topology node's flag, read with every
+			# other shape key (D117).  It stays null for an environment this
+			# walk never loaded, as the rest of the loaded fields do.
 			# The key is inert under the manual provider, where every deploy
 			# waits for a person anyway, and _automated is the one answer to
 			# that question, so the marker on the row and the hold reason
@@ -1216,7 +1216,7 @@ sub plan {
 			# _jsonable passes it through untouched.
 			$env_record->{manual} =
 				(_automated($state->{provider})
-					&& $env->lookup('genesis.pipeline.manual', 0))
+					&& $topo->{nodes}{$name}{manual})
 				? JSON::PP::true() : JSON::PP::false();
 
 			# The certified commit, which is the control commit the
