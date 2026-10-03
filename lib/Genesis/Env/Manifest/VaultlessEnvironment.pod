@@ -1,0 +1,163 @@
+=head1 NAME
+
+Genesis::Env::Manifest::VaultlessEnvironment - Environment files only, evaluated with no vault reachable.
+
+=head1 SYNOPSIS
+
+  # Typically instantiated through the manifest builder, not directly.
+  my $manifest = $env->manifest_provider->vaultless_environment();
+
+  my $data = $manifest->data();
+  # a concat over the hierarchy resolved; a (( vault )) as its own text
+
+=head1 DESCRIPTION
+
+C<Genesis::Env::Manifest::VaultlessEnvironment> is a subclass of
+L<Genesis::Env::Manifest> that merges an environment's own files, its
+name-based ancestors and its C<genesis.inherits> files, with no kit, no
+initiation file and no conclusion, adaptively, as
+L<Genesis::Env::Manifest::PartialEnvironment> does, but with vault made
+unreachable to the merge.
+
+It is the read the pipeline's shape is taken from (D117). Every spruce
+operator the environment's own files can resolve is resolved: C<grab>,
+C<concat>, C<||> defaults, and the merge operators. A C<(( vault ))> fails
+at spruce's vault client, because the merge runs with no vault address, no
+token and a home holding no saferc, so the network is never reached. The
+adaptive merge defers it, and its own text comes back in its place and in
+every value built from it, through any depth of C<grab> and C<concat>. A
+credhub or BOSH variable, C<((name))> with no spaces, is no spruce operator
+and is left as written. So a reader can tell any value that depends on
+something outside the environment's files by the C<((> it still carries.
+
+Vault is made unreachable rather than redacted because a redacted value,
+C<REDACTED>, is indistinguishable from text once a C<concat> has taken it
+in.
+
+B<Limitations:> a value only the kit, the initiation file or the conclusion
+supplies, C<meta.vault> or the conclusion's C<genesis.*> addresses among
+them, resolves nowhere here and comes back as its operator's text. An
+environment whose files hold a C<(( vault ))> anywhere pays one adaptive
+retry, which a rewrite to C<(( defer vault ))> before the first run would
+save.
+
+=head1 METHODS
+
+=head2 description
+
+  my $str = $manifest->description();
+
+A human-readable string identifying this manifest type, which
+C<genesis E<lt>envE<gt> manifest> lists among the types it can build.
+
+B<Returns:> string.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  print $manifest->description();
+  # prints 'Environment files only (no kit components), evaluated with no
+  #         vault - vault values left as their own text'
+
+=head2 source_files
+
+  my $files = $manifest->source_files();
+
+The environment files alone, in merge order, as the builder's
+C<environment_files> gives them: no initiation file, no kit files, no cloud
+config, no conclusion.
+
+B<Parameters:> None.
+
+B<Returns:> An arrayref of the environment files.
+
+B<Errors:> What C<environment_files> raises.
+
+B<Examples:>
+
+  my $files = $manifest->source_files();
+  # returns ['./us.yml', './us-east.yml']
+
+=head2 signature
+
+  my $sig = $manifest->signature();
+
+The environment's own L<signature|Genesis::Env/signature>, since the
+environment's files are all this merge reads, so it is shared by every
+checkout holding the same files, control's scratch tree and the working tree
+among them.
+
+B<Returns:> string (12 hex characters).
+
+B<Errors:> None of its own.
+
+B<Examples:>
+
+  print $manifest->signature();
+  # prints the same value as $manifest->env->signature
+
+=head2 merge_options
+
+  my $opts = $manifest->merge_options();
+
+Adaptive evaluation, so an operator that cannot be resolved is deferred and
+left as its own text rather than failing the merge.
+
+B<Returns:> C<< { eval => 'adaptive' } >>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  print $manifest->merge_options->{eval};  # prints 'adaptive'
+
+=head2 merge_environment
+
+  my $env = $manifest->merge_environment();
+
+The environment the merge runs in: C<VAULT_ADDR>, C<VAULT_TOKEN>,
+C<SAFE_TARGET> and C<REDACT> unset, and C<HOME> a scratch directory, so
+spruce finds no vault target and no token and its vault operator fails at
+the client, before any network is reached.
+
+B<Returns:> A hash reference of variables, C<undef> meaning unset.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my $env = $manifest->merge_environment();
+  print defined($env->{VAULT_ADDR}) ? 'set' : 'unset';  # prints 'unset'
+
+=head1 INTERNAL METHODS
+
+=head2 _merge
+
+  my ($data, $file) = $manifest->_merge();
+
+Merges through the builder's C<merge> with this class's source files,
+options and environment.
+
+B<Returns:> C<($data, $file)>, the merged data and the path of the manifest
+file written.
+
+B<Errors:> What the builder's C<merge> raises, the adaptive merge's
+"Could not merge" among them where its retries cannot complete.
+
+B<Examples:>
+
+  my ($data, $file) = $manifest->_merge();
+  # returns the merged hash and the manifest's path in the work directory
+
+=head1 AUTHOR
+
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2026 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
+
+=cut

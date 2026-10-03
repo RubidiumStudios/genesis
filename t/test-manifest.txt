@@ -234,6 +234,7 @@ unit-tests/genesis_env_deploymentmanager-core.t           # DeploymentManager co
 unit-tests/genesis_env_deploymentmanager-git_context.t    # the exodus record's git block
 unit-tests/genesis_env_manifest-core.t                    # Env::Manifest core
 unit-tests/genesis_env_manifest-signature.t               # each manifest type signs what its merge reads
+unit-tests/genesis_env_manifest-vaultless_environment.t   # the shape's merge resolves the environment's operators and leaves vault as text
 unit-tests/genesis_env_manifestprovider-core.t            # Env::ManifestProvider core
 unit-tests/genesis_env_required_files-core.t              # required-files propagation
 unit-tests/genesis_env_secrets_entombment-core.t          # secrets entombment

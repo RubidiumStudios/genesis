@@ -42,18 +42,21 @@ sub signatures {
 		->load_env('us-west')->manifest_provider;
 	return (
 		environment => $provider->partial_environment->signature,
+		vaultless   => $provider->vaultless_environment->signature,
 		kit         => $provider->unevaluated->signature,
 	);
 }
 
 subtest 'a local ops file is signed only where the kit is merged' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my %one = signatures(checkout("---\n- type: remove\n  path: /a\n"));
 	my %two = signatures(checkout("---\n- type: remove\n  path: /b\n"));
 
 	is($two{environment}, $one{environment},
 		'an environment-only manifest is shared by the two checkouts');
+	is($two{vaultless}, $one{vaultless},
+		'and so is the vaultless one the shape is read from');
 	isnt($two{kit}, $one{kit},
 		'while a manifest that merges the kit is not, since the blueprint may '
 		.'pick the ops file that differs');
