@@ -723,4 +723,317 @@ subtest 'bosh_configs_upload - the network claims lock is released on a signal' 
 	}
 };
 
+# ---------------------------------------------------------------------------
+# a director's own cloud config
+# ---------------------------------------------------------------------------
+# A director environment owns a second cloud config, <env>.<type>.director,
+# which the kit builds with the director-purpose cloud-config hook and which
+# lives on the director itself.  Its network map is the director's own claims
+# record in exodus, so the upload holds that director's network claims lock
+# while the hook reads the claims and until the record is written back.
+
+# make_director_env - a director environment whose kit honours the hook
+# purpose the way Genesis::Kit::has_hook does.  The hook and every director
+# call land in @director_calls as well, so a subtest can check their order.
+sub make_director_env {
+	my (%o) = @_;
+	my $self_bosh = $o{self_bosh};
+	my $parent    = $o{parent};
+	my $hooks     = {'cloud-config' => 1, 'cloud-config-director' => 1, %{$o{hooks} // {}}};
+	my $run_hook  = $o{run_hook} // sub {
+		my ($s, $h, %p) = @_;
+		return [] if $h eq 'runtime-config';
+		return ($p{purpose} ? "director: yes\n" : "parent: yes\n", {subnets => {}});
+	};
+	return make_env(
+		name => 'lab-ocf', type => 'bosh', bosh_config_name => 'lab-ocf.bosh',
+		is_bosh_director => 1, use_create_env => $o{create_env} ? 1 : 0,
+		exodus_base => 'secret/exodus/lab-ocf/bosh', vault => $o{vault} // $vault,
+		has_hook => sub {
+			my ($s, $h, %p) = @_;
+			$h = "cloud-config-$p{purpose}" if $h eq 'cloud-config' && $p{purpose};
+			return $hooks->{$h} ? 1 : 0;
+		},
+		run_hook => sub {
+			my ($s, $h, %p) = @_;
+			push @hook_calls, [$h, \%p];
+			push @director_calls, ['run_hook', $h, $p{purpose} // ''];
+			return $run_hook->(@_);
+		},
+		get_target_bosh => sub {
+			my $s = shift;
+			my $t = ref($_[0]) eq 'HASH' ? $_[0] : {@_};
+			return ($t->{self} || $s->use_create_env) ? $self_bosh : $parent;
+		},
+		%{$o{overrides} // {}},
+	);
+}
+
+# call_index - the position of the first recorded director call matching
+# the given leading fields, or undef
+sub call_index {
+	my (@want) = @_;
+	CALL: for my $i (0..$#director_calls) {
+		for my $j (0..$#want) {
+			next CALL unless defined($director_calls[$i][$j]) && $director_calls[$i][$j] eq $want[$j];
+		}
+		return $i;
+	}
+	return undef;
+}
+
+subtest 'director config - a director environment provides its own director cloud config' => sub {
+	plan tests => 5;
+	@hook_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $parent    = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	my ($configs) = Genesis::Commands::Bosh::_bosh_configs_provided($env, $parent, type => 'cloud');
+	my ($dir) = grep { $_->{name} eq 'lab-ocf.bosh.director' } @$configs;
+	ok($dir, 'the director config is in the list');
+	is($dir && $dir->{bosh}->alias, 'lab-ocf', 'it targets the director itself');
+	ok(grep({ $_->[0] eq 'cloud-config' && ($_->[1]{purpose} // '') eq 'director' } @hook_calls), 'it ran the director-purpose hook');
+	is($dir && $dir->{exodus_path}, 'secret/exodus/lab-ocf/bosh/network',
+		'its network map belongs in the director\'s own exodus network record');
+	my ($parent_config) = grep { $_->{name} eq 'lab-ocf.bosh' } @$configs;
+	is($parent_config && $parent_config->{bosh}->alias, 'lab-mgmt',
+		'the parent-side cloud config is still provided, on the deploying director');
+};
+
+subtest 'director config - none for a non-director, and a note when the kit has no director hook' => sub {
+	plan tests => 5;
+	my $parent = make_director('lab-mgmt', {});
+
+	@hook_calls = ();
+	my $plain = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: []\n");
+	my ($configs) = Genesis::Commands::Bosh::_bosh_configs_provided($plain, $parent, type => 'cloud');
+	ok(!grep({ $_->{name} =~ /\.director$/ } @$configs), 'an environment that is not a director gets no director config');
+	ok(!grep({ ($_->[1]{purpose} // '') eq 'director' } @hook_calls), 'and no director-purpose hook runs for it');
+
+	@hook_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent, hooks => {'cloud-config-director' => 0});
+	my ($dconfigs, $notes) = Genesis::Commands::Bosh::_bosh_configs_provided($env, $parent, type => 'cloud');
+	ok(!grep({ $_->{name} eq 'lab-ocf.bosh.director' } @$dconfigs), 'a director whose kit has no director hook gets no director config');
+	ok(grep({ /lab-ocf\.bosh\.director/ && /cloud-config-director/ } @$notes), 'and a note says the kit has no director hook')
+		or diag explain $notes;
+	ok(!grep({ ($_->[1]{purpose} // '') eq 'director' } @hook_calls), 'and no director-purpose hook runs');
+};
+
+subtest 'director config - --name selects only the director config' => sub {
+	plan tests => 4;
+	@hook_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $parent    = make_director('lab-mgmt', {});
+	my $env = make_director_env(
+		self_bosh => $self_bosh, parent => $parent,
+		hooks => {'runtime-config' => 1},
+	);
+	my ($configs) = Genesis::Commands::Bosh::_bosh_configs_provided($env, $parent, name => 'lab-ocf.bosh.director');
+	is(scalar(@$configs), 1, 'one config is selected');
+	is($configs->[0]{name}, 'lab-ocf.bosh.director', 'and it is the director config');
+	is(scalar(@hook_calls), 1, 'only one hook runs');
+	is_deeply([$hook_calls[0][0], $hook_calls[0][1]{purpose}], ['cloud-config', 'director'],
+		'and it is the director-purpose cloud-config hook');
+};
+
+subtest 'director config - upload locks the director, writes its own exodus record, and releases the lock' => sub {
+	plan tests => 9;
+	@director_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $parent    = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	output_from {
+		Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+	};
+
+	my $acquire = call_index('acquire_network_lock', 'lab-ocf');
+	my $hook    = call_index('run_hook', 'cloud-config', 'director');
+	my $upload  = call_index('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director');
+	my $claims  = call_index('set_path');
+	my $release = call_index('clear_network_lock', 'lab-ocf');
+	ok(defined $acquire && defined $hook && $acquire < $hook,
+		'the director\'s lock is taken before the director-purpose hook reads the claims')
+		or diag explain \@director_calls;
+	ok(defined $upload && $upload > $hook, 'the director config is uploaded to the director itself');
+	is_deeply($claims && [@{$director_calls[$claims]}[1..2]], ['secret/exodus/lab-ocf/bosh/network', {subnets => {}}],
+		'the network map is written to the director\'s own exodus network record');
+	is_deeply($claims && {@{$director_calls[$claims]}[3..6]}, {flatten => 1, clear => 1},
+		'with flatten and clear, as post-deploy writes it');
+	ok(defined $claims && $claims > $upload, 'after the upload');
+	ok(defined $release && $release > $claims, 'and the lock is released at the end');
+	ok(!$self_bosh->network_locked_by_me, 'so no lock of ours is left on the director');
+	ok(!defined(call_index('acquire_network_lock', 'lab-mgmt')), 'the parent director\'s lock is not taken for the director config alone');
+	ok(!defined(call_index('run_hook', 'cloud-config', '')), 'the parent-side cloud-config hook does not run');
+};
+
+subtest 'director config - upload releases the director\'s lock on every failure' => sub {
+	plan tests => 9;
+	my %cases = (
+		'a failed upload' => {
+			self_overrides => {upload_config => sub { push @director_calls, ['upload_config', 'lab-ocf']; return ('', 1, 'director refused the cloud config') }},
+			error => qr/Failed to upload cloud config lab-ocf\.bosh\.director/,
+		},
+		'a failed exodus write' => {
+			vault => mock("Mock::BoshConfigs::FailingVault" => {set_path => sub { push @director_calls, ['set_path']; die "vault sealed\n" }}),
+			error => qr/was uploaded, but the network map could not be updated.*vault sealed/s,
+		},
+		'a failed hook' => {
+			run_hook => sub { die "the director cloud-config hook failed\n" },
+			error => qr/the director cloud-config hook failed/,
+		},
+	);
+	for my $case (sort keys %cases) {
+		my $c = $cases{$case};
+		@director_calls = ();
+		my $self_bosh = make_director('lab-ocf', {}, %{$c->{self_overrides} // {}});
+		my $parent    = make_director('lab-mgmt', {});
+		my $env = make_director_env(
+			self_bosh => $self_bosh, parent => $parent,
+			($c->{vault} ? (vault => $c->{vault}) : ()),
+			($c->{run_hook} ? (run_hook => $c->{run_hook}) : ()),
+		);
+		throws_ok {
+			output_from {
+				Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, name => 'lab-ocf.bosh.director')
+			}
+		} $c->{error}, "$case stops the upload with its own error";
+		ok(defined(call_index('clear_network_lock', 'lab-ocf')), "$case: the director's lock is released");
+		ok(!$self_bosh->network_locked_by_me, "$case: so no lock of ours is left behind");
+	}
+};
+
+subtest 'director config - upload refuses when another process holds the director\'s lock' => sub {
+	plan tests => 4;
+	@director_calls = ();
+	my $held = {status => 'locked', description => 'about 2 minutes ago by ubuntu@bastion (env: ocfp-cf1-lab-ocf, pid: 4242)'};
+	my $self_bosh = make_director('lab-ocf', {},
+		check_network_lock   => sub { return $held },
+		network_locked_by_me => sub { 0 },
+	);
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	my ($out, $err);
+	throws_ok {
+		($out, $err) = output_from {
+			Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, name => 'lab-ocf.bosh.director')
+		}
+	} qr/Network claims are currently locked/, 'the upload is refused with the lock message';
+	ok(!defined(call_index('run_hook')), 'no hook runs');
+	ok(!defined(call_index('upload_config')), 'nothing is uploaded');
+	ok(!defined(call_index('clear_network_lock')), 'the other process\'s lock is left alone');
+};
+
+subtest 'director config - compare shows the diff without a lock or an exodus write' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	my $self_bosh = make_director('lab-ocf',
+		{cloud => {'lab-ocf.bosh.director' => entry(5)}},
+		contents => {'cloud|lab-ocf.bosh.director' => "director: no\n"},
+	);
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	my ($out, $err) = output_from {
+		Genesis::Commands::Bosh::bosh_configs_compare($env, $parent, name => 'lab-ocf.bosh.director')
+	};
+	like($out.$err, qr/cloud config lab-ocf\.bosh\.director on lab-ocf is different.*--- uploaded/s,
+		'the director config\'s diff is shown');
+	ok(defined(call_index('run_hook', 'cloud-config', 'director')), 'the director-purpose hook built the config');
+	ok(!grep({ $_->[0] =~ /network_lock/ } @director_calls), 'no lock is checked, taken, or released')
+		or diag explain \@director_calls;
+	ok(!defined(call_index('set_path')), 'and no exodus record is written');
+};
+
+subtest 'director config - an upload of both cloud configs takes the parent lock first, then the director\'s' => sub {
+	plan tests => 12;
+
+	# Both configs go up and both locks come off
+	@director_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $parent    = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud') };
+	my $parent_lock = call_index('acquire_network_lock', 'lab-mgmt');
+	my $self_lock   = call_index('acquire_network_lock', 'lab-ocf');
+	ok(defined $parent_lock && defined $self_lock && $parent_lock < $self_lock,
+		'the parent lock is taken before the director\'s')
+		or diag explain \@director_calls;
+	ok(defined($self_lock) && defined(call_index('run_hook')) && $self_lock < call_index('run_hook'), 'both locks are held before any hook runs');
+	ok(defined(call_index('upload_config', 'lab-mgmt', 'cloud', 'lab-ocf.bosh')), 'the parent-side cloud config is uploaded to the parent');
+	ok(defined(call_index('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director')), 'the director config is uploaded to the director');
+	ok(defined(call_index('clear_network_lock', 'lab-mgmt')) && defined(call_index('clear_network_lock', 'lab-ocf')),
+		'both locks are released');
+	ok(!$parent->network_locked_by_me && !$self_bosh->network_locked_by_me, 'and neither director is left locked');
+
+	# The director config fails to upload, and both locks still come off
+	@director_calls = ();
+	$self_bosh = make_director('lab-ocf', {},
+		upload_config => sub { push @director_calls, ['upload_config', 'lab-ocf']; return ('', 1, 'refused') },
+	);
+	$parent = make_director('lab-mgmt', {});
+	$env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	throws_ok {
+		output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud') }
+	} qr/Failed to upload cloud config lab-ocf\.bosh\.director/, 'a failed director upload stops the run';
+	ok(!$parent->network_locked_by_me && !$self_bosh->network_locked_by_me,
+		'and both locks are released after the failure');
+
+	# The director's lock is held elsewhere, so the parent lock comes off again
+	@director_calls = ();
+	$self_bosh = make_director('lab-ocf', {},
+		check_network_lock   => sub { return {status => 'locked', description => 'by someone else'} },
+		network_locked_by_me => sub { 0 },
+	);
+	$parent = make_director('lab-mgmt', {});
+	$env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	throws_ok {
+		output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud') }
+	} qr/Network claims are currently locked/, 'a held director lock stops the run';
+	ok(defined(call_index('clear_network_lock', 'lab-mgmt')), 'the parent lock that was taken is released');
+	ok(!$parent->network_locked_by_me, 'so the parent is left unlocked');
+	ok(!defined(call_index('run_hook')), 'and no hook ran');
+};
+
+subtest 'director config - a create-env director builds and uploads its own cloud config' => sub {
+	plan tests => 8;
+	@director_calls = ();
+	@hook_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => undef, create_env => 1);
+
+	# bosh_configs hands a create-env director's actions an undefined
+	# deploying director
+	my ($configs, $notes) = Genesis::Commands::Bosh::_bosh_configs_provided($env, undef, type => 'cloud');
+	my ($dir) = grep { $_->{name} eq 'lab-ocf.bosh.director' } @$configs;
+	ok($dir, 'the director config is provided');
+	is($dir && $dir->{bosh}->alias, 'lab-ocf', 'on the director itself');
+	ok(!grep({ $_->{name} eq 'lab-ocf.bosh' } @$configs), 'the parent-side cloud config is still skipped');
+	ok(grep({ /create-env/ } @$notes), 'with the create-env note') or diag explain $notes;
+	ok(!grep({ !($_->[1]{purpose}) } @hook_calls), 'and the parent-side hook never runs');
+
+	@director_calls = ();
+	lives_ok {
+		output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, undef, yes => 1) }
+	} 'an unfiltered upload runs with no deploying director';
+	ok(defined(call_index('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director')),
+		'the director config is uploaded to the director');
+	my $claims = call_index('set_path');
+	is($claims && $director_calls[$claims][1], 'secret/exodus/lab-ocf/bosh/network',
+		'and the director\'s own exodus network record is written');
+};
+
+subtest 'director config - delete refuses the director config' => sub {
+	plan tests => 2;
+	@director_calls = ();
+	my $self_bosh = make_director('lab-ocf', {cloud => {'lab-ocf.bosh.director' => entry(5)}});
+	my $parent    = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	throws_ok {
+		Genesis::Commands::Bosh::bosh_configs_delete($env, $parent, yes => 1, name => 'lab-ocf.bosh.director')
+	} qr/lab-ocf\.bosh\.director.*compilation network/s, 'delete refuses, saying the compilation network depends on it';
+	ok(!defined(call_index('delete_config')), 'and nothing is deleted');
+};
+
 done_testing;
