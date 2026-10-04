@@ -1793,7 +1793,8 @@ subtest '_calculate_subnet_allocation - growing and shrinking a claim' => sub {
 #
 # %LAB is keyed by director, and $LAB_DIRECTOR picks the one the lab_* helpers
 # work on, so another director's fixture is one more entry plus a
-# `local $LAB_DIRECTOR = ...` in its subtests.
+# `local $LAB_DIRECTOR = ...` in its subtests.  The mgmt entry models the mgmt
+# director, whose carve gives every service a triple on adjacent addresses.
 # ---------------------------------------------------------------------------
 
 {
@@ -1879,6 +1880,20 @@ subtest '_calculate_subnet_allocation - growing and shrinking a claim' => sub {
 			},
 		);
 	}
+
+	# The concourse kit on PVE: every VM in ocfp-0, the web node on the
+	# reserved concourse_ip static, and four dynamic addresses for the rest
+	package Genesis::Hook::CloudConfig::LabConcourse;
+	use parent -norequire, 'Genesis::Hook::CloudConfig';
+	sub lab_network {
+		return $_[0]->network_definition('concourse', strategy => 'ocfp',
+			dynamic_subnets => {
+				subnets                   => ['ocfp-0'],
+				allocation                => {total_size => 4},
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+			},
+		);
+	}
 }
 
 # lab_band - one /24 band's ocfp subnet record, with its 3-compact reserved-ips
@@ -1907,6 +1922,8 @@ my %LAB = (
 		env_name => 'ocfp-cf1-lab-ocf',
 		create_env => 0,
 		prefix   => '10.61.148.',
+		# The targets whose _ip records lab_assert_disjoint_and_record_clean checks
+		record_owners => [qw(bosh jumpbox blacksmith haproxy)],
 		bands    => {'ocfp-0' => [64, 'pvupvecf101'], 'ocfp-1' => [128, 'pvupvecf102'], 'ocfp-2' => [192, 'pvupvecf103']},
 		# The owner of each reserved-ips record that a network may hold, by claim key
 		record_holders => {
@@ -1961,7 +1978,7 @@ sub lab { return $LAB{$LAB_DIRECTOR} // die "No lab fixture for director '$LAB_D
 sub lab_ocfp_config {
 	my $lab = lab();
 	my %subnets = map {
-		($_ => lab_band($lab->{prefix}, @{$lab->{bands}{$_}}))
+		($_ => ($lab->{band} // \&lab_band)->($lab->{prefix}, @{$lab->{bands}{$_}}))
 	} keys %{$lab->{bands}};
 	for my $subnet (keys %{$LAB_STATE{records} // {}}) {
 		my $extra = $LAB_STATE{records}{$subnet};
@@ -2027,10 +2044,12 @@ sub lab_exodus {
 	return {azs => \%azs, subnets => \%subnets};
 }
 
-# lab_env - an environment of the given type, with these env file overrides
+# lab_env - an environment of the given type, with these env file overrides,
+# deployed with create-env if $create_env is given and true, or if it is not
+# given and the lab's create_env is true
 my $lab_seq = 0;
 sub lab_env {
-	my ($type, $overrides) = @_;
+	my ($type, $overrides, $create_env) = @_;
 	my $lab = lab();
 	my $ocfp = lab_ocfp_config();
 	my $config = {
@@ -2042,7 +2061,7 @@ sub lab_env {
 		type           => $type,
 		kit            => $kit,
 		bosh           => mock("Genesis::BOSH" => {alias => $lab->{env_name}}),
-		use_create_env => $lab->{create_env},
+		use_create_env => $create_env // $lab->{create_env},
 		features       => Mock::ReferencedValue->new(['ocfp', 'haproxy']),
 		iaas           => 'pve',
 		scale          => 'dev',
@@ -2087,7 +2106,7 @@ sub lab_run_net_with_stderr {
 	if (defined $opts{total_size}) {
 		$overrides->{ocf}{allocation}{total_size} = $opts{total_size};
 	}
-	my $env = lab_env($spec->{type}, $overrides);
+	my $env = lab_env($spec->{type}, $overrides, $spec->{create_env});
 	my $class = "Genesis::Hook::CloudConfig::$spec->{class}";
 
 	my ($hook, $net);
@@ -2156,7 +2175,7 @@ sub lab_assert_disjoint_and_record_clean {
 			}
 		}
 		my $records = $ocfp->{net}{subnets}{$subnet}{'reserved-ips'};
-		for my $owner (qw(bosh jumpbox blacksmith haproxy)) {
+		for my $owner (@{$lab->{record_owners}}) {
 			my $record = IPv4->new($records->{"${owner}_ip"});
 			for my $key (@keys) {
 				next if ($lab->{record_holders}{$owner} // '') eq $key;
@@ -2377,6 +2396,184 @@ subtest '_all_reserved_ip_records - returns owner to records with aliases applie
 	my $cf = Genesis::Hook::CloudConfig::LabCF->init(env => lab_env('cf'), purpose => 'lab-'.(++$lab_seq));
 	is_deeply([sort keys %{$cf->_all_reserved_ip_records($subnet, 'ocf')}], [qw(bosh vault web)],
 		'a kit alias (ocf to haproxy) counts as the target\'s own');
+};
+
+
+# lab_mgmt_band - one band of the mgmt carve: the subnet-reserved, available,
+# and second subnet-reserved pairs, then a triple per service with
+# <t>_a = <t>_ip - 1 and <t>_b = <t>_ip + 1, so each service's _a and _b keys
+# sit on its neighbours' _ip addresses, plus the two smoke-test triples
+sub lab_mgmt_band {
+	my ($prefix, $base, $az) = @_;
+	my $a = sub { $prefix . ($base + $_[0]) };
+	my %records = (
+		reserved_0  => $a->(0),  reserved_1  => $a->(27),
+		available_0 => $a->(28), available_1 => $a->(35),
+		reserved_2  => $a->(36), reserved_3  => $a->(62),
+		director_ip => $a->(4),  ip => $a->(4),
+		garage_smoke_a => $a->(21), garage_ip_smoke => $a->(22), garage_smoke_b => $a->(23),
+		rustfs_smoke_a => $a->(20), rustfs_ip_smoke => $a->(21), rustfs_smoke_b => $a->(22),
+		scheme_version => '3-compact',
+	);
+	my @services = lab_mgmt_services();
+	for my $i (0 .. $#services) {
+		my $o = 3 + $i;
+		@records{map {"$services[$i]_$_"} qw(a ip b)} = ($a->($o - 1), $a->($o), $a->($o + 1));
+	}
+	return {
+		az => $az, cidr_block => "${prefix}0/24", gateway => "${prefix}1",
+		dns => ['10.97.160.160', '10.97.160.161'],
+		'reserved-ips' => \%records,
+	};
+}
+
+# lab_mgmt_services - the mgmt carve's services, in address order from .3 of each band
+sub lab_mgmt_services {
+	return qw(bastion bosh vault jumpbox concourse prometheus shield blacksmith artifacts
+	          wireguard ovpn rustfs proxycache nfs ocfp_ui doomsday shout garage);
+}
+
+$LAB{mgmt} = {
+	env_name   => 'ocfp-cf1-lab-mgmt',
+	create_env => 0,
+	prefix     => '10.61.148.',
+	band       => \&lab_mgmt_band,
+	bands      => {'ocfp-0' => [64, 'pvupvecf101'], 'ocfp-1' => [128, 'pvupvecf102'], 'ocfp-2' => [192, 'pvupvecf103']},
+	record_owners => [lab_mgmt_services()],
+	record_holders => {
+		concourse => 'ocfp-cf1-lab-mgmt.concourse.net-concourse',
+		vault     => 'ocfp-cf1-lab-mgmt.openbao.net-openbao',
+		jumpbox   => 'ocfp-cf1-lab-mgmt.jumpbox.net-jumpbox',
+		shield    => 'ocfp-cf1-lab-mgmt.shield.net-shield',
+		doomsday  => 'ocfp-cf1-lab-mgmt.doomsday.net-doomsday',
+	},
+	networks => {
+		concourse   => {class => 'LabConcourse', type => 'concourse', claim => 'ocfp-cf1-lab-mgmt.concourse.net-concourse'},
+		# The mgmt director is deployed with create-env; its own cloud config
+		# still carries the compilation network
+		compilation => {class => 'LabDirector',  type => 'bosh',      claim => 'ocfp-cf1-lab-mgmt.bosh.net-compilation',
+		                director => 1, create_env => 1},
+	},
+	# The mgmt director's saved claims, as read from its network exodus on
+	# 2026-10-04; ocfp-cf1-lab-ocf.bosh.net-bosh is the ocf director's address
+	claims_today => {
+		'ocfp-0' => {
+			'ocfp-cf1-lab-mgmt.concourse.net-concourse' => '10.61.148.71,10.61.148.92-10.61.148.95',
+			'ocfp-cf1-lab-mgmt.doomsday.net-doomsday'   => '10.61.148.82',
+			'ocfp-cf1-lab-mgmt.openbao.net-openbao'     => '10.61.148.69',
+			'ocfp-cf1-lab-mgmt.shield.net-shield'       => '10.61.148.73',
+			'ocfp-cf1-lab-ocf.bosh.net-bosh'            => '10.61.148.87',
+		},
+		'ocfp-1' => {
+			'ocfp-cf1-lab-mgmt.doomsday.net-doomsday'   => '10.61.148.146',
+			'ocfp-cf1-lab-mgmt.jumpbox.net-jumpbox'     => '10.61.148.134',
+			'ocfp-cf1-lab-mgmt.openbao.net-openbao'     => '10.61.148.133',
+			'ocfp-cf1-lab-mgmt.shield.net-shield'       => '10.61.148.137',
+			'ocfp-cf1-lab-ocf.bosh.net-bosh'            => '10.61.148.151',
+		},
+		'ocfp-2' => {
+			'ocfp-cf1-lab-mgmt.bosh.net-compilation'    => '10.61.148.220-10.61.148.223',
+			'ocfp-cf1-lab-mgmt.doomsday.net-doomsday'   => '10.61.148.210',
+			'ocfp-cf1-lab-mgmt.openbao.net-openbao'     => '10.61.148.197',
+			'ocfp-cf1-lab-mgmt.shield.net-shield'       => '10.61.148.201',
+			'ocfp-cf1-lab-ocf.bosh.net-bosh'            => '10.61.148.215',
+		},
+	},
+};
+{
+	# How the mgmt networks render on today's claims, which is how they render
+	# under the claims model before reserved-ips records of other targets were
+	# taken out of a network's free pool, too
+	local $LAB_DIRECTOR = 'mgmt';
+	$LAB{mgmt}{golden} = {
+		concourse => {name => 'ocfp-cf1-lab-mgmt.concourse.net-concourse', type => 'manual', subnets => [
+			lab_subnet('ocfp-0', 1, ['10.61.148.0-10.61.148.70', '10.61.148.72-10.61.148.91', '10.61.148.96-10.61.148.255'],
+			                        ['10.61.148.71']),
+		]},
+		compilation => {name => 'ocfp-cf1-lab-mgmt.bosh.net-compilation', type => 'manual', subnets => [
+			lab_subnet('ocfp-2', 3, ['10.61.148.0-10.61.148.219', '10.61.148.224-10.61.148.255']),
+		]},
+	};
+}
+
+subtest 'lab claims (mgmt) - Concourse and the director compilation network render as they do today, with no warning' => sub {
+	local $LAB_DIRECTOR = 'mgmt';
+	plan tests => 6;
+	for my $net (qw(concourse compilation)) {
+		lab_reset_claims(lab_claims_today());
+		my ($got, $err) = lab_run_net_with_stderr($net);
+		is_deeply($got, lab_golden($net), "$net renders the same network");
+		is_deeply(lab_claims_snapshot(), lab_claims_today(), "$net saves the same claims");
+		is($err, '', "$net prints no prune, clash, or own-record warning");
+	}
+};
+
+subtest 'lab claims (mgmt) - compact neighbour keys add no address and no owner of their own' => sub {
+	local $LAB_DIRECTOR = 'mgmt';
+	plan tests => 4;
+	lab_reset_claims(lab_claims_today());
+	my $hook = Genesis::Hook::CloudConfig::LabConcourse->init(env => lab_env('concourse'), purpose => 'lab-'.(++$lab_seq));
+	my $ocfp = lab_ocfp_config();
+	my $records_seen = IPv4->new();
+	for my $subnet (qw(ocfp-0 ocfp-1 ocfp-2)) {
+		my $base = lab()->{bands}{$subnet}[0];
+		my @services = lab_mgmt_services();
+		my %want = map {
+			($services[$_] => '10.61.148.'.($base + 3 + $_))
+		} grep {$services[$_] ne 'concourse'} 0 .. $#services;
+		$want{garage_smoke} = '10.61.148.'.($base + 22);
+		$want{rustfs_smoke} = '10.61.148.'.($base + 21);
+		my $got = $hook->_all_reserved_ip_records($ocfp->{net}{subnets}{$subnet}, 'concourse');
+		$records_seen += $got->{$_} for keys %$got;
+		is_deeply({map {($_ => $got->{$_}->range)} keys %$got}, \%want,
+			"$subnet: each owner holds only its own _ip address, and the _a/_b keys name no address or owner beyond it");
+	}
+	my $bands = IPv4->new('10.61.148.92-10.61.148.99,10.61.148.156-10.61.148.163,10.61.148.220-10.61.148.227');
+	is(($bands - ($bands - $records_seen))->size, 0, 'no record lies in an available band');
+};
+
+subtest 'lab claims (mgmt) - Concourse keeps .71 and .92-.95, compilation keeps .220-.223, and .248 stays unclaimed' => sub {
+	local $LAB_DIRECTOR = 'mgmt';
+	plan tests => 7;
+	my $claims  = lab_claims_today()->{'ocfp-2'};
+	my $records = lab_ocfp_config()->{net}{subnets}{'ocfp-2'}{'reserved-ips'};
+	my $holds   = sub { my $set = IPv4->range(IPv4->new($_[0])); ($set - IPv4->new('10.61.148.248'))->size < $set->size };
+	my @holding = (
+		(grep {$holds->($claims->{$_})} sort keys %$claims),
+		(grep {$records->{$_} =~ /^\d+\.\d+\.\d+\.\d+$/ && $holds->($records->{$_})} sort keys %$records),
+	);
+	is_deeply(\@holding, [], 'no mgmt claim and no mgmt record on ocfp-2 holds 10.61.148.248');
+
+	lab_reset_claims(lab_claims_today());
+	lab_run_net('concourse');
+	lab_run_net('compilation');
+	is_deeply(lab_claims_snapshot(), lab_claims_today(), 'building both on today\'s claims changes nothing');
+	lab_assert_disjoint_and_record_clean('building both on today\'s claims');
+
+	lab_reset_claims();
+	for my $name (qw(compilation concourse)) { lab_run_net($name) }
+	is(lab_claim('ocfp-0', 'concourse'), '10.61.148.71,10.61.148.92-10.61.148.95',
+		'fresh claims give Concourse its own record and the first four available addresses');
+	is(lab_claim('ocfp-2', 'compilation'), '10.61.148.220-10.61.148.223',
+		'fresh claims give compilation the first four available addresses');
+	lab_assert_disjoint_and_record_clean('fresh claims');
+	my $snap = lab_claims_snapshot();
+	for my $name (qw(compilation concourse)) { lab_run_net($name) }
+	is_deeply(lab_claims_snapshot(), $snap, 'a second pass changes nothing');
+};
+
+subtest 'lab claims (mgmt) - the exempt compilation network gives up an address a new record takes, and warns' => sub {
+	local $LAB_DIRECTOR = 'mgmt';
+	plan tests => 3;
+	lab_reset_claims(lab_claims_today());
+	lab_add_record('ocfp-2', minio_ip => '10.61.148.221');
+	my $err;
+	lives_ok { (undef, $err) = lab_run_net_with_stderr('compilation') }
+		'the compilation network does not stop the build';
+	is(lab_claim('ocfp-2', 'compilation'), '10.61.148.220,10.61.148.222-10.61.148.224',
+		'it drops .221 and takes the next free address');
+	like($err, qr/net-compilation.*ocfp-2.*10\.61\.148\.221.*minio/s,
+		'the warning names the network, the subnet, the address, and its owner');
 };
 
 
