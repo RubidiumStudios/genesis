@@ -361,6 +361,43 @@ checked, and the director is not asked for its deployments.
 
 B<Returns:> Nothing meaningful.
 
+B<Errors:>
+
+=over 4
+
+=item C<"Could not list the deployments on the #M{%s} BOSH director, so Genesis cannot tell whether the empty network claims record at #C{%s} is expected: %s ...">
+
+Raised (via C<bail()>) when the claims record is empty and the director's
+deployments cannot be listed. The placeholders are the director alias, the
+record path, and the error from the listing. The message goes on to say that
+nothing was changed, and to check that the director is reachable and the
+login is valid before running again.
+
+=item C<"The network claims record at #C{%s} is empty, but the #M{%s} BOSH director already has %d deployment%s (%s). ...">
+
+Raised (via C<bail()>) when the claims record is empty and the director has
+deployments. The placeholders are the record path, the director alias, the
+number of deployments, a plural suffix, and the names of up to five of them.
+The message goes on to explain that an empty record on a director with
+deployments usually means a failed or partial claims write, to give the
+C<safe export> command that checks the record, and to describe how to restore
+it from a saved copy or run once with C<GENESIS_ALLOW_EMPTY_CLAIMS=1>.
+
+=back
+
+B<Examples:>
+
+    $hook->_check_claims_record_not_lost;
+    # Returns: nothing, when the record holds claims or the director has no deployments
+
+    # With the record empty and deployments cf and logs on the director
+    $hook->_check_claims_record_not_lost;
+    # Dies: the network claims record is empty, but the director already has 2 deployments
+
+    # With GENESIS_ALLOW_EMPTY_CLAIMS=1 in the environment
+    $hook->_check_claims_record_not_lost;
+    # Warns that the check was skipped and returns
+
 =head2 _set_network_azs
 
     $self->_set_network_azs(%opts)

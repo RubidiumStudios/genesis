@@ -965,6 +965,32 @@ The root vault path to export from. A leading slash is stripped.
 B<Returns:> A nested hash reference as C<get_path> returns, or C<undef> when
 nothing is stored at the path.
 
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised (via C<bail()>) when C<safe export> fails for any reason other than
+the path having nothing stored, or when its output cannot be parsed as JSON.
+The placeholders are the path, the vault URL, and the reason, which is the
+text C<safe> wrote to stderr, or C<safe exited with code N> when it wrote
+none.
+
+=back
+
+B<Examples:>
+
+  my $tree = $vault->get_path_strict('secret/myapp');
+  # Returns: { password => 'hunter2', db => { host => 'localhost' } }
+
+  my $none = $vault->get_path_strict('secret/never-written');
+  # Returns: undef
+
+  # With the vault sealed or the token expired
+  $vault->get_path_strict('secret/myapp');
+  # Dies: Could not read secret/myapp from vault at https://...: <safe's error>
+
 =head2 set
 
   $vault->set($path, $key, $value);       # one key
@@ -2313,6 +2339,45 @@ B<Limitations:>
 
 Checks C<$path>'s own keys only. A recursive clear also removes subpaths,
 and those are not read back.
+
+=head2 _unpack_path_export
+
+  my $tree = $vault->_unpack_path_export($path, $data);
+
+Nests the paths of a C<safe export> under the path the export was made for,
+for L</get_path> and L</get_path_strict>. The export is a flat hash of full
+vault paths to the key/value pairs stored at each. The pairs stored at
+C<$path> itself become the top level of the result, and the pairs at each
+subpath are placed under the keys named by the rest of its path. A path
+stored with the C<__flattened__> marker has the marker removed and is
+unflattened with C<Genesis::unflatten>.
+
+The hashes in C<$data> that carry the marker are modified, because the marker
+is deleted from them.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The path the export was made for, without leading or trailing slashes.
+
+=item C<$data>
+
+The decoded export, a hash reference of full vault path to key/value hash.
+
+=back
+
+B<Returns:> A nested hash reference, empty when C<$data> holds no paths.
+
+B<Examples:>
+
+  my $tree = $vault->_unpack_path_export('secret/myapp', {
+    'secret/myapp'    => {user => 'admin'},
+    'secret/myapp/db' => {host => 'localhost'},
+  });
+  # Returns: { user => 'admin', db => { host => 'localhost' } }
 
 =head1 AUTHOR
 
