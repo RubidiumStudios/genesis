@@ -1779,6 +1779,451 @@ subtest '_calculate_subnet_allocation - growing and shrinking a claim' => sub {
 };
 
 
+# ---------------------------------------------------------------------------
+# Lab claims
+#
+# A director's network exodus, reserved-ips records, and kit network
+# definitions shaped like a three-band PVE lab on one /24, so the claims model
+# can be exercised on the claim shapes a long-lived director accumulates.
+# Each band carries the 3-compact reserved-ips layout: the subnet-reserved and
+# available pairs, the bosh, jumpbox, blacksmith, and haproxy triples,
+# director_ip, a bare ip, and scheme_version.
+#
+# %LAB is keyed by director, and $LAB_DIRECTOR picks the one the lab_* helpers
+# work on, so another director's fixture is one more entry plus a
+# `local $LAB_DIRECTOR = ...` in its subtests.
+# ---------------------------------------------------------------------------
+
+{
+	# The lab's kit hooks, reduced to the network each one defines.  Each
+	# lab_network method calls network_definition with the arguments the real
+	# kit passes; allocation overrides come from the env file, as they do in a
+	# real render.
+	package Genesis::Hook::CloudConfig::LabCF;
+	use parent -norequire, 'Genesis::Hook::CloudConfig';
+	# The cf kit points its ocf network at the carve's haproxy records when the
+	# haproxy feature is on, which it is in the lab.
+	sub ocfp_reserved_ip_target_aliases {
+		my ($self, $target) = @_;
+		return ['haproxy'] if $target =~ /^ocf(-edge)?$/;
+		return;
+	}
+	sub lab_network {
+		my ($self, %opts) = @_;
+		return $self->network_definition('ocf', strategy => 'ocfp',
+			dynamic_subnets => {
+				subnets                   => ['ocfp-0', 'ocfp-1', 'ocfp-2'],
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+				allocation                => {size => 15, statics => $opts{statics} // 3},
+			},
+		);
+	}
+
+	package Genesis::Hook::CloudConfig::LabAutoscaler;
+	use parent -norequire, 'Genesis::Hook::CloudConfig';
+	sub lab_network {
+		return $_[0]->network_definition('autoscaler', strategy => 'ocfp',
+			dynamic_subnets => {
+				allocation                => {size => 7},
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+			},
+		);
+	}
+
+	package Genesis::Hook::CloudConfig::LabScheduler;
+	use parent -norequire, 'Genesis::Hook::CloudConfig';
+	sub lab_network {
+		return $_[0]->network_definition('scheduler', strategy => 'ocfp',
+			dynamic_subnets => {
+				allocation                => {size => 2, statics => 0},
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+			},
+		);
+	}
+
+	package Genesis::Hook::CloudConfig::LabBlacksmith;
+	use parent -norequire, 'Genesis::Hook::CloudConfig';
+	sub lab_network {
+		return $_[0]->network_definition('blacksmith', strategy => 'ocfp',
+			dynamic_subnets => {
+				subnets                   => ['ocfp-1'],
+				allocation                => {size => 0, statics => 0},
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+			},
+		);
+	}
+
+	package Genesis::Hook::CloudConfig::LabValkey;
+	use parent -norequire, 'Genesis::Hook::CloudConfig';
+	sub lab_network {
+		return $_[0]->network_definition('valkey-service', strategy => 'ocfp',
+			name_prefix     => '',
+			dynamic_subnets => {
+				subnets                   => ['ocfp-1'],
+				allocation                => {size => 0, statics => 0},
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+			},
+		);
+	}
+
+	package Genesis::Hook::CloudConfig::LabDirector;
+	use parent -norequire, 'Genesis::Hook::CloudConfig::Director';
+	sub lab_network {
+		return $_[0]->network_definition('compilation', strategy => 'ocfp',
+			dynamic_subnets => {
+				subnets                   => ['ocfp-2'],
+				allocation                => {size => 4, statics => 0},
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+			},
+		);
+	}
+}
+
+# lab_band - one /24 band's ocfp subnet record, with its 3-compact reserved-ips
+sub lab_band {
+	my ($prefix, $base, $az) = @_;
+	my $a = sub { $prefix . ($base + $_[0]) };
+	return {
+		az => $az, cidr_block => "${prefix}0/24", gateway => "${prefix}1",
+		dns => ['10.97.160.160', '10.97.160.161'],
+		'reserved-ips' => {
+			reserved_0  => $a->(0),  reserved_1  => $a->(35),
+			available_0 => $a->(36), available_1 => $a->(62),
+			bosh_a       => $a->(22), bosh_ip       => $a->(23), bosh_b       => $a->(24),
+			director_ip  => $a->(23), ip            => $a->(23),
+			jumpbox_a    => $a->(24), jumpbox_ip    => $a->(25), jumpbox_b    => $a->(26),
+			blacksmith_a => $a->(25), blacksmith_ip => $a->(26), blacksmith_b => $a->(27),
+			haproxy_a    => $a->(36), haproxy_ip    => $a->(37), haproxy_b    => $a->(38),
+			scheme_version => '3-compact',
+		},
+	};
+}
+
+our $LAB_DIRECTOR = 'ocf';
+my %LAB = (
+	ocf => {
+		env_name => 'ocfp-cf1-lab-ocf',
+		create_env => 0,
+		prefix   => '10.61.148.',
+		bands    => {'ocfp-0' => [64, 'pvupvecf101'], 'ocfp-1' => [128, 'pvupvecf102'], 'ocfp-2' => [192, 'pvupvecf103']},
+		# The owner of each reserved-ips record that a network may hold, by claim key
+		record_holders => {
+			haproxy    => 'ocfp-cf1-lab-ocf.cf.net-ocf',
+			blacksmith => 'ocfp-cf1-lab-ocf.blacksmith.net-blacksmith',
+		},
+		networks => {
+			cf            => {class => 'LabCF',         type => 'cf',         claim => 'ocfp-cf1-lab-ocf.cf.net-ocf',
+			                  overrides => {ocf => {allocation => {total_size => 45}}}},
+			'cf-4statics' => {class => 'LabCF',         type => 'cf',         claim => 'ocfp-cf1-lab-ocf.cf.net-ocf',
+			                  overrides => {ocf => {allocation => {total_size => 45}}}, statics => 4},
+			autoscaler    => {class => 'LabAutoscaler', type => 'autoscaler', claim => 'ocfp-cf1-lab-ocf.autoscaler.net-autoscaler',
+			                  overrides => {autoscaler => {allocation => {vms_per_subnet => {'ocfp-0' => 7}}}}},
+			scheduler     => {class => 'LabScheduler',  type => 'scheduler',  claim => 'ocfp-cf1-lab-ocf.scheduler.net-scheduler'},
+			blacksmith    => {class => 'LabBlacksmith', type => 'blacksmith', claim => 'ocfp-cf1-lab-ocf.blacksmith.net-blacksmith'},
+			valkey        => {class => 'LabValkey',     type => 'blacksmith', claim => 'valkey-service',
+			                  overrides => {'valkey-service' => {allocation => {size => 8}}}},
+			compilation   => {class => 'LabDirector',   type => 'bosh',       claim => 'ocfp-cf1-lab-ocf.bosh.net-compilation',
+			                  director => 1},
+		},
+		# The director's saved claims, as read from its network exodus
+		claims_today => {
+			'ocfp-0' => {
+				'ocfp-cf1-lab-ocf.cf.net-ocf'                 => '10.61.148.100-10.61.148.114',
+				'ocfp-cf1-lab-ocf.autoscaler.net-autoscaler'  => '10.61.148.115-10.61.148.121',
+				'ocfp-cf1-lab-ocf.scheduler.net-scheduler'    => '10.61.148.122-10.61.148.123',
+			},
+			'ocfp-1' => {
+				'ocfp-cf1-lab-ocf.blacksmith.net-blacksmith'  => '10.61.148.154',
+				'ocfp-cf1-lab-ocf.cf.net-ocf'                 => '10.61.148.164-10.61.148.178',
+				'valkey-service'                              => '10.61.148.179-10.61.148.186',
+				'ocfp-cf1-lab-ocf.scheduler.net-scheduler'    => '10.61.148.187-10.61.148.188',
+			},
+			'ocfp-2' => {
+				'ocfp-cf1-lab-ocf.bosh.net-compilation'       => '10.61.148.228-10.61.148.231',
+				'ocfp-cf1-lab-ocf.cf.net-ocf'                 => '10.61.148.229,10.61.148.232-10.61.148.245',
+				'ocfp-cf1-lab-ocf.scheduler.net-scheduler'    => '10.61.148.246-10.61.148.247',
+			},
+		},
+	},
+);
+
+my %LAB_STATE; # claims and extra reserved-ips records the lab_* helpers work on
+sub lab { return $LAB{$LAB_DIRECTOR} // die "No lab fixture for director '$LAB_DIRECTOR'"; }
+
+# lab_ocfp_config - the ocfp net config, with any records lab_add_record added
+sub lab_ocfp_config {
+	my $lab = lab();
+	my %subnets = map {
+		($_ => lab_band($lab->{prefix}, @{$lab->{bands}{$_}}))
+	} keys %{$lab->{bands}};
+	for my $subnet (keys %{$LAB_STATE{records} // {}}) {
+		my $extra = $LAB_STATE{records}{$subnet};
+		$subnets{$subnet}{'reserved-ips'}{$_} = $extra->{$_} for keys %$extra;
+	}
+	my %azs = map {
+		my $az = $lab->{bands}{$_}[1];
+		($az => {index => ($az =~ /(\d)$/)[0]})
+	} keys %{$lab->{bands}};
+	return {net => {topology => 'v2', subnets => \%subnets, azs => \%azs}};
+}
+
+# lab_claims_today - a fresh copy of the director's saved claims
+sub lab_claims_today { return dclone(lab()->{claims_today}); }
+
+# lab_reset_claims - start from these claims (none if omitted), with optional
+# per-subnet claims laid over them, and drop any records lab_add_record added
+sub lab_reset_claims {
+	my ($claims, %over) = @_;
+	$claims = $claims ? dclone($claims) : {};
+	$claims->{$_} //= {} for keys %{lab()->{bands}};
+	for my $subnet (keys %over) {
+		for my $net (keys %{$over{$subnet}}) {
+			my $key = lab()->{networks}{$net} ? lab()->{networks}{$net}{claim} : $net;
+			$claims->{$subnet}{$key} = $over{$subnet}{$net};
+		}
+	}
+	%LAB_STATE = (claims => $claims, records => {});
+}
+
+# lab_add_record - add a reserved-ips record to one subnet of the lab
+sub lab_add_record {
+	my ($subnet, $key, $value) = @_;
+	$LAB_STATE{records}{$subnet}{$key} = $value;
+}
+
+# lab_exodus - the director's network exodus over the current claims
+sub lab_exodus {
+	my $lab = lab();
+	my %azs = map {
+		my $az = $lab->{bands}{$_}[1];
+		my $idx = ($az =~ /(\d)$/)[0];
+		($az => {name => "$lab->{env_name}-z$idx", index => $idx})
+	} keys %{$lab->{bands}};
+	my %subnets = map {
+		($_ => {
+			az     => $lab->{bands}{$_}[1],
+			range  => IPv4->new("$lab->{prefix}0/24")->range,
+			claims => dclone($LAB_STATE{claims}{$_} // {}),
+		})
+	} keys %{$lab->{bands}};
+	return {azs => \%azs, subnets => \%subnets};
+}
+
+# lab_env - an environment of the given type, with these env file overrides
+my $lab_seq = 0;
+sub lab_env {
+	my ($type, $overrides) = @_;
+	my $lab = lab();
+	my $ocfp = lab_ocfp_config();
+	my $config = {
+		params => {},
+		'bosh-configs' => {cloud => {networks => $overrides // {}}},
+	};
+	return mock "Genesis::Env" => {
+		name           => $lab->{env_name},
+		type           => $type,
+		kit            => $kit,
+		bosh           => mock("Genesis::BOSH" => {alias => $lab->{env_name}}),
+		use_create_env => $lab->{create_env},
+		features       => Mock::ReferencedValue->new(['ocfp', 'haproxy']),
+		iaas           => 'pve',
+		scale          => 'dev',
+		is_ocfp        => 1,
+		config         => $config,
+
+		env_config_overrides      => sub { $config->{'bosh-configs'}{$_[1]} // {} },
+		director_config_overrides => {},
+		ocfp_subnet_prefix        => 'ocfp',
+		ocfp_config               => $ocfp,
+
+		lookup => sub {
+			my ($self, $key, $default) = @_;
+			return scalar struct_lookup($config, $key, $default);
+		},
+		ocfp_config_lookup => sub {
+			my ($self, $key, $default) = @_;
+			return scalar struct_lookup($ocfp, $key, $default);
+		},
+		director_exodus_lookup => sub {
+			my ($self, $key) = @_;
+			return lab_exodus() if $key eq '/network';
+			die "Unknown director exodus key: $key";
+		},
+		exodus_lookup => sub {
+			my ($self, $key) = @_;
+			return lab_exodus() if $key eq '/network:.';
+			return undef;
+		},
+		cpi_enabled => 0,
+		cpi_name    => undef,
+	};
+}
+
+# lab_run_net_with_stderr - build one lab network on the current claims and
+# save its claims back, as a deploy would; returns the network definition and
+# whatever the build printed on stderr.  A build that bails saves nothing.
+sub lab_run_net_with_stderr {
+	my ($name, %opts) = @_;
+	my $spec = lab()->{networks}{$name} or die "No lab network '$name'";
+	my $overrides = dclone($spec->{overrides} // {});
+	if (defined $opts{total_size}) {
+		$overrides->{ocf}{allocation}{total_size} = $opts{total_size};
+	}
+	my $env = lab_env($spec->{type}, $overrides);
+	my $class = "Genesis::Hook::CloudConfig::$spec->{class}";
+
+	my ($hook, $net);
+	my $err = stderr_from {
+		if ($spec->{director}) {
+			$hook = $class->init(env => $env, purpose => 'director');
+			# A real build is a fresh process; the hook cache hands back the last
+			# director hook, so let it read this run's subnets
+			delete $hook->{subnets};
+		} else {
+			# A distinct purpose keeps the hook cache from handing back the last
+			# build of the same deployment, without changing any network name
+			$hook = $class->init(env => $env, purpose => 'lab-'.(++$lab_seq));
+		}
+		$net = $hook->lab_network(statics => $spec->{statics});
+	};
+	$LAB_STATE{claims} = {map {
+		($_ => dclone($hook->network->{subnets}{$_}{claims} // {}))
+	} keys %{lab()->{bands}}};
+	return ($net, $err);
+}
+
+# lab_run_net - lab_run_net_with_stderr without the stderr
+sub lab_run_net {
+	my ($net) = lab_run_net_with_stderr(@_);
+	return $net;
+}
+
+# lab_claims_snapshot - the saved claims after the last build
+sub lab_claims_snapshot { return dclone($LAB_STATE{claims}); }
+
+# lab_claim - one network's saved claim on one subnet
+sub lab_claim {
+	my ($subnet, $name) = @_;
+	return $LAB_STATE{claims}{$subnet}{lab()->{networks}{$name}{claim}};
+}
+
+# lab_assert_disjoint_and_record_clean - no two claims on a subnet share an
+# address, and no claim holds a reserved-ips record of a target it isn't.
+# Counts as one test.
+sub lab_assert_disjoint_and_record_clean {
+	my ($label) = @_;
+	my $lab = lab();
+	my $ocfp = lab_ocfp_config();
+	my @problems;
+	for my $subnet (sort keys %{$LAB_STATE{claims}}) {
+		my $claims = $LAB_STATE{claims}{$subnet};
+		my @keys = sort keys %$claims;
+		for my $i (0 .. $#keys) {
+			for my $j ($i+1 .. $#keys) {
+				my $x = IPv4->range(IPv4->new($claims->{$keys[$i]}));
+				my $shared = IPv4->range($x - (IPv4->range($x) - IPv4->new($claims->{$keys[$j]})));
+				push @problems, "$subnet: $keys[$i] and $keys[$j] share ".$shared->range
+					if $shared->size;
+			}
+		}
+		my $records = $ocfp->{net}{subnets}{$subnet}{'reserved-ips'};
+		for my $owner (qw(bosh jumpbox blacksmith haproxy)) {
+			my $record = IPv4->new($records->{"${owner}_ip"});
+			for my $key (@keys) {
+				next if ($lab->{record_holders}{$owner} // '') eq $key;
+				my $claim = IPv4->range(IPv4->new($claims->{$key}));
+				push @problems, "$subnet: $key holds the $owner record ".$records->{"${owner}_ip"}
+					if $claim->size && ($claim - $record)->size < $claim->size;
+			}
+		}
+	}
+	is_deeply(\@problems, [], "claims are disjoint and record-clean after $label");
+}
+
+# lab_golden - how each lab network renders on today's claims
+sub lab_golden {
+	my ($name) = @_;
+	return dclone(lab()->{golden}{$name} // die "No golden render for '$name'");
+}
+
+
+# lab_subnet - one rendered subnet of a lab network, as network_definition
+# returns it before the subnets are folded for BOSH
+sub lab_subnet {
+	my ($name, $zone, $reserved, $static) = @_;
+	my $lab = lab();
+	return {
+		name             => $name,
+		az               => "$lab->{env_name}-z$zone",
+		range            => "$lab->{prefix}0/24",
+		gateway          => "$lab->{prefix}1",
+		dns              => ['10.97.160.160', '10.97.160.161'],
+		cloud_properties => {bridge => 'vlan54'},
+		reserved         => $reserved,
+		($static ? (static => $static) : ()),
+	};
+}
+
+# How each lab network renders on today's claims, captured from the claims
+# model as it stood before reserved-ips records of other targets were taken
+# out of a network's free pool.  The renders agree with the lab's real kit
+# hooks on the same claims.
+$LAB{ocf}{golden} = {
+	cf => {name => 'ocfp-cf1-lab-ocf.cf.net-ocf', type => 'manual', subnets => [
+		lab_subnet('ocfp-0', 1, ['10.61.148.0-10.61.148.99', '10.61.148.115-10.61.148.255'],
+		                        ['10.61.148.100-10.61.148.102']),
+		lab_subnet('ocfp-1', 2, ['10.61.148.0-10.61.148.163', '10.61.148.179-10.61.148.255'],
+		                        ['10.61.148.164-10.61.148.166']),
+		lab_subnet('ocfp-2', 3, ['10.61.148.0-10.61.148.228', '10.61.148.230-10.61.148.231', '10.61.148.246-10.61.148.255'],
+		                        ['10.61.148.229', '10.61.148.232-10.61.148.233']),
+	]},
+	'cf-4statics' => {name => 'ocfp-cf1-lab-ocf.cf.net-ocf', type => 'manual', subnets => [
+		lab_subnet('ocfp-0', 1, ['10.61.148.0-10.61.148.99', '10.61.148.115-10.61.148.255'],
+		                        ['10.61.148.100-10.61.148.103']),
+		lab_subnet('ocfp-1', 2, ['10.61.148.0-10.61.148.163', '10.61.148.179-10.61.148.255'],
+		                        ['10.61.148.164-10.61.148.167']),
+		lab_subnet('ocfp-2', 3, ['10.61.148.0-10.61.148.228', '10.61.148.230-10.61.148.231', '10.61.148.246-10.61.148.255'],
+		                        ['10.61.148.229', '10.61.148.232-10.61.148.234']),
+	]},
+	autoscaler => {name => 'ocfp-cf1-lab-ocf.autoscaler.net-autoscaler', type => 'manual', subnets => [
+		lab_subnet('ocfp-0', 1, ['10.61.148.0-10.61.148.114', '10.61.148.122-10.61.148.255']),
+	]},
+	scheduler => {name => 'ocfp-cf1-lab-ocf.scheduler.net-scheduler', type => 'manual', subnets => [
+		lab_subnet('ocfp-0', 1, ['10.61.148.0-10.61.148.121', '10.61.148.124-10.61.148.255']),
+		lab_subnet('ocfp-1', 2, ['10.61.148.0-10.61.148.186', '10.61.148.189-10.61.148.255']),
+		lab_subnet('ocfp-2', 3, ['10.61.148.0-10.61.148.245', '10.61.148.248-10.61.148.255']),
+	]},
+	blacksmith => {name => 'ocfp-cf1-lab-ocf.blacksmith.net-blacksmith', type => 'manual', subnets => [
+		lab_subnet('ocfp-1', 2, ['10.61.148.0-10.61.148.153', '10.61.148.155-10.61.148.255'],
+		                        ['10.61.148.154']),
+	]},
+	valkey => {name => 'valkey-service', type => 'manual', subnets => [
+		lab_subnet('ocfp-1', 2, ['10.61.148.0-10.61.148.178', '10.61.148.187-10.61.148.255']),
+	]},
+	compilation => {name => 'ocfp-cf1-lab-ocf.bosh.net-compilation', type => 'manual', subnets => [
+		lab_subnet('ocfp-2', 3, ['10.61.148.0-10.61.148.227', '10.61.148.232-10.61.148.255']),
+	]},
+};
+
+subtest 'lab claims - every lab network renders as it does today' => sub {
+	my @nets = qw(cf cf-4statics autoscaler scheduler blacksmith valkey);
+	plan tests => 2 * @nets;
+	for my $net (@nets) {
+		lab_reset_claims(lab_claims_today());
+		my $got = lab_run_net($net);
+		is_deeply($got, lab_golden($net), "$net renders the same network");
+		is_deeply(lab_claims_snapshot(), lab_claims_today(), "$net saves the same claims");
+	}
+};
+
+subtest 'lab claims - the director compilation network renders as it does today' => sub {
+	plan tests => 2;
+	lab_reset_claims(lab_claims_today());
+	is_deeply(lab_run_net('compilation'), lab_golden('compilation'), 'compilation renders the same network');
+	is_deeply(lab_claims_snapshot(), lab_claims_today(), 'compilation saves the same claims');
+};
+
+
 done_testing;
 
 
