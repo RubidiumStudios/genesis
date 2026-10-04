@@ -140,9 +140,9 @@ subtest 'director hook - build network exodus for deployment tests' => sub {
 		director_exodus_lookup => sub {
 			die 'Create-env environments do not have directors';
 		},
-		# Director hook calls exodus_lookup('/network:.') to preserve existing
+		# Director hook calls exodus_lookup_strict('/network:.') to preserve existing
 		# claims; returning undef indicates a fresh first-time deploy.
-		exodus_lookup => sub { return undef },
+		exodus_lookup_strict => sub { return undef },
 		cpi_enabled => 0,
 		cpi_name => undef,
 		ocfp_config_lookup => sub {
@@ -2086,7 +2086,7 @@ sub lab_env {
 			return lab_exodus() if $key eq '/network';
 			die "Unknown director exodus key: $key";
 		},
-		exodus_lookup => sub {
+		exodus_lookup_strict => sub {
 			my ($self, $key) = @_;
 			return lab_exodus() if $key eq '/network:.';
 			return undef;

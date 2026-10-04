@@ -223,7 +223,10 @@ sub _set_network_subnets {
 # }}}
 # _get_bosh_network_data - Returns the network data for the BOSH director (self) {{{
 sub _get_bosh_network_data {
-	return $_[0]->env->exodus_lookup('/network:.');
+	# Strict, because a read that failed would look like no deployment
+	# holding any claims, and the config built from that would hand out
+	# addresses that are taken.  Only a record that was never written is empty.
+	return $_[0]->env->exodus_lookup_strict('/network:.');
 }
 
 # }}}

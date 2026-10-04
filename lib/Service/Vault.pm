@@ -503,6 +503,36 @@ sub get_path {
 		return {};
 	}
 
+	return $self->_unpack_path_export($path, $data);
+}
+# }}}
+# get_path_strict - get_path, except a failed read dies and a path with nothing stored comes back undef {{{
+sub get_path_strict {
+	my ($self, $path) = @_;
+	$path =~ s{(^/*|/*$)}{}; # Trim preceeding and trailing / as safe doesn't honour it
+	my ($out,$rc,$err) = $self->query({stderr => 0, redact_output => 1}, 'export', $path);
+	my $data;
+	unless ($rc) {
+		local $@;
+		eval {$data = load_json($out)};
+		$err = $@; # safe exited cleanly, so only an unparseable payload is an error
+	}
+	if ($rc || $err) {
+		# safe names a path with nothing stored on stderr, and exits the same
+		# way for it as for an unreachable or sealed vault
+		return undef if $rc && ($err // '') =~ /no secret exists at path/;
+		my $reason = ($err // '') =~ s/\s+$//r;
+		bail(
+			"Could not read #C{%s} from vault at #M{%s}: %s",
+			$path, $self->{url}, length($reason) ? $reason : "safe exited with code $rc"
+		);
+	}
+	return $self->_unpack_path_export($path, $data);
+}
+# }}}
+# _unpack_path_export - nest the paths in a safe export under the path it was made for {{{
+sub _unpack_path_export {
+	my ($self, $path, $data) = @_;
 	my $results = {};
 	for my $subpath (sort keys %$data) {
 		if ($subpath eq $path) {

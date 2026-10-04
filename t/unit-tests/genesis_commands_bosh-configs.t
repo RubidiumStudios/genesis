@@ -29,12 +29,14 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 my @director_calls; # what the actions asked the director (and its vault) to do
 my @hook_calls;     # what the actions asked the kit hooks to do
 
-my $stored_claims = {}; # what the network record in exodus holds, as the vault reads it
+my $stored_claims = {}; # what the network record in exodus holds, as the vault reads it; undef when none was written
+my $claims_read_error;  # when set, the vault fails every read of the network record with this
 
 my $vault = mock "Mock::BoshConfigs::Vault" => {
-	get_path => sub {
+	get_path_strict => sub {
 		my ($self, $path) = @_;
-		push @director_calls, ['get_path', $path];
+		push @director_calls, ['get_path_strict', $path];
+		die $claims_read_error if $claims_read_error;
 		return $stored_claims;
 	},
 	set_path => sub {
@@ -883,7 +885,10 @@ subtest 'director config - upload releases the director\'s lock on every failure
 			error => qr/Failed to upload cloud config lab-ocf\.bosh\.director/,
 		},
 		'a failed exodus write' => {
-			vault => mock("Mock::BoshConfigs::FailingVault" => {set_path => sub { push @director_calls, ['set_path']; die "vault sealed\n" }}),
+			vault => mock("Mock::BoshConfigs::FailingVault" => {
+				get_path_strict => sub { return {} },
+				set_path => sub { push @director_calls, ['set_path']; die "vault sealed\n" },
+			}),
 			error => qr/was uploaded, but the network map could not be updated.*vault sealed/s,
 		},
 		'a failed hook' => {
@@ -1084,7 +1089,7 @@ subtest 'claims drift - an identical cloud config still gets its claims written 
 	is_deeply($write && [@{$director_calls[$write]}[1..2]], ['secret/exodus/lab-ocf/bosh/network', $fresh_claims],
 		'to the director\'s own record, from the built network map');
 	is_deeply($write && {@{$director_calls[$write]}[3..6]}, {flatten => 1, clear => 1}, 'with flatten and clear');
-	my $read = call_index('get_path', 'secret/exodus/lab-ocf/bosh/network');
+	my $read = call_index('get_path_strict', 'secret/exodus/lab-ocf/bosh/network');
 	ok(defined $read && defined $write && $read < $write, 'after the stored record is read');
 	ok(defined(call_index('clear_network_lock', 'lab-ocf')), 'and the lock is released');
 	like($all, qr/network claims.*differ/s, 'and the output says the claims were out of date');
@@ -1104,7 +1109,7 @@ subtest 'claims drift - nothing is written when the config and the claims both m
 	like($out.$err, qr/already up to date/, 'the cloud config is reported as up to date');
 	ok(!defined(call_index('upload_config')), 'nothing is uploaded');
 	ok(!defined(call_index('set_path')), 'and no claims are written');
-	ok(defined(call_index('get_path', 'secret/exodus/lab-ocf/bosh/network')), 'though the stored record was compared');
+	ok(defined(call_index('get_path_strict', 'secret/exodus/lab-ocf/bosh/network')), 'though the stored record was compared');
 };
 
 subtest 'claims drift - a cloud config that is not the director\'s own is checked the same way' => sub {
@@ -1127,7 +1132,7 @@ subtest 'claims drift - a failed claims write tells the operator how to repair i
 	no warnings 'redefine';
 	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
 	my $failing = mock "Mock::BoshConfigs::DriftVault" => {
-		get_path => sub { return $stale_claims },
+		get_path_strict => sub { return $stale_claims },
 		set_path => sub { die "vault sealed\n" },
 	};
 	my $self_bosh = make_director('lab-ocf', {cloud => {'lab-ocf.bosh.director' => entry(5)}},
@@ -1146,6 +1151,108 @@ subtest 'claims drift - a failed claims write tells the operator how to repair i
 		'with the command that repairs it');
 	like($message, qr/already up to date on the director and writes the claims/, 'and what that command does');
 	ok(!$self_bosh->network_locked_by_me, 'and the lock is released');
+};
+
+# ---------------------------------------------------------------------------
+# reading the stored claims before they are rewritten
+# ---------------------------------------------------------------------------
+# The write clears the network record before it fills it, so a record that
+# could not be read must stop the upload rather than read as empty, and an
+# operator is shown what a write changes before it happens.
+
+# missing_claims_env - a director environment whose cloud config the director
+# does not hold yet, so an upload runs
+sub missing_claims_env {
+	my (%o) = @_;
+	my $self_bosh = make_director('lab-ocf', {});
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(
+		self_bosh => $self_bosh, parent => $parent, ($o{vault} ? (vault => $o{vault}) : ()),
+		run_hook => sub { my ($s, $h) = @_; return $h eq 'runtime-config' ? [] : ("director: yes\n", $fresh_claims) },
+	);
+	return ($env, $parent, $self_bosh);
+}
+
+subtest 'claims read - a failed read of the stored claims stops the upload before anything is written' => sub {
+	plan tests => 12;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	$claims_read_error = "Could not read secret/exodus/lab-ocf/bosh/network from vault at https://vault.example.com:8200: connection refused\n";
+	$stored_claims = $stale_claims;
+
+	for my $case ('a cloud config to upload', 'a cloud config that is already up to date') {
+		@director_calls = ();
+		my ($env, $parent, $self_bosh) = $case =~ /already/ ? claims_env(network_map => $fresh_claims) : missing_claims_env();
+		my $message;
+		eval {
+			output_from {
+				Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+			};
+			1;
+		} or $message = $@ =~ s/\s+/ /gr;
+		like($message, qr/Could not read secret\/exodus\/lab-ocf\/bosh\/network from vault.*connection refused/,
+			"$case: the failure names the path and the error");
+		ok(!defined(call_index('set_path')), "$case: no claims are written");
+		ok(!defined(call_index('upload_config')), "$case: nothing is uploaded");
+		ok(defined(call_index('clear_network_lock', 'lab-ocf')), "$case: the lock is released");
+		ok(!$self_bosh->network_locked_by_me, "$case: so no lock of ours is left");
+		ok(!defined(call_index('delete_config')), "$case: and nothing is deleted");
+	}
+	$claims_read_error = undef;
+	$stored_claims = {};
+};
+
+subtest 'claims read - a record that was never written builds from empty and every claim is shown as added' => sub {
+	plan tests => 5;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	$stored_claims = undef;
+	my ($env, $parent) = missing_claims_env();
+	my ($out, $err) = output_from {
+		Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+	};
+	my $all = $out.$err;
+	ok(defined(call_index('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director')), 'the upload goes ahead');
+	my $write = call_index('set_path');
+	is_deeply($write && $director_calls[$write][2], $fresh_claims, 'and the network map is written');
+	like($all, qr/cf \(ocfp-2\): adds 10\.61\.148\.232-10\.61\.148\.245/, 'the summary shows a claim with no record as added');
+	unlike($all, qr/removes/, 'and removes nothing');
+	like($all, qr/compilation \(ocfp-2\): adds 10\.61\.148\.228,10\.61\.148\.230-10\.61\.148\.231,10\.61\.148\.248/,
+		'with every address of the network');
+	$stored_claims = {};
+};
+
+subtest 'claims read - the summary of the change prints before the claims are written' => sub {
+	plan tests => 7;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	$stored_claims = $stale_claims;
+	my $sealed = mock "Mock::BoshConfigs::SummaryVault" => {
+		get_path_strict => sub { return $stale_claims },
+		set_path => sub { push @director_calls, ['set_path']; die "vault sealed\n" },
+	};
+	my ($env, $parent) = missing_claims_env(vault => $sealed);
+	my ($out, $err, $message);
+	eval {
+		($out, $err) = output_from {
+			eval {
+				Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+			} or print STDOUT "[died] ".($@ =~ s/\s+/ /gr);
+		};
+		1;
+	};
+	my $all = $out.$err;
+	my $summary = index($all, 'compilation (ocfp-2)');
+	my $submit  = index($all, 'submitting network claims');
+	ok($summary >= 0, 'a summary is printed') or diag $all;
+	ok($submit > $summary, 'before the claims are submitted');
+	like($all, qr/compilation \(ocfp-2\): adds 10\.61\.148\.248, removes 10\.61\.148\.229/, 'it shows the addresses a network gains and loses');
+	unlike($all, qr/cf \(ocfp-2\)/, 'and says nothing of a network whose claim is unchanged');
+	like($all, qr/vault sealed/, 'and the write still fails on a sealed vault');
+	ok(defined(call_index('set_path')), 'the write was attempted');
+	unlike($all, qr/\[y\|n\].*\[y\|n\]/s, 'with no confirmation prompt added');
 };
 
 subtest 'director config - delete refuses the director config' => sub {

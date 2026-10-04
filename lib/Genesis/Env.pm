@@ -1799,6 +1799,24 @@ sub exodus_lookup {
 }
 
 # }}}
+# exodus_lookup_strict - exodus_lookup of a /path:key, but a failed Vault read dies instead of reading as the default {{{
+sub exodus_lookup_strict {
+	my ($self, $key, $default, $for) = @_;
+	$for ||= $self->exodus_slug;
+	my ($subpath, $inner) = ($key // '') =~ m#^(/[^:]*)(?::(.*))?#
+		or bug("exodus_lookup_strict only reads extended #C{/path:key} keys, not #C{%s}", $key // '');
+	my $path = $self->exodus_mount().$for.$subpath;
+	debug "Retrieving $path from the Vault";
+	# Nothing stored there is the one answer that is the default; a read
+	# that fails dies, since reading it as the default would look to the
+	# caller like an exodus record with nothing in it.
+	my $out = eval {$self->vault->get_path_strict($path)};
+	bail "Could not get $for exodus data from the Vault: $@" if $@;
+	return $default unless defined($out);
+	return struct_lookup($out, $inner // '', $default);
+}
+
+# }}}
 # director_exodus_lookup - lookup Exodus data from the director that deploys this environment {{{
 sub director_exodus_lookup {
 	my ($self, $key) = (shift, shift);

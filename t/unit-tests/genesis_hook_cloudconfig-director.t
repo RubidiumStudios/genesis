@@ -91,7 +91,7 @@ sub mock_env {
 		lookup => sub { my ($self, $key, $default) = @_; return struct_lookup($self->config, $key, $default); },
 		cpi_enabled => 0,
 		cpi_name => undef,
-		exodus_lookup => sub { return undef },
+		exodus_lookup_strict => sub { return undef },
 		director_exodus_lookup => sub { die 'Create-env environments do not have directors' },
 		ocfp_config_lookup => sub { my ($self, $key) = @_; return struct_lookup($self->ocfp_config, $key); },
 		config => { params => { cloud_config_prefix => 'test-env.test' } },
@@ -752,7 +752,7 @@ sub lab_director {
 		ocfp_config               => $ocfp,
 		lookup => sub { my ($self, $k, $default) = @_; return scalar struct_lookup($self->config, $k, $default); },
 		ocfp_config_lookup => sub { my ($self, $k, $default) = @_; return scalar struct_lookup($ocfp, $k, $default); },
-		exodus_lookup => sub {
+		exodus_lookup_strict => $o{exodus_lookup_strict} // sub {
 			my ($self, $k) = @_;
 			return undef unless $k eq '/network:.';
 			return {subnets => {map {
@@ -823,6 +823,28 @@ subtest 'lab claims - a create-env director repairs its compilation network the 
 	is($state->{claims}{'ocfp-2'}{$state->{key}->('compilation')}, '10.61.148.228,10.61.148.230-10.61.148.231,10.61.148.248',
 		'compilation drops .229 and takes .248');
 	like($err, qr/net-compilation.*10\.61\.148\.229.*haproxy/s, 'with the same warning');
+};
+
+subtest 'lab claims - a failed claims read stops the build, and an absent record builds from empty' => sub {
+	plan tests => 5;
+	my $reads = 0;
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub {
+		$reads++;
+		die "Could not get lab-director/bosh exodus data from the Vault: Could not read secret/exodus/lab-director/bosh/network ".
+		    "from vault at https://vault.example.com:8200: connection refused\n";
+	});
+	my $before = {%{$state->{claims}{'ocfp-2'}}};
+	throws_ok { lab_build($env, $state, 'compilation') }
+		qr/Could not read secret\/exodus\/lab-director\/bosh\/network from vault.*connection refused/s,
+		'a claims read that fails dies with the path and the error';
+	is($reads, 1, 'after the one read');
+	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and the claims are left as they were');
+
+	($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef });
+	my ($net, $err) = lab_build($env, $state, 'compilation');
+	ok($net, 'a record that was never written builds the network');
+	is($state->{claims}{'ocfp-2'}{$state->{key}->('compilation')}, '10.61.148.228,10.61.148.230-10.61.148.232',
+		'from empty claims, so with no record of CF\'s claim compilation takes .232');
 };
 
 done_testing;

@@ -510,6 +510,54 @@ subtest 'custom secrets_mount propagates to exodus, ci, and ocfp_config' => sub 
 };
 
 # ============================================================================
+# exodus_lookup_strict - a failed read is not an absent record
+# ============================================================================
+
+subtest 'exodus_lookup_strict - reads the key from the stored tree' => sub {
+	plan tests => 2;
+	my $env = make_bosh_env();
+	my @read;
+	my $vault = mock "Mock::ExodusStrict::Vault" => {
+		get_path_strict => sub { push @read, $_[1]; return {subnets => {'ocfp-2' => {claims => {cf => '10.0.0.1-10.0.0.4'}}}} },
+	};
+	no warnings 'redefine';
+	local *Genesis::Env::vault = sub { $vault };
+	use warnings 'redefine';
+
+	is_deeply(scalar($env->exodus_lookup_strict('/network:.')), {subnets => {'ocfp-2' => {claims => {cf => '10.0.0.1-10.0.0.4'}}}},
+		'the whole record comes back for the key .');
+	is($read[0], $env->exodus_mount.$env->exodus_slug.'/network', 'from the env\'s exodus network path');
+};
+
+subtest 'exodus_lookup_strict - an absent record reads as the default' => sub {
+	plan tests => 2;
+	my $env = make_bosh_env();
+	my $vault = mock "Mock::ExodusStrict::AbsentVault" => {get_path_strict => sub { return undef }};
+	no warnings 'redefine';
+	local *Genesis::Env::vault = sub { $vault };
+	use warnings 'redefine';
+
+	is($env->exodus_lookup_strict('/network:.'), undef, 'undef without a default');
+	is_deeply($env->exodus_lookup_strict('/network:.', {}), {}, 'and the default when one is given');
+};
+
+subtest 'exodus_lookup_strict - a failed read dies naming the path and the error' => sub {
+	plan tests => 2;
+	my $env = make_bosh_env();
+	my $vault = mock "Mock::ExodusStrict::FailingVault" => {
+		get_path_strict => sub { die "Could not read secret/exodus/x/network from vault at https://v: connection refused\n" },
+	};
+	no warnings 'redefine';
+	local *Genesis::Env::vault = sub { $vault };
+	use warnings 'redefine';
+
+	throws_ok { $env->exodus_lookup_strict('/network:.', {}) }
+		qr/Could not get \Q@{[$env->exodus_slug]}\E exodus\s+data from the Vault:\s+Could\s+not\s+read\s+secret\/exodus\/x\/network\s+from\s+vault\s+at\s+https:\/\/v:\s+connection\s+refused/,
+		'the failure is raised with the path and the reason';
+	throws_ok { $env->exodus_lookup_strict('network', {}) } qr/only reads extended/, 'a key that is not a /path:key is refused';
+};
+
+# ============================================================================
 # Cross-cutting: different env names produce different paths
 # ============================================================================
 

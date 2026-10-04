@@ -939,6 +939,32 @@ B<Examples:>
   my $tree = $vault->get_path('secret/myapp');
   # Returns: { password => 'hunter2', db => { host => 'localhost' } }
 
+=head2 get_path_strict
+
+  my $data = $vault->get_path_strict($path);
+
+Reads the tree under C<$path> as C<get_path> does, but tells a failed read
+from a path with nothing stored. Returns C<undef> when C<safe> reports that no
+secret exists at the path, and dies with the path, the vault URL, and the
+error for any other failure, such as an unreachable or sealed vault, an
+expired token, or an export that cannot be parsed.
+
+Use it where a read that failed must not pass for an empty record, such as
+before a write that clears the record it replaces.
+
+B<Parameters:>
+
+=over 4
+
+=item $path
+
+The root vault path to export from. A leading slash is stripped.
+
+=back
+
+B<Returns:> A nested hash reference as C<get_path> returns, or C<undef> when
+nothing is stored at the path.
+
 =head2 set
 
   $vault->set($path, $key, $value);       # one key

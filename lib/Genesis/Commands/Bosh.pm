@@ -10,6 +10,7 @@ use Genesis::Commands;
 use Genesis::Top;
 use Genesis::UI;
 use JSON::PP;
+use IPv4;
 
 # bosh - provide a wrapper around the bosh command {{{
 sub bosh {
@@ -990,6 +991,11 @@ sub _bosh_configs_upload_cloud {
 		"stale and been removed) -- cannot upload the cloud config!"
 	) if ($last_check->{status} eq 'unlocked');
 
+	# Read before the director is changed, so a record that cannot be read
+	# stops the upload instead of leaving it half done.
+	my $stored = ref($config->{network_map}) eq 'HASH'
+		? _bosh_configs_claims_stored($env, $config) : undef;
+
 	info({pending => 1},
 		"[[  - >>uploading cloud config #C{%s} to #M{%s} BOSH director...",
 		$config->{name}, $bosh->alias
@@ -1004,7 +1010,7 @@ sub _bosh_configs_upload_cloud {
 	}
 	info "#G{done}";
 
-	_bosh_configs_write_claims($env, $config, uploaded => 1)
+	_bosh_configs_write_claims($env, $config, $stored, uploaded => 1)
 		if ref($config->{network_map}) eq 'HASH';
 	return 1;
 }
@@ -1040,26 +1046,104 @@ sub _bosh_configs_claims_differ {
 }
 
 # }}}
+# _bosh_configs_claims_stored - the network record stored in exodus for a cloud config's claims, empty when none was written {{{
+sub _bosh_configs_claims_stored {
+	my ($env, $config) = @_;
+	my ($vault, $path) = _bosh_configs_claims_target($env, $config);
+	# Strict, because a read that failed would look like a record with no
+	# claims in it, and the write that follows clears the record.  Only a
+	# record that was never written is empty.
+	return $vault->get_path_strict($path) // {};
+}
+
+# }}}
+# _bosh_configs_claims_changes - how the claims of a network map differ from the stored record, by network and subnet {{{
+sub _bosh_configs_claims_changes {
+	my ($stored, $map) = @_;
+	my $claims = sub {
+		my ($record) = @_;
+		my $subnets = ref($record) eq 'HASH' && ref($record->{subnets}) eq 'HASH' ? $record->{subnets} : {};
+		my %found;
+		for my $subnet (keys %$subnets) {
+			my $held = ref($subnets->{$subnet}) eq 'HASH' ? $subnets->{$subnet}{claims} : undef;
+			next unless ref($held) eq 'HASH';
+			$found{$_}{$subnet} = $held->{$_} for keys %$held;
+		}
+		return \%found;
+	};
+	my ($old, $new) = ($claims->($stored), $claims->($map));
+	# The addresses of one range that another does not hold.  A value that is
+	# not a range of addresses is shown as it is.
+	my $addresses = sub {
+		my ($range, $without) = @_;
+		return '' unless defined($range) && length($range);
+		return $range unless defined($without) && length($without);
+		my $left = eval {
+			my %taken = map {("$_" => 1)} IPv4->new($without)->addresses;
+			IPv4->range(grep {!$taken{$_}} map {"$_"} IPv4->new($range)->addresses)->range;
+		};
+		return defined($left) ? $left : $range;
+	};
+
+	my @changes;
+	for my $network (sort keys %{{%$old, %$new}}) {
+		for my $subnet (sort keys %{{%{$old->{$network} // {}}, %{$new->{$network} // {}}}}) {
+			my ($was, $now) = ($old->{$network}{$subnet}, $new->{$network}{$subnet});
+			next if ($was // '') eq ($now // '');
+			my ($added, $removed) = ($addresses->($now, $was), $addresses->($was, $now));
+			next unless length($added) || length($removed);
+			push @changes, {network => $network, subnet => $subnet, added => $added, removed => $removed};
+		}
+	}
+	return @changes;
+}
+
+# }}}
+# _bosh_configs_claims_summary - tell the operator what a write of the network claims changes {{{
+sub _bosh_configs_claims_summary {
+	my ($path, $stored, $map) = @_;
+	my @changes = _bosh_configs_claims_changes($stored, $map);
+	unless (@changes) {
+		info("[[  - >>the network claims at #C{%s} keep the same addresses.", $path);
+		return;
+	}
+	info("[[  - >>the network claims at #C{%s} change:", $path);
+	for my $change (@changes) {
+		info(
+			"[[      >>#M{%s} (%s): %s", $change->{network}, $change->{subnet},
+			join(', ',
+				(length($change->{added})   ? "adds #G{$change->{added}}"       : ()),
+				(length($change->{removed}) ? "removes #R{$change->{removed}}" : ())
+			)
+		);
+	}
+	return;
+}
+
+# }}}
 # _bosh_configs_sync_claims - write the claims of an up-to-date cloud config when the stored record differs from them {{{
 sub _bosh_configs_sync_claims {
 	my ($env, $config) = @_;
-	my ($vault, $path) = _bosh_configs_claims_target($env, $config);
-	return 0 unless _bosh_configs_claims_differ($vault->get_path($path), $config->{network_map});
+	my $stored = _bosh_configs_claims_stored($env, $config);
+	return 0 unless _bosh_configs_claims_differ($stored, $config->{network_map});
 
+	my (undef, $path) = _bosh_configs_claims_target($env, $config);
 	info(
 		"[[  - >>the network claims recorded at #C{%s} #Y{differ} from the ones %s builds, ".
 		"so they will be written.", $path, _bosh_configs_label($config)
 	);
-	_bosh_configs_write_claims($env, $config, uploaded => 0);
+	_bosh_configs_write_claims($env, $config, $stored, uploaded => 0);
 	return 1;
 }
 
 # }}}
-# _bosh_configs_write_claims - record a cloud config's network map in the exodus network record {{{
+# _bosh_configs_write_claims - record a cloud config's network map in the exodus network record, after saying what it changes {{{
 sub _bosh_configs_write_claims {
-	my ($env, $config, %opts) = @_;
+	my ($env, $config, $stored, %opts) = @_;
 	my $bosh = $config->{bosh};
 	my ($network_vault, $network_path) = _bosh_configs_claims_target($env, $config);
+
+	_bosh_configs_claims_summary($network_path, $stored, $config->{network_map});
 
 	info({pending => 1},
 		"[[  - >>submitting network claims for #C{%s} to #M{%s} BOSH director...",
