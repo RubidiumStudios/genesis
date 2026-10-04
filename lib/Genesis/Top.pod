@@ -3513,7 +3513,10 @@ refusal in the same words whichever command loaded it.
 A section that is off is left alone. Otherwise the checks run in this
 order. Both halves of the deployment slug are checked as git ref components
 by L</_validate_slug_components>, first, because they name the branches
-everything else here is about. Then the source-control block is resolved,
+everything else here is about. Then every key that shapes the pipeline is
+checked by L</_validate_shape_values> to have resolved from the
+environment's own files, before anything reads the shape. Then the
+source-control block is resolved,
 which is where the derivations and their refusals are raised. The configured
 provider's own rules are not among the checks here: the provider block
 declares the type that decides it, so C<Genesis::Config::validate> has
@@ -3525,12 +3528,61 @@ L</_validate_one_exodus_mount>, which comes after the store because the
 mount is where that store keeps the pipeline's applied record. Last, every
 environment the deployment root holds has its C<genesis.pipeline> block
 checked, read merged through L</_merged_env_params>. The refusals
-themselves belong to L</_validate_slug_components>, to L</_source_control>,
+themselves belong to L</_validate_slug_components>, to
+L</_validate_shape_values>, to L</_source_control>,
 to L</_validate_capability_gates>, to
 L</_validate_manifest_store>, to L</_validate_one_exodus_mount>, and to
 L</_validate_env_pipeline_block>.
 
 B<Returns:> 1.
+
+=head2 _validate_shape_values
+
+    $top->_validate_shape_values();
+
+Refuses, at C<Genesis::Exit::CONFIG>, a key that shapes the pipeline whose
+value still contains C<((> after the environment's merge: C<genesis.bosh_env>
+and the eight keys of the C<genesis.pipeline> block, C<prior_env>,
+C<require_pr>, C<manual>, C<redeploy_cron>, C<notifications>,
+C<track_dependencies>, C<track_additional_files> and C<track_bosh_configs>,
+searched through any list or hash a value holds.
+
+Each environment's shape is read through L</_merged_env_params>, a merge of
+its own files with vault unreachable (D117), so a C<grab>, a C<concat> or a
+C<||> default the files resolve has already been resolved, and what still
+holds C<((> is one of three things: a credhub or BOSH variable, which no
+shape key may carry since none holds sensitive data; a vault value, directly
+or through any reference to one, which would let the pipeline's gating
+change without a commit; or a reference those files do not resolve, a value
+only Genesis or the kit supplies among them. Each is checked on every
+environment L</_env_file_names> holds, so a value a site file sets is
+refused on every environment that inherits it, and the refusal names the
+nearest file in that environment's hierarchy that sets the key, found by
+reading the hierarchy's files one at a time on the way to a refusal.
+
+B<Returns:> 1.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Configuration validation failed for ..."> - one bullet per environment
+and key, naming the key, the environment, the value as it stands after the
+merge, and the file that sets the key.
+
+=back
+
+B<Examples:>
+
+    $top->_validate_shape_values;
+    # returns 1 where prior_env is (( concat meta.site "-lab" )) and
+    # meta.site is set
+
+    $top->_validate_shape_values;
+    # exits CONFIG (78) where prior_env is (( concat "c-" meta.value "-lab" ))
+    # and meta.value is a (( vault )), naming c-(( vault "..." ))-lab
 
 =head2 _validate_capability_gates
 
@@ -3718,14 +3770,17 @@ from the leaf file, so a leaf-only read answers wrongly and says nothing
 about it.
 
 The read is the environment's own: a bare C<Genesis::Env>, its
-C<unevaluated_environment> manifest, which is C<spruce merge --skip-eval>
-over the hierarchy C<actual_environment_files> gives, the name-based
-ancestors and any C<genesis.inherits>. Spruce's merge operators,
+C<vaultless_environment> manifest, which is spruce's adaptive merge over the
+hierarchy C<actual_environment_files> gives, the name-based ancestors and any
+C<genesis.inherits>, with vault unreachable to it
+(L<Genesis::Env::Manifest::VaultlessEnvironment>). Spruce's merge operators,
 C<(( append ))>, C<(( prune ))> and the rest, apply exactly as they do when
-the environment is deployed, and its value operators are left as written. No
-kit is needed, which is what lets the check run as the configuration loads,
-and the manifest is cached for the process under the environment's
-signature.
+the environment is deployed; a value operator the files resolve, a C<grab> or
+a C<concat>, is resolved; and a C<(( vault ))> comes back as its own text, in
+its place and in every value built from it, as does anything else that
+resolves nowhere here. No kit is needed, which is what lets the check run as
+the configuration loads, and the manifest is cached for the process under the
+environment's signature.
 
 An operator written in spruce's C<(( op(args) ))> call form is refused first,
 in its own words, by L<Genesis::Env/_refuse_operator_call_form>. A file in

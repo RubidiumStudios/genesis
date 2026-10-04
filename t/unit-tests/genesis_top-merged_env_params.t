@@ -1,8 +1,9 @@
 #!perl
 # Proves T353: configuration load validates what a deploy would merge.  The
-# merged read is Genesis::Env's own unevaluated_environment manifest, which
-# is spruce's merge with value operators left alone, so spruce's merge
-# operators apply across the hierarchy exactly as they do at deploy time.
+# merged read is Genesis::Env's own vaultless_environment manifest, spruce's
+# adaptive merge with vault unreachable, so spruce's merge operators apply
+# across the hierarchy exactly as they do at deploy time, what the files
+# resolve is resolved, and a vault value comes back as its own text.
 use strict;
 use warnings;
 use utf8;
@@ -59,16 +60,21 @@ subtest "spruce's merge operators apply across the hierarchy" => sub {
 		['ops/dependency.yml'], 'while the site file read on its own still carries it');
 };
 
-subtest 'value operators are left unevaluated' => sub {
-	plan tests => 1;
+subtest 'what the files resolve is resolved, and vault comes back as text' => sub {
+	plan tests => 2;
 
-	commit_on_control($h, message => 'a grab in the leaf', files => {
-		'us-west.yml' => "---\ngenesis:\n  env: us-west\n  bosh_env: (( grab meta.director ))\n",
+	# Keys outside the shape, because a shape key still holding (( is
+	# refused at load (T352).
+	commit_on_control($h, message => 'a grab and a vault in the leaf', files => {
+		'us-west.yml' => "---\ngenesis:\n  env: us-west\nmeta:\n  director: us-west-bosh\n"
+			. "params:\n  director: (( grab meta.director ))\n"
+			. "  secret:   (( vault \"secret/x:y\" ))\n",
 	});
-	my $fresh = Genesis::Top->new($h->a, no_vault => 1);
-	is($fresh->_merged_env_params('us-west')->{genesis}{bosh_env},
-		'(( grab meta.director ))',
-		'a grab comes back as written, since nothing it could reach is read');
+	my $fresh  = Genesis::Top->new($h->a, no_vault => 1);
+	my $params = $fresh->_merged_env_params('us-west')->{params};
+	is($params->{director}, 'us-west-bosh', 'a grab the files can resolve is resolved');
+	is($params->{secret}, '(( vault "secret/x:y" ))',
+		'and a vault value comes back as its own text, since no vault is reached');
 };
 
 subtest 'an environment is merged once and the answer kept' => sub {

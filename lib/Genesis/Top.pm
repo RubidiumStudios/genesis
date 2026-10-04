@@ -2860,6 +2860,10 @@ sub _validate_pipeline_config {
 	# is worth saying before anything is said about what it configures.
 	$self->_validate_slug_components;
 
+	# Before anything reads the shape, because a shape key still holding ((
+	# would be read as its own text.
+	$self->_validate_shape_values;
+
 	$self->_source_control;
 
 	# Before the environment blocks are read for their shape, because a key
@@ -2887,6 +2891,65 @@ sub _validate_pipeline_config {
 		next unless exists $genesis->{pipeline};
 		$self->_validate_env_pipeline_block($env_name, $genesis->{pipeline});
 	}
+
+	return 1;
+}
+
+# }}}
+# _validate_shape_values - the keys that shape the pipeline resolve from the files {{{
+#
+# The shape is read through a merge of each environment's own files with
+# vault unreachable (D117), so a shape key whose value still contains (( is
+# a credhub variable, a vault value directly or by reference, or a reference
+# that resolves nowhere in those files.  Each is refused on the environment
+# that inherits it, naming the nearest file that sets the key, which is found
+# by reading the hierarchy's files one at a time and only on the way to a
+# refusal.
+my @SHAPE_KEYS = (
+	'genesis.bosh_env',
+	map {"genesis.pipeline.$_"} qw/
+		prior_env require_pr manual redeploy_cron notifications
+		track_dependencies track_additional_files track_bosh_configs
+	/
+);
+sub _validate_shape_values {
+	my ($self) = @_;
+
+	my $unresolved;
+	$unresolved = sub {
+		my ($value) = @_;
+		return grep {defined} map {$unresolved->($_)} values %$value if ref($value) eq 'HASH';
+		return grep {defined} map {$unresolved->($_)} @$value         if ref($value) eq 'ARRAY';
+		return (defined($value) && !ref($value) && $value =~ /\(\(/) ? ($value) : ();
+	};
+
+	my @errors;
+	for my $env_name ($self->_env_file_names) {
+		my $params = $self->_merged_env_params($env_name);
+		for my $key (@SHAPE_KEYS) {
+			my ($held) = $unresolved->(scalar struct_lookup($params, $key)) or next;
+
+			my $env = Genesis::Env->bare($env_name, $self);
+			my ($from) = grep {
+				defined scalar struct_lookup(scalar(load_yaml_file($env->path($_))) // {}, $key)
+			} reverse grep {-f $env->path($_)} $env->actual_environment_files;
+
+			push @errors, sprintf(
+				"#R{%s} in #C{%s} is #C{%s}, set in #C{%s}: a key that shapes the ".
+				"pipeline must resolve from the environment's own files, and this ".
+				"one still holds a credhub variable, a vault value, or a reference ".
+				"those files do not resolve (a value only Genesis or the kit supplies ".
+				"is not among them)",
+				$key, $env_name, $held, ($from // "$env_name.yml") =~ s{^\./}{}r
+			);
+		}
+	}
+
+	bail({exitcode => CONFIG},
+		"Configuration validation failed for #C{%s}:%s",
+		$self->path('.genesis/config'),
+		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
+	) if @errors;
 
 	return 1;
 }
@@ -3065,9 +3128,10 @@ sub _validate_manifest_store {
 # Genesis resolves an environment by merging its ancestral hierarchy, with
 # the nearer file winning, and every genesis.pipeline.* read follows that
 # rule.  This is the load-time form of that read, and it is the environment's
-# own: a bare Genesis::Env's unevaluated_environment manifest, spruce's merge
-# with the value operators left alone, so the merge operators apply exactly as
-# they do at deploy time and no kit is needed (D117).
+# own: a bare Genesis::Env's vaultless_environment manifest, spruce's adaptive
+# merge with vault unreachable, so the merge operators apply exactly as they do
+# at deploy time, what the files resolve is resolved, a vault value comes back
+# as its own text, and no kit is needed (D117).
 sub _merged_env_params {
 	my ($self, $env_name) = @_;
 
@@ -3100,7 +3164,7 @@ sub _merged_env_params {
 	# the hierarchy in full parses every file for what it inherits and would
 	# fall over the same file again.
 	my ($merged, $err);
-	eval {$merged = $env->manifest_provider->unevaluated_environment->data; 1}
+	eval {$merged = $env->manifest_provider->vaultless_environment->data; 1}
 		or $err = $@;
 	bail({exitcode => CONFIG},
 		"An environment file could not be read as YAML.\n%s\n%s\n".

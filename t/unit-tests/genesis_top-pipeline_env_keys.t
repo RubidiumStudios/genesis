@@ -223,6 +223,52 @@ subtest 'the read is merged and never leaf-only' => sub {
 		'and the refusal never names the site file as an environment';
 };
 
+subtest "a shape key resolves from the environment's own files, or is refused (T352)" => sub {
+	plan tests => 9;
+
+	# The shape is read through a merge of the environment's files with vault
+	# unreachable (D117), so what those files resolve is resolved, and a
+	# shape key still holding (( afterwards is refused at load, naming the
+	# environment, the key, the value, and the file that set it.
+	my $g = make_harness(envs => [], pipeline => 1, vault => 0);
+	my $site = "---\nmeta:\n  site:  us-east\n  value: (( vault \"secret/value:test\" ))\n";
+	my $qa = sub {
+		my ($pipeline) = @_;
+		commit_on_control($g, message => 'qa shape', files => {
+			'us.yml'         => $site,
+			'us-east-lab.yml' => "---\ngenesis:\n  env: us-east-lab\n",
+			'us-east-qa.yml'  => "---\ngenesis:\n  env: us-east-qa\n$pipeline",
+		});
+		my $refusal = '';
+		my $top = eval {my $t = Genesis::Top->new($g->a, no_vault => 1); $t->config; $t}
+			or $refusal = $@;
+		return ($top, $refusal);
+	};
+
+	my ($top) = $qa->("  pipeline:\n    prior_env:  (( concat meta.site \"-lab\" ))\n"
+		. "    require_pr: (( grab meta.pr || false ))\n");
+	ok($top, 'a shape key the environment\'s files resolve loads');
+	is($top && $top->_merged_env_params('us-east-qa')->{genesis}{pipeline}{prior_env},
+		'us-east-lab', 'and reads resolved');
+	ok($top && !$top->_merged_env_params('us-east-qa')->{genesis}{pipeline}{require_pr},
+		'and a || default applies where its reference is unset');
+
+	my (undef, $missing) = $qa->("  pipeline:\n    prior_env: (( grab meta.upsteam ))\n");
+	like($missing, qr/genesis\.pipeline\.prior_env.*\bus-east-qa\b/s,
+		'a reference that resolves nowhere is refused, naming the key and the environment');
+	like($missing, qr/\(\( grab meta\.upsteam \)\)/, 'and the value as it stands');
+	like($missing, qr/\bus-east-qa\.yml\b/, 'and the file that set it');
+
+	my (undef, $variable) = $qa->("  bosh_env: ((director_name))\n");
+	like($variable, qr/genesis\.bosh_env.*\(\(director_name\)\)/s,
+		'a credhub variable is refused, since no shape key may carry one');
+
+	my (undef, $tainted) = $qa->("  pipeline:\n    prior_env: (( concat \"c-\" meta.value \"-lab\" ))\n");
+	like($tainted, qr/genesis\.pipeline\.prior_env.*c-\(\(\s+vault\s+"secret\/value:test"\s+\)\)-lab/s,
+		'a vault value is refused through a concat that takes it in');
+	unlike($tainted, qr/REDACTED/, 'and no vault was asked for it');
+};
+
 subtest 'the reader promotes a bare string the way the validator does' => sub {
 	plan tests => 1;
 
