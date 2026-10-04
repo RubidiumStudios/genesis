@@ -119,24 +119,38 @@ sub _acquire_director_network_lock {
 	}
 	my $interval = $NETWORK_LOCK_POLL_SECONDS > 0 ? $NETWORK_LOCK_POLL_SECONDS : 5;
 
-	my ($waited, $announced, $lock) = (0, 0);
+	my ($waited, $announced, $lock, $acquire_error) = (0, 0);
 	while (1) {
+		$acquire_error = undef;
 		$lock = $bosh->check_network_lock;
 		if ($lock->{status} eq 'unlocked') {
 			# Another process can take it between the check and here, and then
-			# acquire_network_lock refuses; go round again and wait for it.
+			# acquire_network_lock refuses; go round again and wait for it.  A
+			# refusal that leaves the lock free is a vault failure instead, and
+			# waits and counts the same as a held lock does.
 			return 1 if eval { $bosh->acquire_network_lock; 1 };
+			$acquire_error = ($@ =~ s/\s+$//r) || 'unknown error';
 			$lock = $bosh->check_network_lock;
-			next if $lock->{status} eq 'unlocked';
+			undef $acquire_error unless $lock->{status} eq 'unlocked';
 		}
 		last if $lock->{status} eq 'stale' || $waited >= $limit;
 
-		info(
-			"[[  - >>the network claims lock on #M{%s} BOSH director is held %s; ".
-			"waiting up to %s for it...",
-			$bosh->alias, $lock->{description} // 'by another process',
-			count_nouns($limit, "second")
-		) unless $announced++;
+		unless ($announced++) {
+			if (defined $acquire_error) {
+				info(
+					"[[  - >>the network claims lock on #M{%s} BOSH director could not be ".
+					"taken (%s); retrying for up to %s...",
+					$bosh->alias, $acquire_error, count_nouns($limit, "second")
+				);
+			} else {
+				info(
+					"[[  - >>the network claims lock on #M{%s} BOSH director is held %s; ".
+					"waiting up to %s for it...",
+					$bosh->alias, $lock->{description} // 'by another process',
+					count_nouns($limit, "second")
+				);
+			}
+		}
 		my $step = $interval < $limit - $waited ? $interval : $limit - $waited;
 		sleep($step);
 		$waited += $step;
@@ -158,6 +172,18 @@ sub _acquire_director_network_lock {
 			"deploy is running against this director, then run #C{%s}, which clears ".
 			"the stale lock and finishes this step without a redeploy.",
 			$bosh->alias, $config_name, $lock->{description} // 'by an unknown process', $finish
+		);
+	} elsif (defined $acquire_error) {
+		error(
+			"The #M{%s} BOSH director deployed and is working, but its own cloud config ".
+			"#C{%s} and its network record in exodus were not updated.  The network ".
+			"claims lock on the director is free, but it could not be taken, and it ".
+			"still could not be taken after %s.  The last error was: %s.  This usually ".
+			"means the vault is sealed or unreachable, the token has expired, or the ".
+			"token has no write access to the director's network claims lock in ".
+			"exodus.  Check the vault and the token, then run #C{%s} to finish this ".
+			"step without a redeploy.",
+			$bosh->alias, $config_name, count_nouns($waited, "second"), $acquire_error, $finish
 		);
 	} else {
 		error(

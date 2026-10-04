@@ -591,15 +591,24 @@ sub net_bosh {
 	my $alias  = $o{alias} // 'lab-ocf';
 	my @states = @{$o{states} // [{status => 'unlocked'}]};
 	my $mine   = 0;
+	my $tries  = 0;
 	$net_seq++;
 	return mock "Mock::PostDeploy::NetBosh$net_seq" => {
 		alias => $alias,
 		check_network_lock => sub {
 			push @netcalls, ['check_network_lock', $alias];
+			# Past the cap, a lock that can't be taken reads stale, which ends
+			# any wait loop that would otherwise keep going
+			return {status => 'stale', description => 'runaway wait loop'} if $o{acquire_cap} && $tries > $o{acquire_cap};
 			return {status => 'locked', description => 'just now by this process'} if $mine;
 			return @states > 1 ? shift(@states) : $states[0];
 		},
-		acquire_network_lock => sub { push @netcalls, ['acquire_network_lock', $alias]; $mine = 1 },
+		acquire_network_lock => sub {
+			push @netcalls, ['acquire_network_lock', $alias];
+			$tries++;
+			die $o{fail_acquire} if $o{fail_acquire};
+			$mine = 1;
+		},
 		network_locked_by_me => sub { $mine },
 		clear_network_lock   => sub { push @netcalls, ['clear_network_lock', $alias]; $mine = 0; 1 },
 		upload_config => sub {
@@ -720,6 +729,32 @@ subtest 'update_director_network_config - fails only this step when the wait run
 		'and gives the exact command that finishes the step');
 	like($all, qr/deployed and is working, but its own cloud config lab-ocf\.bosh\.director and its network record in exodus were not updated/,
 		'and says the director deployed but its network record was not updated');
+};
+
+subtest 'update_director_network_config - fails this step when every attempt to take the lock errors' => sub {
+	plan tests => 8;
+	no warnings 'once';
+	local $Genesis::Hook::PostDeploy::NETWORK_LOCK_POLL_SECONDS = 1;
+	local $ENV{GENESIS_NETWORK_LOCK_WAIT} = 2;
+	@netcalls = ();
+	# The vault read answers unlocked while every write fails, so the lock never
+	# looks held.  The cap ends the wait if a regression stops it from counting.
+	my $bosh = net_bosh(fail_acquire => "vault write failed: permission denied\n", acquire_cap => 40);
+	my $hook = make_hook(env => net_env(self_bosh => $bosh));
+	my ($ret, $out, $err);
+	my $start = time;
+	($out, $err) = output_from { $ret = $hook->update_director_network_config };
+	ok(time - $start < 10, 'within the wait limit');
+	my $attempts = scalar(grep { $_->[0] eq 'acquire_network_lock' } @netcalls);
+	ok($attempts >= 2 && $attempts <= 4, 'the attempts are spaced by the poll interval') or diag "attempts: $attempts";
+	is($ret, 0, 'the step returns 0, so only this step fails');
+	ok(!defined(netcall('run_hook')), 'no hook runs');
+	ok(!defined(netcall('upload_config')), 'nothing is uploaded');
+	my $all = ($out.$err) =~ s/\s+/ /gr; # the error is wrapped to the terminal
+	like($all, qr/vault write failed: permission denied/, 'the error reports the last failure');
+	like($all, qr/genesis lab-ocf bosh-configs upload --type cloud --name lab-ocf\.bosh\.director -y/,
+		'and gives the exact command that finishes the step');
+	ok(!grep({ $_->[0] eq 'clear_network_lock' } @netcalls), 'no lock is cleared, since none was taken');
 };
 
 subtest 'update_director_network_config - fails at once on a stale lock and leaves it in place' => sub {
