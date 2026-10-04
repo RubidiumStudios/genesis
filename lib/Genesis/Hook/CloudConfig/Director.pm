@@ -23,6 +23,9 @@ sub init {
 	) unless ($opts{purpose}//'') eq 'director';
 	my $obj = $class->SUPER::init(%opts, network => {});
 
+	# Stop before building from a claims record that a failed write may have emptied
+	$obj->_check_claims_record_not_lost();
+
 	# Set the azs and subnets
 	# FIXME: Check if az prefix set in environment config
 	$obj->_set_network_azs();
@@ -134,6 +137,67 @@ sub overrides_base {
 # }}}
 
 # Private Methods {{{
+# _check_claims_record_not_lost - Stops when an absent claims record sits on a director that has deployments {{{
+sub _check_claims_record_not_lost {
+	my ($self) = @_;
+	my $env = $self->env;
+
+	# Only a record that is absent, or exports as an empty one, is in doubt.
+	# One that holds anything is the director's own view to build on.
+	my $network_data = $self->_get_bosh_network_data;
+	return if ref($network_data) eq 'HASH' && keys %$network_data;
+	return if defined($network_data) && ref($network_data) ne 'HASH';
+
+	# The claims are written by clearing the record and then setting it, so a
+	# write that fails in between leaves nothing stored, which reads the same as
+	# a director that was never built.  Building from that hands out addresses
+	# that other deployments hold, and the change summary shows only additions.
+	my $path = $env->exodus_base.'/network';
+	if ($ENV{GENESIS_ALLOW_EMPTY_CLAIMS}) {
+		warning(
+			"#C{GENESIS_ALLOW_EMPTY_CLAIMS} is set, so Genesis is building from the ".
+			"empty network claims record at #C{%s} without checking whether the ".
+			"director has deployments.",
+			$path
+		);
+		return;
+	}
+
+	# A failed listing is not an answer, so it stops the build with its own error
+	my $bosh = scalar $env->get_target_bosh({self => !$env->use_create_env});
+	my $deployments = eval {$bosh->deployments};
+	if (my $err = $@) {
+		$err =~ s/\s+$//;
+		bail(
+			"Could not list the deployments on the #M{%s} BOSH director, so Genesis ".
+			"cannot tell whether the empty network claims record at #C{%s} is ".
+			"expected: %s\n\nGenesis has stopped without changing anything.  Check ".
+			"that the director is reachable and the login is valid, then run this ".
+			"again.",
+			$bosh->alias, $path, $err
+		);
+	}
+	my @names = sort keys %{$deployments // {}};
+	return unless @names;
+
+	bail(
+		"The network claims record at #C{%s} is empty, but the #M{%s} BOSH ".
+		"director already has %d deployment%s (%s).  An empty record on a director ".
+		"with deployments usually means a failed or partial claims write, such as ".
+		"a vault timeout or an expired token between clearing the record and ".
+		"writing it.  Building from it would hand out addresses that those ".
+		"deployments hold, so Genesis has stopped without changing anything.  ".
+		"Check the record with #C{safe export %s} and restore it from a saved copy ".
+		"if it should hold claims.  If this director is new, or you have confirmed ".
+		"that the record should be empty, run this again with ".
+		"#C{GENESIS_ALLOW_EMPTY_CLAIMS=1} set for that one run.",
+		$path, $bosh->alias, scalar(@names), (@names == 1 ? '' : 's'),
+		join(', ', @names[0 .. ($#names < 4 ? $#names : 4)]).(@names > 5 ? ', ...' : ''),
+		$path
+	);
+}
+
+# }}}
 # _set_network_azs - Set (and validate?) the network azs for the environment {{{
 sub _set_network_azs {
 	my ($self, %opts) = @_;

@@ -143,6 +143,10 @@ subtest 'director hook - build network exodus for deployment tests' => sub {
 		# Director hook calls exodus_lookup_strict('/network:.') to preserve existing
 		# claims; returning undef indicates a fresh first-time deploy.
 		exodus_lookup_strict => sub { return undef },
+		# With no record of claims the director hook asks the director whether
+		# it has deployments; this one has none, so it is a first build.
+		exodus_base => 'secret/exodus/test-env-mgmt/bosh',
+		get_target_bosh => sub { return mock "Genesis::BOSH" => {alias => 'mock-bosh', deployments => {}} },
 		cpi_enabled => 0,
 		cpi_name => undef,
 		ocfp_config_lookup => sub {

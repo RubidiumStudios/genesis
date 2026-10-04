@@ -92,6 +92,8 @@ sub mock_env {
 		cpi_enabled => 0,
 		cpi_name => undef,
 		exodus_lookup_strict => sub { return undef },
+		exodus_base => "secret/exodus/test-env-dir-$test_seq/bosh",
+		get_target_bosh => sub { return mock "Genesis::BOSH" => {alias => 'mock-bosh', deployments => {}} },
 		director_exodus_lookup => sub { die 'Create-env environments do not have directors' },
 		ocfp_config_lookup => sub { my ($self, $key) = @_; return struct_lookup($self->ocfp_config, $key); },
 		config => { params => { cloud_config_prefix => 'test-env.test' } },
@@ -726,7 +728,7 @@ sub lab_director {
 	my (%o) = @_;
 	my $name = 'lab-director-'.(++$lab_seq);
 	my $key = sub { $_[0] eq 'cf' ? "$name.cf.net-ocf" : $_[0] eq 'scheduler' ? "$name.scheduler.net-scheduler" : "$name.bosh.net-$_[0]" };
-	my $state = {name => $name, key => $key, claims => {
+	my $state = {name => $name, key => $key, deployment_lists => 0, targets => [], claims => {
 		'ocfp-0' => {}, 'ocfp-1' => {},
 		'ocfp-2' => {map {($key->($_) => $o{claims}{$_})} keys %{$o{claims}}},
 	}};
@@ -735,6 +737,14 @@ sub lab_director {
 		subnets  => {'ocfp-0' => lab_band(64, 'pvupvecf101'), 'ocfp-1' => lab_band(128, 'pvupvecf102'), 'ocfp-2' => lab_band(192, 'pvupvecf103')},
 		azs      => {pvupvecf101 => {index => 1}, pvupvecf102 => {index => 2}, pvupvecf103 => {index => 3}},
 	}};
+	# the director's own BOSH, which the hook asks for its deployments
+	my $lab_bosh = mock "Genesis::BOSH" => {
+		alias       => $name,
+		deployments => sub {
+			$state->{deployment_lists}++;
+			return ref($o{deployments}) eq 'CODE' ? $o{deployments}->() : ($o{deployments} // {});
+		},
+	};
 	my $env = mock "Genesis::Env" => {
 		name           => $name,
 		type           => 'bosh',
@@ -752,6 +762,12 @@ sub lab_director {
 		ocfp_config               => $ocfp,
 		lookup => sub { my ($self, $k, $default) = @_; return scalar struct_lookup($self->config, $k, $default); },
 		ocfp_config_lookup => sub { my ($self, $k, $default) = @_; return scalar struct_lookup($ocfp, $k, $default); },
+		exodus_base => "secret/exodus/$name/bosh",
+		get_target_bosh => sub {
+			my ($self, $opts) = @_;
+			push @{$state->{targets}}, $opts;
+			return $lab_bosh;
+		},
 		exodus_lookup_strict => $o{exodus_lookup_strict} // sub {
 			my ($self, $k) = @_;
 			return undef unless $k eq '/network:.';
@@ -825,8 +841,8 @@ subtest 'lab claims - a create-env director repairs its compilation network the 
 	like($err, qr/net-compilation.*10\.61\.148\.229.*haproxy/s, 'with the same warning');
 };
 
-subtest 'lab claims - a failed claims read stops the build, and an absent record builds from empty' => sub {
-	plan tests => 5;
+subtest 'lab claims - a failed claims read stops the build' => sub {
+	plan tests => 4;
 	my $reads = 0;
 	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub {
 		$reads++;
@@ -839,12 +855,79 @@ subtest 'lab claims - a failed claims read stops the build, and an absent record
 		'a claims read that fails dies with the path and the error';
 	is($reads, 1, 'after the one read');
 	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and the claims are left as they were');
+	is($state->{deployment_lists}, 0, 'without asking the director for its deployments');
+};
 
-	($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef });
+my %lab_deployed = (cf => {releases => [], stemcells => [], teams => []}, scheduler => {releases => [], stemcells => [], teams => []});
+
+subtest 'lab claims - an absent record on a director with deployments stops the build' => sub {
+	plan tests => 9;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS};
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef }, deployments => {%lab_deployed});
+	my $before = {%{$state->{claims}{'ocfp-2'}}};
+	my $err;
+	throws_ok { lab_build($env, $state, 'compilation') } qr/network claims record/i, 'the build stops';
+	$err = $@;
+	like($err, qr{secret/exodus/lab-director-\d+/bosh/network}, 'the message names the claims record path');
+	like($err, qr/2\s+deployments.*cf.*scheduler/s, 'it says how many deployments the director has, and names them');
+	like($err, qr/failed\s+or\s+partial\s+claims\s+write/, 'it says an empty record on a director with deployments usually means a failed or partial claims write');
+	like($err, qr{safe\s+export\s+secret/exodus/lab-director-\d+/bosh/network}, 'it says how to check the record');
+	like($err, qr/GENESIS_ALLOW_EMPTY_CLAIMS=1/, 'it names the override');
+	is($state->{deployment_lists}, 1, 'the director was asked for its deployments once');
+	is_deeply($state->{targets}, [{self => 1}], 'and it was the director\'s own BOSH, not its parent');
+	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and no claims are written');
+};
+
+subtest 'lab claims - a create-env director asks its own BOSH for the deployments' => sub {
+	plan tests => 2;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS};
+	my ($env, $state) = lab_director(create_env => 1, claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef }, deployments => {%lab_deployed});
+	throws_ok { lab_build($env, $state, 'compilation') } qr/GENESIS_ALLOW_EMPTY_CLAIMS=1/, 'the build stops';
+	is_deeply($state->{targets}, [{self => ''}], 'after asking for the BOSH a create-env director already targets');
+};
+
+subtest 'lab claims - the override builds an absent record from empty' => sub {
+	plan tests => 4;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS} = 1;
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef }, deployments => {%lab_deployed});
 	my ($net, $err) = lab_build($env, $state, 'compilation');
-	ok($net, 'a record that was never written builds the network');
+	ok($net, 'the network is built');
 	is($state->{claims}{'ocfp-2'}{$state->{key}->('compilation')}, '10.61.148.228,10.61.148.230-10.61.148.232',
 		'from empty claims, so with no record of CF\'s claim compilation takes .232');
+	like($err, qr/GENESIS_ALLOW_EMPTY_CLAIMS.*empty.*record/s, 'and the build says it was allowed to');
+	is($state->{deployment_lists}, 0, 'without asking the director for its deployments');
+};
+
+subtest 'lab claims - an absent record on a director with no deployments builds from empty' => sub {
+	plan tests => 3;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS};
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef }, deployments => {});
+	my ($net, $err) = lab_build($env, $state, 'compilation');
+	ok($net, 'the network is built without the override');
+	is($state->{claims}{'ocfp-2'}{$state->{key}->('compilation')}, '10.61.148.228,10.61.148.230-10.61.148.232',
+		'from empty claims');
+	unlike($err, qr/GENESIS_ALLOW_EMPTY_CLAIMS/, 'with nothing to warn about');
+};
+
+subtest 'lab claims - a record that holds claims is not checked against the deployments' => sub {
+	plan tests => 2;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS};
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, deployments => sub { die "the director was asked\n" });
+	lives_ok { lab_build($env, $state, 'compilation') } 'the build goes ahead';
+	is($state->{deployment_lists}, 0, 'without asking the director for its deployments');
+};
+
+subtest 'lab claims - a failed deployment listing stops the build' => sub {
+	plan tests => 4;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS};
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef },
+		deployments => sub { die "Failed to run bosh deployments: Post https://10.0.0.6:25555/oauth/token: connection refused\n" });
+	my $before = {%{$state->{claims}{'ocfp-2'}}};
+	throws_ok { lab_build($env, $state, 'compilation') }
+		qr/deployments.*?connection\s+refused/s, 'the build stops with the error of the listing';
+	like($@, qr{secret/exodus/lab-director-\d+/bosh/network}, 'and names the claims record it could not check');
+	unlike($@, qr/failed\s+or\s+partial\s+claims\s+write/, 'without saying the record looks emptied');
+	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and no claims are written');
 };
 
 done_testing;

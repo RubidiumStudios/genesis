@@ -85,8 +85,9 @@ See also:
 Constructs and returns a director cloud-config hook object. Enforces that
 C<< $opts{purpose} >> is exactly C<'director'>, then delegates to the parent
 C<init> with C<< network => {} >> added to C<%opts>. After the parent object
-is built, calls C<_set_network_azs> and C<_set_network_subnets> to populate
-the in-memory network data from the OCFP Vault config.
+is built, calls C<_check_claims_record_not_lost>, then C<_set_network_azs>
+and C<_set_network_subnets> to populate the in-memory network data from the
+OCFP Vault config.
 
 B<Parameters:>
 
@@ -123,6 +124,18 @@ C<"Purpose must be 'director' - %s"> -- raised via C<bail()> if C<purpose>
 is absent or not equal to C<'director'>. C<%s> is replaced with
 C<"got '$opts{purpose}'"> when a wrong value was supplied, or
 C<"no purpose provided"> when the key was absent.
+
+=item *
+
+C<"The network claims record at %s is empty, but the %s BOSH director already has %d deployments (%s). ...">
+-- raised via C<bail()> when the director's network claims record is absent
+and the director has deployments. See L</_check_claims_record_not_lost>.
+
+=item *
+
+C<"Could not list the deployments on the %s BOSH director, so Genesis cannot tell whether the empty network claims record at %s is expected: %s">
+-- raised via C<bail()> when the record is absent and the director's
+deployments cannot be listed.
 
 =back
 
@@ -318,6 +331,36 @@ B<Examples:>
     my $ok = Genesis::Hook::CloudConfig::Director->_can_build_cloud_config($env);
     # Returns: 1
 
+=head2 _check_claims_record_not_lost
+
+    $self->_check_claims_record_not_lost;
+
+Stops the build when the director's network claims record looks lost. The
+claims are written by clearing the record and then setting it, so a write
+that fails in between leaves nothing stored. That reads the same as a
+director that was never built, and building from it would hand out addresses
+that other deployments hold, with a change summary that shows only additions.
+
+When the record is absent, or exports as an empty hash, the method asks the
+director's own BOSH for its deployments, using C<< $env->get_target_bosh >>
+with C<self> set unless the environment is a create-env director. If there
+are none, this is a first build and the method returns. If there are some, it
+bails with a message that names the record path, says that an empty record on
+a director with deployments usually means a failed or partial claims write,
+shows how to check the record, and names the override. If the deployments
+cannot be listed, it bails with the error from the listing; a failed check is
+never taken as permission to build from empty claims.
+
+The C<GENESIS_ALLOW_EMPTY_CLAIMS> environment variable skips the check, for a
+director that is new but already has deployments, or a record that has been
+confirmed to be empty. It is an environment variable because the post-deploy
+hook builds through this code and takes no command-line options, and it
+matches C<GENESIS_ALLOW_CLAIM_PRUNE>, which the same hook already reads.
+A warning says when it was used. A record that holds anything is never
+checked, and the director is not asked for its deployments.
+
+B<Returns:> Nothing meaningful.
+
 =head2 _set_network_azs
 
     $self->_set_network_azs(%opts)
@@ -404,8 +447,8 @@ B<Examples:>
     my $data = $self->_get_bosh_network_data;
 
 Returns the stored network data hash for this BOSH director by calling
-C<< $self->env->exodus_lookup('/network:.') >>. Returns C<undef> if no
-exodus network data exists yet.
+C<< $self->env->exodus_lookup_strict('/network:.') >>. Returns C<undef> if no
+exodus network data was ever written, and dies if the read fails.
 
 B<Returns:> A hash reference of exodus network data, or C<undef>.
 

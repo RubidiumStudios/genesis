@@ -723,6 +723,12 @@ define_command("bosh-configs", {
 		"or #y{--name} when you mean something narrower, such as only the ".
 		"runtime configs.".
 		"\n\n".
+		"Building the director's own cloud config stops when its network claims ".
+		"record is absent but the director has deployments, because a failed ".
+		"claims write usually leaves it that way.  Set ".
+		"#y{GENESIS_ALLOW_EMPTY_CLAIMS=1} for a new director, or once you have ".
+		"confirmed that the record should be empty.".
+		"\n\n".
 		"The actions are:\n".
 		"\n".
 		"[[  #C{upload}  >>Upload the synthesized configs to the director, showing ".
