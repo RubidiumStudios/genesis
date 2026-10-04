@@ -1754,7 +1754,7 @@ subtest 'network_definition - statics take the front of the allocation' => sub {
 };
 
 subtest '_calculate_subnet_allocation - growing and shrinking a claim' => sub {
-	plan tests => 6;
+	plan tests => 7;
 
 	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => make_deploy_env());
 	my $pool = IPv4->new('10.0.0.10-10.0.0.100');
@@ -1776,6 +1776,8 @@ subtest '_calculate_subnet_allocation - growing and shrinking a claim' => sub {
 	throws_ok { $calc->('10.0.0.40-10.0.0.47', -1) }
 		qr/allocation for network 'net' must not be negative/,
 		'a negative allocation is refused rather than releasing the claim';
+	is($calc->('10.0.0.10-10.0.0.13', 8), '10.0.0.10-10.0.0.17',
+		'growing a claim at the front of the pool takes new addresses instead of counting its own');
 };
 
 
@@ -1944,6 +1946,11 @@ my %LAB = (
 				'ocfp-cf1-lab-ocf.scheduler.net-scheduler'    => '10.61.148.246-10.61.148.247',
 			},
 		},
+		# What changes once the compilation network gives up the address CF's
+		# haproxy record holds
+		claims_repaired => {
+			'ocfp-2' => {compilation => '10.61.148.228,10.61.148.230-10.61.148.231,10.61.148.248'},
+		},
 	},
 );
 
@@ -1969,6 +1976,17 @@ sub lab_ocfp_config {
 
 # lab_claims_today - a fresh copy of the director's saved claims
 sub lab_claims_today { return dclone(lab()->{claims_today}); }
+
+# lab_claims_repaired - today's claims after the compilation network's repair
+sub lab_claims_repaired {
+	my $claims = lab_claims_today();
+	my $repair = lab()->{claims_repaired};
+	for my $subnet (keys %$repair) {
+		$claims->{$subnet}{lab()->{networks}{$_}{claim}} = $repair->{$subnet}{$_}
+			for keys %{$repair->{$subnet}};
+	}
+	return $claims;
+}
 
 # lab_reset_claims - start from these claims (none if omitted), with optional
 # per-subnet claims laid over them, and drop any records lab_add_record added
@@ -2140,6 +2158,11 @@ sub lab_assert_disjoint_and_record_clean {
 	is_deeply(\@problems, [], "claims are disjoint and record-clean after $label");
 }
 
+# lab_cf_statics_today - the static lists CF renders today, one per subnet
+sub lab_cf_statics_today {
+	return [map {$_->{static}} @{lab_golden('cf')->{subnets}}];
+}
+
 # lab_golden - how each lab network renders on today's claims
 sub lab_golden {
 	my ($name) = @_;
@@ -2200,8 +2223,10 @@ $LAB{ocf}{golden} = {
 	valkey => {name => 'valkey-service', type => 'manual', subnets => [
 		lab_subnet('ocfp-1', 2, ['10.61.148.0-10.61.148.178', '10.61.148.187-10.61.148.255']),
 	]},
+	# The compilation network gives up 10.61.148.229, which is CF's haproxy
+	# record, and takes the next free address in its place
 	compilation => {name => 'ocfp-cf1-lab-ocf.bosh.net-compilation', type => 'manual', subnets => [
-		lab_subnet('ocfp-2', 3, ['10.61.148.0-10.61.148.227', '10.61.148.232-10.61.148.255']),
+		lab_subnet('ocfp-2', 3, ['10.61.148.0-10.61.148.227', '10.61.148.229', '10.61.148.232-10.61.148.247', '10.61.148.249-10.61.148.255']),
 	]},
 };
 
@@ -2216,11 +2241,131 @@ subtest 'lab claims - every lab network renders as it does today' => sub {
 	}
 };
 
-subtest 'lab claims - the director compilation network renders as it does today' => sub {
-	plan tests => 2;
+subtest 'lab claims - the director compilation network gives up another target\'s record and nothing else' => sub {
+	plan tests => 4;
 	lab_reset_claims(lab_claims_today());
-	is_deeply(lab_run_net('compilation'), lab_golden('compilation'), 'compilation renders the same network');
-	is_deeply(lab_claims_snapshot(), lab_claims_today(), 'compilation saves the same claims');
+	my ($net, $err) = lab_run_net_with_stderr('compilation');
+	is_deeply($net, lab_golden('compilation'), 'compilation renders without 10.61.148.229');
+	is_deeply(lab_claims_snapshot(), lab_claims_repaired(),
+		'only the compilation claim changes, to .228,.230-.231,.248');
+	like($err, qr/net-compilation.*ocfp-2.*10\.61\.148\.229.*haproxy/s,
+		'the warning names the network, the subnet, the address, and its owner');
+	lab_run_net('compilation');
+	is_deeply(lab_claims_snapshot(), lab_claims_repaired(), 'a second build changes nothing');
+};
+
+subtest 'lab claims - a CF rebuild keeps every claim and every static and names the stray compilation address' => sub {
+	plan tests => 3;
+	lab_reset_claims(lab_claims_today());
+	my ($net, $err) = lab_run_net_with_stderr('cf');
+	is_deeply(lab_claims_snapshot(), lab_claims_today(), 'no claim changes');
+	is_deeply([map {$_->{static}} @{$net->{subnets}}],
+		[['10.61.148.100-10.61.148.102'], ['10.61.148.164-10.61.148.166'], ['10.61.148.229', '10.61.148.232-10.61.148.233']],
+		'the real kit statics stay where the running VMs are');
+	like($err, qr/10\.61\.148\.229.*haproxy.*net-compilation/s,
+		'the warning names the address, the owner, and the other network');
+};
+
+subtest 'lab claims - every other network renders the same after the compilation repair' => sub {
+	my @nets = qw(cf cf-4statics autoscaler scheduler blacksmith valkey);
+	plan tests => 2 * @nets;
+	for my $net (@nets) {
+		lab_reset_claims(lab_claims_repaired());
+		my ($got, $err) = lab_run_net_with_stderr($net);
+		is_deeply($got, lab_golden($net), "$net renders as it does today");
+		unlike($err, qr/reserved-ips record for|both claim/, "$net warns of no reserved address or clash");
+	}
+};
+
+subtest 'lab claims - a growing claim takes new addresses and keeps its statics' => sub {
+	plan tests => 4;
+	lab_reset_claims(lab_claims_repaired());
+	my $net = lab_run_net('cf', total_size => 48);
+	is(lab_claim('ocfp-0', 'cf'), '10.61.148.100-10.61.148.114,10.61.148.124',
+		'ocfp-0 grows past the autoscaler and scheduler');
+	is(lab_claim('ocfp-1', 'cf'), '10.61.148.164-10.61.148.178,10.61.148.189',
+		'ocfp-1 grows past valkey-service and the scheduler');
+	is(lab_claim('ocfp-2', 'cf'), '10.61.148.229,10.61.148.232-10.61.148.245,10.61.148.249',
+		'ocfp-2 grows past the scheduler and compilation');
+	is_deeply([map {$_->{static}} @{$net->{subnets}}], lab_cf_statics_today(), 'statics unchanged');
+};
+
+subtest 'lab claims - fresh claims are disjoint, record-clean, and stable in either order' => sub {
+	my @lab_order = qw(compilation cf blacksmith valkey autoscaler scheduler);
+	plan tests => 4;
+	for my $order ([@lab_order], [reverse @lab_order]) {
+		# Named loop variables: a build iterates IPv4 sets into $_, which would
+		# overwrite the names in @$order through an aliased $_
+		lab_reset_claims();
+		for my $name (@$order) { lab_run_net($name) }
+		lab_assert_disjoint_and_record_clean("@$order");
+		my $snap = lab_claims_snapshot();
+		for my $name (@$order) { lab_run_net($name) }
+		is_deeply(lab_claims_snapshot(), $snap, "a second pass in order @$order changes nothing");
+	}
+};
+
+subtest 'lab claims - a record added inside a persistent network claim stops the build' => sub {
+	plan tests => 4;
+	lab_reset_claims(lab_claims_today());
+	lab_add_record('ocfp-1', nfs_ip => '10.61.148.182');
+	throws_ok { lab_run_net('valkey') }
+		qr/valkey-service.*ocfp-1.*10\.61\.148\.182.*nfs.*bosh vms.*GENESIS_ALLOW_CLAIM_PRUNE=valkey-service/s,
+		'the bail names the network, subnet, address, owner, the check, and the opt-in';
+	is_deeply(lab_claims_snapshot(), lab_claims_today(), 'nothing changed');
+	local $ENV{GENESIS_ALLOW_CLAIM_PRUNE} = 'valkey-service';
+	my (undef, $err) = lab_run_net_with_stderr('valkey');
+	is(lab_claim('ocfp-1', 'valkey'), '10.61.148.179-10.61.148.181,10.61.148.183-10.61.148.186,10.61.148.189',
+		'the opt-in drops .182 and refills');
+	like($err, qr/valkey-service.*ocfp-1.*10\.61\.148\.182.*nfs.*GENESIS_ALLOW_CLAIM_PRUNE/s,
+		'and warns what it dropped and why it was allowed');
+};
+
+subtest 'lab claims - two dynamic claims over the same addresses stop the build' => sub {
+	plan tests => 2;
+	lab_reset_claims(lab_claims_today(), 'ocfp-2' => {scheduler => '10.61.148.245-10.61.148.246'});
+	my $before = lab_claims_snapshot();
+	throws_ok { lab_run_net('scheduler') }
+		qr/net-scheduler.*net-ocf.*both claim 10\.61\.148\.245 on subnet ocfp-2.*network claims lock/s,
+		'the bail names both networks, the address, and the likely cause';
+	is_deeply(lab_claims_snapshot(), $before, 'neither claim changed');
+};
+
+subtest '_all_reserved_ip_records - returns owner to records with aliases applied' => sub {
+	plan tests => 4;
+	my $subnet = {'reserved-ips' => {
+		reserved_0  => '10.9.0.0',  reserved_1  => '10.9.0.35',      # subnet-reserved pair
+		available_0 => '10.9.0.36', available_1 => '10.9.0.62',      # available pair
+		reserved_a  => '10.9.0.250', reserved_b => '10.9.0.255',
+		available_a => '10.9.0.100', available_b => '10.9.0.200',
+		scheme_version => '3-compact',
+		bosh_a => '10.9.0.22', bosh_ip => '10.9.0.23', bosh_b => '10.9.0.24',
+		director_ip => '10.9.0.23', ip => '10.9.0.30',               # both name the director
+		haproxy_ip => '10.9.0.37', haproxy_ip_a => '10.9.0.36', haproxy_ip_b => '10.9.0.38',
+		web_a => '10.9.0.40', web_b => '10.9.0.44', web_c => '10.9.0.50', web_d => '10.9.0.53',
+		router_static => 1,
+		vault_ip => '10.9.0.60',
+		lonely_a => '10.9.0.70',                                      # no closing _b
+	}};
+	my $ranges = sub { my ($h) = @_; return {map {($_ => $h->{$_}->range)} keys %$h} };
+
+	my $plain = Genesis::Hook::CloudConfig::Bosh->init(env => make_deploy_env());
+	is_deeply($ranges->($plain->_all_reserved_ip_records($subnet, 'app')), {
+		bosh    => '10.9.0.23,10.9.0.30',
+		haproxy => '10.9.0.37',
+		web     => '10.9.0.41-10.9.0.43,10.9.0.51-10.9.0.52',
+		vault   => '10.9.0.60',
+	}, 'singles, exclusive pairs, and later letter pairs are read; neighbour notes, statics, and subnet keys are not');
+
+	is_deeply([sort keys %{$plain->_all_reserved_ip_records($subnet, 'web')}], [qw(bosh haproxy vault)],
+		'the asking target\'s own records are not another owner\'s');
+	is_deeply([sort keys %{$plain->_all_reserved_ip_records($subnet, 'openbao')}], [qw(bosh haproxy web)],
+		'a module alias (openbao to vault) counts as the target\'s own');
+
+	lab_reset_claims(lab_claims_today());
+	my $cf = Genesis::Hook::CloudConfig::LabCF->init(env => lab_env('cf'), purpose => 'lab-'.(++$lab_seq));
+	is_deeply([sort keys %{$cf->_all_reserved_ip_records($subnet, 'ocf')}], [qw(bosh vault web)],
+		'a kit alias (ocf to haproxy) counts as the target\'s own');
 };
 
 

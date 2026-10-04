@@ -8,6 +8,7 @@ use Test::More;
 use Test::Exception;
 use Test::Deep;
 use Test::Differences;
+use Test::Output;
 use Carp qw/croak/;
 use Genesis qw(logger struct_lookup bail);
 use Cwd qw(abs_path);
@@ -672,6 +673,156 @@ subtest 'full cloud config - network results structure' => sub {
 			}
 		}
 	}, 'network results structure matches expected exodus data');
+};
+
+# ---------------------------------------------------------------------------
+# Lab claims: a long-lived director's compilation network
+#
+# Three bands of one /24, each with the 3-compact reserved-ips records, and the
+# claims a director accumulated when its compilation network was carved before
+# CF's haproxy record was taken into account: compilation holds 10.61.148.229,
+# which is the haproxy record CF's network holds as well.
+# ---------------------------------------------------------------------------
+{
+	package Genesis::Hook::CloudConfig::LabDirector;
+	use parent -norequire, 'Genesis::Hook::CloudConfig::Director';
+	sub lab_network {
+		my ($self, $target) = @_;
+		return $self->network_definition($target, strategy => 'ocfp',
+			dynamic_subnets => {
+				subnets                   => ['ocfp-2'],
+				allocation                => {size => 4, statics => 0},
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+			},
+		);
+	}
+}
+
+sub lab_band {
+	my ($base, $az) = @_;
+	my $a = sub { '10.61.148.' . ($base + $_[0]) };
+	return {
+		az => $az, cidr_block => '10.61.148.0/24', gateway => '10.61.148.1',
+		dns => ['10.97.160.160', '10.97.160.161'],
+		'reserved-ips' => {
+			reserved_0  => $a->(0),  reserved_1  => $a->(35),
+			available_0 => $a->(36), available_1 => $a->(62),
+			bosh_a       => $a->(22), bosh_ip       => $a->(23), bosh_b       => $a->(24),
+			director_ip  => $a->(23), ip            => $a->(23),
+			jumpbox_a    => $a->(24), jumpbox_ip    => $a->(25), jumpbox_b    => $a->(26),
+			blacksmith_a => $a->(25), blacksmith_ip => $a->(26), blacksmith_b => $a->(27),
+			haproxy_a    => $a->(36), haproxy_ip    => $a->(37), haproxy_b    => $a->(38),
+			scheme_version => '3-compact',
+		},
+	};
+}
+
+# lab_director - a director environment over the given ocfp-2 claims, keyed by
+# short network name ('compilation' is the director's own); returns the env and
+# a state hash whose claims the env's network exodus reads, so a second build
+# sees what the first one saved
+my $lab_seq = 0;
+sub lab_director {
+	my (%o) = @_;
+	my $name = 'lab-director-'.(++$lab_seq);
+	my $key = sub { $_[0] eq 'cf' ? "$name.cf.net-ocf" : $_[0] eq 'scheduler' ? "$name.scheduler.net-scheduler" : "$name.bosh.net-$_[0]" };
+	my $state = {name => $name, key => $key, claims => {
+		'ocfp-0' => {}, 'ocfp-1' => {},
+		'ocfp-2' => {map {($key->($_) => $o{claims}{$_})} keys %{$o{claims}}},
+	}};
+	my $ocfp = {net => {
+		topology => 'v2',
+		subnets  => {'ocfp-0' => lab_band(64, 'pvupvecf101'), 'ocfp-1' => lab_band(128, 'pvupvecf102'), 'ocfp-2' => lab_band(192, 'pvupvecf103')},
+		azs      => {pvupvecf101 => {index => 1}, pvupvecf102 => {index => 2}, pvupvecf103 => {index => 3}},
+	}};
+	my $env = mock "Genesis::Env" => {
+		name           => $name,
+		type           => 'bosh',
+		kit            => $kit,
+		bosh           => $bosh,
+		use_create_env => $o{create_env} ? 1 : 0,
+		features       => Mock::ReferencedValue->new(['ocfp']),
+		iaas           => 'pve',
+		scale          => 'dev',
+		is_ocfp        => 1,
+		config         => {params => {}},
+		env_config_overrides      => {},
+		director_config_overrides => {},
+		ocfp_subnet_prefix        => 'ocfp',
+		ocfp_config               => $ocfp,
+		lookup => sub { my ($self, $k, $default) = @_; return scalar struct_lookup($self->config, $k, $default); },
+		ocfp_config_lookup => sub { my ($self, $k, $default) = @_; return scalar struct_lookup($ocfp, $k, $default); },
+		exodus_lookup => sub {
+			my ($self, $k) = @_;
+			return undef unless $k eq '/network:.';
+			return {subnets => {map {
+				($_ => {range => '10.61.148.0-10.61.148.255', claims => {%{$state->{claims}{$_}}}})
+			} keys %{$state->{claims}}}};
+		},
+		director_exodus_lookup => sub { die 'a director builds its own cloud config from its own exodus' },
+		cpi_enabled => 0,
+		cpi_name    => undef,
+	};
+	return ($env, $state);
+}
+
+# lab_build - build one network on the director, save its claims to the state,
+# and return the network definition and what the build printed on stderr
+sub lab_build {
+	my ($env, $state, $target) = @_;
+	my ($hook, $net);
+	my $err = Test::Output::stderr_from(sub {
+		$hook = Genesis::Hook::CloudConfig::LabDirector->init(env => $env, purpose => 'director');
+		$net = $hook->lab_network($target);
+	});
+	$state->{claims} = {map {($_ => {%{$hook->network->{subnets}{$_}{claims} // {}}})} keys %{$state->{claims}}};
+	return ($net, $err);
+}
+
+my %lab_claims_today = (
+	compilation => '10.61.148.228-10.61.148.231',
+	cf          => '10.61.148.229,10.61.148.232-10.61.148.245',
+	scheduler   => '10.61.148.246-10.61.148.247',
+);
+
+subtest 'lab claims - the compilation network gives up an address another target has a record for' => sub {
+	plan tests => 6;
+	my ($env, $state) = lab_director(claims => {%lab_claims_today});
+	my ($net, $err) = lab_build($env, $state, 'compilation');
+	my $k = $state->{key};
+	is($state->{claims}{'ocfp-2'}{$k->('compilation')}, '10.61.148.228,10.61.148.230-10.61.148.231,10.61.148.248',
+		'compilation drops .229 and takes .248, the first free address');
+	is($state->{claims}{'ocfp-2'}{$k->('cf')}, $lab_claims_today{cf}, 'CF\'s claim is untouched');
+	is($state->{claims}{'ocfp-2'}{$k->('scheduler')}, $lab_claims_today{scheduler}, 'the scheduler\'s claim is untouched');
+	like($err, qr/net-compilation.*ocfp-2.*10\.61\.148\.229.*haproxy.*compilation VMs exist only during a deploy/s,
+		'a warning names the network, the subnet, the address, its owner, and why it was dropped without stopping');
+
+	my $after = {%{$state->{claims}{'ocfp-2'}}};
+	my (undef, $again) = lab_build($env, $state, 'compilation');
+	is_deeply($state->{claims}{'ocfp-2'}, $after, 'a second build changes nothing');
+	unlike($again, qr/reserved-ips record/, 'and has nothing to warn about');
+};
+
+subtest 'lab claims - only the compilation network of a director is exempt from the reserved-address stop' => sub {
+	plan tests => 2;
+	my ($env, $state) = lab_director(claims => {
+		workers => '10.61.148.228-10.61.148.231',
+		cf      => $lab_claims_today{cf},
+	});
+	my $before = {%{$state->{claims}{'ocfp-2'}}};
+	throws_ok { lab_build($env, $state, 'workers') }
+		qr/net-workers.*ocfp-2.*10\.61\.148\.229.*haproxy.*bosh vms.*GENESIS_ALLOW_CLAIM_PRUNE=\S*net-workers/s,
+		'another network on the director hook stops at a reserved address in its claim';
+	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and saves nothing');
+};
+
+subtest 'lab claims - a create-env director repairs its compilation network the same way' => sub {
+	plan tests => 2;
+	my ($env, $state) = lab_director(create_env => 1, claims => {%lab_claims_today});
+	my (undef, $err) = lab_build($env, $state, 'compilation');
+	is($state->{claims}{'ocfp-2'}{$state->{key}->('compilation')}, '10.61.148.228,10.61.148.230-10.61.148.231,10.61.148.248',
+		'compilation drops .229 and takes .248');
+	like($err, qr/net-compilation.*10\.61\.148\.229.*haproxy/s, 'with the same warning');
 };
 
 done_testing;
