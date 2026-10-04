@@ -3727,7 +3727,9 @@ kit is needed, which is what lets the check run as the configuration loads,
 and the manifest is cached for the process under the environment's
 signature.
 
-A file in the hierarchy that will not merge is refused rather than skipped:
+An operator written in spruce's C<(( op(args) ))> call form is refused first,
+in its own words, by L<Genesis::Env/_refuse_operator_call_form>. A file in
+the hierarchy that will not merge is refused rather than skipped:
 a key can live anywhere in the hierarchy, so a file nobody can read is a key
 nobody can see.
 

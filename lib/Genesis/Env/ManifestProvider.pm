@@ -167,6 +167,10 @@ sub merge {
 	my %options = (%option_defaults,%$options);
 	$env_vars //= {};
 
+	# Before any spruce run, because every reader of an operator below
+	# assumes the (( op args )) form.
+	$self->env->_refuse_operator_call_form;
+
 	$self->env->notify($manifest->get_build_notice)
 		if $manifest->has_notice && ! $self->{suppress_notification};
 

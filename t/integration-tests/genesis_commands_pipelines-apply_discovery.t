@@ -129,30 +129,28 @@ subtest 'an environment that will not load keeps its declared set' => sub {
 		'and only the discovery it actually lost is marked incomplete');
 };
 
-subtest 'an environment nothing can read at all costs only itself' => sub {
-	# Four rows, and one more for the run's own restoration assertion.
-	plan tests => 5;
+subtest 'an operator in the call form refuses the apply before anything is written' => sub {
+	# Six rows, and one more for the run's own restoration assertion.
+	plan tests => 7;
 
-	# The recovery path reads the declared half through a bare environment,
-	# and that read can raise in its turn for an environment whose files
-	# will not merge at all.  This operator is one no merge can work around.
-	# The three names put the broken environment between two healthy ones,
-	# because what the row is really about is the environment that comes
-	# after it in the walk still being recorded.
+	# Spruce accepts (( op(args) )) as well as (( op args )), but Genesis
+	# supports only the second, and the configuration load refuses the first
+	# before any environment is merged.  The broken environment stands between
+	# two healthy ones, so the row shows that nothing at all was recorded.
 	my $h = make_harness(envs => ['qa', 'rogue', 'zulu']);
 	write_env_file($h, 'rogue', genesis => {notes => '(( static_ips(0) ))'});
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
 	my $said = unfolded($out, $err);
 
-	is($exit, 0, 'the apply carries on rather than bailing the whole run');
-	like($said, qr{Could not load rogue, and could not read it bare either},
-		'the warning says both reads failed and names the environment');
+	is($exit, Genesis::Exit::CONFIG, 'the apply refuses at configuration load');
+	like($said, qr{rogue\.yml line \d+: \(\( static_ips\(0\) \)\)},
+		'naming the file, the line, and the operator as written');
+	like($said, qr{write \(\( static_ips 0 \)\)}, 'and the form to write instead');
 
-	no_secret($h->env_path('rogue') . '/pipeline:discovery',
-		'the environment nothing could read carries no record');
-	have_secret($h->env_path('zulu') . '/pipeline:discovery',
-		'and the one after it in the walk still gets one');
+	no_secret($h->env_path($_) . '/pipeline:discovery',
+		"$_ carries no record, since nothing was applied")
+		for qw/qa rogue zulu/;
 };
 
 subtest 'an environment joins the set at the next apply and not before' => sub {

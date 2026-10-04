@@ -11,7 +11,7 @@ use Genesis::State qw/envset under_test in_callback/;
 use Genesis::Term qw/csprintf wrap fix_wrap decolorize in_controlling_terminal bullet/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_line prompt_for_choice new_prompt_for_choice/;
 use Genesis::Commands qw/current_command known_commands/;
-use Genesis::Exit qw/UNAVAILABLE/;
+use Genesis::Exit qw/CONFIG UNAVAILABLE/;
 use Genesis::Env::ManifestProvider;
 use Genesis::Env::Secrets::Plan;
 
@@ -1387,6 +1387,49 @@ sub workpath {
 	my ($self, $relative) = @_;
 	return $relative ? "$self->{__tmp}/$relative"
 	                 :  $self->{__tmp};
+}
+
+# }}}
+# _refuse_operator_call_form - refuse the (( op(args) )) form spruce also accepts {{{
+#
+# Genesis supports operators written (( op args )), and every place it reads
+# or rewrites one assumes that form: the adaptive merge's deferral, the
+# vaultinfo sanitiser entombment runs, and the vault and grab detectors.  The
+# call form slips past all of them, so it is refused before any merge rather
+# than taught to each, naming the file, the line, and the form to write.
+# Only the environment's own files are read, its genesis.inherits files
+# among them, which are found by a merge with no evaluation that the call
+# form does not trouble; comment lines are passed over.
+sub _refuse_operator_call_form {
+	my ($self) = @_;
+	return $self->_memoize(sub {
+		my ($self) = @_;
+		# A file that will not parse fails the listing of what is inherited,
+		# and is the merge's to refuse, so the name-based files stand in.
+		my @files = eval {$self->actual_environment_files};
+		@files = $self->potential_environment_files unless @files;
+
+		my @found;
+		for my $file (grep {-f $self->path($_)} @files) {
+			my $line = 0;
+			for (split /\n/, slurp($self->path($file))) {
+				$line++;
+				next if /^\s*#/;
+				while (/(\(\(\s*[A-Za-z][\w-]*\s*\((.*)\)\s*\)\))/g) {
+					my $written = $1;
+					(my $rewrite = $written) =~ s/^\(\(\s*([A-Za-z][\w-]*)\s*\((.*)\)\s*\)\)$/(( $1 $2 ))/;
+					push @found, sprintf("#C{%s} line %d: #R{%s} - write #G{%s}",
+						$file =~ s{^\./}{}r, $line, $written, $rewrite);
+				}
+			}
+		}
+		bail({exitcode => CONFIG},
+			"Environment #C{%s} writes a spruce operator in the #y{(( op(args) ))} call ".
+			"form, which Genesis does not support:\n%s\nWrite each as #y{(( op args ))}.",
+			$self->name, join("\n", map {"  $_"} @found)
+		) if @found;
+		return 1;
+	});
 }
 
 # }}}

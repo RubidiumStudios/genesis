@@ -3089,6 +3089,10 @@ sub _merged_env_params {
 
 	my $env = Genesis::Env->bare($env_name, $self);
 
+	# Ahead of the merge's own refusal below, so an operator in the call form
+	# is refused in its own words rather than as a file that will not parse.
+	$env->_refuse_operator_call_form;
+
 	# A file that will not merge is refused rather than skipped.  A key can
 	# live anywhere in the hierarchy, so a file nobody could read is a key
 	# nobody can see, which is the silent wrong answer this read exists to

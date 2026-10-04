@@ -323,6 +323,12 @@ to the manifest's work file. This is the low-level build operation used by
 all C<Genesis::Env::Manifest> subclasses; it is not normally called
 directly by application code.
 
+Before any spruce run it asks the environment to refuse an operator written
+in spruce's C<(( op(args) ))> call form
+(L<Genesis::Env/_refuse_operator_call_form>), because every reader of an
+operator after it, this module's adaptive merge and vaultinfo sanitiser
+among them, assumes the C<(( op args ))> form Genesis supports.
+
 B<Parameters:>
 
 =over 4
