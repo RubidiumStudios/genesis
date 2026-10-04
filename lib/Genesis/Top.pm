@@ -1338,6 +1338,30 @@ sub pipeline_section {
 }
 
 # }}}
+# pipeline_env - an environment of the pipeline, read from control's tree {{{
+#
+# For a reader that wants an environment's pipeline facts, its own pipeline
+# keys and the files it takes, where the tree in front of the command may not
+# carry its file at all: a deploy standing on a deployment branch holds only
+# its own environment's hierarchy.  The environment is loaded bare from the
+# tree control was read from, and the repository's vault is lent to that tree
+# so its records are read where the environment's own would be.
+sub pipeline_env {
+	my ($self, $name) = @_;
+	my $shape = $self->_shape;
+	unless ($shape == $self || $shape->{__vault_lent}) {
+		my $vault = eval {$self->vault};
+		if (Scalar::Util::blessed($vault) && $vault->isa('Service::Vault')) {
+			local %ENV = %ENV;
+			$shape->set_vault(vault => $vault, session_only => 1);
+		}
+		$shape->{__vault_lent} = 1;
+	}
+	require Genesis::Env;
+	return Genesis::Env->bare($name, $shape);
+}
+
+# }}}
 # source_control_remote - the remote the pipeline derives its url from {{{
 #
 # The public reader over the resolved block, so a caller asks for the one

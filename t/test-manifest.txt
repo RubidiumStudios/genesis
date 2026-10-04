@@ -461,6 +461,7 @@ integration-tests/genesis_commands_env-deploy_session_faults.t  # the cleanlines
 integration-tests/genesis_commands_env-deploy_control_and_disowned.t  # control nowhere refuses, and a disowned pipeline warns locally and refuses in a job
 integration-tests/genesis_commands_env-deploy_branch_classes.t  # the deployment branch is classified before the deploy, and four states refuse
 integration-tests/genesis_commands_env-deploy_prior_env.t  # the predecessor's record is read once, through the merged hierarchy
+integration-tests/genesis_commands_env-deploy_reparented.t  # a re-parented environment is checked against control's predecessor
 integration-tests/genesis_commands_env-deploy_provider_gate.t  # an automated provider's pipeline owns the deploy, and --force is the only way past
 integration-tests/genesis_commands_env-deploy_stale_pipeline.t  # the stale-pipeline warning names the changed environments and the apply
 integration-tests/genesis_commands_env-deploy_due_commits.t  # the due-commits warning, its silence, the proposed record, and the warning order

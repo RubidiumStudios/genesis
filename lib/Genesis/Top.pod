@@ -1710,6 +1710,44 @@ B<Examples:>
     my $section = $top->pipeline_section();
     # returns {enabled => 1, provider => {type => 'concourse', ...}, ...}
 
+=head2 pipeline_env
+
+    my $env = $top->pipeline_env($name);
+
+An environment of the pipeline, loaded bare from the tree control was read
+from.
+
+For a reader that wants an environment's pipeline facts, its own pipeline
+keys and the files it takes, where the tree in front of the command may not
+carry its file: a deploy standing on a deployment branch holds only its own
+environment's hierarchy. L<Genesis::CI::Walk/plan> reads an ancestor this
+way. Read off L</_shape>, so the environment is the one control holds.
+
+Where that tree is not this one, this repository's vault is lent to it the
+first time it is asked, session only, so the environment's records are read
+from the vault its own would be. A repository with no vault lends nothing,
+and a reader of a record then gets that environment's own error.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$name>
+
+The environment's name.
+
+=back
+
+B<Returns:> A bare C<Genesis::Env> on control's tree.
+
+B<Errors:> Whatever L</_shape> raises where the shape cannot be read, and
+whatever C<Genesis::Env/bare> raises for a name control carries no file for.
+
+B<Examples:>
+
+    my $qa = $top->pipeline_env('qa');
+    my $prior = $qa->lookup('genesis.pipeline.prior_env');
+
 =head2 source_control_remote
 
     my $remote = $top->source_control_remote();

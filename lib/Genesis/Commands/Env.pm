@@ -1323,8 +1323,13 @@ sub _deploy_preflight {
 	# The record is read once and handed to the check.  Two readers want it,
 	# the check for the fact that the predecessor deployed at all and the
 	# due computation for the commit it certified, and one read serves both.
+	#
+	# The predecessor is control's (D112): the branch the deploy stands on
+	# mirrors this environment's hierarchy as it stood when it was delivered,
+	# so its prior_env is the predecessor at delivery and not now, and a
+	# re-parented environment is checked against the one it follows today.
 	my $bare         = Genesis::Env->bare($name, $top);
-	my $prior        = $bare->lookup('genesis.pipeline.prior_env', '');
+	my $prior        = $top->pipeline_topology->{parent_of}{$name} // '';
 	my $prior_record = _prior_env_record($bare, $prior);
 	_assert_prior_env_deployed($bare, $prior, $prior_record) if $prior;
 
@@ -1407,10 +1412,15 @@ sub _deploy_preflight {
 		$tip = {due => [], drifted => []};
 	} else {
 		require Genesis::CI::Walk;
+		# The predecessor's record was read once above, so the walk takes it
+		# rather than reading it a second time (T326, D112).
 		my $walk = Genesis::CI::Walk::plan($top,
-			git      => $git,
-			scope    => [$name],
-			branches => {$name => {branch => $branch}},
+			git       => $git,
+			scope     => [$name],
+			branches  => {$name => {branch => $branch}},
+			certified => $prior ? {
+				$prior => Genesis::CI::Walk::certified_from_record($prior_record)
+			} : {},
 		);
 		# The walk was asked about one environment, so it answers about one,
 		# and a list with nothing in it is the walk disagreeing with its own

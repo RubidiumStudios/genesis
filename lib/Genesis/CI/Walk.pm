@@ -25,7 +25,7 @@ use Genesis::Exit qw/UNAVAILABLE/;
 our @EXPORT_OK = qw/
 	plan scope_for changed_set route_commit undeployed_set overlap
 	read_durable_state env_state
-	certified_for hold_for
+	certified_for certified_from_record hold_for
 	apply_hold
 	gate_state released_gates
 	introducing_commit walk_base
@@ -410,6 +410,29 @@ sub overlap {
 
 	my %undeployed = map {$_ => 1} @$undeployed;
 	return grep {$undeployed{$_}} @$files;
+}
+
+# }}}
+# certified_from_record - the certified state a caller's deployment record gives {{{
+#
+# The deploy reads its predecessor's latest successful deployment before it
+# loads anything, and hands the walk what certified_for would have answered
+# from it, so the one read serves both.  The record is the deploy's own shape,
+# its time and its git block, and no record at all is a predecessor that has
+# never deployed.
+sub certified_from_record {
+	my ($record) = @_;
+	return {state => 'never-certified'} unless $record;
+	my $git       = $record->{git} || {};
+	my $certified = $git->{control_commit};
+	return {state => 'never-applied'}
+		unless defined $certified && length $certified;
+	return {
+		state          => 'certified',
+		control_commit => $certified,
+		commit         => $git->{commit},
+		at             => $record->{at},
+	};
 }
 
 # }}}
@@ -1079,11 +1102,21 @@ sub plan {
 	# a topology of any depth would otherwise read the same record once per
 	# descendant.  The load error is kept beside the environment, since the
 	# reader below may ask long after the eval that raised it.
-	my (%env_of, %load_error, %durable_of);
+	# A caller that has already read an environment's certified commit hands
+	# it in, and the walk takes it rather than reading the record a second
+	# time: the deploy reads its predecessor's once, before it loads (T326).
+	my (%env_of, %load_error);
+	my %durable_of = %{$opts{certified} || {}};
 	my $env_for = sub {
 		my ($name) = @_;
 		unless (exists $env_of{$name}) {
-			$env_of{$name} = eval {$top->load_env($name)};
+			# An environment whose file the tree in front of the command does
+			# not carry, such as an ancestor of the one a deploy stands on, is
+			# read from control's tree, which carries every environment of
+			# the pipeline (D112).
+			$env_of{$name} = -f $top->path("$name.yml")
+				? eval {$top->load_env($name)}
+				: eval {$top->pipeline_env($name)};
 			$load_error{$name} = _load_error($@) unless $env_of{$name};
 		}
 		return $env_of{$name};

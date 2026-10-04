@@ -91,6 +91,11 @@ costs a walk of control over that environment's own file and an environment
 this run will not walk has no use for the answer, so its C<merged> stays null
 and its reading stays C<not-propagated>.
 
+An environment is loaded from the tree in front of the command where that
+tree carries its file, and otherwise from control's tree through
+L<Genesis::Top/pipeline_env>, since a deploy standing on a deployment branch
+carries its own environment's hierarchy and none of its ancestors'.
+
 Each environment's ancestors are read once and asked of every commit it
 routes, through L</hold_for>, so a commit whose files an ancestor has not yet
 deployed is held, and so is every commit after it.  An ancestor outside the
@@ -215,6 +220,16 @@ the one the configuration names.
 Optional.  Passed to L</read_durable_state> as the sentence its refusal
 closes with, for a caller whose command writes nothing and so owes the
 operator a different account of where it stopped.
+
+=item C<certified>
+
+Optional.  A hashref of certified states the caller has already read, keyed
+by environment name, each in the shape L</certified_for> answers.  The walk
+takes an environment's state from here rather than reading its record again.
+C<genesis deploy> reads its predecessor's deployment record once, before it
+loads anything, and hands in what L</certified_from_record> makes of it, so
+the prior-env check and the due computation read one record.  An environment
+absent from the map is read as usual.
 
 =back
 
@@ -813,6 +828,47 @@ B<Examples:>
 
   my @shared = Genesis::CI::Walk::overlap(['qa.yml', 'dev/'], ['dev/']);
   # returns ('dev/')
+
+=head2 certified_from_record
+
+    my $certified = Genesis::CI::Walk::certified_from_record($record);
+
+The certified state a deployment record gives, in the shape L</certified_for>
+answers.
+
+For a caller that has already read an environment's latest successful
+deployment and hands the answer to L</plan> through its C<certified> option,
+so the record is read once.  No record is an environment that has never
+deployed, and a record carrying no C<git.control_commit> is one the pipeline
+was never applied to.  It never answers C<unreadable>, because a caller that
+could not read the record has no record to hand in.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The deployment record, carrying C<at> and a C<git> block, or C<undef> where
+the environment has none.
+
+=back
+
+B<Returns:> A hashref carrying C<state>, which is one of C<certified>,
+C<never-certified>, and C<never-applied>, with C<control_commit>, C<commit>,
+and C<at> beside it where the state is C<certified>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my $certified = Genesis::CI::Walk::certified_from_record(
+    {at => $at, git => {control_commit => $sha, commit => $deployed}});
+  # returns {state => 'certified', control_commit => $sha,
+  #          commit => $deployed, at => $at}
+
+  my $fresh = Genesis::CI::Walk::certified_from_record(undef);
+  # returns {state => 'never-certified'}
 
 =head2 certified_for
 
