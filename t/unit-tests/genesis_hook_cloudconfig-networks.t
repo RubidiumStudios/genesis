@@ -2094,9 +2094,20 @@ sub lab_run_net_with_stderr {
 	my $err = stderr_from {
 		if ($spec->{director}) {
 			$hook = $class->init(env => $env, purpose => 'director');
-			# A real build is a fresh process; the hook cache hands back the last
-			# director hook, so let it read this run's subnets
-			delete $hook->{subnets};
+			# A real build is a fresh process, but the hook cache hands back the
+			# director hook from the last build.  Point it at this run's env and
+			# rebuild what init read from the env, so it sees this run's claims and
+			# reserved-ips records rather than those of the first build.
+			$hook->{env} = $env;
+			delete @$hook{qw(subnets features __exodus_data)};
+			$hook->{overrides} = {
+				environment => $env->env_config_overrides('cloud'),
+				director    => $env->director_config_overrides('cloud'),
+			};
+			$hook->{ocfp_config} = $env->ocfp_config_lookup(['net', 'vpc']);
+			$hook->{network} = {};
+			$hook->_set_network_azs();
+			$hook->_set_network_subnets();
 		} else {
 			# A distinct purpose keeps the hook cache from handing back the last
 			# build of the same deployment, without changing any network name
