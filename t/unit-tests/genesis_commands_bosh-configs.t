@@ -29,7 +29,14 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 my @director_calls; # what the actions asked the director (and its vault) to do
 my @hook_calls;     # what the actions asked the kit hooks to do
 
+my $stored_claims = {}; # what the network record in exodus holds, as the vault reads it
+
 my $vault = mock "Mock::BoshConfigs::Vault" => {
+	get_path => sub {
+		my ($self, $path) = @_;
+		push @director_calls, ['get_path', $path];
+		return $stored_claims;
+	},
 	set_path => sub {
 		my ($self, @args) = @_;
 		push @director_calls, ['set_path', @args];
@@ -105,6 +112,7 @@ sub make_env {
 		can_build_cloud_configs => 1,
 		kit                     => $kit,
 		notify                  => sub { 1 },
+		get_call_path_with_env  => sub { 'genesis '.$_[0]->name },
 		has_hook => sub {
 			my ($self, $hook) = @_;
 			return $hooks->{$hook} ? 1 : 0;
@@ -1022,6 +1030,122 @@ subtest 'director config - a create-env director builds and uploads its own clou
 	my $claims = call_index('set_path');
 	is($claims && $director_calls[$claims][1], 'secret/exodus/lab-ocf/bosh/network',
 		'and the director\'s own exodus network record is written');
+};
+
+# ---------------------------------------------------------------------------
+# claims that drifted from an up-to-date cloud config
+# ---------------------------------------------------------------------------
+# The cloud config is uploaded before the network record is written, so a
+# failed write leaves the director holding the new config.  Running the upload
+# again finds that config identical, and has to write the record all the same.
+
+my $fresh_claims = {subnets => {'ocfp-2' => {claims => {
+	compilation => '10.61.148.228,10.61.148.230-10.61.148.231,10.61.148.248',
+	cf          => '10.61.148.232-10.61.148.245',
+}}}};
+my $stale_claims = {subnets => {'ocfp-2' => {claims => {
+	compilation => '10.61.148.228-10.61.148.231',
+	cf          => '10.61.148.232-10.61.148.245',
+}}}};
+
+# claims_env - a director environment whose cloud config the director already
+# holds, built with the given network map
+sub claims_env {
+	my (%o) = @_;
+	my $self_bosh = make_director('lab-ocf', {cloud => {'lab-ocf.bosh.director' => entry(5)}},
+		contents => {'cloud|lab-ocf.bosh.director' => "director: yes\n"});
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(
+		self_bosh => $self_bosh, parent => $parent,
+		run_hook => sub {
+			my ($s, $h, %p) = @_;
+			return [] if $h eq 'runtime-config';
+			return ("director: yes\n", $o{network_map});
+		},
+	);
+	return ($env, $parent, $self_bosh);
+}
+
+subtest 'claims drift - an identical cloud config still gets its claims written when the record is stale' => sub {
+	plan tests => 8;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	$stored_claims = $stale_claims;
+	my ($env, $parent, $self_bosh) = claims_env(network_map => $fresh_claims);
+	my ($out, $err) = output_from {
+		Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+	};
+	my $all = $out.$err;
+	like($all, qr/already up to date/, 'the cloud config is reported as up to date');
+	ok(!defined(call_index('upload_config')), 'and is not uploaded');
+	my $write = call_index('set_path');
+	ok(defined $write, 'the claims are written all the same') or diag explain \@director_calls;
+	is_deeply($write && [@{$director_calls[$write]}[1..2]], ['secret/exodus/lab-ocf/bosh/network', $fresh_claims],
+		'to the director\'s own record, from the built network map');
+	is_deeply($write && {@{$director_calls[$write]}[3..6]}, {flatten => 1, clear => 1}, 'with flatten and clear');
+	my $read = call_index('get_path', 'secret/exodus/lab-ocf/bosh/network');
+	ok(defined $read && defined $write && $read < $write, 'after the stored record is read');
+	ok(defined(call_index('clear_network_lock', 'lab-ocf')), 'and the lock is released');
+	like($all, qr/network claims.*differ/s, 'and the output says the claims were out of date');
+};
+
+subtest 'claims drift - nothing is written when the config and the claims both match' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	# the empty claims of ocfp-0 are not stored, so they must not read as drift
+	$stored_claims = {subnets => {'ocfp-2' => $fresh_claims->{subnets}{'ocfp-2'}}};
+	my ($env, $parent) = claims_env(network_map => {subnets => {%{$fresh_claims->{subnets}}, 'ocfp-0' => {claims => {}}}});
+	my ($out, $err) = output_from {
+		Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+	};
+	like($out.$err, qr/already up to date/, 'the cloud config is reported as up to date');
+	ok(!defined(call_index('upload_config')), 'nothing is uploaded');
+	ok(!defined(call_index('set_path')), 'and no claims are written');
+	ok(defined(call_index('get_path', 'secret/exodus/lab-ocf/bosh/network')), 'though the stored record was compared');
+};
+
+subtest 'claims drift - a cloud config that is not the director\'s own is checked the same way' => sub {
+	plan tests => 3;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	$stored_claims = $stale_claims;
+	my $director = make_director('parent', {cloud => {'test-env.cf' => entry(3)}}, contents => {'cloud|test-env.cf' => "azs: []\n"});
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: []\n", network_map => $fresh_claims);
+	output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1, type => 'cloud') };
+	ok(!defined(call_index('upload_config')), 'the identical config is not uploaded');
+	my $write = call_index('set_path');
+	ok(defined $write, 'its claims are written');
+	is($write && $director_calls[$write][1], 'secret/exodus/parent/bosh/network', 'under the director that holds it');
+};
+
+subtest 'claims drift - a failed claims write tells the operator how to repair it' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	my $failing = mock "Mock::BoshConfigs::DriftVault" => {
+		get_path => sub { return $stale_claims },
+		set_path => sub { die "vault sealed\n" },
+	};
+	my $self_bosh = make_director('lab-ocf', {cloud => {'lab-ocf.bosh.director' => entry(5)}},
+		contents => {'cloud|lab-ocf.bosh.director' => "director: yes\n"});
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(
+		self_bosh => $self_bosh, parent => $parent, vault => $failing,
+		run_hook => sub { my ($s, $h) = @_; return $h eq 'runtime-config' ? [] : ("director: yes\n", $fresh_claims) },
+	);
+	@director_calls = ();
+	my $message;
+	eval { output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director') }; 1 }
+		or $message = $@ =~ s/\s+/ /gr;
+	like($message, qr/network map could not be updated.*vault sealed/s, 'the write failure is reported with its cause');
+	like($message, qr/genesis lab-ocf bosh-configs upload --type cloud --name lab-ocf\.bosh\.director -y/,
+		'with the command that repairs it');
+	like($message, qr/already up to date on the director and writes the claims/, 'and what that command does');
+	ok(!$self_bosh->network_locked_by_me, 'and the lock is released');
 };
 
 subtest 'director config - delete refuses the director config' => sub {

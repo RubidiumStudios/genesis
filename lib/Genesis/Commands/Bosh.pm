@@ -333,6 +333,10 @@ sub bosh_configs_upload {
 			if ($config->{status} eq 'identical') {
 				info("[[  - >>%s is #G{already up to date}.", $label);
 				push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
+				# The upload that would have recorded the claims is skipped, so a
+				# record left behind by an earlier failed write is repaired here.
+				_bosh_configs_sync_claims($env, $config)
+					if $config->{type} eq 'cloud' && ref($config->{network_map}) eq 'HASH';
 				next;
 			}
 
@@ -1000,40 +1004,92 @@ sub _bosh_configs_upload_cloud {
 	}
 	info "#G{done}";
 
-	if (ref($config->{network_map}) eq 'HASH') {
-		info({pending => 1},
-			"[[  - >>submitting network claims for #C{%s} to #M{%s} BOSH director...",
-			$env->name, $bosh->alias
+	_bosh_configs_write_claims($env, $config, uploaded => 1)
+		if ref($config->{network_map}) eq 'HASH';
+	return 1;
+}
+
+# }}}
+# _bosh_configs_claims_target - the vault and path of the network record a cloud config's claims are written to {{{
+sub _bosh_configs_claims_target {
+	my ($env, $config) = @_;
+	# A director's own cloud config names the director's own exodus record,
+	# the one post-deploy writes; any other cloud config's claims belong
+	# under the director that holds it.
+	return $config->{exodus_path}
+		? ($env->vault, $config->{exodus_path})
+		: ($config->{bosh}->vault, $config->{bosh}->exodus_path.'/network');
+}
+
+# }}}
+# _bosh_configs_claims_flat - a network map as the vault stores it, so two of them compare by what they hold {{{
+sub _bosh_configs_claims_flat {
+	my ($map) = @_;
+	my $flat = flatten({}, '', $map);
+	# set_path stores no empty hash or array, so neither is a difference
+	return {map {($_ => $flat->{$_} // '')} grep {!ref($flat->{$_})} keys %$flat};
+}
+
+# }}}
+# _bosh_configs_claims_differ - whether the stored network record holds other claims than a cloud config's network map {{{
+sub _bosh_configs_claims_differ {
+	my ($stored, $map) = @_;
+	my $json = JSON::PP->new->canonical;
+	return $json->encode(_bosh_configs_claims_flat($stored))
+		ne $json->encode(_bosh_configs_claims_flat($map));
+}
+
+# }}}
+# _bosh_configs_sync_claims - write the claims of an up-to-date cloud config when the stored record differs from them {{{
+sub _bosh_configs_sync_claims {
+	my ($env, $config) = @_;
+	my ($vault, $path) = _bosh_configs_claims_target($env, $config);
+	return 0 unless _bosh_configs_claims_differ($vault->get_path($path), $config->{network_map});
+
+	info(
+		"[[  - >>the network claims recorded at #C{%s} #Y{differ} from the ones %s builds, ".
+		"so they will be written.", $path, _bosh_configs_label($config)
+	);
+	_bosh_configs_write_claims($env, $config, uploaded => 0);
+	return 1;
+}
+
+# }}}
+# _bosh_configs_write_claims - record a cloud config's network map in the exodus network record {{{
+sub _bosh_configs_write_claims {
+	my ($env, $config, %opts) = @_;
+	my $bosh = $config->{bosh};
+	my ($network_vault, $network_path) = _bosh_configs_claims_target($env, $config);
+
+	info({pending => 1},
+		"[[  - >>submitting network claims for #C{%s} to #M{%s} BOSH director...",
+		$env->name, $bosh->alias
+	);
+	eval {
+		$network_vault->set_path(
+			$network_path, $config->{network_map}, flatten => 1, clear => 1
 		);
-		# A director's own cloud config names the director's own exodus record,
-		# the one post-deploy writes; any other cloud config's claims belong
-		# under the director that holds it.
-		my ($network_vault, $network_path) = $config->{exodus_path}
-			? ($env->vault, $config->{exodus_path})
-			: ($bosh->vault, $bosh->exodus_path.'/network');
-		eval {
-			$network_vault->set_path(
-				$network_path, $config->{network_map}, flatten => 1, clear => 1
-			);
-			1;
-		} or do {
-			# Kept before info runs, which can reset $@
-			my $err = $@ || 'no error was reported';
-			info "#R{failed}";
-			bail(
-				"Cloud config #C{%s} was uploaded, but the network map could not be ".
-				"updated at #C{%s}:\n\n%s\n\nThe director now holds the new cloud ".
-				"config while that record may be empty or out of date, because the ".
-				"write clears the record before filling it.  This usually means the ".
-				"vault is sealed or unreachable, or the token has expired or cannot ".
-				"write that path.  Check #C{safe target} and #C{safe get %s}, restore ".
-				"the record from a saved copy if it is empty, and then run this upload ".
-				"again so the claims are written.",
-				$config->{name}, $network_path, $err, $network_path
-			);
-		};
-		info "#G{done}";
-	}
+		1;
+	} or do {
+		# Kept before info runs, which can reset $@
+		my $err = $@ || 'no error was reported';
+		info "#R{failed}";
+		bail(
+			"Cloud config #C{%s} %s, but the network map could not be ".
+			"updated at #C{%s}:\n\n%s\n\nThe director now holds the new cloud ".
+			"config while that record may be empty or out of date, because the ".
+			"write clears the record before filling it.  This usually means the ".
+			"vault is sealed or unreachable, or the token has expired or cannot ".
+			"write that path.  Check #C{safe target} and #C{safe get %s}, restore ".
+			"the record from a saved copy if it is empty, and then run #C{%s ".
+			"bosh-configs upload --type cloud --name %s -y}, which finds the ".
+			"cloud config already up to date on the director and writes the claims.",
+			$config->{name}, $opts{uploaded} ? 'was uploaded' : 'is on the director',
+			$network_path, $err, $network_path,
+			scalar($env->get_call_path_with_env), $config->{name}
+		);
+	};
+	info "#G{done}";
 	return 1;
 }
 
