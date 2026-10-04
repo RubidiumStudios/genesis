@@ -571,4 +571,226 @@ subtest 'upload_stemcells - returns immediately without action when rc is non-ze
 	} 'upload_stemcells() with rc=1 returns early without BOSH access';
 };
 
+# ---------------------------------------------------------------------------
+# update_director_network_config - the network claims lock
+# ---------------------------------------------------------------------------
+# The director's own cloud config is built from the claims every deployment on
+# that director has recorded, and the step rewrites the director's network
+# record.  It holds the director's network claims lock while it does, so a
+# deploy on the same director can't record claims that the rewrite then
+# erases.  When another process holds the lock, the step waits for it, and if
+# the wait runs out, or the lock is stale, it fails only this step.
+
+my @netcalls; # director, hook, and vault calls, in order
+my $net_seq = 0;
+
+# net_bosh - a director mock whose lock answers come from @$states in turn
+# (the last one repeats), or from its own state once this process takes it
+sub net_bosh {
+	my (%o) = @_;
+	my $alias  = $o{alias} // 'lab-ocf';
+	my @states = @{$o{states} // [{status => 'unlocked'}]};
+	my $mine   = 0;
+	$net_seq++;
+	return mock "Mock::PostDeploy::NetBosh$net_seq" => {
+		alias => $alias,
+		check_network_lock => sub {
+			push @netcalls, ['check_network_lock', $alias];
+			return {status => 'locked', description => 'just now by this process'} if $mine;
+			return @states > 1 ? shift(@states) : $states[0];
+		},
+		acquire_network_lock => sub { push @netcalls, ['acquire_network_lock', $alias]; $mine = 1 },
+		network_locked_by_me => sub { $mine },
+		clear_network_lock   => sub { push @netcalls, ['clear_network_lock', $alias]; $mine = 0; 1 },
+		upload_config => sub {
+			my ($self, $content, $type, $name) = @_;
+			push @netcalls, ['upload_config', $alias, $type, $name];
+			die "director refused the cloud config\n" if $o{fail_upload};
+			return 1;
+		},
+	};
+}
+
+sub net_env {
+	my (%o) = @_;
+	my $self_bosh   = $o{self_bosh};
+	my $create_env  = $o{create_env} ? 1 : 0;
+	$net_seq++;
+	my $vault = mock "Mock::PostDeploy::NetVault$net_seq" => {
+		set_path => sub {
+			my ($self, @args) = @_;
+			push @netcalls, ['set_path', @args];
+			die "vault sealed\n" if $o{fail_set_path};
+			return 1;
+		},
+	};
+	return mock_env(
+		name                    => 'lab-ocf',
+		type                    => 'bosh',
+		use_create_env          => $create_env,
+		can_build_cloud_configs => 1,
+		notify                  => sub { 1 },
+		exodus_base             => 'secret/exodus/lab-ocf/bosh',
+		vault                   => $vault,
+		get_call_path_with_env  => sub { wantarray ? ('genesis', 'lab-ocf') : 'genesis lab-ocf' },
+		get_target_bosh => sub {
+			my ($self, $opts) = @_;
+			push @netcalls, ['get_target_bosh', $opts->{self} ? 'self' : 'default'];
+			# create-env directors answer for themselves with no option
+			return ($opts->{self} || $create_env) ? $self_bosh : die "the parent director was asked for\n";
+		},
+		run_hook => sub {
+			my ($self, $hook, %opts) = @_;
+			push @netcalls, ['run_hook', $hook, $opts{purpose} // ''];
+			die "the director cloud-config hook failed\n" if $o{fail_hook};
+			return ("director: yes\n", {subnets => {'ocfp-2' => {claims => {}}}});
+		},
+	);
+}
+
+sub netcall {
+	my (@want) = @_;
+	CALL: for my $i (0..$#netcalls) {
+		for my $j (0..$#want) {
+			next CALL unless defined($netcalls[$i][$j]) && $netcalls[$i][$j] eq $want[$j];
+		}
+		return $i;
+	}
+	return undef;
+}
+
+subtest 'update_director_network_config - takes the lock before the hook and releases it after the exodus write' => sub {
+	plan tests => 6;
+	@netcalls = ();
+	my $bosh = net_bosh();
+	my $hook = make_hook(env => net_env(self_bosh => $bosh));
+	my $ret;
+	output_from { $ret = $hook->update_director_network_config };
+	my $acquire = netcall('acquire_network_lock', 'lab-ocf');
+	my $build   = netcall('run_hook', 'cloud-config', 'director');
+	my $write   = netcall('set_path', 'secret/exodus/lab-ocf/bosh/network');
+	my $release = netcall('clear_network_lock', 'lab-ocf');
+	ok(defined $acquire && defined $build && $acquire < $build, 'the lock is taken before the hook runs')
+		or diag explain \@netcalls;
+	ok(defined $write && defined $acquire && $acquire < $write, 'and before the exodus write');
+	ok(defined $release && $release > $write, 'and released after the exodus write');
+	ok(defined(netcall('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director')), 'the director config is uploaded');
+	ok(!$bosh->network_locked_by_me, 'no lock of ours is left');
+	is($ret, 1, 'the step reports success');
+};
+
+subtest 'update_director_network_config - waits for a lock that another process releases' => sub {
+	plan tests => 5;
+	no warnings 'once';
+	local $Genesis::Hook::PostDeploy::NETWORK_LOCK_POLL_SECONDS = 1;
+	local $ENV{GENESIS_NETWORK_LOCK_WAIT} = 30;
+	@netcalls = ();
+	my $held = {status => 'locked', description => 'about 1 minute ago by ubuntu@bastion (env: cf, pid: 4242)'};
+	my $bosh = net_bosh(states => [$held, $held, {status => 'unlocked'}]);
+	my $hook = make_hook(env => net_env(self_bosh => $bosh));
+	my ($ret, $out, $err);
+	($out, $err) = output_from { $ret = $hook->update_director_network_config };
+	is(scalar(grep { $_->[0] eq 'check_network_lock' } @netcalls[0..(netcall('acquire_network_lock') // 0)]), 3,
+		'the lock is checked until the third check finds it free');
+	my $all = ($out.$err) =~ s/\s+/ /gr;
+	like($all, qr/held about 1 minute ago by ubuntu\@bastion \(env: cf, pid: 4242\); waiting up to 30 seconds/, 'the wait names the holder and the limit');
+	is(scalar(() = $all =~ /waiting up to/g), 1, 'and is announced once');
+	ok(defined(netcall('set_path')), 'the step then completes');
+	is($ret, 1, 'and reports success');
+};
+
+subtest 'update_director_network_config - fails only this step when the wait runs out' => sub {
+	plan tests => 8;
+	no warnings 'once';
+	local $Genesis::Hook::PostDeploy::NETWORK_LOCK_POLL_SECONDS = 1;
+	local $ENV{GENESIS_NETWORK_LOCK_WAIT} = 2;
+	@netcalls = ();
+	my $held = {status => 'locked', description => 'about 3 minutes ago by ubuntu@bastion (env: cf, pid: 4242)'};
+	my $bosh = net_bosh(states => [$held]);
+	my $hook = make_hook(env => net_env(self_bosh => $bosh));
+	my ($ret, $out, $err);
+	lives_ok { ($out, $err) = output_from { $ret = $hook->update_director_network_config } } 'the step does not bail';
+	my $all = ($out.$err) =~ s/\s+/ /gr; # the error is wrapped to the terminal
+	is($ret, 0, 'it returns 0, so only this step fails');
+	ok(!defined(netcall('run_hook')), 'no hook runs');
+	ok(!defined(netcall('upload_config')), 'nothing is uploaded');
+	ok(!grep({ $_->[0] =~ /^(acquire|clear)_network_lock$/ } @netcalls), 'the other process\'s lock is left untouched');
+	like($all, qr/held about 3 minutes ago by ubuntu\@bastion \(env: cf, pid: 4242\)/, 'the error names the holder');
+	like($all, qr/genesis lab-ocf bosh-configs upload --type cloud --name lab-ocf\.bosh\.director -y/,
+		'and gives the exact command that finishes the step');
+	like($all, qr/deployed and is working, but its own cloud config lab-ocf\.bosh\.director and its network record in exodus were not updated/,
+		'and says the director deployed but its network record was not updated');
+};
+
+subtest 'update_director_network_config - fails at once on a stale lock and leaves it in place' => sub {
+	plan tests => 5;
+	no warnings 'once';
+	local $Genesis::Hook::PostDeploy::NETWORK_LOCK_POLL_SECONDS = 1;
+	local $ENV{GENESIS_NETWORK_LOCK_WAIT} = 30;
+	@netcalls = ();
+	my $stale = {status => 'stale', description => 'about 2 hours ago by ubuntu@bastion (env: cf, pid: 4242)'};
+	my $bosh = net_bosh(states => [$stale]);
+	my $hook = make_hook(env => net_env(self_bosh => $bosh));
+	my ($ret, $out, $err);
+	my $start = time;
+	($out, $err) = output_from { $ret = $hook->update_director_network_config };
+	is($ret, 0, 'the step fails');
+	ok(time - $start < 5, 'without waiting');
+	ok(!grep({ $_->[0] =~ /^(acquire|clear)_network_lock$/ } @netcalls), 'the stale lock is not cleared');
+	my $all = ($out.$err) =~ s/\s+/ /gr; # the error is wrapped to the terminal
+	like($all, qr/stale: it was taken about 2 hours ago by ubuntu\@bastion/, 'the error names the stale holder');
+	like($all, qr/genesis lab-ocf bosh-configs upload --type cloud --name lab-ocf\.bosh\.director -y/, 'and gives the command that finishes the step');
+};
+
+subtest 'update_director_network_config - releases the lock when a step inside it fails' => sub {
+	plan tests => 9;
+	my %cases = (
+		'a failed upload'       => {fail_upload   => 1, error => qr/director refused the cloud config/},
+		'a failed exodus write' => {fail_set_path => 1, error => qr/vault sealed/},
+		'a failed hook'         => {fail_hook     => 1, error => qr/the director cloud-config hook failed/},
+	);
+	for my $case (sort keys %cases) {
+		my $c = $cases{$case};
+		@netcalls = ();
+		my $bosh = net_bosh(fail_upload => $c->{fail_upload});
+		my $hook = make_hook(env => net_env(self_bosh => $bosh, fail_set_path => $c->{fail_set_path}, fail_hook => $c->{fail_hook}));
+		throws_ok { output_from { $hook->update_director_network_config } } $c->{error}, "$case is reported";
+		ok(defined(netcall('clear_network_lock', 'lab-ocf')), "$case: the lock is released");
+		ok(!$bosh->network_locked_by_me, "$case: no lock of ours is left");
+	}
+};
+
+subtest 'update_director_network_config - releases the lock on a signal' => sub {
+	plan tests => 4;
+	@netcalls = ();
+	my $sent = 0;
+	my $base_bosh = net_bosh();
+	# Delivers TERM to ourselves while the lock is held, which is the only way
+	# to exercise the handler the step installs
+	my $signal_bosh = mock "Mock::PostDeploy::SignalBosh" => {
+		alias                => 'lab-ocf',
+		check_network_lock   => sub { $base_bosh->check_network_lock },
+		acquire_network_lock => sub { $base_bosh->acquire_network_lock },
+		network_locked_by_me => sub { $base_bosh->network_locked_by_me },
+		clear_network_lock   => sub { $base_bosh->clear_network_lock },
+		upload_config        => sub { $sent++; kill TERM => $$; return 1 },
+	};
+	my $hook = make_hook(env => net_env(self_bosh => $signal_bosh));
+	throws_ok { output_from { $hook->update_director_network_config } } qr/Terminated/, 'TERM stops the step';
+	is($sent, 1, 'it arrived while the lock was held');
+	ok(defined(netcall('clear_network_lock', 'lab-ocf')), 'the lock is released on the way out');
+	ok(!$base_bosh->network_locked_by_me, 'no lock of ours is left');
+};
+
+subtest 'update_director_network_config - a create-env director locks itself' => sub {
+	plan tests => 3;
+	@netcalls = ();
+	my $bosh = net_bosh();
+	my $hook = make_hook(env => net_env(self_bosh => $bosh, create_env => 1));
+	output_from { $hook->update_director_network_config };
+	ok(defined(netcall('get_target_bosh', 'default')), 'the director is resolved without --self, as create-env requires');
+	ok(defined(netcall('acquire_network_lock', 'lab-ocf')), 'the lock is taken on the director itself');
+	ok(defined(netcall('clear_network_lock', 'lab-ocf')), 'and released there');
+};
+
 done_testing;

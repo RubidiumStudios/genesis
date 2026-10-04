@@ -145,41 +145,87 @@ B<Examples:>
 
 =head2 update_director_network_config
 
-    $hook->update_director_network_config;
+    my $ok = $hook->update_director_network_config;
 
-Generates and uploads the director cloud-config for the BOSH director, then
-stores the resulting network details in the environment's exodus vault path.
-Does nothing and returns immediately if the environment cannot build cloud
-configs (C<< $env->can_build_cloud_configs >> is false).
+Builds and uploads the BOSH director's own cloud config, then stores the
+resulting network details in the director's exodus record, all while holding
+the director's network claims lock.  Does nothing and returns immediately if
+the environment cannot build cloud configs
+(C<< $env->can_build_cloud_configs >> is false).
 
-The method:
+The director's own cloud config is built from the claims every deployment on
+the director has recorded, and the network record is rewritten from it.
+Without the lock, a deploy on the same director could record claims that this
+rewrite then erases, so the method:
 
 =over 4
 
 =item 1.
 
-Runs the C<cloud-config> hook with C<purpose =E<gt> 'director'> to produce
-a config YAML document and a network hash.
+Resolves the director with C<< get_target_bosh({self => !$env->use_create_env}) >>,
+which is the director itself for both a normal and a create-env director.
 
 =item 2.
 
-Uploads the cloud config to the BOSH director under the name
-C<$env_name.$env_type.director>.
+Takes that director's network claims lock through
+L</_acquire_director_network_lock>, waiting for another process to release it
+if need be.  When the lock can't be taken, it prints an error and returns
+C<0> without building or uploading anything.
 
 =item 3.
 
-Stores the network hash in the environment's exodus vault path under
-C</network>.
+Runs the C<cloud-config> hook with C<< purpose => 'director' >> to produce
+a config YAML document and a network hash.
+
+=item 4.
+
+Uploads the cloud config to the director under the name
+C<$env_name.$env_type.director>.
+
+=item 5.
+
+Stores the network hash at C<< $env->exodus_base . '/network' >> with
+C<flatten> and C<clear>.
+
+=item 6.
+
+Releases the lock.  This happens on every exit path, including a failed hook,
+a failed upload, a failed exodus write, and an C<INT>, C<TERM>, C<HUP>, or
+C<QUIT> signal, which are turned into errors for the duration of the step.
 
 =back
 
-B<Returns:> Nothing. Returns immediately (without completing the upload) if
-the environment does not support building cloud configs.
+A deploy can't deadlock against its own post-deploy step, because a normal
+deploy releases its claims lock on the parent director before BOSH deploys,
+and a create-env deploy never takes one.  The lock guards against a different
+deploy on this director, such as a CF deploy, running at the same time.
+
+B<Returns:> C<1> when the config was uploaded and the network record written,
+C<0> when the lock could not be taken (so the kit's post-deploy step runner
+records only this step as failed), and nothing when the environment cannot
+build cloud configs.
+
+B<Errors:>
+
+=over 4
+
+=item C<"The network claims lock on the %s BOSH director could not be released: %s ...">
+
+Printed with C<error()>, not raised, when the release itself fails.  The
+message says other deploys on the director will wait until the lock goes
+stale, that the vault probably became unreachable or the token expired, and
+gives the C<bosh-configs upload ... -y> command that clears a stale lock and
+finishes the step.
+
+=back
+
+Errors from the hook, the upload, and the exodus write propagate after the
+lock is released.
 
 B<Examples:>
 
-    $hook->update_director_network_config;
-    # Returns: nothing; uploads config and stores network details in exodus
+    my $ok = $hook->update_director_network_config;
+    # Returns: 1; uploads lab-ocf.bosh.director and stores the network details in exodus
 
 =head2 command
 
@@ -444,6 +490,75 @@ B<Examples:>
 
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
+
+=head2 _acquire_director_network_lock
+
+    my $held = $hook->_acquire_director_network_lock($bosh, $config_name);
+
+Takes the network claims lock on C<$bosh> for
+L</update_director_network_config>.  When the lock is free, it takes it and
+returns C<1>.  When another process holds it, it prints one line naming the
+holder and how long it will wait, then checks again every
+C<$Genesis::Hook::PostDeploy::NETWORK_LOCK_POLL_SECONDS> seconds (5 by
+default, and a package variable so tests can shorten it) for up to
+C<GENESIS_NETWORK_LOCK_WAIT> seconds (300 by default).  If another process
+takes the lock between a check and the acquire, it goes back to waiting.
+
+It never clears a stale lock, because it cannot tell whether the holder left
+its claims half written.  When the wait runs out, or the lock is stale, it
+prints an error and returns C<0>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$bosh>
+
+The C<Service::BOSH::Director> whose lock to take, the director itself.
+
+=item C<$config_name>
+
+The director's own cloud config name, C<< <env>.<type>.director >>, used in
+the command the error gives.
+
+=back
+
+B<Returns:> C<1> when the lock is held, C<0> when it is not.
+
+B<Errors:>
+
+=over 4
+
+=item C<"The %s BOSH director deployed and is working, but its own cloud config %s and its network record in exodus were not updated.  The network claims lock on the director was held %s, and it was still held after waiting %s. ...">
+
+Printed with C<error()>, not raised, when the wait runs out.  The message
+names the holder from the lock's description and how long the step waited,
+gives the likely cause (another deploy on this director held the lock, for
+example while waiting at a confirmation prompt), gives the exact
+C<genesis E<lt>envE<gt> bosh-configs upload --type cloud --name E<lt>envE<gt>.E<lt>typeE<gt>.director -y>
+command, built from C<get_call_path_with_env>, that finishes the step
+without a redeploy, and says that C<GENESIS_NETWORK_LOCK_WAIT> sets a longer
+wait.
+
+=item C<"The %s BOSH director deployed and is working, but its own cloud config %s and its network record in exodus were not updated.  The network claims lock on the director is stale: ...">
+
+Printed with C<error()>, not raised, at once when the lock is stale.  The
+message names the stale holder, says why post-deploy does not clear it, gives
+the likely cause (an interrupted deploy or upload on this director), and
+gives the same command, whose C<-y> also clears the stale lock.
+
+=item C<"GENESIS_NETWORK_LOCK_WAIT is set to '%s', which is not a whole number of seconds, ...">
+
+Printed with C<warning()> when the variable is not a whole number, after
+which the default of 300 seconds applies.
+
+=back
+
+B<Examples:>
+
+    local $ENV{GENESIS_NETWORK_LOCK_WAIT} = 600;
+    my $held = $hook->_acquire_director_network_lock($bosh, 'lab-ocf.bosh.director');
+    # Returns: 1 once the lock is free, or 0 after ten minutes
 
 =head2 _commit_config_credhub_secrets
 
