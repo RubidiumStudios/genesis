@@ -260,6 +260,49 @@ sub git_calls {
 	return $calls;
 }
 
+subtest "control's tree is written from its blobs, byte for byte" => sub {
+	# The files are read out of the object database in one git process and
+	# written straight into the scratch tree (D117), with no archive written
+	# and no tar run over it, at the repository's root and under a deployment
+	# root alike, where the root's own prefix is taken off each path.
+	plan tests => 6;
+
+	for my $root ('', 'bosh') {
+		my $h = make_harness(envs => ['lab', 'qa'], vault => 0, root => $root);
+		write_env_file($h, 'qa', pipeline => {prior_env => 'lab'});
+		push_from($h, 'a', $h->control);
+
+		my @ran;
+		no warnings qw/redefine once/;
+		my $real = \&Genesis::Top::run;
+		local *Genesis::Top::run = sub {
+			push @ran, join(' ', grep {defined && !ref} @_);
+			goto &$real;
+		};
+		my $top = do {local %ENV = %ENV;
+			Genesis::Top->new($root ? $h->a . "/$root" : $h->a)};
+		$top->pipeline_topology;
+		my $where = $root ? "under $root/" : 'at the root';
+
+		is_deeply([grep {/\barchive\b|^tar\b/} @ran], [],
+			"no archive is written and no tar is run $where");
+
+		my $scratch = $top->_shape->path;
+		my $control = 'origin/' . $h->control;
+		my @files   = ('.genesis/config', 'lab.yml', 'qa.yml');
+		my @differ  = grep {
+			my ($want) = run({dir => $h->a, trim => 0}, 'git', 'show',
+				"$control:" . ($root ? "$root/" : '') . $_);
+			($want // '') ne (slurp("$scratch/$_") // '');
+		} @files;
+		is_deeply(\@differ, [], "every file is control's, byte for byte, $where");
+		ok(!-e "$scratch/$root", 'and the root prefix is taken off each path')
+			if $root;
+		ok(-f "$scratch/.genesis/config", 'and the configuration is there to load')
+			unless $root;
+	}
+};
+
 subtest 'control is resolved in one git call, and a commit written out once' => sub {
 	# Every command resolves control when it starts, so that read is one git
 	# call.  The tree a commit writes out is the same for every command that
@@ -272,8 +315,9 @@ subtest 'control is resolved in one git call, and a commit written out once' => 
 	my $h = three_stage();
 	my $one = top_in($h);
 	my $first = git_calls(sub {$one->pipeline_topology});
-	cmp_ok($first, '<=', 5,
-		'the first read resolves control and writes its tree out in at most five');
+	cmp_ok($first, '<=', 4,
+		'the first read resolves control, finds the repository, lists the tree '
+		.'and reads its files, in four');
 
 	my $two = top_in($h);
 	my $second = git_calls(sub {$two->pipeline_topology});

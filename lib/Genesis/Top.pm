@@ -1595,8 +1595,8 @@ sub pipeline_staleness {
 # written out of the ref into a scratch tree, and a Genesis::Top is opened
 # over that tree as a reading surface, so the topology comes back exactly as
 # pipeline_topology would answer it for a clone standing on the ref.  The
-# archive carries the bytes git holds, which is what
-# Genesis::Env::_propagation_file_kinds_at does for the same reason.
+# files are the bytes git holds, read by Service::Git::read_blobs, which is
+# what Genesis::Env::_propagation_file_kinds_at reads for the same reason.
 #
 # Nothing but the configuration and the environment files is written out.  No
 # kit hook runs against this tree, so the kit source and everything else under
@@ -1626,18 +1626,17 @@ sub _topology_at {
 		$_ eq $config || $_ eq $dev_kit || m{^\Q$prefix\E[^/]+\.ya?ml$}
 	} sort keys %tree;
 
+	# Read out of the object database in one git process and written straight
+	# into the scratch tree, each path with the deployment root's own prefix
+	# taken off (D117).
 	require File::Temp;
 	my $scratch = File::Temp->newdir();
 	my $root    = "$scratch";
-	my $archive = File::Temp->new(SUFFIX => '.tar');
-	run({dir => $git->root,
-		onfailure => "Failed to read the deployment root at $ref"},
-		'git', 'archive', '--format=tar', '-o', "$archive", $ref, @want);
-	my $depth = ($prefix =~ tr{/}{});
-	run({dir => $root,
-		onfailure => "Failed to write out the deployment root at $ref"},
-		'tar', '-x', '-f', "$archive",
-		($depth ? ('--strip-components', $depth) : ()));
+	my $blobs   = $git->read_blobs($ref, @want);
+	for my $path (sort keys %$blobs) {
+		(my $relative = $path) =~ s{^\Q$prefix\E}{};
+		mkfile_or_fail("$root/$relative", $blobs->{$path}{content});
+	}
 
 	# Opening a Top sets GENESIS_ROOT, and the caller localises the
 	# environment around this call and around every read it makes through the

@@ -2545,8 +2545,10 @@ B<Examples:>
 The pipeline's environments as one ref holds them, and the C<Genesis::Top>
 they were read through.
 
-The deployment root's configuration and environment files are written out of
-the ref into a scratch tree, and a C<Genesis::Top> is opened over that tree as
+The deployment root's configuration and environment files are read out of
+the ref's objects in one git process, L<Service::Git/read_blobs>, and written
+byte for byte into a scratch tree with the root's own prefix taken off each
+path, and a C<Genesis::Top> is opened over that tree as
 a materialised one, so what comes back is what L</pipeline_topology> would
 answer for a clone standing on that ref. Nothing else under the root is
 written out: no kit hook runs against this tree, so the kit source would be
@@ -2581,14 +2583,14 @@ B<Errors:>
 
 =item *
 
-C<< "Failed to read the deployment root at <ref>" >> - raised when
-C<git archive> cannot write the ref's configuration and environment files
-out.
+C<< "Cannot read <ref> ..." >> - raised at C<DATAERR> by
+L<Service::Git/read_blobs> when git cannot resolve the ref or read its
+objects.
 
 =item *
 
-C<< "Failed to write out the deployment root at <ref>" >> - raised when the
-archive cannot be unpacked into the scratch tree.
+What C<mkfile_or_fail> raises when a file cannot be written into the scratch
+tree.
 
 =back
 
