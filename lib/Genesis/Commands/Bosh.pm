@@ -264,13 +264,18 @@ sub bosh_configs_upload {
 
 	# Cloud configs record network claims on the director, so their synthesis
 	# and upload happen under the same network claims lock the deploy path
-	# uses.  The lock is released on every exit path below.
-	my $lock_held = 0;
+	# uses.  The lock is released on every exit path below.  A director
+	# environment's own cloud config records the claims on the director
+	# itself, so it takes that director's lock as well: the parent's first,
+	# then the director's, the same order on every run.
+	my @locked = ();
 	my $wants_cloud = (!$options{type} || $options{type} eq 'cloud')
 		&& (!$options{name} || $options{name} eq $env->bosh_config_name)
 		&& !$env->use_create_env
 		&& $env->has_hook('cloud-config')
 		&& $env->can_build_cloud_configs;
+	my $wants_director = !$env->use_create_env
+		&& _bosh_configs_director_buildable($env, %options);
 
 	# A signal while the lock is held has to unwind through the release below
 	# instead of killing the process with the lock still on the director.  HUP
@@ -285,7 +290,12 @@ sub bosh_configs_upload {
 	eval {
 		if ($wants_cloud) {
 			_bosh_configs_acquire_network_lock($env, $bosh, $yes);
-			$lock_held = 1;
+			push @locked, $bosh;
+		}
+		if ($wants_director) {
+			my $director = _bosh_configs_director_bosh($env);
+			_bosh_configs_acquire_network_lock($env, $director, $yes);
+			push @locked, $director;
 		}
 
 		my ($configs, $notes) = _bosh_configs_provided($env, $bosh, %options);
@@ -379,9 +389,10 @@ sub bosh_configs_upload {
 		1;
 	};
 	my $err = $@;
-	if ($lock_held && $bosh->network_locked_by_me) {
-		info({pending => 1}, "[[  - >>releasing network claims lock on #M{%s} BOSH director...", $bosh->alias);
-		$bosh->clear_network_lock();
+	for my $held (reverse @locked) {
+		next unless $held->network_locked_by_me;
+		info({pending => 1}, "[[  - >>releasing network claims lock on #M{%s} BOSH director...", $held->alias);
+		$held->clear_network_lock();
 		info "#G{done}";
 	}
 	die $err if $err;
@@ -526,6 +537,20 @@ sub bosh_configs_delete {
 		"#y{--name} (the #C{list} action shows the names the director holds)."
 	) unless defined $options{name};
 
+	if ($env->is_bosh_director
+		&& $options{name} eq _bosh_configs_director_name($env)
+		&& (!$options{type} || $options{type} eq 'cloud')) {
+		bail(
+			"Cloud config #C{%s} is the BOSH director's own cloud config, so ".
+			"bosh-configs will not delete it.  The director's compilation network ".
+			"is defined there, and the network claims in the director's exodus ".
+			"record describe it, so without it the director cannot compile ".
+			"packages for any deployment.  If the config is wrong, rebuild it with ".
+			"#C{genesis %s bosh-configs upload --type cloud --name %s} instead.",
+			$options{name}, $env->name, $options{name}
+		);
+	}
+
 	my @rows = _bosh_configs_uploaded($env, $bosh, %options);
 	bail(
 		"No bosh config named #C{%s}%s belonging to #C{%s} was found on %s.  Only ".
@@ -591,6 +616,12 @@ sub _bosh_configs_provided {
 				network_map => $network_map,
 			};
 		}
+	}
+
+	if ($wanted{cloud} && !$env->use_create_env) {
+		my ($director_config, $director_notes) = _bosh_configs_director_config($env, %options);
+		push @configs, $director_config if $director_config;
+		push @notes, @$director_notes;
 	}
 
 	if ($wanted{cpi}) {
@@ -662,6 +693,69 @@ sub _bosh_configs_provided {
 }
 
 # }}}
+# _bosh_configs_director_name - the name of a director environment's own cloud config {{{
+sub _bosh_configs_director_name {
+	my ($env) = @_;
+	return join('.', $env->name, $env->type, 'director');
+}
+
+# }}}
+# _bosh_configs_director_bosh - the director that holds a director environment's own cloud config {{{
+sub _bosh_configs_director_bosh {
+	my ($env) = @_;
+	# The same director the post-deploy hook uploads the config to: the
+	# director itself, which get_target_bosh picks unasked for create-env.
+	return scalar($env->get_target_bosh({self => !$env->use_create_env}));
+}
+
+# }}}
+# _bosh_configs_director_selected - whether --type and --name select a director environment's own cloud config {{{
+sub _bosh_configs_director_selected {
+	my ($env, %options) = @_;
+	return 0 unless $env->is_bosh_director;
+	return 0 if $options{type} && $options{type} ne 'cloud';
+	return 0 if defined($options{name}) && $options{name} ne _bosh_configs_director_name($env);
+	return 1;
+}
+
+# }}}
+# _bosh_configs_director_buildable - whether a director environment's own cloud config is selected and can be built {{{
+sub _bosh_configs_director_buildable {
+	my ($env, %options) = @_;
+	return 0 unless _bosh_configs_director_selected($env, %options);
+	return 0 unless $env->can_build_cloud_configs;
+	return $env->has_hook('cloud-config', purpose => 'director') ? 1 : 0;
+}
+
+# }}}
+# _bosh_configs_director_config - synthesize a director environment's own cloud config, or say why not {{{
+sub _bosh_configs_director_config {
+	my ($env, %options) = @_;
+	return (undef, []) unless _bosh_configs_director_selected($env, %options);
+
+	my $name = _bosh_configs_director_name($env);
+	return (undef, [sprintf(
+		"the director's own cloud config #C{%s} is not managed by genesis for this environment.",
+		$name
+	)]) unless $env->can_build_cloud_configs;
+	return (undef, [sprintf(
+		"kit #C{%s} provides no cloud-config-director hook, so the director's own ".
+		"cloud config #C{%s} is not synthesized.",
+		$env->kit->id, $name
+	)]) unless $env->has_hook('cloud-config', purpose => 'director');
+
+	my ($content, $network_map) = $env->run_hook('cloud-config', purpose => 'director');
+	return ({
+		type        => 'cloud',
+		name        => $name,
+		bosh        => _bosh_configs_director_bosh($env),
+		content     => $content,
+		network_map => $network_map,
+		exodus_path => $env->exodus_base.'/network',
+	}, []);
+}
+
+# }}}
 # _bosh_configs_runtime_requests - the runtime-config hook requests for the enabled builds, or for one named config {{{
 sub _bosh_configs_runtime_requests {
 	my ($env, $name) = @_;
@@ -671,6 +765,8 @@ sub _bosh_configs_runtime_requests {
 	if (defined $name) {
 		my $prefix = $env->bosh_config_name.'.';
 		return undef unless index($name, $prefix) == 0 && length($name) > length($prefix);
+		# A director's own cloud config shares the prefix but is no runtime build
+		return undef if $env->is_bosh_director && $name eq _bosh_configs_director_name($env);
 		my $build = substr($name, length($prefix));
 		my $opts = ref($enabled->{$build}) eq 'HASH' ? $enabled->{$build} : {};
 		return {$build => $opts};
@@ -899,16 +995,31 @@ sub _bosh_configs_upload_cloud {
 			"[[  - >>submitting network claims for #C{%s} to #M{%s} BOSH director...",
 			$env->name, $bosh->alias
 		);
+		# A director's own cloud config names the director's own exodus record,
+		# the one post-deploy writes; any other cloud config's claims belong
+		# under the director that holds it.
+		my ($network_vault, $network_path) = $config->{exodus_path}
+			? ($env->vault, $config->{exodus_path})
+			: ($bosh->vault, $bosh->exodus_path.'/network');
 		eval {
-			$bosh->vault->set_path(
-				$bosh->exodus_path.'/network', $config->{network_map}, flatten => 1, clear => 1
+			$network_vault->set_path(
+				$network_path, $config->{network_map}, flatten => 1, clear => 1
 			);
 			1;
 		} or do {
+			# Kept before info runs, which can reset $@
+			my $err = $@ || 'no error was reported';
 			info "#R{failed}";
 			bail(
 				"Cloud config #C{%s} was uploaded, but the network map could not be ".
-				"updated:\n\n%s", $config->{name}, $@
+				"updated at #C{%s}:\n\n%s\n\nThe director now holds the new cloud ".
+				"config while that record may be empty or out of date, because the ".
+				"write clears the record before filling it.  This usually means the ".
+				"vault is sealed or unreachable, or the token has expired or cannot ".
+				"write that path.  Check #C{safe target} and #C{safe get %s}, restore ".
+				"the record from a saved copy if it is empty, and then run this upload ".
+				"again so the claims are written.",
+				$config->{name}, $network_path, $err, $network_path
 			);
 		};
 		info "#G{done}";

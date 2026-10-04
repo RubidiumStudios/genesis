@@ -337,6 +337,16 @@ C<cpi-config> hook yields one cpi config named for the environment's cpi.
 Cloud and cpi configs live on the director that deploys the environment;
 runtime configs live on the environment itself when it is a BOSH director.
 
+A BOSH director environment also owns its own cloud config, named
+C<< <env>.<type>.director >>, which the kit builds with its
+C<cloud-config-director> hook (the C<cloud-config> hook run with
+C<< purpose => 'director' >>).  It lives on the director itself and holds
+the director's compilation network, and its network map is the director's
+own network claims record at C<< <exodus base>/network >>, the same record
+the post-deploy hook writes.  Every action sees it: C<summary>, C<list>,
+C<view>, and C<compare> report it, C<upload> rebuilds it under the
+director's network claims lock, and C<delete> refuses it.
+
 B<Parameters:>
 
 =over 4
@@ -483,12 +493,25 @@ excluded from the C<runtime-config> hook's upload.
 
 Cloud configs are handled the way the deploy path handles them: the network
 claims lock is taken on the director before the cloud config is synthesized,
+so the hook reads claims nobody else is changing,
 the config is uploaded with C<upload_config>, the network map the hook
 produced is written to the director's exodus data, and the lock is released
 even when something fails.  C<INT>, C<TERM>, C<HUP>, and C<QUIT> are turned
 into errors for as long as the lock is held, so a cancelled command, a
 killed one, and an ssh session that drops out from under a bastion all
-unwind through that release rather than leaving the lock behind.  Cpi
+unwind through that release rather than leaving the lock behind.
+
+For a BOSH director environment, the director's own cloud config
+C<< <env>.<type>.director >> is uploaded to the director itself.  Its lock
+is the director's own network claims lock, taken before the
+C<cloud-config-director> hook runs, and its network map is written to the
+director's own exodus record at C<< <exodus base>/network >> with
+C<flatten> and C<clear>, exactly as the post-deploy hook writes it.  When
+one run uploads both the parent-side cloud config and the director's own,
+the parent's lock is taken first and the director's second, and both are
+released, in reverse order, on every exit path.  A run filtered by
+C<--type> or C<--name> to something other than a cloud config takes no
+lock.  Cpi
 configs go through
 C<< Genesis::Env->_fix_cpi_config >>, which also creates the CredHub secrets
 the config references.  Runtime configs are uploaded by running the kit's
@@ -530,7 +553,8 @@ spruce could not compare one or more configs with the director's copies.
 =back
 
 Errors from the helpers it calls (lock contention, a failed upload, a lost
-lock, a refused prompt) propagate after the network claims lock is released.
+lock, a failed exodus write, a failed hook, a refused prompt) propagate
+after every network claims lock this run took is released.
 
 B<Returns:> C<1>.
 
@@ -647,7 +671,9 @@ Synthesizes the provided configs and reports, for each, whether the
 director's copy is identical, different (with the C<spruce diff> output),
 missing (with the synthesized content), or could not be compared (with
 spruce's output, reported as an error).  Honors C<--type> and C<--name>.
-Nothing is changed on the director.
+Nothing is changed on the director.  It takes no network claims lock, even
+for a director's own cloud config, so it is safe to run while a deploy
+holds the lock; the claims it reads may then be about to change.
 
 B<Parameters:>
 
@@ -682,7 +708,9 @@ B<Examples:>
 Removes the config named by C<--name> from the director after confirmation
 (skipped with C<--yes>).  Only configs whose names belong to this
 environment can be removed here; when the same name exists under more than
-one type, C<--type> chooses.
+one type, C<--type> chooses.  A BOSH director environment's own cloud config,
+C<< <env>.<type>.director >>, is refused, because the director's compilation
+network is defined there.
 
 B<Parameters:>
 
@@ -709,6 +737,14 @@ B<Errors:>
 =item C<"The delete action needs the name of the config to remove; give it with --name (the list action shows the names the director holds).">
 
 Raised (via C<bail()>) when C<--name> is absent.
+
+=item C<"Cloud config %s is the BOSH director's own cloud config, so bosh-configs will not delete it.  ...">
+
+Raised (via C<bail()>) when C<--name> is the director environment's own
+cloud config and C<--type> is absent or C<cloud>.  The message says that the
+director's compilation network is defined there and that the director
+cannot compile packages without it, and gives the
+C<bosh-configs upload --type cloud --name ...> command that rebuilds it.
 
 =item C<"No bosh config named %s%s belonging to %s was found on %s.  Only configs named for this environment can be deleted here; use genesis %s bosh delete-config for anything else.">
 
@@ -737,7 +773,8 @@ the hash the helpers pass around: C<type>, C<name>, C<bosh> (the director
 that holds it), C<content> (the synthesized YAML, or C<undef>), and, once
 C<_bosh_configs_status> has run, C<status>, C<uploaded>, and C<diff>.  Cloud
 records also carry C<network_map>, cpi records C<cpi_config>, and runtime
-records C<build> and C<description>.
+records C<build> and C<description>.  A director's own cloud config record
+also carries C<exodus_path>, the Vault path its network map is written to.
 
 =head2 _bosh_configs_provided($env, $bosh, %options)
 
@@ -752,6 +789,11 @@ C<runtime-config> hook in collect mode for the builds returned by
 C<_bosh_configs_runtime_requests>.  Runtime configs of a BOSH director
 environment target the environment's own director.  A runtime hook failure
 becomes a note rather than an error, so the other types still report.
+
+When cloud configs are wanted, a BOSH director environment also gets its
+own cloud config from C<_bosh_configs_director_config>, unless C<--name>
+names something else.  It carries its own C<bosh>, the director itself, so
+no action needs the C<$bosh> argument to reach it.
 
 B<Parameters:>
 
@@ -789,6 +831,155 @@ B<Examples:>
   my ($configs, $notes) = _bosh_configs_provided($env, $bosh, type => 'cloud');
   # $configs holds at most one cloud record; $notes is empty
 
+=head2 _bosh_configs_director_name($env)
+
+  my $name = _bosh_configs_director_name($env);
+
+Returns the name of a director environment's own cloud config, which is
+C<< <env>.<type>.director >>.  The post-deploy hook uploads the config under
+the same name.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=back
+
+B<Returns:> The config name.
+
+B<Examples:>
+
+  _bosh_configs_director_name($env);
+  # Returns: 'lab-ocf.bosh.director'
+
+=head2 _bosh_configs_director_bosh($env)
+
+  my $director = _bosh_configs_director_bosh($env);
+
+Returns the director that holds a director environment's own cloud config,
+which is the director itself.  It asks C<get_target_bosh> for the self
+director, or for the default target of a create-env director, which is
+already itself, so this is the same director the post-deploy hook uploads to.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object for a BOSH director environment.
+
+=back
+
+B<Returns:> A C<Service::BOSH::Director>.
+
+B<Examples:>
+
+  my $director = _bosh_configs_director_bosh($env);
+  # Returns: the lab-ocf director itself
+
+=head2 _bosh_configs_director_selected($env, %options)
+
+  my $selected = _bosh_configs_director_selected($env, %options);
+
+Says whether the command's filters select a director environment's own
+cloud config.  It is true for a BOSH director environment when C<--type> is
+absent or C<cloud> and C<--name> is absent or names the director config.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<%options>
+
+The command options; C<type> and C<name> are consulted.
+
+=back
+
+B<Returns:> C<1> or C<0>.
+
+B<Examples:>
+
+  _bosh_configs_director_selected($env, type => 'runtime');
+  # Returns: 0
+
+=head2 _bosh_configs_director_buildable($env, %options)
+
+  my $buildable = _bosh_configs_director_buildable($env, %options);
+
+Says whether the director's own cloud config is selected and can be built,
+which means the filters select it, the environment can build cloud configs,
+and the kit has a C<cloud-config-director> hook.  The upload uses it to
+decide, before any hook runs, whether to take the director's network claims
+lock.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<%options>
+
+The command options; C<type> and C<name> are consulted.
+
+=back
+
+B<Returns:> C<1> or C<0>.
+
+B<Examples:>
+
+  _bosh_configs_director_buildable($env);
+  # Returns: 1 for a director whose kit has a cloud-config-director hook
+
+=head2 _bosh_configs_director_config($env, %options)
+
+  my ($config, $notes) = _bosh_configs_director_config($env, %options);
+
+Synthesizes a director environment's own cloud config by running the
+C<cloud-config> hook with C<< purpose => 'director' >>, and returns it as a
+cloud config record.  The record targets the director itself (see
+C<_bosh_configs_director_bosh>) and carries C<exodus_path>, the
+director's own exodus network record, so the upload writes the same record
+the post-deploy hook writes.
+
+It returns no record, and no note, when the environment is not a BOSH
+director or the filters select something else.  It returns no record and
+one note when the environment does not let Genesis manage its cloud
+configs, or when the kit has no C<cloud-config-director> hook.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+A C<Genesis::Env> object.
+
+=item C<%options>
+
+The command options; C<type> and C<name> are consulted.
+
+=back
+
+B<Returns:> A list of the config record (or C<undef>) and an array
+reference of notes.
+
+B<Examples:>
+
+  my ($config, $notes) = _bosh_configs_director_config($env, type => 'cloud');
+  # $config->{name} is 'lab-ocf.bosh.director' and $config->{bosh} is the director itself
+
 =head2 _bosh_configs_runtime_requests($env, $name)
 
   my $requests = _bosh_configs_runtime_requests($env, $name);
@@ -799,7 +990,9 @@ when that hash is absent or empty (the same rule the post-deploy hook
 applies).  With C<$name> it is a one-entry hash for the build the name
 denotes (the part after C<< <env>.<type>. >>), carrying that build's options
 from C<bosh-configs.runtime> when present, or C<undef> when the name cannot
-be a runtime config of this environment.
+be a runtime config of this environment.  A director environment's own cloud
+config name, C<< <env>.<type>.director >>, shares that prefix but is not a
+runtime build, so it also gives C<undef>.
 
 B<Parameters:>
 
@@ -1185,7 +1378,10 @@ B<Examples:>
 Uploads a cloud config record and records its network claims, as the deploy
 path does: checks the lock is still held, uploads with C<upload_config>,
 then writes the record's C<network_map> under the director's exodus
-C</network> path.
+C</network> path.  A record that carries C<exodus_path>, which a director's
+own cloud config does, has its network map written there through the
+environment's vault instead, so this and the post-deploy hook always write
+the same record.
 
 B<Parameters:>
 
@@ -1214,9 +1410,15 @@ Raised (via C<bail()>) when the lock is gone at upload time.
 
 Raised (via C<bail()>) when the bosh upload fails.
 
-=item C<"Cloud config %s was uploaded, but the network map could not be updated:\n\n%s">
+=item C<"Cloud config %s was uploaded, but the network map could not be updated at %s:\n\n%s\n\n...">
 
-Raised (via C<bail()>) when the exodus write fails after the upload.
+Raised (via C<bail()>) when the exodus write fails after the upload.  The
+placeholders are the config name, the Vault path, and the vault's error.
+The message goes on to say that the record may now be empty or out of date,
+because the write clears it before filling it, that the vault is probably
+sealed, unreachable, or refusing the token, and that the operator should
+check the vault, restore the record from a saved copy if it is empty, and
+run the upload again.
 
 =back
 

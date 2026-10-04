@@ -709,7 +709,11 @@ define_command("bosh-configs", {
 		"compare them with the copies the BOSH director holds.  On the director, ".
 		"cloud configs are named #C{<env>.<deployment-type>}, runtime configs add ".
 		"a #C{.<build>} suffix to that name, and cpi configs use the environment's ".
-		"cpi name.".
+		"cpi name.  A BOSH director environment also has its own cloud config, ".
+		"named #C{<env>.<deployment-type>.director}, which lives on the director ".
+		"itself and holds its compilation network.  Uploading it takes that ".
+		"director's network claims lock and rewrites the director's network ".
+		"claims record in exodus, and the delete action refuses it.".
 		"\n\n".
 		"The actions are:\n".
 		"\n".
