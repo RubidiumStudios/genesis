@@ -1417,6 +1417,11 @@ Builds an OCFP greedy network definition. Greedy networks consume all
 available IPs in the OCFP subnet CIDR ranges and do not allocate static IPs.
 Only OCFP-prefixed subnets are included.
 
+A greedy network applies no reserved-ips records. It neither holds back
+other targets' records nor claims its own, so the addresses it covers are
+not checked against the C<reserved-ips> map the way a C<dynamic_subnets>
+network's are.
+
 B<Parameters:>
 
 =over 4
@@ -1546,6 +1551,79 @@ merged into a single de-duplicated list. AZ calculation has to account
 for the join as well, and cannot distinguish by subnet id -- the subnet
 id is ignored and only the network id is used.
 
+B<The pool a network slices from>
+
+For each subnet the model starts from the B<band>, which is the subnet's
+available range with the subnet-reserved range removed, captured before
+anything else is taken out. The free pool is the band minus every other
+network's claim on the subnet, minus every other target's reserved-ips
+record (see L</_all_reserved_ip_records>), and minus this target's own
+records (see L</_get_reserved_allocation>). Dynamic addresses come only from
+that pool, so a network never takes an address that another target's
+reserved-ips record names.
+
+B<Counting own records>
+
+This target's own records that sit inside the band count toward its size.
+A network that asks for 15 addresses on a band where it owns one record
+slices 14 dynamic addresses. Own records outside the band, such as a
+director's C<bosh_ip> in the subnet-reserved range, do not count.
+
+B<Repairing a saved claim>
+
+The saved claim for this network is read from the director's network
+exodus, and these steps run in order.
+
+=over 4
+
+=item 1.
+
+The subnet-reserved range is removed from it.
+
+=item 2.
+
+If another target's record sits inside it, the build stops with the PRUNE
+error from L</_prune_claim_of_reserved_records>, because dropping the
+address could move a VM that holds it. A BOSH director's compilation
+network (target C<compilation> built by a
+C<Genesis::Hook::CloudConfig::Director> hook) drops those addresses with a
+warning instead, because compilation VMs exist only during a deploy. Any
+network named in the comma-separated C<GENESIS_ALLOW_CLAIM_PRUNE>
+environment variable drops them with the same warning, so an operator can
+accept one prune for one run after checking C<bosh vms>.
+
+=item 3.
+
+This target's own records are removed from it, because they are handled
+separately.
+
+=item 4.
+
+If what is left still overlaps another network's claim, the build stops
+with the CLASH error from L</_bail_on_claim_clash>, because no reserved-ips
+record says which network is right.
+
+=back
+
+The claim then grows from the free pool, or shrinks from its high end, to
+the dynamic count (see L</_calculate_subnet_allocation>).
+
+B<Statics>
+
+Statics are taken from the claim as stored, which is the allocated dynamic
+addresses together with this target's own in-band records, sliced from the
+front the way earlier releases sliced them. A network whose own record sits
+among its statics therefore keeps the same static addresses it had before
+this check existed. The own records are then added to the statics or to the
+allocated range, according to the target's C<_static> flag.
+
+B<When another network holds an own record>
+
+The owner of a reserved-ips record wins. The network keeps its record, and
+L</_warn_own_records_in_other_claims> warns that the other network still
+claims the address and names the command that rebuilds it. The other
+network gives the address up the next time its cloud config is built.
+
 B<Parameters:>
 
 =over 4
@@ -1615,6 +1693,23 @@ Thrown when no OCFP-prefixed subnets exist. C<%s> is the target name.
 =item C<"More static IPs requested (%d) than the allocation for the %s subnet for network %s allows (%d)">
 
 Thrown when static count exceeds subnet allocation.
+
+=item C<"Network %s on subnet %s has %s in its saved claim, but those addresses are reserved-ips records for %s. ...">
+
+The PRUNE error, thrown when a saved claim holds another target's
+reserved-ips record and the network is neither a director's compilation
+network nor named in C<GENESIS_ALLOW_CLAIM_PRUNE>. See
+L</_prune_claim_of_reserved_records>.
+
+=item C<"Network %s and network %s both claim %s on subnet %s, and no reserved-ips record names an owner for those addresses. ...">
+
+The CLASH error, thrown when two networks' dynamic claims overlap. See
+L</_bail_on_claim_clash>.
+
+=item C<"Not enough available IPs in the subnet for the network '%s' allocation:  (has %d, needs %d)">
+
+Thrown when the free pool cannot satisfy the network's growth. See
+L</_calculate_subnet_allocation>.
 
 =back
 
@@ -2204,9 +2299,15 @@ B<Examples:>
     );
 
 Calculates the new IP allocation range for a subnet, growing or shrinking
-the existing allocation to reach C<$count> IPs. Adds IPs from the available
-range when growing; removes from the high end of the existing range when
-shrinking.
+the existing allocation to reach C<$count> IPs. When growing, it adds the
+lowest addresses of the free pool that the existing claim does not already
+hold, so a claim can grow below its current start as well as above its end.
+When shrinking, it removes addresses from the high end of the existing
+claim.
+
+The caller has already repaired C<$existing> before passing it in. It holds
+no other target's reserved-ips record, none of this target's own records,
+and nothing another network claims, so this method trusts it as it is.
 
 B<Parameters:>
 
@@ -2218,11 +2319,12 @@ Network target name (used in error messages).
 
 =item C<$available>
 
-An C<IPv4> range object of IPs available for new allocation.
+An C<IPv4> range object of the free pool, which is the band minus other
+networks' claims and minus every reserved-ips record on the subnet.
 
 =item C<$existing>
 
-An C<IPv4> range object of currently allocated IPs.
+An C<IPv4> range object of the network's repaired saved claim.
 
 =item C<$count>
 
@@ -2243,7 +2345,9 @@ would read as a shrink and release the whole claim.
 
 =item C<"Not enough available IPs in the subnet for the network '%s' allocation:  (has %d, needs %d)">
 
-Thrown when the available range cannot satisfy the growth request.
+Thrown when the free pool, less the addresses the existing claim already
+holds, cannot satisfy the growth request. The "has" figure is the size of
+the free pool.
 
 =back
 
@@ -2350,6 +2454,17 @@ C<< ${target}_ip_a >> and its siblings are neither spelling. The bracket-pair
 loop looks for C<< ${target}_a >> and so never sees them, which leaves them
 to the C<_ip> match, where they would silently widen the allocation. They are
 excluded and reported instead.
+
+The records are read for the target and for each of its aliases, in the
+order L</_reserved_ip_targets> returns them. For each spelling, the first
+name in that order with a record of that spelling supplies it.
+
+The C<dynamic_subnets> model reads these own records once per subnet and
+uses them three ways. It removes them from the free pool and from the saved
+claim, counts the ones inside the band toward the network's size, and adds
+them back to the statics or the allocated range afterwards. A record's
+owner keeps it even when another network's claim also holds it (see
+L</_warn_own_records_in_other_claims>).
 
 B<Parameters:>
 
@@ -2479,6 +2594,316 @@ B<Examples:>
 
     my $key = $self->_find_az_key('z2');
     # Returns: 'pveb'  (matched on the AZ index)
+
+=head2 _reserved_ip_targets
+
+    my @names = $self->_reserved_ip_targets($target);
+
+Returns the names whose reserved-ips records belong to C<$target>. The list
+starts with C<$target> and follows it with its aliases, with duplicates
+removed. The aliases come from the kit's C<ocfp_reserved_ip_target_aliases>
+method when it returns a defined value, where an empty list opts out of
+aliases altogether. Otherwise they come from the module's
+C<%OCFP_RESERVED_IP_TARGET_ALIASES> map, which maps C<openbao> to C<vault>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$target>
+
+Network target name.
+
+=back
+
+B<Returns:> A list of names, C<$target> first.
+
+B<Examples:>
+
+    my @names = $self->_reserved_ip_targets('openbao');
+    # Returns: ('openbao', 'vault')
+
+=head2 _intersection
+
+    my $shared = _intersection($x, $y);
+
+Returns the addresses that two C<IPv4> sets have in common. The IPv4 library
+has no intersect method, so this computes C<range(x) - (range(x) - range(y))>.
+Every set goes through C<< IPv4->range >> first, because a simplified set of
+one address is an C<IPv4::Address>, whose C<subtract> does integer arithmetic
+rather than set subtraction. This is a plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$x>, C<$y>
+
+C<IPv4> sets of any kind (address, range, or list). Either may be undefined
+or empty.
+
+=back
+
+B<Returns:> An C<IPv4> range, empty when the sets share nothing or either is
+empty.
+
+B<Examples:>
+
+    my $shared = _intersection(IPv4->new('10.0.0.1-10.0.0.10'), IPv4->new('10.0.0.8-10.0.0.20'));
+    # Returns: IPv4 range 10.0.0.8-10.0.0.10
+
+=head2 _all_reserved_ip_records
+
+    my $by_owner = $self->_all_reserved_ip_records(\%subnet, $target);
+
+Reads every reserved-ips record on a subnet and groups the addresses by the
+target that owns them, leaving out C<$target> and its aliases (see
+L</_reserved_ip_targets>). With C<$target> undefined, it returns every
+owner. The C<dynamic_subnets> model uses the result to keep other targets'
+addresses out of a network's free pool and saved claim, and to name the
+owner in its messages.
+
+Keys in C<< $subnet->{'reserved-ips'} >> are read as follows.
+
+=over 4
+
+=item C<< <owner>_ip >>
+
+A single address owned by C<< <owner> >>.
+
+=item C<< <owner>_a >>, C<< <owner>_b >> (and C<_c>, C<_d>, ...)
+
+Exclusive bounds, so each pair names the addresses strictly between them.
+An unpaired trailing bound is ignored.
+
+=item C<director_ip> and a bare C<ip>
+
+The director's address, owned by C<bosh>, because both name it on every
+3-compact band.
+
+=item Skipped keys
+
+C<reserved*> and C<available*> keys, C<scheme_version>, C<*_static> flags,
+and the scheme 2 neighbour annotations C<< <owner>_ip_a >> and
+C<< <owner>_ip_b >>. Values that are not a single IPv4 address are skipped
+too.
+
+=back
+
+B<Parameters:>
+
+=over 4
+
+=item C<\%subnet>
+
+A subnet definition hashref with an optional C<reserved-ips> entry.
+
+=item C<$target>
+
+B<(optional)> The asking network's target, whose own records and its
+aliases' records are left out.
+
+=back
+
+B<Returns:> A hashref mapping each owning target to an C<IPv4> range of its
+addresses. Owners with no addresses are not included.
+
+B<Examples:>
+
+    my $by_owner = $self->_all_reserved_ip_records($subnet, 'compilation');
+    # Returns: { haproxy => IPv4 range 10.61.148.229, bosh => IPv4 range 10.61.148.194 }
+
+=head2 _prune_claim_of_reserved_records
+
+    $self->_prune_claim_of_reserved_records(
+        $target, $network_id, $subnet_name, $existing, \%other_records_by_owner
+    );
+
+Checks a network's saved claim for addresses that another target's
+reserved-ips records name. When there are none, it returns quietly. When
+there are some, it either warns that the claim will drop them, or stops the
+build, depending on the network.
+
+It warns, and lets the caller drop the addresses, when the network is a BOSH
+director's compilation network (target C<compilation> built by a
+C<Genesis::Hook::CloudConfig::Director> hook), because compilation VMs exist
+only during a deploy. It also warns when C<$network_id> appears in the
+comma-separated C<GENESIS_ALLOW_CLAIM_PRUNE> environment variable, which lets
+an operator accept one prune for one run after checking C<bosh vms>. Every
+other network stops, because dropping the addresses would move any VM that
+holds one.
+
+The caller removes the addresses from the claim afterwards. This method only
+decides whether that is allowed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$target>
+
+Network target name.
+
+=item C<$network_id>
+
+The full network name, such as C<ocfp-cf1-lab-ocf.cf.net-ocf>, which is
+what C<GENESIS_ALLOW_CLAIM_PRUNE> is matched against.
+
+=item C<$subnet_name>
+
+Subnet name, for the messages.
+
+=item C<$existing>
+
+An C<IPv4> range of the saved claim, with the subnet-reserved range already
+removed.
+
+=item C<\%other_records_by_owner>
+
+Other targets' records by owner, as L</_all_reserved_ip_records> returns
+them.
+
+=back
+
+B<Returns:> Nothing meaningful.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Network %s on subnet %s has %s in its saved claim, but those addresses are reserved-ips records for %s. ...">
+
+The PRUNE error. The placeholders are the network, the subnet, the
+addresses, and each owner with its addresses. The message goes on to say
+that nothing changed, that the claim was probably saved by a Genesis build
+that did not check reserved addresses or that the record was written after
+the claim, and that the operator should check with C<bosh vms> that no VM on
+the network holds those addresses and then re-run with
+C<GENESIS_ALLOW_CLAIM_PRUNE> set to the network name for that one run.
+
+=back
+
+B<Examples:>
+
+    $self->_prune_claim_of_reserved_records(
+        'compilation', 'lab-ocf.bosh.net-compilation', 'ocfp-2', $existing, $others
+    );
+    # Returns: nothing; warns that 10.61.148.229 leaves the compilation claim
+
+=head2 _bail_on_claim_clash
+
+    $self->_bail_on_claim_clash(
+        $network_id, $subnet_name, $existing, \%other_claims_by_network
+    );
+
+Stops the build when a network's repaired saved claim still overlaps another
+network's claim on the same subnet. By this point both reserved-ips records
+and own records have been removed from the claim, so an overlap means two
+dynamic claims hold the same addresses and nothing says which is right.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$network_id>
+
+The full name of the network being built.
+
+=item C<$subnet_name>
+
+Subnet name, for the message.
+
+=item C<$existing>
+
+An C<IPv4> range of the repaired saved claim.
+
+=item C<\%other_claims_by_network>
+
+Every other network's claim on the subnet, keyed by network name.
+
+=back
+
+B<Returns:> Nothing meaningful.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Network %s and network %s both claim %s on subnet %s, and no reserved-ips record names an owner for those addresses. ...">
+
+The CLASH error. The placeholders are this network, the other network, the
+shared addresses, and the subnet. The message goes on to say that neither
+claim changed, that two deploys probably saved claims without holding the
+network claims lock or the director's network exodus was edited by hand,
+and that the operator should find the right owner with C<bosh vms>, remove
+the wrong claim from the director's exodus C<network> record, and run
+again.
+
+=back
+
+B<Examples:>
+
+    $self->_bail_on_claim_clash('lab.cf.net-ocf', 'ocfp-0', $existing, $other_claims);
+    # Returns: nothing when the claims are disjoint
+
+=head2 _warn_own_records_in_other_claims
+
+    $self->_warn_own_records_in_other_claims(
+        $target, $network_id, $subnet_name, \%subnet, $own_records,
+        \%other_claims_by_network
+    );
+
+Warns once for each other network whose claim holds one of this target's own
+reserved-ips records. The record's owner wins, so this network keeps the
+address, and the warning says that both networks list it until the other one
+is rebuilt. It names the record's owner, and when an alias owns the record it
+names the alias as well as the target, as in C<haproxy (target 'ocf')>. When
+the other network is a director's compilation network, named
+C<< <env>.<type>.net-compilation >>, the warning gives the exact
+C<genesis bosh-configs upload --type cloud --name E<lt>envE<gt>.E<lt>typeE<gt>.director -y>
+command that rebuilds it. Otherwise it says to rebuild the cloud config of
+the deployment that owns the other network.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$target>
+
+Network target name.
+
+=item C<$network_id>
+
+The full name of the network being built.
+
+=item C<$subnet_name>
+
+Subnet name, for the message.
+
+=item C<\%subnet>
+
+The subnet definition, used to find which alias owns a record.
+
+=item C<$own_records>
+
+An C<IPv4> range of this target's own records on the subnet.
+
+=item C<\%other_claims_by_network>
+
+Every other network's claim on the subnet, keyed by network name.
+
+=back
+
+B<Returns:> Nothing meaningful.
+
+B<Examples:>
+
+    $self->_warn_own_records_in_other_claims(
+        'ocf', 'lab-ocf.cf.net-ocf', 'ocfp-2', $subnet, $own, $other_claims
+    );
+    # Warns: Address 10.61.148.229 on subnet ocfp-2 is a reserved-ips record for
+    #        haproxy (target 'ocf'), so network lab-ocf.cf.net-ocf keeps it, but
+    #        network lab-ocf.bosh.net-compilation also claims it. ...
 
 =head2 _get_bosh_network_data
 

@@ -477,7 +477,10 @@ sub _build_ocfp_network_model_dynamic_subnets {
 			? sprintf("allocation.size of %s", $allocation->{size})
 			: "no allocation given";
 	}
-	my $statics = $allocation->{statics} // 0; # Excludes the reserved-ips keyed by target name
+	# Statics are the first addresses of the claim as BOSH sees it, which takes
+	# in the target's own reserved-ips records inside the band; records with
+	# <target>_static set (the default) join the static list on top of these
+	my $statics = $allocation->{statics} // 0;
 
 	# Get existing allocations from exodus data
 	my $existing_allocations = $self->get_allocated_networks;
@@ -492,42 +495,98 @@ sub _build_ocfp_network_model_dynamic_subnets {
 		my $preset_reserved_size = $reserved->size;
 		my $unclaimed_size = $available->size;
 
-		# Remove existing allocations from available range that are not for the
-		# target network
-		for my $claiming_network (keys %$existing_allocations) {
+		# The subnet's available band, before any claim is taken out of it
+		my $band = IPv4->range($available);
+
+		# Other networks' claims, kept per network so a conflict can name it
+		my %other_claims_by_network;
+		my $other_claims = IPv4->new();
+		for my $claiming_network (sort keys %$existing_allocations) {
 			next if grep {$_ eq $claiming_network} @own_claim_keys;
 			my $alloc = $existing_allocations->{$claiming_network}{$subnet_name}{allocated};
-			$available -= $alloc if ($alloc);
+			next unless $alloc;
+			$other_claims_by_network{$claiming_network} = IPv4->range($alloc);
+			$other_claims += $alloc;
 		}
+		$available -= $other_claims if $other_claims->size;
 		my $other_claims_size = $unclaimed_size - $available->size;
 
-		# Find any existing allocations, but ignore those explicitly reserved
+		# Reserved-ips records: this target's own (with its aliases), and every
+		# other target's, which this network may never take
+		my ($own_records, $reserved_static) = $self->_get_reserved_allocation($target, $subnet);
+		$own_records = IPv4->range($own_records);
+		my %other_records_by_owner;
+		my $other_records = IPv4->new();
+		my $all_other_records = $self->_all_reserved_ip_records($subnet, $target);
+		for my $owner (keys %$all_other_records) {
+			my $records = IPv4->range($all_other_records->{$owner});
+			$records -= $own_records if $own_records->size;
+			next unless $records->size;
+			$other_records_by_owner{$owner} = IPv4->range($records);
+			$other_records += $records;
+		}
+		$other_records = IPv4->range($other_records);
+		my $own_in_band = _intersection($own_records, $band);
+
+		# This network's saved claim, less the subnet-reserved range
 		my $existing = IPv4->new();
 		for my $key (@own_claim_keys) {
 			my $claim = $existing_allocations->{$key}{$subnet_name}{allocated};
 			$existing += $claim if $claim;
 		}
-		$existing -= $reserved if $existing && $reserved;
+		$existing = IPv4->range($existing);
+		$existing -= $reserved if $existing->size && $reserved->size;
+
+		# A saved claim holding another target's reserved address stops the
+		# build, unless the network is exempt; an exempt network loses it
+		$self->_prune_claim_of_reserved_records(
+			$target, $network_id, $subnet_name, $existing, \%other_records_by_owner
+		);
+		$existing -= $other_records if $existing->size && $other_records->size;
+
+		# Own records are added back below, so what is left is the dynamic part
+		$existing -= $own_records if $existing->size && $own_records->size;
+
+		# Two dynamic claims over the same addresses, with no record to say
+		# which network owns them
+		$self->_bail_on_claim_clash(
+			$network_id, $subnet_name, $existing, \%other_claims_by_network
+		);
+
+		# The pool excludes every other claim and every reserved-ips record, and
+		# own records inside the band count toward this network's size
+		my $pool = IPv4->range($available);
+		$pool -= $other_records if $pool->size && $other_records->size;
+		$pool -= $own_records   if $pool->size && $own_records->size;
+		my $dynamic_count = $vm_count - $own_in_band->size;
+		$dynamic_count = 0 if $dynamic_count < 0;
 
 		# Compare existing and desired allocations, and adjust as needed
 		my $allocated_range = $self->_calculate_subnet_allocation(
 			$target,
-			$available,
+			$pool,
 			$existing,
-			$vm_count
+			$dynamic_count
 		);
 		$reserved += $full_range->subtract($allocated_range);
 
+		# Statics come from the front of the claim as BOSH sees it, which
+		# includes the own records inside the band
+		my $static_source = IPv4->new($allocated_range);
+		$static_source += $own_in_band if $own_in_band->size;
 		my $static_range = $self->_calculate_static_allocation(
-			$target, $subnet_name, $allocated_range, $statics, $vm_count
+			$target, $subnet_name, IPv4->range($static_source), $statics, $vm_count
 		);
 
-		# Check for reserved_ips and "unreserve" them from the reserved range
-		# and put them into the static list
-		my ($reserved_ips,$reserved_static) = $self->_get_reserved_allocation(
-			$target,
-			$subnet
+		# An own record inside another network's claim stays with this network;
+		# the other network gives it up when it is next built
+		$self->_warn_own_records_in_other_claims(
+			$target, $network_id, $subnet_name, $subnet, $own_records, \%other_claims_by_network
 		);
+
+		# Own reserved-ips records come out of the reserved range and go into
+		# the static list, or into the dynamic range if <target>_static is 0
+		my $reserved_ips = IPv4->new($own_records);
 
 		while (<$reserved_ips>) {
 			$reserved_static ? $static_range += $_ : $allocated_range += $_;
@@ -1388,10 +1447,8 @@ sub _calculate_subnet_allocation {
 	my ($self, $target, $available, $existing, $count) = @_;
 	my $needed = $count - $existing->size();
 
-	# FIXME: We currently don't check if the current allocation is within
-	# the available range.  This is an oversight that needs to be corrected,
-	# but for MVP, we will assume that the existing allocations are within
-	# the available range.
+	# The caller has already checked the existing claim against other claims
+	# and reserved-ips records, so it is taken as valid here.
 
 	bail(
 		"The allocation for network '%s' must not be negative (got %d)",
@@ -1402,13 +1459,16 @@ sub _calculate_subnet_allocation {
 	# Shrink: keep the lowest addresses of the claim, releasing from the top
 	return $existing->slice($count)->simplify if $needed < 0;
 
-	# Grow: keep the claim and take the shortfall from the pool
+	# Grow: keep the claim and take the shortfall from the pool, never
+	# counting the claim's own addresses as free
+	my $pool = IPv4->range($available);
+	$pool -= $existing if $pool->size && $existing->size;
 	bail(
 		'Not enough available IPs in the subnet for the network \'%s\' allocation: '.
 		' (has %d, needs %d)',
-		$target, $available, $needed
-	) if ($available < $needed);
-	return IPv4->new($existing)->add($available->slice($needed))->simplify;
+		$target, $pool->size, $needed
+	) if ($pool->size < $needed);
+	return IPv4->new($existing)->add($pool->slice($needed))->simplify;
 }
 
 # }}}
@@ -1438,15 +1498,7 @@ sub _calculate_static_allocation {
 sub _get_reserved_allocation {
 	my ($self, $target, $subnet) = @_;
 	my $reserved_ips = $subnet->{'reserved-ips'} // {};
-
-	# A defined kit answer owns the aliases (an empty list opts out);
-	# the module map is the fallback.  Target first, then aliases, per lookup.
-	my $kit_aliases = $self->ocfp_reserved_ip_target_aliases($target);
-	my @aliases = defined($kit_aliases)
-		? _as_list($kit_aliases)
-		: _as_list($OCFP_RESERVED_IP_TARGET_ALIASES{$target});
-	my %seen;
-	my @candidates = grep { !$seen{$_}++ } ($target, @aliases);
+	my @candidates = $self->_reserved_ip_targets($target);
 
 	# We need to use target_a, .._b, .._c, _d if available
 	my $allocation = IPv4->new();
@@ -1496,6 +1548,187 @@ sub _get_reserved_allocation {
 	$static //= 1;
 
 	return ($allocation->simplify, $static);
+}
+
+# }}}
+# _reserved_ip_targets - Returns a target and the aliases whose reserved-ips records it owns {{{
+sub _reserved_ip_targets {
+	my ($self, $target) = @_;
+
+	# A defined kit answer owns the aliases (an empty list opts out);
+	# the module map is the fallback.  Target first, then aliases, per lookup.
+	my $kit_aliases = $self->ocfp_reserved_ip_target_aliases($target);
+	my @aliases = defined($kit_aliases)
+		? _as_list($kit_aliases)
+		: _as_list($OCFP_RESERVED_IP_TARGET_ALIASES{$target});
+	my %seen;
+	return grep { !$seen{$_}++ } ($target, @aliases);
+}
+
+# }}}
+# _intersection - Returns the addresses two IPv4 sets share {{{
+sub _intersection {
+	my ($x, $y) = @_;
+	return IPv4->range() unless $x && $y && $x->size && $y->size;
+	# The IPv4 library has no intersect; a - (a - b) is the same set.  Both go
+	# through range() first, because a simplified single address subtracts as
+	# an integer rather than as a set.
+	my $rx = IPv4->range($x);
+	return IPv4->range($rx->subtract(IPv4->range($x)->subtract(IPv4->range($y))));
+}
+
+# }}}
+# _all_reserved_ip_records - Returns every other target's reserved-ips records on a subnet, by owner {{{
+sub _all_reserved_ip_records {
+	my ($self, $subnet, $target) = @_;
+	my $records = $subnet->{'reserved-ips'} // {};
+
+	# The asking target and its aliases are not other owners
+	my %own = defined($target) ? (map {($_ => 1)} $self->_reserved_ip_targets($target)) : ();
+
+	my %by_owner;
+	my $add = sub {
+		my ($owner, $set) = @_;
+		# director_ip and a bare ip both name the director's address
+		$owner = 'bosh' if $owner eq 'director' || $owner eq '';
+		return if $own{$owner};
+		$by_owner{$owner} //= IPv4->range();
+		$by_owner{$owner} += $set;
+	};
+
+	for my $key (sort keys %$records) {
+		next if $key =~ /^(?:reserved|available)(?:_|$)/;
+		next if $key eq 'scheme_version' || $key =~ /_static$/;
+		next if $key =~ /_ip_[a-z]$/; # scheme 2 neighbour notes, or malformed
+		my $value = $records->{$key};
+		next unless defined($value) && $value =~ /^\d+\.\d+\.\d+\.\d+$/;
+		if ($key eq 'ip') {
+			$add->('', IPv4->range($value));
+		} elsif ($key =~ /^(.+)_ip$/) {
+			$add->($1, IPv4->range($value));
+		} elsif ($key =~ /^(.+)_a$/) {
+			# <owner>_a/_b, then _c/_d and so on, each the range between the two
+			my $owner = $1;
+			my $idx = 'a';
+			while (exists $records->{$owner."_$idx"}) {
+				my $start_key = $owner."_".$idx++;
+				my $end_key   = $owner."_".$idx++;
+				last unless exists $records->{$end_key};
+				my $start = IPv4->address($records->{$start_key})+1;
+				my $end   = IPv4->address($records->{$end_key})-1;
+				$add->($owner, $start->to($end)) if $start->int <= $end->int;
+			}
+		}
+	}
+	return {map {($_ => IPv4->range($by_owner{$_}))} grep {$by_owner{$_}->size} keys %by_owner};
+}
+
+# }}}
+# _prune_claim_of_reserved_records - Stops, or warns for an exempt network, when a saved claim holds another target's reserved address {{{
+sub _prune_claim_of_reserved_records {
+	my ($self, $target, $network_id, $subnet_name, $existing, $other_records_by_owner) = @_;
+	return unless $existing->size;
+	my @lost = map {
+		my $hit = _intersection($existing, $other_records_by_owner->{$_});
+		$hit->size ? ([$_, $hit]) : ()
+	} sort keys %$other_records_by_owner;
+	return unless @lost;
+
+	my $addresses = IPv4->range(map {$_->[1]} @lost)->range;
+	my $owners = join(', ', map {sprintf("%s (%s)", $_->[0], $_->[1]->range)} @lost);
+	my %allowed = map {$_ => 1} grep {length} split(/\s*,\s*/, $ENV{GENESIS_ALLOW_CLAIM_PRUNE} // '');
+	my $compilation = $target eq 'compilation' && $self->isa('Genesis::Hook::CloudConfig::Director');
+
+	if ($compilation || $allowed{$network_id}) {
+		warning(
+			"Network #C{%s} on subnet #C{%s} had %s in its saved claim, but those ".
+			"addresses are reserved-ips records for %s.  Genesis has dropped them ".
+			"from this network's claim and will take replacements from the free ".
+			"pool, %s.  This usually means the claim was saved by a Genesis build ".
+			"that did not check reserved addresses, or the record was written after ".
+			"the claim.",
+			$network_id, $subnet_name, $addresses, $owners,
+			($compilation
+				? "because compilation VMs exist only during a deploy"
+				: "because #C{GENESIS_ALLOW_CLAIM_PRUNE} names this network")
+		);
+		return;
+	}
+	bail(
+		"Network #C{%s} on subnet #C{%s} has %s in its saved claim, but those ".
+		"addresses are reserved-ips records for %s.  Dropping them would move any ".
+		"VM of this network that holds one, so Genesis has stopped without ".
+		"changing anything.  This usually means the claim was saved by a Genesis ".
+		"build that did not check reserved addresses, or the record was written ".
+		"after the claim.  Check with #C{bosh vms} that no VM on #C{%s} holds %s, ".
+		"then re-run with #C{GENESIS_ALLOW_CLAIM_PRUNE=%s} set for that one run to ".
+		"accept the change.",
+		$network_id, $subnet_name, $addresses, $owners, $network_id, $addresses, $network_id
+	);
+}
+
+# }}}
+# _bail_on_claim_clash - Stops when this network's dynamic claim overlaps another network's claim {{{
+sub _bail_on_claim_clash {
+	my ($self, $network_id, $subnet_name, $existing, $other_claims_by_network) = @_;
+	return unless $existing->size;
+	for my $other (sort keys %$other_claims_by_network) {
+		my $clash = _intersection($existing, $other_claims_by_network->{$other});
+		next unless $clash->size;
+		bail(
+			"Network #C{%s} and network #C{%s} both claim %s on subnet #C{%s}, and ".
+			"no reserved-ips record names an owner for those addresses.  Genesis has ".
+			"stopped without changing either claim.  This usually means two deploys ".
+			"saved claims without holding the network claims lock, or the director's ".
+			"network exodus was edited by hand.  Check which deployment's VMs sit on ".
+			"those addresses with #C{bosh vms}, remove the wrong claim from the ".
+			"director's exodus #C{network} record, and run this again.",
+			$network_id, $other, $clash->range, $subnet_name
+		);
+	}
+}
+
+# }}}
+# _warn_own_records_in_other_claims - Warns when another network's claim holds this target's reserved address {{{
+sub _warn_own_records_in_other_claims {
+	my ($self, $target, $network_id, $subnet_name, $subnet, $own_records, $other_claims_by_network) = @_;
+	return unless $own_records->size;
+	my $by_owner;
+	for my $other (sort keys %$other_claims_by_network) {
+		my $hit = _intersection($own_records, $other_claims_by_network->{$other});
+		next unless $hit->size;
+
+		# Name the record's owner as well as the target, when an alias owns it
+		$by_owner //= $self->_all_reserved_ip_records($subnet);
+		my @owners = grep {
+			$by_owner->{$_} && _intersection($hit, $by_owner->{$_})->size
+		} $self->_reserved_ip_targets($target);
+		my $record_for = (!@owners || (@owners == 1 && $owners[0] eq $target))
+			? "target '$target'"
+			: sprintf("%s (target '%s')", join(', ', @owners), $target);
+
+		# A director's compilation network is rebuilt from the director's own
+		# cloud config, so name the command for that one
+		my $rebuild = $other =~ /^(.+)\.([^.]+)\.net-compilation$/
+			? sprintf(
+				"'%s' is the compilation network of director #C{%s}, so run ".
+				"#C{genesis bosh-configs upload --type cloud --name %s.%s.director -y} ".
+				"against that director's environment.",
+				$other, $1, $1, $2)
+			: sprintf(
+				"Rebuild the cloud config of the deployment that owns '%s'.  For a ".
+				"director's compilation network, that is #C{genesis bosh-configs upload ".
+				"--type cloud --name <env>.<type>.director -y} run against the ".
+				"director's environment.",
+				$other);
+		warning(
+			"Address %s on subnet #C{%s} is a reserved-ips record for %s, so network ".
+			"#C{%s} keeps it, but network #C{%s} also claims it.  Until #C{%s} is ".
+			"rebuilt, both networks list the address and the director could hand it ".
+			"out twice.  %s",
+			$hit->range, $subnet_name, $record_for, $network_id, $other, $other, $rebuild
+		);
+	}
 }
 
 # }}}
