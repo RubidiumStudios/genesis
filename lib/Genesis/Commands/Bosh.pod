@@ -345,7 +345,22 @@ the director's compilation network, and its network map is the director's
 own network claims record at C<< <exodus base>/network >>, the same record
 the post-deploy hook writes.  Every action sees it: C<summary>, C<list>,
 C<view>, and C<compare> report it, C<upload> rebuilds it under the
-director's network claims lock, and C<delete> refuses it.
+director's network claims lock, and C<delete> refuses it.  This holds for a
+create-env director too.  It has no deploying director, so C<$bosh> is
+C<undef> for it and the parent-side cloud config does not apply, but its own
+cloud config carries the director itself as its target.
+
+B<An unfiltered upload on a director rewrites its network record.>  Run on
+a BOSH director environment with neither C<--type> nor C<--name>,
+C<upload> also uploads the director's own cloud config and rewrites the
+director's network claims record in exodus, and with C<--yes> it does both
+without a prompt.  A C<--yes> upload meant only for runtime configs on a
+management director would therefore rewrite that director's network record
+as well.  Save the record first (for example with C<safe export> of
+C<< <exodus base>/network >> to a file only you can read), and give
+C<--type> or C<--name> when you mean something narrower.  A run filtered to
+anything other than the director's own cloud config behaves as it did
+before.
 
 B<Parameters:>
 
@@ -391,7 +406,8 @@ Raised (via C<bail()>) when C<--type> is not C<cloud>, C<runtime>, or C<cpi>.
 =item C<"Environment %s is deployed with create-env and is not a BOSH director, so there is no BOSH director to hold bosh configs for it.">
 
 Raised (via C<bail()>) for a create-env environment that is not itself a
-director.  A create-env director is accepted; only its runtime configs apply.
+director.  A create-env director is accepted; its runtime configs and its
+own cloud config apply, and its parent-side cloud and cpi configs do not.
 
 =back
 
@@ -793,7 +809,10 @@ becomes a note rather than an error, so the other types still report.
 When cloud configs are wanted, a BOSH director environment also gets its
 own cloud config from C<_bosh_configs_director_config>, unless C<--name>
 names something else.  It carries its own C<bosh>, the director itself, so
-no action needs the C<$bosh> argument to reach it.
+no action needs the C<$bosh> argument to reach it.  That includes a
+create-env director, for which C<$bosh> is C<undef>.  The parent-side cloud
+config is skipped for a create-env director, with a note saying it has no
+deploying director, and the director's own cloud config is still built.
 
 B<Parameters:>
 
@@ -805,7 +824,8 @@ A C<Genesis::Env> object.
 
 =item C<$bosh>
 
-The C<Service::BOSH::Director> that deploys the environment.
+The C<Service::BOSH::Director> that deploys the environment, or C<undef>
+for a create-env director.
 
 =item C<%options>
 

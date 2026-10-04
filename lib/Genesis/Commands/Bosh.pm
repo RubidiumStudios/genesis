@@ -219,8 +219,10 @@ sub bosh_configs {
 	) if $env->use_create_env && !$env->is_bosh_director;
 
 	# The director that deploys this environment holds its cloud and cpi
-	# configs.  A create-env director has no such director; its runtime
-	# configs live on the director itself and are targeted per config.
+	# configs.  A create-env director has no such director, so $bosh stays
+	# undefined for it; its runtime configs and its own cloud config live on
+	# the director itself, and every config record carries the director that
+	# holds it, so no action reaches for $bosh to handle them.
 	my $bosh = $env->use_create_env ? undef : $env->with_bosh->bosh;
 
 	my $subcommand = "bosh_configs_$action";
@@ -274,8 +276,7 @@ sub bosh_configs_upload {
 		&& !$env->use_create_env
 		&& $env->has_hook('cloud-config')
 		&& $env->can_build_cloud_configs;
-	my $wants_director = !$env->use_create_env
-		&& _bosh_configs_director_buildable($env, %options);
+	my $wants_director = _bosh_configs_director_buildable($env, %options);
 
 	# A signal while the lock is held has to unwind through the release below
 	# instead of killing the process with the lock still on the director.  HUP
@@ -596,9 +597,18 @@ sub _bosh_configs_provided {
 	my %wanted = map {$_ => 1} ($options{type} ? ($options{type}) : @BOSH_CONFIG_TYPES);
 	my $name = $options{name};
 
+	# A director environment's cloud configs come in two parts.  The
+	# parent-side one, <env>.<type>, lives on the director that deploys this
+	# one; the director's own, <env>.<type>.director, lives on the director
+	# itself.  A create-env director has no deploying director, so only the
+	# second applies to it.
 	if ($wanted{cloud}) {
 		if ($env->use_create_env) {
-			push @notes, "cloud configs do not apply to a create-env director.";
+			push @notes, sprintf(
+				"a create-env director has no deploying director, so the parent-side ".
+				"cloud config #C{%s} does not apply to it.",
+				$env->bosh_config_name
+			) if !defined($name) || $name eq $env->bosh_config_name;
 		} elsif (!$env->has_hook('cloud-config')) {
 			push @notes, sprintf(
 				"kit #C{%s} provides no cloud-config hook, so no cloud config is synthesized.",
@@ -618,7 +628,7 @@ sub _bosh_configs_provided {
 		}
 	}
 
-	if ($wanted{cloud} && !$env->use_create_env) {
+	if ($wanted{cloud}) {
 		my ($director_config, $director_notes) = _bosh_configs_director_config($env, %options);
 		push @configs, $director_config if $director_config;
 		push @notes, @$director_notes;
