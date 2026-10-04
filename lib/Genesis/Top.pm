@@ -1129,6 +1129,18 @@ sub _shape {
 }
 
 # }}}
+# shape_commit - the control commit the pipeline's shape was read at {{{
+#
+# The commit _shape resolved control to, which is control on T, or the local
+# control branch in a clone with no remote, so a report can name what its
+# topology came from.  Undefined where the tree reads its own files.
+sub shape_commit {
+	my ($self) = @_;
+	$self->_shape;
+	return $self->{__shape_commit};
+}
+
+# }}}
 # _read_shape - resolve control once and write its tree out {{{
 #
 # Control is read as R holds it when the command starts, so this runs once

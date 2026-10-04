@@ -1680,6 +1680,28 @@ B<Examples:>
     my $name = $top->pipeline_name();
     # returns undef where pipeline.name is unset
 
+=head2 shape_commit
+
+    my $sha = $top->shape_commit();
+
+The control commit the pipeline's shape was read at: control on C<T>, or the
+local control branch in a clone with no remote, as L</_shape> resolved it.
+C<genesis pipeline-status> names it in its header, so an operator reads what
+the report's topology came from.
+
+B<Parameters:> None.
+
+B<Returns:> A commit sha, or C<undef> where the tree reads its own files: a
+directory under no git control, a clone with no control branch at all, or a
+materialised tree, which is its own shape.
+
+B<Errors:> What L</_shape> raises.
+
+B<Examples:>
+
+    my $sha = $top->shape_commit();
+    # returns the sha origin/control resolved to when the command started
+
 =head2 pipeline_section
 
     my $section = $top->pipeline_section();

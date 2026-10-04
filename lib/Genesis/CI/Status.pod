@@ -79,6 +79,14 @@ take that decision from one place. With no token nothing is read, no call is
 made, and the pull request column falls back to the environment's proposed
 record.
 
+The record's C<control> block carries, beside the walk's own C<branch> and
+C<commit>, the control commit the topology was read at, C<shape_commit>, from
+L<Genesis::Top/shape_commit>, and the local control branch's standing against
+it, C<local>, which is the divergence the control check read: its C<state>,
+its C<ahead> and C<behind> counts, and whether it is C<unverifiable>. So an
+operator standing on a change to the shape that is not yet on the remote
+reads that it is not in effect (D112).
+
 An API that will not answer is reported rather than refused. The read is asked
 for through refusal closures that record what happened and return, so the run
 warns once on standard error and every environment the client would have
@@ -336,7 +344,9 @@ Renders one root's record as the header, the column heads, and one line per
 environment in DAG order, each indented to its depth and carrying its branch
 column, its deploy column, and its composed phrase.  The header names the
 pipeline by the label the configuration gives it, and by the deployment type
-where a repository names no label.
+where a repository names no label, and names control at the commit the
+topology was read at.  Where the local control branch stands elsewhere, the
+line beneath the header says so, through C<_local_control_line>.
 
 Beneath the table comes one red line per breach the record carries, because a
 marker naming a commit the remote no longer holds is a fact about the
@@ -886,6 +896,36 @@ B<Examples:>
 
   my $short = Genesis::CI::Status::_short('6084166abc123');
   # '6084166'
+
+=head2 _local_control_line($record)
+
+  my $line = Genesis::CI::Status::_local_control_line($record);
+
+The line beneath the header that says where the local control branch stands
+against the commit the topology was read at, from the record's
+C<control.local>: ahead, with its changes to the pipeline not in effect until
+pushed; behind, with the report reading control as the remote holds it;
+diverged, with both counts; or, with no remote, that the pipeline is read from
+the local branch.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The record C<status_records> returns.
+
+=back
+
+B<Returns:> the line, or undefined where local control stands where the
+remote does, or where the clone has no local control branch.
+
+B<Examples:>
+
+  my $line = Genesis::CI::Status::_local_control_line($record);
+  # '  local control is 1 commit ahead of control@58ec6a5; its changes to the
+  #  pipeline are not in effect until it is pushed'
 
 =head1 SEE ALSO
 

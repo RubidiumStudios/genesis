@@ -153,6 +153,13 @@ sub status_records {
 	# record, which is what every fixed field has to do.
 	$record->{refreshed} = $record->{refreshed} ? JSON::PP::true : JSON::PP::false;
 
+	# The control commit the topology was read at, and where the local control
+	# branch stands against it, so an operator standing on an unpublished
+	# change to the shape reads that it is not in effect (D112).  The standing
+	# is the divergence the control check above already read.
+	$record->{control}{shape_commit} = $top->shape_commit // $record->{control}{commit};
+	$record->{control}{local}        = $control->{divergence};
+
 	# What the API answered, carried onto the walk's own records through the
 	# arm's own writer, so the column below and the run's report read one
 	# answer about one pull request.  An environment the read said nothing
@@ -436,7 +443,11 @@ sub render_tree {
 
 	push @out, csprintf("\n#G{Pipeline}: #C{%s}  #Yi{provider}: %s  #Yi{control}: #C{%s}#Yi{\@}#C{%s}",
 		$record->{pipeline} // $record->{type}, $record->{provider},
-		$record->{control}{branch}, _short($record->{control}{commit}));
+		$record->{control}{branch},
+		_short($record->{control}{shape_commit} // $record->{control}{commit}));
+	# Directly under the header that names the commit, so an operator whose
+	# local control stands elsewhere reads that before anything else.
+	push @out, _local_control_line($record) // ();
 	# Directly under the pipeline header, so the operator reads that the
 	# report rests on a stale pipeline before they read a row.
 	push @out, _applied_line($record) if $record->{applied};
@@ -843,6 +854,36 @@ sub worst_class {
 # control commit, in hold_reason and in held_qualifier alike, so the run's
 # report and this one print one sha at one width.
 sub _short { my ($sha) = @_; return defined($sha) ? substr($sha, 0, 7) : undef }
+
+# }}}
+# _local_control_line - where the local control branch stands against the shape's commit {{{
+#
+# Undefined where the two are one, which is every clone that has pulled; the
+# line exists for an operator standing on a change to the shape that is not
+# yet on the remote, or on a clone that has not pulled.
+sub _local_control_line {
+	my ($record) = @_;
+	my $local = $record->{control}{local} or return;
+	my $state = $local->{state} // '';
+	return if $state eq 'in-sync' || $state eq 'no-local';
+	my $at = sprintf('control@%s', _short($record->{control}{shape_commit}));
+	my $count = sub {sprintf('%d commit%s', $_[0], $_[0] == 1 ? '' : 's')};
+
+	return csprintf("  #Y{local control is %s ahead of %s; its changes to the pipeline ".
+		"are not in effect until it is pushed}", $count->($local->{ahead}), $at)
+		if $state eq 'ahead';
+	return csprintf("  #Y{local control is %s behind %s; this report reads control as ".
+		"the remote holds it}", $count->($local->{behind}), $at)
+		if $state eq 'behind';
+	return csprintf("  #Y{local control has diverged from %s, %s ahead and %s behind; its ".
+		"changes to the pipeline are not in effect until they are on the remote}",
+		$at, $count->($local->{ahead}), $count->($local->{behind}))
+		if $state eq 'diverged';
+	return csprintf("  #Y{control has no remote, so the pipeline is read from the local ".
+		"branch at %s}", $at)
+		if $state eq 'no-remote';
+	return;
+}
 
 # }}}
 1;
