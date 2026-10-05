@@ -156,8 +156,8 @@ without one records the outcomes and resets nothing.
 
 =item C<remote>
 
-Required. The remote to publish to, by name, which the caller resolves
-through L<Genesis::Top/source_control_remote>; a call without one is a bug.
+The remote to publish to, by name. Optional: it defaults to C<git>'s
+L<Service::Git/pipeline_remote>, and a call with neither is a bug.
 
 =item C<control>
 

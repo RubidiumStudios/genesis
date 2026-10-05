@@ -215,6 +215,18 @@ subtest 'a repository is one identity however it is written' => sub {
 	is($id->('just-a-name'), undef, 'and neither does a bare word');
 };
 
+subtest 'the resolved remote is set on the shared handle' => sub {
+	plan tests => 3;
+
+	my $top = load_control("pipeline:\n  enabled: true");
+	my $remote = $top->source_control_remote;
+	isa_ok($top->git, 'Service::Git', 'Top->git');
+	is($top->git, Service::Git->new($h->a),
+		'is the one handle every caller of the repository shares');
+	is($top->git->pipeline_remote, $remote,
+		'and it carries the remote the source-control block resolved');
+};
+
 subtest 'repository may be written as owner/repo or as a URL' => sub {
 	plan tests => 4;
 

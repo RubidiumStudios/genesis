@@ -160,8 +160,8 @@ subtest 'fetch_pipeline_envs - control leads, and the rest are deployment branch
 	my $call = $git->{_calls}[0];
 	is_deeply $call->{names}, [qw(control lab/bosh prod/bosh qa/bosh)],
 		'control leads the sorted deployment branches';
-	is $call->{remote}, 'dev',
-		'remote is the one the source-control block resolves';
+	is $call->{remote}, undef,
+		'the remote is left to the handle, which the source-control block sets';
 };
 
 subtest 'fetch_pipeline_envs - the refresh result is what comes back' => sub {

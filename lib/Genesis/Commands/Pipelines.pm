@@ -968,7 +968,6 @@ sub propagate {
 		# the whole walk to finish.
 		push @publish_specs, Genesis::CI::PullRequest::_nothing_due_specs(
 			git     => $git,
-			remote  => $top->source_control_remote,
 			records => $record->{environments},
 		) unless $dry_run;
 
@@ -990,11 +989,10 @@ sub propagate {
 		# the remote refused is put back through the session for the same
 		# reason.
 		if (@publish_specs) {
-			my $remote = $top->source_control_remote;
+			my $remote = $git->pipeline_remote;
 			$publish = Genesis::CI::Publish::publish_run(
 				git     => $git,
 				session => $session,
-				remote  => $remote,
 				control => $control,
 				records => $record->{environments},
 				specs   => \@publish_specs,
@@ -1639,8 +1637,7 @@ sub open_control_session {
 	my ($top, $git) = @_;
 
 	my $control = $top->control_branch;
-	my $session = $git->session(control => $control,
-		remote => $top->source_control_remote);
+	my $session = $git->session(control => $control);
 	$session->begin;
 	$session->switch($control);
 	return $session;
@@ -1796,7 +1793,7 @@ sub _apply_init_branches {
 	for my $name (@{$top->pipeline_topology->{order}}) {
 		my $branch = $top->branch_for($name);
 
-		if ($git->remote_branch_exists($branch, $remote)) {
+		if ($git->remote_branch_exists($branch)) {
 			info("  #Gi{standing} #C{%s}", $branch);
 			push @{$report{standing}}, $branch;
 			next;
@@ -1811,7 +1808,7 @@ sub _apply_init_branches {
 			if ($opts{dry_run}) {
 				info("  #Y{would publish} #C{%s}", $branch);
 			} else {
-				$git->push_append_only($branch, remote => $remote);
+				$git->push_append_only($branch);
 				info("  #G{published} #C{%s}", $branch);
 			}
 			push @{$report{published}}, $branch;
@@ -1825,7 +1822,7 @@ sub _apply_init_branches {
 				files   => {init => INIT_FILE_BODY},
 				message => sprintf('Initialize %s branch [ci skip]', $branch),
 			);
-			$git->push_append_only($branch, remote => $remote);
+			$git->push_append_only($branch);
 			info("  #G{created} #C{%s}", $branch);
 		}
 		push @{$report{created}}, $branch;

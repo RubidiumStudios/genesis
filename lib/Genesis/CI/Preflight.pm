@@ -104,7 +104,7 @@ sub require_control {
 	push @events, sprintf('created control from %s/%s', $remote, $control)
 		if grep {$_ eq $control} @{($opts{refreshed} || {})->{created} || []};
 
-	my $div = $git->resolve_branch($control, remote => $remote,
+	my $div = $git->resolve_branch($control,
 		unverifiable => ($opts{unverifiable} ? 1 : 0));
 
 	bail({exitcode => CONFIG},
@@ -422,7 +422,7 @@ sub initial_state {
 	my (@local_only, @unrelated);
 	for my $env (@{$opts{envs} // []}) {
 		my $branch = $top->branch_for($env);
-		my $div    = $git->resolve_branch($branch, remote => $remote);
+		my $div    = $git->resolve_branch($branch);
 
 		# Neither side has it, so the environment is awaiting pipeline-apply,
 		# which is the walk's outcome and not a refusal here.
@@ -598,7 +598,7 @@ sub initial_state {
 		my $record = $state->{branches}{$env} or next;
 		my $branch = $record->{branch};
 
-		my $div = $git->resolve_branch($branch, remote => $remote);
+		my $div = $git->resolve_branch($branch);
 		next unless $div && $div->{state} eq 'behind';
 
 		my $line = sprintf('fast-forwarded %s to %s/%s, %s behind',

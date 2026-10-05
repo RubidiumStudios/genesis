@@ -127,6 +127,36 @@ subtest 'the rewritten URL is the one git would contact' => sub {
 	}
 };
 
+subtest 'the remote set on the handle is the one every remote operation uses' => sub {
+	plan tests => 5;
+	my $dir = repo();
+	my $bare = "$dir-r.git";
+	run({dir => $dir}, 'git', 'clone', '-q', '--bare', $dir, $bare);
+	run({dir => $dir}, 'git', 'remote', 'add', 'origin', $bare);
+	my $git = Service::Git->new($dir);
+
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+	ok(!eval {$git->resolve_branch('control'); 1},
+		'a handle with no remote set refuses a remote operation');
+	like($@, qr{needs its remote by name}, 'as a bug, rather than guessing one');
+
+	$git->pipeline_remote('origin');
+	is($git->pipeline_remote, 'origin', 'the remote is set on the handle');
+	my (undef, $result) = $git->fetch_branches(['control']);
+	ok($result->{ok}, 'and a refresh asked without one fetches from it');
+	is($git->resolve_branch('control')->{state}, 'in-sync',
+		'and a query asked without one is measured against it');
+};
+
+subtest 'a session takes its remote from the handle' => sub {
+	plan tests => 1;
+	my $dir = repo();
+	my $git = Service::Git->new($dir);
+	$git->pipeline_remote('upstream');
+	is($git->session(control => 'control')->remote, 'upstream',
+		'built without a remote, it resets against the one the handle carries');
+};
+
 subtest "a worktree reads its repository's configuration" => sub {
 	plan tests => 2;
 	my $dir = repo();

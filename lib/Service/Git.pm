@@ -723,7 +723,7 @@ sub status {
 # non-fast-forward.
 sub pull_ff_only {
 	my ($self, $branch, $remote) = @_;
-	_require_remote($remote, 'pull_ff_only');
+	$remote = $self->_remote_for($remote, 'pull_ff_only');
 	run({ dir => $self->{root},
 		  onfailure => "Failed to fast-forward $branch from $remote -- ".
 		               "resolve the divergence and retry" },
@@ -739,7 +739,7 @@ sub pull_ff_only {
 # onfailure) when rebase fails.
 sub pull_rebase {
 	my ($self, $branch, $remote) = @_;
-	_require_remote($remote, 'pull_rebase');
+	$remote = $self->_remote_for($remote, 'pull_rebase');
 	run({ dir => $self->{root},
 		  onfailure => "Failed to rebase $branch on $remote/$branch -- ".
 		               "resolve the divergence and push manually" },
@@ -1260,6 +1260,26 @@ sub _require_remote {
 }
 
 # }}}
+# pipeline_remote - the remote this repository's pipeline lives on {{{
+#
+# Genesis::Top resolves it once, from the source-control block (D29, D118),
+# and sets it here, on the handle every caller of the repository shares, so
+# the remote operations below take it without being told and no caller has
+# to carry it.  Nothing here guesses it: a handle nobody set it on refuses.
+sub pipeline_remote {
+	my ($self, @set) = @_;
+	$self->{pipeline_remote} = $set[0] if @set;
+	return $self->{pipeline_remote};
+}
+
+# }}}
+# _remote_for - the remote a call names, else the one the handle carries {{{
+sub _remote_for {
+	my ($self, $remote, $method) = @_;
+	return _require_remote($remote // $self->{pipeline_remote}, $method);
+}
+
+# }}}
 # _config - the clone's remotes, upstreams and rewrites, read once {{{
 #
 # Every question about which remotes a clone has, where they point, what a
@@ -1391,7 +1411,7 @@ sub remote_url {
 # whether to create qa/bosh would be told it was already there.
 sub remote_branch_exists {
 	my ($self, $branch, $remote) = @_;
-	_require_remote($remote, 'remote_branch_exists');
+	$remote = $self->_remote_for($remote, 'remote_branch_exists');
 	my ($out, $rc, $err) = run({ dir => $self->{root}, passfail => 0 },
 		'git', 'ls-remote', '--heads', $remote, "refs/heads/$branch");
 	bail("ls-remote against #C{%s} failed: %s",
@@ -1434,7 +1454,7 @@ sub remote_branch_exists {
 # pipeline-status --no-refresh` does.
 sub resolve_branch {
 	my ($self, $branch, %opts) = @_;
-	my $remote       = _require_remote($opts{remote}, 'resolve_branch');
+	my $remote       = $self->_remote_for($opts{remote}, 'resolve_branch');
 	my $unverifiable = $opts{unverifiable} ? 1 : 0;
 
 	my $local    = $self->_ref_exists("refs/heads/$branch");
@@ -1542,7 +1562,7 @@ sub delete_branch {
 # and been told the branch is gone, rather than a prune of everything.
 sub forget_branch {
 	my ($self, $branch, $remote) = @_;
-	_require_remote($remote, 'forget_branch');
+	$remote = $self->_remote_for($remote, 'forget_branch');
 	return $self unless $self->branch_exists("$remote/$branch");
 
 	run({dir => $self->{root},
@@ -1562,7 +1582,7 @@ sub forget_branch {
 # the local-only commit query reads the tracking refs a prune would delete.
 sub fetch_branches {
 	my ($self, $names, $remote) = @_;
-	_require_remote($remote, 'fetch_branches');
+	$remote = $self->_remote_for($remote, 'fetch_branches');
 	my $noop = {ok => 1, kind => 'success', fetched => [], created => [], absent => []};
 	return wantarray ? ($self, $noop) : $self
 		unless $names && @$names;
@@ -1702,13 +1722,7 @@ sub _classify_remote_error {
 # and the name worth reporting is the remote's own.
 sub push {
 	my ($self, %opts) = @_;
-	# Tested for presence rather than for truth, because a remote somebody
-	# named 0 is a remote and not a missing argument.
-	bail(
-		"#R{Service::Git->push} needs its remote by name, as ".
-		"#C{remote => '<remote>'}"
-	) unless defined $opts{remote} && length $opts{remote};
-	my $remote = $opts{remote};
+	my $remote = $self->_remote_for($opts{remote}, 'push');
 	my @specs = @{$opts{refs} || []};
 	return [map {$self->_push_one($remote, $_)} @specs];
 }
@@ -1858,7 +1872,7 @@ sub _refuse_rewrite {
 sub push_append_only {
 	my ($self, $branch, %opts) = @_;
 
-	my $remote = _require_remote($opts{remote}, 'push_append_only');
+	my $remote = $self->_remote_for($opts{remote}, 'push_append_only');
 
 	my $local = $self->sha($branch);
 	my ($out, $rc, $err) = run({dir => $self->{root}, passfail => 0},

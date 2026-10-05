@@ -45,11 +45,14 @@ subtest 'a stale tracking ref does not survive the alignment' => sub {
 	);
 	isnt($moved, $stale, 'and the branch on R has moved under this clone');
 
-	my $session = $git->session(control => $h->control, remote => 'origin');
+	# The remote is set on the handle, as the configuration load sets it for a
+	# command, and the helper and the session both take it from there.
+	$git->pipeline_remote('origin');
+	my $session = $git->session(control => $h->control);
 	$session->begin;
 	$session->switch($pr);
 
-	is(Genesis::CI::PullRequest::align_with_remote($git, $pr, 'origin'), 1,
+	is(Genesis::CI::PullRequest::align_with_remote($git, $pr), 1,
 		'the alignment says the remote carries the branch');
 	is($git->sha($pr), $moved,
 		"and the local branch stands at the remote's current tip");

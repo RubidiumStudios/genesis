@@ -722,6 +722,30 @@ B<Examples:>
     my $config = $top->path('.genesis/config');
     # Returns: /srv/cf-deployments/.genesis/config
 
+=head2 git
+
+    my $git = $top->git;
+
+The handle on the repository this deployment root lives in. It is the one
+handle every caller of the repository shares, since L<Service::Git> keeps one
+per root and answers a path it has resolved before from memory, so a reader
+holding a Top asks here rather than building one from a path. For a pipeline
+it carries the remote L</source_control_remote> resolved, which
+L</_source_control> sets on it as L<Service::Git/pipeline_remote>.
+
+B<Parameters:> None.
+
+B<Returns:> The L<Service::Git> handle.
+
+B<Errors:> What L<Service::Git/new> raises for a directory under no git
+control.
+
+B<Examples:>
+
+    my $git = $top->git;
+    $git->fetch_branches([$top->control_branch]);
+    # fetches from the pipeline's remote
+
 =head2 mkfile
 
     $top->mkfile($file, @rest);
@@ -3371,7 +3395,9 @@ on every command. So a configured repository is the only way C<uri> comes
 back undef.
 
 The answer is resolved once and kept, so the refusals land at configuration
-load rather than at the first read.
+load rather than at the first read. The remote is also set on L</git>'s
+shared handle as its L<Service::Git/pipeline_remote>, so every remote
+operation on the repository takes it without being told.
 
 B<Returns:> A hash reference of the five resolved values.
 

@@ -1049,7 +1049,7 @@ sub _deploy_branch_action {
 
 	my $branch = $top->branch_for($env_name);
 	my $remote = $top->source_control_remote;
-	my $d      = $git->resolve_branch($branch, remote => $remote);
+	my $d      = $git->resolve_branch($branch);
 
 	# resolve_branch answers undef when neither ref exists, which is the one
 	# case that has no state, so it is read before anything reads a state.
@@ -1252,7 +1252,7 @@ sub _deploy_preflight {
 		# move is made against the ref the class was read from.
 		my $remote = $top->source_control_remote;
 		info "Fast-forwarding #C{%s} to #C{%s/%s}...", $branch, $remote, $branch;
-		$git->pull_ff_only($branch, $remote);
+		$git->pull_ff_only($branch);
 	}
 
 	# 5.  What the branch carries, asked after the move, because a branch

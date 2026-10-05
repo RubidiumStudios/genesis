@@ -91,11 +91,11 @@ every verb below acts on.
 =item C<%opts>
 
 Options. C<control> names the branch a later abort never resets, which is how
-a commit made on control survives an abort whole. C<remote> is required: the
-remote whose tracking refs a switch to a branch held only there reads, and an
-abort resets each branch it committed to. The caller resolves it through
-L<Genesis::Top/source_control_remote> (D29), because this layer cannot read
-the configuration that says which remote it is.
+a commit made on control survives an abort whole. C<remote> is the remote
+whose tracking refs a switch to a branch held only there reads, and an abort
+resets each branch it committed to. It defaults to the handle's
+L<Service::Git/pipeline_remote>, which L<Genesis::Top/source_control_remote>
+set (D29, D118), and a session with neither is a bug.
 
 =back
 
@@ -113,8 +113,8 @@ and nothing to come back to.
 
 =item *
 
-C<< "Service::Git->session needs its remote by name" >> -- a bug, where the
-caller named no remote.
+C<< "Service::Git->session needs its remote by name" >> -- a bug, where
+neither the caller nor the handle names a remote.
 
 =back
 
@@ -1049,9 +1049,8 @@ B<Examples:>
 
   my $remote = $session->remote;
 
-The remote the caller named when it built the session, which the session
-resets against and which a caller holding the session reads rather than
-resolving it a second time.
+The remote the session resets against: the one the caller named when it
+built the session, else the handle's L<Service::Git/pipeline_remote>.
 
 B<Parameters:> None.
 

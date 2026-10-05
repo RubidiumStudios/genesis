@@ -87,7 +87,7 @@ sub refresh_control {
 	# telling the operator to try again.
 	return 1 unless $git->has_remote($remote);
 
-	my (undef, $result) = $git->fetch_branches([$control], $remote);
+	my (undef, $result) = $git->fetch_branches([$control]);
 	return 1 if $result->{ok};
 
 	# The result says which class of failure it was, and the three of them
@@ -184,10 +184,9 @@ sub permitted_feature_branch {
 	# needs whether or not the remote turns out to have it.
 	unless ($git->branch_exists($control_ref)) {
 		my $refresh = defined($opts{refresh}) ? $opts{refresh} : 1;
-		my $elsewhere = defined $git->resolve_branch($top->control_branch,
-			remote => $remote);
+		my $elsewhere = defined $git->resolve_branch($top->control_branch);
 		$elsewhere ||= $refresh
-			? $git->remote_branch_exists($top->control_branch, $remote)
+			? $git->remote_branch_exists($top->control_branch)
 			: 1;
 
 		bail({exitcode => CONFIG},

@@ -262,6 +262,38 @@ B<Examples:>
   my $prefix = $git->prefix;
   # returns '' when the deployment repo is the git root
 
+=head2 pipeline_remote
+
+  $git->pipeline_remote($remote);
+  my $remote = $git->pipeline_remote;
+
+The remote this repository's pipeline lives on. L<Genesis::Top> resolves it
+once, from the source-control block (D29, D118), and sets it here when the
+configuration loads, on the handle every caller of the repository shares, so
+L</fetch_branches>, L</resolve_branch>, L</push> and the other remote
+operations take it without being told. An explicit remote still wins.
+Nothing here guesses it: a handle nobody set it on refuses a remote
+operation as a bug.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$remote> (optional)
+
+The remote to set.
+
+=back
+
+B<Returns:> The remote set on the handle, or C<undef> where none is.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  $git->pipeline_remote('upstream');
+  $git->fetch_branches(['control']);    # fetches from upstream
+
 =head2 git_dir
 
   my $dir = $git->git_dir;
@@ -1032,8 +1064,9 @@ The branch to fast-forward.
 
 =item C<$remote>
 
-Required.  The remote by name, which the caller resolves through
-L<Genesis::Top/source_control_remote>; a call without one is a bug.
+The remote by name. Optional: it defaults to L</pipeline_remote>, which
+L<Genesis::Top/source_control_remote> set on the handle, and a call with
+neither is a bug.
 
 =back
 
@@ -1077,8 +1110,9 @@ The branch to rebase onto.
 
 =item C<$remote>
 
-Required.  The remote by name, which the caller resolves through
-L<Genesis::Top/source_control_remote>; a call without one is a bug.
+The remote by name. Optional: it defaults to L</pipeline_remote>, which
+L<Genesis::Top/source_control_remote> set on the handle, and a call with
+neither is a bug.
 
 =back
 
@@ -1961,8 +1995,8 @@ B<Parameters:>
 
 =item C<$remote>
 
-Required.  The remote by name, which the caller resolves through
-L<Genesis::Top/source_control_remote>; a call without one is a bug.
+Required.  The remote by name, since this answers about a named remote rather
+than acting on the pipeline's.
 
 =back
 
@@ -2059,8 +2093,9 @@ The branch to look for.
 
 =item C<$remote>
 
-Required.  The remote by name, which the caller resolves through
-L<Genesis::Top/source_control_remote>; a call without one is a bug.
+The remote by name. Optional: it defaults to L</pipeline_remote>, which
+L<Genesis::Top/source_control_remote> set on the handle, and a call with
+neither is a bug.
 
 =back
 
@@ -2135,9 +2170,8 @@ with no C<refs/> prefix.
 
 =item C<remote>
 
-Required.  The remote whose tracking refs the branch is measured against,
-which the caller resolves through L<Genesis::Top/source_control_remote>; a
-call without one is a bug.
+The remote whose tracking refs the branch is measured against. Optional: it
+defaults to L</pipeline_remote>, and a call with neither is a bug.
 
 =item C<unverifiable>
 
@@ -2254,8 +2288,9 @@ The branch whose tracking ref goes.
 
 =item C<$remote>
 
-Required.  The remote by name, which the caller resolves through
-L<Genesis::Top/source_control_remote>; a call without one is a bug.
+The remote by name. Optional: it defaults to L</pipeline_remote>, which
+L<Genesis::Top/source_control_remote> set on the handle, and a call with
+neither is a bug.
 
 =back
 
@@ -2376,8 +2411,9 @@ The branches to fetch. Repeated names are collapsed.
 
 =item C<$remote>
 
-Required.  The remote by name, which the caller resolves through
-L<Genesis::Top/source_control_remote>; a call without one is a bug.
+The remote by name. Optional: it defaults to L</pipeline_remote>, which
+L<Genesis::Top/source_control_remote> set on the handle, and a call with
+neither is a bug.
 
 =back
 
@@ -2445,10 +2481,12 @@ B<Examples:>
 
 Pushes each ref on its own and reports what git did with it.
 
-B<The remote is required and given by name.> It used to be detected, by
-asking whether the first argument was a known local branch, which meant a
-branch named after a remote was pushed as a branch and a mistyped remote that
-collided with a branch name went to the default remote instead.
+B<The remote is given by name, or is the handle's own.> It used to be
+detected, by asking whether the first argument was a known local branch,
+which meant a branch named after a remote was pushed as a branch and a
+mistyped remote that collided with a branch name went to the default remote
+instead. Now it is the one the call names, else L</pipeline_remote>, and a
+call with neither is a bug.
 
 Each ref is pushed separately, so one ref's rejection does not withhold
 another's push.
@@ -2473,7 +2511,7 @@ B<Parameters:>
 
 =item C<remote>
 
-Required. The remote to push to, by name.
+The remote to push to, by name. Optional: it defaults to L</pipeline_remote>.
 
 =item C<refs>
 
@@ -2509,8 +2547,8 @@ B<Errors:>
 
 =item *
 
-C<"Service::Git-E<gt>push needs its remote by name"> -- raised via C<bail()>
-when C<remote> is missing.
+C<"Service::Git-E<gt>push needs its remote by name"> -- a bug, raised when
+neither C<remote> nor L</pipeline_remote> names one.
 
 =item *
 
@@ -2572,8 +2610,8 @@ The local branch to publish. It is pushed to the ref of the same name.
 
 =item C<remote>
 
-Required.  The remote to publish to, which the caller resolves through
-L<Genesis::Top/source_control_remote>; a call without one is a bug.
+The remote to publish to. Optional: it defaults to L</pipeline_remote>, and
+a call with neither is a bug.
 
 =back
 
@@ -2986,6 +3024,36 @@ B<Examples:>
 
   my $remote = _require_remote($opts{remote}, 'resolve_branch');
   # returns 'origin' when the caller named it, and is a bug otherwise
+
+=head2 _remote_for
+
+  my $remote = $git->_remote_for($remote, 'fetch_branches');
+
+The remote a call names, else the one L</pipeline_remote> carries, through
+L</_require_remote>, so a call with neither is a bug rather than a guess.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$remote>
+
+The remote the call named, or C<undef>.
+
+=item C<$method>
+
+The method asking, which the refusal names.
+
+=back
+
+B<Returns:> The remote.
+
+B<Errors:> What L</_require_remote> raises.
+
+B<Examples:>
+
+  my $remote = $git->_remote_for(undef, 'fetch_branches');
+  # returns the handle's pipeline remote
 
 =head2 _refuse_dubious_ownership
 

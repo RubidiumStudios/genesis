@@ -37,9 +37,10 @@ our @EXPORT_OK = qw/client_for_run pr_state carry_state state_for_scope
 # the one thing it can still answer, which is whether the remote has the
 # branch at all.
 sub align_with_remote {
-	my ($git, $branch, $remote) = @_;
+	my ($git, $branch) = @_;
+	my $remote = $git->pipeline_remote;
 
-	$git->fetch_branches([$branch], $remote);
+	$git->fetch_branches([$branch]);
 	return 0 unless $git->branch_exists("$remote/$branch");
 
 	$git->reset_hard("$remote/$branch");
@@ -331,16 +332,16 @@ sub preview {
 # the strength of a probe that failed.
 sub forget_lost_branch {
 	my ($git, $branch, %opts) = @_;
-	my $remote = $opts{remote};
+	my $remote = $git->pipeline_remote;
 	return 0 unless $git->branch_exists("$remote/$branch")
 		|| $git->branch_exists($branch);
 
-	my $on_remote = eval {$git->remote_branch_exists($branch, $remote)};
+	my $on_remote = eval {$git->remote_branch_exists($branch)};
 	return 0 unless defined $on_remote;
 	return 0 if $on_remote;
 	return 1 if $opts{dry_run};
 
-	$git->forget_branch($branch, $remote);
+	$git->forget_branch($branch);
 	$git->delete_branch($branch) if $git->branch_exists($branch);
 	return 1;
 }
@@ -368,7 +369,8 @@ sub forget_lost_branch {
 # nothing.  Narrowing that invalidation would give this reader and
 # align_with_remote a stale miss apiece.
 sub expected_tip {
-	my ($git, $pr_branch, $remote) = @_;
+	my ($git, $pr_branch) = @_;
+	my $remote = $git->pipeline_remote;
 	return undef unless $git->branch_exists("$remote/$pr_branch");
 	return $git->rev_parse("$remote/$pr_branch");
 }
@@ -450,7 +452,8 @@ sub discard_line {
 # clone with no remote has no branch on R to be settled against, which is the
 # first push rather than a repeat of one.
 sub settled {
-	my ($git, $pr_branch, $newest, $tree, $remote) = @_;
+	my ($git, $pr_branch, $newest, $tree) = @_;
+	my $remote = $git->pipeline_remote;
 	return 0 unless $git->branch_exists("$remote/$pr_branch");
 
 	my $marker = Genesis::CI::Marker::newest($git, "$remote/$pr_branch");
@@ -583,13 +586,12 @@ sub deliver {
 
 	# R is asked about the branch before its tip is read, because a branch R
 	# has lost leaves refs behind that would otherwise be read as R's own.
-	forget_lost_branch($git, $pr->{branch},
-		remote => $remote, dry_run => $opts{dry_run});
+	forget_lost_branch($git, $pr->{branch}, dry_run => $opts{dry_run});
 
 	# Recorded above everything the arm writes, so the value the publish is
 	# handed is the one the rest of the arm reasoned from, and not the one the
 	# arm's own rewrite leaves behind.
-	$pr->{expected} = expected_tip($git, $pr->{branch}, $remote);
+	$pr->{expected} = expected_tip($git, $pr->{branch});
 
 	# Nothing is due, so the branch has nothing left to say and the whole of it
 	# is retired, the proposed record with it.  The guard asks about the two
@@ -646,7 +648,7 @@ sub deliver {
 	# derived state and the deployment branch is what it is derived from, and
 	# the session records the absence so the reset can take it off again.
 	$session->switch($pr->{branch}, create_from => $record->{branch});
-	align_with_remote($git, $pr->{branch}, $remote);
+	align_with_remote($git, $pr->{branch});
 
 	# Read what we are about to destroy before we destroy it, because the
 	# rebuild is right and silence about it is not (I4).
@@ -736,7 +738,7 @@ sub deliver {
 	# aggregate the writer built above survives nowhere.
 	if (!$pr->{discarded}
 		&& settled($git, $pr->{branch}, $source,
-			$git->rev_parse($written->{commit}.'^{tree}'), $remote)) {
+			$git->rev_parse($written->{commit}.'^{tree}'))) {
 		$git->reset_hard("$remote/$pr->{branch}");
 		$pr->{action} = 'idempotent';
 		return 'idempotent';
@@ -808,7 +810,7 @@ sub _nothing_due_specs {
 	my (%args) = @_;
 	my $git     = $args{git};
 	my $records = $args{records} || [];
-	my $remote  = $args{remote};
+	my $remote  = $git->pipeline_remote;
 
 	my @specs;
 	for my $record (@$records) {

@@ -987,6 +987,19 @@ sub path {
 }
 
 # }}}
+# git - the handle on the repository this deployment root lives in {{{
+#
+# The one handle every caller of the repository shares (Service::Git keeps
+# one per root), so a reader holding a Top asks here rather than building one
+# from a path.  For a pipeline it carries the remote the source-control block
+# resolved, which _source_control sets on it.
+sub git {
+	my ($self) = @_;
+	require Service::Git;
+	return Service::Git->new($self->path);
+}
+
+# }}}
 # mkfile - make a file with the given content relative to the root of the repo {{{
 sub mkfile {
 	my ($self, $file, @rest) = @_;
@@ -1151,8 +1164,7 @@ sub shape_commit {
 sub read_shape_from {
 	my ($self, $ref) = @_;
 
-	require Service::Git;
-	my $git = Service::Git->new($self->path);
+	my $git = $self->git;
 	my $sha = $git->sha("$ref^{commit}")
 		or bail("Cannot read the pipeline's shape from #C{%s}, which names no ".
 			"commit in this repository.", $ref);
@@ -1202,8 +1214,7 @@ sub _read_shape {
 	require Cwd;
 	my $key = join("\0", Cwd::abs_path($self->path) // $self->path, $sha);
 	return $SHAPE_AT{$key} //= do {
-		require Service::Git;
-		my $git = Service::Git->new($self->path);
+		my $git = $self->git;
 
 		# Opening a Top sets GENESIS_ROOT, and this read must leave the
 		# command's own repository where it stands.
@@ -1866,7 +1877,7 @@ sub fetch_pipeline_envs {
 	my @names = ($self->control_branch,
 		map { $self->branch_for($_) } $self->pipeline_env_names);
 
-	my (undef, $result) = $git->fetch_branches(\@names, $remote);
+	my (undef, $result) = $git->fetch_branches(\@names);
 	return $result if $result->{ok};
 
 	my $because = $result->{kind} eq 'network'
@@ -2769,7 +2780,7 @@ sub _source_control {
 		$self->path
 	) unless Service::Git->is_inside_work_tree($self->path);
 
-	my $git = Service::Git->new($self->path);
+	my $git = $self->git;
 
 	$sc{remote} = $self->_remote_named($git, $sc{control_branch});
 	bail({exitcode => CONFIG},
@@ -2778,6 +2789,10 @@ sub _source_control {
 		"no remote named #C{origin}.  Name the remote explicitly.",
 		$sc{control_branch}
 	) unless $sc{remote};
+
+	# Set on the handle every caller of the repository shares, so the remote
+	# operations take it without being told.
+	$git->pipeline_remote($sc{remote});
 
 	$sc{uri} = $config->get('pipeline.source_control.uri');
 

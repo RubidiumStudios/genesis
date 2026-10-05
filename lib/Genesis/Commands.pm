@@ -905,8 +905,7 @@ sub _gate_deployed_state {
 	}
 
 	require Service::Git::Session;
-	my $session = $git->session(control => $top->control_branch,
-		remote => $remote);
+	my $session = $git->session(control => $top->control_branch);
 	$session->begin;
 
 	# A branch that pipeline-apply cut and no propagate run has delivered to
@@ -923,7 +922,7 @@ sub _gate_deployed_state {
 	# on the remote.  The distance between the two refs is what tells them
 	# apart, and it is read here for both the move below and the line that
 	# stands in its place where no move is made.
-	my $d = $git->resolve_branch($branch, remote => $remote);
+	my $d = $git->resolve_branch($branch);
 	my $behind = ($d && $d->{state} eq 'behind') ? $d->{behind} : 0;
 
 	# The one ref the gate moves, and only for a command that declares it.

@@ -63,7 +63,7 @@ sub publish_run {
 	my (%args) = @_;
 	my $git     = $args{git};
 	my $session = $args{session};
-	my $remote  = $args{remote}
+	my $remote  = $args{remote} // ($git ? $git->pipeline_remote : undef)
 		or bug("Genesis::CI::Publish::publish_run needs the remote it publishes to");
 	my $records = $args{records} || [];
 	my @specs   = @{$args{specs} || []};

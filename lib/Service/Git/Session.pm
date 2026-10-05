@@ -24,11 +24,10 @@ use IO::Handle;
 sub new {
 	my ($class, $git, %opts) = @_;
 	bail("A branch session needs a Service::Git handle") unless $git;
-	Service::Git::_require_remote($opts{remote}, 'session');
 	return bless {
 		git       => $git,
 		control   => $opts{control},
-		remote    => $opts{remote},
+		remote    => $git->_remote_for($opts{remote}, 'session'),
 		active    => 0,
 		finished  => 0,
 		origin    => undef,
