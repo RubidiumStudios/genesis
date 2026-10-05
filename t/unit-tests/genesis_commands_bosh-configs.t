@@ -32,19 +32,28 @@ my @hook_calls;     # what the actions asked the kit hooks to do
 my $stored_claims = {}; # what the network record in exodus holds, as the vault reads it; undef when none was written
 my $claims_read_error;  # when set, the vault fails every read of the network record with this
 
-my $vault = mock "Mock::BoshConfigs::Vault" => {
-	get_path_strict => sub {
-		my ($self, $path) = @_;
-		push @director_calls, ['get_path_strict', $path];
-		die $claims_read_error if $claims_read_error;
-		return $stored_claims;
-	},
-	set_path => sub {
-		my ($self, @args) = @_;
-		push @director_calls, ['set_path', @args];
-		return 1;
-	},
-};
+# make_vault - a vault mock that reads and writes the shared network record.
+# Every call is recorded with the vault's tag as its last element, so a test
+# can tell the environment's vault from each director's own.
+my $vault_seq = 0;
+sub make_vault {
+	my ($tag) = @_;
+	$vault_seq++;
+	return mock "Mock::BoshConfigs::Vault$vault_seq" => {
+		get_path_strict => sub {
+			my ($self, $path) = @_;
+			push @director_calls, ['get_path_strict', $path, $tag];
+			die $claims_read_error if $claims_read_error;
+			return $stored_claims;
+		},
+		set_path => sub {
+			my ($self, @args) = @_;
+			push @director_calls, ['set_path', @args, $tag];
+			return 1;
+		},
+	};
+}
+my $vault = make_vault('env');
 
 # make_director - a director mock over a `bosh configs` style listing
 # ($configs is type => name => {current, entries}) and a map of
@@ -54,6 +63,7 @@ sub make_director {
 	my ($alias, $configs, %overrides) = @_;
 	my $contents = delete($overrides{contents}) // {};
 	my $locked = 0; # the network claims lock, held by this process once acquired
+	my $own_vault = make_vault("director:$alias"); # a director's vault is its own, not the environment's
 	$director_seq++;
 	return mock "Mock::BoshConfigs::Director$director_seq" => {
 		alias   => $alias,
@@ -81,7 +91,7 @@ sub make_director {
 		network_locked_by_me => sub { $locked },
 		clear_network_lock   => sub { push @director_calls, ['clear_network_lock', $alias]; $locked = 0; 1 },
 		exodus_path          => "secret/exodus/$alias/bosh",
-		vault                => sub { $vault },
+		vault                => sub { $own_vault },
 		%overrides,
 	};
 }
@@ -848,7 +858,7 @@ subtest 'director config - --name selects only the director config' => sub {
 };
 
 subtest 'director config - upload locks the director, writes its own exodus record, and releases the lock' => sub {
-	plan tests => 9;
+	plan tests => 10;
 	@director_calls = ();
 	my $self_bosh = make_director('lab-ocf', {});
 	my $parent    = make_director('lab-mgmt', {});
@@ -866,11 +876,13 @@ subtest 'director config - upload locks the director, writes its own exodus reco
 		'the director\'s lock is taken before the director-purpose hook reads the claims')
 		or diag explain \@director_calls;
 	ok(defined $upload && $upload > $hook, 'the director config is uploaded to the director itself');
-	is_deeply($claims && [@{$director_calls[$claims]}[1..2]], ['secret/exodus/lab-ocf/bosh/network', {subnets => {}}],
+	is_deeply(defined $claims && [@{$director_calls[$claims]}[1..2]], ['secret/exodus/lab-ocf/bosh/network', {subnets => {}}],
 		'the network map is written to the director\'s own exodus network record');
-	is_deeply($claims && {@{$director_calls[$claims]}[3..6]}, {flatten => 1, clear => 1},
+	is_deeply(defined $claims && {@{$director_calls[$claims]}[3..6]}, {flatten => 1, clear => 1},
 		'with flatten and clear, as post-deploy writes it');
 	ok(defined $claims && $claims > $upload, 'after the upload');
+	is(defined $claims && $director_calls[$claims][-1], 'env',
+		'through the environment\'s vault, not the parent director\'s');
 	ok(defined $release && $release > $claims, 'and the lock is released at the end');
 	ok(!$self_bosh->network_locked_by_me, 'so no lock of ours is left on the director');
 	ok(!defined(call_index('acquire_network_lock', 'lab-mgmt')), 'the parent director\'s lock is not taken for the director config alone');
@@ -960,7 +972,7 @@ subtest 'director config - compare shows the diff without a lock or an exodus wr
 };
 
 subtest 'director config - an upload of both cloud configs takes the parent lock first, then the director\'s' => sub {
-	plan tests => 12;
+	plan tests => 14;
 
 	# Both configs go up and both locks come off
 	@director_calls = ();
@@ -979,6 +991,12 @@ subtest 'director config - an upload of both cloud configs takes the parent lock
 	ok(defined(call_index('clear_network_lock', 'lab-mgmt')) && defined(call_index('clear_network_lock', 'lab-ocf')),
 		'both locks are released');
 	ok(!$parent->network_locked_by_me && !$self_bosh->network_locked_by_me, 'and neither director is left locked');
+	my $parent_write = call_index('set_path', 'secret/exodus/lab-mgmt/bosh/network');
+	is(defined $parent_write && $director_calls[$parent_write][-1], 'director:lab-mgmt',
+		'the parent-side network map is written through the parent director\'s vault');
+	my $self_write = call_index('set_path', 'secret/exodus/lab-ocf/bosh/network');
+	is(defined $self_write && $director_calls[$self_write][-1], 'env',
+		'and the director\'s own network map through the environment\'s');
 
 	# The director config fails to upload, and both locks still come off
 	@director_calls = ();
@@ -1033,7 +1051,7 @@ subtest 'director config - a create-env director builds and uploads its own clou
 	ok(defined(call_index('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director')),
 		'the director config is uploaded to the director');
 	my $claims = call_index('set_path');
-	is($claims && $director_calls[$claims][1], 'secret/exodus/lab-ocf/bosh/network',
+	is(defined $claims && $director_calls[$claims][1], 'secret/exodus/lab-ocf/bosh/network',
 		'and the director\'s own exodus network record is written');
 };
 
@@ -1124,7 +1142,7 @@ subtest 'claims drift - a cloud config that is not the director\'s own is checke
 	ok(!defined(call_index('upload_config')), 'the identical config is not uploaded');
 	my $write = call_index('set_path');
 	ok(defined $write, 'its claims are written');
-	is($write && $director_calls[$write][1], 'secret/exodus/parent/bosh/network', 'under the director that holds it');
+	is(defined $write && $director_calls[$write][1], 'secret/exodus/parent/bosh/network', 'under the director that holds it');
 };
 
 subtest 'claims drift - a failed claims write tells the operator how to repair it' => sub {
@@ -1215,7 +1233,7 @@ subtest 'claims read - a record that was never written builds from empty and eve
 	my $all = $out.$err;
 	ok(defined(call_index('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director')), 'the upload goes ahead');
 	my $write = call_index('set_path');
-	is_deeply($write && $director_calls[$write][2], $fresh_claims, 'and the network map is written');
+	is_deeply(defined $write && $director_calls[$write][2], $fresh_claims, 'and the network map is written');
 	like($all, qr/cf \(ocfp-2\): adds 10\.61\.148\.232-10\.61\.148\.245/, 'the summary shows a claim with no record as added');
 	unlike($all, qr/removes/, 'and removes nothing');
 	like($all, qr/compilation \(ocfp-2\): adds 10\.61\.148\.228,10\.61\.148\.230-10\.61\.148\.231,10\.61\.148\.248/,
