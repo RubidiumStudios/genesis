@@ -944,22 +944,7 @@ sub check_network_lock {
 	return { status => 'unlocked', %found }
 		unless ref($lock) eq 'HASH' && defined($lock->{at});
 
-	my $lock_time = Time::Piece->strptime($lock->{at}, '%Y-%m-%d %H:%M:%S %z');
-	my $lock_age = time - $lock_time->epoch;
-
-	my $status = $lock_age > $max_age ? 'stale' : 'locked';
-
-	# Same-host pid-liveness fallback: a lock recorded on this same
-	# host whose pid is no longer running can never be released by
-	# its owner (eg an interrupted diff, killed process, Ctrl-C), so
-	# don't make callers wait out the full $max_age timeout for it.
-	# Locks from other hosts can't be checked this way, so those still
-	# rely on the age-based timeout above.
-	if ($status ne 'stale' && $lock->{pid} && $lock->{hostname}
-		&& $lock->{hostname} eq Sys::Hostname::hostname()
-		&& !(kill(0, $lock->{pid}) || $!{EPERM})) {
-		$status = 'stale';
-	}
+	my ($status, $lock_age) = $self->_network_lock_freshness($lock, $max_age);
 
 	return {
 		status => $status,
@@ -981,6 +966,8 @@ sub check_network_lock {
 sub acquire_network_lock {
 	my ($self, %opts) = @_;
 	my $path = $self->network_lock_path;
+
+	$self->_refuse_legacy_network_lock($opts{max_lock_age});
 
 	my $lost_race = 0;
 	for (1 .. 5) {
@@ -1181,6 +1168,106 @@ sub _write_network_lock {
 		"clear it sooner, check that #C{safe get %s} shows host %s and pid %s, then run ".
 		"#C{safe rm %s}.",
 		$err, $self->alias, int(($max_age // 1800) / 60), $path, $lock->{hostname}, $lock->{pid}, $path
+	);
+}
+# }}}
+
+# _network_lock_freshness - whether a lock record is still held or has gone stale {{{
+sub _network_lock_freshness {
+	my ($self, $lock, $max_age) = @_;
+	my $lock_time = Time::Piece->strptime($lock->{at}, '%Y-%m-%d %H:%M:%S %z');
+	my $lock_age = time - $lock_time->epoch;
+
+	my $status = $lock_age > $max_age ? 'stale' : 'locked';
+
+	# Same-host pid-liveness fallback: a lock recorded on this same
+	# host whose pid is no longer running can never be released by
+	# its owner (eg an interrupted diff, killed process, Ctrl-C), so
+	# don't make callers wait out the full $max_age timeout for it.
+	# Locks from other hosts can't be checked this way, so those still
+	# rely on the age-based timeout above.
+	if ($status ne 'stale' && $lock->{pid} && $lock->{hostname}
+		&& $lock->{hostname} eq Sys::Hostname::hostname()
+		&& !(kill(0, $lock->{pid}) || $!{EPERM})) {
+		$status = 'stale';
+	}
+
+	return ($status, $lock_age);
+}
+# }}}
+
+# _refuse_legacy_network_lock - stop while an older Genesis holds the network claims lock {{{
+sub _refuse_legacy_network_lock {
+	my ($self, $max_age) = @_;
+	# Guards against older Genesis versions during a rollout: they keep the
+	# lock as JSON in the network-claim-lock key of the exodus secret, and
+	# never read the lock's own secret, so each would take its lock without
+	# seeing the other's.  This only reads that key, and never changes it.
+	my $path = $self->exodus_path;
+	my $key = 'network-claim-lock';
+	$max_age //= 1800;
+
+	my $record = eval { $self->vault->kv_read($path) };
+	if ($@) {
+		my $err = $@;
+		# A signal passes through as it came, for the caller's release to handle.
+		die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
+		$err = $err =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/\s+$//r;
+		bail(
+			"Cannot take the network claims lock on the #M{%s} BOSH director, because the ".
+			"older lock key could not be checked.  An older Genesis, from before the lock ".
+			"moved to a secret of its own, keeps it in the #C{%s} key of #C{%s}, and one ".
+			"may be deploying against this director now.\n\n".
+			"The vault said: %s\n\n".
+			"Likely causes are that the vault is sealed or cannot be reached, or that the ".
+			"token has no read access on #C{%s}.  Nothing was written.  Run #C{safe get %s:%s} ".
+			"with the same token to see which, and #C{safe vault status} to check whether ".
+			"the vault is sealed.",
+			$self->alias, $key, $path, $err, $path, $path, $key
+		);
+	}
+
+	my $json = ref($record->{data}) eq 'HASH' ? $record->{data}{$key} : undef;
+	return unless defined($json) && $json =~ /\S/;
+
+	my ($lock, $status);
+	my $is_lock = eval {
+		$lock = JSON::PP->new->decode($json);
+		die "not a lock\n" unless ref($lock) eq 'HASH' && defined($lock->{at});
+		($status) = $self->_network_lock_freshness($lock, $max_age);
+		1;
+	};
+	return if $is_lock && $status eq 'stale';
+	unless ($is_lock) {
+		# No older Genesis can have written this, and one reading it would
+		# fail on it too, so it holds nothing.
+		warning(
+			"The #C{%s} key of #C{%s} in the vault at #M{%s} is not a lock record, so ".
+			"it is being ignored.  If an older Genesis is not deploying against the ".
+			"#M{%s} BOSH director, it can be removed with #C{safe rm -f %s:%s}.",
+			$key, $path, $self->vault->url, $self->alias, $path, $key
+		);
+		return;
+	}
+
+	bail(
+		"Cannot take the network claims lock on the #M{%s} BOSH director: an older ".
+		"Genesis appears to be deploying against it.  It holds the older form of the ".
+		"lock, the #C{%s} key of #C{%s} in the vault at #M{%s}, and was taken by ".
+		"%s@%s (env: %s, pid: %s) %s, at %s.\n\n".
+		"This usually means someone is running a Genesis from before the lock moved ".
+		"to a secret of its own, in a deploy or a #C{bosh-configs upload} against this ".
+		"director that is still running or is waiting at a prompt.  Wait for it to ".
+		"finish, then try again.  If no such process is running, a crashed run left ".
+		"the lock behind, and it goes stale %s minutes after it was taken (or as soon ".
+		"as its process exits, when that ran on this same host).  #C{safe get %s:%s} ".
+		"shows the lock as it is stored, and once you have checked that nothing is ".
+		"deploying, #C{safe rm -f %s:%s} clears it.",
+		$self->alias, $key, $path, $self->vault->url,
+		$lock->{user} // 'unknown', $lock->{hostname} // 'unknown',
+		$lock->{env} // 'unknown', $lock->{pid} // 'unknown',
+		strfuzzytime($lock->{at}), $lock->{at},
+		int($max_age / 60), $path, $key, $path, $key
 	);
 }
 # }}}

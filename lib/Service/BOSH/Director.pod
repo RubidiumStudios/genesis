@@ -1752,9 +1752,10 @@ B<Examples:>
   my $lock = $director->acquire_network_lock(%opts);
 
 Takes the network claims lock by writing a lock record to
-L</network_lock_path>.  The record holds the time, hostname, user, PID,
-environment name, and a token that marks it as this process's own (see
-L</_network_lock_token>).  The time is written in UTC with a C<+0000>
+L</network_lock_path>, after checking that an older Genesis does not hold
+the older form of the lock (see L</_refuse_legacy_network_lock>).  The
+record holds the time, hostname, user, PID, environment name, and a token
+that marks it as this process's own (see L</_network_lock_token>).  The time is written in UTC with a C<+0000>
 offset, so that a reader on any host works out the same age for it.  A
 stale lock is taken over, with a note saying whose it was.
 
@@ -1804,6 +1805,12 @@ names the director, the holder's user, host, environment, and PID, when
 the lock was taken, the vault path and URL, the likely cause, and how
 long until the lock goes stale.  When this process lost a race for the
 lock, the message says so.
+
+=item *
+
+Dies when an older Genesis holds the older form of the lock, or when the
+vault will not say whether one does, through
+L</_refuse_legacy_network_lock>.  Nothing is written in either case.
 
 =item *
 
@@ -2352,6 +2359,103 @@ B<Examples:>
 
   my $version = $self->_write_network_lock($path, $lock, 1800, cas => 3);
   # Returns: 4, or 0 when another process wrote first
+
+=head2 _network_lock_freshness
+
+  my ($status, $age) = $self->_network_lock_freshness($lock, $max_age);
+
+Works out whether a network claims lock record is still held or has gone
+stale.  A lock is stale when it is older than C<$max_age> seconds, or when
+it was taken on this host by a process that is no longer running, since
+that process can never release it.  A lock from another host is judged by
+its age alone.  It is shared by L</check_network_lock>, which judges the
+current lock with it, and L</_refuse_legacy_network_lock>, which judges the
+older form of the lock with the same rule.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$lock>
+
+The lock record, with an C<at> time in C<%Y-%m-%d %H:%M:%S %z> form, and
+optionally C<hostname> and C<pid>.
+
+=item C<$max_age>
+
+The stale timeout in seconds.
+
+=back
+
+B<Returns:> The status, which is C<'stale'> or C<'locked'>, and the age of
+the lock in seconds.
+
+B<Errors:>
+
+Dies when C<at> is missing or is not in the expected form.
+
+B<Examples:>
+
+  my ($status, $age) = $self->_network_lock_freshness($lock, 1800);
+  # Returns: ('locked', 42)
+
+=head2 _refuse_legacy_network_lock
+
+  $self->_refuse_legacy_network_lock($max_age);
+
+Stops the acquire of the network claims lock while an older Genesis holds
+the older form of it.  This guards against older Genesis versions during a
+rollout.  They keep the lock as a JSON string in the C<network-claim-lock>
+key of the director's exodus secret, and never read the secret that
+L</network_lock_path> names, so without this check the older and the newer
+Genesis could each take their own lock and both write claims.
+
+The key is read once, with C<Service::Vault::kv_read>, and is never
+written or deleted.  A lock there that is still fresh by the older code's
+own rule, as L</_network_lock_freshness> applies it, refuses the acquire.
+A lock that is stale, a key or field that is absent, and an exodus secret
+that does not exist all let the acquire go on.  A value that is not JSON,
+or has no C<at> time, is not a lock record that any older Genesis wrote, so
+it is ignored with a warning that says how to remove it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$max_age>
+
+The stale timeout in seconds.  Defaults to C<1800>, the older code's own.
+
+=back
+
+B<Returns:> Nothing, when the older lock is absent or stale.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dies when a fresh older lock is found.  The message names the director,
+the holder's user, host, environment, and PID, when the lock was taken, the
+vault path and URL, the likely cause, how long until the lock goes stale,
+and the C<safe get> and C<safe rm -f> commands that check and clear the
+key.
+
+=item *
+
+Dies when the exodus secret cannot be read, because a vault that refuses or
+fails cannot be taken to mean that no older Genesis is deploying.  The
+message gives the vault's reason, the likely causes, and the C<safe get>
+and C<safe vault status> commands that check them.  A signal passes
+through unchanged, for the caller's release to handle.
+
+=back
+
+B<Examples:>
+
+  $self->_refuse_legacy_network_lock(1800);
+  # Dies: Cannot take the network claims lock on the lab BOSH director: an older Genesis appears to be deploying against it. ...
 
 =head2 _network_lock_token
 

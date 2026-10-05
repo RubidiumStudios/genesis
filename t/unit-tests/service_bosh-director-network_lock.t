@@ -56,6 +56,7 @@ package MockLockVault {
 	sub kv_read {
 		my ($self, $path) = @_;
 		die $self->{read_error} if $self->{read_error};
+		die $self->{read_errors}{$path} if $self->{read_errors}{$path};
 		push @{$self->{log}}, ['read', $path];
 		my $rec = $self->{store}{$path};
 		return {
@@ -124,12 +125,21 @@ package MockLockVault {
 		return 1;
 	}
 
-	# How many reads happened before the first write landed
+	# How many reads of a path happened before the first write landed
 	sub reads_before_first_write {
-		my $self = shift;
+		my ($self, $path) = @_;
 		my $n = 0;
-		for (@{$self->{log}}) { last if $_->[0] eq 'write'; $n++ if $_->[0] eq 'read' }
+		for (@{$self->{log}}) {
+			last if $_->[0] eq 'write';
+			$n++ if $_->[0] eq 'read' && $_->[1] eq $path;
+		}
 		return $n;
+	}
+
+	# Every write or delete the vault was asked to make to a path or to a key of it
+	sub writes_to {
+		my ($self, $path) = @_;
+		return grep { $_->[0] eq 'write' && $_->[1] =~ m{^\Q$path\E(?::|$)} } @{$self->{log}};
 	}
 }
 
@@ -189,6 +199,20 @@ sub seed_lock {
 	$vault->{plain}{"$EXODUS:network-claim-lock"} = JSON::PP::encode_json($record);
 }
 
+# Seeds the lock as Genesis wrote it before the lock had a secret of its own:
+# a JSON string in the network-claim-lock key of the director's exodus
+# secret, alongside the exodus data itself.
+sub seed_legacy_lock {
+	my ($vault, $record) = @_;
+	$vault->{store}{$EXODUS} = {
+		version => 3,
+		data    => {
+			url                  => 'https://127.0.0.1:25555',
+			'network-claim-lock' => JSON::PP::encode_json($record),
+		},
+	};
+}
+
 # ---------------------------------------------------------------------------
 # The races
 # ---------------------------------------------------------------------------
@@ -204,7 +228,7 @@ subtest 'two acquirers that both read a free lock before either writes: exactly 
 	my $first_result = try_acquire($first);
 	my $user = $ENV{USER} // 'unknown';
 
-	is($vault->reads_before_first_write, 2,
+	is($vault->reads_before_first_write($LOCK_PATH), 2,
 		'both acquirers read the lock record before either write landed');
 	is(scalar(grep { $_ eq 'won' } $first_result, $second_result), 1,
 		'exactly one of the two acquirers takes the lock')
@@ -293,6 +317,130 @@ subtest 'kv v1: a write that a competing write overtook is detected and refused'
 		or diag $result;
 	like($result, qr/kv v1/i, 'and told the mount offers no check-and-set');
 	ok(!$first->network_locked_by_me, 'and it does not hold the lock');
+};
+
+# ---------------------------------------------------------------------------
+# A lock held by an older Genesis
+#
+# Before the lock had a secret of its own, Genesis kept it as JSON in the
+# network-claim-lock key of the exodus secret, and never reads the new
+# secret.  During a rollout an older Genesis can be deploying against the
+# same director, so taking the new lock has to look at the old key first.
+# ---------------------------------------------------------------------------
+
+for my $kv_version (2, 1) {
+	subtest "kv v$kv_version: a fresh lock under the old key refuses, naming the holder" => sub {
+		my $vault = MockLockVault->new(kv_version => $kv_version);
+		no warnings 'once';
+		local $Service::BOSH::Director::NETWORK_LOCK_SETTLE_SECONDS = 0;
+		seed_legacy_lock($vault, lock_record(
+			age => 120, user => 'olduser', hostname => 'oldjumpbox', pid => 31337, env => 'lab-old',
+		));
+		my $result = try_acquire(director($vault));
+		like($result, qr/^refused: /, 'the lock is not taken');
+		like($result, qr/older Genesis/, 'the refusal says an older Genesis appears to be deploying');
+		like($result, qr/olduser\@oldjumpbox/, 'and names the user and host that hold the old lock');
+		like($result, qr/pid: 31337/, 'and its pid');
+		like($result, qr/lab-old/, 'and the environment it was taken for');
+		like($result, qr/ago/, 'and how long ago it was taken');
+		like($result, qr/lock-test/, 'and the director');
+		like($result, qr/usually means/, 'and the likely cause');
+		like($result, qr/safe\s+get\s+\Q$EXODUS:network-claim-lock\E/, 'and how to check the old key');
+		like($result, qr/safe\s+rm\s+-f\s+\Q$EXODUS:network-claim-lock\E/, 'and how to clear it when it is stale');
+		ok(!exists $vault->{store}{$LOCK_PATH}, 'and nothing was written to the new lock');
+	};
+}
+
+subtest 'a fresh old lock from a dead process on this host is stale, as the older Genesis counts it' => sub {
+	my $vault = MockLockVault->new(kv_version => 2);
+	my $dead_pid = fork();
+	if (defined($dead_pid) && $dead_pid == 0) { exit 0; }
+	waitpid($dead_pid, 0) if defined($dead_pid);
+	seed_legacy_lock($vault, lock_record(age => 60, hostname => Sys::Hostname::hostname(), pid => $dead_pid));
+	is(try_acquire(director($vault)), 'won', 'the lock is taken');
+};
+
+subtest 'a stale lock under the old key does not block' => sub {
+	my $vault = MockLockVault->new(kv_version => 2);
+	seed_legacy_lock($vault, lock_record(age => 7200, user => 'crashed-user'));
+	is(try_acquire(director($vault)), 'won', 'the lock is taken');
+	ok(director($vault)->network_locked_by_me, 'and is held by this process');
+
+	my $record = lock_record(age => 1700);
+	my $fresh = MockLockVault->new(kv_version => 2);
+	seed_legacy_lock($fresh, $record);
+	like(try_acquire(director($fresh)), qr/^refused: .*older Genesis/s,
+		'one just inside the thirty minute limit still blocks');
+
+	my $max_age = MockLockVault->new(kv_version => 2);
+	seed_legacy_lock($max_age, lock_record(age => 600));
+	is(quietly { eval { director($max_age)->acquire_network_lock(max_lock_age => 300); 1 } ? 'won' : "refused: $@" },
+		'won', 'max_lock_age applies to the old lock as it does to the new one');
+};
+
+subtest 'an absent old key does not block' => sub {
+	my $none = MockLockVault->new(kv_version => 2);
+	is(try_acquire(director($none)), 'won', 'no exodus secret at all');
+
+	my $no_field = MockLockVault->new(kv_version => 2);
+	$no_field->{store}{$EXODUS} = {version => 1, data => {url => 'https://127.0.0.1:25555'}};
+	is(try_acquire(director($no_field)), 'won', 'an exodus secret without the lock field');
+
+	my $empty = MockLockVault->new(kv_version => 2);
+	$empty->{store}{$EXODUS} = {version => 1, data => {'network-claim-lock' => ''}};
+	is(try_acquire(director($empty)), 'won', 'an empty lock field');
+};
+
+subtest 'an old lock value that is not a lock record does not block, and is warned about' => sub {
+	for my $junk ('not json at all', '{"user":"x"}', '{"at":"yesterday"}') {
+		my $vault = MockLockVault->new(kv_version => 2);
+		$vault->{store}{$EXODUS} = {version => 1, data => {'network-claim-lock' => $junk}};
+		my ($result, $out);
+		$out = join('', output_from(sub {
+			$result = eval { director($vault)->acquire_network_lock; 'won' } || "refused: $@";
+		}));
+		is($result, 'won', "the lock is taken over '$junk'");
+		like($out, qr/network-claim-lock.*is\s+not\s+a\s+lock\s+record/s, '... with a warning that names the key')
+			or diag $out;
+	}
+};
+
+subtest 'an old-key read the vault refuses stops the acquire' => sub {
+	my $vault = MockLockVault->new(kv_version => 2);
+	$vault->{read_errors}{$EXODUS} = "Could not read $EXODUS from the vault: 403 permission denied\n";
+	my $result = try_acquire(director($vault));
+	like($result, qr/^refused: /, 'the lock is not taken');
+	like($result, qr/permission denied/, 'the vault\'s reason is kept');
+	like($result, qr/older Genesis/, 'and it says why the old key matters');
+	like($result, qr/lock-test/, 'it names the director');
+	like($result, qr/\Q$EXODUS\E/, 'and the path it could not read');
+	like($result, qr/usually means|likely/i, 'and the likely causes');
+	like($result, qr/safe\s+get\s+\Q$EXODUS:network-claim-lock\E/, 'and what to check');
+	ok(!exists $vault->{store}{$LOCK_PATH}, 'and nothing was written to the new lock');
+	is(scalar($vault->writes_to($EXODUS)) + scalar($vault->writes_to($LOCK_PATH)), 0, 'and nothing was written at all');
+};
+
+subtest 'the old key is only ever read' => sub {
+	for my $case (
+		['kv v2, fresh old lock',  2, 120],
+		['kv v2, stale old lock',  2, 7200],
+		['kv v1, stale old lock',  1, 7200],
+	) {
+		my ($name, $kv_version, $age) = @$case;
+		my $vault = MockLockVault->new(kv_version => $kv_version);
+		no warnings 'once';
+		local $Service::BOSH::Director::NETWORK_LOCK_SETTLE_SECONDS = 0;
+		my $record = lock_record(age => $age);
+		seed_legacy_lock($vault, $record);
+		my $before = JSON::PP->new->canonical->encode($vault->{store}{$EXODUS});
+		my $bosh = director($vault);
+		try_acquire($bosh);
+		$bosh->clear_network_lock;
+		is(scalar($vault->writes_to($EXODUS)), 0, "$name: no write or delete was issued against the old key");
+		is(JSON::PP->new->canonical->encode($vault->{store}{$EXODUS}), $before, "$name: and the old record is as it was");
+		is(scalar(grep { $_->[0] eq 'read' && $_->[1] eq $EXODUS } @{$vault->{log}}), 1,
+			"$name: it was read once");
+	}
 };
 
 # ---------------------------------------------------------------------------
