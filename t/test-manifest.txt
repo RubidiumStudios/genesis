@@ -175,6 +175,7 @@ unit-tests/genesis_env_deployment-core.t                  # Deployment core
 unit-tests/genesis_env_deploymentmanager-core.t           # DeploymentManager core
 unit-tests/genesis_env_manifest-core.t                    # Env::Manifest core
 unit-tests/genesis_env_manifestprovider-core.t            # Env::ManifestProvider core
+unit-tests/genesis_env_networkclaims-core.t               # Env::NetworkClaims core
 unit-tests/genesis_env_required_files-core.t              # required-files propagation
 unit-tests/genesis_env_secrets_entombment-core.t          # secrets entombment
 

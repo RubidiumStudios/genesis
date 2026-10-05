@@ -184,8 +184,10 @@ C<$env_name.$env_type.director>.
 
 =item 5.
 
-Stores the network hash at C<< $env->exodus_base . '/network' >> with
-C<flatten> and C<clear>.
+Reads the stored record at C<< $env->exodus_base . '/network' >> strictly,
+prints what the write changes through
+L<Genesis::Env::NetworkClaims/claims_summary>, and stores the network hash
+there with C<flatten> and C<clear>.
 
 =item 6.
 
@@ -217,10 +219,17 @@ stale, that the vault probably became unreachable or the token expired, and
 gives the C<bosh-configs upload ... -y> command that clears a stale lock and
 finishes the step.
 
-=back
+=item C<"The %s BOSH director deployed and is working, but its own cloud config %s and its network record in exodus were not updated. The step failed while %s: ...">
 
-Errors from the hook, the upload, and the exodus write propagate after the
-lock is released.
+Raised with C<bail()> after the lock is released, when the hook, the upload,
+the strict read of the stored record, or the exodus write fails. The message
+names the step and the original error, gives the likely causes (a sealed or
+unreachable vault, an expired token or one without access to the record, or a
+director that refused the cloud config), says what to check, and gives the
+C<bosh-configs upload ... -y> command that finishes the step without a
+redeploy. An C<INT>, C<TERM>, C<HUP>, or C<QUIT> signal propagates as it came.
+
+=back
 
 B<Examples:>
 
@@ -503,6 +512,8 @@ C<$Genesis::Hook::PostDeploy::NETWORK_LOCK_POLL_SECONDS> seconds (5 by
 default, and a package variable so tests can shorten it) for up to
 C<GENESIS_NETWORK_LOCK_WAIT> seconds (300 by default).  If another process
 takes the lock between a check and the acquire, it goes back to waiting.
+The line is printed again whenever the reason for waiting changes, such as a
+vault error that clears into a lock another process holds, or the reverse.
 
 It never clears a stale lock, because it cannot tell whether the holder left
 its claims half written.  When the wait runs out, or the lock is stale, it

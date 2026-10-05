@@ -9,6 +9,7 @@ use Genesis::Term;
 use Genesis::Commands;
 use Genesis::Top;
 use Genesis::UI;
+use Genesis::Env::NetworkClaims;
 use JSON::PP;
 use IPv4;
 
@@ -1028,21 +1029,12 @@ sub _bosh_configs_claims_target {
 }
 
 # }}}
-# _bosh_configs_claims_flat - a network map as the vault stores it, so two of them compare by what they hold {{{
-sub _bosh_configs_claims_flat {
-	my ($map) = @_;
-	my $flat = flatten({}, '', $map);
-	# set_path stores no empty hash or array, so neither is a difference
-	return {map {($_ => $flat->{$_} // '')} grep {!ref($flat->{$_})} keys %$flat};
-}
-
-# }}}
 # _bosh_configs_claims_differ - whether the stored network record holds other claims than a cloud config's network map {{{
 sub _bosh_configs_claims_differ {
 	my ($stored, $map) = @_;
 	my $json = JSON::PP->new->canonical;
-	return $json->encode(_bosh_configs_claims_flat($stored))
-		ne $json->encode(_bosh_configs_claims_flat($map));
+	return $json->encode(Genesis::Env::NetworkClaims::claims_flat($stored))
+		ne $json->encode(Genesis::Env::NetworkClaims::claims_flat($map));
 }
 
 # }}}
@@ -1054,70 +1046,6 @@ sub _bosh_configs_claims_stored {
 	# claims in it, and the write that follows clears the record.  Only a
 	# record that was never written is empty.
 	return $vault->get_path_strict($path) // {};
-}
-
-# }}}
-# _bosh_configs_claims_changes - how the claims of a network map differ from the stored record, by network and subnet {{{
-sub _bosh_configs_claims_changes {
-	my ($stored, $map) = @_;
-	my $claims = sub {
-		my ($record) = @_;
-		my $subnets = ref($record) eq 'HASH' && ref($record->{subnets}) eq 'HASH' ? $record->{subnets} : {};
-		my %found;
-		for my $subnet (keys %$subnets) {
-			my $held = ref($subnets->{$subnet}) eq 'HASH' ? $subnets->{$subnet}{claims} : undef;
-			next unless ref($held) eq 'HASH';
-			$found{$_}{$subnet} = $held->{$_} for keys %$held;
-		}
-		return \%found;
-	};
-	my ($old, $new) = ($claims->($stored), $claims->($map));
-	# The addresses of one range that another does not hold.  A value that is
-	# not a range of addresses is shown as it is.
-	my $addresses = sub {
-		my ($range, $without) = @_;
-		return '' unless defined($range) && length($range);
-		return $range unless defined($without) && length($without);
-		my $left = eval {
-			my %taken = map {("$_" => 1)} IPv4->new($without)->addresses;
-			IPv4->range(grep {!$taken{$_}} map {"$_"} IPv4->new($range)->addresses)->range;
-		};
-		return defined($left) ? $left : $range;
-	};
-
-	my @changes;
-	for my $network (sort keys %{{%$old, %$new}}) {
-		for my $subnet (sort keys %{{%{$old->{$network} // {}}, %{$new->{$network} // {}}}}) {
-			my ($was, $now) = ($old->{$network}{$subnet}, $new->{$network}{$subnet});
-			next if ($was // '') eq ($now // '');
-			my ($added, $removed) = ($addresses->($now, $was), $addresses->($was, $now));
-			next unless length($added) || length($removed);
-			push @changes, {network => $network, subnet => $subnet, added => $added, removed => $removed};
-		}
-	}
-	return @changes;
-}
-
-# }}}
-# _bosh_configs_claims_summary - tell the operator what a write of the network claims changes {{{
-sub _bosh_configs_claims_summary {
-	my ($path, $stored, $map) = @_;
-	my @changes = _bosh_configs_claims_changes($stored, $map);
-	unless (@changes) {
-		info("[[  - >>the network claims at #C{%s} keep the same addresses.", $path);
-		return;
-	}
-	info("[[  - >>the network claims at #C{%s} change:", $path);
-	for my $change (@changes) {
-		info(
-			"[[      >>#M{%s} (%s): %s", $change->{network}, $change->{subnet},
-			join(', ',
-				(length($change->{added})   ? "adds #G{$change->{added}}"       : ()),
-				(length($change->{removed}) ? "removes #R{$change->{removed}}" : ())
-			)
-		);
-	}
-	return;
 }
 
 # }}}
@@ -1143,7 +1071,7 @@ sub _bosh_configs_write_claims {
 	my $bosh = $config->{bosh};
 	my ($network_vault, $network_path) = _bosh_configs_claims_target($env, $config);
 
-	_bosh_configs_claims_summary($network_path, $stored, $config->{network_map});
+	Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $config->{network_map});
 
 	info({pending => 1},
 		"[[  - >>submitting network claims for #C{%s} to #M{%s} BOSH director...",

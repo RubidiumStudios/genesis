@@ -626,6 +626,12 @@ sub net_env {
 	my $create_env  = $o{create_env} ? 1 : 0;
 	$net_seq++;
 	my $vault = mock "Mock::PostDeploy::NetVault$net_seq" => {
+		get_path_strict => sub {
+			my ($self, $path) = @_;
+			push @netcalls, ['get_path_strict', $path];
+			die $o{fail_read} if $o{fail_read};
+			return $o{stored};
+		},
 		set_path => sub {
 			my ($self, @args) = @_;
 			push @netcalls, ['set_path', @args];
@@ -652,7 +658,7 @@ sub net_env {
 			my ($self, $hook, %opts) = @_;
 			push @netcalls, ['run_hook', $hook, $opts{purpose} // ''];
 			die "the director cloud-config hook failed\n" if $o{fail_hook};
-			return ("director: yes\n", {subnets => {'ocfp-2' => {claims => {}}}});
+			return ("director: yes\n", $o{network} // {subnets => {'ocfp-2' => {claims => {}}}});
 		},
 	);
 }
@@ -793,6 +799,78 @@ subtest 'update_director_network_config - releases the lock when a step inside i
 		ok(defined(netcall('clear_network_lock', 'lab-ocf')), "$case: the lock is released");
 		ok(!$bosh->network_locked_by_me, "$case: no lock of ours is left");
 	}
+};
+
+subtest 'update_director_network_config - says what the write changes before it writes' => sub {
+	plan tests => 5;
+	@netcalls = ();
+	my $bosh = net_bosh();
+	my $stored = {subnets => {'ocfp-2' => {claims => {'lab-ocf.bosh.net-compilation' => '10.0.0.1-10.0.0.4'}}}};
+	my $hook = make_hook(env => net_env(self_bosh => $bosh, stored => $stored, network => {
+		subnets => {'ocfp-2' => {claims => {'lab-ocf.bosh.net-compilation' => '10.0.0.1-10.0.0.6'}}},
+	}));
+	my ($out, $err) = output_from { $hook->update_director_network_config };
+	my $all = ($out.$err) =~ s/\s+/ /gr;
+	like($all, qr{the network claims at secret/exodus/lab-ocf/bosh/network change: lab-ocf\.bosh\.net-compilation \(ocfp-2\): adds 10\.0\.0\.5-10\.0\.0\.6},
+		'the summary names the path, the network, the subnet, and the added addresses');
+	my $read  = netcall('get_path_strict', 'secret/exodus/lab-ocf/bosh/network');
+	my $write = netcall('set_path', 'secret/exodus/lab-ocf/bosh/network');
+	ok(defined $read && defined $write && $read < $write, 'the record is read strictly before it is written');
+	ok(index($all, 'change:') < index($all, 'storing director network details'), 'and the summary comes before the write');
+
+	@netcalls = ();
+	$hook = make_hook(env => net_env(self_bosh => net_bosh(), stored => {}, network => {subnets => {}}));
+	($out, $err) = output_from { $hook->update_director_network_config };
+	like(($out.$err) =~ s/\s+/ /gr, qr/keep the same addresses/, 'an unchanged record says so');
+	ok(defined(netcall('set_path')), 'and is still written');
+};
+
+subtest 'update_director_network_config - a failed strict read after a good deploy says what failed and what to check' => sub {
+	plan tests => 7;
+	@netcalls = ();
+	my $bosh = net_bosh();
+	my $read_error = "Could not read secret/exodus/lab-ocf/bosh/network from vault at https://v:8200: permission denied\n";
+	my $hook = make_hook(env => net_env(self_bosh => $bosh, fail_read => $read_error));
+	my ($err, $out);
+	throws_ok { ($out) = output_from { $hook->update_director_network_config } } qr/BOSH director deployed and is working/,
+		'the failure is reported as the director having deployed';
+	$err = $@ =~ s/\s+/ /gr;
+	like($err, qr/while storing the director network details in exodus/, 'it names the step');
+	like($err, qr/secret\/exodus\/lab-ocf\/bosh\/network.*permission denied/, 'and the path and safe\'s reason');
+	like($err, qr/token has expired or has no read or write access.*sealed or unreachable|sealed or unreachable.*token has expired/s,
+		'it gives the likely causes');
+	like($err, qr/safe vault status.*safe export secret\/exodus\/lab-ocf\/bosh\/network.*genesis lab-ocf bosh-configs upload --type cloud --name lab-ocf\.bosh\.director -y/,
+		'and what to check and the command that finishes the step');
+	ok(defined(netcall('clear_network_lock', 'lab-ocf')), 'the lock is released');
+	ok(!defined(netcall('set_path')), 'and nothing is written');
+};
+
+subtest 'update_director_network_config - the wait is announced again when its reason changes' => sub {
+	plan tests => 3;
+	no warnings 'once';
+	local $Genesis::Hook::PostDeploy::NETWORK_LOCK_POLL_SECONDS = 1;
+	local $ENV{GENESIS_NETWORK_LOCK_WAIT} = 30;
+	@netcalls = ();
+	my $held = {status => 'locked', description => 'about 1 minute ago by ubuntu@bastion (env: cf, pid: 4242)'};
+	my $free = {status => 'unlocked'};
+
+	# A failed take of a free lock, then a lock held by someone else, then free again
+	my $takes = 0;
+	my $base = net_bosh(states => [$free, $free, $held, $held, $free]);
+	my $bosh = mock "Mock::PostDeploy::ChangingBosh" => {
+		alias                => 'lab-ocf',
+		check_network_lock   => sub { $base->check_network_lock },
+		acquire_network_lock => sub { die "vault write failed\n" if ++$takes == 1; $base->acquire_network_lock },
+		network_locked_by_me => sub { $base->network_locked_by_me },
+		clear_network_lock   => sub { $base->clear_network_lock },
+		upload_config        => sub { $base->upload_config(@_[1..$#_]) },
+	};
+	my $hook = make_hook(env => net_env(self_bosh => $bosh));
+	my ($out, $err) = output_from { $hook->update_director_network_config };
+	my $all = ($out.$err) =~ s/\s+/ /gr;
+	like($all, qr/could not be taken \(vault write failed.*retrying for up to 30 seconds/, 'a vault error is announced');
+	like($all, qr/is held about 1 minute ago by ubuntu\@bastion.*waiting up to 30 seconds/, 'then the lock held by another process is announced');
+	is(scalar(() = $all =~ /waiting up to|retrying for up to/g), 2, 'each once');
 };
 
 subtest 'update_director_network_config - releases the lock on a signal' => sub {

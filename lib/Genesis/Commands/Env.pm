@@ -10,6 +10,7 @@ use Genesis::Term;
 use Genesis::Commands;
 use Genesis::Top;
 use Genesis::UI;
+use Genesis::Env::NetworkClaims;
 
 sub create {
 
@@ -1363,9 +1364,17 @@ sub deploy {
 								"submitting network claims for this deployment to #M{%s} BOSH director...",
 								$env->bosh->{alias}
 							);
-							eval {$env->bosh->vault->set_path(
-								$env->bosh->exodus_path.'/network', $network_map, flatten => 1, clear => 1
-							);};
+							my $network_path = $env->bosh->exodus_path.'/network';
+							eval {
+								# Strict, because a read that failed would look like a record
+								# with no claims, and the summary would show every claim as new
+								my $stored = $env->bosh->vault->get_path_strict($network_path) // {};
+								Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $network_map);
+								$env->bosh->vault->set_path(
+									$network_path, $network_map, flatten => 1, clear => 1
+								);
+								1;
+							};
 							if ($@) {
 								info("  - #R{failed to update network map}\n");
 								bail("\nCannot continue without a valid network map:\n\n%s", $@);

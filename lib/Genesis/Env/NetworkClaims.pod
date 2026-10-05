@@ -1,0 +1,140 @@
+=head1 NAME
+
+Genesis::Env::NetworkClaims - Compare a stored network claims record with a network map and say what a write changes
+
+=head1 SYNOPSIS
+
+  use Genesis::Env::NetworkClaims;
+
+  my @changes = Genesis::Env::NetworkClaims::claims_changes($stored, $map);
+  Genesis::Env::NetworkClaims::claims_summary($path, $stored, $map);
+
+=head1 DESCRIPTION
+
+The claims a director records for its networks live in an exodus network
+record, and every write of the record clears it before filling it. This
+module reads the record and the network map about to replace it, and tells
+the operator which addresses the write adds and removes. C<bosh-configs>,
+the deploy command, and the post-deploy hook all print the same summary
+through it before they write.
+
+=head1 FUNCTIONS
+
+These are plain functions, not methods -- no invocant.
+
+=head2 claims_flat($map)
+
+  my $flat = claims_flat($map);
+
+Flattens a network map into the form the vault stores it in, so that two of
+them compare by what they hold.  Nested keys are joined as dotted paths, and
+every value is kept as a string, with an undefined value read as the empty
+string.  An empty hash or array is dropped, because C<set_path> does not
+store one, so neither counts as a difference.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$map>
+
+A network map, or a network record read from the vault.
+
+=back
+
+B<Returns:> A hash reference of flattened key to string value.
+
+B<Examples:>
+
+  claims_flat({net => {subnets => {a => {claims => '10.0.0.1-10.0.0.3'}}}});
+  # Returns: { 'net.subnets.a.claims' => '10.0.0.1-10.0.0.3' }
+
+  claims_flat({net => {subnets => {}}});
+  # Returns: {}
+
+=head2 claims_changes($stored, $map)
+
+  my @changes = claims_changes($stored, $map);
+
+Works out how the claims of a network map differ from the stored record, by
+network and subnet.  The claims are the C<claims> ranges under each subnet
+of each network.  For every network and subnet whose range is not the same
+on both sides, the addresses the map holds that the record does not are
+C<added>, and those the record holds that the map does not are C<removed>.
+A value that is not a range of addresses is reported as it is.  A subnet
+whose range changed in text but not in the addresses it covers is left out.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$stored>
+
+The network record read from the vault.
+
+=item C<$map>
+
+The cloud config's network map.
+
+=back
+
+B<Returns:> A list of hash references, sorted by network and then subnet,
+each with C<network>, C<subnet>, C<added>, and C<removed>.  The last two are
+ranges, or the empty string when there is nothing to report.  The list is
+empty when no claims changed.
+
+B<Examples:>
+
+  my @changes = claims_changes(
+    {subnets => {a => {claims => {ocf => '10.0.0.1-10.0.0.4'}}}},
+    {subnets => {a => {claims => {ocf => '10.0.0.1-10.0.0.6'}}}}
+  );
+  # Returns: ({network => 'ocf', subnet => 'a', added => '10.0.0.5-10.0.0.6', removed => ''})
+
+=head2 claims_summary($path, $stored, $map)
+
+  claims_summary($path, $stored, $map);
+
+Tells the operator what a write of the network claims changes.  It prints
+one line saying that the claims at C<$path> keep the same addresses when
+C<claims_changes> finds no change.  Otherwise it prints a line
+saying that they change, followed by one line for each changed network and
+subnet that lists the addresses it adds and the addresses it removes.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The vault path of the network record, for the message.
+
+=item C<$stored>
+
+The network record read from the vault.
+
+=item C<$map>
+
+The cloud config's network map.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+  claims_summary($path, $stored, $map);
+  # Prints: the network claims at <path> change:
+  # Prints:     ocf (a): adds 10.0.0.5-10.0.0.6
+
+=head1 AUTHOR
+
+Written by the Genesis team.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2025 FiveTwenty, LLC.
+
+This module is free software, distributed under the same terms as Perl itself.
+
+=cut

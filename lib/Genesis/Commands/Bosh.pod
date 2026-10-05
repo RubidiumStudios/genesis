@@ -1482,42 +1482,12 @@ B<Examples:>
   my ($vault, $path) = _bosh_configs_claims_target($env, $config);
   # Returns: the director's vault and its exodus path followed by '/network'
 
-=head2 _bosh_configs_claims_flat($map)
-
-  my $flat = _bosh_configs_claims_flat($map);
-
-Flattens a network map into the form the vault stores it in, so that two of
-them compare by what they hold.  Nested keys are joined as dotted paths, and
-every value is kept as a string, with an undefined value read as the empty
-string.  An empty hash or array is dropped, because C<set_path> does not
-store one, so neither counts as a difference.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$map>
-
-A network map, or a network record read from the vault.
-
-=back
-
-B<Returns:> A hash reference of flattened key to string value.
-
-B<Examples:>
-
-  _bosh_configs_claims_flat({net => {subnets => {a => {claims => '10.0.0.1-10.0.0.3'}}}});
-  # Returns: { 'net.subnets.a.claims' => '10.0.0.1-10.0.0.3' }
-
-  _bosh_configs_claims_flat({net => {subnets => {}}});
-  # Returns: {}
-
 =head2 _bosh_configs_claims_differ($stored, $map)
 
   my $differs = _bosh_configs_claims_differ($stored, $map);
 
 Decides whether the stored network record holds other claims than a cloud
-config's network map, by comparing the two as C<_bosh_configs_claims_flat>
+config's network map, by comparing the two as C<Genesis::Env::NetworkClaims::claims_flat>
 returns them.
 
 B<Parameters:>
@@ -1589,81 +1559,6 @@ B<Examples:>
   my $stored = _bosh_configs_claims_stored($env, $config);
   # Returns: {} when the network record was never written
 
-=head2 _bosh_configs_claims_changes($stored, $map)
-
-  my @changes = _bosh_configs_claims_changes($stored, $map);
-
-Works out how the claims of a network map differ from the stored record, by
-network and subnet.  The claims are the C<claims> ranges under each subnet
-of each network.  For every network and subnet whose range is not the same
-on both sides, the addresses the map holds that the record does not are
-C<added>, and those the record holds that the map does not are C<removed>.
-A value that is not a range of addresses is reported as it is.  A subnet
-whose range changed in text but not in the addresses it covers is left out.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$stored>
-
-The network record read from the vault.
-
-=item C<$map>
-
-The cloud config's network map.
-
-=back
-
-B<Returns:> A list of hash references, sorted by network and then subnet,
-each with C<network>, C<subnet>, C<added>, and C<removed>.  The last two are
-ranges, or the empty string when there is nothing to report.  The list is
-empty when no claims changed.
-
-B<Examples:>
-
-  my @changes = _bosh_configs_claims_changes(
-    {subnets => {a => {claims => {ocf => '10.0.0.1-10.0.0.4'}}}},
-    {subnets => {a => {claims => {ocf => '10.0.0.1-10.0.0.6'}}}}
-  );
-  # Returns: ({network => 'ocf', subnet => 'a', added => '10.0.0.5-10.0.0.6', removed => ''})
-
-=head2 _bosh_configs_claims_summary($path, $stored, $map)
-
-  _bosh_configs_claims_summary($path, $stored, $map);
-
-Tells the operator what a write of the network claims changes.  It prints
-one line saying that the claims at C<$path> keep the same addresses when
-C<_bosh_configs_claims_changes> finds no change.  Otherwise it prints a line
-saying that they change, followed by one line for each changed network and
-subnet that lists the addresses it adds and the addresses it removes.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$path>
-
-The vault path of the network record, for the message.
-
-=item C<$stored>
-
-The network record read from the vault.
-
-=item C<$map>
-
-The cloud config's network map.
-
-=back
-
-B<Returns:> Nothing.
-
-B<Examples:>
-
-  _bosh_configs_claims_summary($path, $stored, $map);
-  # Prints: the network claims at <path> change:
-  # Prints:     ocf (a): adds 10.0.0.5-10.0.0.6
-
 =head2 _bosh_configs_sync_claims($env, $config)
 
   my $written = _bosh_configs_sync_claims($env, $config);
@@ -1712,7 +1607,7 @@ B<Examples:>
 
 Records a cloud config's network map in the exodus network record, after
 saying what the write changes.  It prints the summary from
-C<_bosh_configs_claims_summary>, then replaces the record at the path
+C<Genesis::Env::NetworkClaims::claims_summary>, then replaces the record at the path
 C<_bosh_configs_claims_target> names with the map, flattened, using
 C<set_path> with C<clear>.
 

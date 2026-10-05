@@ -7,6 +7,7 @@ use parent qw(Genesis::Hook);
 use Genesis;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean/;
+use Genesis::Env::NetworkClaims;
 use Service::Credhub;
 use Time::HiRes qw/gettimeofday/;
 use JSON::PP;
@@ -56,22 +57,31 @@ sub update_director_network_config {
 	local $SIG{QUIT} = sub { die "Quit\n" };
 
 	my $acquired = 0;
+	my $step = 'taking the network claims lock';
 	my $ok = eval {
 		$acquired = $self->_acquire_director_network_lock($bosh, $config_name);
 		if ($acquired) {
+			$step = 'building the director cloud config';
 			info({pending => 1}, "[[  - >>building director cloud-config...");
 			my $tstart = gettimeofday;
 			my ($config, $network) = $env->run_hook('cloud-config', purpose => 'director');
 			info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
 
+			$step = 'uploading the director cloud config';
 			info({pending => 1}, "[[  - >>uploading #c{%s} cloud-config...", $config_name);
 			$tstart = gettimeofday;
 			$bosh->upload_config($config, 'cloud', $config_name);
 			info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
 
+			# Strict, because a failed read would look like a record with no
+			# claims, and the summary would then show every claim as new
+			$step = 'storing the director network details in exodus';
+			my $network_path = $env->exodus_base.'/network';
+			my $stored = $env->vault->get_path_strict($network_path) // {};
+			Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $network);
 			info({pending => 1}, "[[  - >>storing director network details in exodus...");
 			$tstart = gettimeofday;
-			$env->vault->set_path($env->exodus_base.'/network', $network, flatten => 1, clear => 1);
+			$env->vault->set_path($network_path, $network, flatten => 1, clear => 1);
 			info("#G{done}" . pretty_duration(gettimeofday - $tstart, 1, 3));
 		}
 		1;
@@ -99,7 +109,22 @@ sub update_director_network_config {
 		$bosh->alias, ($@ =~ s/\s+$//r), scalar($env->get_call_path_with_env), $config_name
 	) unless $released;
 
-	die $err unless $ok;
+	unless ($ok) {
+		# A signal passes through as it came, and the lock waiter has already
+		# said what it found; anything else failed after the director deployed
+		die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\s*$/;
+		bail(
+			"The #M{%s} BOSH director deployed and is working, but its own cloud config ".
+			"#C{%s} and its network record in exodus were not updated.  The step failed ".
+			"while %s:\n\n%s\n\nThis usually means the vault is sealed or unreachable, ".
+			"the token has expired or has no read or write access to #C{%s}, or the ".
+			"director refused the cloud config.  Check the vault and the token with ".
+			"#C{safe vault status} and #C{safe export %s}, then run #C{%s bosh-configs ".
+			"upload --type cloud --name %s -y} to finish this step without a redeploy.",
+			$bosh->alias, $config_name, $step, ($err =~ s/\s+$//r), $env->exodus_base.'/network',
+			$env->exodus_base.'/network', scalar($env->get_call_path_with_env), $config_name
+		);
+	}
 	return $acquired ? 1 : 0;
 }
 
@@ -119,7 +144,7 @@ sub _acquire_director_network_lock {
 	}
 	my $interval = $NETWORK_LOCK_POLL_SECONDS > 0 ? $NETWORK_LOCK_POLL_SECONDS : 5;
 
-	my ($waited, $announced, $lock, $acquire_error) = (0, 0);
+	my ($waited, $announced, $lock, $acquire_error) = (0, '');
 	while (1) {
 		$acquire_error = undef;
 		$lock = $bosh->check_network_lock;
@@ -135,7 +160,12 @@ sub _acquire_director_network_lock {
 		}
 		last if $lock->{status} eq 'stale' || $waited >= $limit;
 
-		unless ($announced++) {
+		# Said again whenever the reason for waiting changes, so a vault
+		# error that clears into a lock held by another process (or the
+		# reverse) is not left under the wrong message
+		my $reason = defined($acquire_error) ? 'error' : 'held';
+		if ($announced ne $reason) {
+			$announced = $reason;
 			if (defined $acquire_error) {
 				info(
 					"[[  - >>the network claims lock on #M{%s} BOSH director could not be ".
