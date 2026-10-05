@@ -2142,13 +2142,20 @@ define_command("pipeline-apply", {
 # genesis pipeline-graph - write Mermaid pipeline.md {{{
 define_command("pipeline-graph", {
 	summary => "Write a Mermaid pipeline graph to pipeline.md.",
-	usage   => "pipeline-graph",
+	usage   => "pipeline-graph [--from <ref>]",
 	description =>
 		"Compiles the pipeline and writes a Mermaid flowchart to pipeline.md ".
 		"in the current directory.  Replaces `genesis graph`.",
 	function_group => Genesis::Commands::PIPELINE,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'from=s' =>
+			"Draw the pipeline's shape as <ref> holds it rather than as control ".
+			"does, to see a change to it before it is merged.  A banner names ".
+			"the ref and its commit.  Only pipeline-graph and pipeline-describe ".
+			"take it; every command that acts reads control.",
+	],
 }, 'Genesis::Commands::Pipelines::pipeline_graph');
 # }}}
 # genesis pipeline-status - show propagation state across all environments {{{
@@ -2230,7 +2237,7 @@ define_command("propagate", {
 # genesis pipeline-describe - human-readable pipeline description {{{
 define_command("pipeline-describe", {
 	summary => "Describe the pipeline in human-readable form.",
-	usage   => "pipeline-describe",
+	usage   => "pipeline-describe [--from <ref>]",
 	description =>
 		"Compiles the pipeline and prints an ordered environment progression ".
 		"with gate and trigger annotations.  Replaces `genesis describe`.",
@@ -2244,6 +2251,13 @@ define_command("pipeline-describe", {
 	refresh        => 'never',
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
+	options => [
+		'from=s' =>
+			"Describe the pipeline's shape as <ref> holds it rather than as ".
+			"control does, to see a change to it before it is merged.  A banner ".
+			"names the ref and its commit.  Only pipeline-graph and ".
+			"pipeline-describe take it; every command that acts reads control.",
+	],
 }, 'Genesis::Commands::Pipelines::pipeline_describe');
 # }}}
 # genesis pipeline-hold - hold propagation to an environment {{{

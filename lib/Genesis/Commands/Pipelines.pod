@@ -1002,6 +1002,10 @@ repository is compiled first and the drawing comes off the compiler, with
 Concourse standing in as the platform, since nothing here chooses a provider
 and every compiler that emits a Concourse pipeline draws the same graph.
 
+With C<--from E<lt>refE<gt>> the shape is drawn as that ref holds it rather
+than as control does, as L</_shape_from_option($top)> describes, so a change to it
+can be checked before it is merged.
+
 B<Parameters:>
 
 =over 4
@@ -1015,11 +1019,16 @@ The pipeline layout, accepted for the legacy call shape and not read.
 B<Returns:> Nothing. It writes the file, says where it wrote it, and exits 0.
 
 B<Errors:> Bails where the repository has no pipeline section for the parser
-to read.
+to read, and where C<--from> names no commit or a shape that is invalid at
+it.
 
 B<Examples:>
 
   genesis pipeline-graph
+  # Wrote pipeline.md
+
+  genesis pipeline-graph --from HEAD
+  # Reading the pipeline's shape from HEAD at 4cf1438, not from control.
   # Wrote pipeline.md
 
 =head2 pipeline_describe([$layout])
@@ -1037,6 +1046,10 @@ nothing for those derivations to read.  Any other repository is compiled and
 the compiler tells it, with Concourse standing in for the same reason
 L</pipeline_graph([$layout])> gives.
 
+With C<--from E<lt>refE<gt>> the shape is read at that ref rather than at
+control, as L</_shape_from_option($top)> describes, so a change to it can be
+checked before it is merged.
+
 B<Parameters:>
 
 =over 4
@@ -1050,11 +1063,13 @@ The pipeline layout, accepted for the legacy call shape and not read.
 B<Returns:> Nothing. It prints the description and exits 0.
 
 B<Errors:> Bails where the repository has no pipeline section for the parser
-to read.
+to read, and where C<--from> names no commit or a shape that is invalid at
+it.
 
 B<Examples:>
 
   genesis pipeline-describe
+  genesis pipeline-describe --from feature/reshape
 
 =head2 diff()
 
@@ -2006,6 +2021,42 @@ B<Examples:>
 
   _describe_topology($top, {}, []);
   # No environments with pipeline metadata found.
+
+=head2 _shape_from_option($top)
+
+    _shape_from_option($top);
+
+Reads the pipeline's shape at the ref C<--from> names, for
+L</pipeline_graph([$layout])> and L</pipeline_describe([$layout])>, the only
+two commands that take the option.  It calls
+L<Genesis::Top/read_shape_from> and prints a banner on standard error naming
+the ref, its commit, and that the shape is not control's.  Without the option
+it does nothing, and the shape stays control's.
+
+A shape switched off at the ref is reported as disabled there on standard
+output, and the command exits 0 having done nothing more, because the
+compiler both commands fall back to for a repository with no enabled pipeline
+reads the tree in front of the command, not the ref.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment root whose shape is read.
+
+=back
+
+B<Returns:> Nothing; exits 0 where the pipeline is disabled at the ref.
+
+B<Errors:> What L<Genesis::Top/read_shape_from> raises: a ref that names no
+commit, or a shape invalid at it, at C<CONFIG>.
+
+B<Examples:>
+
+  _shape_from_option($top);
+  # Reading the pipeline's shape from HEAD at 4cf1438, not from control.
 
 =head2 _topology_to_mermaid_md($top, $nodes, $edges)
 

@@ -41,7 +41,7 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		'deploy' => {
 			class        => Genesis::Commands::DEPLOYED_STATE,
 			options      => [qw/dry-run|n yes|y no-propagate force redeploy/],
-			absent       => [qw/pull no-fetch no-refresh/],
+			absent       => [qw/pull no-fetch no-refresh from=s/],
 			fast_forward => 1,
 		},
 		# The other two commands of the deployed-state class are here for
@@ -78,7 +78,7 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		'propagate' => {
 			class        => Genesis::Commands::PRE_DEPLOY,
 			options      => [qw/dry-run|n yes|y force/],
-			absent       => [qw/no-fetch no-refresh no-push commit=s/],
+			absent       => [qw/no-fetch no-refresh no-push commit=s from=s/],
 			exactly      => 3,
 			arguments    => [],
 			scope        => 'repo',
@@ -95,9 +95,16 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			options => [qw/dry-run|n yes|y/],
 			absent  => [qw/platform|provider|p=s no-fetch/],
 		},
+		# The two describing commands take --from, the one way to read the
+		# pipeline's shape anywhere but control, and only they take it, so a
+		# shape read off a branch never reaches a command that acts (D112).
 		'pipeline-describe' => {
 			class   => Genesis::Commands::PRE_DEPLOY,
-			options => [],
+			options => [qw/from=s/],
+			absent  => [qw/no-fetch no-refresh/],
+		},
+		'pipeline-graph' => {
+			options => [qw/from=s/],
 			absent  => [qw/no-fetch no-refresh/],
 		},
 		# The four secrets commands are in the sweep for one flag apiece.
@@ -135,8 +142,10 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			for @{$surface{$cmd}{options}};
 		ok(!exists $opts{$_}, "$cmd does not declare $_")
 			for @{$surface{$cmd}{absent}};
+		# pipeline-graph declares no branch class, so its entry names none.
 		is(command_properties($cmd)->{branch_class}, $surface{$cmd}{class},
-			"$cmd carries the $surface{$cmd}{class} marker");
+			"$cmd carries the $surface{$cmd}{class} marker")
+			if exists $surface{$cmd}{class};
 		# Read for every command in the sweep rather than where it is
 		# declared, because the fact worth pinning is which one command
 		# moves a ref and not that the deploy does.

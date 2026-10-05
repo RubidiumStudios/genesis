@@ -1392,6 +1392,7 @@ sub pipeline_graph {
 	my ($layout) = @_;
 
 	my $top = Genesis::Top->new('.');
+	_shape_from_option($top);
 
 	# For env-file topology, build the DAG directly.
 	if ($top->pipeline_enabled) {
@@ -1427,6 +1428,7 @@ sub pipeline_describe {
 	my ($layout) = @_;
 
 	my $top = Genesis::Top->new('.');
+	_shape_from_option($top);
 
 	# For env-file topology (manual provider or genesis-config CI),
 	# build the DAG directly without the full compiler/provider chain.
@@ -2215,6 +2217,28 @@ sub _dump_debug_artifacts {
 	}
 
 	info("Debug artifacts written to #C{%s/}", $debug_dir);
+}
+
+# }}}
+# _shape_from_option - read the shape at --from, under a banner {{{
+#
+# A shape switched off at the ref is said so and the command ends there,
+# because the compiler the two commands fall back to otherwise reads the tree
+# in front of the command, not the ref.
+sub _shape_from_option {
+	my ($top) = @_;
+	my $ref = get_options->{from};
+	return unless defined $ref;
+
+	$top->read_shape_from($ref);
+	my $short = substr($top->shape_commit, 0, 7);
+	info("Reading the pipeline's shape from #C{%s} at #C{%s}, not from control.",
+		$ref, $short);
+	return if $top->pipeline_enabled;
+
+	output("The pipeline is disabled at #C{%s} (#C{%s}): #C{pipeline.enabled} ".
+		"is not true in its #C{.genesis/config}.", $ref, $short);
+	exit 0;
 }
 
 # }}}

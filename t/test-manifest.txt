@@ -445,6 +445,7 @@ integration-tests/genesis_ci_pullrequest-seed.t               # the first pull r
 integration-tests/genesis_ci_pullrequest-title.t              # the marker in the pull request title, and which one a run acts on
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
 integration-tests/genesis_commands_pipelines-graph.t          # pipeline-graph draws the chain control holds
+integration-tests/genesis_commands_pipelines-from.t           # --from previews a shape at a ref, validated as control's, and only the describing commands take it
 integration-tests/branch_class-pre_deploy_refusal.t           # a pre-deploy command refuses off a deployment, pull request, or artifacts branch
 integration-tests/branch_class-deployed_state.t               # a deployed-state command reads the environment's own branch
 integration-tests/genesis_new-no_session.t                    # genesis new opens no session, takes no switch lock, and restores no branch

@@ -1132,12 +1132,45 @@ sub _shape {
 # shape_commit - the control commit the pipeline's shape was read at {{{
 #
 # The commit _shape resolved control to, which is control on T, or the local
-# control branch in a clone with no remote, so a report can name what its
-# topology came from.  Undefined where the tree reads its own files.
+# control branch in a clone with no remote, or the commit read_shape_from
+# read, so a report can name what its topology came from.  Undefined where
+# the tree reads its own files.
 sub shape_commit {
 	my ($self) = @_;
 	$self->_shape;
 	return $self->{__shape_commit};
+}
+
+# }}}
+# read_shape_from - read the pipeline's shape at a ref other than control {{{
+#
+# The one exception to control's shape (D112): the two describing commands
+# preview a change to the shape before it is merged.  The ref's tree is read
+# the way control's is, so it is validated as control's would be, and every
+# shape read on this Top answers from it from here on.
+sub read_shape_from {
+	my ($self, $ref) = @_;
+
+	require Service::Git;
+	my $git = Service::Git->new($self->path);
+	my $sha = $git->sha("$ref^{commit}")
+		or bail("Cannot read the pipeline's shape from #C{%s}, which names no ".
+			"commit in this repository.", $ref);
+
+	# Opening a Top sets GENESIS_ROOT, and this read must leave the
+	# command's own repository where it stands.
+	local %ENV = %ENV;
+	my (undef, $at) = $self->_topology_at($git, $sha);
+	$self->{__shape}        = $at // $self->_no_pipeline_shape;
+	$self->{__shape_commit} = $sha;
+	$self->{__shape_ref}    = $ref;
+	return $self;
+}
+
+# }}}
+# shape_ref - the ref read_shape_from read the shape at {{{
+sub shape_ref {
+	return $_[0]{__shape_ref};
 }
 
 # }}}

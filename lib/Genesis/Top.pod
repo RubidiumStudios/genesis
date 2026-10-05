@@ -1691,6 +1691,8 @@ the report's topology came from.
 
 B<Parameters:> None.
 
+After L</read_shape_from> it is the commit that ref resolved to instead.
+
 B<Returns:> A commit sha, or C<undef> where the tree reads its own files: a
 directory under no git control, a clone with no control branch at all, or a
 materialised tree, which is its own shape.
@@ -1701,6 +1703,62 @@ B<Examples:>
 
     my $sha = $top->shape_commit();
     # returns the sha origin/control resolved to when the command started
+
+=head2 read_shape_from
+
+    $top->read_shape_from($ref);
+
+Reads the pipeline's shape at C<$ref> rather than at control, so every shape
+read on this Top from then on, L</pipeline_topology>, L</pipeline_enabled> and
+the other pipeline keys, answers from that commit.  It is the one exception
+to control's shape (D112): C<genesis pipeline-graph --from> and
+C<genesis pipeline-describe --from> call it to show a change to the shape
+before it is merged.  Commands that act never call it.
+
+The ref's tree is written out of git the way control's is, through
+L</_topology_at>, so its C<prior_env> graph is validated as control's would
+be.  A ref whose tree holds no deployment root of this type reads as a
+repository with no pipeline.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$ref>
+
+Anything C<git rev-parse> resolves to a commit: a branch, a tag, a
+remote-tracking ref, C<HEAD>, or a sha.
+
+=back
+
+B<Returns:> The Top itself.
+
+B<Errors:> Bails where C<$ref> names no commit in the repository.  Bails at
+C<CONFIG> where the shape at the ref is invalid, a C<prior_env> cycle or a
+predecessor that is no environment.
+
+B<Examples:>
+
+    $top->read_shape_from('HEAD');
+    $top->pipeline_topology->{parent_of}{prod};
+    # 'qa', where HEAD's prod.yml names qa and control's names lab
+
+=head2 shape_ref
+
+    my $ref = $top->shape_ref();
+
+The ref L</read_shape_from> read the shape at, as the caller named it.
+
+B<Parameters:> None.
+
+B<Returns:> The ref, or C<undef> where the shape is control's.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $top->read_shape_from('feature/reshape');
+    $top->shape_ref();    # 'feature/reshape'
 
 =head2 pipeline_section
 
