@@ -319,6 +319,22 @@ subtest 'a terminal signal during the release does not kill the release\'s own c
 	}
 };
 
+subtest 'a signal that follows one the work caught still stops the work' => sub {
+	$status = 'unlocked';
+	my $reached = 0;
+	# The first signal is raised inside code that catches it
+	my $env = make_env(acquire_network_lock => sub {
+		push @calls, 'acquire'; $held = 1;
+		eval { kill INT => $$; my $x = 0; $x++ for 1 .. 10; 1 };
+		return 1;
+	});
+	throws_ok {
+		under_lock($env, sub { kill TERM => $$; my $x = 0; $x++ for 1 .. 10; $reached = 1 })
+	} qr/^Terminated\b/, 'the second signal is raised';
+	ok(!$reached, 'and it stopped the work where it landed, instead of being held until the work ended');
+	ok(!$held, 'and the lock is released');
+};
+
 subtest 'the signal handlers are put back when the deploy returns' => sub {
 	$status = 'unlocked';
 	my %before = map { $_ => $SIG{$_} } qw/INT TERM HUP QUIT/;

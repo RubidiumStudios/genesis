@@ -515,7 +515,11 @@ produced is written to the director's exodus data, and the lock is released
 even when something fails.  C<INT>, C<TERM>, C<HUP>, and C<QUIT> are turned
 into errors for as long as the lock is held, so a cancelled command, a
 killed one, and an ssh session that drops out from under a bastion all
-unwind through that release rather than leaving the lock behind.
+unwind through that release rather than leaving the lock behind.  A signal
+that arrives while the locks are being released, which may be two when the
+run holds the parent's and the director's, is held until every one has been
+released and is then raised once, so that it cannot leave the second lock
+behind.
 
 For a BOSH director environment, the director's own cloud config
 C<< <env>.<type>.director >> is uploaded to the director itself.  Its lock

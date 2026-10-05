@@ -285,123 +285,145 @@ sub bosh_configs_upload {
 	# is in the list because this runs over ssh from a bastion, and a dropped
 	# session hangs up every process in it -- which is how a lock outlives the
 	# process that took it.
-	local $SIG{INT}  = sub { die "Interrupted by user\n" };
-	local $SIG{TERM} = sub { die "Terminated\n" };
-	local $SIG{HUP}  = sub { die "Hung up\n" };
-	local $SIG{QUIT} = sub { die "Quit\n" };
-
-	eval {
-		# Each director goes on the list before its lock is taken, so that an
-		# acquire that wrote the lock and then failed is released below too.
-		if ($wants_cloud) {
-			push @locked, $bosh;
-			_bosh_configs_acquire_network_lock($env, $bosh, $yes);
-		}
-		if ($wants_director) {
-			my $director = _bosh_configs_director_bosh($env);
-			push @locked, $director;
-			_bosh_configs_acquire_network_lock($env, $director, $yes);
-		}
-
-		my ($configs, $notes) = _bosh_configs_provided($env, $bosh, %options);
-		unless (@$configs) {
-			info(
-				"\nNo bosh configs are provided for #C{%s}%s, so there is nothing to upload.",
-				$env->name, _bosh_configs_filter_description(%options)
-			);
-			_bosh_configs_notes($notes);
-			return 1;
-		}
-
-		my @runtime_builds = ();
-		my @runtime_skipped = ();
-		my $failures = 0;
-		my $compare_failures = 0;
-		for my $config (@$configs) {
-			_bosh_configs_status($config);
-			my $label = _bosh_configs_label($config);
-
-			if ($config->{status} eq 'unsynthesized') {
-				error("[[  - >>%s could not be synthesized; see the errors above.", $label);
-				$failures++;
-				next;
-			}
-			if ($config->{status} eq 'error') {
-				# Excluded from the runtime-config hook's upload as well, which
-				# would otherwise upload every enabled build.
-				error("[[  - >>%s could not be compared with the director's copy:\n\n%s\n", $label, $config->{diff});
-				push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
-				$compare_failures++;
-				next;
-			}
-			if ($config->{status} eq 'identical') {
-				info("[[  - >>%s is #G{already up to date}.", $label);
-				push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
-				# The upload that would have recorded the claims is skipped, so a
-				# record left behind by an earlier failed write is repaired here.
-				_bosh_configs_sync_claims($env, $config)
-					if $config->{type} eq 'cloud' && ref($config->{network_map}) eq 'HASH';
-				next;
-			}
-
-			if ($config->{status} eq 'missing') {
-				info(
-					"[[  - >>%s is #R{missing} from the director; it would be created with:\n\n%s",
-					$label, $config->{content}
-				);
-			} else {
-				info(
-					"[[  - >>%s is #Y{different} from the director's copy:\n\n%s\n",
-					$label, $config->{diff}
-				);
-			}
-
-			unless (_bosh_configs_confirm(sprintf(
-				"Upload %s config #C{%s} to #M{%s} BOSH director? [y|n]",
-				$config->{type}, $config->{name}, $config->{bosh}->alias
-			), $yes, 1)) {
-				info("[[  - >>#y{skipped} %s\n", $label);
-				push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
-				next;
-			}
-
-			if ($config->{type} eq 'cloud') {
-				_bosh_configs_upload_cloud($env, $config);
-			} elsif ($config->{type} eq 'cpi') {
-				_bosh_configs_upload_cpi($env, $config);
-			} else {
-				# Runtime configs are uploaded by the kit's runtime-config hook,
-				# which also stores any secrets the build generated.
-				push @runtime_builds, $config->{build};
-			}
-		}
-
-		if (@runtime_builds) {
-			my $requests = _bosh_configs_runtime_requests($env, $options{name});
-			$env->run_hook(
-				'runtime-config',
-				args => {%$requests, map {($_ => JSON::PP::false)} @runtime_skipped},
-				interactive => 0,
-			);
-		}
-
-		_bosh_configs_notes($notes);
-		bail(
-			"%d bosh config%s could not be synthesized, so %s not uploaded.",
-			$failures, $failures == 1 ? '' : 's', $failures == 1 ? 'it was' : 'they were'
-		) if $failures;
-		bail(
-			"%d bosh config%s could not be compared with the director's cop%s, so %s not uploaded.",
-			$compare_failures, $compare_failures == 1 ? '' : 's',
-			$compare_failures == 1 ? 'y' : 'ies', $compare_failures == 1 ? 'it was' : 'they were'
-		) if $compare_failures;
-		1;
+	#
+	# The first signal unwinds the work.  Any that follows, including one that
+	# was held back while a release ran, is held until every lock has been
+	# released and is then raised, because dying between two releases would
+	# leave the second lock on its director.
+	my $unwinding = 1;
+	my $held_signal;
+	my $on_signal = sub {
+		my ($message) = @_;
+		# $unwinding stays set until the work has been left, below, and not
+		# until this first die: code inside the work can catch that die, and
+		# the next signal then still has to unwind it.
+		die $message if $unwinding;
+		$held_signal //= $message;
 	};
-	my $err = $@;
+	local $SIG{INT}  = sub { $on_signal->("Interrupted by user\n") };
+	local $SIG{TERM} = sub { $on_signal->("Terminated\n") };
+	local $SIG{HUP}  = sub { $on_signal->("Hung up\n") };
+	local $SIG{QUIT} = sub { $on_signal->("Quit\n") };
+
+	my $err;
+	eval {
+		eval {
+			# Each director goes on the list before its lock is taken, so that an
+			# acquire that wrote the lock and then failed is released below too.
+			if ($wants_cloud) {
+				push @locked, $bosh;
+				_bosh_configs_acquire_network_lock($env, $bosh, $yes);
+			}
+			if ($wants_director) {
+				my $director = _bosh_configs_director_bosh($env);
+				push @locked, $director;
+				_bosh_configs_acquire_network_lock($env, $director, $yes);
+			}
+
+			my ($configs, $notes) = _bosh_configs_provided($env, $bosh, %options);
+			unless (@$configs) {
+				info(
+					"\nNo bosh configs are provided for #C{%s}%s, so there is nothing to upload.",
+					$env->name, _bosh_configs_filter_description(%options)
+				);
+				_bosh_configs_notes($notes);
+				return 1;
+			}
+
+			my @runtime_builds = ();
+			my @runtime_skipped = ();
+			my $failures = 0;
+			my $compare_failures = 0;
+			for my $config (@$configs) {
+				_bosh_configs_status($config);
+				my $label = _bosh_configs_label($config);
+
+				if ($config->{status} eq 'unsynthesized') {
+					error("[[  - >>%s could not be synthesized; see the errors above.", $label);
+					$failures++;
+					next;
+				}
+				if ($config->{status} eq 'error') {
+					# Excluded from the runtime-config hook's upload as well, which
+					# would otherwise upload every enabled build.
+					error("[[  - >>%s could not be compared with the director's copy:\n\n%s\n", $label, $config->{diff});
+					push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
+					$compare_failures++;
+					next;
+				}
+				if ($config->{status} eq 'identical') {
+					info("[[  - >>%s is #G{already up to date}.", $label);
+					push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
+					# The upload that would have recorded the claims is skipped, so a
+					# record left behind by an earlier failed write is repaired here.
+					_bosh_configs_sync_claims($env, $config)
+						if $config->{type} eq 'cloud' && ref($config->{network_map}) eq 'HASH';
+					next;
+				}
+
+				if ($config->{status} eq 'missing') {
+					info(
+						"[[  - >>%s is #R{missing} from the director; it would be created with:\n\n%s",
+						$label, $config->{content}
+					);
+				} else {
+					info(
+						"[[  - >>%s is #Y{different} from the director's copy:\n\n%s\n",
+						$label, $config->{diff}
+					);
+				}
+
+				unless (_bosh_configs_confirm(sprintf(
+					"Upload %s config #C{%s} to #M{%s} BOSH director? [y|n]",
+					$config->{type}, $config->{name}, $config->{bosh}->alias
+				), $yes, 1)) {
+					info("[[  - >>#y{skipped} %s\n", $label);
+					push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
+					next;
+				}
+
+				if ($config->{type} eq 'cloud') {
+					_bosh_configs_upload_cloud($env, $config);
+				} elsif ($config->{type} eq 'cpi') {
+					_bosh_configs_upload_cpi($env, $config);
+				} else {
+					# Runtime configs are uploaded by the kit's runtime-config hook,
+					# which also stores any secrets the build generated.
+					push @runtime_builds, $config->{build};
+				}
+			}
+
+			if (@runtime_builds) {
+				my $requests = _bosh_configs_runtime_requests($env, $options{name});
+				$env->run_hook(
+					'runtime-config',
+					args => {%$requests, map {($_ => JSON::PP::false)} @runtime_skipped},
+					interactive => 0,
+				);
+			}
+
+			_bosh_configs_notes($notes);
+			bail(
+				"%d bosh config%s could not be synthesized, so %s not uploaded.",
+				$failures, $failures == 1 ? '' : 's', $failures == 1 ? 'it was' : 'they were'
+			) if $failures;
+			bail(
+				"%d bosh config%s could not be compared with the director's cop%s, so %s not uploaded.",
+				$compare_failures, $compare_failures == 1 ? '' : 's',
+				$compare_failures == 1 ? 'y' : 'ies', $compare_failures == 1 ? 'it was' : 'they were'
+			) if $compare_failures;
+			1;
+		};
+		$err = $@;
+		# Inside the outer eval, so that a signal between the two lands in it
+		$unwinding = 0;
+		1;
+	} or $err = $@;
 	# Each release logs its own failure rather than dying, so one that fails
 	# neither replaces the error above nor leaves the other director locked.
 	$_->release_network_lock for reverse @locked;
 	die $err if $err;
+	die $held_signal if defined($held_signal);
 	return 1;
 }
 

@@ -978,6 +978,31 @@ subtest 'update_director_network_config - a signal while the lock is being taken
 	}
 };
 
+subtest 'update_director_network_config - a signal that follows one the step caught still stops the step' => sub {
+	plan tests => 3;
+	@netcalls = ();
+	my ($takes, $reached) = (0, 0);
+	my $base = net_bosh();
+	my $bosh = mock "Mock::PostDeploy::CaughtSignalBosh" => {
+		alias                => 'lab-ocf',
+		check_network_lock   => sub { $base->check_network_lock },
+		# The first signal is raised inside code that catches it
+		acquire_network_lock => sub {
+			eval { kill INT => $$; my $x = 0; $x++ for 1 .. 10; 1 };
+			$base->acquire_network_lock;
+		},
+		network_locked_by_me => sub { $base->network_locked_by_me },
+		clear_network_lock   => sub { $base->clear_network_lock },
+		network_lock_path    => sub { $base->network_lock_path },
+		release_network_lock => sub { Service::BOSH::Director::release_network_lock($_[0]) },
+		upload_config        => sub { kill TERM => $$; my $x = 0; $x++ for 1 .. 10; $reached = 1; 1 },
+	};
+	my $hook = make_hook(env => net_env(self_bosh => $bosh));
+	throws_ok { output_from { $hook->update_director_network_config } } qr/^Terminated\b/, 'the second signal is raised';
+	ok(!$reached, 'and it stopped the step where it landed, instead of being held until the step ended');
+	ok(!$base->network_locked_by_me, 'and the lock is released');
+};
+
 subtest 'update_director_network_config - a create-env director locks itself' => sub {
 	plan tests => 3;
 	@netcalls = ();

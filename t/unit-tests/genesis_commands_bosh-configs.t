@@ -1039,6 +1039,72 @@ subtest 'director config - compare shows the diff without a lock or an exodus wr
 	ok(!defined(call_index('set_path')), 'and no exodus record is written');
 };
 
+subtest 'bosh_configs_upload - a signal during the first release still releases the other director\'s lock' => sub {
+	# The director's own lock comes off first, and a terminal signal that
+	# arrives while it does is held back until the release has finished, so
+	# it must not stop the loop before the parent's lock comes off.
+	plan tests => 4 * 4;
+	for my $case ([INT => qr/Interrupted by user/], [TERM => qr/Terminated/], [HUP => qr/Hung up/], [QUIT => qr/Quit/]) {
+		my ($signal, $message) = @$case;
+		@director_calls = ();
+		my $self_bosh = make_director('lab-ocf', {},
+			clear_network_lock => sub { push @director_calls, ['clear_network_lock', 'lab-ocf']; kill $signal => $$; return 1 },
+		);
+		my $parent = make_director('lab-mgmt', {});
+		my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+		my $err;
+		output_from {
+			eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud'); 1 } or $err = $@;
+		};
+		like($err // '', $message, "$signal: the signal is raised once the locks are released");
+		ok(defined(call_index('clear_network_lock', 'lab-ocf')), "$signal: the director's lock is released");
+		ok(defined(call_index('clear_network_lock', 'lab-mgmt')), "$signal: and the parent's too")
+			or diag explain \@director_calls;
+		ok(!$parent->network_locked_by_me, "$signal: so no lock of ours is left on the parent");
+	}
+};
+
+subtest 'bosh_configs_upload - a signal that follows one the work caught still stops the work' => sub {
+	plan tests => 4;
+	@director_calls = ();
+	my $reached = 0;
+	my $held = 0;
+	my $parent = make_director('lab-mgmt', {},
+		# The first signal is raised inside code that catches it, as a vault
+		# call that wraps its work in an eval would
+		acquire_network_lock => sub {
+			push @director_calls, ['acquire_network_lock', 'lab-mgmt'];
+			$held = 1;
+			eval { kill INT => $$; my $x = 0; $x++ for 1 .. 10; 1 };
+			return 1;
+		},
+		network_locked_by_me => sub { $held },
+		clear_network_lock   => sub { push @director_calls, ['clear_network_lock', 'lab-mgmt']; $held = 0; 1 },
+		upload_config => sub {
+			push @director_calls, ['upload_config', 'lab-mgmt'];
+			kill TERM => $$;
+			my $x = 0; $x++ for 1 .. 10;
+			$reached = 1;
+			return ('', 0, '');
+		},
+	);
+	my $env = make_env(
+		hooks       => {'cloud-config' => 1},
+		cloud       => "azs: []\n",
+		network_map => {subnets => {'ocfp-0' => {claims => {}}}},
+	);
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	my $err;
+	output_from {
+		eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud'); 1 } or $err = $@;
+	};
+	like($err // '', qr/^Terminated\b/, 'the second signal is raised');
+	ok(!$reached, 'and it stopped the work where it landed, instead of being held until the work ended');
+	ok(defined(call_index('clear_network_lock', 'lab-mgmt')), 'the lock is released');
+	ok(!$parent->network_locked_by_me, 'so none is left on the director');
+};
+
 subtest 'director config - an upload of both cloud configs takes the parent lock first, then the director\'s' => sub {
 	plan tests => 14;
 
