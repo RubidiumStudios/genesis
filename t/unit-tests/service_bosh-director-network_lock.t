@@ -7,6 +7,7 @@ use lib 't';
 use helper;
 use Test::More;
 use Test::Exception;
+use Test::Output;
 use POSIX qw(strftime);
 use JSON::PP ();
 use Sys::Hostname ();
@@ -54,6 +55,7 @@ package MockLockVault {
 
 	sub kv_read {
 		my ($self, $path) = @_;
+		die $self->{read_error} if $self->{read_error};
 		push @{$self->{log}}, ['read', $path];
 		my $rec = $self->{store}{$path};
 		return {
@@ -77,7 +79,21 @@ package MockLockVault {
 		$rec->{version}++;
 		push @{$self->{log}}, ['write', $path];
 		$self->_after;
+		# A failure after the vault accepted the write, such as a read that
+		# never catches up on an HA vault, or a signal
+		if (my $err = delete $self->{die_after_write}) { die $err }
 		return $self->{kv_version} == 2 ? $rec->{version} : 1;
+	}
+
+	# A refused delete dies, as Service::Vault::kv_delete does.
+	sub kv_delete {
+		my ($self, $path) = @_;
+		die "Could not delete $path from the vault: permission denied\n" if $self->{delete_refused};
+		$self->_before;
+		delete $self->{store}{$path};
+		push @{$self->{log}}, ['write', $path];
+		$self->_after;
+		return 1;
 	}
 
 	# The plain calls, as the check-then-set code used them
@@ -94,8 +110,12 @@ package MockLockVault {
 		$self->_after;
 		return $value;
 	}
+	# Service::Vault::clear asks has() first, and a vault that refuses the
+	# read answers that nothing is there, so nothing is deleted and no error
+	# is raised.
 	sub clear {
 		my ($self, $full) = @_;
+		return if $self->{delete_refused};
 		$self->_before;
 		delete $self->{plain}{$full};
 		delete $self->{store}{$full};
@@ -358,6 +378,131 @@ subtest 'clearing a stale lock that is still the same record' => sub {
 	my $seen = $bosh->check_network_lock;
 	ok($bosh->clear_network_lock(stale => $seen), 'the stale lock is cleared');
 	is($bosh->check_network_lock->{status}, 'unlocked', 'and the director is unlocked');
+};
+
+# ---------------------------------------------------------------------------
+# Failures around the lock
+# ---------------------------------------------------------------------------
+
+subtest 'a lock taken on a host that is not on UTC records the right time' => sub {
+	use Time::Piece ();
+	my $saved = $ENV{TZ};
+	for my $tz ('America/Chicago', 'Asia/Kolkata', 'UTC') {
+		local $ENV{TZ} = $tz;
+		POSIX::tzset();
+		my $vault = MockLockVault->new(kv_version => 2);
+		my $bosh = director($vault);
+		is(try_acquire($bosh), 'won', "$tz: the lock is taken");
+		my $at = $vault->{store}{$LOCK_PATH}{data}{at};
+		my $when = Time::Piece->strptime($at, '%Y-%m-%d %H:%M:%S %z');
+		cmp_ok(abs($when->epoch - time), '<=', 5, "$tz: the time it records is now, wherever it is read")
+			or diag "recorded $at";
+		my $status = $bosh->check_network_lock;
+		is($status->{status}, 'locked', "$tz: a lock just taken is neither stale nor waiting to be");
+		cmp_ok(abs($status->{age}), '<=', 5, "$tz: and is seconds old");
+	}
+	defined($saved) ? ($ENV{TZ} = $saved) : delete($ENV{TZ});
+	POSIX::tzset();
+};
+
+subtest 'a process that lost its lock while it waited is stopped before it changes anything' => sub {
+	my $vault = MockLockVault->new(kv_version => 2);
+	my ($first, $second) = (director($vault), director($vault));
+	is(try_acquire($first), 'won', 'the first process takes the lock');
+	ok($first->ensure_network_lock_held('upload the cloud config'), 'and may go on while it holds it');
+
+	# The first waits at a prompt past the stale timeout, and a second
+	# process clears the lock and takes it.
+	$vault->{store}{$LOCK_PATH}{data}{at} = strftime('%Y-%m-%d %H:%M:%S +0000', gmtime(time - 7200));
+	is(as_other_process(sub { try_acquire($second) }), 'won', 'the second takes over the stale lock');
+
+	my $user = $ENV{USER} // 'unknown';
+	throws_ok { $first->ensure_network_lock_held('upload the cloud config') }
+		qr/Cannot upload the cloud config.*lock-test.*no longer holds.*\Q$user\E\@.*stale.*\Q$LOCK_PATH\E/s,
+		'the first is stopped, and told who holds the lock now and why it lost it';
+
+	ok(as_other_process(sub { $second->clear_network_lock }), 'once the second releases it');
+	throws_ok { $first->ensure_network_lock_held('write the network claims') }
+		qr/Cannot write the network claims.*no longer holds.*nothing holds it now/s,
+		'the first is still stopped, and told that nothing holds the lock';
+};
+
+subtest 'a write that fails after it may have landed says the lock may be held, and how to clear it' => sub {
+	my $vault = MockLockVault->new(kv_version => 2);
+	my $bosh = director($vault);
+	$vault->{die_after_write} = "Wrote version 1 of $LOCK_PATH, but reads still returned version 0 after 10s.\n";
+	my $result = try_acquire($bosh);
+	like($result, qr/^refused: .*reads still returned version 0/s, 'the vault\'s failure is kept')
+		or diag $result;
+	like($result, qr/may now hold the network claims lock/, 'and it says this process may now hold the lock');
+	like($result, qr/safe rm \Q$LOCK_PATH\E/, 'and how to clear it');
+	ok($bosh->network_locked_by_me, 'which it does, so a release by its caller removes it');
+	ok($bosh->clear_network_lock, 'and the release does');
+
+	$vault->{die_after_write} = "Hung up\n";
+	my $signal = eval { quietly { $bosh->acquire_network_lock }; 1 } ? '' : $@;
+	like($signal, qr/^Hung up\b/, 'a signal during the write passes through as it came');
+	unlike($signal, qr/may now hold/, 'with nothing added to it');
+};
+
+subtest 'a release that fails is logged with the specifics and never dies' => sub {
+	my $vault = MockLockVault->new(kv_version => 2);
+	my $bosh = director($vault);
+	is(try_acquire($bosh), 'won', 'the lock is taken');
+
+	$vault->{read_error} = "Could not read $LOCK_PATH from the vault: Vault is sealed\n";
+	my ($result, $out);
+	lives_ok { $out = join('', output_from(sub { $result = $bosh->release_network_lock })) }
+		'a release against an unreadable vault does not die';
+	ok(!defined($result), 'it reports that the release failed');
+	like($out, qr/could not be released.*Vault is sealed/s, 'and logs why');
+	like($out, qr/lock-test/, 'naming the director');
+	like($out, qr/\Q$LOCK_PATH\E/, 'and where the lock is stored');
+	like($out, qr/stale/, 'and when other deploys can take it');
+
+	delete $vault->{read_error};
+	is(quietly { $bosh->release_network_lock }, 1, 'a release of this process\'s lock returns 1');
+	is($bosh->check_network_lock->{status}, 'unlocked', 'and removes it');
+	is(quietly { $bosh->release_network_lock }, 0, 'with nothing of ours to release, it returns 0');
+};
+
+subtest 'a release that finds the lock taken by another process reports that it released nothing' => sub {
+	my $vault = MockLockVault->new(kv_version => 2);
+	my $bosh = director($vault);
+	is(try_acquire($bosh), 'won', 'the lock is taken');
+
+	# Another process clears the lock as stale and takes it between the
+	# release's ownership check and its clear.
+	my $reads = 0;
+	my $real_read = \&MockLockVault::kv_read;
+	no warnings 'redefine';
+	local *MockLockVault::kv_read = sub {
+		my $read = $real_read->(@_);
+		if (++$reads == 1) {
+			my $rec = $vault->{store}{$LOCK_PATH};
+			$rec->{data} = {%{$rec->{data}}, token => 'another-process', pid => getppid()};
+			$rec->{version}++;
+		}
+		return $read;
+	};
+	my $result;
+	my $out = join('', output_from(sub { $result = $bosh->release_network_lock }));
+	is($result, 0, 'the release reports that nothing was released');
+	unlike($out, qr/done/, 'without saying it was done');
+	like($out, qr/no longer held by this process/, 'and says the lock was no longer this process\'s');
+	is($vault->{store}{$LOCK_PATH}{data}{token}, 'another-process', 'and the other process\'s lock is left alone');
+};
+
+subtest 'a kv v1 release the vault refuses is reported, not counted as released' => sub {
+	my $vault = MockLockVault->new(kv_version => 1);
+	my $bosh = director($vault);
+	no warnings 'once';
+	local $Service::BOSH::Director::NETWORK_LOCK_SETTLE_SECONDS = 0;
+	is(try_acquire($bosh), 'won', 'the lock is taken');
+	$vault->{delete_refused} = 1;
+	throws_ok { $bosh->clear_network_lock } qr/Could not delete.*permission denied/,
+		'the refused delete is a failure';
+	ok($bosh->network_locked_by_me, 'and the lock is still there, as the failure says');
 };
 
 done_testing;

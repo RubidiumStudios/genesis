@@ -291,14 +291,16 @@ sub bosh_configs_upload {
 	local $SIG{QUIT} = sub { die "Quit\n" };
 
 	eval {
+		# Each director goes on the list before its lock is taken, so that an
+		# acquire that wrote the lock and then failed is released below too.
 		if ($wants_cloud) {
-			_bosh_configs_acquire_network_lock($env, $bosh, $yes);
 			push @locked, $bosh;
+			_bosh_configs_acquire_network_lock($env, $bosh, $yes);
 		}
 		if ($wants_director) {
 			my $director = _bosh_configs_director_bosh($env);
-			_bosh_configs_acquire_network_lock($env, $director, $yes);
 			push @locked, $director;
+			_bosh_configs_acquire_network_lock($env, $director, $yes);
 		}
 
 		my ($configs, $notes) = _bosh_configs_provided($env, $bosh, %options);
@@ -396,12 +398,9 @@ sub bosh_configs_upload {
 		1;
 	};
 	my $err = $@;
-	for my $held (reverse @locked) {
-		next unless $held->network_locked_by_me;
-		info({pending => 1}, "[[  - >>releasing network claims lock on #M{%s} BOSH director...", $held->alias);
-		$held->clear_network_lock();
-		info "#G{done}";
-	}
+	# Each release logs its own failure rather than dying, so one that fails
+	# neither replaces the error above nor leaves the other director locked.
+	$_->release_network_lock for reverse @locked;
 	die $err if $err;
 	return 1;
 }
@@ -996,11 +995,9 @@ sub _bosh_configs_upload_cloud {
 	my ($env, $config) = @_;
 	my $bosh = $config->{bosh};
 
-	my $last_check = $bosh->check_network_lock;
-	bail(
-		"Network claims lock was lost since it was acquired (it may have become ".
-		"stale and been removed) -- cannot upload the cloud config!"
-	) if ($last_check->{status} eq 'unlocked');
+	# A prompt since the lock was taken can wait past its stale timeout, and
+	# another process may have cleared and taken it in the meantime.
+	$bosh->ensure_network_lock_held('upload the cloud config');
 
 	# Read before the director is changed, so a record that cannot be read
 	# stops the upload instead of leaving it half done.

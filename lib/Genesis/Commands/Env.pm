@@ -1258,22 +1258,7 @@ sub deploy {
 				# director and a real deploy rewrites them, so the deploy holds
 				# the network claims lock from here until the claims are
 				# submitted.  A dry run only reads, so it takes no lock.
-				my $lock_held = _deploy_network_claims_lock(
-					$env, dryrun => $dryrun, yes => $options{yes}
-				);
-
-				# While the lock is held, a signal has to unwind through the
-				# release below instead of killing the process with the lock
-				# still recorded on the director.  HUP is in the list because
-				# these deploys are run over ssh from a bastion, and a dropped
-				# session hangs up every process in it -- which is how a lock
-				# outlives the process that took it.
-				local $SIG{INT}  = $lock_held ? sub { die "Interrupted by user\n" } : $SIG{INT};
-				local $SIG{TERM} = $lock_held ? sub { die "Terminated\n" }         : $SIG{TERM};
-				local $SIG{HUP}  = $lock_held ? sub { die "Hung up\n" }            : $SIG{HUP};
-				local $SIG{QUIT} = $lock_held ? sub { die "Quit\n" }               : $SIG{QUIT};
-
-				eval {
+				_deploy_under_network_claims_lock($env, sub {
 					($cloud_config, $network_map) = $env->run_hook('cloud-config');
 
 					# TODO: Support multiple cloud configs
@@ -1309,10 +1294,9 @@ sub deploy {
 									"Upload the new cloud config to the BOSH director ('no' will cancel deploy)? [y|n]",
 									yes => $options{yes}, default => 1
 								) or bail "Aborted by user!";
-								my $last_check = $env->bosh->check_network_lock;
-								bail(
-									"Network claims lock was lost since last checked (may have become stale and removed) -- cannot proceed with deployment!"
-								) if ($last_check->{status} eq 'unlocked');
+								# The prompt above can wait past the lock's stale timeout,
+								# and another deploy may have cleared and taken it since.
+								$env->bosh->ensure_network_lock_held('upload the cloud config');
 								info(
 									"Uploading new cloud config to #M{%s} BOSH director...",
 									$env->bosh->{alias}
@@ -1359,37 +1343,10 @@ sub deploy {
 								"Network map would be updated on the BOSH director if not in dry-run mode."
 							);
 						} else {
-							# Update the network map on the director's exodus network data
-							$env->notify(
-								"submitting network claims for this deployment to #M{%s} BOSH director...",
-								$env->bosh->{alias}
-							);
-							my $network_path = $env->bosh->exodus_path.'/network';
-							eval {
-								# Strict, because a read that failed would look like a record
-								# with no claims, and the summary would show every claim as new
-								my $stored = $env->bosh->vault->get_path_strict($network_path) // {};
-								Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $network_map);
-								$env->bosh->vault->set_path(
-									$network_path, $network_map, flatten => 1, clear => 1
-								);
-								1;
-							};
-							if ($@) {
-								info("  - #R{failed to update network map}\n");
-								bail("\nCannot continue without a valid network map:\n\n%s", $@);
-							}
-							$env->bosh->clear_network_lock();
-							info("  - #G{network map successfully updated }#Gi{(lock removed)}\n");
+							_deploy_submit_network_claims($env, $network_map);
 						}
 					}
-				}; # end eval
-
-				# Release the lock on every exit path.  A successful deploy already
-				# released it when the network claims were submitted.
-				my $err = $@;
-				_deploy_release_network_claims_lock($env) if $lock_held;
-				die $err if $err;
+				}, dryrun => $dryrun, yes => $options{yes});
 			} else {
 				warning(
 					"Kit #C{%s} does not provide a cloud-config hook, so cloud configs ".
@@ -1968,15 +1925,78 @@ sub _deploy_confirm {
 # _deploy_release_network_claims_lock - release the network claims lock if this process still holds it {{{
 sub _deploy_release_network_claims_lock {
 	my ($env) = @_;
-	my $bosh = $env->bosh;
-	return 0 unless $bosh->network_locked_by_me;
+	# Logs a failed release rather than dying, so it never replaces the error
+	# that stopped the deploy.
+	return $env->bosh->release_network_lock;
+}
 
-	$env->notify("cleaning up...");
-	info({pending => 1},
-		"[[  - >>releasing network claims lock on #M{%s} BOSH director...", $bosh->alias
+# }}}
+# _deploy_under_network_claims_lock - run the cloud config step under the network claims lock, releasing it on every exit {{{
+sub _deploy_under_network_claims_lock {
+	my ($env, $code, %opts) = @_;
+	my $takes_lock = !$opts{dryrun};
+
+	# A signal has to unwind through the release below instead of killing the
+	# process with the lock still recorded on the director, and that holds
+	# from before the lock is written: a signal during the write, or during
+	# the wait that confirms it, would otherwise leave it there.  HUP is in
+	# the list because these deploys are run over ssh from a bastion, and a
+	# dropped session hangs up every process in it -- which is how a lock
+	# outlives the process that took it.
+	local $SIG{INT}  = $takes_lock ? sub { die "Interrupted by user\n" } : $SIG{INT};
+	local $SIG{TERM} = $takes_lock ? sub { die "Terminated\n" }         : $SIG{TERM};
+	local $SIG{HUP}  = $takes_lock ? sub { die "Hung up\n" }            : $SIG{HUP};
+	local $SIG{QUIT} = $takes_lock ? sub { die "Quit\n" }               : $SIG{QUIT};
+
+	my $ok = eval {
+		_deploy_network_claims_lock($env, dryrun => $opts{dryrun}, yes => $opts{yes});
+		$code->();
+		1;
+	};
+	my $err = $@;
+
+	# Released whenever this process holds it, which covers an acquire that
+	# wrote the lock and then failed.  A successful deploy already released
+	# it when the network claims were submitted.
+	_deploy_release_network_claims_lock($env) if $takes_lock;
+	die $err unless $ok;
+	return 1;
+}
+
+# }}}
+# _deploy_submit_network_claims - write this deployment's network claims to the director, then release the lock {{{
+sub _deploy_submit_network_claims {
+	my ($env, $network_map) = @_;
+	my $bosh = $env->bosh;
+	$env->notify(
+		"submitting network claims for this deployment to #M{%s} BOSH director...",
+		$bosh->alias
 	);
-	$bosh->clear_network_lock();
-	info "#G{done}";
+
+	# The claims replace the director's whole network record, so a deploy
+	# that lost the lock while it waited would overwrite the claims of the
+	# deploy that took it over.
+	$bosh->ensure_network_lock_held('write the network claims');
+
+	my $network_path = $bosh->exodus_path.'/network';
+	eval {
+		# Strict, because a read that failed would look like a record
+		# with no claims, and the summary would show every claim as new
+		my $stored = $bosh->vault->get_path_strict($network_path) // {};
+		Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $network_map);
+		$bosh->vault->set_path($network_path, $network_map, flatten => 1, clear => 1);
+		1;
+	} or do {
+		my $err = $@;
+		info("  - #R{failed to update network map}\n");
+		bail("\nCannot continue without a valid network map:\n\n%s", $err);
+	};
+
+	my $released = $bosh->clear_network_lock();
+	info($released
+		? "  - #G{network map successfully updated }#Gi{(lock removed)}\n"
+		: "  - #G{network map successfully updated}, #y{but the network claims lock was not removed, because it was no longer this deploy's to remove}\n"
+	);
 	return 1;
 }
 

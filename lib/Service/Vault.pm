@@ -973,7 +973,7 @@ sub kv_mount {
 	# the path may read it, and Vault and OpenBao both answer it.
 	my ($status, $reply, $reason) = $self->_kv_curl('GET', "sys/internal/ui/mounts/$path");
 	my $data = ref($reply) eq 'HASH' && ref($reply->{data}) eq 'HASH' ? $reply->{data} : undef;
-	if ($status == 200 && $data && defined($data->{path})) {
+	if ($status >= 200 && $status < 300 && $data && defined($data->{path})) {
 		my $type = $data->{type} // '';
 		bail(
 			"#C{%s} is on a #C{%s} secrets engine in the vault at #M{%s}, mounted at ".
@@ -1025,14 +1025,14 @@ sub kv_read {
 			data       => ref($data->{data}) eq 'HASH' ? $data->{data} : undef,
 			version    => $meta->{version} + 0,
 			kv_version => 2,
-		} if $status == 200 && $meta && defined($meta->{version});
+		} if $status >= 200 && $status < 300 && $meta && defined($meta->{version});
 		return {
 			data       => undef,
 			version    => $meta && defined($meta->{version}) ? $meta->{version} + 0 : 0,
 			kv_version => 2,
 		} if $status == 404;
 	} else {
-		return {data => $data // {}, version => undef, kv_version => 1} if $status == 200;
+		return {data => $data // {}, version => undef, kv_version => 1} if $status >= 200 && $status < 300;
 		return {data => undef, version => undef, kv_version => 1} if $status == 404;
 	}
 
@@ -1067,7 +1067,7 @@ sub kv_write {
 		? {data => $data, (defined($cas) ? (options => {cas => $cas + 0}) : ())}
 		: $data;
 	my ($status, $reply, $reason) = $self->_kv_curl('POST', _kv_data_uri($mount, $path), $payload);
-	unless ($status == 200) {
+	unless ($status >= 200 && $status < 300) {
 		return 0 if defined($cas) && $status == 400
 			&& $reason =~ /check-and-set parameter did not match/i;
 		bail(
@@ -1098,33 +1098,89 @@ sub kv_write {
 }
 
 # }}}
+# kv_delete - delete a whole secret, or the latest version of one on kv v2 {{{
+sub kv_delete {
+	my ($self, $path) = @_;
+	$path = _kv_clean_path($path);
+	my $mount = $self->kv_mount($path);
+
+	my ($status, undef, $reason) = $self->_kv_curl('DELETE', _kv_data_uri($mount, $path));
+	return 1 if $status >= 200 && $status < 300;
+	bail(
+		"Could not delete #C{%s} from the vault at #M{%s}: %s\n\n".
+		"Likely causes are that the vault is sealed or cannot be reached, or that ".
+		"the token has no delete access on that path%s.  Run #C{safe vault status} ".
+		"to check whether the vault is sealed, and check the token's policies with ".
+		"#C{safe vault token lookup}.",
+		$path, $self->{url}, $reason,
+		$mount->{version} == 2 ? sprintf(" (on a kv v2 mount the policy has to grant it on #C{%s})", _kv_data_uri($mount, $path)) : ''
+	);
+}
+
+# }}}
 # _kv_curl - one kv API call through safe curl, with the status and reason it came back with {{{
 sub _kv_curl {
 	my ($self, $method, $uri, $payload) = @_;
 
 	# safe curl takes a body only as an argument, which puts it on the
 	# command line, so nothing secret goes through here.
+	#
+	# Without --data-only, every safe Genesis accepts prints the whole
+	# response, status line first.  The status line is read rather than the
+	# exit code, because safe before 1.20 exits 0 whatever the vault
+	# answered, so a refusal there looks like success to anything else.
 	my ($out, $rc, $err) = $self->query(
 		{redact_output => 1, stderr => 0},
-		'curl', '--data-only', $method, "/$uri",
+		'curl', $method, "/$uri",
 		defined($payload) ? (encode_json($payload)) : ()
 	);
-	my $reply = defined($out) && $out =~ /\S/ ? eval {decode_json($out)} : undef;
-	$reply = undef unless ref($reply) eq 'HASH';
-	return (200, $reply, '') unless $rc;
+	my ($status, $status_text, $body) = _kv_http_response($out);
 
-	# safe exits non-zero for a refused request and names the status on
-	# stderr, as in "!! GET /secret/data/x: 404 Not Found".  A failure that
-	# never reached the vault has no status at all, and is 0 here.
-	$err = ($err // '') =~ s/\e\[[0-9;]*m//gr;
-	my ($status) = $err =~ /:\s+(\d{3})\b[^\n]*\s*$/;
-	my @errors = ref($reply) eq 'HASH' && ref($reply->{errors}) eq 'ARRAY'
+	unless (defined($status)) {
+		# Nothing came back from the vault, so the request never reached it
+		# or never got an answer; safe says why on stderr.
+		$err = ($err // '') =~ s/\e\[[0-9;]*m//gr;
+		my $reason = $err =~ /\S/ ? ($err =~ s/^\s*!!\s*//r =~ s/\s+$//r =~ s/\s+/ /gr)
+			: $rc ? "safe exited with code $rc and printed no response"
+			: "safe printed no response";
+		return (0, undef, $reason);
+	}
+
+	my $reply = $body =~ /\S/ ? eval {decode_json($body)} : undef;
+	$reply = undef unless ref($reply) eq 'HASH';
+	return ($status, $reply, '') if $status >= 200 && $status < 300;
+
+	my @errors = $reply && ref($reply->{errors}) eq 'ARRAY'
 		? grep {defined($_) && /\S/} @{$reply->{errors}} : ();
 	my $reason = @errors
 		? join('; ', map {s/\s+/ /gr =~ s/^ | $//gr} @errors)
-		: $err =~ /\S/ ? ($err =~ s/^\s*!!\s*//r =~ s/\s+$//r)
-		: "safe exited with code $rc";
-	return ($status // 0, $reply, $reason);
+		: "$method /$uri: $status $status_text" =~ s/\s+$//r;
+	return ($status, $reply, $reason);
+}
+
+# }}}
+# _kv_http_response - the status and body of a response as safe curl prints it {{{
+sub _kv_http_response {
+	my ($out) = @_;
+	$out = ($out // '') =~ s/^\s+//r;
+	my ($status, $text) = $out =~ m{\AHTTP/\d+(?:\.\d+)?[ \t]+(\d{3})(?:[ \t]+([^\r\n]*))?}
+		or return;
+
+	my ($head, $body) = split(/\r?\n\r?\n/, $out, 2);
+	$body //= '';
+	# Go prints a response that came chunked with its chunks, so they are
+	# joined back into the body.
+	if ($head =~ /^Transfer-Encoding:[ \t]*chunked[ \t]*\r?$/mi) {
+		my $joined = '';
+		while ($body =~ s/\A([0-9a-fA-F]+)[^\r\n]*\r?\n//) {
+			my $size = hex($1);
+			last unless $size;
+			$joined .= substr($body, 0, $size, '');
+			$body =~ s/\A\r?\n//;
+		}
+		$body = $joined;
+	}
+	return ($status + 0, $text // '', $body);
 }
 
 # }}}

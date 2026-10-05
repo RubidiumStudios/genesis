@@ -1754,8 +1754,9 @@ B<Examples:>
 Takes the network claims lock by writing a lock record to
 L</network_lock_path>.  The record holds the time, hostname, user, PID,
 environment name, and a token that marks it as this process's own (see
-L</_network_lock_token>).  A stale lock is taken over, with a note saying
-whose it was.
+L</_network_lock_token>).  The time is written in UTC with a C<+0000>
+offset, so that a reader on any host works out the same age for it.  A
+stale lock is taken over, with a note saying whose it was.
 
 How the write is made depends on the kv mount the lock is on:
 
@@ -1817,8 +1818,15 @@ attempts.
 
 =item *
 
-Vault failures from C<Service::Vault::kv_read> and
-C<Service::Vault::kv_write> propagate.
+Dies when the write of the lock fails, through L</_write_network_lock>.
+The vault may have accepted the write before the failure, so the message
+says that this process may now hold the lock, that it is released as the
+command exits, and how to check for it and clear it by hand.  A signal
+that arrives during the write passes through unchanged.
+
+=item *
+
+Vault failures from C<Service::Vault::kv_read> propagate.
 
 =back
 
@@ -1867,7 +1875,8 @@ On a kv v2 mount the lock is released by a check-and-set write of a record
 with no holder in it, because kv v2 has no check-and-set delete and a plain
 delete could remove a lock that another process wrote after the read.  On a
 kv v1 mount, which refuses a record with no fields, the lock secret is
-deleted.
+deleted with C<Service::Vault::kv_delete>, so that a delete the vault
+refuses is an error rather than a quiet no-op.
 
 B<Parameters:>
 
@@ -1896,7 +1905,9 @@ B<Errors:>
 
 Dies when the lock record changes between every read and write in five
 attempts, naming the director, the path, and the vault.  Vault failures
-from L</check_network_lock> and C<Service::Vault::kv_write> propagate.
+from L</check_network_lock>, C<Service::Vault::kv_write>, and
+C<Service::Vault::kv_delete> propagate, so a release the vault refuses is
+never counted as done.
 
 B<Examples:>
 
@@ -1906,6 +1917,75 @@ B<Examples:>
   my $current = $director->check_network_lock();
   $director->clear_network_lock(stale => $current) if $current->{status} eq 'stale';
   # Returns: 1, or 0 if another process took the lock in the meantime
+
+=head2 ensure_network_lock_held
+
+  $director->ensure_network_lock_held($action);
+
+Stops unless this process still holds the network claims lock.  Call it
+just before a step that the lock protects, such as uploading the cloud
+config or writing the network claims.  This process can lose the lock
+while it waits, most often at a prompt, for longer than the lock's stale
+timeout, because another deploy or C<bosh-configs upload> then clears the
+lock as stale and may take it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$action>
+
+What this process was about to do, as a phrase that follows "Cannot", such
+as C<'upload the cloud config'>.  The message uses it twice.
+
+=back
+
+B<Returns:> C<1> when this process holds the lock.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dies when this process no longer holds the lock.  The message names the
+action, the director, and whether the lock is now free or held by another
+process, and if so whose it is and when it was taken.  It also gives the
+likely cause, says to run the command again once the other process has
+finished, and names the lock's path and the C<safe get> command that shows
+it.
+
+=item *
+
+Vault failures from L</check_network_lock> propagate.
+
+=back
+
+B<Examples:>
+
+  $director->ensure_network_lock_held('upload the cloud config');
+  # Returns: 1, or dies when another process has taken the lock
+
+=head2 release_network_lock
+
+  my $released = $director->release_network_lock();
+
+Releases the network claims lock if this process holds it, for the cleanup
+that runs as a command finishes, fails, or is interrupted.  It never dies,
+so a failed release cannot replace the error that stopped the caller, nor
+stop the caller releasing its locks on other directors.  A release that
+fails is logged with the director, the reason, when other deploys can take
+the lock, the likely causes, and what to check.
+
+B<Returns:> C<1> when the lock was released.  C<0> when this process did
+not hold it, including when another process took it between the check and
+the clear, which is reported on the output.  C<undef> when the release
+failed and was logged.
+
+B<Examples:>
+
+  $director->release_network_lock();
+  # Returns: 1, 0 when there was nothing of ours to release, or undef on a logged failure
 
 =head2 run_on_instance
 
@@ -2221,6 +2301,57 @@ B<Examples:>
   # No env: explicit values pass straight through.
   my ($p, $v) = $class->_derive_exodus_pointers('x', undef, exodus_path => 'a/b');
   # Returns: ('a/b', undef)
+
+=head2 _write_network_lock
+
+  my $written = $self->_write_network_lock($path, $lock, $max_age, %opts);
+
+Writes the network claims lock record with C<Service::Vault::kv_write>.  A
+write can fail after the vault has accepted it, for instance when reads on
+an HA vault never catch up with the new version, and then this process may
+hold the lock without knowing it.  So a failure here stops with the
+original error and a note on how to find and clear the lock.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The lock's vault path, from L</network_lock_path>.
+
+=item C<$lock>
+
+The lock record to write.  Its C<hostname> and C<pid> are named in the
+note.
+
+=item C<$max_age>
+
+The stale timeout in seconds, which the note gives in minutes.  Defaults
+to C<1800>.
+
+=item C<%opts>
+
+Passed to C<Service::Vault::kv_write>, so C<cas> applies on kv v2.
+
+=back
+
+B<Returns:> What C<Service::Vault::kv_write> returned, which is C<0> for a
+refused check-and-set write.
+
+B<Errors:>
+
+Dies when the write fails, with the original error followed by a note
+that this process may now hold the lock.  The note says that the lock is
+released as the command exits, when it goes stale if that release fails,
+and the C<safe get> and C<safe rm> commands that check and clear it.  A
+signal (C<Interrupted by user>, C<Terminated>, C<Hung up>, or C<Quit>)
+passes through unchanged, for the caller's release to handle.
+
+B<Examples:>
+
+  my $version = $self->_write_network_lock($path, $lock, 1800, cas => 3);
+  # Returns: 4, or 0 when another process wrote first
 
 =head2 _network_lock_token
 

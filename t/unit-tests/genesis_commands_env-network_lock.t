@@ -18,6 +18,7 @@ use Test::Output;
 
 use Genesis;
 use_ok 'Genesis::Commands::Env';
+use Service::BOSH::Director;
 
 $ENV{NOCOLOR} = 1;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
@@ -25,19 +26,33 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 my @calls;   # what the helpers asked the director to do
 my $status;  # what check_network_lock reports
 my $held;    # whether this process holds the lock
+my @writes;  # what was written to the director's vault
 
 sub make_env {
+	my (%overrides) = @_;
 	@calls = ();
+	@writes = ();
 	$held = 0;
+	my $vault = mock "Mock::NetworkLock::Vault" => {
+		get_path_strict => sub { return {} },
+		set_path        => sub { my ($self, @args) = @_; push @calls, 'set_path'; push @writes, [@args]; 1 },
+	};
 	my $director = mock "Mock::NetworkLock::Director" => {
 		alias => 'parent',
+		exodus_path       => 'secret/exodus/parent/bosh',
+		network_lock_path => 'secret/exodus/parent/bosh/network-claim-lock',
+		vault             => sub { $vault },
 		check_network_lock => sub {
 			push @calls, 'check';
 			return {status => $status, description => 'about 11 minutes ago by ubuntu@bastion (env: ocf, pid: 229665)'};
 		},
 		acquire_network_lock => sub { push @calls, 'acquire'; $held = 1; 1 },
-		clear_network_lock   => sub { push @calls, 'clear';   $held = 0; 1 },
+		clear_network_lock   => sub { push @calls, 'clear';   my $was = $held; $held = 0; $was },
 		network_locked_by_me => sub { push @calls, 'mine';    $held },
+		# The real ones, which work through the calls above
+		ensure_network_lock_held => \&Service::BOSH::Director::ensure_network_lock_held,
+		release_network_lock     => \&Service::BOSH::Director::release_network_lock,
+		%overrides,
 	};
 	return mock "Mock::NetworkLock::Env" => {
 		name   => 'test-env',
@@ -148,6 +163,93 @@ subtest 'release clears only a lock this process holds' => sub {
 	output_from { $result = Genesis::Commands::Env::_deploy_release_network_claims_lock($env) };
 	is($result, 0, 'nothing is released when the lock is not ours');
 	is_deeply(\@calls, ['mine'], 'the director is only asked whose lock it is');
+};
+
+# ---------------------------------------------------------------------------
+# the deploy's hold on the lock
+# ---------------------------------------------------------------------------
+
+sub under_lock {
+	my ($env, $code, %opts) = @_;
+	my ($out, $err) = output_from {
+		Genesis::Commands::Env::_deploy_under_network_claims_lock($env, $code, dryrun => 0, yes => 0, %opts)
+	};
+	return $out.$err;
+}
+
+subtest 'a lock written by an acquire that then fails is still released' => sub {
+	$status = 'unlocked';
+	my $env = make_env(acquire_network_lock => sub { push @calls, 'acquire'; $held = 1; die "Hung up\n" });
+	my $ran = 0;
+	throws_ok { under_lock($env, sub { $ran = 1 }) } qr/^Hung up\b/, 'the failure is passed on as it came';
+	ok(!$ran, 'the work under the lock never ran');
+	ok(grep({$_ eq 'clear'} @calls), 'the lock the acquire wrote is released') or diag explain \@calls;
+	ok(!$held, 'so none of ours is left on the director');
+};
+
+subtest 'a signal that lands while the lock is being taken still releases it' => sub {
+	$status = 'unlocked';
+	for my $signal (qw/INT TERM HUP QUIT/) {
+		my $env = make_env(acquire_network_lock => sub { push @calls, 'acquire'; $held = 1; kill $signal => $$; 1 });
+		my $ran = 0;
+		throws_ok { under_lock($env, sub { $ran = 1 }) } qr/^(?:Interrupted by user|Terminated|Hung up|Quit)\b/,
+			"$signal stops the deploy";
+		ok(!$ran, "$signal: the work under the lock never ran");
+		ok(!$held, "$signal: and the lock is released");
+	}
+};
+
+subtest 'a dry run takes no lock and so releases none' => sub {
+	$status = 'unlocked';
+	my $env = make_env();
+	my $ran = 0;
+	under_lock($env, sub { $ran = 1 }, dryrun => 1);
+	ok($ran, 'the work runs');
+	ok(!grep({$_ eq 'acquire' || $_ eq 'clear' || $_ eq 'mine'} @calls), 'with no lock taken, asked about, or released')
+		or diag explain \@calls;
+};
+
+subtest 'a release that fails does not hide the error that stopped the deploy' => sub {
+	$status = 'unlocked';
+	my $env = make_env(clear_network_lock => sub { push @calls, 'clear'; die "Could not write the lock: Vault is sealed\n" });
+	my $err;
+	my ($out, $stderr) = output_from {
+		eval {
+			Genesis::Commands::Env::_deploy_under_network_claims_lock(
+				$env, sub { die "the cloud config upload failed\n" }, dryrun => 0, yes => 0
+			);
+			1;
+		} or $err = $@;
+	};
+	like($err // '', qr/^the cloud config upload failed\b/, 'the error that stopped the deploy is the one passed on');
+	like($out.$stderr, qr/could not be released.*Vault is sealed/s, 'and the failed release is logged, with why');
+	like($out.$stderr, qr/network-claim-lock/, 'naming where the lock is stored');
+};
+
+subtest 'a deploy that lost its lock while it waited writes no claims' => sub {
+	$status = 'locked';
+	my $env = make_env();   # holds no lock: another process took it over
+	throws_ok {
+		output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}) }
+	} qr/Cannot write the network claims.*parent.*no longer holds.*ubuntu\@bastion/s,
+		'the write is refused, naming who holds the lock now';
+	ok(!grep({$_ eq 'set_path'} @calls), 'and nothing is written') or diag explain \@calls;
+	ok(!grep({$_ eq 'clear'} @calls), 'and the other process\'s lock is left alone');
+};
+
+subtest 'the release after the claims are written reports what it did' => sub {
+	$status = 'locked';
+	my $env = make_env();
+	$held = 1;
+	my ($out, $err) = output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}) };
+	is(scalar(@writes), 1, 'the claims are written while the lock is held');
+	like($out.$err, qr/\(lock removed\)/, 'and the release that removed the lock says so');
+
+	$env = make_env(clear_network_lock => sub { push @calls, 'clear'; 0 });
+	$held = 1;
+	($out, $err) = output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}) };
+	unlike($out.$err, qr/\(lock removed\)/, 'a release that removed nothing does not claim it did');
+	like($out.$err, qr/lock was not removed/, 'and says the lock was not removed');
 };
 
 # ---------------------------------------------------------------------------

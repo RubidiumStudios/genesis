@@ -18,6 +18,7 @@ use JSON::PP;
 
 use Genesis;
 use Genesis::Commands::Bosh;
+use Service::BOSH::Director;
 
 $ENV{NOCOLOR} = 1;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
@@ -90,6 +91,10 @@ sub make_director {
 		acquire_network_lock => sub { push @director_calls, ['acquire_network_lock', $alias]; $locked = 1 },
 		network_locked_by_me => sub { $locked },
 		clear_network_lock   => sub { push @director_calls, ['clear_network_lock', $alias]; $locked = 0; 1 },
+		# The real ones, which work through the calls above
+		ensure_network_lock_held => \&Service::BOSH::Director::ensure_network_lock_held,
+		release_network_lock     => \&Service::BOSH::Director::release_network_lock,
+		network_lock_path    => "secret/exodus/$alias/bosh/network-claim-lock",
 		exodus_path          => "secret/exodus/$alias/bosh",
 		vault                => sub { $own_vault },
 		%overrides,
@@ -947,6 +952,68 @@ subtest 'director config - upload refuses when another process holds the directo
 	ok(!defined(call_index('run_hook')), 'no hook runs');
 	ok(!defined(call_index('upload_config')), 'nothing is uploaded');
 	ok(!defined(call_index('clear_network_lock')), 'the other process\'s lock is left alone');
+};
+
+subtest 'bosh_configs_upload - a lock written by an acquire that then fails is still released' => sub {
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	my $mine = 0;
+	my $director = make_director('parent', {},
+		acquire_network_lock => sub { push @director_calls, ['acquire_network_lock', 'parent']; $mine = 1; die "Hung up\n" },
+		network_locked_by_me => sub { $mine },
+		clear_network_lock   => sub { push @director_calls, ['clear_network_lock', 'parent']; $mine = 0; 1 },
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: []\n", network_map => {subnets => {}});
+	@director_calls = ();
+	throws_ok {
+		output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1) }
+	} qr/^Hung up\b/, 'the failure is passed on as it came';
+	ok(defined(call_index('clear_network_lock', 'parent')), 'the lock the acquire wrote is released')
+		or diag explain \@director_calls;
+	ok(!$mine, 'so none of ours is left on the director');
+};
+
+subtest 'bosh_configs_upload - a release that fails keeps the original error and still releases the other director' => sub {
+	@director_calls = ();
+	my $self_bosh = make_director('lab-ocf', {},
+		clear_network_lock => sub { push @director_calls, ['clear_network_lock', 'lab-ocf']; die "Could not write the lock: Vault is sealed\n" },
+	);
+	my $parent = make_director('lab-mgmt', {},
+		upload_config => sub {
+			my ($self, @args) = @_;
+			push @director_calls, ['upload_config', 'lab-mgmt', @args[1,2]];
+			return ('', 1, 'director refused the cloud config');
+		},
+	);
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	my $err;
+	my ($out, $stderr) = output_from {
+		eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud'); 1 } or $err = $@;
+	};
+	like($err // '', qr/director refused the cloud config/, 'the upload\'s own error is the one passed on');
+	like($out.$stderr, qr/lab-ocf.*could not be released.*Vault is sealed/s, 'the failed release is logged, with why');
+	ok(defined(call_index('clear_network_lock', 'lab-mgmt')), 'and the parent director\'s lock is still released')
+		or diag explain \@director_calls;
+	ok(!$parent->network_locked_by_me, 'so no lock of ours is left on the parent');
+};
+
+subtest '_bosh_configs_upload_cloud - an upload that lost its lock while it waited is stopped' => sub {
+	my $director = make_director('parent', {},
+		network_locked_by_me => sub { 0 },
+		check_network_lock   => sub { return {status => 'locked', description => 'about 2 minutes ago by ops@jumpbox (env: other, pid: 99)'} },
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1});
+	@director_calls = ();
+	throws_ok {
+		output_from {
+			Genesis::Commands::Bosh::_bosh_configs_upload_cloud($env, {
+				bosh => $director, name => 'test-env.cf', content => "azs: []\n", network_map => {subnets => {}},
+			})
+		}
+	} qr/Cannot upload the cloud config.*parent.*no longer holds.*ops\@jumpbox/s,
+		'the upload is refused, naming who holds the lock now';
+	ok(!defined(call_index('upload_config')), 'nothing is uploaded');
+	ok(!defined(call_index('set_path')), 'and no claims are written');
 };
 
 subtest 'director config - compare shows the diff without a lock or an exodus write' => sub {

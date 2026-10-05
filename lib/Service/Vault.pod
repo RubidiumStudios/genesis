@@ -1641,6 +1641,52 @@ B<Examples:>
   $vault->kv_write('secret/handshake', { knock => 'knock' });
   # Returns: 1 on kv v1, or the new version on kv v2
 
+=head2 kv_delete
+
+  my $ok = $vault->kv_delete($path);
+
+Deletes a secret through the kv API, using C<safe curl>.  On a kv v1 mount
+the secret is gone afterwards.  On a kv v2 mount the latest version is
+deleted, which reads as missing from then on, while the metadata keeps its
+version number, so a later check-and-set write still has to name it.
+
+Unlike C<safe rm>, which reports success whatever the vault answered, this
+says when the vault refused the delete.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+A whole secret path, as for L</kv_mount>.
+
+=back
+
+B<Returns:> C<1> when the vault accepted the delete, including when there
+was nothing at the path.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dies when the vault refuses the delete or cannot be reached.  The message
+names the path, the reason, and the likely causes, including the kv v2 data
+path that a policy has to grant.
+
+=item *
+
+Dies as L</kv_mount> does when the mount cannot be worked out.
+
+=back
+
+B<Examples:>
+
+  $vault->kv_delete('secret/exodus/lab/bosh/network_lock');
+  # Returns: 1
+
 =head2 token_info
 
   my $info = $vault->token_info();
@@ -2562,9 +2608,12 @@ B<Examples:>
 
   my ($status, $reply, $reason) = $self->_kv_curl($method, $uri, $payload);
 
-Makes one kv API call with C<safe curl --data-only>, and works out the HTTP
-status it came back with.  safe exits non-zero for a refused request and
-names the status on stderr, as in C<!! GET /secret/data/x: 404 Not Found>.
+Makes one kv API call with C<safe curl>, and works out the HTTP status it
+came back with from the status line of the response that safe prints.
+Every safe that Genesis accepts prints the whole response, status line
+first, when it is not given C<--data-only>.  The status line is read rather
+than the exit code, because safe before 1.20 exits 0 whatever the vault
+answered, which would make a refusal look like success.
 
 C<safe curl> takes a body only as an argument, so C<$payload> ends up on
 the command line, where other users of the host can see it.  Nothing
@@ -2588,15 +2637,44 @@ Optional.  A hashref, sent as the JSON body.
 
 =back
 
-B<Returns:> A three-element list of the status (C<200> on success, the
-refused status, or C<0> when the request never reached the vault), the
-decoded JSON reply or C<undef>, and a one-line reason taken from the
-reply's C<errors> or from safe's stderr.
+B<Returns:> A three-element list of the status (the vault's status, or
+C<0> when no response came back), the decoded JSON reply or C<undef>, and
+a one-line reason.  The reason is empty for a 2xx status.  Otherwise it is
+taken from the reply's C<errors>, or from the status line, or, when no
+response came back, from safe's stderr or exit code.
 
 B<Examples:>
 
   my ($status, $reply, $reason) = $self->_kv_curl('GET', 'secret/data/x');
   # Returns: (404, { errors => [] }, 'GET /secret/data/x: 404 Not Found')
+
+=head2 _kv_http_response
+
+  my ($status, $text, $body) = _kv_http_response($out);
+
+Splits a response, as C<safe curl> prints it, into its status, status text,
+and body.  A body that came chunked is joined back together, because Go
+prints it with its chunk sizes.  A function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$out>
+
+What C<safe curl> printed on stdout, starting with a status line such as
+C<HTTP/1.1 404 Not Found> or C<HTTP/2.0 200 OK>.
+
+=back
+
+B<Returns:> A three-element list of the numeric status, the status text,
+and the body, or an empty list when C<$out> does not start with a status
+line.
+
+B<Examples:>
+
+  _kv_http_response("HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n{\"errors\":[]}");
+  # Returns: (404, 'Not Found', '{"errors":[]}')
 
 =head2 _kv_clean_path
 

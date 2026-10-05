@@ -992,7 +992,10 @@ sub acquire_network_lock {
 		) if $current->{status} eq 'stale';
 
 		my $lock = {
-			at       => strftime('%Y-%m-%d %H:%M:%S %z', gmtime()),
+			# UTC, labelled as UTC: POSIX's %z gives the local offset even
+			# for a gmtime() value, which made a lock taken west of UTC look
+			# hours old, and one taken east of it look hours away.
+			at       => strftime('%Y-%m-%d %H:%M:%S +0000', gmtime()),
 			hostname => Sys::Hostname::hostname(),
 			user     => $ENV{USER} // 'unknown',
 			pid      => $$,
@@ -1005,7 +1008,7 @@ sub acquire_network_lock {
 		# write gets the lock.  Any other is refused by the vault, and reads
 		# again to find out who has it.
 		if (($current->{kv_version} // 1) == 2) {
-			return $lock if $self->vault->kv_write($path, $lock, cas => $current->{version});
+			return $lock if $self->_write_network_lock($path, $lock, $opts{max_lock_age}, cas => $current->{version});
 			$lost_race = 'cas';
 			next;
 		}
@@ -1017,7 +1020,7 @@ sub acquire_network_lock {
 		# it lost.  It narrows the race rather than closing it, since a writer
 		# slower than the wait can still land after the read-back.
 		$self->_warn_network_lock_not_atomic($current);
-		$self->vault->kv_write($path, $lock);
+		$self->_write_network_lock($path, $lock, $opts{max_lock_age});
 		select(undef, undef, undef, $NETWORK_LOCK_SETTLE_SECONDS)
 			if $NETWORK_LOCK_SETTLE_SECONDS > 0;
 		my $now = $self->check_network_lock(%opts);
@@ -1086,9 +1089,9 @@ sub clear_network_lock {
 			return 1 if $self->vault->kv_write($path, {}, cas => $current->{version});
 			next;
 		}
-		# kv v1 refuses a record with no fields, so the lock is deleted instead.
-		$self->vault->clear($path);
-		return 1;
+		# kv v1 refuses a record with no fields, so the lock is deleted instead,
+		# with a delete whose refusal is an error rather than a quiet no-op.
+		return $self->vault->kv_delete($path) ? 1 : 0;
 	}
 
 	bail(
@@ -1099,6 +1102,85 @@ sub clear_network_lock {
 		"this director are taking and releasing the lock in quick succession.  Check ".
 		"#C{safe get %s} to see who holds it now.",
 		$self->alias, $path, $self->vault->url, $path
+	);
+}
+# }}}
+
+# ensure_network_lock_held - stop unless this process still holds the network claims lock {{{
+sub ensure_network_lock_held {
+	my ($self, $action) = @_;
+	return 1 if $self->network_locked_by_me;
+
+	my $now = $self->check_network_lock;
+	my $path = $now->{path} // $self->network_lock_path;
+	my $holder = $now->{status} eq 'unlocked'
+		? "and nothing holds it now"
+		: sprintf("and it is now held by another process, locked %s", $now->{description} // 'by another process');
+	bail(
+		"Cannot %s on the #M{%s} BOSH director: this process no longer holds the ".
+		"network claims lock, %s.\n\n".
+		"This usually means this process waited, most often at a prompt, for longer ".
+		"than the lock's stale timeout, and another deploy or #C{bosh-configs upload} ".
+		"cleared the lock as stale.  Genesis stopped before it could %s, so that it ".
+		"would not overwrite what the other process is doing.  Run the command again ".
+		"once the other process has finished.  The lock is stored at #C{%s}, and ".
+		"#C{safe get %s} shows who holds it.",
+		$action, $self->alias, $holder, $action, $path, $path
+	);
+}
+# }}}
+
+# release_network_lock - release the network claims lock if this process holds it, logging rather than dying on failure {{{
+sub release_network_lock {
+	my ($self) = @_;
+	my $released = eval {
+		my $cleared = 0;
+		if ($self->network_locked_by_me) {
+			info({pending => 1}, "[[  - >>releasing network claims lock on #M{%s} BOSH director...", $self->alias);
+			# The lock can change hands between the check and the clear, and
+			# then it is someone else's to keep.
+			$cleared = $self->clear_network_lock ? 1 : 0;
+			info($cleared ? "#G{done}" : "#Y{no longer held by this process}");
+		}
+		$cleared;
+	};
+	return $released if defined($released);
+
+	# A failed release must not replace the error that stopped the caller,
+	# nor stop it releasing locks on other directors, so it is logged here.
+	my $err = ($@ // '') =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/\s+$//r;
+	error(
+		"The network claims lock on the #M{%s} BOSH director could not be released: %s\n\n".
+		"Other deploys on this director will wait for it until it goes stale, which ".
+		"is 30 minutes after it was taken, or sooner once this process has exited when ".
+		"they run on this same host; the next deploy then offers to clear it.  This ".
+		"usually means the vault became unreachable or sealed, or the token expired.  ".
+		"Check with #C{safe vault status}, and #C{safe get %s} shows the lock.",
+		$self->alias, $err, $self->network_lock_path
+	);
+	return undef;
+}
+# }}}
+
+# _write_network_lock - write the lock, saying so when a failure may have left it held {{{
+sub _write_network_lock {
+	my ($self, $path, $lock, $max_age, %opts) = @_;
+	my $written = eval { $self->vault->kv_write($path, $lock, %opts) };
+	return $written unless $@;
+
+	my $err = $@;
+	# A signal passes through as it came, for the caller's release to handle.
+	die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
+	$err = $err =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/\s+$//r;
+	bail(
+		"%s\n\n".
+		"This happened while writing the network claims lock for the #M{%s} BOSH ".
+		"director.  If the vault accepted the write first, this process may now hold the ".
+		"network claims lock.  Genesis releases it as this command exits; if that ".
+		"release fails too, the lock goes stale %s minutes after it was taken.  To ".
+		"clear it sooner, check that #C{safe get %s} shows host %s and pid %s, then run ".
+		"#C{safe rm %s}.",
+		$err, $self->alias, int(($max_age // 1800) / 60), $path, $lock->{hostname}, $lock->{pid}, $path
 	);
 }
 # }}}

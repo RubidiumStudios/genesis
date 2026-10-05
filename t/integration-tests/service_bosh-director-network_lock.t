@@ -104,6 +104,8 @@ subtest 'kv_read and kv_write against kv v1' => sub {
 		'kv v1 refuses a record with no fields, which is why a released lock is deleted there';
 	throws_ok { $vault->kv_write($path, {a => 2}, cas => 0) } qr/kv v1 has no check-and-set/,
 		'a check-and-set write is refused before anything is sent';
+	is($vault->kv_delete($path), 1, 'a delete succeeds');
+	is($vault->kv_read($path)->{data}, undef, 'and the secret is gone');
 };
 
 subtest 'kv v2: two acquirers that both read a free lock before either writes' => sub {
