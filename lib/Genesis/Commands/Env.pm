@@ -1895,7 +1895,14 @@ sub _deploy_network_claims_lock {
 			);
 		} else {
 			bail(
-				"Network claims are currently locked -- cannot proceed with deployment!"
+				"Network claims are currently locked -- cannot proceed with deployment!\n\n".
+				"The network claims lock on the #M{%s} BOSH director is held %s%s.  This ".
+				"usually means another deploy, or a #C{bosh-configs upload}, against this ".
+				"director is running now or is waiting at a prompt.  Wait for it to finish, ".
+				"then deploy again.  If no such process is running, the lock goes stale 30 ".
+				"minutes after it was taken, and the next deploy offers to clear it.",
+				$bosh->alias, $current_lock->{description} // 'by another process',
+				defined($current_lock->{path}) ? sprintf(", and is stored at #C{%s}", $current_lock->{path}) : ''
 			);
 		}
 	} elsif ($current_lock->{status} eq 'stale') {
@@ -1920,9 +1927,13 @@ sub _deploy_network_claims_lock {
 			);
 		}
 		unless ($opts{dryrun}) {
-			$bosh->clear_network_lock;
+			# Only the stale lock shown above is cleared; one that another
+			# process has taken since is left for the acquire below to refuse.
+			my $cleared = $bosh->clear_network_lock(stale => $current_lock);
 			$env->notify("checking cloud configs for #C{%s} deployment (continued)...", $env->name);
-			info "[[  - >>stale network claims lock cleared.";
+			info($cleared
+				? "[[  - >>stale network claims lock cleared."
+				: "[[  - >>stale network claims lock was already cleared or taken by another process.");
 		}
 	}
 

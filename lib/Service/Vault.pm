@@ -959,6 +959,219 @@ sub needs_write_confirmation {
 }
 
 # }}}
+# kv_mount - the kv secrets engine a path is on, and which version of it {{{
+sub kv_mount {
+	my ($self, $path) = @_;
+	$path = _kv_clean_path($path);
+
+	my $known = $self->{__kv_mounts} //= {};
+	for my $mount (sort {length($b) <=> length($a)} CORE::keys %$known) {
+		return $known->{$mount} if index("$path/", $mount) == 0;
+	}
+
+	# The endpoint the vault CLI itself asks: any token with any access to
+	# the path may read it, and Vault and OpenBao both answer it.
+	my ($status, $reply, $reason) = $self->_kv_curl('GET', "sys/internal/ui/mounts/$path");
+	my $data = ref($reply) eq 'HASH' && ref($reply->{data}) eq 'HASH' ? $reply->{data} : undef;
+	if ($status == 200 && $data && defined($data->{path})) {
+		my $type = $data->{type} // '';
+		bail(
+			"#C{%s} is on a #C{%s} secrets engine in the vault at #M{%s}, mounted at ".
+			"#C{%s}, but only a kv secrets engine can hold it.\n\n".
+			"This usually means the path was mistyped, or that a mount configured for ".
+			"Genesis (an exodus or secrets mount) names the wrong engine.  Run ".
+			"#C{safe vault secrets list} to see what is mounted where.",
+			$path, $type || 'unknown', $self->{url}, $data->{path}
+		) unless $type eq 'kv' || $type eq 'generic';
+		my $options = ref($data->{options}) eq 'HASH' ? $data->{options} : {};
+		my $mount = $data->{path} =~ s{^/+}{}r;
+		$mount .= '/' unless $mount =~ m{/$};
+		return $known->{$mount} = {
+			path    => $mount,
+			type    => $type,
+			version => ($options->{version} // '1') eq '2' ? 2 : 1,
+		};
+	}
+
+	# A vault from before kv v2 does not have the endpoint, and every kv
+	# mount it has is a v1 one.
+	return {path => undef, type => 'kv', version => 1} if $status == 404;
+
+	bail(
+		"Could not tell which kv mount #C{%s} is on in the vault at #M{%s}: %s\n\n".
+		"Likely causes are that the vault is sealed or cannot be reached, or that ".
+		"the token has no access at all to that path.  Run #C{safe curl GET ".
+		"/sys/internal/ui/mounts/%s} with the same token to see the vault's answer, ".
+		"and #C{safe vault status} to check whether the vault is sealed.",
+		$path, $self->{url}, $reason, $path
+	);
+}
+
+# }}}
+# kv_read - read a whole secret, with the version a check-and-set write has to name {{{
+sub kv_read {
+	my ($self, $path) = @_;
+	$path = _kv_clean_path($path);
+	my $mount = $self->kv_mount($path);
+
+	my ($status, $reply, $reason) = $self->_kv_curl('GET', _kv_data_uri($mount, $path));
+	my $data = ref($reply) eq 'HASH' && ref($reply->{data}) eq 'HASH' ? $reply->{data} : undef;
+	if ($mount->{version} == 2) {
+		# A deleted or destroyed latest version still has a number, and still
+		# answers 404, with that number in its metadata.  A secret that was
+		# never written answers 404 with no metadata, and is version 0.
+		my $meta = $data && ref($data->{metadata}) eq 'HASH' ? $data->{metadata} : undef;
+		return {
+			data       => ref($data->{data}) eq 'HASH' ? $data->{data} : undef,
+			version    => $meta->{version} + 0,
+			kv_version => 2,
+		} if $status == 200 && $meta && defined($meta->{version});
+		return {
+			data       => undef,
+			version    => $meta && defined($meta->{version}) ? $meta->{version} + 0 : 0,
+			kv_version => 2,
+		} if $status == 404;
+	} else {
+		return {data => $data // {}, version => undef, kv_version => 1} if $status == 200;
+		return {data => undef, version => undef, kv_version => 1} if $status == 404;
+	}
+
+	bail(
+		"Could not read #C{%s} from the vault at #M{%s}: %s\n\n".
+		"Likely causes are that the vault is sealed or cannot be reached, or that ".
+		"the token has no read access on that path.  Run #C{safe get %s} with the ".
+		"same token to see which, and #C{safe vault status} to check whether the ".
+		"vault is sealed.",
+		$path, $self->{url}, $reason, $path
+	);
+}
+
+# }}}
+# kv_write - replace a whole secret, optionally only if it is still the version that was read {{{
+sub kv_write {
+	my ($self, $path, $data, %opts) = @_;
+	$path = _kv_clean_path($path);
+	my $mount = $self->kv_mount($path);
+	my $v2 = $mount->{version} == 2;
+	my $cas = $opts{cas};
+
+	bug(
+		"kv_write() was asked for a check-and-set write to #C{%s}, which is on a ".
+		"kv v1 mount, and kv v1 has no check-and-set",
+		$path
+	) if defined($cas) && !$v2;
+	bug("kv_write() was given a check-and-set version that is not a whole number: %s", $cas)
+		if defined($cas) && $cas !~ /^\d+$/;
+
+	my $payload = $v2
+		? {data => $data, (defined($cas) ? (options => {cas => $cas + 0}) : ())}
+		: $data;
+	my ($status, $reply, $reason) = $self->_kv_curl('POST', _kv_data_uri($mount, $path), $payload);
+	unless ($status == 200) {
+		return 0 if defined($cas) && $status == 400
+			&& $reason =~ /check-and-set parameter did not match/i;
+		bail(
+			"Could not write #C{%s} to the vault at #M{%s}: %s\n\n".
+			"Likely causes are that the vault is sealed or cannot be reached, or that ".
+			"the token has no create or update access on that path%s.  Run ".
+			"#C{safe vault status} to check whether the vault is sealed, and check the ".
+			"token's policies with #C{safe vault token lookup}.",
+			$path, $self->{url}, $reason,
+			$v2 ? sprintf(" (on a kv v2 mount the policy has to grant it on #C{%s})", _kv_data_uri($mount, $path)) : ''
+		);
+	}
+	return 1 unless $v2;
+
+	my $version = ref($reply) eq 'HASH' && ref($reply->{data}) eq 'HASH'
+		? $reply->{data}{version} : undef;
+	bail(
+		"Wrote #C{%s} to the vault at #M{%s}, but the vault did not say which version ".
+		"the write made, so it cannot be confirmed.\n\n".
+		"A kv v2 mount always reports the version it wrote, so this usually means ".
+		"something between Genesis and the vault (a proxy, or a different engine at ".
+		"that mount) answered instead.  Check the secret with #C{safe get %s}.",
+		$path, $self->{url}, $path
+	) unless defined($version) && $version =~ /^\d+$/;
+
+	$self->_confirm_kv_version($path, $version);
+	return $version + 0;
+}
+
+# }}}
+# _kv_curl - one kv API call through safe curl, with the status and reason it came back with {{{
+sub _kv_curl {
+	my ($self, $method, $uri, $payload) = @_;
+
+	# safe curl takes a body only as an argument, which puts it on the
+	# command line, so nothing secret goes through here.
+	my ($out, $rc, $err) = $self->query(
+		{redact_output => 1, stderr => 0},
+		'curl', '--data-only', $method, "/$uri",
+		defined($payload) ? (encode_json($payload)) : ()
+	);
+	my $reply = defined($out) && $out =~ /\S/ ? eval {decode_json($out)} : undef;
+	$reply = undef unless ref($reply) eq 'HASH';
+	return (200, $reply, '') unless $rc;
+
+	# safe exits non-zero for a refused request and names the status on
+	# stderr, as in "!! GET /secret/data/x: 404 Not Found".  A failure that
+	# never reached the vault has no status at all, and is 0 here.
+	$err = ($err // '') =~ s/\e\[[0-9;]*m//gr;
+	my ($status) = $err =~ /:\s+(\d{3})\b[^\n]*\s*$/;
+	my @errors = ref($reply) eq 'HASH' && ref($reply->{errors}) eq 'ARRAY'
+		? grep {defined($_) && /\S/} @{$reply->{errors}} : ();
+	my $reason = @errors
+		? join('; ', map {s/\s+/ /gr =~ s/^ | $//gr} @errors)
+		: $err =~ /\S/ ? ($err =~ s/^\s*!!\s*//r =~ s/\s+$//r)
+		: "safe exited with code $rc";
+	return ($status // 0, $reply, $reason);
+}
+
+# }}}
+# _kv_clean_path - a secret path as the kv API wants it {{{
+sub _kv_clean_path {
+	my ($path) = @_;
+	bug("A kv secret path was not given") unless defined($path) && $path =~ /\S/;
+	bug("A kv secret path names a whole secret, not a key: %s", $path) if $path =~ /:/;
+	$path =~ s{/{2,}}{/}g;
+	$path =~ s{^/+|/+$}{}g;
+	return $path;
+}
+
+# }}}
+# _kv_data_uri - where the kv API reads and writes a secret's data {{{
+sub _kv_data_uri {
+	my ($mount, $path) = @_;
+	return $path unless $mount->{version} == 2;
+	return $mount->{path}.'data/'.substr($path, length($mount->{path}));
+}
+
+# }}}
+# _confirm_kv_version - wait until reads return a version at least as new as the one written {{{
+sub _confirm_kv_version {
+	my ($self, $path, $version) = @_;
+	return unless $self->needs_write_confirmation;
+
+	my $timeout = _confirm_timeout();
+	my $deadline = gettimeofday() + $timeout;
+	my $seen;
+	while (1) {
+		$seen = $self->kv_read($path)->{version} // 0;
+		return if $seen >= $version;
+		last if gettimeofday() >= $deadline;
+		select(undef, undef, undef, 0.25);
+	}
+	bail(
+		"Wrote version %s of #C{%s} to the vault at #M{%s}, but reads still ".
+		"returned version %s after %ss.\n\n".
+		"Whatever reads next would act on the older version.  This usually means ".
+		"the vault target is a standby node whose reads lag the leader; pointing it ".
+		"at the cluster leader avoids it.",
+		$version, $path, $self->{url}, $seen, $timeout
+	);
+}
+
+# }}}
 # token_info - return the token information for the active user token {{{
 sub token_info {
 	my $self = shift;

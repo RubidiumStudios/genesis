@@ -33,6 +33,7 @@ unit-tests/service_github-mocked.t
 unit-tests/service_bosh-base.t
 unit-tests/service_bosh-create_env_proxy.t
 unit-tests/service_bosh-director.t
+unit-tests/service_bosh-director-network_lock.t  # network claims lock: check-and-set on kv v2, read-back on kv v1
 unit-tests/service_bosh-stemcell.t
 unit-tests/genesis-run_exit_status_under_trace.t  # run() keeps the exit code when tracing is on
 unit-tests/genesis-spruce_diff_exit_codes.t   # spruce diff's exit code survives script(1) on macOS and Linux
@@ -210,6 +211,7 @@ unit-tests/service_git-remote_branch.t                     # remote_branch helpe
 unit-tests/service_github-pr.t                             # Github PR helpers
 unit-tests/service_vault-max_json_string_value_length.t    # JSON value length guard
 unit-tests/service_vault-write_confirmation.t              # HA read-back confirmation
+unit-tests/service_vault-kv_versioned.t                    # whole-secret kv reads and check-and-set writes via safe curl
 unit-tests/service_vault_remote-reauth.t                   # Remote vault re-auth
 unit-tests/service_vault_remote-token_renewer.t            # Background token renewer
 unit-tests/service_vault_local-port_selection.t            # Local vault free-port scan
@@ -244,6 +246,7 @@ integration-tests/genesis_top-complete.t    # Genesis::Top with external vault a
 integration-tests/genesis_top-ci_yml_soft_gate.t              # stale ci.yml warns rather than blocks
 integration-tests/genesis_commands-pipeline_ci_yml_gate.t     # pipeline commands gated on a legacy ci.yml
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
+integration-tests/service_bosh-director-network_lock.t  # network claims lock on real kv v1 and kv v2 mounts
 integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc
 # Genesis::Env integration tests - require vault/BOSH mocks
 integration-tests/genesis_env-core.t         # Comprehensive env operations (loading, manifest, deployment)

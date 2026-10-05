@@ -952,7 +952,14 @@ sub _bosh_configs_acquire_network_lock {
 	} elsif ($current_lock->{status} eq 'locked') {
 		info "#r{locked} %s", $current_lock->{description};
 		bail(
-			"Network claims are currently locked -- cannot upload a cloud config now!"
+			"Network claims are currently locked -- cannot upload a cloud config now!\n\n".
+			"The network claims lock on the #M{%s} BOSH director is held %s%s.  This ".
+			"usually means a deploy, or another #C{bosh-configs upload}, against this ".
+			"director is running now or is waiting at a prompt.  Wait for it to finish, ".
+			"then upload again.  If no such process is running, the lock goes stale 30 ".
+			"minutes after it was taken, and the next upload offers to clear it.",
+			$bosh->alias, $current_lock->{description} // 'by another process',
+			defined($current_lock->{path}) ? sprintf(", and is stored at #C{%s}", $current_lock->{path}) : ''
 		);
 	} elsif ($current_lock->{status} eq 'stale') {
 		info "#y{locked (stale)} %s", $current_lock->{description};
@@ -968,8 +975,11 @@ sub _bosh_configs_acquire_network_lock {
 				"to clear it.", $current_lock->{description}
 			);
 		}
-		$bosh->clear_network_lock;
-		info "[[  - >>stale network claims lock cleared.";
+		# Only the stale lock shown above is cleared; one that another process
+		# has taken since is left for the acquire below to refuse.
+		info($bosh->clear_network_lock(stale => $current_lock)
+			? "[[  - >>stale network claims lock cleared."
+			: "[[  - >>stale network claims lock was already cleared or taken by another process.");
 	}
 
 	info({pending => 1},

@@ -1471,6 +1471,176 @@ the window rather than closing it. OpenBao exposes no C<X-Vault-Index>
 equivalent for a client to detect staleness directly (openbao/openbao#3877,
 RFC openbao/openbao#1528), so polling is the only available mechanism.
 
+=head2 kv_mount
+
+  my $mount = $vault->kv_mount($path);
+
+Finds the kv secrets engine that C<$path> is on, and which version of kv it
+is, by asking the vault's C<sys/internal/ui/mounts> endpoint.  That is the
+endpoint the C<vault> CLI asks, and any token with any access to the path
+may read it.  Answers are remembered per mount, so each mount is asked
+about once.
+
+A vault that answers the endpoint with 404 predates kv v2, so every mount
+it has is a kv v1 one.  A C<generic> engine is kv v1 under its old name.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+A whole secret path, such as C<secret/exodus/lab/bosh/network-claim-lock>.
+Leading and trailing slashes are ignored.
+
+=back
+
+B<Returns:> A hashref with C<path> (the mount, with a trailing slash, or
+C<undef> for a vault that predates kv v2), C<type> (C<kv> or C<generic>),
+and C<version> (C<1> or C<2>).
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dies when C<$path> is on an engine other than kv, naming the engine and
+its mount.
+
+=item *
+
+Dies when the vault refuses the request or cannot be reached, naming the
+reason, the likely causes, and the C<safe curl> command that shows the
+vault's answer.
+
+=item *
+
+Raises a bug when C<$path> is empty or contains a C<:key>.
+
+=back
+
+B<Examples:>
+
+  my $mount = $vault->kv_mount('secret/exodus/lab/bosh/network-claim-lock');
+  # Returns: { path => 'secret/', type => 'kv', version => 2 }
+
+=head2 kv_read
+
+  my $record = $vault->kv_read($path);
+
+Reads a whole secret with the kv API, through C<safe curl>.  On a kv v2
+mount it also returns the version that was read, which a check-and-set
+write with L</kv_write> must name.
+
+On kv v2, a secret that was never written is version C<0>, and a secret
+whose latest version was deleted has no data but keeps that version, so
+that the next check-and-set write can name it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+A whole secret path, as for L</kv_mount>.
+
+=back
+
+B<Returns:> A hashref with C<data> (the secret's fields as a hashref, or
+C<undef> when there is no secret), C<version> (the kv v2 version, or
+C<undef> on kv v1), and C<kv_version> (C<1> or C<2>).
+
+B<Errors:>
+
+Dies when the vault refuses the read for any reason other than the secret
+not existing, or cannot be reached, so that a sealed vault is never
+mistaken for an absent secret.  The message names the path, the reason,
+the likely causes, and what to run to check.  Errors from L</kv_mount>
+propagate.
+
+B<Examples:>
+
+  my $record = $vault->kv_read('secret/exodus/lab/bosh/network-claim-lock');
+  # Returns: { data => { at => '...', user => 'ops', ... }, version => 4, kv_version => 2 }
+  #       or { data => undef, version => 0, kv_version => 2 } when never written
+
+=head2 kv_write
+
+  my $result = $vault->kv_write($path, \%data, %opts);
+
+Replaces a whole secret with C<\%data> through the kv API, using
+C<safe curl>.  Unlike C<safe set>, it does not merge into what is there,
+and on a kv v2 mount it can make a check-and-set write, which the vault
+refuses unless the secret is still at the version named.  Of any number of
+processes that read the same version and write with check-and-set, only
+the first succeeds.
+
+When L</needs_write_confirmation> is true, a kv v2 write waits until reads
+return the version it made (see L</_confirm_kv_version>).
+
+The body goes on the C<safe curl> command line, so this must not be used to
+write anything secret.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+A whole secret path, as for L</kv_mount>.
+
+=item C<\%data>
+
+The secret's new fields.  kv v2 accepts an empty hash; kv v1 refuses one.
+
+=item C<%opts>
+
+=over 4
+
+=item cas
+
+The version the secret must still be at for the write to happen, with C<0>
+meaning that it must not exist yet.  kv v2 only.
+
+=back
+
+=back
+
+B<Returns:> On kv v2, the version the write made, or C<0> when a
+check-and-set write was refused because the secret had changed.  On kv v1,
+C<1>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dies when the vault refuses the write for any other reason, or cannot be
+reached.  The message names the path, the reason, and the likely causes,
+including the kv v2 data path that a policy has to grant.
+
+=item *
+
+Dies when a kv v2 write succeeds but the vault does not say which version
+it made, and when reads never catch up with that version.
+
+=item *
+
+Raises a bug when C<cas> is given for a kv v1 mount, or is not a whole
+number.
+
+=back
+
+B<Examples:>
+
+  my $version = $vault->kv_write($path, { at => $now, user => 'ops' }, cas => 3);
+  # Returns: 4, or 0 when another write got there first
+
+  $vault->kv_write('secret/handshake', { knock => 'knock' });
+  # Returns: 1 on kv v1, or the new version on kv v2
+
 =head2 token_info
 
   my $info = $vault->token_info();
@@ -2387,6 +2557,140 @@ B<Examples:>
     'secret/myapp/db' => {host => 'localhost'},
   });
   # Returns: { user => 'admin', db => { host => 'localhost' } }
+
+=head2 _kv_curl
+
+  my ($status, $reply, $reason) = $self->_kv_curl($method, $uri, $payload);
+
+Makes one kv API call with C<safe curl --data-only>, and works out the HTTP
+status it came back with.  safe exits non-zero for a refused request and
+names the status on stderr, as in C<!! GET /secret/data/x: 404 Not Found>.
+
+C<safe curl> takes a body only as an argument, so C<$payload> ends up on
+the command line, where other users of the host can see it.  Nothing
+secret may be passed through here.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$method>
+
+The HTTP method, such as C<GET> or C<POST>.
+
+=item C<$uri>
+
+The API path below C</v1/>, with no leading slash.
+
+=item C<$payload>
+
+Optional.  A hashref, sent as the JSON body.
+
+=back
+
+B<Returns:> A three-element list of the status (C<200> on success, the
+refused status, or C<0> when the request never reached the vault), the
+decoded JSON reply or C<undef>, and a one-line reason taken from the
+reply's C<errors> or from safe's stderr.
+
+B<Examples:>
+
+  my ($status, $reply, $reason) = $self->_kv_curl('GET', 'secret/data/x');
+  # Returns: (404, { errors => [] }, 'GET /secret/data/x: 404 Not Found')
+
+=head2 _kv_clean_path
+
+  my $path = _kv_clean_path($path);
+
+Puts a secret path into the form the kv API wants, with no leading,
+trailing, or doubled slashes.  A function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+A whole secret path.
+
+=back
+
+B<Returns:> The cleaned path.
+
+B<Errors:>
+
+Raises a bug when C<$path> is empty, or contains a C<:key>, since the kv
+API reads and writes whole secrets.
+
+B<Examples:>
+
+  _kv_clean_path('/secret//exodus/lab/');
+  # Returns: 'secret/exodus/lab'
+
+=head2 _kv_data_uri
+
+  my $uri = _kv_data_uri($mount, $path);
+
+Returns the API path that reads and writes a secret's data.  On kv v1 that
+is the secret path itself; on kv v2 it is the mount, then C<data/>, then the
+rest of the path.  A function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$mount>
+
+The hashref from L</kv_mount>.
+
+=item C<$path>
+
+A cleaned secret path on that mount.
+
+=back
+
+B<Returns:> The data API path, with no leading slash.
+
+B<Examples:>
+
+  _kv_data_uri({path => 'secret/', version => 2}, 'secret/exodus/lab');
+  # Returns: 'secret/data/exodus/lab'
+
+=head2 _confirm_kv_version
+
+  $self->_confirm_kv_version($path, $version);
+
+Waits until reads of C<$path> return C<$version> or newer, so that whatever
+reads next does not act on an older version.  It does nothing unless
+L</needs_write_confirmation> is true, and otherwise reads every quarter of
+a second for up to C<GENESIS_VAULT_CONFIRM_TIMEOUT> seconds.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The secret that was written.
+
+=item C<$version>
+
+The kv v2 version the write made.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:>
+
+Dies when reads still return an older version at the timeout, naming both
+versions and the likely cause, which is a vault target on a standby node
+whose reads lag the leader.
+
+B<Examples:>
+
+  $self->_confirm_kv_version('secret/exodus/lab/bosh/network-claim-lock', 4);
+  # Returns: nothing, once a read shows version 4 or newer
 
 =head1 AUTHOR
 
