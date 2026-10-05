@@ -200,7 +200,10 @@ subtest 'the namespace holds modules and nothing at its root' => sub {
 	# string reads as a caller too, which is the conservative side of
 	# wrong for a row about a module that is meant to be gone.
 	my @files;
-	find(sub {push @files, $File::Find::name if -f && /\.(pm|t)$/}, 'lib', 't');
+	find(sub {
+		return $File::Find::prune = 1 if $File::Find::name eq 't/tmp';
+		push @files, $File::Find::name if -f && /\.(pm|t)$/;
+	}, 'lib', 't');
 	push @files, 'bin/genesis';
 
 	my @callers;
