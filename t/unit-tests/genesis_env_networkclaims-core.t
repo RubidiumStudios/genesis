@@ -42,7 +42,7 @@ subtest 'claims_changes - reports the addresses added and removed per network an
 		'a range that changed in text but not in addresses is no change');
 };
 
-subtest 'claims_summary - says what a write changes, or that it keeps the same addresses' => sub {
+subtest 'claims_summary - says what a write changes, and that it keeps the same addresses only when asked' => sub {
 	my ($out, $err) = output_from {
 		Genesis::Env::NetworkClaims::claims_summary('secret/exodus/x/network', record(ocf => '10.0.0.1-10.0.0.4'), record(ocf => '10.0.0.2-10.0.0.6'))
 	};
@@ -52,7 +52,11 @@ subtest 'claims_summary - says what a write changes, or that it keeps the same a
 	($out, $err) = output_from {
 		Genesis::Env::NetworkClaims::claims_summary('secret/exodus/x/network', record(ocf => '10.0.0.1'), record(ocf => '10.0.0.1'))
 	};
-	like(($out.$err) =~ s/\s+/ /gr, qr{the network claims at secret/exodus/x/network keep the same addresses}, 'no change says so');
+	is($out.$err, '', 'no change prints nothing unless asked');
+	($out, $err) = output_from {
+		Genesis::Env::NetworkClaims::claims_summary('secret/exodus/x/network', record(ocf => '10.0.0.1'), record(ocf => '10.0.0.1'), say_unchanged => 1)
+	};
+	like(($out.$err) =~ s/\s+/ /gr, qr{the network claims at secret/exodus/x/network keep the same addresses}, 'no change says so when asked');
 };
 
 done_testing;

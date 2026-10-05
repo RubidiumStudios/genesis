@@ -59,10 +59,13 @@ sub claims_changes {
 # }}}
 # claims_summary - tell the operator what a write of the network claims changes {{{
 sub claims_summary {
-	my ($path, $stored, $map) = @_;
+	my ($path, $stored, $map, %opts) = @_;
 	my @changes = claims_changes($stored, $map);
 	unless (@changes) {
-		info("[[  - >>the network claims at #C{%s} keep the same addresses.", $path);
+		# A deploy writes the record every time, so saying so each time is noise;
+		# a command run to write the claims on purpose says what it found
+		my $say = $opts{say_unchanged} ? \&info : \&debug;
+		$say->("[[  - >>the network claims at #C{%s} keep the same addresses.", $path);
 		return;
 	}
 	info("[[  - >>the network claims at #C{%s} change:", $path);

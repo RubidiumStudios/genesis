@@ -1407,6 +1407,21 @@ subtest 'claims read - the summary of the change prints before the claims are wr
 	unlike($all, qr/\[y\|n\].*\[y\|n\]/s, 'with no confirmation prompt added');
 };
 
+subtest 'claims read - an upload that changes nothing says the claims keep the same addresses' => sub {
+	plan tests => 2;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	$stored_claims = $fresh_claims;
+	my ($env, $parent) = missing_claims_env();
+	my ($out, $err) = output_from {
+		Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+	};
+	like(($out.$err) =~ s/\s+/ /gr, qr/the network claims at \S+ keep the same addresses/, 'the upload says so, since it was run to write them');
+	ok(defined(call_index('set_path')), 'and the record is still written');
+	$stored_claims = {};
+};
+
 subtest 'director config - delete refuses the director config' => sub {
 	plan tests => 2;
 	@director_calls = ();

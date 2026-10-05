@@ -840,7 +840,7 @@ subtest 'update_director_network_config - says what the write changes before it 
 	@netcalls = ();
 	$hook = make_hook(env => net_env(self_bosh => net_bosh(), stored => {}, network => {subnets => {}}));
 	($out, $err) = output_from { $hook->update_director_network_config };
-	like(($out.$err) =~ s/\s+/ /gr, qr/keep the same addresses/, 'an unchanged record says so');
+	unlike(($out.$err) =~ s/\s+/ /gr, qr/the network claims at .* (?:keep the same addresses|change)/, 'an unchanged record prints no summary');
 	ok(defined(netcall('set_path')), 'and is still written');
 };
 

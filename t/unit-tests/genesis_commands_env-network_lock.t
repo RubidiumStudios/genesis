@@ -383,6 +383,26 @@ subtest 'the release after the claims are written reports what it did' => sub {
 	like($out.$err, qr/lock was not removed/, 'and says the lock was not removed');
 };
 
+subtest 'the claims write says what changed, and says nothing when nothing did' => sub {
+	$status = 'locked';
+	my $map = {subnets => {'ocfp-2' => {claims => {cf => '10.0.0.1-10.0.0.4'}}}};
+	my $env = make_env(); # the stored record is empty, so every claim is new
+	$held = 1;
+	my ($out, $err) = output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, $map) };
+	like(($out.$err) =~ s/\s+/ /gr, qr/the network claims at secret\/exodus\/parent\/bosh\/network change: cf \(ocfp-2\): adds 10\.0\.0\.1-10\.0\.0\.4/,
+		'a write that changes the record lists what it adds');
+
+	my $same = mock "Mock::NetworkLock::SameVault" => {
+		get_path_strict => sub { return $map },
+		set_path        => sub { my ($self, @args) = @_; push @calls, 'set_path'; 1 },
+	};
+	$env = make_env(vault => sub { $same });
+	$held = 1;
+	($out, $err) = output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, $map) };
+	unlike(($out.$err), qr/the network claims at|keep the same addresses/, 'a write that changes nothing prints no summary');
+	ok(grep({$_ eq 'set_path'} @calls), 'and still writes the record');
+};
+
 # ---------------------------------------------------------------------------
 # every acquire sits under the same signal coverage
 # ---------------------------------------------------------------------------

@@ -1100,7 +1100,7 @@ sub _bosh_configs_write_claims {
 	my $bosh = $config->{bosh};
 	my ($network_vault, $network_path) = _bosh_configs_claims_target($env, $config);
 
-	Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $config->{network_map});
+	Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $config->{network_map}, say_unchanged => 1);
 
 	info({pending => 1},
 		"[[  - >>submitting network claims for #C{%s} to #M{%s} BOSH director...",

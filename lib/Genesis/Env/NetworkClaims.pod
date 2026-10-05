@@ -95,11 +95,14 @@ B<Examples:>
 
   claims_summary($path, $stored, $map);
 
-Tells the operator what a write of the network claims changes.  It prints
-one line saying that the claims at C<$path> keep the same addresses when
-C<claims_changes> finds no change.  Otherwise it prints a line
-saying that they change, followed by one line for each changed network and
-subnet that lists the addresses it adds and the addresses it removes.
+Tells the operator what a write of the network claims changes.  When
+C<claims_changes> finds changes, it prints a line saying that the claims at
+C<$path> change, followed by one line for each changed network and subnet that
+lists the addresses it adds and the addresses it removes.  When it finds none,
+it writes the line saying that the claims keep the same addresses to the debug
+log only, because a deploy and its post-deploy hook write the record every
+time, and a line on each of them says nothing new.  A command that an operator
+runs to write the claims on purpose passes C<say_unchanged> to print that line.
 
 B<Parameters:>
 
@@ -116,6 +119,11 @@ The network record read from the vault.
 =item C<$map>
 
 The cloud config's network map.
+
+=item C<say_unchanged>
+
+B<(optional)> A true value prints the line for an unchanged record at the
+normal log level instead of the debug level.
 
 =back
 
