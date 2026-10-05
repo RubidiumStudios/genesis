@@ -70,7 +70,8 @@ releases it with the process.
 
 =head2 new($git, %opts)
 
-  my $session = Service::Git::Session->new($git, control => 'main');
+  my $session = Service::Git::Session->new($git, control => 'main',
+      remote => 'origin');
 
 Builds a session on one handle without opening it. Nothing is read from the
 repository and nothing is written to it until C<begin> runs.
@@ -90,7 +91,11 @@ every verb below acts on.
 =item C<%opts>
 
 Options. C<control> names the branch a later abort never resets, which is how
-a commit made on control survives an abort whole.
+a commit made on control survives an abort whole. C<remote> is required: the
+remote whose tracking refs a switch to a branch held only there reads, and an
+abort resets each branch it committed to. The caller resolves it through
+L<Genesis::Top/source_control_remote> (D29), because this layer cannot read
+the configuration that says which remote it is.
 
 =back
 
@@ -106,11 +111,17 @@ C<< "A branch session needs a Service::Git handle" >> -- raised when the
 handle is missing, since a session with no working tree has nothing to leave
 and nothing to come back to.
 
+=item *
+
+C<< "Service::Git->session needs its remote by name" >> -- a bug, where the
+caller named no remote.
+
 =back
 
 B<Examples:>
 
-  my $session = Service::Git::Session->new($git, control => 'main');
+  my $session = Service::Git::Session->new($git, control => 'main',
+      remote => 'origin');
   # returns a closed session; nothing has been read or written yet
 
   my $session = Service::Git::Session->new(undef);
@@ -608,9 +619,8 @@ Where the branch is the one the repository is standing on, the reset is a hard
 reset rather than a ref write, so the tree and C<HEAD> go back together.
 
 A branch the remote does not carry at all is left alone, since there is
-nothing to put it back to, and so is every branch in a repository that has no
-default remote to read a tracking ref from. The answer says whether the branch
-was put back or left alone.
+nothing to put it back to. The remote is the one the session was built with.
+The answer says whether the branch was put back or left alone.
 
 B<Parameters:>
 
@@ -1034,6 +1044,23 @@ B<Examples:>
 
   my $git = $session->git;
   # returns the same handle $git->session was asked of
+
+=head2 remote
+
+  my $remote = $session->remote;
+
+The remote the caller named when it built the session, which the session
+resets against and which a caller holding the session reads rather than
+resolving it a second time.
+
+B<Parameters:> None.
+
+B<Returns:> The remote's name.
+
+B<Examples:>
+
+  my $remote = $session->remote;
+  # returns 'origin' for a session built with remote => 'origin'
 
 =head2 active
 
@@ -1637,7 +1664,7 @@ than a switch, so it takes no lock and needs no checkout, except on the
 branch we are standing on, where a hard reset is what puts the tree and HEAD
 back together.
 
-A repository with no remote, or a branch with no remote-tracking ref, is left
+A branch with no remote-tracking ref under the session's remote is left
 exactly as it is, since there is no C<T> to go back to, and the answer says so.
 A caller that promised every branch it hands here has a tracking ref has no
 other way to find out that one of them did not.
@@ -1655,8 +1682,8 @@ The deployment branch to put back.
 
 =back
 
-B<Returns:> 1 where the branch was moved, and 0 where the repository has no
-remote or the branch has no remote-tracking ref to go back to.
+B<Returns:> 1 where the branch was moved, and 0 where the branch has no
+remote-tracking ref to go back to.
 
 B<Errors:>
 

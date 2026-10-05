@@ -24,9 +24,11 @@ use IO::Handle;
 sub new {
 	my ($class, $git, %opts) = @_;
 	bail("A branch session needs a Service::Git handle") unless $git;
+	Service::Git::_require_remote($opts{remote}, 'session');
 	return bless {
 		git       => $git,
 		control   => $opts{control},
+		remote    => $opts{remote},
 		active    => 0,
 		finished  => 0,
 		origin    => undef,
@@ -49,6 +51,13 @@ sub new {
 # through it keeps that caller from building a second handle for the same
 # working tree, which would key a second session and break I9.
 sub git { $_[0]->{git} }
+
+# }}}
+# remote - the remote the caller named, which the session resets against {{{
+#
+# Service::Git cannot read the configuration that says which remote it is, so
+# the caller that can names it when it builds the session (D29).
+sub remote { $_[0]->{remote} }
 
 # }}}
 # active - is this session open {{{
@@ -998,7 +1007,7 @@ sub _is_branch {
 	return 1 if run({ dir => $git->root, passfail => 1 },
 		'git', 'show-ref', '--verify', '--quiet', "refs/heads/$name");
 
-	my $remote = $git->default_remote or return 0;
+	my $remote = $self->{remote};
 	return run({ dir => $git->root, passfail => 1 },
 		'git', 'show-ref', '--verify', '--quiet',
 		"refs/remotes/$remote/$name") ? 1 : 0;
@@ -1246,14 +1255,14 @@ sub _command_line {
 # committed_branches is the set this session moved and it filters that name
 # out of it, and reset_branch refuses it in its own right.
 #
-# The answer says whether the branch was moved.  A repository with no remote,
-# and a branch the remote has never had, both leave the branch exactly as it
-# is, and a caller that promised every branch it hands here has a tracking ref
-# has no other way to find out that one of them did not.
+# The answer says whether the branch was moved.  A branch the remote has never
+# had is left exactly as it is, and a caller that promised every branch it
+# hands here has a tracking ref has no other way to find out that one of them
+# did not.
 sub _reset_to_remote {
 	my ($self, $branch) = @_;
 	my $git    = $self->{git};
-	my $remote = $git->default_remote or return 0;
+	my $remote = $self->{remote};
 	my $t      = "refs/remotes/$remote/$branch";
 
 	my ($tip) = run({ dir => $git->root, passfail => 0 },

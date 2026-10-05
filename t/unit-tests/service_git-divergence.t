@@ -21,7 +21,7 @@ $ENV{NOCOLOR} = 1;
 
 sub div {
 	my ($h, $branch, %opts) = @_;
-	return $h->git('a')->resolve_branch($branch, %opts);
+	return $h->git('a')->resolve_branch($branch, remote => 'origin', %opts);
 }
 
 # The six states the query can answer with.  An assertion helper, beside the

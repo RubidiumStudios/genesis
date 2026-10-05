@@ -1858,8 +1858,7 @@ sub _topology_here {
 sub fetch_pipeline_envs {
 	my ($self, $git, %opts) = @_;
 	return undef unless $self->pipeline_enabled;
-	my $remote = $git->default_remote;
-	return undef unless $remote;
+	my $remote = $self->source_control_remote;
 
 	my $action  = $opts{action}  // sprintf('run #C{genesis %s}', $opts{command} // 'propagate');
 	my $outcome = $opts{outcome} // 'Nothing was written.';

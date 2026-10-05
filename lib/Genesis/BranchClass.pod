@@ -134,11 +134,14 @@ Only the control branch is fetched. A deployment branch's tip answers a
 question no pre-deploy command asks, and fetching one is what let a
 branch-exists check read a ref that is now derived.
 
-A repository with no remote has nothing to refresh, and the function says so
-by returning rather than by refusing. So does a clone that has no local
-control branch, because materialising one is a repair, the pre-flight owns
-it, and the pre-flight reports the creation as it makes it. A fetch here
-would take that repair silently.
+The remote is L<Genesis::Top/source_control_remote> (D29). A clone that has
+no local control branch is left alone, by returning rather than by refusing,
+because materialising one is a repair, the pre-flight owns it, and the
+pre-flight reports the creation as it makes it. A fetch here would take that
+repair silently. A remote the configuration names and the clone lacks is left
+alone too, because it is a configuration fault rather than a network one, and
+the command's own refusal names the remote where this one would tell the
+operator to try again.
 
 B<Parameters:>
 
@@ -154,8 +157,8 @@ The C<Service::Git> handle on the repository the command is running in.
 
 =back
 
-B<Returns:> 1 when the refs are current, or when there is no remote to ask.
-Anything else exits.
+B<Returns:> 1 when the refs are current, when there is no local control
+branch to refresh, or when the clone lacks the remote. Anything else exits.
 
 B<Errors:>
 
@@ -198,8 +201,8 @@ be delivered. Three conditions hold together.
 It descends from the tip of the control branch as observed through the
 remote-tracking ref after a refresh, so it carries every environment file
 control has. The rebase offered as the remedy names
-C<< <remote>/<control> >>, or the control branch on its own where no
-remote is configured and the tip was read off the local branch.
+C<< <remote>/<control> >>, where the remote is
+L<Genesis::Top/source_control_remote>.
 
 =item *
 
@@ -245,11 +248,9 @@ question unasked the arm returns the fetch remedy instead.
 
 Only a remote that lacks control too earns the other refusal. Then the
 predicate bails itself, at C<Genesis::Exit::CONFIG>, with the sentence
-C<require_control> prints for the same state and the words C<the remote>
-standing in when no remote is configured, which is also the answer a
-repository with no remote gets, since C<remote_branch_exists> reports 0 for
-one. Nothing but creating control fixes that state, so it is not the
-refusal a fetch answers.
+C<require_control> prints for the same state, naming the remote
+L<Genesis::Top/source_control_remote> resolves. Nothing but creating control
+fixes that state, so it is not the refusal a fetch answers.
 
 An C<ls-remote> that fails bails in C<remote_branch_exists>' own words,
 which is left as it is. A remote nobody can reach is not a remote that

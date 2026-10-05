@@ -120,7 +120,7 @@ subtest 'a delivery mirrors the set at the delivered commit' => sub {
 	my $env = $top->load_env('qa');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -198,7 +198,7 @@ subtest 'a hand edit is overwritten and named' => sub {
 	my $env = $top->load_env('qa');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -270,7 +270,7 @@ subtest "the writer commits with its caller's message" => sub {
 	reset_steps($fault);
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -363,7 +363,7 @@ subtest 'an empty set is refused before anything is written' => sub {
 	my $env = $top->load_env('qa');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -435,7 +435,7 @@ subtest 'a set the source commit holds none of is refused' => sub {
 	my $env = $top->load_env('qa');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -503,7 +503,7 @@ subtest 'a call with no message is refused' => sub {
 	my $env = $top->load_env('qa');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -576,7 +576,7 @@ subtest 'a dry run writes nothing and checks nothing' => sub {
 	reset_steps($fault);
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -657,7 +657,7 @@ subtest 'the restore takes a branch off the committed set' => sub {
 	my $env = $top->load_env('qa');
 
 	my $branch  = $h->slug('qa');
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($branch);
 	$session->apply_files($due, env => $env,

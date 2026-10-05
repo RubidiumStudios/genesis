@@ -35,7 +35,7 @@ subtest 'one named branch that L holds moves only its tracking ref' => sub {
 		files => {'qa.yml' => "---\nfrom: the teammate\n"});
 	isnt($published, $before_t, 'the teammate moved the branch on R');
 
-	my ($git, $result) = $h->git('a')->fetch_branches([$slug]);
+	my ($git, $result) = $h->git('a')->fetch_branches([$slug], 'origin');
 
 	is(ref_in($h->a, "refs/heads/$slug"), $before_l,
 		'L stayed exactly where it was');
@@ -72,7 +72,7 @@ subtest 'a branch only on the remote is still created from the remote' => sub {
 	delete_local($h, 'a', $slug);
 	is(ref_in($h->a, "refs/heads/$slug"), undef, 'copy A lacks the branch');
 
-	$h->git('a')->fetch_branches([$slug]);
+	$h->git('a')->fetch_branches([$slug], 'origin');
 	is(ref_in($h->a, "refs/heads/$slug"), ref_in($h->r, $slug),
 		'the local ref is created from the remote, which I2 permits');
 };

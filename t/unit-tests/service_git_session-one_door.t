@@ -97,7 +97,7 @@ subtest 'a branch change outside a session dies naming the session' => sub {
 	my $detached = exception(sub { $git->checkout_detached($git->sha('HEAD')) });
 	like($detached, qr/session/i, 'and so does a bare detached checkout');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	ok(eval { $session->switch($h->slug('qa')); 1 },
 		'while the session reaches the same checkout');

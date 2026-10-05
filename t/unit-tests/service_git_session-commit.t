@@ -41,7 +41,7 @@ subtest 'a session stands on a commit with a detached HEAD' => sub {
 	my $git = $h->git('a');
 	my $w   = snapshot_w($h, copy => 'a');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($first);
 
@@ -83,7 +83,7 @@ subtest 'finish restores after a commit exactly as after a branch' => sub {
 	my $git = $h->git('a');
 	stand_on($h, $h->control);
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($delivered);
 	is($session->on, $delivered, 'the session records what it stands on');
@@ -129,7 +129,7 @@ subtest 'a commit the refresh cannot reach is refused at DATAERR' => sub {
 	my $clone = clone_copy($h);
 	my $git   = $h->git($clone);
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 
 	my ($err, $exit) = bail_from(sub {
@@ -162,7 +162,7 @@ subtest 'an unborn HEAD is named as the branch it is, not as a commit' => sub {
 		'git', 'symbolic-ref', '--short', 'HEAD');
 	chomp $named;
 
-	my $where = $git->session(control => $h->control)->_standing_on;
+	my $where = $git->session(control => $h->control, remote => 'origin')->_standing_on;
 
 	like($where, qr/\Q$named\E/,
 		'the phrase names the branch HEAD points at');

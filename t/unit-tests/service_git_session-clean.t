@@ -28,13 +28,13 @@ subtest 'an untracked file blocks nothing and survives everything' => sub {
 	# An operator's scratch file, which is nobody's business but theirs.
 	put_file($h->a . '/scratch.txt', "notes to myself\n");
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	ok(eval { $session->begin; 1 }, 'begin accepted the untracked file');
 	$session->switch($h->slug('qa'));
 	ok(eval { $session->finish; 1 }, 'and finish accepted it too');
 	ok(-f $h->a . '/scratch.txt', 'and the file is still there');
 
-	my $second = $git->session(control => $h->control);
+	my $second = $git->session(control => $h->control, remote => 'origin');
 	$second->begin;
 	$second->switch($h->slug('qa'));
 	eval { $second->abort('the run failed') };
@@ -76,7 +76,7 @@ subtest 'a tracked modification at finish names the files and aborts' => sub {
 	my $w   = snapshot_w($h, copy => 'a');
 	my $qa_t = $git->sha('refs/remotes/origin/' . $h->slug('qa'));
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	$git->checkout_file($control, 'qa.yml');
@@ -105,7 +105,7 @@ subtest 'the defect reaches the caller rather than being swallowed' => sub {
 	init_branch($h, 'qa');
 	my $git = $h->git('a');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -133,7 +133,7 @@ subtest 'a staged change at begin is refused with the tracked ones' => sub {
 	run({dir => $h->a}, 'git', 'add', '--', 'qa.yml');
 	put_file($h->a . '/scratch.txt', "notes\n");
 
-	my $err = exception(sub { $git->session(control => $h->control)->begin });
+	my $err = exception(sub { $git->session(control => $h->control, remote => 'origin')->begin });
 	like($err, qr/qa\.yml/, 'the staged file is named');
 	unlike($err, qr/scratch\.txt/, 'and the untracked one is not');
 };

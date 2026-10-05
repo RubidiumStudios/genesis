@@ -28,7 +28,7 @@ subtest 'a clean run leaves working state exactly as it found it' => sub {
 	my $git = $h->git('a');
 
 	my $w = snapshot_w($h, copy => 'a');
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 
 	$session->begin;
 	is($session->origin->{branch}, $h->control,
@@ -63,7 +63,7 @@ subtest 'the session stands the process on the repository root' => sub {
 	my $below = abs_path($h->a . '/bosh');
 
 	chdir($below) or die "cannot enter the deployment root: $!\n";
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	is(getcwd(), $root, 'begin stood the process on the repository root');
 	is(abs_path($session->origin->{cwd}), $below,
@@ -81,7 +81,7 @@ subtest 'begin refuses over a tracked modification' => sub {
 	my $git = $h->git('a');
 	put_file($h->a . '/qa.yml', "---\nkit: edited by hand\n");
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	my $err = exception(sub { $session->begin });
 
 	like($err, qr/uncommitted/i, 'begin refused');
@@ -100,7 +100,7 @@ subtest 'begin refuses over a staged change, before its first write' => sub {
 	run({dir => $h->a}, 'git', 'add', '--', 'staged.yml');
 
 	my $before = $git->sha($h->slug('qa'));
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	my $err = exception(sub { $session->begin });
 
 	like($err, qr/staged\.yml/, 'begin named the staged file');
@@ -116,7 +116,7 @@ subtest 'a clean tree and index are accepted' => sub {
 	my $h   = make_harness(envs => ['qa']);
 	my $git = $h->git('a');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	ok($session->begin, 'begin accepted a clean tree and index');
 	ok($session->active, 'and the session is open');
 	$session->finish;
@@ -133,7 +133,7 @@ subtest 'a discard names the paths it is about to throw away' => sub {
 	init_branch($h, 'qa');
 	my $git = $h->git('a');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -173,7 +173,7 @@ subtest 'begin reaches the pre-flight through the shared helper' => sub {
 	# the call runs, which is what a row reading a shape itself arranges.
 	local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
 
-	my $err  = exception(sub { $git->session(control => 'control')->begin });
+	my $err  = exception(sub { $git->session(control => 'control', remote => 'origin')->begin });
 	like($err, qr/no committer identity/,
 		'so a fixture with no identity fails in begin naming the fix');
 };
@@ -195,7 +195,7 @@ subtest 'a session begun on a detached HEAD comes back to its commit' => sub {
 	run({dir => $h->a}, 'git', 'checkout', '--detach', $commit);
 	is($git->current_branch, 'HEAD', 'the run is standing on a detached head');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	is($session->origin->{head}, $commit, 'begin recorded the commit');
 

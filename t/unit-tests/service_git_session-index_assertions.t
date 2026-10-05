@@ -99,7 +99,7 @@ subtest 'the index check refuses a staged file that left its source' => sub {
 	my $fault = fault_git($h, copy => 'a');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	my $before = ref_in($h->a, $h->slug('qa'));
@@ -180,7 +180,7 @@ subtest 'the mirror removes what the set no longer holds' => sub {
 	my $env = $top->load_env('qa');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -242,7 +242,7 @@ subtest 'the second assertion fires when the removal is stopped' => sub {
 	my $fault = fault_git($h, copy => 'a');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	my $before = ref_in($h->a, $h->slug('qa'));
@@ -296,7 +296,7 @@ subtest 'a path that dropped out of the tracked list is removed' => sub {
 	my $env = $top->load_env('qa');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 

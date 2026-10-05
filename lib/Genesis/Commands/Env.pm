@@ -1048,7 +1048,7 @@ sub _deploy_branch_action {
 	my ($top, $env_name, $git) = @_;
 
 	my $branch = $top->branch_for($env_name);
-	my $remote = $git->default_remote // 'origin';
+	my $remote = $top->source_control_remote;
 	my $d      = $git->resolve_branch($branch, remote => $remote);
 
 	# resolve_branch answers undef when neither ref exists, which is the one
@@ -1250,7 +1250,7 @@ sub _deploy_preflight {
 	if ($action->{action} eq 'fast-forward' && $on_branch) {
 		# The remote is named the way the classification named it, so the
 		# move is made against the ref the class was read from.
-		my $remote = $git->default_remote // 'origin';
+		my $remote = $top->source_control_remote;
 		info "Fast-forwarding #C{%s} to #C{%s/%s}...", $branch, $remote, $branch;
 		$git->pull_ff_only($branch, $remote);
 	}
@@ -1277,7 +1277,7 @@ sub _deploy_preflight {
 	# repository.
 	unless (($on_branch || defined($target))
 			&& Genesis::Commands::branch_carries_repository($top, $git, $branch)) {
-		my $remote = $git->default_remote // 'origin';
+		my $remote = $top->source_control_remote;
 
 		# Two states reach here and they need different remedies.  A branch
 		# behind its counterpart has a delivery waiting on the remote that

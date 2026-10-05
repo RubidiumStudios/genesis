@@ -43,12 +43,6 @@ sub install_run_stub {
 
 sub reset_stub { @run_calls = (); @run_results = (); }
 
-sub override_default_remote {
-	my ($name) = @_;
-	no warnings qw(redefine once);
-	*Service::Git::default_remote = sub { $name };
-}
-
 # ======================================================================
 # remote_branch_exists - check if a branch exists on the remote
 # ======================================================================
@@ -68,7 +62,6 @@ subtest 'remote_branch_exists - true when ls-remote returns a matching ref' => s
 	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_default_remote('origin');
 	push @run_results, [
 		"abc1234567890\trefs/heads/pr/staging\n",
 		0,
@@ -76,7 +69,7 @@ subtest 'remote_branch_exists - true when ls-remote returns a matching ref' => s
 	];
 
 	my $git = make_git();
-	ok $git->remote_branch_exists('pr/staging'),
+	ok $git->remote_branch_exists('pr/staging', 'origin'),
 		'matching ref in ls-remote output => true';
 	is $run_calls[0][5], 'refs/heads/pr/staging',
 		'and the remote was asked for the fully qualified ref';
@@ -86,7 +79,6 @@ subtest 'remote_branch_exists - a ref that merely ends with the name is not it' 
 	plan tests => 1;
 	reset_stub();
 	install_run_stub();
-	override_default_remote('origin');
 	# What a remote carrying the pull request branch and no deployment
 	# branch answers.  git matches a pattern against the tail of a ref at
 	# slash boundaries, so this line comes back for a query the deployment
@@ -98,7 +90,7 @@ subtest 'remote_branch_exists - a ref that merely ends with the name is not it' 
 	];
 
 	my $git = make_git();
-	ok !$git->remote_branch_exists('qa/bosh'),
+	ok !$git->remote_branch_exists('qa/bosh', 'origin'),
 		'pr/qa/bosh does not stand in for qa/bosh';
 };
 
@@ -106,35 +98,36 @@ subtest 'remote_branch_exists - false when ls-remote returns empty' => sub {
 	plan tests => 1;
 	reset_stub();
 	install_run_stub();
-	override_default_remote('origin');
 	push @run_results, ['', 0, ''];
 
 	my $git = make_git();
-	ok !$git->remote_branch_exists('pr/never-was'),
+	ok !$git->remote_branch_exists('pr/never-was', 'origin'),
 		'empty ls-remote output => false';
 };
 
-subtest 'remote_branch_exists - false when no remote is configured' => sub {
-	plan tests => 1;
+# Which remote is the source-control block's answer (D29), so a caller that
+# names none is a defect rather than a remote to guess at.
+subtest 'remote_branch_exists - a caller that names no remote is refused' => sub {
+	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_default_remote(undef);
 
 	my $git = make_git();
-	ok !$git->remote_branch_exists('pr/staging'),
-		'no default remote => false (no remote to check against)';
+	throws_ok {$git->remote_branch_exists('pr/staging')}
+		qr/remote_branch_exists.*needs its remote by name/,
+		'the query names the method that was not told its remote';
+	is scalar @run_calls, 0, 'and git was never asked anything';
 };
 
 subtest 'remote_branch_exists - bails on ls-remote failure' => sub {
 	plan tests => 1;
 	reset_stub();
 	install_run_stub();
-	override_default_remote('origin');
 	push @run_results, ['', 128, 'fatal: unable to access'];
 
 	my $git = make_git();
 	throws_ok {
-		$git->remote_branch_exists('pr/staging');
+		$git->remote_branch_exists('pr/staging', 'origin');
 	} qr/ls-remote|remote/i,
 		'ls-remote failure bails (auth/network surfaces vs "branch not found")';
 };
@@ -149,8 +142,8 @@ subtest 'remote_branch_exists - bails on ls-remote failure' => sub {
 # of its own, so an answer is about one moment and can be asked for twice.
 #
 # What this file proves is the shape of the git commands the query issues.
-# Every row below has both refs in place, or has no remote at all, because
-# those are the paths a command shape can be read off.  The six states are
+# Every row below has both refs in place, because that is the path a command
+# shape can be read off.  The six states are
 # driven through real repositories in t/unit-tests/service_git-divergence.t,
 # which is also where the rows that need a ref to be missing live, since a
 # ref that is missing is repository state and belongs in the harness.
@@ -158,13 +151,12 @@ subtest 'remote_branch_exists - bails on ls-remote failure' => sub {
 subtest 'resolve_branch - two ref probes and one count, and nothing else' => sub {
 	plan tests => 5;
 	reset_stub(); install_run_stub();
-	override_default_remote('origin');
 	push @run_results, 1;                    # refs/heads/qa is here
 	push @run_results, 1;                    # so is its tracking ref
 	push @run_results, ["2\t1\n", 0, ''];    # and these are the counts
 
 	my $git = make_git();
-	cmp_deeply($git->resolve_branch('qa'),
+	cmp_deeply($git->resolve_branch('qa', remote => 'origin'),
 		{state => 'diverged', ahead => 2, behind => 1, unverifiable => 0},
 		'commits on both sides read diverged, carrying both counts');
 	is scalar @run_calls, 3, 'three git commands answer the whole question';
@@ -176,13 +168,12 @@ subtest 'resolve_branch - two ref probes and one count, and nothing else' => sub
 subtest 'resolve_branch - equal tips read in-sync' => sub {
 	plan tests => 1;
 	reset_stub(); install_run_stub();
-	override_default_remote('origin');
 	push @run_results, 1, 1, ["0\t0\n", 0, ''];
 
 	my $git = make_git();
 	# Two counts of zero are a state of their own rather than a fall-through,
 	# so the row that reads them is worth having on its own.
-	cmp_deeply($git->resolve_branch('qa'),
+	cmp_deeply($git->resolve_branch('qa', remote => 'origin'),
 		{state => 'in-sync', ahead => 0, behind => 0, unverifiable => 0},
 		'neither side holds anything the other lacks');
 };
@@ -190,46 +181,39 @@ subtest 'resolve_branch - equal tips read in-sync' => sub {
 subtest 'resolve_branch - remote names the refs the branch is measured against' => sub {
 	plan tests => 3;
 	reset_stub(); install_run_stub();
-	override_default_remote('origin');
 	push @run_results, 1, 1, ["0\t3\n", 0, ''];
 
 	my $git = make_git();
 	cmp_deeply($git->resolve_branch('qa', remote => 'upstream'),
 		{state => 'behind', ahead => 0, behind => 3, unverifiable => 0},
-		'the named remote answers rather than the default one');
+		'the named remote is the one the branch is measured against');
 	is $run_calls[1][5], 'refs/remotes/upstream/qa',
 		'its tracking ref is the one asked for';
 	is $run_calls[2][5], 'refs/heads/qa...refs/remotes/upstream/qa',
 		'and the one the counts are taken against';
 };
 
-subtest 'resolve_branch - a repository with no remote takes no count' => sub {
-	plan tests => 3;
+subtest 'resolve_branch - a caller that names no remote is refused' => sub {
+	plan tests => 2;
 	reset_stub(); install_run_stub();
-	override_default_remote(undef);
-	push @run_results, 1;                    # refs/heads/qa is here
 
 	my $git = make_git();
-	# No remote names a tracking ref, so there is no second ref to compare
-	# against and every branch the repository holds is one it alone holds.
-	cmp_deeply($git->resolve_branch('qa'),
-		{state => 'no-remote', ahead => 0, behind => 0, unverifiable => 0},
-		'the branch belongs to this clone and to nobody else');
-	is scalar @run_calls, 1, 'only the local ref is asked for';
-	is $run_calls[0][5], 'refs/heads/qa', 'and that is the ref it names';
+	throws_ok {$git->resolve_branch('qa')}
+		qr/resolve_branch.*needs its remote by name/,
+		'the query names the method that was not told its remote';
+	is scalar @run_calls, 0, 'and git was never asked anything';
 };
 
 subtest 'resolve_branch - unverifiable rides on the answer' => sub {
 	plan tests => 2;
 	reset_stub(); install_run_stub();
-	override_default_remote('origin');
 	push @run_results, 1, 1, ["1\t0\n", 0, ''];
 
 	my $git = make_git();
 	# The flag is the caller's own admission that it did not refresh first,
 	# so a report can say its counts rest on a tracking ref nobody moved.
 	# It is not a state, and it changes neither the state nor either count.
-	my $div = $git->resolve_branch('qa', unverifiable => 1);
+	my $div = $git->resolve_branch('qa', remote => 'origin', unverifiable => 1);
 	is $div->{state}, 'ahead', 'the state is still read and still reported';
 	is $div->{unverifiable}, 1, 'and the flag comes back on the record';
 };
@@ -244,7 +228,6 @@ subtest 'resolve_branch - unverifiable rides on the answer' => sub {
 subtest 'remote_url keeps git stderr out of the url' => sub {
 	plan tests => 3;
 	reset_stub(); install_run_stub();
-	override_default_remote('origin');
 	push @run_results, ["error: No such remote 'origin'", 2, ''];
 
 	my $git = make_git();

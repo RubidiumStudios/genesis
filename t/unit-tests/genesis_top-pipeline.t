@@ -87,20 +87,22 @@ subtest 'pipeline_env_names - empty list when no env files exist' => sub {
 #
 # Build a captured-call mock git so we can assert fetch_branches was
 # invoked with the right inputs (or not invoked at all).
+# The remote is the source-control block's answer (D29), so the row names it
+# by standing in for that accessor, and the mock git records what it is told.
 sub mock_git {
 	my %opts = @_;
 	my $calls = [];
+	no warnings qw(redefine once);
+	*Genesis::Top::source_control_remote = sub { $opts{remote} };
 	my $git = bless {
-		_calls         => $calls,
-		_default_remote => $opts{default_remote},
-		_result         => $opts{result},  # optional override of result hash
+		_calls  => $calls,
+		_result => $opts{result},  # optional override of result hash
 	}, 'Test::Mock::Git';
 	$git;
 }
 
 {
 	package Test::Mock::Git;
-	sub default_remote { $_[0]->{_default_remote} }
 	sub fetch_branches {
 		my ($self, $names, $remote) = @_;
 		push @{$self->{_calls}}, {
@@ -117,19 +119,9 @@ subtest 'fetch_pipeline_envs - undef where there is no pipeline' => sub {
 	plan tests => 2;
 
 	my $top = make_top(name => 'fp-no-ci', no_vault => 1);
-	my $git = mock_git(default_remote => 'origin');
+	my $git = mock_git(remote => 'origin');
 
 	is $top->fetch_pipeline_envs($git), undef, 'there is nothing to refresh';
-	is scalar @{$git->{_calls}}, 0, 'fetch_branches not invoked';
-};
-
-subtest 'fetch_pipeline_envs - undef where there is no remote' => sub {
-	plan tests => 2;
-
-	my $top = make_ci_top();
-	my $git = mock_git();  # no remote
-
-	is $top->fetch_pipeline_envs($git), undef, 'there is nowhere to refresh from';
 	is scalar @{$git->{_calls}}, 0, 'fetch_branches not invoked';
 };
 
@@ -141,7 +133,7 @@ subtest 'fetch_pipeline_envs - control is refreshed even with no environments' =
 	# happened to hold.  Control is the branch every other read is measured
 	# against, so it is refreshed whether or not anything follows it.
 	my $top = make_ci_top();
-	my $git = mock_git(default_remote => 'origin');
+	my $git = mock_git(remote => 'origin');
 
 	my $result = $top->fetch_pipeline_envs($git);
 
@@ -159,7 +151,7 @@ subtest 'fetch_pipeline_envs - control leads, and the rest are deployment branch
 	# remote is `qa/bosh`.
 	my $top = make_ci_top();
 	put_env($top, $_) for qw(qa lab prod);
-	my $git = mock_git(default_remote => 'dev');
+	my $git = mock_git(remote => 'dev');
 
 	$top->fetch_pipeline_envs($git);
 
@@ -169,7 +161,7 @@ subtest 'fetch_pipeline_envs - control leads, and the rest are deployment branch
 	is_deeply $call->{names}, [qw(control lab/bosh prod/bosh qa/bosh)],
 		'control leads the sorted deployment branches';
 	is $call->{remote}, 'dev',
-		'remote is passed through from default_remote';
+		'remote is the one the source-control block resolves';
 };
 
 subtest 'fetch_pipeline_envs - the refresh result is what comes back' => sub {
@@ -180,7 +172,7 @@ subtest 'fetch_pipeline_envs - the refresh result is what comes back' => sub {
 	my $top = make_ci_top();
 	put_env($top, $_) for qw(qa lab);
 	my $git = mock_git(
-		default_remote => 'origin',
+		remote => 'origin',
 		result         => { ok => 1, kind => 'success',
 		                    fetched => ['control', 'qa/bosh'],
 		                    created => ['qa/bosh'], absent => ['lab/bosh'] },
@@ -205,7 +197,7 @@ subtest 'fetch_pipeline_envs - a branch the remote lacks is not a failure' => su
 	my $top = make_ci_top();
 	put_env($top, $_) for qw(qa lab);
 	my $git = mock_git(
-		default_remote => 'origin',
+		remote => 'origin',
 		result         => { ok => 1, kind => 'success',
 		                    fetched => ['qa/bosh'], created => [],
 		                    absent => ['lab/bosh'] },
@@ -233,7 +225,7 @@ subtest 'fetch_pipeline_envs - an unreachable remote names the network' => sub {
 	my $top = make_ci_top();
 	put_env($top, 'qa');
 	my $git = mock_git(
-		default_remote => 'origin',
+		remote => 'origin',
 		result         => { ok => 0, kind => 'network', err => 'Could not resolve host: ...' },
 	);
 
@@ -257,7 +249,7 @@ subtest 'fetch_pipeline_envs - a rejected credential names the credential' => su
 	my $top = make_ci_top();
 	put_env($top, 'qa');
 	my $git = mock_git(
-		default_remote => 'origin',
+		remote => 'origin',
 		result         => { ok => 0, kind => 'auth', err => 'Authentication failed' },
 	);
 
@@ -273,7 +265,7 @@ subtest 'fetch_pipeline_envs - anything else carries git\'s own message' => sub 
 	my $top = make_ci_top();
 	put_env($top, 'qa');
 	my $git = mock_git(
-		default_remote => 'origin',
+		remote => 'origin',
 		result         => { ok => 0, kind => 'unknown', err => 'weird transient error' },
 	);
 
@@ -292,7 +284,7 @@ subtest 'fetch_pipeline_envs - the caller names the act and the outcome' => sub 
 	my $top = make_ci_top();
 	put_env($top, 'qa');
 	my $git = mock_git(
-		default_remote => 'origin',
+		remote => 'origin',
 		result         => { ok => 0, kind => 'network', err => 'Could not resolve host: ...' },
 	);
 

@@ -63,14 +63,15 @@ sub publish_run {
 	my (%args) = @_;
 	my $git     = $args{git};
 	my $session = $args{session};
-	my $remote  = $args{remote} || ($git ? $git->default_remote : undef);
+	my $remote  = $args{remote}
+		or bug("Genesis::CI::Publish::publish_run needs the remote it publishes to");
 	my $records = $args{records} || [];
 	my @specs   = @{$args{specs} || []};
 
 	my $result = {
 		published => [], rejected => [], declined => 0, results => [],
 	};
-	return $result unless @specs && $remote;
+	return $result unless @specs;
 
 	# The in-sync rule, asked a second time.  The pre-flight asked it once
 	# before the walk, and a walk takes long enough for a teammate to push
@@ -185,8 +186,8 @@ sub publish_run {
 		#
 		# The answer is not read, and the decline path above does not read
 		# what restore_branch says either, so the two paths agree.  The
-		# reset answers false where the repository has no default remote and
-		# where the remote carries no tracking ref for the branch, and the
+		# reset answers false where the remote carries no tracking ref for
+		# the branch, and the
 		# publish set is the deployment branches alone, every one of which
 		# the pre-flight has already refused the run over if the remote does
 		# not carry it.

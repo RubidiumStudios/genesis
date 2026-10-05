@@ -67,7 +67,7 @@ subtest 'a marker-only local commit is reset and reported as an event' => sub {
 		'and it is not reported as the environment outcome');
 	isnt(ref_in($h->a, "refs/heads/$qa"), $stranded,
 		'the stranded commit is gone from the branch');
-	is($h->git('a')->resolve_branch($qa)->{behind}, 0,
+	is($h->git('a')->resolve_branch($qa, remote => 'origin')->{behind}, 0,
 		'and the branch stands where the remote stands');
 };
 
@@ -93,7 +93,7 @@ subtest 'a dry run reports the reset and moves nothing' => sub {
 
 	is(ref_in($h->a, "refs/heads/$qa"), $stranded,
 		'the dry run left the branch where it stood');
-	is($h->git('a')->resolve_branch($qa)->{state}, 'ahead',
+	is($h->git('a')->resolve_branch($qa, remote => 'origin')->{state}, 'ahead',
 		'so the stranded commit is still there and still unpublished');
 	# The caveat says only that the reset is assumed.  The sentence naming
 	# what would be discarded is the event line, which the caller prints
@@ -249,7 +249,7 @@ subtest 'the straggler, reproduced' => sub {
 
 	is(ref_in($h->a, "refs/heads/$qa"), ref_in($h->r, $qa),
 		'the re-run reset the branch back onto what the remote holds');
-	is($h->git('a')->resolve_branch($qa)->{state}, 'in-sync',
+	is($h->git('a')->resolve_branch($qa, remote => 'origin')->{state}, 'in-sync',
 		'so the branch and the remote agree again');
 };
 
@@ -273,11 +273,11 @@ subtest 'the divergence with no exit, reproduced' => sub {
 	diverge($h, $qa, local => 0, remote => 1);
 	local_only_commit($h, $qa, marker => $control);
 	stand_on($h, $h->control);
-	is($h->git('a')->resolve_branch($qa)->{state}, 'diverged',
+	is($h->git('a')->resolve_branch($qa, remote => 'origin')->{state}, 'diverged',
 		'the branch really is diverged');
 
 	run_genesis($h, 'propagate');
-	is($h->git('a')->resolve_branch($qa)->{state}, 'in-sync',
+	is($h->git('a')->resolve_branch($qa, remote => 'origin')->{state}, 'in-sync',
 		'a marker-only commit reset itself rather than refusing the run');
 
 	my $h2  = make_harness(envs => ['qa']);

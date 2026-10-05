@@ -36,7 +36,7 @@ subtest 'the third checkout_file dies and the first two ran' => sub {
 	my $git = fault_git($h);
 	fail_on($git, 'checkout_file', 3, message => 'the harness stopped here');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	my @wrote;
@@ -75,7 +75,7 @@ subtest 'no other git step behaves differently' => sub {
 	my $git = fault_git($h);
 	fail_on($git, 'checkout_file', 3);
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	ok(eval {$git->checkout_file($control, 'qa.yml'); 1},
@@ -102,7 +102,7 @@ subtest 'a handle taken before the fault faults too' => sub {
 	fault_git($h);
 	fail_on($h->git('a'), 'checkout', 1, message => 'the harness stopped here');
 
-	my $session = $early->session(control => $h->control);
+	my $session = $early->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	ok(!eval {$session->switch($h->slug('qa')); 1},
 		'the handle the row already held dies');
@@ -170,7 +170,7 @@ sub _fetch_in_child {
 	# refresh skips the branch the working tree is on and would take no
 	# step at all.
 	return $h->run_in_child(
-		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branches([$ARGV[1]]);',
+		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branches([$ARGV[1]], "origin");',
 		$h->a, $h->slug('qa'));
 }
 
@@ -308,7 +308,7 @@ subtest 'a child runs under the plan its own harness armed' => sub {
 	fail_on($git, 'fetch_branches', 1, message => 'the armed refusal');
 
 	my ($out, $rc) = $one->run_in_child(
-		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branches([$ARGV[1]]);',
+		'use Service::Git; Service::Git->new($ARGV[0])->fetch_branches([$ARGV[1]], "origin");',
 		$one->a, $one->slug('qa'));
 	isnt($rc, 0, 'the armed step took the child down');
 	is(scalar(grep {$_->[0] eq 'fetch_branches'} step_log($git)), 1,

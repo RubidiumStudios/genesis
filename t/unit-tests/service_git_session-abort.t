@@ -34,7 +34,7 @@ subtest 'a failed restore reaches the stuck state and dies naming both' => sub {
 	my $h   = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
 	my $git = fault_git($h, copy => 'a');
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 
 	$session->begin;
 	$session->switch($h->slug('qa'));
@@ -85,7 +85,7 @@ subtest 'a reset that cannot run is loud rather than carried through' => sub {
 		);
 
 		my $git = $h->git('a');
-		my $session = $git->session(control => $h->control);
+		my $session = $git->session(control => $h->control, remote => 'origin');
 		$session->begin;
 		$session->switch($h->slug('qa'));
 		$git->checkout_file($control, 'ops/one.yml');
@@ -136,7 +136,7 @@ subtest 'a fault between the first write and the commit leaves nothing staged' =
 	);
 
 	my $git = fault_git($h, copy => 'a');
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	my $w = snapshot_w($h, copy => 'a');
 
 	$session->begin;
@@ -179,7 +179,7 @@ subtest 'abort resets every branch it committed to and leaves control alone' => 
 	my $prod_t = $git->sha('refs/remotes/origin/' . $h->slug('prod'));
 	my $control_before = $git->sha($h->control);
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	for my $env (qw/qa prod/) {
 		$session->switch($h->slug($env));
@@ -218,7 +218,7 @@ subtest 'abort takes off a branch this run cut' => sub {
 	my $cut    = $h->pr_branch('qa');
 	my $qa_t   = $git->sha('refs/remotes/origin/' . $h->slug('qa'));
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	$session->switch($cut, create_from => $h->slug('qa'));
@@ -259,7 +259,7 @@ subtest 'a branch that cannot go back does not strand the operator' => sub {
 	my $git = fault_git($h, copy => 'a');
 	my $cut = $h->pr_branch('qa');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	$session->switch($cut, create_from => $h->slug('qa'));
@@ -311,7 +311,7 @@ subtest 'control behind its remote-tracking ref is still left alone' => sub {
 	isnt($before, $git->sha('refs/remotes/origin/' . $h->control),
 		'control is behind its remote-tracking ref');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	exception(sub { $session->abort('the run failed') });
@@ -334,7 +334,7 @@ subtest 'a local commit on control survives the session' => sub {
 	);
 
 	my $git = $h->git('a');
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	$git->checkout_file($mine, 'mine.yml');
@@ -365,7 +365,7 @@ subtest 'a session that is not open still carries the exit code' => sub {
 	# was answered 1 would be told the wrong thing about its own failure.
 	my $h   = make_harness(envs => ['qa']);
 	my $git = $h->git('a');
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 
 	ok(!$session->active, 'the session was never opened');
 

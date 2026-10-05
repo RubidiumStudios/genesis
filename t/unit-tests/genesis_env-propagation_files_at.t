@@ -94,7 +94,7 @@ subtest 'the set is read at the delivered commit, not from the working tree' => 
 		'and at the commit before the restructure it answers the flat set');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	$session->apply_files($restructure,
@@ -143,7 +143,7 @@ subtest 'no rename detection runs' => sub {
 	my $env = Genesis::Env->bare('qa', $top);
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	my $result = $session->apply_files($after,
@@ -203,7 +203,7 @@ subtest 'a glob in the tracked list expands at the commit' => sub {
 		'and the working-tree reader names the same paths');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	$session->apply_files($control,
@@ -353,7 +353,7 @@ subtest 'the fragments are read at the commit, not where the session stands' => 
 	my $env = Genesis::Env->bare('qa', $top);
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -473,7 +473,7 @@ subtest 'a tracked path that fell out of the list is read at the commit' => sub 
 		'while a reader working from the working tree would keep the path');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	$session->apply_files($narrow,

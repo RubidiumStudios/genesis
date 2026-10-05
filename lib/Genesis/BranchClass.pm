@@ -70,7 +70,7 @@ sub classify_branch {
 sub refresh_control {
 	my ($top, $git) = @_;
 
-	my $remote = $git->default_remote or return 1;
+	my $remote  = $top->source_control_remote;
 	my $control = $top->control_branch;
 
 	# A clone that has lost its control branch is the pre-flight's to
@@ -80,6 +80,12 @@ sub refresh_control {
 	# state, one owner, the same rule that keeps the detached HEAD below
 	# out of this assertion.
 	return 1 unless $git->branch_exists('refs/heads/' . $control);
+
+	# A remote the configuration names and this clone lacks is a
+	# configuration fault, not a network one, so the refresh stands aside
+	# and the command's own refusal names the remote, rather than this one
+	# telling the operator to try again.
+	return 1 unless $git->has_remote($remote);
 
 	my (undef, $result) = $git->fetch_branches([$control], $remote);
 	return 1 if $result->{ok};
@@ -137,10 +143,8 @@ sub refresh_control {
 sub permitted_feature_branch {
 	my ($top, $git, $branch, %opts) = @_;
 
-	my $remote = $git->default_remote;
-	my $control_ref = $remote
-		? 'refs/remotes/' . $remote . '/' . $top->control_branch
-		: $top->control_branch;
+	my $remote      = $top->source_control_remote;
+	my $control_ref = 'refs/remotes/' . $remote . '/' . $top->control_branch;
 
 	# The tip is read off a ref, and a clone that has never fetched control
 	# holds none.  Left unchecked, the descent question below is asked of
@@ -166,11 +170,10 @@ sub permitted_feature_branch {
 	# holds neither ref for a control the remote has.  A caller told
 	# "exists neither" would then be told to create a branch that is
 	# already there.  Only a remote that lacks control too earns that
-	# sentence, and a repository with no remote configured gets it because
-	# remote_branch_exists answers 0 for one.  An ls-remote that fails
-	# bails in remote_branch_exists' own words, which is left alone,
-	# because a remote nobody can reach is not a remote that lacks the
-	# branch, and the refresh above has already tolerated whatever it was.
+	# sentence.  An ls-remote that fails bails in remote_branch_exists' own
+	# words, which is left alone, because a remote nobody can reach is not a
+	# remote that lacks the branch, and the refresh above has already
+	# tolerated whatever it was.
 	#
 	# The remote is asked only where the caller allowed a refresh.  A
 	# command that promised to make no network call, which is
@@ -180,9 +183,9 @@ sub permitted_feature_branch {
 	# this arm returns, because a fetch is what a clone missing the ref
 	# needs whether or not the remote turns out to have it.
 	unless ($git->branch_exists($control_ref)) {
-		my $named = $remote // 'the remote';
 		my $refresh = defined($opts{refresh}) ? $opts{refresh} : 1;
-		my $elsewhere = defined $git->resolve_branch($top->control_branch);
+		my $elsewhere = defined $git->resolve_branch($top->control_branch,
+			remote => $remote);
 		$elsewhere ||= $refresh
 			? $git->remote_branch_exists($top->control_branch, $remote)
 			: 1;
@@ -194,7 +197,7 @@ sub permitted_feature_branch {
 			"Create it by hand, with the repository scaffold for a new ".
 			"repository or as the migration describes for a move to v3, ".
 			"push it, then run the command again.",
-			$top->control_branch, $named
+			$top->control_branch, $remote
 		) unless $elsewhere;
 
 		# Control is here or on the remote, so the remedy is a fetch.
@@ -203,12 +206,12 @@ sub permitted_feature_branch {
 			sprintf(
 				"#C{%s} has not been fetched from #C{%s}, so there is no ".
 				"tip for #C{%s} to be measured against",
-				$top->control_branch, $named, $branch
+				$top->control_branch, $remote, $branch
 			),
 			sprintf(
 				"Fetch it, and cut the branch from what arrives:\n\n".
 				"    git fetch %s %s\n",
-				$named, $top->control_branch
+				$remote, $top->control_branch
 			)
 		);
 	}
@@ -227,10 +230,8 @@ sub permitted_feature_branch {
 			$branch, $top->control_branch
 		),
 		sprintf(
-			"Rebase it onto the refreshed tip:\n\n    git rebase %s\n",
-			$remote
-				? $remote . '/' . $top->control_branch
-				: $top->control_branch
+			"Rebase it onto the refreshed tip:\n\n    git rebase %s/%s\n",
+			$remote, $top->control_branch
 		)
 	) unless $git->is_ancestor($control_tip, $branch);
 

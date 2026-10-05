@@ -86,7 +86,7 @@ subtest 'an absent local ref is created from the remote and nothing else is' => 
 	delete_local($h, 'a', $prod);
 
 	my $before = refs_in($h->a);
-	my (undef, $result) = $h->git('a')->fetch_branches([$qa, $prod, $h->control]);
+	my (undef, $result) = $h->git('a')->fetch_branches([$qa, $prod, $h->control], 'origin');
 	my $after = refs_in($h->a);
 
 	is_deeply($result->{created}, [$prod], 'one ref was created');

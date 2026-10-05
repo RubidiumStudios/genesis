@@ -2384,8 +2384,10 @@ C<Nothing was written.>
 =back
 
 B<Returns:> The refresh result, carrying C<ok>, C<kind>, C<fetched>,
-C<created>, and C<absent>.  C<undef> where the repository declares no pipeline
-or has no remote, both of which leave nothing to refresh.
+C<created>, and C<absent>.  C<undef> where the repository declares no
+pipeline, which leaves nothing to refresh.  The remote is
+L</source_control_remote>, which a pipeline repository always resolves, since
+the load refuses one that cannot derive it.
 
 B<Errors:>
 

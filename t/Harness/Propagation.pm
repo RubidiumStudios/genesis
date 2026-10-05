@@ -4234,7 +4234,7 @@ sub fork_and_switch {
 use Genesis;
 use Service::Git;
 my ($root, $control, $branch) = @ARGV;
-my $session = Service::Git->new($root)->session(control => $control);
+my $session = Service::Git->new($root)->session(control => $control, remote => 'origin');
 $session->begin;
 $session->switch($branch);
 $session->finish;

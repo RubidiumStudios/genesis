@@ -102,7 +102,7 @@ subtest 'the failure ends the run and every branch goes back to T' => sub {
 		qw(qa dev prod);
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 
 	# qa is delivered, dev fails its check, and prod is never reached.
@@ -214,7 +214,7 @@ subtest 'a commit that left the tip where it was is still reset' => sub {
 	isnt($ahead, $t, 'the branch starts ahead of the ref the abort puts it back to');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -267,7 +267,7 @@ subtest 'a checkout_file that dies leaves the branch at T and clean' => sub {
 	fail_on($fault, 'checkout_file', 3, message => 'the third write dies');
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -354,7 +354,7 @@ subtest 'the loss reports nothing it cannot show' => sub {
 	skip_on($fault, 'checkout_file', 1, from => 1);
 
 	my $w = snapshot_w($h);
-	my $session = $git->session;
+	my $session = $git->session(remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 

@@ -115,7 +115,8 @@ subtest 'one handle per copy, and one session on each' => sub {
 	# what lets a row drive both copies at once.
 	my $b = $h->git('b');
 	isnt($b, $a, 'the other copy has a handle of its own');
-	isnt($b->session, $a->session, 'and a session of its own with it');
+	isnt($b->session(remote => 'origin'), $a->session(remote => 'origin'),
+		'and a session of its own with it');
 };
 
 done_testing;

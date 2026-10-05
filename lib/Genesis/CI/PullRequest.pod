@@ -50,10 +50,10 @@ always naming this one in full.
 
 =head1 FUNCTIONS
 
-=head2 align_with_remote($git, $branch)
+=head2 align_with_remote($git, $branch, $remote)
 
     my $aligned = Genesis::CI::PullRequest::align_with_remote($git,
-        'pr/qa/bosh');
+        'pr/qa/bosh', 'origin');
 
 Brings the local pull request branch level with what the remote carries, and
 says whether the remote carried it at all.
@@ -85,20 +85,24 @@ The repository handle.
 
 The pull request branch.
 
+=item C<$remote>
+
+The remote the session was built with, which is the source-control block's
+answer (D29).
+
 =back
 
 B<Returns:> 1 where the remote carried the branch and the local ref is now
-level with it, and 0 where the remote has no such branch or the repository
-has no remote at all.
+level with it, and 0 where the remote has no such branch.
 
 B<Errors:> Whatever the fetch or the reset raises.
 
 B<Examples:>
 
-    align_with_remote($git, 'pr/qa/bosh');
+    align_with_remote($git, 'pr/qa/bosh', 'origin');
     # returns 1, with the checked-out branch now at origin/pr/qa/bosh
 
-    align_with_remote($git, 'pr/prod/bosh');
+    align_with_remote($git, 'pr/prod/bosh', 'origin');
     # returns 0, and touches nothing, where the remote has never had it
 
 =head2 aggregate_message($git, $env, $commits, %opts)
@@ -351,7 +355,7 @@ B<Examples:>
 =head2 forget_lost_branch($git, $branch [, %opts])
 
     my $lost = Genesis::CI::PullRequest::forget_lost_branch($git,
-        'pr/qa/bosh');
+        'pr/qa/bosh', remote => 'origin');
 
 Asks the remote about the pull request branch and answers whether the remote
 has lost it, taking the leftover refs off where it has.
@@ -391,28 +395,29 @@ The pull request branch to ask about.
 
 =item C<%opts>
 
-C<dry_run> gets the same answer with neither ref taken off, because a ref
-removed is a write like any other.
+C<remote> is the remote the session was built with, which is the
+source-control block's answer (D29).  C<dry_run> gets the same answer with
+neither ref taken off, because a ref removed is a write like any other.
 
 =back
 
 B<Returns:> 1 where the remote has lost the branch, and 0 where it still has
-it, where neither ref is here to be lost, where there is no remote, and where
-the probe failed.
+it, where neither ref is here to be lost, and where the probe failed.
 
 B<Errors:> Whatever the tracking-ref removal or the local deletion raises.
 
 B<Examples:>
 
-    forget_lost_branch($git, 'pr/qa/bosh');
+    forget_lost_branch($git, 'pr/qa/bosh', remote => 'origin');
     # returns 1, with the local ref and origin/pr/qa/bosh both gone
 
-    forget_lost_branch($git, 'pr/qa/bosh', dry_run => 1);
+    forget_lost_branch($git, 'pr/qa/bosh', remote => 'origin', dry_run => 1);
     # returns 1, with both refs still standing
 
-=head2 expected_tip($git, $pr_branch)
+=head2 expected_tip($git, $pr_branch, $remote)
 
-    my $expected = Genesis::CI::PullRequest::expected_tip($git, 'pr/prod/bosh');
+    my $expected = Genesis::CI::PullRequest::expected_tip($git,
+        'pr/prod/bosh', 'origin');
 
 Returns the pull request branch's value on the remote as the run's refresh
 read it, or C<undef> when the remote does not carry the branch. The publish
@@ -443,13 +448,16 @@ B<Parameters:>
 
 =item C<$git>
 
-The C<Service::Git> handle onto the operator's repository. Its default remote
-is what R is read through, and a repository with no remote answers C<undef>,
-since there is nothing to publish to and so nothing to lease against.
+The C<Service::Git> handle onto the operator's repository.
 
 =item C<$pr_branch>
 
 The pull request branch's name, without a remote on the front of it.
+
+=item C<$remote>
+
+The remote R is read through, which is the one the session was built with
+and the source-control block's answer (D29).
 
 =back
 
@@ -457,7 +465,7 @@ B<Returns:> the full sha the remote-tracking ref names, or C<undef>.
 
 B<Examples:>
 
-    expected_tip($git, 'pr/prod/bosh');
+    expected_tip($git, 'pr/prod/bosh', 'origin');
     # returns 'd1f65205d4b31d65dc81864dfc0f56a73b6bd74c' where the remote
     # carries the branch, and undef where it does not
 
@@ -707,10 +715,10 @@ B<Examples:>
     # returns '1 commit on pr/prod/bosh that this run did not write,
     # discarded by the rebuild'
 
-=head2 settled($git, $pr_branch, $newest, $tree)
+=head2 settled($git, $pr_branch, $newest, $tree, $remote)
 
     my $bool = Genesis::CI::PullRequest::settled($git, $pr_branch,
-        $newest_due_sha, $tree);
+        $newest_due_sha, $tree, 'origin');
 
 Returns true when the pull request branch on the remote already carries the
 newest due control commit as its marker and holds the same tree the rebuild
@@ -730,10 +738,10 @@ or a file may have been changed under it, so the tree the writer has just
 built is compared against the tree the branch carries and only a branch that
 matches on both is settled.
 
-The remote is asked for by name rather than spelled C<origin>, for the reason
-C<expected_tip> gives: C<align_with_remote> reads the same ref through the
-same accessor a few lines above, and the two must not disagree about which
-remote R is.
+The remote is passed in rather than spelled C<origin>: C<align_with_remote>
+and C<expected_tip> read the same ref through the same remote, the one the
+session was built with, and the three must not disagree about which remote R
+is.
 
 B<Parameters:>
 
@@ -758,11 +766,15 @@ branch names.
 The tree the rebuild would write, read off the commit the single writer has
 already built.
 
+=item C<$remote>
+
+The remote R is read through, the one the session was built with.
+
 =back
 
-B<Returns:> C<1> or C<0>. C<0> where the clone has no remote, where R does not
-have the branch, where the branch carries no marker at all, where its newest
-marker names another commit, or where the trees differ.
+B<Returns:> C<1> or C<0>. C<0> where R does not have the branch, where the
+branch carries no marker at all, where its newest marker names another
+commit, or where the trees differ.
 
 A marker naming a commit this clone has never fetched falls under the same
 C<0>. L<Genesis::CI::Marker/newest> hands such a marker back at the width the
@@ -773,7 +785,7 @@ branch this clone cannot name is one it should rebuild rather than skip.
 
 B<Examples:>
 
-    settled($git, 'pr/qa/bosh', $newest, $tree);
+    settled($git, 'pr/qa/bosh', $newest, $tree, 'origin');
     # returns 1 when R's pr/qa/bosh names $newest and holds $tree
 
 =head2 carry_state($record, $state)
@@ -1542,7 +1554,8 @@ B<Examples:>
 =head2 _nothing_due_specs(%args)
 
     my @specs = Genesis::CI::PullRequest::_nothing_due_specs(
-        git => $git, records => $record->{environments});
+        git => $git, remote => $top->source_control_remote,
+        records => $record->{environments});
 
 Returns the deletion push specs for the branches this run retires, each leased
 against the tip the refresh read, so a branch somebody moved refuses its own
@@ -1558,9 +1571,9 @@ B<Parameters:>
 
 =item C<%args>
 
-C<git> is the repository the tips are read from, and C<records> is the
-arrayref of per-environment records, of which the ones whose C<pr> carries the
-action C<delete> are the ones read.
+C<git> is the repository the tips are read from, C<remote> the remote they are
+read under, and C<records> is the arrayref of per-environment records, of
+which the ones whose C<pr> carries the action C<delete> are the ones read.
 
 =back
 
@@ -1569,7 +1582,7 @@ C<delete>, and C<expect>. The list is empty where nothing was retired.
 
 B<Examples:>
 
-    _nothing_due_specs(git => $git, records => $envs);
+    _nothing_due_specs(git => $git, remote => 'origin', records => $envs);
     # returns ({branch => 'pr/qa/bosh', kind => 'pr', env => 'qa',
     #           delete => 1, expect => '9f1c...'})
 

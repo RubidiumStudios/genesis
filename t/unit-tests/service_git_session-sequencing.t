@@ -23,7 +23,7 @@ subtest 'a second session inside a first is refused' => sub {
 	init_branch($h, 'qa');
 	my $git = $h->git('a');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -48,7 +48,7 @@ subtest 'control after a deployment branch is a second session' => sub {
 	stand_on($h, $h->slug('qa'));
 	my $git = $h->git('a');
 
-	my $first = $git->session(control => $h->control);
+	my $first = $git->session(control => $h->control, remote => 'origin');
 	$first->begin;
 	$first->switch($h->control);
 	is($git->current_branch, $h->control, 'the first session reached control');
@@ -57,7 +57,7 @@ subtest 'control after a deployment branch is a second session' => sub {
 	is($git->current_branch, $h->slug('qa'),
 		'and stood us back on the deployment branch');
 
-	my $second = $git->session(control => $h->control);
+	my $second = $git->session(control => $h->control, remote => 'origin');
 	$second->begin;
 	$second->switch($h->control);
 	is($git->current_branch, $h->control, 'the second session reached control');
@@ -76,8 +76,8 @@ subtest 'two handles for two working trees hold one session each' => sub {
 	my $b = $h->git('b');
 	isnt($a, $b, 'the two copies are two handles');
 
-	my $sa = $a->session(control => $h->control);
-	my $sb = $b->session(control => $h->control);
+	my $sa = $a->session(control => $h->control, remote => 'origin');
+	my $sb = $b->session(control => $h->control, remote => 'origin');
 	isnt($sa, $sb, 'and each handle has its own session');
 
 	$sa->begin;
@@ -95,7 +95,7 @@ subtest 'one handle answers with one session' => sub {
 
 	my $h   = make_harness(envs => ['qa']);
 	my $git = $h->git('a');
-	is($git->session, $git->session,
+	is($git->session(remote => 'origin'), $git->session,
 		'asking twice for the session gives the same object');
 };
 

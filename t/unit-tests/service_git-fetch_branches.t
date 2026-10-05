@@ -87,16 +87,14 @@ sub queue_after {
 # Command line of the Nth captured run() call, minus the opts hashref.
 sub run_argv { my ($n) = @_; my @a = @{$run_calls[$n]}; shift @a; return \@a; }
 
-# Also stub the checked-out branch and the default remote on this instance,
-# because both normally consult git via run and these rows want deterministic
-# values.  The refresh reads the branch it is standing on through the private
-# reader rather than through current_branch, because current_branch cannot
-# name an unborn branch.
+# Also stub the checked-out branch on this instance, because it normally
+# consults git via run and these rows want a deterministic value.  The refresh
+# reads the branch it is standing on through the private reader rather than
+# through current_branch, because current_branch cannot name an unborn branch.
 sub override_inspections {
 	my (%opts) = @_;
 	no warnings qw(redefine once);
 	*Service::Git::checked_out_branch = sub { $opts{checked_out} };
-	*Service::Git::default_remote      = sub { $opts{default_remote} };
 }
 
 # ======================================================================
@@ -107,7 +105,7 @@ subtest 'fetch_branches - success returns ($self, kind=success)' => sub {
 	plan tests => 5;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads(qw(qa lab));
 	queue_local_heads();                        # neither is here yet
 	push @run_results, ['Fetching origin', 0, '']; # fetch
@@ -136,7 +134,7 @@ subtest 'fetch_branches - probes the remote with fully-qualified refs' => sub {
 	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads(qw(qa lab));
 	queue_local_heads();                # no local branches
 	push @run_results, ['', 0, ''];     # fetch
@@ -163,7 +161,7 @@ subtest 'fetch_branches - fetches only the branches the remote has' => sub {
 	plan tests => 4;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads(qw(qa prod));           # lab is absent on the remote
 	queue_local_heads();                # neither is local yet
 	push @run_results, ['', 0, ''];     # fetch
@@ -188,7 +186,7 @@ subtest 'fetch_branches - no fetch at all when the remote has none of them' => s
 	plan tests => 3;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads();                      # remote has nothing
 
 	my $git = make_git();
@@ -203,7 +201,7 @@ subtest 'fetch_branches - caches fetched branches, not absent ones' => sub {
 	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads(qw(qa));
 	queue_local_heads();                # qa is not here yet
 	push @run_results, ['', 0, ''];     # fetch
@@ -224,7 +222,7 @@ subtest 'fetch_branches - probe failure is classified and reported' => sub {
 	plan tests => 3;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	push @run_results, ['', 128, 'fatal: Authentication failed for https://example/x.git'];
 
 	my $git = make_git();
@@ -239,7 +237,7 @@ subtest 'fetch_branches - fetch failure after a good probe is classified' => sub
 	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads(qw(qa));
 	queue_local_heads();                # for-each-ref
 	push @run_results, ['', 128, 'fatal: unable to access: Could not resolve host: example'];
@@ -259,7 +257,7 @@ subtest 'fetch_branches - a branch already local only updates its tracking ref' 
 	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads(qw(qa lab));
 	queue_local_heads(qw(qa control));  # qa is here already
 	push @run_results, ['', 0, ''];     # fetch
@@ -281,7 +279,7 @@ subtest 'fetch_branches - network failure classified' => sub {
 	plan tests => 3;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	push @run_results, ['', 128, 'fatal: unable to access: Could not resolve host: github.com'];
 
 	my $git = make_git();
@@ -296,7 +294,7 @@ subtest 'fetch_branches - auth failure classified' => sub {
 	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	push @run_results, ['', 128, 'fatal: Authentication failed for https://github.com/foo/bar.git'];
 
 	my $git = make_git();
@@ -310,7 +308,7 @@ subtest 'fetch_branches - terminal-prompts-disabled also classified as auth' => 
 	plan tests => 1;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	push @run_results, ['', 128, 'fatal: could not read Username for ...: terminal prompts disabled'];
 
 	my $git = make_git();
@@ -323,7 +321,7 @@ subtest 'fetch_branches - unknown failure classified' => sub {
 	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	push @run_results, ['', 1, 'something weird went wrong'];
 
 	my $git = make_git();
@@ -333,18 +331,19 @@ subtest 'fetch_branches - unknown failure classified' => sub {
 	is $result->{kind}, 'unknown', 'unmatched err lands in unknown bucket';
 };
 
-subtest 'fetch_branches - no-op when no remote returns success' => sub {
-	plan tests => 3;
+# Which remote is the source-control block's answer (D29), so a caller that
+# names none is a defect, and the refresh refuses rather than guessing.
+subtest 'fetch_branches - a caller that names no remote is refused' => sub {
+	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => undef);
+	override_inspections(checked_out => 'control');
 
 	my $git = make_git();
-	my ($returned, $result) = $git->fetch_branches([qw(qa)]);
-
-	is $returned, $git, 'returns $self';
-	is $result->{ok}, 1, 'ok=1 (no-op)';
-	is scalar @run_calls, 0, 'run was never invoked';
+	throws_ok {$git->fetch_branches([qw(qa)])}
+		qr/fetch_branches.*needs its remote by name/,
+		'the refresh names the method that was not told its remote';
+	is scalar @run_calls, 0, 'and git was never asked anything';
 };
 
 subtest 'fetch_branches - the checked-out branch is refreshed like any other' => sub {
@@ -355,7 +354,7 @@ subtest 'fetch_branches - the checked-out branch is refreshed like any other' =>
 	plan tests => 3;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads(qw(control));
 	queue_local_heads(qw(control));     # control is here already
 	push @run_results, ['', 0, ''];     # fetch
@@ -380,7 +379,7 @@ subtest 'fetch_branches - one name asked for twice is one branch' => sub {
 	plan tests => 4;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads(qw(control qa));
 	# control is the checked-out branch here, so it has to be a branch this
 	# clone holds.  Were it absent it would take the forced refspec onto
@@ -414,7 +413,7 @@ subtest 'fetch_branches - an unborn checked-out branch takes the tracking refspe
 	plan tests => 3;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'newbranch', default_remote => 'origin');
+	override_inspections(checked_out => 'newbranch');
 	queue_heads(qw(newbranch qa));
 	queue_local_heads(qw(qa));          # newbranch is unborn, so it is not here
 	push @run_results, ['', 0, ''];     # fetch
@@ -441,7 +440,7 @@ subtest 'fetch_branches - the report is read off the refs, not off the probe' =>
 	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads(qw(qa lab));
 	queue_local_heads();                # neither is here yet
 	push @run_results, ['', 0, ''];     # fetch
@@ -487,7 +486,7 @@ subtest 'fetch_branches - a local-head read that failed is raised, not assumed' 
 	plan tests => 2;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	queue_heads(qw(qa));
 	push @run_results, ['', 128, 'fatal: not a git repository'];   # for-each-ref
 
@@ -503,7 +502,7 @@ subtest 'fetch_branches - GIT_TERMINAL_PROMPT=0 when non-interactive' => sub {
 	plan tests => 1;
 	reset_stub();
 	install_run_stub();
-	override_inspections(checked_out => 'control', default_remote => 'origin');
+	override_inspections(checked_out => 'control');
 	push @run_results, ['', 0, ''];
 
 	# Override in_controlling_terminal to false so we exercise the

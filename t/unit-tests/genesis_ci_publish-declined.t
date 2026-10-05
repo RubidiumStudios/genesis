@@ -45,7 +45,7 @@ subtest 'a no resets every branch and publishes nothing' => sub {
 	# to both deployment branches and pushed neither, which is the state a
 	# decline has to leave no trace of.
 	my $git     = $h->git('a');
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	for my $env (qw/lab qa/) {
 		$session->switch($h->slug($env));
@@ -145,7 +145,7 @@ subtest 'a publish-set branch the remote never had goes back where it was' => su
 	);
 
 	my $git     = $h->git('a');
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('lab'));
 	my $found = $git->sha('HEAD');
@@ -182,7 +182,7 @@ subtest 'a branch the run cut is taken off again on a decline' => sub {
 
 	my $git     = $h->git('a');
 	my $cut     = $h->pr_branch('lab');
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($cut, create_from => $h->slug('lab'));
 	$git->checkout_file($control, 'ops/shared.yml');

@@ -1653,8 +1653,8 @@ overrides one of them widens the tier column to hold C<explicit>.
 
 =head2 _preview_warnings
 
-  my $caveats = _preview_warnings($git, $control, $control_state, $initial,
-      \@dag_order);
+  my $caveats = _preview_warnings($top->source_control_remote, $control,
+      $control_state, $initial, \@dag_order);
 
 Gathers a preview's caveats, off the records the run's first two stages
 already settled.
@@ -1677,11 +1677,9 @@ B<Parameters:>
 
 =over 4
 
-=item C<$git>
+=item C<$remote>
 
-A C<Service::Git> handle, asked only for the default remote's name.  A
-repository with no remote configured has none to print, so the caveats say
-"the remote" instead, which is how the pre-flight's own refusals spell it.
+The remote the source-control block resolves to, which every caveat names.
 
 =item C<$control>
 
@@ -1712,7 +1710,7 @@ B<Errors:> None.
 
 B<Examples:>
 
-  _preview_warnings($git, 'control', $control_state, $initial, ['qa']);
+  _preview_warnings('origin', 'control', $control_state, $initial, ['qa']);
   # [ { kind => 'unpushed-control', branch => 'control',
   #     remote => 'origin' },
   #   { kind => 'unreset-branch', branch => 'qa/bosh',

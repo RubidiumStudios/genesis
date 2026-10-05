@@ -75,7 +75,7 @@ subtest 'Genesis refuses to push a tip that would rewrite the branch' => sub {
 	my $err = '';
 	eval {
 		local $ENV{GENESIS_IGNORE_EVAL} = '';
-		$git->push_append_only('qa/bosh');
+		$git->push_append_only('qa/bosh', remote => 'origin');
 		1;
 	} or $err = $@;
 	my $said = unfolded($err);

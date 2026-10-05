@@ -156,8 +156,8 @@ without one records the outcomes and resets nothing.
 
 =item C<remote>
 
-The remote to publish to, by name. It falls back to the repository's default
-remote, and a repository with no remote at all publishes nothing.
+Required. The remote to publish to, by name, which the caller resolves
+through L<Genesis::Top/source_control_remote>; a call without one is a bug.
 
 =item C<control>
 
@@ -200,13 +200,14 @@ holding the sentence, with every other key left as it began. A publish the
 operator declined carries C<declined> as 1 and every other key as it began,
 having reset the branches and written the outcomes first.
 
-B<Errors:> None of its own. A rejection is an outcome rather than a failure, a
+B<Errors:> A call that names no C<remote> is a bug, and raises as one.
+Otherwise none of its own. A rejection is an outcome rather than a failure, a
 control that moved is a sentence for the caller to refuse with, and the one
 failure the stage meets is raised by the caller's own callback.
 
 B<Examples:>
 
-    publish_run(git => $git, specs => []);
+    publish_run(git => $git, remote => 'origin', specs => []);
     # returns the empty result and pushes nothing
 
     publish_run(git => $git, session => $session, remote => 'origin',

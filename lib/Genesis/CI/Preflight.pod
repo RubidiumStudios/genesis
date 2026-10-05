@@ -213,10 +213,10 @@ remote only, naming what is true of the branch and the one command that fixes
 it.  The remote-only refusal is the one that says the refresh should have
 written the local ref and did not, which is what a working tree standing on an
 unborn control does to it, so it asks for the ref to be written rather than
-reading a staleness out of two counts that are both zero.  Where the
-repository has no remote configured at all, the local-only refusal asks for a
-remote instead of printing a push command with nothing to push to.  No refusal
-writes anything, and no path here moves control.
+reading a staleness out of two counts that are both zero.  The remote every
+refusal names is L<Genesis::Top/source_control_remote> (D29), which a
+pipeline repository always resolves, since the load refuses one that cannot
+derive it.  No refusal writes anything, and no path here moves control.
 
 B<Examples:>
 

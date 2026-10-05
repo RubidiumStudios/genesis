@@ -27,7 +27,7 @@ subtest 'a clean finish answers finished and finish_if_clean' => sub {
 	refresh($h, 'a', $h->control, $h->slug('qa'));
 	my $git = $h->git('a');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	ok(!$session->finished, 'a session that never opened is not finished');
 
 	# A clean tree is not a finish.  The answer says whether the session
@@ -53,7 +53,7 @@ subtest 'a tracked modification at finish is reported and not finished' => sub {
 	refresh($h, 'a', $h->control, $h->slug('qa'));
 	my $git = $h->git('a');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -80,7 +80,7 @@ subtest 'the session hands back its handle and takes a recorded commit' => sub {
 	refresh($h, 'a', $h->control, $h->slug('qa'));
 	my $git = $h->git('a');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -105,7 +105,7 @@ subtest 'a session opened a second time answers for itself alone' => sub {
 	# The handle builds the session once and answers with that object
 	# afterwards, so control after a deployment branch is this same session
 	# opened again rather than a second one.
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	$session->finish;

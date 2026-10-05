@@ -968,6 +968,7 @@ sub propagate {
 		# the whole walk to finish.
 		push @publish_specs, Genesis::CI::PullRequest::_nothing_due_specs(
 			git     => $git,
+			remote  => $top->source_control_remote,
 			records => $record->{environments},
 		) unless $dry_run;
 
@@ -989,47 +990,45 @@ sub propagate {
 		# the remote refused is put back through the session for the same
 		# reason.
 		if (@publish_specs) {
-			my $remote = $git->default_remote;
-			if ($remote) {
-				$publish = Genesis::CI::Publish::publish_run(
-					git     => $git,
-					session => $session,
-					remote  => $remote,
-					control => $control,
-					records => $record->{environments},
-					specs   => \@publish_specs,
-					# The publish's ask arrives here.  The delta every push
-					# would carry is shown either way, and this answers the
-					# question that follows it.
-					yes     => $opts->{yes},
-					# The two shapes reach one reading.  git push failing to
-					# run at all raises, and a remote nobody can resolve comes
-					# back as a refused push per ref, so a run where nothing
-					# landed and no result named a ref is the remote being
-					# gone, where a run holding a result that landed or that
-					# named a ref is those branches' own quarrel with it
-					# however many of them it refused.  The words git wrote are
-					# classified here, beside the run, because the remedy each
-					# class earns is the run's to offer and not the stage's.
-					unsurvivable => sub {
-						my ($reason, $stderr) = @_;
-						my ($message, $remedy) =
-							_push_failure($remote, $reason, $stderr);
-						die Genesis::CI::RunFailure->unsurvivable(
-							message => $message,
-							remedy  => $remedy,
-						);
-					},
-				);
+			my $remote = $top->source_control_remote;
+			$publish = Genesis::CI::Publish::publish_run(
+				git     => $git,
+				session => $session,
+				remote  => $remote,
+				control => $control,
+				records => $record->{environments},
+				specs   => \@publish_specs,
+				# The publish's ask arrives here.  The delta every push
+				# would carry is shown either way, and this answers the
+				# question that follows it.
+				yes     => $opts->{yes},
+				# The two shapes reach one reading.  git push failing to
+				# run at all raises, and a remote nobody can resolve comes
+				# back as a refused push per ref, so a run where nothing
+				# landed and no result named a ref is the remote being
+				# gone, where a run holding a result that landed or that
+				# named a ref is those branches' own quarrel with it
+				# however many of them it refused.  The words git wrote are
+				# classified here, beside the run, because the remedy each
+				# class earns is the run's to offer and not the stage's.
+				unsurvivable => sub {
+					my ($reason, $stderr) = @_;
+					my ($message, $remedy) =
+						_push_failure($remote, $reason, $stderr);
+					die Genesis::CI::RunFailure->unsurvivable(
+						message => $message,
+						remedy  => $remedy,
+					);
+				},
+			);
 
-				# What _write_trailer_holds reads, put on the record where
-				# the publish settles it, so the writer takes one record
-				# rather than arguments that can come to disagree about one
-				# run.  It is all the writer needs, because the trailer's
-				# own reason rides out on the delivered entry the walk
-				# wrote.
-				$record->{published} = $publish->{published} || [];
-			}
+			# What _write_trailer_holds reads, put on the record where
+			# the publish settles it, so the writer takes one record
+			# rather than arguments that can come to disagree about one
+			# run.  It is all the writer needs, because the trailer's
+			# own reason rides out on the delivered entry the walk
+			# wrote.
+			$record->{published} = $publish->{published} || [];
 		}
 
 		# The pull request is opened or updated once its branch is on the
@@ -1114,8 +1113,8 @@ sub propagate {
 	# those two stages settled rather than asked again.  The renderer prints
 	# them under its banner, which is the only place a caveat about a
 	# preview can stand and still be read before the report it is about.
-	$record->{warnings} = _preview_warnings($git, $control, $control_state,
-		$initial, \@dag_order) if $dry_run && $record;
+	$record->{warnings} = _preview_warnings($top->source_control_remote,
+		$control, $control_state, $initial, \@dag_order) if $dry_run && $record;
 
 	$dry_run
 		? Genesis::CI::Report::render_preview($record, git => $git)
@@ -1260,12 +1259,7 @@ sub _write_trailer_holds {
 # the verb of.  Every count was read once already, by the control check or
 # by the classification, so none is asked of git again here.
 sub _preview_warnings {
-	my ($git, $control, $control_state, $initial, $order) = @_;
-
-	# A repository with no remote configured has no name to print, and the
-	# words that stand in for one belong in prose, which is how the
-	# pre-flight's own refusals spell it.
-	my $remote = $git->default_remote // 'the remote';
+	my ($remote, $control, $control_state, $initial, $order) = @_;
 	my @caveats;
 
 	my $divergence = $control_state->{divergence} || {};
@@ -1645,7 +1639,8 @@ sub open_control_session {
 	my ($top, $git) = @_;
 
 	my $control = $top->control_branch;
-	my $session = $git->session(control => $control);
+	my $session = $git->session(control => $control,
+		remote => $top->source_control_remote);
 	$session->begin;
 	$session->switch($control);
 	return $session;

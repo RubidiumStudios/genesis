@@ -52,12 +52,12 @@ subtest 'a branch that is behind is fast-forwarded before the walk' => sub {
 	my $theirs = deliver($h, 'qa', control => $control, copy => 'b');
 	refresh($h, 'a', $qa);
 
-	is($h->git('a')->resolve_branch($qa)->{state}, 'behind',
+	is($h->git('a')->resolve_branch($qa, remote => 'origin')->{state}, 'behind',
 		'copy A starts the run behind the remote');
 
 	my (undef, $err) = run_genesis($h, 'propagate');
 
-	is($h->git('a')->resolve_branch($qa)->{state}, 'in-sync',
+	is($h->git('a')->resolve_branch($qa, remote => 'origin')->{state}, 'in-sync',
 		'the pre-flight moved it up to the tracking ref');
 	like($err, qr{fast-forwarded\s+\Q$qa\E}, 'and reported the move');
 	ok((grep { $_ eq $theirs } commits_on($h->a, "refs/heads/$qa")),
@@ -192,7 +192,7 @@ subtest 'a dry run assumes the fast-forward and moves nothing' => sub {
 
 	is(ref_in($h->a, "refs/heads/$qa"), $before,
 		'the dry run left the branch where it stood');
-	is($h->git('a')->resolve_branch($qa)->{state}, 'behind',
+	is($h->git('a')->resolve_branch($qa, remote => 'origin')->{state}, 'behind',
 		'so it is still behind the remote');
 	# The warning says only that the fast-forward is assumed.  The sentence
 	# naming the counts is the event line, which the caller prints under

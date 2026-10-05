@@ -55,7 +55,7 @@ subtest 'checkout survives losing the current directory' => sub {
 
 	my $root = make_repo();
 	my $git  = Service::Git->new($root);
-	my $session = $git->session(control => 'control');
+	my $session = $git->session(control => 'control', remote => 'origin');
 
 	my $origin = getcwd();
 	chdir("$root/doomsday") or die "cannot enter doomsday/: $!";
@@ -81,7 +81,7 @@ subtest 'checkout keeps the current directory when it survives' => sub {
 
 	my $root = make_repo();
 	my $git  = Service::Git->new($root);
-	my $session = $git->session(control => 'control');
+	my $session = $git->session(control => 'control', remote => 'origin');
 
 	my $origin = getcwd();
 	mkdir_or_fail("$root/shared");

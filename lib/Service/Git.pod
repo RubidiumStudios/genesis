@@ -50,7 +50,7 @@ root. Two callers naming different subdirectories of the same repository get
 the same object.
 
 That matters because instances carry mutable state -- the branch-existence
-cache, the resolved default remote, and the one branch session. Independent
+cache and the one branch session. Independent
 objects for one repository would each hold a session of their own, and two
 sessions in one working tree is exactly what I9 forbids.
 
@@ -295,7 +295,8 @@ B<Examples:>
 
 =head2 session
 
-  my $session = $git->session(control => $top->control_branch);
+  my $session = $git->session(control => $top->control_branch,
+      remote => $top->source_control_remote);
 
 The one branch session for this handle, built on the first ask and returned
 unchanged afterwards. Every branch change Genesis makes goes through it.
@@ -315,8 +316,9 @@ B<Parameters:>
 
 =item C<%opts>
 
-Options, handed straight to the session's constructor. C<control> names the
-branch a later abort never resets.
+Options, handed straight to the session's constructor on the first ask.
+C<control> names the branch a later abort never resets, and C<remote>, which
+is required there, names the remote the session resets against.
 
 =back
 
@@ -1006,7 +1008,6 @@ B<Examples:>
 
 =head2 pull_ff_only
 
-  $git->pull_ff_only($branch);
   $git->pull_ff_only($branch, $remote);
 
 Fast-forwards a branch from a remote, refusing anything that would require a
@@ -1026,15 +1027,21 @@ The branch to fast-forward.
 
 =item C<$remote>
 
-Defaults to C<default_remote>.
+Required.  The remote by name, which the caller resolves through
+L<Genesis::Top/source_control_remote>; a call without one is a bug.
 
 =back
 
-B<Returns:> C<$self>. No-op when no remote is configured.
+B<Returns:> C<$self>.
 
 B<Errors:>
 
 =over 4
+
+=item *
+
+C<"Service::Git-E<gt>pull_ff_only needs its remote by name"> -- a bug, where
+the caller named none.
 
 =item *
 
@@ -1045,12 +1052,11 @@ raised via C<run>'s C<onfailure>.
 
 B<Examples:>
 
-  $git->pull_ff_only('control');
+  $git->pull_ff_only('control', 'origin');
   # returns $self, or bails if control has diverged from the remote
 
 =head2 pull_rebase
 
-  $git->pull_rebase($branch);
   $git->pull_rebase($branch, $remote);
 
 Rebases the current branch onto C<remote/branch>, to integrate concurrent
@@ -1066,15 +1072,21 @@ The branch to rebase onto.
 
 =item C<$remote>
 
-Defaults to C<default_remote>.
+Required.  The remote by name, which the caller resolves through
+L<Genesis::Top/source_control_remote>; a call without one is a bug.
 
 =back
 
-B<Returns:> C<$self>. No-op when no remote is configured.
+B<Returns:> C<$self>.
 
 B<Errors:>
 
 =over 4
+
+=item *
+
+C<"Service::Git-E<gt>pull_rebase needs its remote by name"> -- a bug, where
+the caller named none.
 
 =item *
 
@@ -1085,7 +1097,7 @@ C<"Failed to rebase %s on %s/%s -- resolve the divergence and push manually">
 
 B<Examples:>
 
-  $git->pull_rebase('staging');
+  $git->pull_rebase('staging', 'origin');
   # returns $self with local commits replayed on the remote tip
 
 =head2 diff_files
@@ -1870,25 +1882,6 @@ B<Examples:>
   $git->cherry_pick($conflicting_sha);
   # aborts the cherry-pick, then bails naming the conflicting files
 
-=head2 default_remote
-
-  my $remote = $git->default_remote;
-
-The first configured remote, memoized.
-
-Every remote-taking method falls back to this, and every one of them treats
-C<undef> as "nothing to do" rather than an error -- a repository with no
-remote is a legitimate local-only deployment repo, not a misconfiguration.
-
-B<Parameters:> None.
-
-B<Returns:> The remote name, or C<undef> when none is configured.
-
-B<Examples:>
-
-  my $remote = $git->default_remote;
-  # returns 'origin', or undef in a repository with no remotes
-
 =head2 branch_upstream_remote
 
   my $remote = $git->branch_upstream_remote($branch);
@@ -1896,10 +1889,11 @@ B<Examples:>
 The remote a branch is configured to track, read from
 C<branch.E<lt>branchE<gt>.remote>.
 
-This is the answer to "which remote does this branch belong to", which
-C<default_remote> is not: that one is alphabetical order, so a repository
-holding both C<dev> and C<origin> answers C<dev>. A caller that needs the
-remote a particular branch was set up against asks here first.
+This is the answer to "which remote does this branch belong to", and the
+first entry of C<git remote> is not: that one is alphabetical order, so a
+repository holding both C<dev> and C<origin> answers C<dev>.
+L<Genesis::Top/source_control_remote> asks here, after the configured
+C<pipeline.source_control.remote> and before falling back to C<origin>.
 
 B<Parameters:>
 
@@ -1949,7 +1943,6 @@ B<Examples:>
 
 =head2 remote_url
 
-  my $url = $git->remote_url;
   my $url = $git->remote_url($remote);
 
 The fetch URL for a remote.
@@ -1966,21 +1959,21 @@ B<Parameters:>
 
 =item C<$remote>
 
-Defaults to C<default_remote>.
+Required.  The remote by name, which the caller resolves through
+L<Genesis::Top/source_control_remote>; a call without one is a bug.
 
 =back
 
-B<Returns:> The URL, or C<undef> when no remote is configured or git could
-not answer for the one that was named.
+B<Returns:> The URL, or C<undef> where git could not answer for the remote
+that was named.
 
 B<Examples:>
 
-  my $url = $git->remote_url;
+  my $url = $git->remote_url('origin');
   # returns 'git@github.com:org/deployments.git'
 
 =head2 remote_branch_exists
 
-  my $bool = $git->remote_branch_exists($branch);
   my $bool = $git->remote_branch_exists($branch, $remote);
 
 Whether a branch exists on the remote.
@@ -2007,16 +2000,21 @@ The branch to look for.
 
 =item C<$remote>
 
-Defaults to C<default_remote>.
+Required.  The remote by name, which the caller resolves through
+L<Genesis::Top/source_control_remote>; a call without one is a bug.
 
 =back
 
-B<Returns:> 1 or 0. Returns 0 when no remote is configured -- there is
-nothing to check against.
+B<Returns:> 1 or 0.
 
 B<Errors:>
 
 =over 4
+
+=item *
+
+C<"Service::Git-E<gt>remote_branch_exists needs its remote by name"> -- a
+bug, where the caller named none.
 
 =item *
 
@@ -2027,17 +2025,16 @@ git's message.
 
 B<Examples:>
 
-  my $bool = $git->remote_branch_exists('staging');
+  my $bool = $git->remote_branch_exists('staging', 'origin');
   # returns 1
 
-  my $bool = $git->remote_branch_exists('staging');
+  my $bool = $git->remote_branch_exists('staging', 'origin');
   # bails when credentials are missing, rather than reporting 0
 
 =head2 resolve_branch
 
-  my $div = $git->resolve_branch($branch);
-  my $div = $git->resolve_branch($branch, remote => 'upstream');
-  my $div = $git->resolve_branch($branch, unverifiable => 1);
+  my $div = $git->resolve_branch($branch, remote => 'origin');
+  my $div = $git->resolve_branch($branch, remote => 'origin', unverifiable => 1);
 
 Reports how the local branch stands against its remote-tracking ref, as one
 hashref:
@@ -2079,9 +2076,9 @@ with no C<refs/> prefix.
 
 =item C<remote>
 
-The remote whose tracking refs the branch is measured against. It defaults to
-L</default_remote>, and where the repository has no remote at all every branch
-it holds reads C<no-remote>.
+Required.  The remote whose tracking refs the branch is measured against,
+which the caller resolves through L<Genesis::Top/source_control_remote>; a
+call without one is a bug.
 
 =item C<unverifiable>
 
@@ -2098,6 +2095,10 @@ B<Errors:>
 
 =over 4
 
+=item C<"Service::Git-E<gt>resolve_branch needs its remote by name">
+
+A bug, where the caller named no remote.
+
 =item C<< "Failed to compare '%s' with '%s/%s'" >>
 
 Raised where C<git rev-list> fails on two refs that both exist, which is a
@@ -2113,16 +2114,17 @@ reads a failed refresh as a branch it now has.
 
 B<Examples:>
 
-  my $div = $git->resolve_branch('qa/bosh');
+  my $div = $git->resolve_branch('qa/bosh', remote => 'origin');
   # returns {state => 'in-sync', ahead => 0, behind => 0, unverifiable => 0}
 
-  my $div = $git->resolve_branch('qa/bosh');
+  my $div = $git->resolve_branch('qa/bosh', remote => 'origin');
   # returns {state => 'diverged', ahead => 2, behind => 1, unverifiable => 0}
 
-  my $div = $git->resolve_branch('qa/bosh', unverifiable => 1);
+  my $div = $git->resolve_branch('qa/bosh', remote => 'origin',
+      unverifiable => 1);
   # the same state and the same counts, read off a ref nobody refreshed
 
-  my $div = $git->resolve_branch('nowhere/bosh');
+  my $div = $git->resolve_branch('nowhere/bosh', remote => 'origin');
   # returns undef, because no state describes a branch that is nowhere
 
 =head2 delete_branch
@@ -2170,11 +2172,10 @@ B<Examples:>
 
 =head2 forget_branch
 
-  $git->forget_branch($branch);
   $git->forget_branch($branch, 'origin');
 
 Drops the remote-tracking ref for one branch, and does nothing where there is
-no such ref or no remote at all.
+no such ref.
 
 C<fetch_branches> never prunes, because the local-only commit query reads the
 tracking refs a prune would delete, so a branch the remote no longer carries
@@ -2194,7 +2195,8 @@ The branch whose tracking ref goes.
 
 =item C<$remote>
 
-Defaults to C<default_remote>.
+Required.  The remote by name, which the caller resolves through
+L<Genesis::Top/source_control_remote>; a call without one is a bug.
 
 =back
 
@@ -2206,6 +2208,11 @@ B<Errors:>
 
 =item *
 
+C<"Service::Git-E<gt>forget_branch needs its remote by name"> -- a bug, where
+the caller named none.
+
+=item *
+
 C<"Failed to forget the remote-tracking ref for '%s'"> -- raised via C<run>'s
 C<onfailure>. C<%s> is the branch name.
 
@@ -2213,12 +2220,11 @@ C<onfailure>. C<%s> is the branch name.
 
 B<Examples:>
 
-  $git->forget_branch('pr/qa/bosh');
+  $git->forget_branch('pr/qa/bosh', 'origin');
   # returns $self, with refs/remotes/origin/pr/qa/bosh gone
 
 =head2 fetch_branches
 
-  my ($git, $result) = $git->fetch_branches(\@branches);
   my ($git, $result) = $git->fetch_branches(\@branches, $remote);
 
 Refreshes the named branches in one round trip, reporting which of them the
@@ -2311,7 +2317,8 @@ The branches to fetch. Repeated names are collapsed.
 
 =item C<$remote>
 
-Defaults to C<default_remote>.
+Required.  The remote by name, which the caller resolves through
+L<Genesis::Top/source_control_remote>; a call without one is a bug.
 
 =back
 
@@ -2334,7 +2341,8 @@ B<Errors:> Transport failures never raise. They are returned as
 C<ok =E<gt> 0> with a C<kind>, and a branch the remote does not have is
 returned in C<absent>; callers that want a hard failure --
 C<Genesis::Top::fetch_pipeline_envs> -- raise on the classified result
-themselves. One condition does raise, and it is local rather than remote:
+themselves. A call that names no remote is a bug, and raises as one. One
+other condition does raise, and it is local rather than remote:
 where C<git for-each-ref> cannot enumerate a namespace this refresh
 reads, the local branches before the fetch or either namespace after it,
 the refresh bails naming that namespace, the repository, and git's
@@ -2346,27 +2354,27 @@ fetched nothing.
 
 B<Examples:>
 
-  my ($git, $r) = $git->fetch_branches(['staging', 'prod']);
+  my ($git, $r) = $git->fetch_branches(['staging', 'prod'], 'origin');
   # returns ($self, { ok => 1, kind => 'success',
   #                   fetched => ['staging','prod'],
   #                   created => [], absent => [] })
 
-  my ($git, $r) = $git->fetch_branches(['staging', 'brand-new']);
+  my ($git, $r) = $git->fetch_branches(['staging', 'brand-new'], 'origin');
   # returns ($self, { ok => 1, kind => 'success',
   #                   fetched => ['staging'], created => [],
   #                   absent => ['brand-new'] })
   # staging is still refreshed -- the absent branch does not poison it
 
-  my ($git, $r) = $git->fetch_branches(['control', 'qa/bosh']);
+  my ($git, $r) = $git->fetch_branches(['control', 'qa/bosh'], 'origin');
   # returns created => ['qa/bosh'] where this clone had no local qa/bosh
   # and the remote did
 
-  my ($git, $r) = $git->fetch_branches(\@branches);
+  my ($git, $r) = $git->fetch_branches(\@branches, 'origin');
   # returns ($self, { ok => 0, kind => 'auth', err => '...',
   #                   fetched => [], created => [], absent => [] })
   # when credentials are missing
 
-  $git->fetch_branches([]);
+  $git->fetch_branches([], 'origin');
   # returns $self -- nothing to fetch is a success, not a failure
 
 =head2 push
@@ -2480,7 +2488,6 @@ B<Examples:>
 
 =head2 push_append_only
 
-  my $sha = $git->push_append_only($branch);
   my $sha = $git->push_append_only($branch, remote => 'origin');
 
 Publishes one branch with no force option of any kind, after checking that the
@@ -2506,7 +2513,8 @@ The local branch to publish. It is pushed to the ref of the same name.
 
 =item C<remote>
 
-The remote to publish to. Defaults to the repository's default remote.
+Required.  The remote to publish to, which the caller resolves through
+L<Genesis::Top/source_control_remote>; a call without one is a bug.
 
 =back
 
@@ -2518,8 +2526,8 @@ B<Errors:>
 
 =item *
 
-C<"No remote is configured, so %s cannot be published"> -- when no remote was
-named and the repository has none.
+C<"Service::Git-E<gt>push_append_only needs its remote by name"> -- a bug,
+where the caller named none.
 
 =item *
 
@@ -2542,10 +2550,10 @@ itself rejects the push.
 
 B<Examples:>
 
-  my $sha = $git->push_append_only('qa/bosh');
+  my $sha = $git->push_append_only('qa/bosh', remote => 'origin');
   # returns the sha now on the remote
 
-  $git->push_append_only('qa/bosh');
+  $git->push_append_only('qa/bosh', remote => 'origin');
   # refuses, naming qa/bosh, when the local tip rewrites the remote's
 
 =head2 prefixed
@@ -2818,6 +2826,52 @@ B<Examples:>
   Service::Git::provision_ci_credentials();
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _require_remote
+
+  _require_remote($remote, 'fetch_branches');
+
+Refuses a remote operation the caller did not tell which remote to use.
+
+Which remote a repository's pipeline lives on is the source-control block's
+answer (D29), which L<Genesis::Top/source_control_remote> gives and this layer
+cannot read, so every caller names it.  The first entry of C<git remote> was
+the guess this replaces, and alphabetical order puts C<dev> ahead of
+C<origin>, so a clone with both was refreshed, checked and published against
+the wrong one.  A call without a remote is therefore a defect in the caller
+rather than a remote to guess at.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$remote>
+
+The remote the caller named.
+
+=item C<$method>
+
+The method asking, which the refusal names.
+
+=back
+
+B<Returns:> C<$remote>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Service::Git-E<gt>%s needs its remote by name"> -- raised via C<bug()>
+where C<$remote> is undefined or empty.
+
+=back
+
+B<Examples:>
+
+  my $remote = _require_remote($opts{remote}, 'resolve_branch');
+  # returns 'origin' when the caller named it, and is a bug otherwise
 
 =head2 _refuse_dubious_ownership
 

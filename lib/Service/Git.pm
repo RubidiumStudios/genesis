@@ -709,13 +709,11 @@ sub status {
 # }}}
 # pull_ff_only - fast-forward a branch from a remote, bail on divergence {{{
 #
-# Defaults to `default_remote` when no remote is given.  No-op when
-# no remote is configured.  Bails (via run's onfailure) when the
-# pull would require a non-fast-forward.
+# Bails (via run's onfailure) when the pull would require a
+# non-fast-forward.
 sub pull_ff_only {
 	my ($self, $branch, $remote) = @_;
-	$remote //= $self->default_remote;
-	return $self unless $remote;
+	_require_remote($remote, 'pull_ff_only');
 	run({ dir => $self->{root},
 		  onfailure => "Failed to fast-forward $branch from $remote -- ".
 		               "resolve the divergence and retry" },
@@ -727,13 +725,11 @@ sub pull_ff_only {
 # }}}
 # pull_rebase - rebase the current branch on top of remote/<branch> {{{
 #
-# Used to integrate concurrent updates before a push.  Defaults to
-# `default_remote` when no remote is given.  No-op when no remote
-# is configured.  Bails (via run's onfailure) when rebase fails.
+# Used to integrate concurrent updates before a push.  Bails (via run's
+# onfailure) when rebase fails.
 sub pull_rebase {
 	my ($self, $branch, $remote) = @_;
-	$remote //= $self->default_remote;
-	return $self unless $remote;
+	_require_remote($remote, 'pull_rebase');
 	run({ dir => $self->{root},
 		  onfailure => "Failed to rebase $branch on $remote/$branch -- ".
 		               "resolve the divergence and push manually" },
@@ -1239,18 +1235,18 @@ sub cherry_pick {
 
 ### Remote Operations {{{
 
-# default_remote - first configured remote name (cached) {{{
-sub default_remote {
-	my ($self) = @_;
-	return $self->{_default_remote} if exists $self->{_default_remote};
-	my ($out) = run({ dir => $self->{root} }, 'git', 'remote');
-	if ($out && $out =~ /\S/) {
-		chomp $out;
-		$self->{_default_remote} = (split /\n/, $out)[0];
-	} else {
-		$self->{_default_remote} = undef;
-	}
-	return $self->{_default_remote};
+# _require_remote - a remote operation is always told which remote {{{
+#
+# Which remote a repository's pipeline lives on is the source-control block's
+# answer (D29), which this layer cannot read, so every caller names it and a
+# caller that forgot is a defect rather than a reason to guess.  The first
+# entry of `git remote` was the guess this replaces, and alphabetical order
+# puts dev ahead of origin.
+sub _require_remote {
+	my ($remote, $method) = @_;
+	bug("#R{Service::Git->%s} needs its remote by name", $method)
+		unless defined $remote && length $remote;
+	return $remote;
 }
 
 # }}}
@@ -1276,11 +1272,10 @@ sub has_remote {
 }
 
 # }}}
-# remote_url - fetch the fetch URL for a named (or default) remote {{{
+# remote_url - fetch the fetch URL for a named remote {{{
 sub remote_url {
 	my ($self, $remote) = @_;
-	$remote //= $self->default_remote;
-	return undef unless $remote;
+	_require_remote($remote, 'remote_url');
 	# git writes its complaint on stderr, and merging that into stdout would
 	# put the text of the complaint into the url a caller goes on to use, so
 	# it is captured apart and a non-zero exit answers no url at all.
@@ -1301,8 +1296,7 @@ sub remote_url {
 # whether to create qa/bosh would be told it was already there.
 sub remote_branch_exists {
 	my ($self, $branch, $remote) = @_;
-	$remote //= $self->default_remote;
-	return 0 unless $remote;
+	_require_remote($remote, 'remote_branch_exists');
 	my ($out, $rc, $err) = run({ dir => $self->{root}, passfail => 0 },
 		'git', 'ls-remote', '--heads', $remote, "refs/heads/$branch");
 	bail("ls-remote against #C{%s} failed: %s",
@@ -1345,13 +1339,11 @@ sub remote_branch_exists {
 # pipeline-status --no-refresh` does.
 sub resolve_branch {
 	my ($self, $branch, %opts) = @_;
-	my $remote       = exists $opts{remote} ? $opts{remote} : $self->default_remote;
+	my $remote       = _require_remote($opts{remote}, 'resolve_branch');
 	my $unverifiable = $opts{unverifiable} ? 1 : 0;
 
 	my $local    = $self->_ref_exists("refs/heads/$branch");
-	my $tracking = $remote
-		? $self->_ref_exists("refs/remotes/$remote/$branch")
-		: 0;
+	my $tracking = $self->_ref_exists("refs/remotes/$remote/$branch");
 
 	return undef unless $local || $tracking;
 
@@ -1455,8 +1447,7 @@ sub delete_branch {
 # and been told the branch is gone, rather than a prune of everything.
 sub forget_branch {
 	my ($self, $branch, $remote) = @_;
-	$remote //= $self->default_remote;
-	return $self unless $remote;
+	_require_remote($remote, 'forget_branch');
 	return $self unless $self->branch_exists("$remote/$branch");
 
 	run({dir => $self->{root},
@@ -1476,10 +1467,10 @@ sub forget_branch {
 # the local-only commit query reads the tracking refs a prune would delete.
 sub fetch_branches {
 	my ($self, $names, $remote) = @_;
-	$remote //= $self->default_remote;
+	_require_remote($remote, 'fetch_branches');
 	my $noop = {ok => 1, kind => 'success', fetched => [], created => [], absent => []};
 	return wantarray ? ($self, $noop) : $self
-		unless $remote && $names && @$names;
+		unless $names && @$names;
 
 	# One name asked for twice is one branch, and a caller that prepends the
 	# control branch to a list that may already carry it should not have to
@@ -1772,8 +1763,7 @@ sub _refuse_rewrite {
 sub push_append_only {
 	my ($self, $branch, %opts) = @_;
 
-	my $remote = $opts{remote} // $self->default_remote
-		or bail("No remote is configured, so #C{%s} cannot be published", $branch);
+	my $remote = _require_remote($opts{remote}, 'push_append_only');
 
 	my $local = $self->sha($branch);
 	my ($out, $rc, $err) = run({dir => $self->{root}, passfail => 0},

@@ -480,7 +480,7 @@ sub branch_session { $BRANCH_SESSION }
 sub branch_carries_repository {
 	my ($top, $git, $branch) = @_;
 
-	my $remote = $git->default_remote // 'origin';
+	my $remote = $top->source_control_remote;
 	my $root   = Cwd::realpath($git->root) // $git->root;
 	my $path   = Cwd::realpath($top->path) // $top->path;
 	my $read   = $git->branch_exists($branch) ? $branch : "$remote/$branch";
@@ -894,9 +894,9 @@ sub _gate_deployed_state {
 	# answer different questions and an operator cannot tell the two apart
 	# from the answer alone.  Saying so is all that happens here: the
 	# refusals belong to each command's own classification of the state.
-	my $remote = $git->default_remote;
+	my $remote = $top->source_control_remote;
 	unless ($git->branch_exists($branch)
-			|| ($remote && $git->branch_exists("$remote/$branch"))) {
+			|| $git->branch_exists("$remote/$branch")) {
 		info(
 			"Not reading the deployment branch #C{%s}: it does not exist yet, ".
 			"so this runs on #C{%s}.",
@@ -905,7 +905,8 @@ sub _gate_deployed_state {
 	}
 
 	require Service::Git::Session;
-	my $session = $git->session(control => $top->control_branch);
+	my $session = $git->session(control => $top->control_branch,
+		remote => $remote);
 	$session->begin;
 
 	# A branch that pipeline-apply cut and no propagate run has delivered to
@@ -922,8 +923,7 @@ sub _gate_deployed_state {
 	# on the remote.  The distance between the two refs is what tells them
 	# apart, and it is read here for both the move below and the line that
 	# stands in its place where no move is made.
-	my $d = $remote
-		? $git->resolve_branch($branch, remote => $remote) : undef;
+	my $d = $git->resolve_branch($branch, remote => $remote);
 	my $behind = ($d && $d->{state} eq 'behind') ? $d->{behind} : 0;
 
 	# The one ref the gate moves, and only for a command that declares it.

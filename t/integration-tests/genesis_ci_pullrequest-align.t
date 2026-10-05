@@ -45,11 +45,11 @@ subtest 'a stale tracking ref does not survive the alignment' => sub {
 	);
 	isnt($moved, $stale, 'and the branch on R has moved under this clone');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($pr);
 
-	is(Genesis::CI::PullRequest::align_with_remote($git, $pr), 1,
+	is(Genesis::CI::PullRequest::align_with_remote($git, $pr, 'origin'), 1,
 		'the alignment says the remote carries the branch');
 	is($git->sha($pr), $moved,
 		"and the local branch stands at the remote's current tip");

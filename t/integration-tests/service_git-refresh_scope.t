@@ -33,14 +33,14 @@ subtest 'a branch R holds and L lacks comes down and reads in-sync' => sub {
 	delete_local($h, 'a', $prod);
 
 	is(ref_in($h->a, "refs/heads/$prod"), undef, 'copy A lacks the branch');
-	is($git->resolve_branch($prod)->{state}, 'no-local',
+	is($git->resolve_branch($prod, remote => 'origin')->{state}, 'no-local',
 		'and it reads no-local while it does');
 
-	my (undef, $result) = $git->fetch_branches([$qa, $prod, $h->control]);
+	my (undef, $result) = $git->fetch_branches([$qa, $prod, $h->control], 'origin');
 
 	is(ref_in($h->a, "refs/heads/$prod"), ref_in($h->r, $prod),
 		'the local ref is created from what the remote holds');
-	is($git->resolve_branch($prod)->{state}, 'in-sync',
+	is($git->resolve_branch($prod, remote => 'origin')->{state}, 'in-sync',
 		'and the branch now reads in-sync');
 	cmp_deeply($result->{created}, [$prod],
 		'the refresh reports the one ref it created and no other');
@@ -52,7 +52,7 @@ subtest 'a branch nobody has is never created' => sub {
 	my $h   = make_harness(envs => ['qa'], vault => 0);
 	my $git = $h->git('a');
 
-	my (undef, $result) = $git->fetch_branches([$h->slug('nowhere')]);
+	my (undef, $result) = $git->fetch_branches([$h->slug('nowhere')], 'origin');
 
 	is(ref_in($h->a, 'refs/heads/nowhere/bosh'), undef,
 		'no local ref is invented for a branch the remote lacks');
@@ -74,7 +74,7 @@ subtest 'the checked-out branch is refreshed like any other' => sub {
 		message => 'a teammate publishes onto control',
 	);
 
-	my (undef, $result) = $git->fetch_branches([$control]);
+	my (undef, $result) = $git->fetch_branches([$control], 'origin');
 
 	cmp_deeply($result->{fetched}, [$control],
 		'the checked-out branch is in the refresh and not dropped from it');
@@ -97,7 +97,7 @@ subtest 'the refresh never prunes' => sub {
 		marker => 0, message => 'a commit only copy A has');
 
 	delete_on_r($h, $lab);
-	$git->fetch_branches([$lab, $h->control]);
+	$git->fetch_branches([$lab, $h->control], 'origin');
 
 	is(ref_in($h->a, "refs/heads/$lab"), $stranded,
 		"copy A's local branch is still here after the teammate's delete");
@@ -105,7 +105,7 @@ subtest 'the refresh never prunes' => sub {
 	# the query would then have one ref to read and would answer no-remote.
 	# It answers against both refs instead, ahead by the one commit copy A
 	# never pushed, which is the tracking ref saying it is still here.
-	cmp_deeply($git->resolve_branch($lab),
+	cmp_deeply($git->resolve_branch($lab, remote => 'origin'),
 		{state => 'ahead', ahead => 1, behind => 0, unverifiable => 0},
 		'and it still reads against a tracking ref, which a prune would have taken');
 

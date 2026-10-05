@@ -163,7 +163,7 @@ subtest 'the unrefreshed control branch, reproduced' => sub {
 	# The baseline never named control in its refresh, so copy A's control
 	# stayed where it was and the run propagated from it and reported
 	# success.  The refresh names control now, so the run sees behind.
-	is($h->git('a')->resolve_branch($h->control)->{state}, 'in-sync',
+	is($h->git('a')->resolve_branch($h->control, remote => 'origin')->{state}, 'in-sync',
 		'copy A has not refreshed yet, so it still believes it is current');
 
 	my (undef, $err, $exit) = run_genesis($h, 'propagate');

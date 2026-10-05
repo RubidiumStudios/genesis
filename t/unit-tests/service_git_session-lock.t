@@ -33,7 +33,7 @@ subtest 'a second switch is refused naming the holder' => sub {
 	ok(-f $git->git_dir . '/genesis-session.lock',
 		'the lock sits on genesis-session.lock in the git directory');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 
 	# I1 promises the directory at exit is the one at entry, and a refusal
@@ -98,7 +98,7 @@ subtest 'the kernel releases the lock when its holder dies' => sub {
 	my $pid = hold_session_lock($h, copy => 'a');
 	release_session_lock($h, $pid, hard => 1);
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	ok(eval { $session->switch($h->slug('qa')); 1 },
 		'a later switch succeeds with no break-lock option anywhere');
@@ -132,7 +132,7 @@ subtest 'the lock is per working tree' => sub {
 		'two copies of one repository have their own git directories');
 
 	my $pid = hold_session_lock($h, copy => 'a');
-	my $sb = $b->session(control => $h->control);
+	my $sb = $b->session(control => $h->control, remote => 'origin');
 	$sb->begin;
 	ok(eval { $sb->switch($h->slug('qa')); 1 },
 		"a held lock in copy A does not reach copy B");
@@ -141,7 +141,7 @@ subtest 'the lock is per working tree' => sub {
 	# Read the refusal rather than the bare death, since a failed checkout
 	# or an unopened session would die here too and say nothing about the
 	# lock.
-	my $sa = $a->session(control => $h->control);
+	my $sa = $a->session(control => $h->control, remote => 'origin');
 	$sa->begin;
 	my $refused = exception(sub { $sa->switch($h->slug('qa')) });
 	like($refused, qr/\b$pid\b/,
@@ -164,7 +164,7 @@ subtest 'the child takes the lock itself after the session has finished' => sub 
 	init_branch($h, 'qa');
 	my $git = $h->git('a');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -200,7 +200,7 @@ subtest 'a switch that removes the current directory lands at the root' => sub {
 	);
 	stand_on($h, $h->control, dir => 'doomsday');
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 
@@ -225,7 +225,7 @@ subtest 'the lock file stops naming a holder once it is released' => sub {
 	my $git = $h->git('a');
 	my $path = $git->git_dir . '/genesis-session.lock';
 
-	my $session = $git->session(control => $h->control);
+	my $session = $git->session(control => $h->control, remote => 'origin');
 	$session->begin;
 	$session->switch($h->slug('qa'));
 	is(read_first_line($path), "$$",
@@ -238,7 +238,7 @@ subtest 'the lock file stops naming a holder once it is released' => sub {
 	# The take side truncates before it writes, so an emptied file is a
 	# shape it already expects and a later session takes the lock as
 	# readily as it took the first one.
-	my $second = $git->session(control => $h->control);
+	my $second = $git->session(control => $h->control, remote => 'origin');
 	ok(eval {$second->begin; $second->switch($h->slug('qa')); 1},
 		'and a later session takes the same file again');
 	$second->finish;
