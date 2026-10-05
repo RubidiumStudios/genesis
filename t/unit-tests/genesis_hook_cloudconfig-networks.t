@@ -1885,6 +1885,20 @@ subtest '_calculate_subnet_allocation - growing and shrinking a claim' => sub {
 		);
 	}
 
+	# The bosh kit's parent-side config for the ocf director, built on the
+	# mgmt director: one address for the director on each subnet, from the
+	# pool the mgmt carve leaves free
+	package Genesis::Hook::CloudConfig::LabOcfBosh;
+	use parent -norequire, 'Genesis::Hook::CloudConfig';
+	sub lab_network {
+		return $_[0]->network_definition('bosh', strategy => 'ocfp',
+			dynamic_subnets => {
+				allocation                => {size => 0, statics => 0},
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+			},
+		);
+	}
+
 	# A deploy hook asking for a network called compilation, which the
 	# director-only exemption must not cover
 	package Genesis::Hook::CloudConfig::LabCompilationDeploy;
@@ -2069,7 +2083,7 @@ sub lab_exodus {
 # given and the lab's create_env is true
 my $lab_seq = 0;
 sub lab_env {
-	my ($type, $overrides, $create_env) = @_;
+	my ($type, $overrides, $create_env, $env_name) = @_;
 	my $lab = lab();
 	my $ocfp = lab_ocfp_config();
 	my $config = {
@@ -2077,7 +2091,7 @@ sub lab_env {
 		'bosh-configs' => {cloud => {networks => $overrides // {}}},
 	};
 	return mock "Genesis::Env" => {
-		name           => $lab->{env_name},
+		name           => $env_name // $lab->{env_name},
 		type           => $type,
 		kit            => $kit,
 		bosh           => mock("Genesis::BOSH" => {alias => $lab->{env_name}}),
@@ -2126,7 +2140,7 @@ sub lab_run_net_with_stderr {
 	if (defined $opts{total_size}) {
 		$overrides->{ocf}{allocation}{total_size} = $opts{total_size};
 	}
-	my $env = lab_env($spec->{type}, $overrides, $spec->{create_env});
+	my $env = lab_env($spec->{type}, $overrides, $spec->{create_env}, $spec->{env_name});
 	my $class = "Genesis::Hook::CloudConfig::$spec->{class}";
 
 	my ($hook, $net);
@@ -2514,6 +2528,10 @@ $LAB{mgmt} = {
 		# still carries the compilation network
 		compilation => {class => 'LabDirector',  type => 'bosh',      claim => 'ocfp-cf1-lab-mgmt.bosh.net-compilation',
 		                director => 1, create_env => 1},
+		# The ocf director's own address, in the parent-side cloud config the
+		# mgmt director holds for it
+		'ocf-bosh'  => {class => 'LabOcfBosh',   type => 'bosh',      claim => 'ocfp-cf1-lab-ocf.bosh.net-bosh',
+		                env_name => 'ocfp-cf1-lab-ocf'},
 	},
 	# The mgmt director's saved claims, as read from its network exodus on
 	# 2026-10-04; ocfp-cf1-lab-ocf.bosh.net-bosh is the ocf director's address
@@ -2553,6 +2571,12 @@ $LAB{mgmt} = {
 		]},
 		compilation => {name => 'ocfp-cf1-lab-mgmt.bosh.net-compilation', type => 'manual', subnets => [
 			lab_subnet('ocfp-2', 3, ['10.61.148.0-10.61.148.219', '10.61.148.224-10.61.148.255']),
+		]},
+		# The ocf director takes the carve's bosh record on each subnet as its static
+		'ocf-bosh' => {name => 'ocfp-cf1-lab-ocf.bosh.net-bosh', type => 'manual', subnets => [
+			lab_subnet('ocfp-0', 1, ['10.61.148.0-10.61.148.67',  '10.61.148.69-10.61.148.255'],  ['10.61.148.68']),
+			lab_subnet('ocfp-1', 2, ['10.61.148.0-10.61.148.131', '10.61.148.133-10.61.148.255'], ['10.61.148.132']),
+			lab_subnet('ocfp-2', 3, ['10.61.148.0-10.61.148.195', '10.61.148.197-10.61.148.255'], ['10.61.148.196']),
 		]},
 	};
 }
@@ -2637,6 +2661,43 @@ subtest 'lab claims (mgmt) - the exempt compilation network gives up an address 
 		'the warning names the network, the subnet, the address, and its owner');
 };
 
+subtest 'lab claims (mgmt) - the ocf director\'s parent-side net-bosh config renders from the carve\'s bosh records' => sub {
+	local $LAB_DIRECTOR = 'mgmt';
+	plan tests => 3;
+	lab_reset_claims(lab_claims_today());
+	my ($got, $err) = lab_run_net_with_stderr('ocf-bosh');
+	is_deeply($got, lab_golden('ocf-bosh'), 'the network takes one static from each subnet\'s bosh record');
+	is($err, '', 'and prints no prune, clash, or own-record warning');
+	my %bosh_ip = map {($_ => lab_ocfp_config()->{net}{subnets}{$_}{'reserved-ips'}{bosh_ip})} qw(ocfp-0 ocfp-1 ocfp-2);
+	is_deeply({map {($_ => lab_claim($_, 'ocf-bosh'))} sort keys %bosh_ip}, \%bosh_ip,
+		'and its saved claim on each subnet is that record');
+};
+
+subtest 'lab claims (mgmt) - records outside the subnet-reserved range keep a claim out of the pool' => sub {
+	local $LAB_DIRECTOR = 'mgmt';
+	plan tests => 6;
+
+	# The carve's own records sit inside the subnet-reserved range, where the
+	# pool would leave them out anyway.  These two sit in the available band.
+	lab_reset_claims();
+	lab_add_record('ocfp-0', minio_ip   => '10.61.148.93');
+	lab_add_record('ocfp-2', grafana_ip => '10.61.148.221');
+	for my $name (qw(compilation concourse)) { lab_run_net($name) }
+	is(lab_claim('ocfp-0', 'concourse'), '10.61.148.71,10.61.148.92,10.61.148.94-10.61.148.96',
+		'Concourse\'s fresh claim steps over the record at .93');
+	is(lab_claim('ocfp-2', 'compilation'), '10.61.148.220,10.61.148.222-10.61.148.224',
+		'compilation\'s fresh claim steps over the record at .221');
+	lab_assert_disjoint_and_record_clean('fresh claims beside records in the available band');
+
+	my $snap = lab_claims_snapshot();
+	for my $name (qw(compilation concourse)) { lab_run_net($name) }
+	is_deeply(lab_claims_snapshot(), $snap, 'a second pass changes nothing');
+
+	my $claim = IPv4->range(lab_claim('ocfp-0', 'concourse'));
+	is((IPv4->range('10.61.148.93') - $claim)->size, 1, 'the record at .93 is in no claim on ocfp-0');
+	is((IPv4->range('10.61.148.221') - IPv4->range(lab_claim('ocfp-2', 'compilation')))->size, 1,
+		'and the record at .221 is in no claim on ocfp-2');
+};
 
 done_testing;
 
