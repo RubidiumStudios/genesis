@@ -1953,6 +1953,39 @@ B<Examples:>
   # returns 'origin' for a branch pushed with -u
   # returns undef for a branch that has never been pushed
 
+=head2 ssh_hostname
+
+  my $host = $git->ssh_hostname($alias);
+
+The host an ssh alias resolves to, as C<ssh -G> prints it from ssh's own
+configuration, which contacts nothing. An alias defined in ssh's
+configuration, which is how two GitHub accounts on one machine are usually
+told apart, names no host git or Genesis could recognise otherwise. A name
+that is no alias resolves to itself.
+
+ssh reads its configuration from the home the user database names, not from
+C<$HOME>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$alias>
+
+The host as a URL writes it.
+
+=back
+
+B<Returns:> The hostname, or C<undef> where ssh cannot be run or prints none.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my $host = $git->ssh_hostname('gh-work');
+  # returns 'github.com' where ~/.ssh/config has "Host gh-work" with
+  # "HostName github.com"
+
 =head2 has_remote
 
   my $bool = $git->has_remote($remote);
@@ -2015,7 +2048,9 @@ B<Examples:>
   my @remotes = $git->remote_names;
 
 Every remote this clone has, sorted as C<git remote> lists them, answered from
-the configuration L</_config> read once.
+the configuration L</_config> read once. L<Genesis::Top/_resolve_remote>
+reads them all and chooses by the repository each points at, never by this
+order.
 
 B<Parameters:> None.
 
@@ -2034,7 +2069,8 @@ B<Examples:>
 
 A remote's URL as the clone's configuration writes it, before any
 C<insteadOf> rewrite. L</remote_url> answers the URL git would contact, which
-is what traffic needs; this answers what the remote names (D118).
+is what traffic needs; this answers what the remote names, which is what
+L<Genesis::Top/_remote_identity> reads first (D118).
 
 B<Parameters:>
 

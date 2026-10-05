@@ -1,8 +1,8 @@
 #!perl
-# Proves T57: remote resolves to the control branch's upstream, else
-# origin, else refuses by name, repository parses owner/repo from an
-# https and an ssh URL alike, and pipeline-describe shows each resolved
-# value with explicit beating derived beating default.
+# Proves T57: the remote is the clone's remote that points at the
+# repository, never the first entry of git remote, repository parses
+# owner/repo from an https and an ssh URL alike, and pipeline-describe shows
+# each resolved value and how it resolved (D29 as D118 revises it).
 use strict;
 use warnings;
 use utf8;
@@ -22,19 +22,18 @@ use Genesis::Top;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-subtest 'remote is the control branch upstream' => sub {
+subtest 'the remote is the one pointing at the repository' => sub {
 	plan tests => 2;
 
-	# The url is asked of git only where the repository has to come out of
-	# it, so the row that reads the url takes the harness's repository
-	# override away.  The urls are here to be read and never to be talked
-	# to, so the remotes go in without a fetch and the row stays on this
-	# machine.
+	# dev sorts ahead of origin and control tracks it, and it points at
+	# another repository, so neither git's order nor the upstream may choose
+	# it.  The urls are here to be read and never to be talked to, so the
+	# remotes go in without a fetch and the row stays on this machine.
 	my $h = make_harness(envs => ['qa'], vault => 0,
-		source_control => {repository => undef});
+		source_control => {repository => 'fivetwenty-io/lmelt'});
 	set_remotes($h,
 		remotes  => {
-			origin => 'https://github.com/fivetwenty-io/origin-side.git',
+			origin => 'https://github.com/fivetwenty-io/lmelt.git',
 			dev    => 'https://github.com/fivetwenty-io/dev-side.git',
 		},
 		upstream => 'dev',
@@ -42,41 +41,10 @@ subtest 'remote is the control branch upstream' => sub {
 	);
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
 
-	is($top->source_control_remote, 'dev',
-		"the control branch's configured upstream wins");
-	is($top->source_control_uri,
-		'https://github.com/fivetwenty-io/dev-side.git',
-		"and the uri is that remote's fetch url");
-};
-
-subtest 'remote falls back to origin and never to the first remote' => sub {
-	plan tests => 2;
-
-	my $h = make_harness(envs => ['qa'], vault => 0);
-	set_remotes($h,
-		remotes  => {origin => $h->r, dev => $h->r},
-		upstream => 0,
-	);
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-
 	is($top->source_control_remote, 'origin',
-		'origin wins where the control branch has no upstream');
+		'the remote that points at the repository is the one used');
 	isnt($top->source_control_remote, 'dev',
-		'and dev never wins on alphabetical order');
-};
-
-subtest 'neither derivation answering is refused by name' => sub {
-	plan tests => 2;
-
-	my $h = make_harness(envs => ['qa'], vault => 0);
-	set_remotes($h, remotes => {dev => $h->r}, upstream => 0);
-	my $top = Genesis::Top->new($h->a, no_vault => 1);
-
-	local $ENV{GENESIS_IGNORE_EVAL} = '';
-	my $remote = eval { $top->source_control_remote };
-	is($remote, undef, 'nothing is derived');
-	like($@, qr{pipeline\.source_control\.remote},
-		'and the refusal names the key that is the remedy');
+		'and dev wins neither on alphabetical order nor by being tracked');
 };
 
 subtest 'repository parses owner and repo from either url shape' => sub {

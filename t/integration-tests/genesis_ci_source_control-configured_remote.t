@@ -53,6 +53,48 @@ subtest 'propagate uses the configured remote throughout' => sub {
 		'and nothing was pushed to the remote git lists first');
 };
 
+# Proves T355's run: with a fork beside the canonical repository, a real
+# propagate refreshes from, checks against and publishes to the canonical one
+# though control tracks the fork (D118).  The canonical remote is named by its
+# GitHub URL, which identifies it, and an insteadOf rewrite sends its traffic
+# to the harness's bare repository; the fork's URL reaches nothing, so a run
+# that touched it would fail.
+subtest 'a fork beside the canonical repository is never used' => sub {
+	# Four rows, and the run's own restoration assertion.
+	plan tests => 5;
+
+	# No remote is named in the configuration, so the match alone decides.
+	my $h = ready_harness(delivered => ['qa'], certified => ['lab', 'qa'],
+		kit => 'omega-v2.7.0');
+	my $due = commit_on_control($h,
+		files   => {'qa.yml' =>
+			"---\nkit:\n  name: dev\ngenesis:\n  env: qa\nn: 2\n"},
+		message => 'Tune qa again',
+		push    => 1,
+	);
+	certify($h, 'lab', control_commit => $due);
+
+	my $canonical = 'https://github.com/genesis/bosh-deployments.git';
+	set_remotes($h,
+		remotes  => {origin => 'git@github.com:someone/bosh-deployments.git',
+		             upstream => $canonical},
+		upstream => 'origin',
+		fetch    => 0,
+	);
+	run({dir => $h->a}, 'git', 'config', "url.@{[$h->r]}.insteadOf", $canonical);
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+	is($exit, 0, 'the run succeeds') or diag($err);
+	unlike($err, qr{someone/bosh-deployments|\borigin\b}, 'and never names the fork');
+
+	my ($subject) = run({dir => $h->r}, 'git', 'log', '-1', '--format=%s',
+		$h->slug('qa'));
+	like($subject, qr{\@\Q@{[substr($due, 0, 7)]}\E},
+		'the delivery landed on the canonical repository');
+	is(ref_in($h->a, 'refs/remotes/origin/' . $h->slug('qa')), undef,
+		'and nothing was fetched from or pushed to the fork');
+};
+
 subtest 'pipeline-status reads the configured remote' => sub {
 	# Three rows, and the run's own restoration assertion.
 	plan tests => 4;

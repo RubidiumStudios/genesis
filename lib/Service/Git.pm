@@ -1377,6 +1377,22 @@ sub branch_upstream_remote {
 }
 
 # }}}
+# ssh_hostname - the host an ssh alias resolves to, through ssh's own config {{{
+#
+# An alias defined in ~/.ssh/config, as two GitHub accounts on one machine are
+# usually told apart, names no host git or Genesis could recognise; ssh -G
+# prints the configuration ssh would use, hostname included, and contacts
+# nothing.
+sub ssh_hostname {
+	my ($self, $alias) = @_;
+	return undef unless defined $alias && length $alias;
+	my ($out, $rc) = run({stderr => 0}, 'ssh', '-G', $alias);
+	return undef if $rc || !defined $out;
+	my ($host) = $out =~ m{^hostname\s+(\S+)\s*$}m;
+	return $host;
+}
+
+# }}}
 # has_remote - whether a remote of this name is configured {{{
 sub has_remote {
 	my ($self, $remote) = @_;

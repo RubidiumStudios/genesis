@@ -245,38 +245,122 @@ subtest 'repository may be written as owner/repo or as a URL' => sub {
 		'and a value that names no repository is refused by the key';
 };
 
-subtest 'the remote is derived down a ladder' => sub {
-	plan tests => 4;
-
-	# Copy A is a clone, so it answers on the first rung of the ladder and
-	# every row above this one stops there.  These rows take the rungs away
-	# one at a time and put them back, so the file is left as it was found.
+# The remote a clone's configuration resolves to, with the clone's remotes
+# swapped for the ones a row names.  The configuration is loaded and published
+# through the real origin first, and the named remotes go in without a fetch,
+# because finding the remote reads URLs and contacts nothing; origin is put
+# back, fetched, before the row reads anything else.
+sub resolved {
+	my (%o) = @_;
+	load_control(join("\n", 'pipeline:', '  enabled: true',
+		(defined $o{repository}
+			? ('  source_control:', "    repository: $o{repository}") : ())),
+		derive_repository => 1);
 	my ($origin) = run({dir => $h->a}, 'git', 'remote', 'get-url', 'origin');
 	chomp $origin;
-	run({dir => $h->a}, 'git', 'remote', 'add', 'upstream', $origin);
-	run({dir => $h->a}, 'git', 'config', 'branch.control.remote', 'upstream');
 
-	my $tracked = load_control("pipeline:\n  enabled: true");
-	is $tracked->source_control_remote, 'upstream',
-		"the control branch's own upstream is the first rung";
+	set_remotes($h, remotes => $o{remotes}, upstream => $o{upstream} // 0,
+		fetch => 0);
+	run({dir => $h->a}, 'git', 'config', @$_) for @{$o{git_config} || []};
 
-	run({dir => $h->a}, 'git', 'config', '--unset', 'branch.control.remote');
-	my $fallen = load_control("pipeline:\n  enabled: true");
-	is $fallen->source_control_remote, 'origin',
-		'a branch with no upstream falls back to the remote named origin';
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+	my $top = Genesis::Top->new($h->a, no_vault => 1);
+	my $remote = eval {$top->source_control_remote};
+	my $error  = $@;
+	my $repository = $remote ? $top->source_control_repository : undef;
 
-	# git drops a branch's upstream with the remote it names, so origin goes
-	# last and there is nothing left below it.
-	run({dir => $h->a}, 'git', 'remote', 'remove', 'upstream');
-	run({dir => $h->a}, 'git', 'remote', 'remove', 'origin');
-	throws_ok {load_control("pipeline:\n  enabled: true")}
-		qr/pipeline\.source_control\.remote.*could\s+not\s+be\s+derived/s,
-		'and with neither rung left the refusal names the key';
+	run({dir => $h->a, passfail => 1}, 'git', 'config', '--unset-all', $_->[0])
+		for @{$o{git_config} || []};
+	set_remotes($h, remotes => {origin => $origin}, upstream => 'origin');
+	return ($remote, $error, $repository);
+}
 
-	run({dir => $h->a}, 'git', 'remote', 'add', 'origin', $origin);
-	run({dir => $h->a}, 'git', 'config', 'branch.control.remote', 'origin');
-	lives_ok {load_control("pipeline:\n  enabled: true")}
-		'the checkout is back on its first rung';
+# Proves T354 at the resolver: the remote is the one that points at the
+# repository, under any name and in any spelling (D118).
+subtest 'the remote is found by the repository it points at' => sub {
+	plan tests => 10;
+
+	# A remote pointing elsewhere sorts ahead of every name below, so a row
+	# that passes did not pass by taking the first remote git lists.
+	my $decoy = 'git@github.com:someone/else.git';
+
+	is((resolved(repository => 'team/bosh', remotes => {
+			aaa => $decoy, upstream => 'git@github.com:team/bosh.git'}))[0],
+		'upstream', 'a remote not named origin, over ssh');
+	is((resolved(repository => 'team/bosh', remotes => {
+			aaa => $decoy, origin => 'https://GitHub.com/Team/Bosh.git/'}))[0],
+		'origin', 'a URL differing in case and carrying a trailing slash');
+
+	# ssh reads its configuration from the home the user database names, not
+	# from $HOME, so a test cannot write an alias for it to read.  The alias
+	# is answered here, and ssh_hostname's own reading of ssh -G is proved
+	# against a host that needs no configuration at all.
+	{
+		no warnings 'redefine';
+		local *Service::Git::ssh_hostname = sub {
+			$_[1] eq 'gh-work' ? 'github.com' : $_[1];
+		};
+		is((resolved(repository => 'team/bosh', remotes => {
+				aaa => $decoy, work => 'git@gh-work:team/bosh.git'}))[0],
+			'work', 'an ssh host alias resolved to github.com');
+	}
+	is($h->git('a')->ssh_hostname('github.com'), 'github.com',
+		'and ssh_hostname reads the host ssh -G prints');
+
+	is((resolved(repository => 'team/bosh',
+			remotes => {aaa => $decoy, short => 'gh:team/bosh'},
+			git_config => [['url.git@github.com:.insteadOf', 'gh:']]))[0],
+		'short', 'a shorthand resolved through its insteadOf rewrite');
+
+	my ($remote, undef, $repository) = resolved(
+		remotes => {upstream => 'git@github.com:team/bosh.git'});
+	is($remote, 'upstream', 'with no repository set, the one remote is used');
+	is($repository, 'team/bosh', 'and the repository is derived from it');
+
+	($remote) = resolved(repository => 'team/bosh',
+		remotes => {origin => '/srv/git/bosh.git'});
+	is($remote, 'origin', 'a single remote that is a path is used as it stands');
+
+	my (undef, $error) = resolved(repository => 'team/bosh',
+		remotes => {origin => 'git@github.com:other/repo.git'});
+	like($error, qr{team/bosh}, 'a single remote naming another repository is refused');
+	like($error, qr{other/repo}, 'and the refusal shows what it points at');
+};
+
+# Proves T355 at the resolver: a fork is never chosen (D118).
+subtest 'a fork never wins' => sub {
+	plan tests => 4;
+
+	my %remotes = (origin => 'git@github.com:me/bosh.git',
+	               upstream => 'git@github.com:team/bosh.git');
+
+	is((resolved(repository => 'team/bosh', remotes => \%remotes,
+			upstream => 'origin'))[0],
+		'upstream', 'the canonical remote, though control tracks the fork');
+
+	my (undef, $error) = resolved(remotes => \%remotes, upstream => 'origin');
+	like($error, qr{more than one repository},
+		'with no repository set, remotes naming two repositories are refused');
+	like($error, qr{me/bosh.*team/bosh|team/bosh.*me/bosh}s,
+		'naming both repositories');
+	like($error, qr{pipeline\.source_control\.repository},
+		'and the key that settles it');
+};
+
+# Proves T356 at the resolver: two spellings of one repository (D118).
+subtest 'two remotes for one repository' => sub {
+	plan tests => 3;
+
+	my %remotes = (https => 'https://github.com/team/bosh.git',
+	               ssh   => 'git@github.com:team/bosh.git');
+
+	is((resolved(repository => 'team/bosh', remotes => \%remotes,
+			upstream => 'ssh'))[0],
+		'ssh', "control's upstream chooses between them");
+
+	my (undef, $error) = resolved(repository => 'team/bosh', remotes => \%remotes);
+	like($error, qr{\bhttps\b.*\bssh\b}s, 'with no upstream, both are named');
+	like($error, qr{set-upstream-to}, 'and the way to choose is given');
 };
 
 subtest 'a required flag can be a predicate' => sub {

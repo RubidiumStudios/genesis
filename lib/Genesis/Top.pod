@@ -2585,14 +2585,14 @@ B<Examples:>
 
     my $sha = $top->_control_commit();
 
-The commit control stands at, resolved in one git call.
+The commit control stands at.
 
-One C<git for-each-ref> reads the local control branch, its upstream, and
-every remote's copy of control. The remote is chosen as L</_remote_named>
-chooses it, but without a git call of its own and without a refusal: the
-configured C<pipeline.source_control.remote>, else the local branch's
-upstream, else C<origin>. That remote's copy answers where the clone holds
-one, and the local branch otherwise. A clone with a remote copy of control is
+One C<git for-each-ref> reads the local control branch and every remote's
+copy of control. Where any remote holds a copy, the remote is the one
+L</_resolve_remote> finds, without its refusal, which the configuration load
+raises for a pipeline. That remote's copy answers where the clone holds one,
+and the local branch otherwise, as it does in a clone whose remotes settle
+on none. A clone with a remote copy of control is
 read off it even while its local branch carries commits not yet pushed,
 because under D112 control means what C<R> holds, not what the local checkout
 does. A directory under no git control fails the call itself, which is how
@@ -2616,30 +2616,48 @@ B<Examples:>
     my $sha = $top->_control_commit;
     # returns undef in a directory that is not a git checkout
 
-=head2 _remote_named
+=head2 _resolve_remote
 
-    my $remote = $top->_remote_named($git, $control);
+    my $resolved = $top->_resolve_remote($control);
 
-The remote control lives on, or C<undef> where none is.
+The remote this clone's pipeline lives on, found by the repository it points
+at rather than by its name, since a remote's name and protocol are each
+cloner's own (D118).
 
-The configured C<pipeline.source_control.remote>, else the control branch's
-configured upstream, else C<origin> where the clone has one. Read from the
-tree in front of the command, because it says where control is rather than
-what the pipeline is.
+=over 4
 
-Used by L</_source_control>, which refuses by name where no remote can be
-found; L</_control_commit> applies the same order to what its one git call
-has already read, rather than calling this. Neither goes looking for
-a remote any other way, so a repository holding several remotes is never
-resolved by C<git remote>'s alphabetical listing.
+=item *
+
+The configured C<pipeline.source_control.remote> is honoured first, until the
+refusal that retires it lands.
+
+=item *
+
+A clone with one remote uses it whatever its URL, unless that URL names a
+repository other than the configured C<repository>. A filesystem path or a
+C<file://> URL names none, and stands.
+
+=item *
+
+Among several remotes, the ones naming the repository are kept: the
+configured C<repository>, or else the one repository all of them agree on.
+Remotes naming more than one repository with none configured are refused,
+because a clone of a fork tracks the fork and choosing by tracking would
+publish there. Where several remotes name the repository, control's upstream
+chooses between them, and otherwise they are refused.
+
+=back
+
+It answers a refusal rather than raising one, because L</_control_commit>
+asks it before the configuration is validated, and in repositories with no
+pipeline at all. L</_source_control> raises the refusal at C<CONFIG>. Read
+from the tree in front of the command, because it says where control is
+(D112). The remotes are read through the Top's shared handle, L</git>, and the
+answer is kept on the Top.
 
 B<Parameters:>
 
 =over 4
-
-=item C<$git>
-
-A C<Service::Git> for the repository.
 
 =item C<$control>
 
@@ -2647,19 +2665,190 @@ The control branch's name.
 
 =back
 
-B<Returns:> The remote's name, or C<undef> where none can be derived.
+B<Returns:> A hashref of C<remote>, C<identity> (the repository, or C<undef>
+for a single remote that names none), and C<how> (C<configured>, C<only> or
+C<matched>); or a hashref of C<refusal> alone, carrying the words.
 
-B<Errors:> None. L</_source_control> is what turns C<undef> into a refusal;
-this reader only names what it finds.
+B<Errors:> None of its own; see L</_remote_refusal> for the refusals it
+answers with.
 
 B<Examples:>
 
-    my $remote = $top->_remote_named($git, 'control');
-    # returns 'origin' for a clone with an origin remote and no override
+    my $resolved = $top->_resolve_remote('control');
+    # returns {remote => 'upstream', how => 'matched',
+    #          identity => {host => 'github.com', owner => 'org', repo => 'repo'}}
+    # where upstream points at org/repo and origin at a fork
 
-    my $remote = $top->_remote_named($git, 'control');
-    # returns undef for a clone with no configured remote, no upstream on
-    # control, and no origin
+=head2 _remote_identity
+
+    my $identity = $top->_remote_identity($remote);
+
+The repository one remote points at. It is read from the URL as configured,
+and from the URL git rewrites it to through C<insteadOf> only where the
+configured one names no repository, so a shorthand such as C<gh:org/repo>
+resolves through its rewrite while a rewrite sending a repository's traffic
+elsewhere leaves its identity as written. An ssh host alias is resolved to
+its real host first, through L</_ssh_host_resolved>. The URLs are read
+through the Top's shared handle, L</git>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$remote>
+
+The remote's name.
+
+=back
+
+B<Returns:> An identity from L</_repository_identity>, or C<undef>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $identity = $top->_remote_identity('upstream');
+    # returns {host => 'github.com', owner => 'org', repo => 'repo'}
+
+=head2 _ssh_host_resolved
+
+    my $url = _ssh_host_resolved($git, $url);
+
+An ssh URL with its host alias replaced by the host ssh would connect to, as
+L<Service::Git/ssh_hostname> reads it. A URL that is not ssh, or whose host
+already names GitHub, comes back as it was.
+
+Plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git>, which asks ssh.
+
+=item C<$url>
+
+The remote's URL.
+
+=back
+
+B<Returns:> The URL, with the real host where an alias resolved.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _ssh_host_resolved($git, 'git@gh-work:org/repo.git');
+    # returns 'git@github.com:org/repo.git' where gh-work is an alias for it
+
+=head2 _only_remote
+
+    my $resolved = _only_remote($remote, $identity, $want);
+
+A clone's single remote, unless the repository it names is not the configured
+one, in which case the refusal for no match.
+
+Plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$remote>, C<$identity>
+
+The remote and the repository it points at, which may be C<undef>.
+
+=item C<$want>
+
+The configured repository's identity, or C<undef>.
+
+=back
+
+B<Returns:> What L</_resolve_remote> returns.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _only_remote('origin', undef, $want);
+    # returns {remote => 'origin', identity => $want, how => 'only'}
+
+=head2 _matched_remote
+
+    my $resolved = _matched_remote($git, $control, \@names, \%id, $want);
+
+Among several remotes, the one naming the repository, as L</_resolve_remote>
+describes.
+
+Plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>, C<$control>
+
+The repository, asked for control's upstream, and the control branch's name.
+
+=item C<\@names>, C<\%id>
+
+The remotes, and the repository each points at.
+
+=item C<$want>
+
+The configured repository's identity, or C<undef>.
+
+=back
+
+B<Returns:> What L</_resolve_remote> returns.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _matched_remote($git, 'control', ['https', 'ssh'], \%id, $want);
+    # returns the one control tracks, or the refusal naming both
+
+=head2 _remote_refusal
+
+    my $words = _remote_refusal($kind, %opts);
+
+The words for a remote L</_resolve_remote> cannot settle, each listing the
+clone's remotes with the repository each points at, since the operator's next
+step is to change one of them or the configuration.
+
+Plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$kind>
+
+C<none>, a clone with no remote at all; C<unmatched>, no remote naming the
+repository, with C<git remote add> and C<git remote set-url> as the remedies
+where C<want> is given; C<several>, remotes naming more than one repository
+with none configured; C<ambiguous>, several remotes naming the repository
+and control's upstream naming none of them, with
+C<git branch --set-upstream-to> as the remedy.
+
+=item C<%opts>
+
+C<control>, C<want>, and C<listed>, an arrayref of C<[$remote, $identity]>.
+
+=back
+
+B<Returns:> The refusal's words, which L</_source_control> raises at
+C<CONFIG>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _remote_refusal(several => listed => [[origin => $fork], [upstream => $org]]);
+    # returns "This clone's remotes point at more than one repository, ..."
 
 =head2 _topology_here
 
@@ -3372,11 +3561,11 @@ Returns the resolved source-control values as a hash reference, whose keys
 are C<remote>, C<uri>, C<repository>, C<control_branch>, and C<pr_prefix>.
 Precedence is explicit over derived over default.
 
-The remote is L</_remote_named>'s answer -- the configured override, else the
-control branch's configured upstream, else C<origin> where it exists -- and
-otherwise refused by name; it is never the first C<git remote>, which is
-alphabetical order. The repository is the one written in the configuration,
-as C<owner/repo> or as a URL, or else the GitHub C<owner/repo> the remote's
+The remote is L</_resolve_remote>'s answer, the clone's remote that points at
+the repository, and its refusals are raised here at C<CONFIG>; it is never
+the first C<git remote>, which is alphabetical order. The repository is the
+one written in the configuration, as C<owner/repo> or as a URL, or else the
+repository the resolved remote points at, or the GitHub C<owner/repo> its
 URL carries, github.com or GitHub Enterprise alike; either way it is read
 through L</_repository_identity>, the identity is kept beside it as
 C<identity>, and any other host must name it explicitly. An empty C<pr_prefix>
@@ -3425,8 +3614,14 @@ with nothing to read.
 =item *
 
 C<"pipeline.source_control.remote could not be derived"> - raised when the
-control branch has no configured upstream and there is no remote named
-C<origin>.
+clone has no remote at all.
+
+=item *
+
+C<"No remote of this clone points at ...">, C<"This clone's remotes point at
+more than one repository ...">, and C<"Remotes ... all point at ..."> -
+raised when L</_resolve_remote> cannot settle the remote, as
+L</_remote_refusal> words each case.
 
 =item *
 
