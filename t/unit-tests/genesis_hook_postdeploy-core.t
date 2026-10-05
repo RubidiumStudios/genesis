@@ -643,6 +643,12 @@ sub net_env {
 			my ($self, $path) = @_;
 			push @netcalls, ['get_path_strict', $path];
 			die $o{fail_read} if $o{fail_read};
+			if (defined $o{read_stderr}) {
+				# The real strict read, so a failure carries the text it really raises
+				no warnings 'redefine';
+				local *Service::Vault::query = sub { return ('', 1, $o{read_stderr}) };
+				return bless({url => 'https://v:8200'}, 'Service::Vault')->get_path_strict($path);
+			}
 			return $o{stored};
 		},
 		set_path => sub {
@@ -856,6 +862,29 @@ subtest 'update_director_network_config - a failed strict read after a good depl
 		'and what to check and the command that finishes the step');
 	ok(defined(netcall('clear_network_lock', 'lab-ocf')), 'the lock is released');
 	ok(!defined(netcall('set_path')), 'and nothing is written');
+};
+
+subtest 'update_director_network_config - a failed strict read reports once, with one prefix and one set of causes' => sub {
+	plan tests => 8;
+	require_ok 'Service::Vault';
+	@netcalls = ();
+	my $hook = make_hook(env => net_env(
+		self_bosh   => net_bosh(),
+		read_stderr => "!! permission denied reading secret/exodus/lab-ocf/bosh/network\n",
+	));
+	throws_ok { output_from { $hook->update_director_network_config } } qr/BOSH director deployed and is working/,
+		'the failure is reported as the director having deployed';
+	my $raw = $@;
+	my $err = $raw =~ s/\s+/ /gr;
+	is(scalar(() = $raw =~ /\[FATAL\]/g), 1, 'it carries one [FATAL] prefix');
+	is(scalar(() = $err =~ /likely causes|usually means/gi), 1, 'and one paragraph of likely causes');
+	like($err, qr/while storing the director network details in exodus/, 'it still names the step');
+	like($err, qr/Could not read secret\/exodus\/lab-ocf\/bosh\/network from vault at https:\/\/v:8200: !! permission denied reading/,
+		'and the path, the vault, and safe\'s reason');
+	like($err, qr/safe export secret\/exodus\/lab-ocf\/bosh\/network.*safe vault status|safe vault status.*safe export secret\/exodus\/lab-ocf\/bosh\/network/,
+		'and the checks to run');
+	like($err, qr/genesis lab-ocf bosh-configs upload --type cloud --name lab-ocf\.bosh\.director -y/,
+		'and the command that finishes the step');
 };
 
 subtest 'update_director_network_config - the wait is announced again when its reason changes' => sub {

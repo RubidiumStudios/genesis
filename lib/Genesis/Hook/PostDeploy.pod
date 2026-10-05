@@ -236,7 +236,12 @@ names the step and the original error, gives the likely causes (a sealed or
 unreachable vault, an expired token or one without access to the record, or a
 director that refused the cloud config), says what to check, and gives the
 C<bosh-configs upload ... -y> command that finishes the step without a
-redeploy. An C<INT>, C<TERM>, C<HUP>, or C<QUIT> signal propagates as it came.
+redeploy. The original error is shown without its own C<[FATAL]> prefix or
+line wrapping, so the message carries one prefix. When that error already
+lists its likely causes and what to check, as a failed strict read does, the
+message leaves out its own list of causes and says only to run the
+C<bosh-configs upload ... -y> command once the cause is fixed. An C<INT>,
+C<TERM>, C<HUP>, or C<QUIT> signal propagates as it came.
 
 =back
 
@@ -585,6 +590,34 @@ B<Examples:>
     local $ENV{GENESIS_NETWORK_LOCK_WAIT} = 600;
     my $held = $hook->_acquire_director_network_lock($bosh, 'lab-ocf.bosh.director');
     # Returns: 1 once the lock is free, or 0 after ten minutes
+
+=head2 _plain_error
+
+    my ($text, $has_causes) = _plain_error($err);
+
+Turns an error caught from a nested C<bail> into text that can sit inside
+another message.  It trims the surrounding whitespace, drops the leading
+C<[FATAL]> prefix, and, when it found that prefix, joins the lines the first
+C<bail> wrapped to the terminal back into paragraphs so the outer C<bail>
+wraps the text once.  An error without the prefix is returned trimmed and
+otherwise as it is.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$err>
+
+The error text, usually C<$@>.
+
+=back
+
+B<Returns:> The cleaned text, and true when that text names its likely causes.
+
+B<Examples:>
+
+    my ($text, $has_causes) = _plain_error("\n[FATAL] Could not read the record.\n        Likely causes are a sealed vault.\n");
+    # Returns: ("Could not read the record. Likely causes are a sealed vault.", 1)
 
 =head2 _commit_config_credhub_secrets
 

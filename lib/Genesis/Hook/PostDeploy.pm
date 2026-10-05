@@ -117,16 +117,30 @@ sub update_director_network_config {
 		# A signal passes through as it came, and the lock waiter has already
 		# said what it found; anything else failed after the director deployed
 		die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
+		my $network_path = $env->exodus_base.'/network';
+		my $finish = sprintf(
+			"#C{%s bosh-configs upload --type cloud --name %s -y}",
+			scalar($env->get_call_path_with_env), $config_name
+		);
+		my ($reason, $has_causes) = _plain_error($err);
+
+		# An error that already lists its likely causes and checks says them
+		# once; only one that does not gets the ones for this step
 		bail(
 			"The #M{%s} BOSH director deployed and is working, but its own cloud config ".
 			"#C{%s} and its network record in exodus were not updated.  The step failed ".
-			"while %s:\n\n%s\n\nThis usually means the vault is sealed or unreachable, ".
-			"the token has expired or has no read or write access to #C{%s}, or the ".
-			"director refused the cloud config.  Check the vault and the token with ".
-			"#C{safe vault status} and #C{safe export %s}, then run #C{%s bosh-configs ".
-			"upload --type cloud --name %s -y} to finish this step without a redeploy.",
-			$bosh->alias, $config_name, $step, ($err =~ s/\s+$//r), $env->exodus_base.'/network',
-			$env->exodus_base.'/network', scalar($env->get_call_path_with_env), $config_name
+			"while %s:\n\n%s\n\n%s",
+			$bosh->alias, $config_name, $step, $reason,
+			$has_causes
+				? "Once that is fixed, run $finish to finish this step without a redeploy."
+				: sprintf(
+					"This usually means the vault is sealed or unreachable, the token has ".
+					"expired or has no read or write access to #C{%s}, or the director ".
+					"refused the cloud config.  Check the vault and the token with ".
+					"#C{safe vault status} and #C{safe export %s}, then run %s to finish ".
+					"this step without a redeploy.",
+					$network_path, $network_path, $finish
+				)
 		);
 	}
 	die $held_signal if defined($held_signal);
@@ -135,6 +149,18 @@ sub update_director_network_config {
 	return $acquired ? 1 : 0;
 }
 
+# _plain_error - the text of a caught error without the [FATAL] prefix and the wrapping a nested bail adds {{{
+sub _plain_error {
+	my ($err) = @_;
+	$err =~ s/^\s+|\s+$//g;
+	my $wrapped = $err =~ s/^(?:\e\[[0-9;]*m)*\[FATAL\](?:\e\[[0-9;]*m)*[ \t]*//;
+	# Lines the earlier bail wrapped to the terminal join back into
+	# paragraphs, so the outer bail wraps the text once
+	$err = join("\n\n", map {s/\s*\n\s*/ /gr} split(/\n[ \t]*\n/, $err)) if $wrapped;
+	return ($err, scalar($err =~ /\blikely causes?\b/i));
+}
+
+# }}}
 sub _acquire_director_network_lock {
 	my ($self, $bosh, $config_name) = @_;
 	my $env = $self->env;
