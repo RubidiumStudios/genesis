@@ -2007,6 +2007,60 @@ B<Examples:>
   _describe_topology($top, {}, []);
   # No environments with pipeline metadata found.
 
+=head2 _topology_to_mermaid_md($top, $nodes, $edges)
+
+    my $md = _topology_to_mermaid_md($top, $topo->{nodes}, $topo->{edges});
+
+Renders the pipeline topology as the Markdown page C<pipeline-graph> writes:
+a heading naming the pipeline, then a top-down Mermaid flowchart with one
+node per environment and one arrow from each environment to the one that
+follows it.
+
+Each node is declared with its label, the environment's alias or else its
+name, so Mermaid shows the whole name.  A node's id is the environment name
+with every character outside C<[A-Za-z0-9_]> turned into an underscore,
+because Mermaid ids take no hyphens.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment root, read for C<pipeline.name>, and for its type when no name
+is set.
+
+=item C<$nodes>
+
+The topology's nodes, keyed by environment name.
+
+=item C<$edges>
+
+The topology's edges, each a hash of C<from> and C<to>.
+
+=back
+
+B<Returns:> The Markdown page as a string.
+
+B<Errors:> None.
+
+B<Limitations:> Two environment names that differ only in characters outside
+C<[A-Za-z0-9_]> map to the same node id, and Mermaid draws them as one node.
+
+B<Examples:>
+
+  my $md = _topology_to_mermaid_md($top,
+      {lab => {}, qa => {}}, [{from => 'lab', to => 'qa'}]);
+  # # Pipeline: lab-chain
+  #
+  # ```mermaid
+  # ...
+  # flowchart TD
+  #   lab["lab"]
+  #   qa["qa"]
+  #   lab --> qa
+  # ```
+
 =head2 _dump_debug_artifacts($debug_dir, $result, $platform)
 
     _dump_debug_artifacts('/tmp/ci-debug', $result, 'concourse');

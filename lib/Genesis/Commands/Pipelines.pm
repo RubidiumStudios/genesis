@@ -2218,6 +2218,38 @@ sub _dump_debug_artifacts {
 }
 
 # }}}
+# _topology_to_mermaid_md - mermaid flowchart from nodes+edges {{{
+sub _topology_to_mermaid_md {
+	my ($top, $nodes, $edges) = @_;
+
+	my $name  = $top->config->get('pipeline.name') || $top->type;
+	my @lines = (
+		"---",
+		"config:",
+		"  flowchart:",
+		"    useMaxWidth: false",
+		"---",
+		"flowchart TD",
+	);
+
+	# Declare nodes with explicit labels so names aren't truncated
+	my %declared;
+	for my $n (sort keys %$nodes) {
+		my $label = $nodes->{$n}{alias} || $n;
+		(my $id = $n) =~ s/[^a-zA-Z0-9_]/_/g;
+		push @lines, "  ${id}[\"$label\"]";
+		$declared{$n} = $id;
+	}
+
+	for my $edge (@$edges) {
+		push @lines, "  $declared{$edge->{from}} --> $declared{$edge->{to}}";
+	}
+
+	my $mermaid = join("\n", @lines) . "\n";
+	return "# Pipeline: $name\n\n\`\`\`mermaid\n${mermaid}\`\`\`\n";
+}
+
+# }}}
 # _describe_source_control - print each source-control value and its tier {{{
 #
 # pipeline-describe opens with the resolved source-control values, so an
