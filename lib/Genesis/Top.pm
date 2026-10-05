@@ -2785,24 +2785,40 @@ sub _source_control {
 	# for the url costs a fork on every command, so where the operator named
 	# the repository the url is left alone.  That is the one way the uri
 	# comes back undef, and the one way a report shows it as (none).
-	$sc{repository} = $config->get('pipeline.source_control.repository');
-	unless ($sc{repository}) {
+	#
+	# Written as owner/repo or as a URL, the repository is one identity
+	# (D118), and the API is handed its owner/repo whichever was written.
+	if (defined(my $written = $config->get('pipeline.source_control.repository'))) {
+		$sc{identity} = _repository_identity($written);
+		bail({exitcode => CONFIG},
+			"#C{pipeline.source_control.repository} is #C{%s}, which names no ".
+			"repository.\nWrite it as #C{owner/repo}, or as the repository's ".
+			"https or ssh URL; the MVP supports GitHub, github.com or GitHub ".
+			"Enterprise.",
+			$written
+		) unless $sc{identity};
+	} else {
 		$sc{uri} //= $git->remote_url($sc{remote});
-		$sc{repository} = _github_owner_repo($sc{uri});
+		$sc{identity} = _repository_identity($sc{uri});
 		bail({exitcode => CONFIG},
 			"#C{pipeline.source_control.repository} could not be derived from ".
 			"#C{%s}.\nThe MVP supports GitHub, github.com or GitHub Enterprise, ".
 			"and that URL carries no #C{owner/repo} pair.  Name the repository ".
 			"explicitly, or move the pipeline to a GitHub remote.",
 			$sc{uri} // '<no remote url>'
-		) unless $sc{repository};
+		) unless $sc{identity};
 	}
+	$sc{repository} = join('/', @{$sc{identity}}{qw/owner repo/});
 
 	return $self->{__source_control} = \%sc;
 }
 
 # }}}
-# _github_owner_repo - the owner/repo a GitHub URL carries, or undef {{{
+# _repository_identity - host, owner and repo, however the repository is written {{{
+#
+# A repository is one identity whether it is written owner/repo, as an https
+# URL, or in either ssh form (D118), so a clone's remotes can be matched to it
+# under any protocol.  owner/repo alone means github.com.
 #
 # Enterprise parses the same way, because its URLs carry the pair in the
 # same shape and only the host differs.  The host is what says GitHub.
@@ -2814,12 +2830,30 @@ sub _source_control {
 # operator might run and those are named freely.  A host that merely contains
 # the word therefore parses too, and the pair it yields then fails against the
 # configured API base, which is a later refusal rather than a wrong answer.
-sub _github_owner_repo {
-	my ($uri) = @_;
-	return undef unless defined $uri && length $uri;
-	return "$1/$2" if $uri =~ m{^https?://[^/]*github[^/]*/([^/]+)/([^/]+?)(?:\.git)?/?$}i;
-	return "$1/$2" if $uri =~ m{^(?:ssh://)?[^@]+\@[^:/]*github[^:/]*[:/]([^/]+)/([^/]+?)(?:\.git)?/?$}i;
-	return undef;
+sub _repository_identity {
+	my ($text) = @_;
+	return undef unless defined $text && length $text;
+	my ($host, $owner, $repo);
+	if ($text =~ m{^([A-Za-z0-9][\w.-]*)/([\w.-]+?)(?:\.git)?/?$}) {
+		($host, $owner, $repo) = ('github.com', $1, $2);
+	} elsif ($text =~ m{^https?://(?:[^@/]+\@)?([^/:]+)(?::\d+)?/([^/]+)/([^/]+?)(?:\.git)?/?$}i) {
+		($host, $owner, $repo) = ($1, $2, $3);
+	} elsif ($text =~ m{^(?:ssh://)?[^@/]+\@([^:/]+)(?::\d+)?[:/]([^/]+)/([^/]+?)(?:\.git)?/?$}i) {
+		($host, $owner, $repo) = ($1, $2, $3);
+	}
+	return undef unless defined $host && $host =~ /github/i;
+	return {host => lc($host), owner => $owner, repo => $repo};
+}
+
+# }}}
+# _identity_key - one string two spellings of a repository share {{{
+#
+# Owner and repo compare without regard to case, as GitHub's do, so the key
+# folds them; the identity keeps its spelling for the API and for messages.
+sub _identity_key {
+	my ($identity) = @_;
+	return undef unless $identity;
+	return lc(join('/', @{$identity}{qw/host owner repo/}));
 }
 
 # }}}

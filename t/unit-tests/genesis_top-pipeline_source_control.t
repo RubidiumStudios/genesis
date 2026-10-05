@@ -188,6 +188,51 @@ subtest 'the uri row says whether git was asked' => sub {
 		'and the row carries what git said';
 };
 
+# Proves T57's parsing half under D118: a repository is one identity, host,
+# owner and repo, however it is written.
+subtest 'a repository is one identity however it is written' => sub {
+	plan tests => 10;
+
+	my $id = \&Genesis::Top::_repository_identity;
+	my $want = {host => 'github.com', owner => 'team', repo => 'bosh'};
+	is_deeply($id->('team/bosh'), $want, 'owner/repo assumes github.com');
+	is_deeply($id->('https://github.com/team/bosh'), $want, 'an https URL');
+	is_deeply($id->('https://github.com/team/bosh.git/'), $want,
+		'with a .git suffix and a trailing slash dropped');
+	is_deeply($id->('git@github.com:team/bosh.git'), $want, 'the scp-like ssh form');
+	is_deeply($id->('ssh://git@github.com/team/bosh.git'), $want, 'an ssh URL');
+	is_deeply($id->('https://GitHub.com/Team/Bosh.git'),
+		{host => 'github.com', owner => 'Team', repo => 'Bosh'},
+		'the host is lowercased and owner and repo keep their spelling');
+	is(Genesis::Top::_identity_key($id->('https://GitHub.com/Team/Bosh.git')),
+		Genesis::Top::_identity_key($want),
+		'and two spellings of one repository compare equal');
+	is_deeply($id->('https://github.example.com/team/bosh'),
+		{host => 'github.example.com', owner => 'team', repo => 'bosh'},
+		'an Enterprise host keeps its own name');
+	is($id->('https://git.example.com/team/bosh.git'), undef,
+		'a host that is not GitHub carries no identity in the MVP');
+	is($id->('just-a-name'), undef, 'and neither does a bare word');
+};
+
+subtest 'repository may be written as owner/repo or as a URL' => sub {
+	plan tests => 4;
+
+	for my $written ('team/bosh', 'https://github.com/team/bosh.git',
+	                 'git@github.com:team/bosh.git') {
+		my $body = join("\n", 'pipeline:', '  enabled: true',
+			'  source_control:', "    repository: $written");
+		is(load_control($body, derive_repository => 1)->source_control_repository,
+			'team/bosh', "$written is read as team/bosh");
+	}
+
+	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
+		'  source_control:', '    repository: not-a-repository'),
+		derive_repository => 1)}
+		qr/pipeline\.source_control\.repository/,
+		'and a value that names no repository is refused by the key';
+};
+
 subtest 'the remote is derived down a ladder' => sub {
 	plan tests => 4;
 

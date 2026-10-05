@@ -1859,8 +1859,9 @@ B<Errors:>
 C<"pipeline.source_control.control_branch must not be empty.">,
 C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
 enabled, but %s is not a git checkout.">,
-C<"pipeline.source_control.remote could not be derived.">, and
-C<"pipeline.source_control.repository could not be derived from %s."> -
+C<"pipeline.source_control.remote could not be derived.">,
+C<"pipeline.source_control.repository could not be derived from %s.">, and
+C<"pipeline.source_control.repository is %s, which names no repository."> -
 raised by L</_source_control>, whichever of the five values the caller asked
 for, because it settles all of them at once.
 
@@ -1904,8 +1905,9 @@ B<Errors:>
 C<"pipeline.source_control.control_branch must not be empty.">,
 C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
 enabled, but %s is not a git checkout.">,
-C<"pipeline.source_control.remote could not be derived.">, and
-C<"pipeline.source_control.repository could not be derived from %s."> -
+C<"pipeline.source_control.remote could not be derived.">,
+C<"pipeline.source_control.repository could not be derived from %s.">, and
+C<"pipeline.source_control.repository is %s, which names no repository."> -
 raised by L</_source_control>, whichever of the five values the caller asked
 for, because it settles all of them at once.
 
@@ -1924,9 +1926,12 @@ B<Examples:>
 
 The C<< <owner>/<repo> >> pair the GitHub API targets.
 
-Parsed from the remote's url, in either the https or the ssh shape. GitHub
-Enterprise parses the same way, since only the host differs. A mirror whose
-url does not carry the pair needs the override.
+Read from C<pipeline.source_control.repository> where it is set, written as
+C<owner/repo> or as the repository's https or ssh URL (D118), and otherwise
+parsed from the remote's url. Every form goes through
+L</_repository_identity>, so this answers C<owner/repo> whichever was
+written. GitHub Enterprise parses the same way, since only the host differs.
+A mirror whose url does not carry the pair needs the key set.
 
 B<Parameters:> None.
 
@@ -1941,8 +1946,9 @@ B<Errors:>
 C<"pipeline.source_control.control_branch must not be empty.">,
 C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
 enabled, but %s is not a git checkout.">,
-C<"pipeline.source_control.remote could not be derived.">, and
-C<"pipeline.source_control.repository could not be derived from %s."> -
+C<"pipeline.source_control.remote could not be derived.">,
+C<"pipeline.source_control.repository could not be derived from %s.">, and
+C<"pipeline.source_control.repository is %s, which names no repository."> -
 raised by L</_source_control>, whichever of the five values the caller asked
 for, because it settles all of them at once.
 
@@ -3345,9 +3351,11 @@ Precedence is explicit over derived over default.
 The remote is L</_remote_named>'s answer -- the configured override, else the
 control branch's configured upstream, else C<origin> where it exists -- and
 otherwise refused by name; it is never the first C<git remote>, which is
-alphabetical order. The repository is the GitHub
-C<owner/repo> the remote's URL carries, github.com or GitHub Enterprise
-alike, and any other host must name it explicitly. An empty C<pr_prefix>
+alphabetical order. The repository is the one written in the configuration,
+as C<owner/repo> or as a URL, or else the GitHub C<owner/repo> the remote's
+URL carries, github.com or GitHub Enterprise alike; either way it is read
+through L</_repository_identity>, the identity is kept beside it as
+C<identity>, and any other host must name it explicitly. An empty C<pr_prefix>
 is refused, because it would give the pull request branch the deployment
 branch's own name. The prefix checked is the one in the configuration being
 loaded, not L</pr_prefix>'s answer from control, because this runs as that
@@ -3400,6 +3408,11 @@ C<"pipeline.source_control.repository could not be derived"> - raised when
 the remote's URL carries no GitHub C<owner/repo> pair and no override names
 one. There is no exception under the manual provider.
 
+=item *
+
+C<"pipeline.source_control.repository is %s, which names no repository"> -
+raised when the configured value is neither C<owner/repo> nor a GitHub URL.
+
 =back
 
 B<Examples:>
@@ -3407,18 +3420,28 @@ B<Examples:>
     my $sc = $top->_source_control;
     # returns {remote => 'origin', uri => 'git@github.com:team/bosh.git',
     #          repository => 'team/bosh', control_branch => 'control',
-    #          pr_prefix => 'pr/'}
+    #          pr_prefix => 'pr/',
+    #          identity => {host => 'github.com', owner => 'team',
+    #                       repo => 'bosh'}}
 
-=head2 _github_owner_repo
+=head2 _repository_identity
 
-    my $pair = _github_owner_repo($uri);
+    my $identity = _repository_identity($text);
 
-The GitHub C<owner/repo> a remote's URL carries, or C<undef> where it
-carries none. Both the https and the ssh forms parse, and GitHub Enterprise
-parses the same way as github.com, because its URLs carry the pair in the
-same shape and only the host differs. The host is what says GitHub: every
-https URL on earth has two path segments, so a URL that names some other
-forge answers C<undef> and its repository has to be configured by hand.
+The repository a value names, as its host, owner and repo, or C<undef> where
+it names none. A repository is one identity however it is written (D118):
+C<owner/repo>, which means github.com, an https URL, or either ssh form, the
+scp-like C<git@host:owner/repo> or C<ssh://git@host/owner/repo>. A C<.git>
+suffix and a trailing slash are dropped, a userinfo or port in the URL is
+passed over, and the host is lowercased; owner and repo keep their spelling,
+which the API and the messages use, and L</_identity_key> folds them for
+comparison.
+
+GitHub Enterprise parses the same way as github.com, because its URLs carry
+the pair in the same shape and only the host differs. The host is what says
+GitHub: every https URL on earth has two path segments, so a URL that names
+some other forge answers C<undef>, which is the MVP's refusal of any host that
+is not GitHub under D102.
 
 Plain function, not a method.
 
@@ -3426,25 +3449,55 @@ B<Parameters:>
 
 =over 4
 
-=item C<$uri>
+=item C<$text>
 
-The remote's fetch URL, in either form. An undefined or empty value answers
-C<undef>.
+The configured C<repository>, or a remote's fetch URL. An undefined or empty
+value answers C<undef>.
 
 =back
 
-B<Returns:> The C<owner/repo> string, or C<undef>.
+B<Returns:> A hashref of C<host>, C<owner> and C<repo>, or C<undef>.
 
 B<Examples:>
 
-    my $pair = _github_owner_repo('git@github.com:team/bosh.git');
-    # returns 'team/bosh'
+    my $identity = _repository_identity('git@github.com:team/bosh.git');
+    # returns {host => 'github.com', owner => 'team', repo => 'bosh'}
 
-    my $pair = _github_owner_repo('https://github.example.com/team/bosh');
-    # returns 'team/bosh' -- GitHub Enterprise parses the same way
+    my $identity = _repository_identity('team/bosh');
+    # returns the same
 
-    my $pair = _github_owner_repo('https://git.example.com/team/bosh.git');
+    my $identity = _repository_identity('https://github.example.com/team/bosh');
+    # returns {host => 'github.example.com', owner => 'team', repo => 'bosh'}
+
+    my $identity = _repository_identity('https://git.example.com/team/bosh.git');
     # returns undef -- that host is not GitHub
+
+=head2 _identity_key
+
+    my $key = _identity_key($identity);
+
+The one string that two spellings of a repository share: host, owner and repo
+joined and lowercased, since owner and repo compare without regard to case,
+as GitHub's do.
+
+Plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$identity>
+
+A hashref from L</_repository_identity>.
+
+=back
+
+B<Returns:> The key, or C<undef> for no identity.
+
+B<Examples:>
+
+    _identity_key(_repository_identity('https://GitHub.com/Team/Bosh.git'));
+    # returns 'github.com/team/bosh', as 'team/bosh' does
 
 =head2 _ref_component_errors
 
