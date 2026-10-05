@@ -598,8 +598,9 @@ B<Examples:>
 Turns an error caught from a nested C<bail> into text that can sit inside
 another message.  It trims the surrounding whitespace, drops the leading
 C<[FATAL]> prefix, and, when it found that prefix, joins the lines the first
-C<bail> wrapped to the terminal back into paragraphs so the outer C<bail>
-wraps the text once.  An error without the prefix is returned trimmed and
+C<bail> wrapped to the terminal back into paragraphs and removes the indent
+that wrap gave each one, so the outer C<bail> wraps the text once and indents
+every paragraph the same.  An error without the prefix is returned trimmed and
 otherwise as it is.
 
 B<Parameters:>
@@ -612,7 +613,10 @@ The error text, usually C<$@>.
 
 =back
 
-B<Returns:> The cleaned text, and true when that text names its likely causes.
+B<Returns:> The cleaned text, and true when the error came from a C<bail> and
+says its likely causes, that it usually means something, or what to check.  An
+error without the prefix, such as a die from a library, never counts, so the
+caller adds the causes for its own step to it.
 
 B<Examples:>
 

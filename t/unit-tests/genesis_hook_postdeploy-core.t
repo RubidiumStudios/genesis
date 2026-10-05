@@ -865,7 +865,10 @@ subtest 'update_director_network_config - a failed strict read after a good depl
 };
 
 subtest 'update_director_network_config - a failed strict read reports once, with one prefix and one set of causes' => sub {
-	plan tests => 8;
+	plan tests => 10;
+	# Carp::Always, which the harness may load, appends a stack trace to every
+	# die; the operator sees the message without it
+	local $SIG{__DIE__} = 'DEFAULT';
 	require_ok 'Service::Vault';
 	@netcalls = ();
 	my $hook = make_hook(env => net_env(
@@ -885,6 +888,80 @@ subtest 'update_director_network_config - a failed strict read reports once, wit
 		'and the checks to run');
 	like($err, qr/genesis lab-ocf bosh-configs upload --type cloud --name lab-ocf\.bosh\.director -y/,
 		'and the command that finishes the step');
+	my @starts = ($raw =~ /\n[ \t]*\n( *)\S/g);
+	is_deeply([sort {$a <=> $b} map {length} @starts], [(length($starts[0])) x @starts],
+		'every paragraph after the first starts at the same indent');
+	cmp_ok(max_indent($raw), '<=', 8, 'and nothing is indented past one wrap');
+};
+
+# The text of the real bail from the code that raises it, so the step is tested
+# against what an operator gets and not against a stand-in
+sub real_bail {
+	my ($code) = @_;
+	local $ENV{NOCOLOR} = 'y';
+	eval { $code->(); 1 } and die "the code did not bail\n";
+	return $@;
+}
+
+sub max_indent {
+	my ($text) = @_;
+	my ($max) = sort {$b <=> $a} map {/^( *)\S/ ? length($1) : 0} split /\n/, $text;
+	return $max // 0;
+}
+
+subtest 'update_director_network_config - an error that lists its own causes gets no second list' => sub {
+	local $SIG{__DIE__} = 'DEFAULT';
+	require Genesis::Hook::CloudConfig::Director;
+	require Genesis::Hook::CloudConfig;
+	my $own = mock "Mock::PostDeploy::ClaimsEnv" => {
+		exodus_base     => 'secret/exodus/lab-ocf/bosh',
+		use_create_env  => 0,
+		get_target_bosh => sub { mock "Mock::PostDeploy::ClaimsBosh" => {
+			alias       => 'lab-ocf',
+			deployments => sub { {cf => 1, shield => 1} },
+		} },
+	};
+	my $director = mock "Mock::PostDeploy::ClaimsHook" => {env => $own};
+	require IPv4;
+	my @cases = (
+		['an empty claims record on a director with deployments',
+			real_bail(sub { Genesis::Hook::CloudConfig::Director::_check_claims_record_not_lost($director, {}) }),
+			qr/GENESIS_ALLOW_EMPTY_CLAIMS=1/, qr/failed or partial claims write/],
+		['two networks claiming the same addresses',
+			real_bail(sub { Genesis::Hook::CloudConfig::_bail_on_claim_clash(
+				$director, 'cf', 'cf-subnet', IPv4->range('10.8.0.4-10.8.0.6'),
+				{other => IPv4->range('10.8.0.5-10.8.0.9')}) }),
+			qr/both claim/, qr/saved claims without holding the network claims lock/],
+		['a vault error with its likely causes',
+			real_bail(sub { Genesis::bail("Could not reach the vault.  Likely causes are an expired token.  Check #C{safe vault status}.") }),
+			qr/Could not reach the vault/, qr/Likely causes are an expired token/],
+	);
+	plan tests => 5 * @cases + 5;
+	for my $case (@cases) {
+		my ($name, $nested, $says, $cause) = @$case;
+		@netcalls = ();
+		my $hook = make_hook(env => net_env(self_bosh => net_bosh(), fail_read => $nested));
+		throws_ok { output_from { $hook->update_director_network_config } } qr/BOSH director deployed and is working/,
+			"$name is reported as the director having deployed";
+		my $raw = $@;
+		my $err = $raw =~ s/\s+/ /gr;
+		is(scalar(() = $raw =~ /\[FATAL\]/g), 1, "$name carries one [FATAL] prefix");
+		like($err, $says, "$name keeps what it said");
+		unlike($err, qr/vault is sealed or unreachable, the token has expired/, "$name gets no second list of causes from the step");
+		cmp_ok(max_indent($raw), '<=', 8, "$name stays within one wrap of indent");
+	}
+
+	# An error Genesis does not word, here a bare die, has no causes of its own
+	@netcalls = ();
+	my $hook = make_hook(env => net_env(self_bosh => net_bosh(), fail_read => "connection reset by peer\n"));
+	throws_ok { output_from { $hook->update_director_network_config } } qr/BOSH director deployed and is working/,
+		'a bare die is reported as the director having deployed';
+	my $raw = $@;
+	like($raw =~ s/\s+/ /gr, qr/connection reset by peer/, 'it keeps the text it died with');
+	like($raw =~ s/\s+/ /gr, qr/This usually means the vault is sealed or unreachable, the token has expired/,
+		'and the step adds the causes and checks for it');
+	like($raw =~ s/\s+/ /gr, qr/safe vault status.*safe export secret\/exodus\/lab-ocf\/bosh\/network/, 'with the checks to run');
+	cmp_ok(max_indent($raw), '<=', 8, 'at one wrap of indent');
 };
 
 subtest 'update_director_network_config - the wait is announced again when its reason changes' => sub {

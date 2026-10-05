@@ -124,8 +124,9 @@ sub update_director_network_config {
 		);
 		my ($reason, $has_causes) = _plain_error($err);
 
-		# An error that already lists its likely causes and checks says them
-		# once; only one that does not gets the ones for this step
+		# An error Genesis raised that already gives its likely causes or what
+		# to check says them once; any other, such as a die from a library or
+		# an error with neither, gets the causes and checks for this step
 		bail(
 			"The #M{%s} BOSH director deployed and is working, but its own cloud config ".
 			"#C{%s} and its network record in exodus were not updated.  The step failed ".
@@ -149,15 +150,23 @@ sub update_director_network_config {
 	return $acquired ? 1 : 0;
 }
 
-# _plain_error - the text of a caught error without the [FATAL] prefix and the wrapping a nested bail adds {{{
+# _plain_error - the text of a caught error without the [FATAL] prefix and the wrapping a nested bail adds, and whether it gives its own causes {{{
 sub _plain_error {
 	my ($err) = @_;
 	$err =~ s/^\s+|\s+$//g;
 	my $wrapped = $err =~ s/^(?:\e\[[0-9;]*m)*\[FATAL\](?:\e\[[0-9;]*m)*[ \t]*//;
-	# Lines the earlier bail wrapped to the terminal join back into
-	# paragraphs, so the outer bail wraps the text once
-	$err = join("\n\n", map {s/\s*\n\s*/ /gr} split(/\n[ \t]*\n/, $err)) if $wrapped;
-	return ($err, scalar($err =~ /\blikely causes?\b/i));
+	if ($wrapped) {
+		# Lines the earlier bail wrapped to the terminal join back into
+		# paragraphs, and the indent it gave them goes, so the outer bail
+		# wraps the text once and indents every paragraph the same
+		$err = join("\n\n", map {
+			my $paragraph = s/^\s+|\s+$//gr;
+			$paragraph =~ s/\s*\n\s*/ /gr
+		} split(/\n[ \t]*\n/, $err));
+	}
+	# Only an error Genesis raised words its own causes and checks; the
+	# wording is the one every such error uses
+	return ($err, scalar($wrapped && $err =~ /\b(?:likely causes?|usually means|check)\b/i));
 }
 
 # }}}
