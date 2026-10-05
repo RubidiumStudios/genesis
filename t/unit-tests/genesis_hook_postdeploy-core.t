@@ -944,6 +944,40 @@ subtest 'update_director_network_config - a signal during the release waits for 
 	}
 };
 
+subtest 'update_director_network_config - a signal while the lock is being taken stops the step' => sub {
+	plan tests => 8;
+	no warnings 'once';
+	local $Genesis::Hook::PostDeploy::NETWORK_LOCK_POLL_SECONDS = 1;
+	local $ENV{GENESIS_NETWORK_LOCK_WAIT} = 30;
+	for my $signal (qw/INT TERM/) {
+		@netcalls = ();
+		my ($takes, $uploads) = (0, 0);
+		my $base = net_bosh();
+		my $bosh = mock "Mock::PostDeploy::AcquireSignalBosh" => {
+			alias                => 'lab-ocf',
+			check_network_lock   => sub { $base->check_network_lock },
+			acquire_network_lock => sub {
+				if (++$takes == 1) { kill $signal => $$; my $x = 0; $x++ for 1 .. 10 }
+				$base->acquire_network_lock;
+			},
+			network_locked_by_me => sub { $base->network_locked_by_me },
+			clear_network_lock   => sub { $base->clear_network_lock },
+			network_lock_path    => sub { $base->network_lock_path },
+			release_network_lock => sub { Service::BOSH::Director::release_network_lock($_[0]) },
+			upload_config        => sub { $uploads++; $base->upload_config(@_[1..$#_]) },
+		};
+		my $hook = make_hook(env => net_env(self_bosh => $bosh));
+		my ($out, $err);
+		($out, $err) = output_from {
+			throws_ok { $hook->update_director_network_config }
+				qr/^(?:Interrupted by user|Terminated)\b/, "$signal: the step stops with the signal";
+		};
+		is($takes, 1, "$signal: the lock is not taken again");
+		is($uploads, 0, "$signal: nothing is built or uploaded after the signal");
+		unlike(($out.$err), qr/could not be taken/, "$signal: and it is not reported as a vault error");
+	}
+};
+
 subtest 'update_director_network_config - a create-env director locks itself' => sub {
 	plan tests => 3;
 	@netcalls = ();

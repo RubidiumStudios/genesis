@@ -1951,10 +1951,10 @@ sub _deploy_under_network_claims_lock {
 	my $held_signal;
 	my $on_signal = sub {
 		my ($message) = @_;
-		if ($unwinding) {
-			$unwinding = 0;
-			die $message;
-		}
+		# $unwinding stays set until the work has been left, below, and not
+		# until this first die: code inside the work can catch that die, and
+		# the next signal then still has to unwind it.
+		die $message if $unwinding;
 		$held_signal //= $message;
 	};
 	local $SIG{INT}  = $takes_lock ? sub { $on_signal->("Interrupted by user\n") } : $SIG{INT};

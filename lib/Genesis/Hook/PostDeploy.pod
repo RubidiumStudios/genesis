@@ -565,6 +565,12 @@ message names the stale holder, says why post-deploy does not clear it, gives
 the likely cause (an interrupted deploy or upload on this director), and
 gives the same command, whose C<-y> also clears the stale lock.
 
+=item An C<INT>, C<TERM>, C<HUP>, or C<QUIT> signal
+
+Raised as it came, when it arrives while the lock is being taken.  It is
+not a failure to wait out and retry, so the loop stops, and nothing is built
+or uploaded.
+
 =item C<"GENESIS_NETWORK_LOCK_WAIT is set to '%s', which is not a whole number of seconds, ...">
 
 Printed with C<warning()> when the variable is not a whole number, after

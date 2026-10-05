@@ -58,10 +58,10 @@ sub update_director_network_config {
 	my $held_signal;
 	my $on_signal = sub {
 		my ($message) = @_;
-		if ($unwinding) {
-			$unwinding = 0;
-			die $message;
-		}
+		# $unwinding stays set until the work has been left, below, and not
+		# until this first die: code inside the work can catch that die, and
+		# the next signal then still has to unwind it.
+		die $message if $unwinding;
 		$held_signal //= $message;
 	};
 	local $SIG{INT}  = sub { $on_signal->("Interrupted by user\n") };
@@ -116,7 +116,7 @@ sub update_director_network_config {
 	unless ($ok) {
 		# A signal passes through as it came, and the lock waiter has already
 		# said what it found; anything else failed after the director deployed
-		die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\s*$/;
+		die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
 		bail(
 			"The #M{%s} BOSH director deployed and is working, but its own cloud config ".
 			"#C{%s} and its network record in exodus were not updated.  The step failed ".
@@ -159,7 +159,10 @@ sub _acquire_director_network_lock {
 			# refusal that leaves the lock free is a vault failure instead, and
 			# waits and counts the same as a held lock does.
 			return 1 if eval { $bosh->acquire_network_lock; 1 };
-			$acquire_error = ($@ =~ s/\s+$//r) || 'unknown error';
+			my $failure = $@;
+			# A signal is not a vault failure to wait out and retry
+			die $failure if $failure =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
+			$acquire_error = ($failure =~ s/\s+$//r) || 'unknown error';
 			$lock = $bosh->check_network_lock;
 			undef $acquire_error unless $lock->{status} eq 'unlocked';
 		}
