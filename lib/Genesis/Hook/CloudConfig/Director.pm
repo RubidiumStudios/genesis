@@ -23,13 +23,18 @@ sub init {
 	) unless ($opts{purpose}//'') eq 'director';
 	my $obj = $class->SUPER::init(%opts, network => {});
 
+	# One read of the stored record serves the three steps below, since every
+	# read is an export from the vault.  Each init reads it afresh, because the
+	# hook object can be handed back to a later build in the same process.
+	my $stored = $obj->_get_bosh_network_data;
+
 	# Stop before building from a claims record that a failed write may have emptied
-	$obj->_check_claims_record_not_lost();
+	$obj->_check_claims_record_not_lost($stored);
 
 	# Set the azs and subnets
 	# FIXME: Check if az prefix set in environment config
-	$obj->_set_network_azs();
-	$obj->_set_network_subnets();
+	$obj->_set_network_azs(network_data => $stored);
+	$obj->_set_network_subnets(network_data => $stored);
 
 	return $obj;
 }
@@ -139,12 +144,11 @@ sub overrides_base {
 # Private Methods {{{
 # _check_claims_record_not_lost - Stops when an absent claims record sits on a director that has deployments {{{
 sub _check_claims_record_not_lost {
-	my ($self) = @_;
+	my ($self, $network_data) = @_;
 	my $env = $self->env;
 
 	# Only a record that is absent, or exports as an empty one, is in doubt.
 	# One that holds anything is the director's own view to build on.
-	my $network_data = $self->_get_bosh_network_data;
 	return if ref($network_data) eq 'HASH' && keys %$network_data;
 	return if defined($network_data) && ref($network_data) ne 'HASH';
 
@@ -228,7 +232,7 @@ sub _set_network_azs {
 		# We need to check if there's already network data for the environment and
 		# if so, we need to preserve the for_cpi data (that's the only thing that is
 		# added outside of the director hook)
-		my $network_data = $self->_get_bosh_network_data;
+		my $network_data = exists($opts{network_data}) ? $opts{network_data} : $self->_get_bosh_network_data;
 		if ($network_data && ref($network_data) eq 'HASH' && exists $network_data->{azs}) {
 			my $existing_azs = $network_data->{azs};
 			for my $az_name (keys %azs) {
@@ -250,7 +254,7 @@ sub _set_network_azs {
 # }}}
 # _set_network_subnets - Set (and validate?) the network subnets for the environment {{{
 sub _set_network_subnets {
-	my ($self) = @_;
+	my ($self, %opts) = @_;
 	if ($self->env->is_ocfp) {
 		my $subnets = $self->env->ocfp_config_lookup(['net.subnets','vpc.subnets']);
 		my %subnets = map {
@@ -267,7 +271,7 @@ sub _set_network_subnets {
 		# We need to check if there's already network subnet data for the environment,
 		# and if so, we need to preserve the existing claims data (that's the only
 		# thing that is added outside of the director hook)
-		my $network_data = $self->_get_bosh_network_data;
+		my $network_data = exists($opts{network_data}) ? $opts{network_data} : $self->_get_bosh_network_data;
 		if ($network_data && ref($network_data) eq 'HASH' && exists $network_data->{subnets}) {
 			my $existing_subnets = $network_data->{subnets};
 			for my $subnet_name (keys %subnets) {
@@ -287,16 +291,10 @@ sub _set_network_subnets {
 # }}}
 # _get_bosh_network_data - Returns the network data for the BOSH director (self) {{{
 sub _get_bosh_network_data {
-	my ($self) = @_;
-
 	# Strict, because a read that failed would look like no deployment
 	# holding any claims, and the config built from that would hand out
 	# addresses that are taken.  Only a record that was never written is empty.
-	# Read once and reused, since init asks for it three times and every read
-	# is an export from the vault.
-	$self->{bosh_network_data} = {value => $self->env->exodus_lookup_strict('/network:.')}
-		unless $self->{bosh_network_data};
-	return $self->{bosh_network_data}{value};
+	return $_[0]->env->exodus_lookup_strict('/network:.');
 }
 
 # }}}

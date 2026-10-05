@@ -85,9 +85,11 @@ See also:
 Constructs and returns a director cloud-config hook object. Enforces that
 C<< $opts{purpose} >> is exactly C<'director'>, then delegates to the parent
 C<init> with C<< network => {} >> added to C<%opts>. After the parent object
-is built, calls C<_check_claims_record_not_lost>, then C<_set_network_azs>
-and C<_set_network_subnets> to populate the in-memory network data from the
-OCFP Vault config.
+is built, reads the stored network record once with C<_get_bosh_network_data>
+and passes it to C<_check_claims_record_not_lost>, then to C<_set_network_azs>
+and C<_set_network_subnets>, which populate the in-memory network data from the
+OCFP Vault config.  Every init reads the record afresh, so a hook object that
+is handed back to a later build sees that build's record.
 
 B<Parameters:>
 
@@ -333,7 +335,7 @@ B<Examples:>
 
 =head2 _check_claims_record_not_lost
 
-    $self->_check_claims_record_not_lost;
+    $self->_check_claims_record_not_lost($network_data);
 
 Stops the build when the director's network claims record looks lost. The
 claims are written by clearing the record and then setting it, so a write
@@ -358,6 +360,17 @@ hook builds through this code and takes no command-line options, and it
 matches C<GENESIS_ALLOW_CLAIM_PRUNE>, which the same hook already reads.
 A warning says when it was used. A record that holds anything is never
 checked, and the director is not asked for its deployments.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$network_data>
+
+The stored network record, as C<_get_bosh_network_data> returned it, or
+C<undef> when none was ever written.
+
+=back
 
 B<Returns:> Nothing meaningful.
 
@@ -417,9 +430,11 @@ B<Parameters:>
 
 =over 4
 
-=item C<%opts>
+=item C<network_data>
 
-Currently unused; reserved for future use.
+B<(optional)> The stored network record to preserve C<for_cpi> values from,
+so C<init> can read it once for all of its steps.  When the key is absent,
+the record is read with C<_get_bosh_network_data>.
 
 =back
 
@@ -449,7 +464,7 @@ B<Examples:>
 
 =head2 _set_network_subnets
 
-    $self->_set_network_subnets
+    $self->_set_network_subnets(%opts)
 
 Populates C<< $self->{network}{subnets} >> from the OCFP Vault config. Looks
 up subnet data from C<net.subnets> or C<vpc.subnets> via
@@ -460,6 +475,18 @@ C<cidr_block>) and the resolved AZ name (via C<lookup_az>).
 If existing exodus network data contains subnet entries with a C<claims>
 field, those values are preserved in the newly built C<%subnets> hash so
 that subnet allocation data added outside the director hook is not lost.
+
+B<Parameters:>
+
+=over 4
+
+=item C<network_data>
+
+B<(optional)> The stored network record to preserve claims from, as for
+L</_set_network_azs>.  When the key is absent, the record is read with
+C<_get_bosh_network_data>.
+
+=back
 
 B<Returns:> Nothing. Modifies C<< $self->{network}{subnets} >> in-place.
 
@@ -485,9 +512,8 @@ B<Examples:>
 
 Returns the stored network data hash for this BOSH director by calling
 C<< $self->env->exodus_lookup_strict('/network:.') >>. Returns C<undef> if no
-exodus network data was ever written, and dies if the read fails.  The
-record is read from the vault the first time and kept on the hook, so the
-three checks that run during C<init> share one read.
+exodus network data was ever written, and dies if the read fails.  Each call
+reads the vault, so C<init> calls it once and passes the result on.
 
 B<Returns:> A hash reference of exodus network data, or C<undef>.
 
