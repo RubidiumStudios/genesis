@@ -1194,6 +1194,35 @@ subtest '_get_reserved_allocation - unaliased target with no keys returns empty'
 		'target with no matching keys and no alias table entry resolves to no allocation');
 };
 
+subtest 'reserved-ips records - every <owner>_ip form owns its addresses, for the owner and for others' => sub {
+	my @forms = (
+		['garage _ip with an _ip_smoke beside it', {garage_ip => '10.8.0.84', garage_ip_smoke => '10.8.0.86'}, '10.8.0.84,10.8.0.86'],
+		['rustfs _ip with an _ip_smoke beside it', {rustfs_ip => '10.8.0.77', rustfs_ip_smoke => '10.8.0.85'}, '10.8.0.77,10.8.0.85'],
+		['a comma list',                           {garage_ip => '10.8.0.84,10.8.0.90'},                       '10.8.0.84,10.8.0.90'],
+		['a dash range',                           {garage_ip => '10.8.0.84-10.8.0.86'},                       '10.8.0.84-10.8.0.86'],
+		['a CIDR',                                 {garage_ip => '10.8.0.80/30'},                              '10.8.0.80-10.8.0.83'],
+		['an _ips key',                            {garage_ips => '10.8.0.84,10.8.0.85'},                      '10.8.0.84-10.8.0.85'],
+		['an _ip2 key beside _ip',                 {garage_ip => '10.8.0.84', garage_ip2 => '10.8.0.88'},      '10.8.0.84,10.8.0.88'],
+		['a value with trailing whitespace',       {garage_ip => '10.8.0.84 '},                                '10.8.0.84'],
+	);
+	plan tests => 2 * @forms;
+
+	for my $form (@forms) {
+		my ($label, $records, $expect) = @$form;
+		my $env  = make_deploy_env(ocfp_config => reserved_ip_config(%$records));
+		my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => $env);
+		my $subnet = $hook->subnets->{'ocfp-0'};
+
+		my $owner = (grep {/^rustfs/} keys %$records) ? 'rustfs' : 'garage';
+		my ($alloc) = $hook->_get_reserved_allocation($owner, $subnet);
+		is($alloc->range, $expect, "own record: $label");
+
+		my $others = $hook->_all_reserved_ip_records($subnet, 'bosh');
+		my $set = IPv4->range(values %$others);
+		is($set->range, $expect, "other owners' view: $label");
+	}
+};
+
 subtest '_get_reserved_allocation - kit-declared aliases resolve (scalar + arrayref forms)' => sub {
 	plan tests => 3;
 
@@ -2454,7 +2483,8 @@ subtest '_get_reserved_allocation and _all_reserved_ip_records read every form t
 		'bosh_ip with director_ip'       => [bosh  => {bosh_ip => '10.9.0.23', director_ip => '10.9.0.30', ip => '10.9.0.31'},
 		                                                                                                '10.9.0.23,10.9.0.30-10.9.0.31'],
 		'an unpaired trailing bound'     => [web   => {web_a => '10.9.0.40'},                           ''],
-		'a prefix-only key'              => [bosh  => {bosh_ipfoo => '10.9.0.23', ocfp_bosh_ip => '10.9.0.24'}, ''],
+		'a suffixed key beside a longer owner name'
+		                                 => [bosh  => {bosh_ipfoo => '10.9.0.23', ocfp_bosh_ip => '10.9.0.24'}, '10.9.0.23'],
 	);
 	plan tests => 2 * keys %forms;
 
@@ -2468,7 +2498,6 @@ subtest '_get_reserved_allocation and _all_reserved_ip_records read every form t
 
 		my $others = $hook->_all_reserved_ip_records($subnet, 'unrelated');
 		my $other = exists $others->{$owner} ? $others->{$owner}->range : '';
-		$other = '' if $name eq 'a prefix-only key';  # ocfp_bosh_ip is ocfp_bosh's, not bosh's
 		is($other, $expect, "$name, as another target's record");
 	}
 };
@@ -2606,6 +2635,9 @@ subtest 'lab claims (mgmt) - compact neighbour keys add no address and no owner 
 		my %want = map {
 			($services[$_] => '10.61.148.'.($base + 3 + $_))
 		} grep {$services[$_] ne 'concourse'} 0 .. $#services;
+		# the _ip_smoke addresses are the owner's own, beside its _ip
+		$want{garage} .= ',10.61.148.'.($base + 22);
+		$want{rustfs} .= ',10.61.148.'.($base + 21);
 		$want{garage_smoke} = '10.61.148.'.($base + 22);
 		$want{rustfs_smoke} = '10.61.148.'.($base + 21);
 		my $got = $hook->_all_reserved_ip_records($ocfp->{net}{subnets}{$subnet}, 'concourse');

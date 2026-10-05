@@ -1616,13 +1616,18 @@ sub _parse_reserved_ip_records {
 			push @{$rec->($1)->{malformed}}, $key;
 			next;
 		}
-		next unless defined($value) && $value =~ /^\d+\.\d+\.\d+\.\d+$/;
+		# An address, a comma list, a dash range or a CIDR, as IPv4 reads them
+		next unless defined($value) && !ref($value) && $value =~ /^\s*\d[\d.,\/\-\s]*$/;
+		(my $addresses = $value) =~ s/\s+$//;
 		if ($key eq 'ip') {
-			$rec->('')->{ips} += IPv4->range($value);
+			$rec->('')->{ips} += IPv4->range($addresses);
 		} elsif ($key =~ /^(.+)_ip$/) {
 			my $r = $rec->($1);
-			$r->{ips} += IPv4->range($value);
-			$r->{anchor} = $value;
+			$r->{ips} += IPv4->range($addresses);
+			$r->{anchor} = $addresses;
+		} elsif ($key =~ /^(.+?)_ip.+$/) {
+			# <owner>_ip_smoke, _ips, _ip2 and the like add to the owner's addresses
+			$rec->($1)->{ips} += IPv4->range($addresses);
 		} elsif ($key =~ /^(.+)_a$/) {
 			# <owner>_a/_b, then _c/_d and so on, each the range between the two
 			my $owner = $1;
