@@ -1503,7 +1503,7 @@ sub _get_reserved_allocation {
 	# Ranges (<target>_a/_b, then _c/_d) and single addresses (<target>_ip,
 	# and director_ip or a bare ip for bosh) each come from the first
 	# candidate that records them, through the parser every owner shares
-	my $parsed = _parse_reserved_ip_records($reserved_ips);
+	my $parsed = _parse_reserved_ip_records($reserved_ips, known => \@candidates);
 	my $allocation = IPv4->new();
 	for my $candidate (@candidates) {
 		my $rec = $parsed->{$candidate} or next;
@@ -1580,7 +1580,9 @@ sub _all_reserved_ip_records {
 	# The asking target and its aliases are not other owners
 	my %own = defined($target) ? (map {($_ => 1)} $self->_reserved_ip_targets($target)) : ();
 
-	my $parsed = _parse_reserved_ip_records($subnet->{'reserved-ips'} // {});
+	my $parsed = _parse_reserved_ip_records(
+		$subnet->{'reserved-ips'} // {}, known => [keys %own]
+	);
 	my %by_owner;
 	for my $owner (keys %$parsed) {
 		next if $own{$owner};
@@ -1593,7 +1595,7 @@ sub _all_reserved_ip_records {
 # }}}
 # _parse_reserved_ip_records - Reads a subnet's reserved-ips records into per-owner addresses, the one reader both own and other records use {{{
 sub _parse_reserved_ip_records {
-	my ($reserved_ips) = @_;
+	my ($reserved_ips, %opts) = @_;
 	my %owners;
 	my $rec = sub {
 		my ($owner) = @_;
@@ -1607,6 +1609,19 @@ sub _parse_reserved_ip_records {
 		};
 	};
 
+	# A key like <owner>_ip_smoke cannot say where its owner's name ends, so
+	# the owners that other keys name settle it: <owner>_ip, <owner>_ip_a/_b
+	# and <owner>_a each name an owner without doubt, and so does the target
+	# the caller asks for.  The longest of those that the key starts with is
+	# its owner, so my_ipsec_ip_smoke goes to my_ipsec beside my_ipsec_ip, not
+	# to my.  A key that no known owner explains splits at the first _ip.
+	my %known = map {($_ => 1)} @{$opts{known} // []};
+	for my $key (keys %$reserved_ips) {
+		next if $key =~ /^(?:reserved|available)(?:_|$)/ || $key eq 'scheme_version' || $key =~ /_static$/;
+		$known{$1} = 1 if $key =~ /^(.+)_ip(?:_[a-z])?$/ || $key =~ /^(.+)_a$/;
+	}
+	my @known = sort {length($b) <=> length($a) || $a cmp $b} keys %known;
+
 	for my $key (sort keys %$reserved_ips) {
 		next if $key =~ /^(?:reserved|available)(?:_|$)/;
 		next if $key eq 'scheme_version' || $key =~ /_static$/;
@@ -1618,16 +1633,25 @@ sub _parse_reserved_ip_records {
 		}
 		# An address, a comma list, a dash range or a CIDR, as IPv4 reads them
 		next unless defined($value) && !ref($value) && $value =~ /^\s*\d[\d.,\/\-\s]*$/;
-		(my $addresses = $value) =~ s/\s+$//;
+		# IPv4 reads only the first address of a dash range that has spaces
+		# around its dash, and refuses a value that starts with a space
+		(my $addresses = $value) =~ s/^\s+|\s+$//g;
+		$addresses =~ s/\s*-\s*/-/g;
+		# <owner>_a and _b bound a range even when the owner's name holds _ip,
+		# as my_ipsec_a does, so they are not read as suffixed _ip keys of my
+		my ($bounded, $letter) = $key =~ /^(.+)_([a-z])$/ ? ($1, $2) : ();
+		undef $bounded unless defined($bounded) && exists $reserved_ips->{$bounded.'_a'} && exists $reserved_ips->{$bounded.'_b'};
+		next if defined($bounded) && $letter ne 'a';
 		if ($key eq 'ip') {
 			$rec->('')->{ips} += IPv4->range($addresses);
 		} elsif ($key =~ /^(.+)_ip$/) {
 			my $r = $rec->($1);
 			$r->{ips} += IPv4->range($addresses);
 			$r->{anchor} = $addresses;
-		} elsif ($key =~ /^(.+?)_ip.+$/) {
+		} elsif (!defined($bounded) && $key =~ /^(.+?)_ip.+$/) {
 			# <owner>_ip_smoke, _ips, _ip2 and the like add to the owner's addresses
-			$rec->($1)->{ips} += IPv4->range($addresses);
+			my ($owner) = grep {$key =~ /^\Q$_\E_ip./} @known;
+			$rec->($owner // $1)->{ips} += IPv4->range($addresses);
 		} elsif ($key =~ /^(.+)_a$/) {
 			# <owner>_a/_b, then _c/_d and so on, each the range between the two
 			my $owner = $1;
@@ -1638,6 +1662,7 @@ sub _parse_reserved_ip_records {
 				last unless exists $reserved_ips->{$end_key};
 				my $start = IPv4->address($reserved_ips->{$start_key})+1;
 				my $end   = IPv4->address($reserved_ips->{$end_key})-1;
+				# Bounds that are reversed or adjacent leave nothing between them
 				$rec->($owner)->{ranges} += $start->to($end) if $start->int <= $end->int;
 			}
 		}

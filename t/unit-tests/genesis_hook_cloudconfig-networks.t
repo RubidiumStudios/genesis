@@ -1204,8 +1204,12 @@ subtest 'reserved-ips records - every <owner>_ip form owns its addresses, for th
 		['an _ips key',                            {garage_ips => '10.8.0.84,10.8.0.85'},                      '10.8.0.84-10.8.0.85'],
 		['an _ip2 key beside _ip',                 {garage_ip => '10.8.0.84', garage_ip2 => '10.8.0.88'},      '10.8.0.84,10.8.0.88'],
 		['a value with trailing whitespace',       {garage_ip => '10.8.0.84 '},                                '10.8.0.84'],
+		['a value with leading whitespace',        {garage_ip => '  10.8.0.84'},                               '10.8.0.84'],
+		['a range with whitespace on both ends',   {garage_ip => " \t10.8.0.84-10.8.0.86 "},                   '10.8.0.84-10.8.0.86'],
+		['a dash range with spaces around the dash', {garage_ip => '10.8.0.84 - 10.8.0.86'},                   '10.8.0.84-10.8.0.86'],
+		['a list holding a spaced dash range',     {garage_ip => '10.8.0.80, 10.8.0.84 - 10.8.0.86'},          '10.8.0.80,10.8.0.84-10.8.0.86'],
 	);
-	plan tests => 2 * @forms;
+	plan tests => 3 * @forms;
 
 	for my $form (@forms) {
 		my ($label, $records, $expect) = @$form;
@@ -1217,9 +1221,75 @@ subtest 'reserved-ips records - every <owner>_ip form owns its addresses, for th
 		my ($alloc) = $hook->_get_reserved_allocation($owner, $subnet);
 		is($alloc->range, $expect, "own record: $label");
 
+		# Per owner, so a record credited to the wrong owner is a difference
 		my $others = $hook->_all_reserved_ip_records($subnet, 'bosh');
-		my $set = IPv4->range(values %$others);
-		is($set->range, $expect, "other owners' view: $label");
+		is_deeply([sort keys %$others], [$owner], "other owners' view credits $owner alone: $label");
+		is(exists $others->{$owner} ? $others->{$owner}->range : '', $expect, "other owners' view gives $owner the addresses: $label");
+	}
+};
+
+subtest 'reserved-ips records - an owner whose name holds another owner\'s name keeps its suffixed keys' => sub {
+	my @cases = (
+		['an owner named by its _ip key', {my_ipsec_ip => '10.8.0.20', my_ipsec_ip_smoke => '10.8.0.22'},
+			'bosh', {my_ipsec => '10.8.0.20,10.8.0.22'}],
+		['beside a shorter owner with an _ip key', {my_ip => '10.8.0.10', my_ipsec_ip => '10.8.0.20', my_ipsec_ip_smoke => '10.8.0.22'},
+			'bosh', {my => '10.8.0.10', my_ipsec => '10.8.0.20,10.8.0.22'}],
+		['an owner named by its _a/_b pair', {my_ipsec_a => '10.8.0.20', my_ipsec_b => '10.8.0.24', my_ipsec_ip_smoke => '10.8.0.22'},
+			'bosh', {my_ipsec => '10.8.0.21-10.8.0.23'}],
+		['a suffixed key with no key that names its owner', {my_ipsec_ip_smoke => '10.8.0.22'},
+			'bosh', {my => '10.8.0.22'}],
+	);
+	plan tests => 2 * @cases + 3;
+
+	for my $case (@cases) {
+		my ($label, $records, $asking, $want) = @$case;
+		my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => make_deploy_env(ocfp_config => reserved_ip_config(%$records)));
+		my $others = $hook->_all_reserved_ip_records($hook->subnets->{'ocfp-0'}, $asking);
+		is_deeply({map {($_ => $others->{$_}->range)} keys %$others}, $want, "other owners' view: $label");
+		is_deeply([sort keys %$others], [sort keys %$want], "and no owner is credited that holds nothing: $label");
+	}
+
+	# The asking target is the one owner name that is certain
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => make_deploy_env(ocfp_config => reserved_ip_config(
+		my_ipsec_ip_smoke => '10.8.0.22',
+	)));
+	my $subnet = $hook->subnets->{'ocfp-0'};
+	my ($own) = $hook->_get_reserved_allocation('my_ipsec', $subnet);
+	is($own->range, '10.8.0.22', 'the target\'s own record includes a suffixed key even with no key that names it');
+	is_deeply([sort keys %{$hook->_all_reserved_ip_records($subnet, 'my_ipsec')}], [],
+		'and no other owner is credited with it');
+	my ($mine) = $hook->_get_reserved_allocation('my', $subnet);
+	is($mine->range, '10.8.0.22', 'while target my, which the split names, also reads it as its own');
+};
+
+subtest 'reserved-ips records - reversed or adjacent bounds hold nothing, and an _ip_static key is not an address' => sub {
+	my %forms = (
+		'adjacent bounds'          => [{garage_a => '10.8.0.20', garage_b => '10.8.0.21'}, ''],
+		'equal bounds'             => [{garage_a => '10.8.0.20', garage_b => '10.8.0.20'}, ''],
+		'reversed bounds'          => [{garage_a => '10.8.0.30', garage_b => '10.8.0.20'}, ''],
+		'a bracket with one address inside' => [{garage_a => '10.8.0.20', garage_b => '10.8.0.22'}, '10.8.0.21'],
+		'reversed later bounds'    => [{garage_a => '10.8.0.20', garage_b => '10.8.0.24', garage_c => '10.8.0.40', garage_d => '10.8.0.30'}, '10.8.0.21-10.8.0.23'],
+		'an _ip_static of 1'       => [{garage_ip_static => 1}, ''],
+		'an _ip_static of 0'       => [{garage_ip_static => 0}, ''],
+		'an _ip_static beside the _ip' => [{garage_ip => '10.8.0.84', garage_ip_static => 1}, '10.8.0.84'],
+	);
+	plan tests => 3 * keys %forms;
+
+	for my $label (sort keys %forms) {
+		my ($records, $expect) = @{$forms{$label}};
+		my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => make_deploy_env(ocfp_config => reserved_ip_config(%$records)));
+		my $subnet = $hook->subnets->{'ocfp-0'};
+		my $warn;
+		my ($own) = do {
+			my @r;
+			$warn = stderr_from { @r = $hook->_get_reserved_allocation('garage', $subnet) };
+			@r;
+		};
+		is($own->range, $expect, "own record: $label");
+		my $others = $hook->_all_reserved_ip_records($subnet, 'bosh');
+		is_deeply({map {($_ => $others->{$_}->range)} keys %$others}, ($expect eq '' ? {} : {garage => $expect}),
+			"other owners' view: $label");
+		is($warn, '', "and nothing is warned about: $label");
 	}
 };
 

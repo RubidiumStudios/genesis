@@ -2669,12 +2669,29 @@ Keys in C<< $subnet->{'reserved-ips'} >> are read as follows.
 
 =item C<< <owner>_ip >>
 
-A single address owned by C<< <owner> >>.
+An address owned by C<< <owner> >>.  The value can be a single address, a
+comma list, a dash range, or a CIDR.  Whitespace around the value, and around
+the dash of a range, is ignored, so C<10.0.0.5 - 10.0.0.9> is the whole range.
+
+=item C<< <owner>_ip_<word> >>, C<< <owner>_ips >>, C<< <owner>_ip2 >>
+
+More addresses of C<< <owner> >>, as for C<< <owner>_ip >>.  The key does not
+say where the owner's name ends, so the split uses the owners that other keys
+name beyond doubt, which are C<< <owner>_ip >>, C<< <owner>_ip_a >>,
+C<< <owner>_ip_b >>, C<< <owner>_a >>, and the target being asked about.  The
+longest of those that the key starts with is its owner, so
+C<my_ipsec_ip_smoke> goes to C<my_ipsec> when C<my_ipsec_ip> is present.  When
+no such key names an owner, the key splits at its first C<_ip>, and
+C<my_ipsec_ip_smoke> alone goes to C<my>.  Name the owner with its own
+C<< <owner>_ip >> or C<< <owner>_a >> key to avoid that.
 
 =item C<< <owner>_a >>, C<< <owner>_b >> (and C<_c>, C<_d>, ...)
 
 Exclusive bounds, so each pair names the addresses strictly between them.
-An unpaired trailing bound is ignored.
+Bounds that are adjacent, equal, or reversed name nothing, so the pair gives
+an empty range and its owner holds nothing from it.  An unpaired trailing
+bound is ignored.  The pair is a pair even when the owner's name holds C<_ip>,
+so C<my_ipsec_a> and C<my_ipsec_b> bound a range for C<my_ipsec>.
 
 =item C<director_ip> and a bare C<ip>
 
@@ -2683,10 +2700,10 @@ The director's address, owned by C<bosh>, because both name it on every
 
 =item Skipped keys
 
-C<reserved*> and C<available*> keys, C<scheme_version>, C<*_static> flags,
+C<reserved*> and C<available*> keys, C<scheme_version>, C<*_static> flags
+(including C<< <owner>_ip_static >>, which is a flag and never an address),
 and the scheme 2 neighbour annotations C<< <owner>_ip_a >> and
-C<< <owner>_ip_b >>. Values that are not a single IPv4 address are skipped
-too.
+C<< <owner>_ip_b >>. Values that are not made of addresses are skipped too.
 
 =back
 
@@ -2715,7 +2732,7 @@ B<Examples:>
 
 =head2 _parse_reserved_ip_records
 
-    my $by_owner = _parse_reserved_ip_records(\%reserved_ips);
+    my $by_owner = _parse_reserved_ip_records(\%reserved_ips, known => \@owners);
 
 Reads a subnet's reserved-ips records into one entry per owner. Plain
 function, not a method -- no invocant. L</_get_reserved_allocation> and
@@ -2731,6 +2748,13 @@ B<Parameters:>
 =item C<\%reserved_ips>
 
 The C<reserved-ips> hashref of a subnet.
+
+=item C<known>
+
+B<(optional)> An array reference of owner names the caller is certain of,
+such as the asking target and its aliases.  They join the owners that the keys
+name, to settle which owner a suffixed key such as C<< <owner>_ip_smoke >>
+belongs to, as described under L</_all_reserved_ip_records>.
 
 =back
 
