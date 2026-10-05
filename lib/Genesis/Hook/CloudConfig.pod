@@ -2670,8 +2670,10 @@ Keys in C<< $subnet->{'reserved-ips'} >> are read as follows.
 =item C<< <owner>_ip >>
 
 An address owned by C<< <owner> >>.  The value can be a single address, a
-comma list, a dash range, or a CIDR.  Whitespace around the value, and around
-the dash of a range, is ignored, so C<10.0.0.5 - 10.0.0.9> is the whole range.
+comma list, a dash range, or a CIDR.  Whitespace around the value, around the
+dash of a range, and around the commas of a list is ignored, so
+C<10.0.0.5 - 10.0.0.9> is the whole range.  The same goes for the values of the
+C<< <owner>_a >> and C<< <owner>_b >> bounds.
 
 =item C<< <owner>_ip_<word> >>, C<< <owner>_ips >>, C<< <owner>_ip2 >>
 

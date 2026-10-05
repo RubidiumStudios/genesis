@@ -1208,6 +1208,9 @@ subtest 'reserved-ips records - every <owner>_ip form owns its addresses, for th
 		['a range with whitespace on both ends',   {garage_ip => " \t10.8.0.84-10.8.0.86 "},                   '10.8.0.84-10.8.0.86'],
 		['a dash range with spaces around the dash', {garage_ip => '10.8.0.84 - 10.8.0.86'},                   '10.8.0.84-10.8.0.86'],
 		['a list holding a spaced dash range',     {garage_ip => '10.8.0.80, 10.8.0.84 - 10.8.0.86'},          '10.8.0.80,10.8.0.84-10.8.0.86'],
+		['a list with spaces before its commas',   {garage_ip => '10.8.0.84 - 10.8.0.86 , 10.8.0.90'},         '10.8.0.84-10.8.0.86,10.8.0.90'],
+		['bounds with leading whitespace',         {garage_a => ' 10.8.0.20', garage_b => "\t10.8.0.24"},      '10.8.0.21-10.8.0.23'],
+		['bounds with trailing whitespace',        {garage_a => '10.8.0.20 ', garage_b => '10.8.0.24  '},      '10.8.0.21-10.8.0.23'],
 	);
 	plan tests => 3 * @forms;
 

@@ -1634,9 +1634,10 @@ sub _parse_reserved_ip_records {
 		# An address, a comma list, a dash range or a CIDR, as IPv4 reads them
 		next unless defined($value) && !ref($value) && $value =~ /^\s*\d[\d.,\/\-\s]*$/;
 		# IPv4 reads only the first address of a dash range that has spaces
-		# around its dash, and refuses a value that starts with a space
+		# around its dash, and refuses a value that starts with a space or has
+		# one before a comma
 		(my $addresses = $value) =~ s/^\s+|\s+$//g;
-		$addresses =~ s/\s*-\s*/-/g;
+		$addresses =~ s/\s*([-,])\s*/$1/g;
 		# <owner>_a and _b bound a range even when the owner's name holds _ip,
 		# as my_ipsec_a does, so they are not read as suffixed _ip keys of my
 		my ($bounded, $letter) = $key =~ /^(.+)_([a-z])$/ ? ($1, $2) : ();
@@ -1660,8 +1661,9 @@ sub _parse_reserved_ip_records {
 				my $start_key = $owner."_".$idx++;
 				my $end_key   = $owner."_".$idx++;
 				last unless exists $reserved_ips->{$end_key};
-				my $start = IPv4->address($reserved_ips->{$start_key})+1;
-				my $end   = IPv4->address($reserved_ips->{$end_key})-1;
+				my ($start, $end) = map {IPv4->address(s/^\s+|\s+$//gr)} @{$reserved_ips}{$start_key, $end_key};
+				$start += 1;
+				$end   -= 1;
 				# Bounds that are reversed or adjacent leave nothing between them
 				$rec->($owner)->{ranges} += $start->to($end) if $start->int <= $end->int;
 			}
