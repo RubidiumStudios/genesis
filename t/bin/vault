@@ -43,11 +43,15 @@ if [[ ! -f "$cmd" ]]; then
 fi
 
 
-port=8200
-while lsof -nP -i ":$port" | grep ":$port\s*(LISTEN)" >/dev/null 2>&1 ; do
-  [[ $((++port)) -gt 8300 ]] && bail "No free ports available for dev vault server"
-done
-$cmd server -config <(cat <<EOF
+# Two test runs can pick the same free-looking port at once.  A vault that
+# dies before it listens means the port was taken after the scan, so scan
+# again from the next port instead of waiting out the timeout.
+port=8199
+attempts=0
+while :; do
+	while [[ $((++port)) -le 8300 ]] && lsof -nP -i ":$port" | grep ":$port\s*(LISTEN)" >/dev/null 2>&1 ; do :; done
+	[[ $port -gt 8300 ]] && bail "No free ports available for dev vault server"
+	$cmd server -config <(cat <<EOF
 disable_mlock = 1
 listener "tcp" {
   address     = "127.0.0.1:$port"
@@ -56,16 +60,25 @@ listener "tcp" {
 storage "inmem" {}
 EOF
 ) >$HOME/log 2>&1 &
-vault_pid=$!
-[ -n "${DEBUG_TESTS:-}" ] && printf >&2 "\rStarting Vault ${version} CLI on port $port as '$target' (pid: $vault_pid)..."
-waitfor=600
-while ! lsof -a -p $vault_pid -i tcp:$port -s TCP:listen -nP >/dev/null 2>&1; do
-	if [[ $waitfor -gt 0 ]]; then
+	vault_pid=$!
+	[ -n "${DEBUG_TESTS:-}" ] && printf >&2 "\rStarting Vault ${version} CLI on port $port as '$target' (pid: $vault_pid)..."
+	waitfor=600
+	listening=
+	while [[ $waitfor -gt 0 ]]; do
+		if lsof -a -p $vault_pid -i tcp:$port -s TCP:listen -nP >/dev/null 2>&1; then
+			listening=1
+			break
+		fi
+		kill -0 $vault_pid 2>/dev/null || break
 		waitfor=$((waitfor - 1))
 		sleep 0.1
-	else
-		bail "\nFAILED - timed out waiting for vault server to start\n"
-	fi
+	done
+	[[ -n "$listening" ]] && break
+	kill -0 $vault_pid 2>/dev/null \
+		&& bail "\nFAILED - timed out waiting for vault server to start on port $port\n"
+	vault_pid=""
+	[[ $((++attempts)) -ge 5 ]] \
+		&& bail "\nFAILED - vault server exited before listening on 5 ports in a row, the last was $port; see $HOME/log\n"
 done
 safe target "$target" http://127.0.0.1:$port --no-strongbox >/dev/null 2>&1
 safe auth token <<<"dummy" > /dev/null 2>&1 # Another Hack around safe init issue
