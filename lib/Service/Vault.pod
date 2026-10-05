@@ -953,7 +953,9 @@ parsed.
 A token that can list a path but cannot read it makes C<safe> report that no
 secret exists, after a refusal. When the output holds C<403>, C<permission
 denied>, or C<forbidden> as well, the read is treated as failed and dies,
-since the path was never read.
+since the path was never read.  The path that C<safe> quotes in its "no secret
+exists" line is not searched, so an environment name that holds C<403> or
+C<forbidden> reads as absent when nothing is stored.
 
 Use it where a read that failed must not pass for an empty record, such as
 before a write that clears the record it replaces.

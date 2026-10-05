@@ -521,9 +521,12 @@ sub get_path_strict {
 		# safe names a path with nothing stored on stderr, and exits the same
 		# way for it as for an unreachable or sealed vault.  A token that can
 		# list a path but not read it gets that same line after a refusal,
-		# so a refusal anywhere in the output means the path was not read.
+		# so a refusal anywhere in the output means the path was not read.  The
+		# path quoted in the absent-secret line is left out of that scan, since
+		# an environment name can hold 403 or forbidden and is not a refusal.
 		my $reason = ($err // '') =~ s/\s+$//r;
-		my $refused = $reason =~ /\b403\b|permission denied|forbidden/i;
+		my $refusals = $reason =~ s/no secret exists at path\s+`[^`]*`//gr;
+		my $refused = $refusals =~ /\b403\b|permission denied|forbidden/i;
 		return undef if $rc && $reason =~ /no secret exists at path/ && !$refused;
 		bail(
 			"Could not read #C{%s} from vault at #M{%s}: %s\n\n".

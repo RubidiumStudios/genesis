@@ -486,6 +486,30 @@ subtest 'get_path_strict - tells a failed read from a path with nothing stored' 
 	}
 };
 
+subtest 'get_path_strict - an env name that holds 403 is not a refusal' => sub {
+	plan tests => 4;
+	my $v = make_vault();
+	my $path = 'secret/exodus/lab-403/bosh/network';
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub { return ('', 1, "!! no secret exists at path `$path`\n") };
+	use warnings 'redefine';
+	is($v->get_path_strict("/$path"), undef, 'a path with 403 in it and nothing stored comes back undef');
+
+	local *Service::Vault::query = sub { return ('', 1, "!! no secret exists at path `secret/exodus/403/bosh/network`\n") };
+	is($v->get_path_strict('/secret/exodus/403/bosh/network'), undef, 'so does a path segment that is only 403');
+
+	local *Service::Vault::query = sub {
+		return ('', 1, "Error making API request.\nCode: 403. Errors:\n* permission denied\n!! no secret exists at path `$path`\n");
+	};
+	throws_ok { $v->get_path_strict("/$path") } qr/Could not read \Q$path\E.*Code: 403/s,
+		'a real 403 on a path with 403 in it still dies';
+
+	local *Service::Vault::query = sub { return ('', 1, "!! Forbidden reading `$path`\n!! no secret exists at path `$path`\n") };
+	throws_ok { $v->get_path_strict("/$path") } qr/Could not read \Q$path\E.*Forbidden/s,
+		'and so does a forbidden refusal ahead of the absent-secret line';
+};
+
 subtest 'a real error on stderr still fails, even when safe exits 0' => sub {
 	plan tests => 2;
 
