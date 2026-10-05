@@ -2713,6 +2713,37 @@ B<Examples:>
     my $by_owner = $self->_all_reserved_ip_records($subnet, 'compilation');
     # Returns: { haproxy => IPv4 range 10.61.148.229, bosh => IPv4 range 10.61.148.194 }
 
+=head2 _parse_reserved_ip_records
+
+    my $by_owner = _parse_reserved_ip_records(\%reserved_ips);
+
+Reads a subnet's reserved-ips records into one entry per owner. Plain
+function, not a method -- no invocant. L</_get_reserved_allocation> and
+L</_all_reserved_ip_records> both read through it, so the two can never
+disagree about which keys name an address. The key forms are the ones
+listed under L</_all_reserved_ip_records>, including C<director_ip> and a
+bare C<ip>, which belong to C<bosh>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\%reserved_ips>
+
+The C<reserved-ips> hashref of a subnet.
+
+=back
+
+B<Returns:> A hashref mapping each owner to a hashref with C<ranges> and
+C<ips> (C<IPv4> ranges of the addresses its range pairs and its single
+address keys name), C<malformed> (its C<< <owner>_ip_<suffix> >> keys), and
+C<anchor> (the value of C<< <owner>_ip >>, or undef).
+
+B<Examples:>
+
+    my $by_owner = _parse_reserved_ip_records({bosh_a => '10.0.0.1', bosh_b => '10.0.0.6', director_ip => '10.0.0.9'});
+    # $by_owner->{bosh}{ranges} is 10.0.0.2-10.0.0.5, {ips} is 10.0.0.9
+
 =head2 _prune_claim_of_reserved_records
 
     $self->_prune_claim_of_reserved_records(

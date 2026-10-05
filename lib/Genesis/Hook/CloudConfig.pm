@@ -1500,42 +1500,37 @@ sub _get_reserved_allocation {
 	my $reserved_ips = $subnet->{'reserved-ips'} // {};
 	my @candidates = $self->_reserved_ip_targets($target);
 
-	# We need to use target_a, .._b, .._c, _d if available
+	# Ranges (<target>_a/_b, then _c/_d) and single addresses (<target>_ip,
+	# and director_ip or a bare ip for bosh) each come from the first
+	# candidate that records them, through the parser every owner shares
+	my $parsed = _parse_reserved_ip_records($reserved_ips);
 	my $allocation = IPv4->new();
 	for my $candidate (@candidates) {
-		next unless exists $reserved_ips->{$candidate."_a"};
-		my $idx = 'a';
-		while (exists $reserved_ips->{$candidate."_$idx"}) {
-			my $start = IPv4->address($reserved_ips->{$candidate."_".$idx++})+1;
-			my $end   = IPv4->address($reserved_ips->{$candidate."_".$idx++})-1;
-			$allocation += $start->to($end);
-		}
+		my $rec = $parsed->{$candidate} or next;
+		next unless $rec->{ranges}->size;
+		$allocation += $rec->{ranges};
 		last;
 	}
 
 	# Anchored and quoted: ocfp_bosh_ip must not answer for bosh
 	for my $candidate (@candidates) {
-		my @ip_keys = grep {$_ =~ m/^\Q${candidate}\E_ip/} keys %$reserved_ips;
+		my $rec = $parsed->{$candidate} or next;
 
 		# <target>_ip_a/_b beside <target>_ip are scheme_version 2 neighbour
 		# notes, not reservations; any other _ip_<x> key is malformed and named
-		my @malformed = grep {$_ =~ m/_ip_[a-z]$/} @ip_keys;
-		if (@malformed) {
-			my $anchor = $reserved_ips->{$candidate."_ip"};
-			my @unexplained = grep {!_is_neighbour_annotation($_, $reserved_ips->{$_}, $anchor)} @malformed;
-			warning(
-				"Ignoring malformed reserved-ip key%s %s: use #C{%s_ip} for a ".
-				"single address or #C{%s_a}/#C{%s_b} for a range, not both.",
-				(@unexplained > 1 ? 's' : ''),
-				join(', ', map {"#Y{$_}"} sort @unexplained),
-				$candidate, $candidate, $candidate
-			) if @unexplained;
-			my %skip = map {$_ => 1} @malformed;
-			@ip_keys = grep {!$skip{$_}} @ip_keys;
-		}
+		my @unexplained = grep {
+			!_is_neighbour_annotation($_, $reserved_ips->{$_}, $rec->{anchor})
+		} @{$rec->{malformed}};
+		warning(
+			"Ignoring malformed reserved-ip key%s %s: use #C{%s_ip} for a ".
+			"single address or #C{%s_a}/#C{%s_b} for a range, not both.",
+			(@unexplained > 1 ? 's' : ''),
+			join(', ', map {"#Y{$_}"} sort @unexplained),
+			$candidate, $candidate, $candidate
+		) if @unexplained;
 
-		next unless @ip_keys;
-		$allocation += IPv4->new(map {$reserved_ips->{$_}} @ip_keys);
+		next unless $rec->{ips}->size;
+		$allocation += $rec->{ips};
 		last;
 	}
 
@@ -1581,46 +1576,73 @@ sub _intersection {
 # _all_reserved_ip_records - Returns every other target's reserved-ips records on a subnet, by owner {{{
 sub _all_reserved_ip_records {
 	my ($self, $subnet, $target) = @_;
-	my $records = $subnet->{'reserved-ips'} // {};
 
 	# The asking target and its aliases are not other owners
 	my %own = defined($target) ? (map {($_ => 1)} $self->_reserved_ip_targets($target)) : ();
 
+	my $parsed = _parse_reserved_ip_records($subnet->{'reserved-ips'} // {});
 	my %by_owner;
-	my $add = sub {
-		my ($owner, $set) = @_;
+	for my $owner (keys %$parsed) {
+		next if $own{$owner};
+		my $set = IPv4->range($parsed->{$owner}{ranges}, $parsed->{$owner}{ips});
+		$by_owner{$owner} = $set if $set->size;
+	}
+	return \%by_owner;
+}
+
+# }}}
+# _parse_reserved_ip_records - Reads a subnet's reserved-ips records into per-owner addresses, the one reader both own and other records use {{{
+sub _parse_reserved_ip_records {
+	my ($reserved_ips) = @_;
+	my %owners;
+	my $rec = sub {
+		my ($owner) = @_;
 		# director_ip and a bare ip both name the director's address
 		$owner = 'bosh' if $owner eq 'director' || $owner eq '';
-		return if $own{$owner};
-		$by_owner{$owner} //= IPv4->range();
-		$by_owner{$owner} += $set;
+		return $owners{$owner} //= {
+			ranges    => IPv4->range(),
+			ips       => IPv4->range(),
+			malformed => [],
+			anchor    => undef,
+		};
 	};
 
-	for my $key (sort keys %$records) {
+	for my $key (sort keys %$reserved_ips) {
 		next if $key =~ /^(?:reserved|available)(?:_|$)/;
 		next if $key eq 'scheme_version' || $key =~ /_static$/;
-		next if $key =~ /_ip_[a-z]$/; # scheme 2 neighbour notes, or malformed
-		my $value = $records->{$key};
+		my $value = $reserved_ips->{$key};
+		if ($key =~ /^(.+)_ip_[a-z]$/) {
+			# scheme 2 neighbour notes, or malformed; the caller decides which
+			push @{$rec->($1)->{malformed}}, $key;
+			next;
+		}
 		next unless defined($value) && $value =~ /^\d+\.\d+\.\d+\.\d+$/;
 		if ($key eq 'ip') {
-			$add->('', IPv4->range($value));
+			$rec->('')->{ips} += IPv4->range($value);
 		} elsif ($key =~ /^(.+)_ip$/) {
-			$add->($1, IPv4->range($value));
+			my $r = $rec->($1);
+			$r->{ips} += IPv4->range($value);
+			$r->{anchor} = $value;
 		} elsif ($key =~ /^(.+)_a$/) {
 			# <owner>_a/_b, then _c/_d and so on, each the range between the two
 			my $owner = $1;
 			my $idx = 'a';
-			while (exists $records->{$owner."_$idx"}) {
+			while (exists $reserved_ips->{$owner."_$idx"}) {
 				my $start_key = $owner."_".$idx++;
 				my $end_key   = $owner."_".$idx++;
-				last unless exists $records->{$end_key};
-				my $start = IPv4->address($records->{$start_key})+1;
-				my $end   = IPv4->address($records->{$end_key})-1;
-				$add->($owner, $start->to($end)) if $start->int <= $end->int;
+				last unless exists $reserved_ips->{$end_key};
+				my $start = IPv4->address($reserved_ips->{$start_key})+1;
+				my $end   = IPv4->address($reserved_ips->{$end_key})-1;
+				$rec->($owner)->{ranges} += $start->to($end) if $start->int <= $end->int;
 			}
 		}
 	}
-	return {map {($_ => IPv4->range($by_owner{$_}))} grep {$by_owner{$_}->size} keys %by_owner};
+
+	# Settle each owner's sets, and drop owners with nothing but a note
+	for my $owner (keys %owners) {
+		$owners{$owner}{$_} = IPv4->range($owners{$owner}{$_}) for qw(ranges ips);
+	}
+	return \%owners;
 }
 
 # }}}

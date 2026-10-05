@@ -2402,6 +2402,36 @@ subtest '_all_reserved_ip_records - returns owner to records with aliases applie
 		'a kit alias (ocf to haproxy) counts as the target\'s own');
 };
 
+subtest '_get_reserved_allocation and _all_reserved_ip_records read every form the same way' => sub {
+	my %forms = (
+		'a single <owner>_ip'            => [bosh  => {bosh_ip => '10.9.0.23'},                         '10.9.0.23'],
+		'an exclusive <owner>_a/_b pair' => [web   => {web_a => '10.9.0.40', web_b => '10.9.0.44'},     '10.9.0.41-10.9.0.43'],
+		'later letter pairs'             => [web   => {web_a => '10.9.0.40', web_b => '10.9.0.44',
+		                                               web_c => '10.9.0.50', web_d => '10.9.0.53'},     '10.9.0.41-10.9.0.43,10.9.0.51-10.9.0.52'],
+		'director_ip for bosh'           => [bosh  => {director_ip => '10.9.0.30'},                     '10.9.0.30'],
+		'a bare ip for bosh'             => [bosh  => {ip => '10.9.0.31'},                              '10.9.0.31'],
+		'bosh_ip with director_ip'       => [bosh  => {bosh_ip => '10.9.0.23', director_ip => '10.9.0.30', ip => '10.9.0.31'},
+		                                                                                                '10.9.0.23,10.9.0.30-10.9.0.31'],
+		'an unpaired trailing bound'     => [web   => {web_a => '10.9.0.40'},                           ''],
+		'a prefix-only key'              => [bosh  => {bosh_ipfoo => '10.9.0.23', ocfp_bosh_ip => '10.9.0.24'}, ''],
+	);
+	plan tests => 2 * keys %forms;
+
+	my $hook = Genesis::Hook::CloudConfig::Bosh->init(env => make_deploy_env());
+	for my $name (sort keys %forms) {
+		my ($owner, $records, $expect) = @{$forms{$name}};
+		my $subnet = {'reserved-ips' => $records};
+
+		my ($own) = $hook->_get_reserved_allocation($owner, $subnet);
+		is($own->range, $expect, "$name, as the target's own record");
+
+		my $others = $hook->_all_reserved_ip_records($subnet, 'unrelated');
+		my $other = exists $others->{$owner} ? $others->{$owner}->range : '';
+		$other = '' if $name eq 'a prefix-only key';  # ocfp_bosh_ip is ocfp_bosh's, not bosh's
+		is($other, $expect, "$name, as another target's record");
+	}
+};
+
 
 # lab_mgmt_band - one band of the mgmt carve: the subnet-reserved, available,
 # and second subnet-reserved pairs, then a triple per service with
