@@ -318,7 +318,9 @@ subtest 'a stale clone deploys the branch, and a read moves no ref' => sub {
 subtest 'the divergence refusal prints before the prior-env one' => sub {
 	plan tests => 3;
 
-	my $h    = seeded_harness();
+	# lab is an environment of the pipeline that has never deployed, because a
+	# predecessor has to be an environment where the shape is read.
+	my $h    = seeded_harness(envs => ['lab', 'qa'], certified => ['qa']);
 	my $slug = $h->slug('qa');
 
 	# Both refusals apply to this one deploy, which is the whole point of the

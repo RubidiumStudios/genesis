@@ -269,6 +269,43 @@ subtest "a shape key resolves from the environment's own files, or is refused (T
 	unlike($tainted, qr/REDACTED/, 'and no vault was asked for it');
 };
 
+subtest 'the prior_env graph is refused where the shape is read, if not well formed (T350)' => sub {
+	plan tests => 6;
+
+	# A cycle or a predecessor that is no environment is refused where the
+	# shape is built, on the shape's own tree, rather than left for the
+	# topology to drop the environments it cannot place.  The commit is
+	# published, because the shape is control as the remote holds it.  The
+	# dependency-cycle exception of D77 is another key.
+	my $g = make_harness(envs => [], pipeline => 1, vault => 0);
+	my $load = sub {
+		my (%prior) = @_;
+		commit_on_control($g, message => 'the prior_env graph', push => 1, files => {
+			map {("$_.yml" => "---\ngenesis:\n  env: $_\n"
+				. (defined $prior{$_} ? "  pipeline:\n    prior_env: $prior{$_}\n" : ''))}
+			qw/lab qa prod/
+		});
+		my $refusal = '';
+		eval {Genesis::Top->new($g->a, no_vault => 1)->pipeline_topology; 1} or $refusal = $@;
+		return $refusal;
+	};
+
+	is($load->(qa => 'lab', prod => 'qa'), '', 'a chain from a root loads');
+
+	my $cycle = $load->(lab => 'prod', qa => 'lab', prod => 'qa');
+	like($cycle, qr/prior_env.*cycle/is, 'a cycle is refused');
+	like($cycle, qr/\blab\b.*\bqa\b.*\bprod\b|\blab\b.*\bprod\b.*\bqa\b/s,
+		'naming every environment in it');
+
+	like($load->(qa => 'qa'), qr/prior_env.*cycle.*\bqa\b/is,
+		'an environment that follows itself is a cycle of one');
+
+	my $missing = $load->(qa => 'lab', prod => 'staging');
+	like($missing, qr/\bprod\b.*\bstaging\b/s,
+		'a predecessor that is no environment is refused, naming both');
+	unlike($missing, qr/cycle/i, 'as a missing predecessor, not a cycle');
+};
+
 subtest 'the reader promotes a bare string the way the validator does' => sub {
 	plan tests => 1;
 

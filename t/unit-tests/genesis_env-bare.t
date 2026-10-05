@@ -85,6 +85,11 @@ subtest 'the merged read finds an inherited key the leaf lacks' => sub {
 	my $h   = inherited_harness(envs => [$LEAF], type => 'bosh', vault => 0,
 		site => $SITE, pipeline_keys => {track_additional_files => $TRACKED},
 		leaf_keys => {prior_env => 'lmelt-vsphere-canwest-1-lab'});
+	# The predecessor the leaf names is an environment of the repository, as
+	# every prior_env has to be where the shape is read.
+	commit_on_control($h, message => 'the predecessor the leaf names', push => 1,
+		files => {'lmelt-vsphere-canwest-1-lab.yml'
+			=> "---\ngenesis:\n  env: lmelt-vsphere-canwest-1-lab\n"});
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
 
 	# The compiler's leaf-only reader, the hazard's shape, is gone (D117):

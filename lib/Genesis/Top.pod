@@ -3646,6 +3646,52 @@ B<Examples:>
     # exits CONFIG (78) where prior_env is (( concat "c-" meta.value "-lab" ))
     # and meta.value is a (( vault )), naming c-(( vault "..." ))-lab
 
+=head2 _validate_prior_env_graph
+
+    $top->_validate_prior_env_graph();
+
+Refuses, at C<Genesis::Exit::CONFIG>, a C<genesis.pipeline.prior_env> graph
+that is not well formed: a predecessor that is no environment of this
+pipeline, and a chain of predecessors that comes back on itself, an
+environment that follows itself included.
+
+The topology orders the environments from the ones that follow nothing, so
+an environment in a cycle is never reached, and one whose predecessor is no
+environment becomes a root that nothing holds; left to the topology, both
+would be dropped or ungated without a word. The edges come from each
+environment's merged files through L</_merged_env_params>.
+
+It runs where the shape is built, from L</_topology_here>, on the shape's own
+tree, rather than at configuration load: a deployment branch carries one
+environment's hierarchy, so the tree in front of a deploy never holds the
+predecessor it names, and only the shape's tree holds every environment.
+Every command that uses the graph reads the shape first, so a malformed
+graph still refuses before anything acts. D77's dependency-cycle exception
+concerns C<track_dependencies>, another key, and is untouched.
+
+B<Returns:> 1.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Configuration validation failed for ..."> - one bullet per environment
+whose predecessor is no environment, naming both, and one per cycle, naming
+each environment in it and the one it follows.
+
+=back
+
+B<Examples:>
+
+    $top->_validate_prior_env_graph;
+    # returns 1 where qa follows lab and prod follows qa
+
+    $top->_validate_prior_env_graph;
+    # exits CONFIG (78) where lab follows prod, prod follows qa, and qa
+    # follows lab
+
 =head2 _validate_capability_gates
 
     $top->_validate_capability_gates();

@@ -1755,6 +1755,12 @@ sub _topology_here {
 	my %empty = (nodes => {}, edges => [], children => {}, parent_of => {}, order => []);
 	return \%empty unless $self->pipeline_enabled;
 
+	# The prior_env graph is checked here, on the shape's own tree, rather
+	# than at configuration load: a deployment branch carries one
+	# environment's hierarchy, so the tree in front of a deploy never holds
+	# the predecessor it names.
+	$self->_validate_prior_env_graph;
+
 	require Genesis::CI::Compiler::ASTBuilder;
 	my $builder = Genesis::CI::Compiler::ASTBuilder->new(
 		top     => $self,
@@ -2978,6 +2984,68 @@ sub _validate_shape_values {
 				$key, $env_name, $held, ($from // "$env_name.yml") =~ s{^\./}{}r
 			);
 		}
+	}
+
+	bail({exitcode => CONFIG},
+		"Configuration validation failed for #C{%s}:%s",
+		$self->path('.genesis/config'),
+		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
+	) if @errors;
+
+	return 1;
+}
+
+# }}}
+# _validate_prior_env_graph - every predecessor is an environment, and no chain loops {{{
+#
+# The topology orders the environments from the ones that follow nothing, so
+# an environment in a prior_env cycle is never reached and one whose
+# predecessor is no environment becomes a root that nothing holds; both
+# would be dropped or ungated without a word.  It runs where the shape is
+# built, on the shape's own tree, which is the only tree that holds every
+# environment; D77's dependency-cycle exception, another key, is untouched.
+sub _validate_prior_env_graph {
+	my ($self) = @_;
+
+	my @names = $self->_env_file_names;
+	my %is_env = map {($_ => 1)} @names;
+	my %prior;
+	for my $name (@names) {
+		my $pipeline = ($self->_merged_env_params($name)->{genesis} // {})->{pipeline};
+		next unless ref($pipeline) eq 'HASH';
+		my $up = $pipeline->{prior_env};
+		$prior{$name} = $up if defined($up) && length($up);
+	}
+
+	my @errors;
+	for my $name (sort keys %prior) {
+		push @errors, sprintf(
+			"#R{genesis.pipeline.prior_env} in #C{%s} names #C{%s}, which is no ".
+			"environment of this pipeline", $name, $prior{$name}
+		) unless $is_env{$prior{$name}};
+	}
+
+	# Each chain is followed from every environment; one that comes back to
+	# an environment already on it has closed a cycle, which is named once,
+	# from its alphabetically first member.
+	my %reported;
+	for my $start (sort keys %prior) {
+		my (@chain, %on_chain);
+		my $at = $start;
+		while (defined $at && $is_env{$at} && !$on_chain{$at}) {
+			$on_chain{$at} = 1;
+			push @chain, $at;
+			$at = $prior{$at};
+		}
+		next unless defined $at && $on_chain{$at};
+		my @cycle = @chain[(grep {$chain[$_] eq $at} 0..$#chain)[0] .. $#chain];
+		my ($first) = sort @cycle;
+		next if $reported{$first}++;
+		push @errors, sprintf(
+			"#R{genesis.pipeline.prior_env} forms a cycle: %s; a pipeline orders its ".
+			"environments from the ones that follow nothing, so these would never be reached",
+			join(', ', map {sprintf('#C{%s} follows #C{%s}', $_, $prior{$_})} sort @cycle)
+		);
 	}
 
 	bail({exitcode => CONFIG},
