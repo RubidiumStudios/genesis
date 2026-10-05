@@ -5641,11 +5641,13 @@ sub _write_whole_config {
 #
 # The key covers the builder, its arguments, and the size and time of every
 # file under lib/, t/Harness, t/kits and t/src, bin/genesis and t/helper.pm,
-# so an edit to anything a build reads builds afresh.  Only the outermost
-# builder a row calls is cached, since the builders call one another.  A call
-# whose arguments hold code or objects, one that asks for a BOSH director,
-# whose listener is a process no copy can keep, and any call while
-# GENESIS_HARNESS_NO_CACHE is set, is built afresh.
+# so an edit to anything a build reads builds afresh.  It covers the Genesis
+# version as well, because a build writes it into the repository it makes and
+# a file that loads Genesis ahead of t/helper.pm runs under a different one.
+# Only the outermost builder a row calls is cached, since the builders call
+# one another.  A call whose arguments hold code or objects, one that asks for
+# a BOSH director, whose listener is a process no copy can keep, and any call
+# while GENESIS_HARNESS_NO_CACHE is set, is built afresh.
 our $CACHE_DEPTH = 0;
 my $FINGERPRINT;
 
@@ -5687,7 +5689,7 @@ sub _cache_dir {
 	require Digest::SHA;
 	my $key = Digest::SHA::sha1_hex(join("\0", $name,
 		JSON::PP->new->canonical->encode(@args % 2 ? \@args : {@args}),
-		_source_fingerprint()));
+		_source_fingerprint(), $Genesis::VERSION // ''));
 	return "$helper::TOPDIR/t/tmp/fixture-cache/$key";
 }
 

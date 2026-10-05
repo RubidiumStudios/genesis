@@ -105,4 +105,24 @@ subtest 'a build the cache cannot key is built afresh' => sub {
 	ok($c->{base}, 'and one with a code reference among its arguments still builds');
 };
 
+subtest 'a build under another Genesis version is keyed apart' => sub {
+	plan tests => 2;
+
+	# A file that loads Genesis before t/helper.pm runs as (development), and
+	# one that loads helper first runs as 999.999.999, and a build writes the
+	# version into the repository it makes.  Sharing one entry let whichever
+	# file built first decide what the other restored.
+	my @args = (envs => ['qa'], root => 'bosh', vault => 0);
+	my %dir = map {
+		local $Genesis::VERSION = $_;
+		($_ => Harness::Propagation::_cache_dir('make_harness', @args));
+	} ('(development)', '999.999.999');
+	isnt($dir{'(development)'}, $dir{'999.999.999'},
+		'the same arguments under two versions are two entries');
+
+	local $Genesis::VERSION = '999.999.999';
+	is(Harness::Propagation::_cache_dir('make_harness', @args),
+		$dir{'999.999.999'}, 'and one version keys its own entry every time');
+};
+
 done_testing;

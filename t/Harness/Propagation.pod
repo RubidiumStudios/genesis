@@ -52,7 +52,12 @@ seeds it as it creates the repository and a restore creates nothing.
 
 The key covers the builder, its arguments, and the size and time of every
 file under F<lib/>, F<t/Harness>, F<t/kits> and F<t/src>, F<bin/genesis> and
-F<t/helper.pm>, so an edit to anything a build reads builds afresh.  Only the
+F<t/helper.pm>, so an edit to anything a build reads builds afresh.  It
+covers C<$Genesis::VERSION> too, because a build writes the version into the
+repository it creates, and a test file that loads C<Genesis> ahead of
+F<t/helper.pm> runs as C<(development)> where the rest run as
+C<999.999.999>; one shared entry let whichever file built first decide what
+the other restored.  Only the
 outermost builder a row calls is cached, since the builders call one
 another.  A cache entry is written beside its final name and renamed into
 place, so files running side by side never read half of one.  C<make test>
