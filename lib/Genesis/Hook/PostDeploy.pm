@@ -130,6 +130,8 @@ sub update_director_network_config {
 		);
 	}
 	die $held_signal if defined($held_signal);
+	# 0 means the lock was never taken; it tells the step runner that this
+	# step failed and the rest can go on
 	return $acquired ? 1 : 0;
 }
 

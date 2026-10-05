@@ -210,7 +210,9 @@ deploy on this director, such as a CF deploy, running at the same time.
 B<Returns:> C<1> when the config was uploaded and the network record written,
 C<0> when the lock could not be taken (so the kit's post-deploy step runner
 records only this step as failed), and nothing when the environment cannot
-build cloud configs.
+build cloud configs.  A C<0> never releases anything, because the step holds
+no network claims lock when it fails to take one; it only reports the failure
+to the runner, and the other steps still run.
 
 B<Errors:>
 
