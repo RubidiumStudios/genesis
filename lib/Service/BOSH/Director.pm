@@ -1096,7 +1096,15 @@ sub clear_network_lock {
 # ensure_network_lock_held - stop unless this process still holds the network claims lock {{{
 sub ensure_network_lock_held {
 	my ($self, $action) = @_;
-	return 1 if $self->network_locked_by_me;
+	if ($self->network_locked_by_me) {
+		# An older Genesis that started after this process took its lock never
+		# looks at that lock, so the older key is looked at again here, right
+		# before the write the lock is for.  This narrows the window in which
+		# both write claims; it cannot close it, because an older Genesis can
+		# still take its own lock the moment after this check.
+		$self->_refuse_legacy_network_lock(undef, $action);
+		return 1;
+	}
 
 	my $now = $self->check_network_lock;
 	my $path = $now->{path} // $self->network_lock_path;
@@ -1121,6 +1129,18 @@ sub ensure_network_lock_held {
 sub release_network_lock {
 	my ($self) = @_;
 	my $stage = 'read';
+
+	# A terminal sends Ctrl-C and Ctrl-\ to every process in its foreground
+	# group, and a hung-up ssh session sends HUP to all of them, which includes
+	# the safe processes this release runs.  A signal that kills one of those
+	# fails the release and leaves the lock on the director.  The signals are
+	# blocked here, which the processes started below inherit, so they stay
+	# pending in this process until the release is over, and then reach the
+	# handler the caller installed, which runs after the release has finished.
+	my $blocked = POSIX::SigSet->new(POSIX::SIGINT(), POSIX::SIGTERM(), POSIX::SIGHUP(), POSIX::SIGQUIT());
+	my $before = POSIX::SigSet->new;
+	POSIX::sigprocmask(POSIX::SIG_BLOCK(), $blocked, $before);
+
 	my $released = eval {
 		my $cleared = 0;
 		if ($self->network_locked_by_me) {
@@ -1133,7 +1153,10 @@ sub release_network_lock {
 		}
 		$cleared;
 	};
+	my $failure = $@;
+	POSIX::sigprocmask(POSIX::SIG_SETMASK(), $before);
 	return $released if defined($released);
+	$@ = $failure;
 
 	# A failed release must not replace the error that stopped the caller,
 	# nor stop it releasing locks on other directors, so it is logged here.
@@ -1217,7 +1240,7 @@ sub _network_lock_freshness {
 
 # _refuse_legacy_network_lock - stop while an older Genesis holds the network claims lock {{{
 sub _refuse_legacy_network_lock {
-	my ($self, $max_age) = @_;
+	my ($self, $max_age, $action) = @_;
 	# Guards against older Genesis versions during a rollout: they keep the
 	# lock as JSON in the network-claim-lock key of the exodus secret, and
 	# never read the lock's own secret, so each would take its lock without
@@ -1225,6 +1248,12 @@ sub _refuse_legacy_network_lock {
 	my $path = $self->exodus_path;
 	my $key = 'network-claim-lock';
 	$max_age //= 1800;
+	# Said in the refusal as what could not be done: taking the lock when
+	# called from the acquire, or the caller's action when this process already
+	# holds its own lock.
+	my $what = $action // 'take the network claims lock';
+	my $appears = $action ? 'appears to have started deploying against it since this process took its lock'
+	                      : 'appears to be deploying against it';
 
 	my $record = eval { $self->vault->kv_read($path) };
 	if ($@) {
@@ -1233,7 +1262,7 @@ sub _refuse_legacy_network_lock {
 		die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
 		$err = $err =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/\s+$//r;
 		bail(
-			"Cannot take the network claims lock on the #M{%s} BOSH director, because the ".
+			"Cannot %s on the #M{%s} BOSH director, because the ".
 			"older lock key could not be checked.  An older Genesis, from before the lock ".
 			"moved to a secret of its own, keeps it in the #C{%s} key of #C{%s}, and one ".
 			"may be deploying against this director now.\n\n".
@@ -1242,7 +1271,7 @@ sub _refuse_legacy_network_lock {
 			"token has no read access on #C{%s}.  Nothing was written.  Run #C{safe get %s:%s} ".
 			"with the same token to see which, and #C{safe vault status} to check whether ".
 			"the vault is sealed.",
-			$self->alias, $key, $path, $err, $path, $path, $key
+			$what, $self->alias, $key, $path, $err, $path, $path, $key
 		);
 	}
 
@@ -1256,6 +1285,9 @@ sub _refuse_legacy_network_lock {
 		($status) = $self->_network_lock_freshness($lock, $max_age);
 		1;
 	};
+	my $parse_error = $@;
+	# A signal that landed while the value was being read is not a verdict on it
+	die $parse_error if !$is_lock && $parse_error =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
 	return if $is_lock && $status eq 'stale';
 	unless ($is_lock) {
 		# No older Genesis can have written this, and one reading it would
@@ -1270,8 +1302,8 @@ sub _refuse_legacy_network_lock {
 	}
 
 	bail(
-		"Cannot take the network claims lock on the #M{%s} BOSH director: an older ".
-		"Genesis appears to be deploying against it.  It holds the older form of the ".
+		"Cannot %s on the #M{%s} BOSH director: an older ".
+		"Genesis %s.  It holds the older form of the ".
 		"lock, the #C{%s} key of #C{%s} in the vault at #M{%s}, and was taken by ".
 		"%s@%s (env: %s, pid: %s) %s, at %s.\n\n".
 		"This usually means someone is running a Genesis from before the lock moved ".
@@ -1282,7 +1314,7 @@ sub _refuse_legacy_network_lock {
 		"as its process exits, when that ran on this same host).  #C{safe get %s:%s} ".
 		"shows the lock as it is stored, and once you have checked that nothing is ".
 		"deploying, #C{safe rm -f %s:%s} clears it.",
-		$self->alias, $key, $path, $self->vault->url,
+		$what, $self->alias, $appears, $key, $path, $self->vault->url,
 		$lock->{user} // 'unknown', $lock->{hostname} // 'unknown',
 		$lock->{env} // 'unknown', $lock->{pid} // 'unknown',
 		strfuzzytime($lock->{at}), $lock->{at},

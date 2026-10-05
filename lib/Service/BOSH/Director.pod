@@ -1936,6 +1936,13 @@ while it waits, most often at a prompt, for longer than the lock's stale
 timeout, because another deploy or C<bosh-configs upload> then clears the
 lock as stale and may take it.
 
+While this process does hold its lock, it also reads the older form of the
+lock again, with L</_refuse_legacy_network_lock>.  An older Genesis that
+started after this process took its lock never looks at that lock, so this
+is the last point before the write at which the two can be told apart.  It
+narrows the window in which both write claims, and cannot close it, because
+an older Genesis can still take its own lock just after the check.
+
 B<Parameters:>
 
 =over 4
@@ -1952,6 +1959,13 @@ B<Returns:> C<1> when this process holds the lock.
 B<Errors:>
 
 =over 4
+
+=item *
+
+Dies when this process holds its lock but an older Genesis holds the older
+form of it, or the vault will not say whether one does.  The messages are
+those of L</_refuse_legacy_network_lock>, with C<$action> in place of taking
+the lock.  Nothing is written.
 
 =item *
 
@@ -1983,6 +1997,14 @@ so a failed release cannot replace the error that stopped the caller, nor
 stop the caller releasing its locks on other directors.  A release that
 fails is logged with the director, the reason, when other deploys can take
 the lock, the likely causes, and what to check.
+
+While it runs, C<INT>, C<TERM>, C<HUP>, and C<QUIT> are blocked, and the
+processes it starts inherit that.  A terminal sends Ctrl-C to every process
+in its foreground group, and a dropped ssh session sends C<HUP> to every
+process in it, so the C<safe> child of a vault call would otherwise be
+killed, the release would fail, and the lock would stay on the director.
+A signal that arrives meanwhile stays pending in this process, and reaches
+the handler the caller installed once the release is over.
 
 The log says which step failed.  When the lock could not be read, nothing
 was released and it is not known whether this process holds a lock, so the
@@ -2408,7 +2430,7 @@ B<Examples:>
 
 =head2 _refuse_legacy_network_lock
 
-  $self->_refuse_legacy_network_lock($max_age);
+  $self->_refuse_legacy_network_lock($max_age, $action);
 
 Stops the acquire of the network claims lock while an older Genesis holds
 the older form of it.  This guards against older Genesis versions during a
@@ -2432,6 +2454,14 @@ B<Parameters:>
 =item C<$max_age>
 
 The stale timeout in seconds.  Defaults to C<1800>, the older code's own.
+
+=item C<$action>
+
+Given by L</ensure_network_lock_held>, which checks again once this process
+already holds its own lock: what this process was about to do, as a phrase
+that follows "Cannot".  The refusal then says that an older Genesis appears
+to have started deploying since this process took its lock.  Without it,
+the refusal is about taking the lock.
 
 =back
 

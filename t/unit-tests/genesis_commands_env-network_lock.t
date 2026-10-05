@@ -51,6 +51,8 @@ sub make_env {
 		network_locked_by_me => sub { push @calls, 'mine';    $held },
 		# The real ones, which work through the calls above
 		ensure_network_lock_held => \&Service::BOSH::Director::ensure_network_lock_held,
+		# The check for an older Genesis's lock is tested with the director
+		_refuse_legacy_network_lock => sub { push @calls, 'legacy'; 1 },
 		release_network_lock     => \&Service::BOSH::Director::release_network_lock,
 		%overrides,
 	};
@@ -272,12 +274,71 @@ subtest 'a signal that lands during the release does not replace the error that 
 	ok(!$held, 'and the lock is not left on the director');
 };
 
+# A terminal sends Ctrl-C (INT) or Ctrl-\\ (QUIT) to every process in the
+# foreground group, and a release runs safe as a child in that group, so the
+# signal reaches the child as well as Genesis.  The tests above send to this
+# process alone, which cannot show that.  Here a forked helper sends to the
+# whole group while the release's own child process is running, as a terminal
+# does, and the child has to survive it for the release to read the lock and
+# clear it.
+subtest 'a terminal signal during the release does not kill the release\'s own child processes' => sub {
+	$status = 'unlocked';
+	# This process leads a group of its own, so the signal below reaches it
+	# and what it forks, and not prove or the shell that started the tests.
+	setpgrp(0, 0) or plan skip_all => "cannot make a process group: $!";
+	for my $signal (qw/INT QUIT HUP TERM/) {
+		my $child_ok;
+		my $cleared = 0;
+		my $env = make_env(
+			network_locked_by_me => sub {
+				push @calls, 'mine';
+				# A real child, as the vault calls are, in this group, running
+				# while the helper signals the group.
+				my $helper = fork();
+				die "fork failed: $!" unless defined $helper;
+				if (!$helper) {
+					select(undef, undef, undef, 0.3);
+					kill $signal => -getpgrp();
+					exit 0;
+				}
+				my $out = Genesis::run({stderr => 0}, 'sleep 1; echo survived');
+				$child_ok = defined($out) && $out eq 'survived';
+				waitpid($helper, 0);
+				die "the vault call was killed by the signal\n" unless $child_ok;
+				return $held;
+			},
+			clear_network_lock => sub { push @calls, 'clear'; $cleared = 1; $held = 0; 1 },
+		);
+		$held = 1;
+		my $ran = 0;
+		throws_ok { under_lock($env, sub { $ran = 1 }) }
+			qr/^(?:Interrupted by user|Terminated|Hung up|Quit)\b/,
+			"$signal: the signal is raised once the release has finished";
+		ok($child_ok, "$signal: the release\'s child process survived it");
+		ok($cleared && !$held, "$signal: and the lock was cleared");
+	}
+};
+
 subtest 'the signal handlers are put back when the deploy returns' => sub {
 	$status = 'unlocked';
 	my %before = map { $_ => $SIG{$_} } qw/INT TERM HUP QUIT/;
 	my $env = make_env();
 	under_lock($env, sub { 1 });
 	is($SIG{$_}, $before{$_}, "\$SIG{$_} is as it was") for qw/INT TERM HUP QUIT/;
+};
+
+subtest 'the claims are written only after the older Genesis lock key was checked while this process holds its own lock' => sub {
+	$status = 'locked';
+	my $env = make_env();
+	$held = 1;
+	output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}) };
+	my ($legacy, $write) = (0, 0);
+	for my $i (0 .. $#calls) {
+		$legacy = $i if $calls[$i] eq 'legacy' && !$legacy;
+		$write  = $i if $calls[$i] eq 'set_path' && !$write;
+	}
+	ok($legacy && $write && $legacy < $write, 'the older key is checked before the claims are written')
+		or diag explain \@calls;
 };
 
 subtest 'a deploy that lost its lock while it waited writes no claims' => sub {

@@ -93,6 +93,7 @@ sub make_director {
 		clear_network_lock   => sub { push @director_calls, ['clear_network_lock', $alias]; $locked = 0; 1 },
 		# The real ones, which work through the calls above
 		ensure_network_lock_held => \&Service::BOSH::Director::ensure_network_lock_held,
+		_refuse_legacy_network_lock => sub { 1 },
 		release_network_lock     => \&Service::BOSH::Director::release_network_lock,
 		network_lock_path    => "secret/exodus/$alias/bosh/network-claim-lock",
 		exodus_path          => "secret/exodus/$alias/bosh",

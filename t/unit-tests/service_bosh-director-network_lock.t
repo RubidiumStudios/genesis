@@ -443,6 +443,54 @@ subtest 'the old key is only ever read' => sub {
 	}
 };
 
+subtest 'a fresh old lock that appears after this process took its lock stops the claims write' => sub {
+	for my $kv_version (2, 1) {
+		my $vault = MockLockVault->new(kv_version => $kv_version);
+		no warnings 'once';
+		local $Service::BOSH::Director::NETWORK_LOCK_SETTLE_SECONDS = 0;
+		my $bosh = director($vault);
+		is(try_acquire($bosh), 'won', "kv v$kv_version: the lock is taken with no older lock about");
+		ok($bosh->ensure_network_lock_held('write the network claims'), "kv v$kv_version: and the claims may be written");
+
+		# An older Genesis starts after the lock was taken, and takes its own.
+		seed_legacy_lock($vault, lock_record(age => 30, user => 'lateuser', hostname => 'latebox', pid => 555, env => 'lab-late'));
+		my $before = JSON::PP->new->canonical->encode($vault->{store}{$EXODUS});
+		throws_ok { $bosh->ensure_network_lock_held('write the network claims') }
+			qr/Cannot write the network claims.*lock-test.*older Genesis.*lateuser\@latebox.*lab-late.*pid: 555/s,
+			"kv v$kv_version: the write is refused, naming the older Genesis and its holder";
+		throws_ok { $bosh->ensure_network_lock_held('write the network claims') }
+			qr/safe\s+get\s+\Q$EXODUS:network-claim-lock\E.*safe\s+rm\s+-f\s+\Q$EXODUS:network-claim-lock\E/s,
+			"kv v$kv_version: and gives the commands that check and clear the old key";
+		is(scalar($vault->writes_to($EXODUS)), 0, "kv v$kv_version: nothing was written to the old key");
+		is(JSON::PP->new->canonical->encode($vault->{store}{$EXODUS}), $before, "kv v$kv_version: the old record is as it was");
+		ok($bosh->network_locked_by_me, "kv v$kv_version: and this process still holds its own lock, for its release to clear");
+
+		# Once that lock is stale, or gone, the claims may be written again.
+		seed_legacy_lock($vault, lock_record(age => 7200));
+		ok($bosh->ensure_network_lock_held('write the network claims'), "kv v$kv_version: a stale old lock does not stop the write");
+		delete $vault->{store}{$EXODUS};
+		ok($bosh->ensure_network_lock_held('write the network claims'), "kv v$kv_version: nor does an absent one");
+	}
+};
+
+subtest 'a vault that refuses the old-key read stops the claims write' => sub {
+	my $vault = MockLockVault->new(kv_version => 2);
+	my $bosh = director($vault);
+	is(try_acquire($bosh), 'won', 'the lock is taken');
+	$vault->{read_errors}{$EXODUS} = "Could not read $EXODUS from the vault: 403 permission denied\n";
+	throws_ok { $bosh->ensure_network_lock_held('write the network claims') }
+		qr/Cannot write the network claims.*older Genesis.*permission denied/s,
+		'the write is refused, with the vault\'s reason';
+};
+
+subtest 'a lock this process lost is still reported as lost, before the old key is looked at' => sub {
+	my $vault = MockLockVault->new(kv_version => 2);
+	my $bosh = director($vault);
+	$vault->{read_errors}{$EXODUS} = "Could not read $EXODUS from the vault: 403 permission denied\n";
+	throws_ok { $bosh->ensure_network_lock_held('write the network claims') }
+		qr/no longer holds the network claims lock/, 'the lost lock is what is reported';
+};
+
 # ---------------------------------------------------------------------------
 # The lock's ordinary life
 # ---------------------------------------------------------------------------
