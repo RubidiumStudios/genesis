@@ -96,8 +96,10 @@ my $kit = mock "Genesis::Kit" => {
 
 my $bosh = mock "Genesis::BOSH" => {
 	alias => 'mock-bosh',
+	deployments => {},
 };
 
+my $director_network_exodus;
 sub mock_env {
 	mock "Genesis::Env" => {(
 			name           => 'test-env-ocf',
@@ -105,6 +107,7 @@ sub mock_env {
 			kit            => $kit,
 			bosh           => $bosh,
 			use_create_env => 0,
+			cpi_enabled    => 0,
 			features       => Mock::ReferencedValue->new(['ocfp', 'some-feature']),
 			iaas           => 'openstack',
 			scale          => 'dev',
@@ -127,6 +130,15 @@ sub mock_env {
 			director_exodus_lookup => sub {
 				die 'Create-env environments do not have directors'
 			},
+			# The director hook reads its own stored network record strictly;
+			# a test that has recorded one sets it in $director_network_exodus
+			exodus_lookup_strict => sub {
+				my ( $self, $key, $default ) = @_;
+				die "Unknown key: $key" unless $key eq '/network:.';
+				return $director_network_exodus // $default;
+			},
+			exodus_base => 'secret/exodus/test-env-ocf/bosh',
+			get_target_bosh => sub { return $bosh },
 			ocfp_config_lookup => sub {
 				my ( $self, $key ) = @_;
 				return struct_lookup( $self->ocfp_config, $key );
@@ -141,7 +153,7 @@ sub mock_env {
 
 		), @_};
 };
-my ($mgmt_env, $env, $cf_env, $director_network_exodus);
+my ($mgmt_env, $env, $cf_env);
 my ($cc_hook, $cc_director_hook, $cc_cf_hook);
 
 subtest 'Genesis::Hook::CloudConfig::Bosh' => sub {
