@@ -1430,15 +1430,11 @@ Raised (via C<bail()>) when the lock is gone at upload time.
 
 Raised (via C<bail()>) when the bosh upload fails.
 
-=item C<"Cloud config %s was uploaded, but the network map could not be updated at %s:\n\n%s\n\n...">
+=item C<"Cloud config %s %s, but the network map could not be updated at %s:\n\n%s\n\n...">
 
-Raised (via C<bail()>) when the exodus write fails after the upload.  The
-placeholders are the config name, the Vault path, and the vault's error.
-The message goes on to say that the record may now be empty or out of date,
-because the write clears it before filling it, that the vault is probably
-sealed, unreachable, or refusing the token, and that the operator should
-check the vault, restore the record from a saved copy if it is empty, and
-run the upload again.
+Raised (via C<bail()> in L</_bosh_configs_write_claims($env, $config, $stored, %opts)>) when the exodus write
+fails after the upload.  The config name is followed by C<was uploaded>, and
+the message goes on as that helper's entry describes.
 
 =back
 
