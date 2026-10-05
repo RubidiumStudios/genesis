@@ -218,41 +218,6 @@ subtest 'resolve_branch - unverifiable rides on the answer' => sub {
 	is $div->{unverifiable}, 1, 'and the flag comes back on the record';
 };
 
-# ======================================================================
-# remote_url and has_remote - what git says when it cannot answer
-# ======================================================================
-#
-# Both read a value out of git's stdout, so git's own complaint has to be
-# captured apart from it or the complaint becomes the value.
-
-subtest 'remote_url keeps git stderr out of the url' => sub {
-	plan tests => 3;
-	reset_stub(); install_run_stub();
-	push @run_results, ["error: No such remote 'origin'", 2, ''];
-
-	my $git = make_git();
-	is($git->remote_url('origin'), undef,
-		'a remote git cannot answer for has no url');
-	is($run_calls[0][0]{stderr}, 0,
-		'and the complaint is captured apart from the output');
-
-	reset_stub();
-	push @run_results, ["https://github.com/team/bosh.git\n", 0, ''];
-	is($git->remote_url('origin'), 'https://github.com/team/bosh.git',
-		'while a remote that answers gives its fetch url');
-};
-
-subtest 'has_remote asks git quietly too' => sub {
-	plan tests => 2;
-	reset_stub(); install_run_stub();
-	push @run_results, ["origin\ndev\n", 0, ''];
-
-	my $git = make_git();
-	is($git->has_remote('dev'), 1, 'a configured remote is found');
-	is($run_calls[0][0]{stderr}, 0,
-		'and a complaint never reaches the list of names it reads');
-};
-
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet

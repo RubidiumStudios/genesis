@@ -285,6 +285,7 @@ unit-tests/service_git-push_remote.t                       # the publish helper 
 unit-tests/service_git-ref_reads.t                         # what a ref read answers where git cannot resolve the ref
 unit-tests/service_git-blob_reads.t                        # a commit's blobs in one git process, and a ref git cannot resolve refused
 unit-tests/service_git-remote_branch.t                     # remote_branch helper
+unit-tests/service_git-handle_config.t                     # a handle asked for again costs nothing, and the clone's configuration is read once
 unit-tests/service_git-single_branch_refresh.t             # one named branch refreshes T alone
 unit-tests/service_git-set_branch_ref.t                    # the one forced write onto a local branch
 unit-tests/service_git_session-abort.t                     # abort discards, resets to T, and is loud

@@ -15,6 +15,7 @@ use constant NULL_SHA => '0' x 40;
 
 ### Class State {{{
 my %_instances;  # keyed by resolved git root path
+my %_root_of;    # a path asked for, by its absolute spelling, to the root it resolved to
 my $_ci_credentials_dir;  # temp dir holding materialised CI credentials
 # }}}
 
@@ -185,6 +186,14 @@ sub new {
 	# environment carries no credentials, which is every local run.
 	provision_ci_credentials();
 
+	# A path asked for before is answered from memory, because every command
+	# asks for its handle in several places and each ask was a git process.
+	# The absolute spelling is the key, so '.' asked from two directories is
+	# two paths.
+	my $asked = abs_path($path);
+	return $_instances{$_root_of{$asked}}
+		if defined $asked && $_root_of{$asked} && $_instances{$_root_of{$asked}};
+
 	my ($root, $rc, $err) = run({}, 'git', '-C', $path, 'rev-parse', '--show-toplevel');
 	chomp $root if defined $root;
 
@@ -203,6 +212,7 @@ sub new {
 	}
 
 	# Return existing instance for this repo
+	$_root_of{$asked} = $root if defined $asked;
 	return $_instances{$root} if $_instances{$root};
 
 	my ($prefix) = run({}, 'git', '-C', $path, 'rev-parse', '--show-prefix');
@@ -1250,40 +1260,125 @@ sub _require_remote {
 }
 
 # }}}
+# _config - the clone's remotes, upstreams and rewrites, read once {{{
+#
+# Every question about which remotes a clone has, where they point, what a
+# branch tracks, and how git rewrites a URL is answered from one read of the
+# configuration, because each was a git process of its own and a command asks
+# them many times.  The read is kept until a configuration file changes, which
+# a stat says without git: the time to the nanosecond, the size, and the
+# inode, since git rewrites a file through a new one, so even a change of the
+# same size in the same second is seen.
+sub _config {
+	my ($self) = @_;
+	my $stamp = $self->_config_stamp;
+	return $self->{_config}{data}
+		if $self->{_config} && $self->{_config}{stamp} eq $stamp;
+
+	my ($out) = run({dir => $self->{root}, stderr => 0},
+		'git', 'config', '-z', '--get-regexp',
+		'^(remote\..+\.url|branch\..+\.remote|url\..+\.insteadof)$');
+	my %data = (remotes => {}, order => [], upstream => {}, rewrites => []);
+	for my $entry (split /\0/, ($out // '')) {
+		my ($key, $value) = split /\n/, $entry, 2;
+		next unless defined $value;
+		if ($key =~ m{^remote\.(.+)\.url$}) {
+			push @{$data{order}}, $1 unless exists $data{remotes}{$1};
+			$data{remotes}{$1} //= $value;
+		} elsif ($key =~ m{^branch\.(.+)\.remote$}) {
+			$data{upstream}{$1} = $value;
+		} elsif ($key =~ m{^url\.(.+)\.insteadof$}) {
+			push @{$data{rewrites}}, [$value, $1];
+		}
+	}
+	$self->{_config} = {stamp => $stamp, data => \%data};
+	return \%data;
+}
+
+# }}}
+# _config_stamp - what the configuration files look like now, without git {{{
+#
+# The repository's own configuration lives in the common git directory, which
+# for a worktree is named by the commondir file in the worktree's git
+# directory, and a worktree may carry its own config.worktree beside it.  The
+# user's own files can carry insteadOf rewrites too.  The paths are found from
+# the filesystem once, so asking costs a stat of each and no git process.
+sub _config_stamp {
+	my ($self) = @_;
+	$self->{_config_files} //= do {
+		my $dot = "$self->{root}/.git";
+		my $gitdir = $dot;
+		if (-f $dot && open(my $fh, '<', $dot)) {
+			my ($line) = <$fh>;
+			($gitdir) = ($line // '') =~ m{^gitdir:\s*(.+?)\s*$};
+			$gitdir = "$self->{root}/$gitdir" if defined $gitdir && $gitdir !~ m{^/};
+		}
+		my $common = $gitdir;
+		if (defined $gitdir && open(my $fh, '<', "$gitdir/commondir")) {
+			chomp(my $rel = <$fh> // '');
+			$common = $rel =~ m{^/} ? $rel : "$gitdir/$rel" if length $rel;
+		}
+		my $xdg = $ENV{XDG_CONFIG_HOME} || "$ENV{HOME}/.config";
+		[grep {defined} ("$common/config", "$gitdir/config.worktree",
+			"$ENV{HOME}/.gitconfig", "$xdg/git/config")];
+	};
+	require Time::HiRes;
+	return join("\0", map {
+		my @st = Time::HiRes::stat($_);
+		@st ? join(':', $_, @st[1, 7, 9]) : "$_:-";
+	} @{$self->{_config_files}});
+}
+
+# }}}
+# remote_names - every remote this clone has, in the order git lists them {{{
+sub remote_names {
+	my ($self) = @_;
+	return sort @{$self->_config->{order}};
+}
+
+# }}}
+# configured_url - a remote's URL as written, before any insteadOf rewrite {{{
+#
+# remote_url answers the URL git would contact, with insteadOf applied, which
+# is what traffic needs; this answers what the clone's configuration says,
+# which is what a remote names (D118).
+sub configured_url {
+	my ($self, $remote) = @_;
+	_require_remote($remote, 'configured_url');
+	return $self->_config->{remotes}{$remote};
+}
+
+# }}}
 # branch_upstream_remote - the remote a branch is configured to track {{{
 sub branch_upstream_remote {
 	my ($self, $branch) = @_;
-	my ($out) = run({dir => $self->{root}, passfail => 0, stderr => 0},
-		'git', 'config', '--get', "branch.$branch.remote");
-	chomp $out if defined $out;
-	return (defined $out && length $out) ? $out : undef;
+	my $remote = $self->_config->{upstream}{$branch};
+	return (defined $remote && length $remote) ? $remote : undef;
 }
 
 # }}}
 # has_remote - whether a remote of this name is configured {{{
 sub has_remote {
 	my ($self, $remote) = @_;
-	# stderr apart from stdout for the same reason branch_upstream_remote
-	# asks for it: a complaint merged into the output would be one more
-	# line to search for a remote's name in.
-	my ($out) = run({dir => $self->{root}, stderr => 0}, 'git', 'remote');
-	return 0 unless defined $out;
-	return scalar(grep {$_ eq $remote} split(/\n/, $out)) ? 1 : 0;
+	return exists $self->_config->{remotes}{$remote} ? 1 : 0;
 }
 
 # }}}
-# remote_url - fetch the fetch URL for a named remote {{{
+# remote_url - the URL git would contact for a named remote {{{
+#
+# The configured URL with git's insteadOf rewrite applied: of every
+# url.<base>.insteadOf value the URL begins with, the longest wins and is
+# replaced by its base, which is git's own rule.  A remote this clone does not
+# have answers no URL.
 sub remote_url {
 	my ($self, $remote) = @_;
 	_require_remote($remote, 'remote_url');
-	# git writes its complaint on stderr, and merging that into stdout would
-	# put the text of the complaint into the url a caller goes on to use, so
-	# it is captured apart and a non-zero exit answers no url at all.
-	my ($url, $rc) = run({dir => $self->{root}, stderr => 0},
-		'git', 'remote', 'get-url', $remote);
-	return undef if $rc;
-	chomp $url if defined $url;
-	return $url;
+	my $config = $self->_config;
+	my $url = $config->{remotes}{$remote};
+	return undef unless defined $url;
+	my ($best) = sort {length($b->[0]) <=> length($a->[0])}
+		grep {index($url, $_->[0]) == 0} @{$config->{rewrites}};
+	return $best ? $best->[1] . substr($url, length $best->[0]) : $url;
 }
 
 # }}}
