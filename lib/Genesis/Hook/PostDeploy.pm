@@ -50,64 +50,68 @@ sub update_director_network_config {
 	# on this director has recorded, and the network record is rewritten from
 	# it, so both happen under the director's network claims lock.  A signal
 	# while the lock is held unwinds through the release below instead of
-	# leaving the lock on the director.
-	local $SIG{INT}  = sub { die "Interrupted by user\n" };
-	local $SIG{TERM} = sub { die "Terminated\n" };
-	local $SIG{HUP}  = sub { die "Hung up\n" };
-	local $SIG{QUIT} = sub { die "Quit\n" };
+	# leaving the lock on the director.  The first signal unwinds the step;
+	# any that follows, including one in the gap before the release starts or
+	# while it runs, is held until the release has finished, because dying
+	# there would skip it or cut it short.
+	my $unwinding = 1;
+	my $held_signal;
+	my $on_signal = sub {
+		my ($message) = @_;
+		if ($unwinding) {
+			$unwinding = 0;
+			die $message;
+		}
+		$held_signal //= $message;
+	};
+	local $SIG{INT}  = sub { $on_signal->("Interrupted by user\n") };
+	local $SIG{TERM} = sub { $on_signal->("Terminated\n") };
+	local $SIG{HUP}  = sub { $on_signal->("Hung up\n") };
+	local $SIG{QUIT} = sub { $on_signal->("Quit\n") };
 
 	my $acquired = 0;
 	my $step = 'taking the network claims lock';
-	my $ok = eval {
-		$acquired = $self->_acquire_director_network_lock($bosh, $config_name);
-		if ($acquired) {
-			$step = 'building the director cloud config';
-			info({pending => 1}, "[[  - >>building director cloud-config...");
-			my $tstart = gettimeofday;
-			my ($config, $network) = $env->run_hook('cloud-config', purpose => 'director');
-			info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
+	my ($ok, $err);
+	eval {
+		$ok = eval {
+			$acquired = $self->_acquire_director_network_lock($bosh, $config_name);
+			if ($acquired) {
+				$step = 'building the director cloud config';
+				info({pending => 1}, "[[  - >>building director cloud-config...");
+				my $tstart = gettimeofday;
+				my ($config, $network) = $env->run_hook('cloud-config', purpose => 'director');
+				info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
 
-			$step = 'uploading the director cloud config';
-			info({pending => 1}, "[[  - >>uploading #c{%s} cloud-config...", $config_name);
-			$tstart = gettimeofday;
-			$bosh->upload_config($config, 'cloud', $config_name);
-			info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
+				$step = 'uploading the director cloud config';
+				info({pending => 1}, "[[  - >>uploading #c{%s} cloud-config...", $config_name);
+				$tstart = gettimeofday;
+				$bosh->upload_config($config, 'cloud', $config_name);
+				info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
 
-			# Strict, because a failed read would look like a record with no
-			# claims, and the summary would then show every claim as new
-			$step = 'storing the director network details in exodus';
-			my $network_path = $env->exodus_base.'/network';
-			my $stored = $env->vault->get_path_strict($network_path) // {};
-			Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $network);
-			info({pending => 1}, "[[  - >>storing director network details in exodus...");
-			$tstart = gettimeofday;
-			$env->vault->set_path($network_path, $network, flatten => 1, clear => 1);
-			info("#G{done}" . pretty_duration(gettimeofday - $tstart, 1, 3));
-		}
+				# Strict, because a failed read would look like a record with no
+				# claims, and the summary would then show every claim as new
+				$step = 'storing the director network details in exodus';
+				my $network_path = $env->exodus_base.'/network';
+				my $stored = $env->vault->get_path_strict($network_path) // {};
+				Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $network);
+				info({pending => 1}, "[[  - >>storing director network details in exodus...");
+				$tstart = gettimeofday;
+				$env->vault->set_path($network_path, $network, flatten => 1, clear => 1);
+				info("#G{done}" . pretty_duration(gettimeofday - $tstart, 1, 3));
+			}
+			1;
+		};
+		$err = $@;
+		# Inside the outer eval, so that a signal between the two lands in it
+		$unwinding = 0;
 		1;
-	};
-	my $err = $@;
+	} or ($ok, $err) = (0, $@);
 
 	# Released whenever this process holds it, which covers a signal that
-	# lands between taking the lock and recording that it was taken
-	my $released = eval {
-		if ($bosh->network_locked_by_me) {
-			info({pending => 1}, "[[  - >>releasing network claims lock on #M{%s} BOSH director...", $bosh->alias);
-			$bosh->clear_network_lock;
-			info("#G{done}");
-		}
-		1;
-	};
-	error(
-		"The network claims lock on the #M{%s} BOSH director could not be released: %s\n".
-		"Other deploys on this director will wait for it until it goes stale, which ".
-		"is after 30 minutes, or sooner once this process has exited when they run ".
-		"on this same host.  This usually means the vault became unreachable or the ".
-		"token expired during the step.  Check the vault, then run ".
-		"#C{%s bosh-configs upload --type cloud --name %s -y}, which clears a stale ".
-		"lock and finishes this step.",
-		$bosh->alias, ($@ =~ s/\s+$//r), scalar($env->get_call_path_with_env), $config_name
-	) unless $released;
+	# lands between taking the lock and recording that it was taken.  The
+	# release logs a failure rather than dying, so it never replaces the error
+	# that stopped the step.
+	$bosh->release_network_lock;
 
 	unless ($ok) {
 		# A signal passes through as it came, and the lock waiter has already
@@ -125,6 +129,7 @@ sub update_director_network_config {
 			$env->exodus_base.'/network', scalar($env->get_call_path_with_env), $config_name
 		);
 	}
+	die $held_signal if defined($held_signal);
 	return $acquired ? 1 : 0;
 }
 

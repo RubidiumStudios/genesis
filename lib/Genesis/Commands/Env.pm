@@ -1943,23 +1943,44 @@ sub _deploy_under_network_claims_lock {
 	# the list because these deploys are run over ssh from a bastion, and a
 	# dropped session hangs up every process in it -- which is how a lock
 	# outlives the process that took it.
-	local $SIG{INT}  = $takes_lock ? sub { die "Interrupted by user\n" } : $SIG{INT};
-	local $SIG{TERM} = $takes_lock ? sub { die "Terminated\n" }         : $SIG{TERM};
-	local $SIG{HUP}  = $takes_lock ? sub { die "Hung up\n" }            : $SIG{HUP};
-	local $SIG{QUIT} = $takes_lock ? sub { die "Quit\n" }               : $SIG{QUIT};
-
-	my $ok = eval {
-		_deploy_network_claims_lock($env, dryrun => $opts{dryrun}, yes => $opts{yes});
-		$code->();
-		1;
+	#
+	# The first signal unwinds the work.  Any that follows, including one in
+	# the gap before the release starts or while it runs, is held until the
+	# release has finished, because dying there would skip it or cut it short.
+	my $unwinding = $takes_lock;
+	my $held_signal;
+	my $on_signal = sub {
+		my ($message) = @_;
+		if ($unwinding) {
+			$unwinding = 0;
+			die $message;
+		}
+		$held_signal //= $message;
 	};
-	my $err = $@;
+	local $SIG{INT}  = $takes_lock ? sub { $on_signal->("Interrupted by user\n") } : $SIG{INT};
+	local $SIG{TERM} = $takes_lock ? sub { $on_signal->("Terminated\n") }         : $SIG{TERM};
+	local $SIG{HUP}  = $takes_lock ? sub { $on_signal->("Hung up\n") }            : $SIG{HUP};
+	local $SIG{QUIT} = $takes_lock ? sub { $on_signal->("Quit\n") }               : $SIG{QUIT};
+
+	my ($ok, $err);
+	eval {
+		$ok = eval {
+			_deploy_network_claims_lock($env, dryrun => $opts{dryrun}, yes => $opts{yes});
+			$code->();
+			1;
+		};
+		$err = $@;
+		# Inside the outer eval, so that a signal between the two lands in it
+		$unwinding = 0;
+		1;
+	} or ($ok, $err) = (0, $@);
 
 	# Released whenever this process holds it, which covers an acquire that
 	# wrote the lock and then failed.  A successful deploy already released
 	# it when the network claims were submitted.
 	_deploy_release_network_claims_lock($env) if $takes_lock;
 	die $err unless $ok;
+	die $held_signal if defined($held_signal);
 	return 1;
 }
 

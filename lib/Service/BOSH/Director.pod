@@ -1984,6 +1984,13 @@ stop the caller releasing its locks on other directors.  A release that
 fails is logged with the director, the reason, when other deploys can take
 the lock, the likely causes, and what to check.
 
+The log says which step failed.  When the lock could not be read, nothing
+was released and it is not known whether this process holds a lock, so the
+message says that, and gives the C<safe get> command that shows the lock,
+the host and PID that make it this process's, and the C<safe rm> command
+that clears it.  Only a failure of the clear itself is logged as a lock
+that could not be released.
+
 B<Returns:> C<1> when the lock was released.  C<0> when this process did
 not hold it, including when another process took it between the check and
 the clear, which is reported on the output.  C<undef> when the release

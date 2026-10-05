@@ -10,6 +10,7 @@ use Test::Exception;
 use Test::Deep;
 use Test::Output;
 use Genesis qw(bail);
+use Service::BOSH::Director;
 use Cwd qw(abs_path);
 
 $ENV{GENESIS_CALLBACK_BIN} ||= abs_path('bin/genesis');
@@ -610,7 +611,19 @@ sub net_bosh {
 			$mine = 1;
 		},
 		network_locked_by_me => sub { $mine },
-		clear_network_lock   => sub { push @netcalls, ['clear_network_lock', $alias]; $mine = 0; 1 },
+		clear_network_lock   => sub {
+			push @netcalls, ['clear_network_lock', $alias];
+			die $o{fail_clear} if $o{fail_clear};
+			$o{on_clear}->() if $o{on_clear};
+			$mine = 0;
+			1;
+		},
+		network_lock_path    => "secret/exodus/$alias/bosh/network-claim-lock",
+		# The real release, which works through the calls above
+		release_network_lock => sub {
+			push @netcalls, ['release_network_lock', $alias];
+			return Service::BOSH::Director::release_network_lock(@_);
+		},
 		upload_config => sub {
 			my ($self, $content, $type, $name) = @_;
 			push @netcalls, ['upload_config', $alias, $type, $name];
@@ -863,6 +876,8 @@ subtest 'update_director_network_config - the wait is announced again when its r
 		acquire_network_lock => sub { die "vault write failed\n" if ++$takes == 1; $base->acquire_network_lock },
 		network_locked_by_me => sub { $base->network_locked_by_me },
 		clear_network_lock   => sub { $base->clear_network_lock },
+		network_lock_path    => sub { $base->network_lock_path },
+		release_network_lock => sub { Service::BOSH::Director::release_network_lock($_[0]) },
 		upload_config        => sub { $base->upload_config(@_[1..$#_]) },
 	};
 	my $hook = make_hook(env => net_env(self_bosh => $bosh));
@@ -886,6 +901,8 @@ subtest 'update_director_network_config - releases the lock on a signal' => sub 
 		acquire_network_lock => sub { $base_bosh->acquire_network_lock },
 		network_locked_by_me => sub { $base_bosh->network_locked_by_me },
 		clear_network_lock   => sub { $base_bosh->clear_network_lock },
+		network_lock_path    => sub { $base_bosh->network_lock_path },
+		release_network_lock => sub { Service::BOSH::Director::release_network_lock($_[0]) },
 		upload_config        => sub { $sent++; kill TERM => $$; return 1 },
 	};
 	my $hook = make_hook(env => net_env(self_bosh => $signal_bosh));
@@ -893,6 +910,38 @@ subtest 'update_director_network_config - releases the lock on a signal' => sub 
 	is($sent, 1, 'it arrived while the lock was held');
 	ok(defined(netcall('clear_network_lock', 'lab-ocf')), 'the lock is released on the way out');
 	ok(!$base_bosh->network_locked_by_me, 'no lock of ours is left');
+};
+
+subtest 'update_director_network_config - releases through the director\'s release, which logs rather than dies' => sub {
+	plan tests => 5;
+	@netcalls = ();
+	my $bosh = net_bosh();
+	my $hook = make_hook(env => net_env(self_bosh => $bosh));
+	output_from { $hook->update_director_network_config };
+	ok(defined(netcall('release_network_lock', 'lab-ocf')), 'the lock is released through release_network_lock');
+	ok(defined(netcall('clear_network_lock', 'lab-ocf')), 'which clears the lock this process holds');
+
+	@netcalls = ();
+	my $failing = net_bosh(fail_clear => "Could not write the lock: Vault is sealed\n");
+	$hook = make_hook(env => net_env(self_bosh => $failing));
+	my ($ret, $out, $err);
+	($out, $err) = output_from { $ret = eval { $hook->update_director_network_config } };
+	is($ret, 1, 'a release that fails does not fail the step');
+	like(($out.$err) =~ s/\s+/ /gr, qr/could not be released.*Vault is sealed/, 'and is logged with why');
+	like($out.$err, qr/network-claim-lock/, 'naming where the lock is stored');
+};
+
+subtest 'update_director_network_config - a signal during the release waits for the release to finish' => sub {
+	plan tests => 4;
+	for my $signal (qw/INT TERM/) {
+		@netcalls = ();
+		my $finished = 0;
+		my $bosh = net_bosh(on_clear => sub { kill $signal => $$; $finished = 1 });
+		my $hook = make_hook(env => net_env(self_bosh => $bosh));
+		throws_ok { output_from { $hook->update_director_network_config } }
+			qr/^(?:Interrupted by user|Terminated)\b/, "$signal: the step still stops with the signal";
+		ok($finished && !$bosh->network_locked_by_me, "$signal: after the release has run to its end");
+	}
 };
 
 subtest 'update_director_network_config - a create-env director locks itself' => sub {

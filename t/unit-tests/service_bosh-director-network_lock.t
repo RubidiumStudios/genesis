@@ -593,7 +593,7 @@ subtest 'a write that fails after it may have landed says the lock may be held, 
 	unlike($signal, qr/may now hold/, 'with nothing added to it');
 };
 
-subtest 'a release that fails is logged with the specifics and never dies' => sub {
+subtest 'a release that cannot read the lock says its state is unknown, and never dies' => sub {
 	my $vault = MockLockVault->new(kv_version => 2);
 	my $bosh = director($vault);
 	is(try_acquire($bosh), 'won', 'the lock is taken');
@@ -603,15 +603,37 @@ subtest 'a release that fails is logged with the specifics and never dies' => su
 	lives_ok { $out = join('', output_from(sub { $result = $bosh->release_network_lock })) }
 		'a release against an unreadable vault does not die';
 	ok(!defined($result), 'it reports that the release failed');
-	like($out, qr/could not be released.*Vault is sealed/s, 'and logs why');
-	like($out, qr/lock-test/, 'naming the director');
-	like($out, qr/\Q$LOCK_PATH\E/, 'and where the lock is stored');
-	like($out, qr/stale/, 'and when other deploys can take it');
+	my $flat = $out =~ s/\s+/ /gr;
+	like($flat, qr/could not be read.*Vault is sealed/, 'and logs that the lock state could not be read, and why');
+	like($flat, qr/not known whether (?:this process|a lock)/i, 'and that it is not known whether a lock is held');
+	unlike($flat, qr/could not be released/, 'without claiming that a release failed');
+	like($flat, qr/lock-test/, 'naming the director');
+	like($flat, qr/safe get \Q$LOCK_PATH\E/, 'and giving the command that shows the lock');
+	like($flat, qr/safe vault status/, 'and the one that checks the vault');
+	like($flat, qr/stale/, 'and when other deploys can take it');
 
 	delete $vault->{read_error};
 	is(quietly { $bosh->release_network_lock }, 1, 'a release of this process\'s lock returns 1');
 	is($bosh->check_network_lock->{status}, 'unlocked', 'and removes it');
 	is(quietly { $bosh->release_network_lock }, 0, 'with nothing of ours to release, it returns 0');
+};
+
+subtest 'a release whose delete fails is logged as a failed release, and never dies' => sub {
+	my $vault = MockLockVault->new(kv_version => 1);
+	my $bosh = director($vault);
+	no warnings 'once';
+	local $Service::BOSH::Director::NETWORK_LOCK_SETTLE_SECONDS = 0;
+	is(try_acquire($bosh), 'won', 'the lock is taken');
+	$vault->{delete_refused} = 1;
+	my ($result, $out);
+	lives_ok { $out = join('', output_from(sub { $result = $bosh->release_network_lock })) }
+		'a release the vault refuses does not die';
+	ok(!defined($result), 'it reports that the release failed');
+	my $flat = $out =~ s/\s+/ /gr;
+	like($flat, qr/could not be released.*permission denied/, 'and logs that the lock could not be released, and why');
+	unlike($flat, qr/could not be read/, 'without saying the state was unreadable');
+	like($flat, qr/\Q$LOCK_PATH\E/, 'and where the lock is stored');
+	like($flat, qr/stale/, 'and when other deploys can take it');
 };
 
 subtest 'a release that finds the lock taken by another process reports that it released nothing' => sub {

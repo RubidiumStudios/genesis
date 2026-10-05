@@ -191,9 +191,14 @@ there with C<flatten> and C<clear>.
 
 =item 6.
 
-Releases the lock.  This happens on every exit path, including a failed hook,
-a failed upload, a failed exodus write, and an C<INT>, C<TERM>, C<HUP>, or
-C<QUIT> signal, which are turned into errors for the duration of the step.
+Releases the lock through C<Service::BOSH::Director::release_network_lock>,
+which releases it only when this process holds it.  This happens on every
+exit path, including a failed hook, a failed upload, a failed exodus write,
+and an C<INT>, C<TERM>, C<HUP>, or C<QUIT> signal, which are turned into
+errors for the duration of the step.  The first such signal unwinds the
+step.  One that arrives after that, whether before the release starts or
+while it runs, is held until the release has finished and is then raised, so
+that it cannot skip the release or cut it short.
 
 =back
 
@@ -213,11 +218,13 @@ B<Errors:>
 
 =item C<"The network claims lock on the %s BOSH director could not be released: %s ...">
 
-Printed with C<error()>, not raised, when the release itself fails.  The
-message says other deploys on the director will wait until the lock goes
-stale, that the vault probably became unreachable or the token expired, and
-gives the C<bosh-configs upload ... -y> command that clears a stale lock and
-finishes the step.
+Printed with C<error()> by C<Service::BOSH::Director::release_network_lock>,
+not raised, when the release itself fails.  The message says other deploys
+on the director will wait until the lock goes stale, that the vault
+probably became unreachable or the token expired, and gives the C<safe get>
+command that shows the lock.  When the lock could not be read at all, the
+message says instead that it is not known whether this process holds the
+lock.
 
 =item C<"The %s BOSH director deployed and is working, but its own cloud config %s and its network record in exodus were not updated. The step failed while %s: ...">
 

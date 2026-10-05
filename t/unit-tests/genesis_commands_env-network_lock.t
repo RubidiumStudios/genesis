@@ -226,6 +226,60 @@ subtest 'a release that fails does not hide the error that stopped the deploy' =
 	like($out.$stderr, qr/network-claim-lock/, 'naming where the lock is stored');
 };
 
+# A signal that arrives once the work under the lock has ended, and before
+# the release has finished, cannot be aimed at the gap between the two, so it
+# is sent from inside the release itself: the handlers are the same ones the
+# gap runs under, since they stay installed until the function returns.
+subtest 'a signal that lands during the release is held back until the release has finished' => sub {
+	$status = 'unlocked';
+	for my $signal (qw/INT TERM HUP QUIT/) {
+		my $finished = 0;
+		my $env = make_env(clear_network_lock => sub {
+			push @calls, 'clear';
+			kill $signal => $$;
+			# Work that follows the signal, as the vault calls in a real release do
+			$held = 0;
+			$finished = 1;
+			return 1;
+		});
+		my $ran = 0;
+		throws_ok { under_lock($env, sub { $ran = 1 }) } qr/^(?:Interrupted by user|Terminated|Hung up|Quit)\b/,
+			"$signal: the deploy still stops with the signal once the release is done";
+		ok($ran, "$signal: the work under the lock ran");
+		ok($finished, "$signal: the release ran to its end");
+		ok(!$held, "$signal: and the lock is not left on the director");
+	}
+};
+
+subtest 'a signal that lands during the release does not replace the error that stopped the deploy' => sub {
+	$status = 'unlocked';
+	my $finished = 0;
+	my $env = make_env(clear_network_lock => sub {
+		push @calls, 'clear';
+		kill TERM => $$;
+		$held = 0;
+		$finished = 1;
+		return 1;
+	});
+	my $err;
+	output_from {
+		eval { Genesis::Commands::Env::_deploy_under_network_claims_lock(
+			$env, sub { $held = 1; die "the cloud config upload failed\n" }, dryrun => 0, yes => 0
+		); 1 } or $err = $@;
+	};
+	like($err // '', qr/^the cloud config upload failed\b/, 'the error that stopped the deploy is the one passed on');
+	ok($finished, 'the release ran to its end');
+	ok(!$held, 'and the lock is not left on the director');
+};
+
+subtest 'the signal handlers are put back when the deploy returns' => sub {
+	$status = 'unlocked';
+	my %before = map { $_ => $SIG{$_} } qw/INT TERM HUP QUIT/;
+	my $env = make_env();
+	under_lock($env, sub { 1 });
+	is($SIG{$_}, $before{$_}, "\$SIG{$_} is as it was") for qw/INT TERM HUP QUIT/;
+};
+
 subtest 'a deploy that lost its lock while it waited writes no claims' => sub {
 	$status = 'locked';
 	my $env = make_env();   # holds no lock: another process took it over

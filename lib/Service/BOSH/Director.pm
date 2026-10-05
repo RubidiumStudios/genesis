@@ -1120,9 +1120,11 @@ sub ensure_network_lock_held {
 # release_network_lock - release the network claims lock if this process holds it, logging rather than dying on failure {{{
 sub release_network_lock {
 	my ($self) = @_;
+	my $stage = 'read';
 	my $released = eval {
 		my $cleared = 0;
 		if ($self->network_locked_by_me) {
+			$stage = 'release';
 			info({pending => 1}, "[[  - >>releasing network claims lock on #M{%s} BOSH director...", $self->alias);
 			# The lock can change hands between the check and the clear, and
 			# then it is someone else's to keep.
@@ -1136,6 +1138,23 @@ sub release_network_lock {
 	# A failed release must not replace the error that stopped the caller,
 	# nor stop it releasing locks on other directors, so it is logged here.
 	my $err = ($@ // '') =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/\s+$//r;
+	if ($stage eq 'read') {
+		# Nothing was deleted, and nothing is known: this process may hold the
+		# lock or may not, so the lock itself is what to look at.
+		error(
+			"The network claims lock on the #M{%s} BOSH director could not be read, so ".
+			"it is not known whether this process holds it: %s\n\n".
+			"If it does, other deploys on this director will wait for it until it goes ".
+			"stale, which is 30 minutes after it was taken, or sooner once this process ".
+			"has exited when they run on this same host.  This usually means the vault ".
+			"became unreachable or sealed, or the token expired.  Check with #C{safe vault ".
+			"status}, then #C{safe get %s} shows the lock; it is this process's if it names ".
+			"host %s and pid %s, and #C{safe rm %s} clears it.",
+			$self->alias, $err, $self->network_lock_path,
+			Sys::Hostname::hostname(), $$, $self->network_lock_path
+		);
+		return undef;
+	}
 	error(
 		"The network claims lock on the #M{%s} BOSH director could not be released: %s\n\n".
 		"Other deploys on this director will wait for it until it goes stale, which ".
