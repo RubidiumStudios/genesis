@@ -951,6 +951,41 @@ subtest 'lab claims - a failed deployment listing stops the build' => sub {
 	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and no claims are written');
 };
 
+# ---------------------------------------------------------------------------
+# the stored network record is read once per init
+# ---------------------------------------------------------------------------
+subtest 'init - reads the stored network record once' => sub {
+	plan tests => 5;
+
+	my $stored = {
+		azs     => {az1 => {for_cpi => 'cpi-one'}},
+		subnets => {'ocfp-0' => {claims => {cf => '10.0.0.10-10.0.0.20'}}},
+	};
+	for my $case (
+		['a stored record', $stored],
+		['an empty record on a director with no deployments', undef],
+	) {
+		my ($label, $record) = @$case;
+		my @reads;
+		my $env = mock_env(exodus_lookup_strict => sub {
+			my ($self, $key, @rest) = @_;
+			push @reads, $key;
+			return $record;
+		});
+		local $ENV{GENESIS_ENVIRONMENT} = "test-env-dir-$test_seq";
+		my $hook = Genesis::Hook::CloudConfig::Bosh::Director->init(
+			env => $env, purpose => 'director'
+		);
+		is_deeply(\@reads, ['/network:.'], "$label is read strictly, once");
+		if ($record) {
+			is($hook->{network}{azs}{az1}{for_cpi}, 'cpi-one', "$label still supplies the for_cpi data");
+			is($hook->{network}{subnets}{'ocfp-0'}{claims}{cf}, '10.0.0.10-10.0.0.20', "$label still supplies the claims");
+		} else {
+			ok(!exists $hook->{network}{subnets}{'ocfp-0'}{claims}, "$label leaves the claims absent");
+		}
+	}
+};
+
 done_testing;
 
 # vim: fdm=marker:foldlevel=1:ts=2:sts=2:sw=2:noet

@@ -485,7 +485,9 @@ B<Examples:>
 
 Returns the stored network data hash for this BOSH director by calling
 C<< $self->env->exodus_lookup_strict('/network:.') >>. Returns C<undef> if no
-exodus network data was ever written, and dies if the read fails.
+exodus network data was ever written, and dies if the read fails.  The
+record is read from the vault the first time and kept on the hook, so the
+three checks that run during C<init> share one read.
 
 B<Returns:> A hash reference of exodus network data, or C<undef>.
 
