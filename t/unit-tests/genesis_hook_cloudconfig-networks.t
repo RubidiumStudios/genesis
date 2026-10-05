@@ -1885,6 +1885,20 @@ subtest '_calculate_subnet_allocation - growing and shrinking a claim' => sub {
 		);
 	}
 
+	# A deploy hook asking for a network called compilation, which the
+	# director-only exemption must not cover
+	package Genesis::Hook::CloudConfig::LabCompilationDeploy;
+	use parent -norequire, 'Genesis::Hook::CloudConfig';
+	sub lab_network {
+		return $_[0]->network_definition('compilation', strategy => 'ocfp',
+			dynamic_subnets => {
+				subnets                   => ['ocfp-2'],
+				allocation                => {size => 4, statics => 0},
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+			},
+		);
+	}
+
 	# The concourse kit on PVE: every VM in ocfp-0, the web node on the
 	# reserved concourse_ip static, and four dynamic addresses for the rest
 	package Genesis::Hook::CloudConfig::LabConcourse;
@@ -1947,6 +1961,8 @@ my %LAB = (
 			                  overrides => {'valkey-service' => {allocation => {size => 8}}}},
 			compilation   => {class => 'LabDirector',   type => 'bosh',       claim => 'ocfp-cf1-lab-ocf.bosh.net-compilation',
 			                  director => 1},
+			'compilation-deploy' => {class => 'LabCompilationDeploy', type => 'bosh',
+			                  claim => 'ocfp-cf1-lab-ocf.bosh.net-compilation'},
 		},
 		# The director's saved claims, as read from its network exodus
 		claims_today => {
@@ -2353,6 +2369,17 @@ subtest 'lab claims - a record added inside a persistent network claim stops the
 		'the opt-in drops .182 and refills');
 	like($err, qr/valkey-service.*ocfp-1.*10\.61\.148\.182.*nfs.*GENESIS_ALLOW_CLAIM_PRUNE/s,
 		'and warns what it dropped and why it was allowed');
+};
+
+subtest 'lab claims - the compilation exemption belongs to a director hook, not a deploy hook' => sub {
+	plan tests => 2;
+	# The same compilation claim that a director hook repairs with a warning
+	lab_reset_claims(lab_claims_today());
+	my $before = lab_claims_snapshot();
+	throws_ok { lab_run_net('compilation-deploy') }
+		qr/net-compilation.*10\.61\.148\.229.*haproxy.*GENESIS_ALLOW_CLAIM_PRUNE/s,
+		'a deploy hook stops at a reserved address in a compilation claim';
+	is_deeply(lab_claims_snapshot(), $before, 'and saves nothing');
 };
 
 subtest 'lab claims - two dynamic claims over the same addresses stop the build' => sub {

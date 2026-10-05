@@ -832,6 +832,27 @@ subtest 'lab claims - only the compilation network of a director is exempt from 
 	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and saves nothing');
 };
 
+subtest 'lab claims - GENESIS_ALLOW_CLAIM_PRUNE takes a comma-separated list of networks' => sub {
+	plan tests => 3;
+	my ($env, $state) = lab_director(claims => {
+		workers => '10.61.148.228-10.61.148.231',
+		cf      => $lab_claims_today{cf},
+	});
+	local $ENV{GENESIS_ALLOW_CLAIM_PRUNE} = join(', ', 'net-other', $state->{key}->('workers').' ', 'net-more');
+	my ($net, $err) = lab_build($env, $state, 'workers');
+	unlike($state->{claims}{'ocfp-2'}{$state->{key}->('workers')}, qr/229/, 'the claim drops the reserved address');
+	like($err, qr/net-workers.*10\.61\.148\.229.*haproxy.*GENESIS_ALLOW_CLAIM_PRUNE/s,
+		'the network is allowed when it is any item of the list');
+
+	$ENV{GENESIS_ALLOW_CLAIM_PRUNE} = 'net-other,net-more';
+	my ($env2, $state2) = lab_director(claims => {
+		workers => '10.61.148.228-10.61.148.231',
+		cf      => $lab_claims_today{cf},
+	});
+	throws_ok { lab_build($env2, $state2, 'workers') } qr/GENESIS_ALLOW_CLAIM_PRUNE=\S*net-workers/,
+		'a list that does not name the network still stops';
+};
+
 subtest 'lab claims - a create-env director repairs its compilation network the same way' => sub {
 	plan tests => 2;
 	my ($env, $state) = lab_director(create_env => 1, claims => {%lab_claims_today});
