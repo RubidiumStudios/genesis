@@ -241,6 +241,20 @@
   implemented.  This commit completes that implementation, so that if
   `hooks/prereqs` exists in a kit, it will be run prior to usage.
 
+* Network claims no longer hand out another target's reserved address.
+
+  A network's free pool now leaves out every other target's reserved-ips
+  records, and a saved claim that holds one of those addresses stops the
+  build instead of keeping it.  Set `GENESIS_ALLOW_CLAIM_PRUNE` to a
+  comma-separated list of network names to drop the address for one run.  A
+  director's compilation network drops it with a warning, because its VMs
+  exist only during a deploy.
+
+  A network's own in-band reserved-ips records now take away a claim's top
+  address on the first build.  Before this fix the same address went on the
+  second build, so a claim that was saved by an earlier Genesis may change
+  by one address the first time it is built.
+
 * Fix bug where default config type was lost when fetching configs from BOSH
   director, resulting in bad messages and error reports.
 

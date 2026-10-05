@@ -712,13 +712,15 @@ define_command("bosh-configs", {
 		"cpi name.  A BOSH director environment also has its own cloud config, ".
 		"named #C{<env>.<deployment-type>.director}, which lives on the director ".
 		"itself and holds its compilation network.  Uploading it takes that ".
-		"director's network claims lock and rewrites the director's network ".
-		"claims record in exodus, and the delete action refuses it.  This ".
+		"director's network claims lock and writes the director's network claims ".
+		"record in exodus whenever the claims differ from what the record holds, ".
+		"even when the config itself is identical and is not uploaded again.  ".
+		"The delete action refuses it.  This ".
 		"includes a create-env director, which has no parent-side cloud config.".
 		"\n\n".
 		"#Y{Note:} an upload on a BOSH director environment with neither ".
 		"#y{--type} nor #y{--name} also uploads the director's own cloud config ".
-		"and rewrites its network claims record, with no prompt under #y{--yes}.  ".
+		"and may write its network claims record, with no prompt under #y{--yes}.  ".
 		"Save the director's #C{network} exodus record first, and use #y{--type} ".
 		"or #y{--name} when you mean something narrower, such as only the ".
 		"runtime configs.".
