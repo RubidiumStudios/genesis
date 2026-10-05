@@ -88,6 +88,7 @@ unit-tests/genesis_log-stack.t
 unit-tests/genesis_log-routing.t
 unit-tests/genesis_log-convenience.t
 unit-tests/genesis_secret-base.t
+unit-tests/genesis_env-secrets_plan-errors.t  # Plan error reporting includes safe stderr
 unit-tests/genesis_secret_dhparams-core.t
 unit-tests/genesis_secret_invalid-core.t
 unit-tests/genesis_secret_random-core.t
