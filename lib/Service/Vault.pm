@@ -519,12 +519,19 @@ sub get_path_strict {
 	}
 	if ($rc || $err) {
 		# safe names a path with nothing stored on stderr, and exits the same
-		# way for it as for an unreachable or sealed vault
-		return undef if $rc && ($err // '') =~ /no secret exists at path/;
+		# way for it as for an unreachable or sealed vault.  A token that can
+		# list a path but not read it gets that same line after a refusal,
+		# so a refusal anywhere in the output means the path was not read.
 		my $reason = ($err // '') =~ s/\s+$//r;
+		my $refused = $reason =~ /\b403\b|permission denied|forbidden/i;
+		return undef if $rc && $reason =~ /no secret exists at path/ && !$refused;
 		bail(
-			"Could not read #C{%s} from vault at #M{%s}: %s",
-			$path, $self->{url}, length($reason) ? $reason : "safe exited with code $rc"
+			"Could not read #C{%s} from vault at #M{%s}: %s\n\n".
+			"Likely causes are that the token has no read access on that path, ".
+			"that the vault is sealed, or that the vault cannot be reached.  ".
+			"Run #C{safe export %s} with the same token to see which, and ".
+			"#C{safe vault status} to check whether the vault is sealed.",
+			$path, $self->{url}, length($reason) ? $reason : "safe exited with code $rc", $path
 		);
 	}
 	return $self->_unpack_path_export($path, $data);

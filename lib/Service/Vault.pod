@@ -945,9 +945,15 @@ B<Examples:>
 
 Reads the tree under C<$path> as C<get_path> does, but tells a failed read
 from a path with nothing stored. Returns C<undef> when C<safe> reports that no
-secret exists at the path, and dies with the path, the vault URL, and the
-error for any other failure, such as an unreachable or sealed vault, an
-expired token, or an export that cannot be parsed.
+secret exists at the path, and dies with the path, the vault URL, the error,
+the likely causes, and what to check for any other failure, such as an
+unreachable or sealed vault, an expired token, or an export that cannot be
+parsed.
+
+A token that can list a path but cannot read it makes C<safe> report that no
+secret exists, after a refusal. When the output holds C<403>, C<permission
+denied>, or C<forbidden> as well, the read is treated as failed and dies,
+since the path was never read.
 
 Use it where a read that failed must not pass for an empty record, such as
 before a write that clears the record it replaces.
@@ -975,7 +981,10 @@ Raised (via C<bail()>) when C<safe export> fails for any reason other than
 the path having nothing stored, or when its output cannot be parsed as JSON.
 The placeholders are the path, the vault URL, and the reason, which is the
 text C<safe> wrote to stderr, or C<safe exited with code N> when it wrote
-none.
+none. The message goes on to name the likely causes (a token without read on
+the path, a sealed vault, or an unreachable vault) and to say to run
+C<safe export> on the path and C<safe vault status>. The text here is the
+start of it.
 
 =back
 
