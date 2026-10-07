@@ -1295,14 +1295,21 @@ sub _config {
 	return $self->{_config}{data}
 		if $self->{_config} && $self->{_config}{stamp} eq $stamp;
 
+	# Each entry comes as its scope, then its key and value, so the pin can be
+	# told apart by where it was set.
 	my ($out) = run({dir => $self->{root}, stderr => 0},
-		'git', 'config', '-z', '--get-regexp',
-		'^(remote\..+\.url|branch\..+\.remote|url\..+\.insteadof)$');
-	my %data = (remotes => {}, order => [], upstream => {}, rewrites => []);
-	for my $entry (split /\0/, ($out // '')) {
-		my ($key, $value) = split /\n/, $entry, 2;
+		'git', 'config', '-z', '--show-scope', '--get-regexp',
+		'^(remote\..+\.url|branch\..+\.remote|url\..+\.insteadof|genesis\.remote)$');
+	my %data = (remotes => {}, order => [], upstream => {}, rewrites => [],
+		pin => {});
+	my @fields = split /\0/, ($out // '');
+	while (my ($scope, $entry) = splice(@fields, 0, 2)) {
+		my ($key, $value) = split /\n/, ($entry // ''), 2;
 		next unless defined $value;
-		if ($key =~ m{^remote\.(.+)\.url$}) {
+		if ($key eq 'genesis.remote') {
+			my $where = ($scope eq 'local' || $scope eq 'worktree') ? 'local' : 'outside';
+			$data{pin}{$where} = $value;
+		} elsif ($key =~ m{^remote\.(.+)\.url$}) {
 			push @{$data{order}}, $1 unless exists $data{remotes}{$1};
 			$data{remotes}{$1} //= $value;
 		} elsif ($key =~ m{^branch\.(.+)\.remote$}) {
@@ -1354,6 +1361,18 @@ sub _config_stamp {
 sub remote_names {
 	my ($self) = @_;
 	return sort @{$self->_config->{order}};
+}
+
+# }}}
+# remote_pin - the genesis.remote this clone sets, and one set elsewhere {{{
+#
+# The clone's own .git/config pins its pipeline's remote (D118); a value from
+# the user's or the system's configuration would pin every repository on the
+# machine, so it is answered apart, for the caller to warn about and ignore.
+sub remote_pin {
+	my ($self) = @_;
+	my $pin = $self->_config->{pin};
+	return ($pin->{local}, $pin->{outside});
 }
 
 # }}}

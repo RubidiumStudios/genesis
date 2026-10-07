@@ -217,8 +217,7 @@ subtest 'a repository with no remote never reaches the control check' => sub {
 	my (undef, $err, $exit) = run_genesis($h, 'propagate');
 
 	is($exit, Genesis::Exit::CONFIG, 'the run exits CONFIG');
-	like($err,
-		qr/pipeline\.source_control\.remote\s+could\s+not\s+be\s+derived/,
+	like($err, qr/This\s+clone\s+has\s+no\s+git\s+remote/,
 		'and the refusal is the derivation\'s, well before the control check');
 };
 

@@ -1883,8 +1883,9 @@ B<Errors:>
 C<"pipeline.source_control.control_branch must not be empty.">,
 C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
 enabled, but %s is not a git checkout.">,
-C<"pipeline.source_control.remote could not be derived.">,
-C<"pipeline.source_control.repository could not be derived from %s.">, and
+the remote refusals of L</_remote_refusal>,
+C<"pipeline.source_control.repository could not be derived from %s, which
+carries no owner/repo pair.">, and
 C<"pipeline.source_control.repository is %s, which names no repository."> -
 raised by L</_source_control>, whichever of the five values the caller asked
 for, because it settles all of them at once.
@@ -1929,8 +1930,9 @@ B<Errors:>
 C<"pipeline.source_control.control_branch must not be empty.">,
 C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
 enabled, but %s is not a git checkout.">,
-C<"pipeline.source_control.remote could not be derived.">,
-C<"pipeline.source_control.repository could not be derived from %s.">, and
+the remote refusals of L</_remote_refusal>,
+C<"pipeline.source_control.repository could not be derived from %s, which
+carries no owner/repo pair.">, and
 C<"pipeline.source_control.repository is %s, which names no repository."> -
 raised by L</_source_control>, whichever of the five values the caller asked
 for, because it settles all of them at once.
@@ -1954,8 +1956,8 @@ Read from C<pipeline.source_control.repository> where it is set, written as
 C<owner/repo> or as the repository's https or ssh URL (D118), and otherwise
 parsed from the remote's url. Every form goes through
 L</_repository_identity>, so this answers C<owner/repo> whichever was
-written. GitHub Enterprise parses the same way, since only the host differs.
-A mirror whose url does not carry the pair needs the key set.
+written. Any host parses the same way, GitHub Enterprise included. A remote
+whose url does not carry the pair, such as a path, needs the key set.
 
 B<Parameters:> None.
 
@@ -1970,8 +1972,9 @@ B<Errors:>
 C<"pipeline.source_control.control_branch must not be empty.">,
 C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
 enabled, but %s is not a git checkout.">,
-C<"pipeline.source_control.remote could not be derived.">,
-C<"pipeline.source_control.repository could not be derived from %s.">, and
+the remote refusals of L</_remote_refusal>,
+C<"pipeline.source_control.repository could not be derived from %s, which
+carries no owner/repo pair.">, and
 C<"pipeline.source_control.repository is %s, which names no repository."> -
 raised by L</_source_control>, whichever of the five values the caller asked
 for, because it settles all of them at once.
@@ -2018,8 +2021,9 @@ B<Errors:>
 C<"pipeline.source_control.control_branch must not be empty.">,
 C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
 enabled, but %s is not a git checkout.">,
-C<"pipeline.source_control.remote could not be derived.">, and
-C<"pipeline.source_control.repository could not be derived from %s."> -
+the remote refusals of L</_remote_refusal>, and
+C<"pipeline.source_control.repository could not be derived from %s, which
+carries no owner/repo pair."> -
 raised by L</_source_control>, which this reader calls like the three
 single-value readers beside it.
 
@@ -2633,6 +2637,13 @@ refusal that retires it lands.
 
 =item *
 
+The clone's own pin, C<genesis.remote> in its C<.git/config>, is read before
+the match and wins, unchecked against the repository, through
+L</_pinned_remote>. One set only in the user's or the system's configuration
+is ignored, with the warning L</_warn_outside_pin> gives.
+
+=item *
+
 A clone with one remote uses it whatever its URL, unless that URL names a
 repository other than the configured C<repository>. A filesystem path or a
 C<file://> URL names none, and stands.
@@ -2666,11 +2677,11 @@ The control branch's name.
 =back
 
 B<Returns:> A hashref of C<remote>, C<identity> (the repository, or C<undef>
-for a single remote that names none), and C<how> (C<configured>, C<only> or
-C<matched>); or a hashref of C<refusal> alone, carrying the words.
+for a single remote that names none), and C<how> (C<configured>, C<pinned>,
+C<only> or C<matched>); or a hashref of C<refusal> alone, carrying the words.
 
 B<Errors:> None of its own; see L</_remote_refusal> for the refusals it
-answers with.
+answers with. A pin set only outside the clone is reported as a warning.
 
 B<Examples:>
 
@@ -2745,7 +2756,7 @@ B<Examples:>
 
 =head2 _only_remote
 
-    my $resolved = _only_remote($remote, $identity, $want);
+    my $resolved = _only_remote($entry, $want);
 
 A clone's single remote, unless the repository it names is not the configured
 one, in which case the refusal for no match.
@@ -2756,9 +2767,9 @@ B<Parameters:>
 
 =over 4
 
-=item C<$remote>, C<$identity>
+=item C<$entry>
 
-The remote and the repository it points at, which may be C<undef>.
+The remote as C<[$remote, $url, $identity]>, the identity possibly C<undef>.
 
 =item C<$want>
 
@@ -2772,12 +2783,12 @@ B<Errors:> None.
 
 B<Examples:>
 
-    _only_remote('origin', undef, $want);
+    _only_remote(['origin', '/srv/git/bosh.git', undef], $want);
     # returns {remote => 'origin', identity => $want, how => 'only'}
 
 =head2 _matched_remote
 
-    my $resolved = _matched_remote($git, $control, \@names, \%id, $want);
+    my $resolved = _matched_remote($git, $control, \@listed, $want);
 
 Among several remotes, the one naming the repository, as L</_resolve_remote>
 describes.
@@ -2792,9 +2803,9 @@ B<Parameters:>
 
 The repository, asked for control's upstream, and the control branch's name.
 
-=item C<\@names>, C<\%id>
+=item C<\@listed>
 
-The remotes, and the repository each points at.
+The remotes, each as C<[$remote, $url, $identity]>.
 
 =item C<$want>
 
@@ -2808,16 +2819,88 @@ B<Errors:> None.
 
 B<Examples:>
 
-    _matched_remote($git, 'control', ['https', 'ssh'], \%id, $want);
+    _matched_remote($git, 'control', [[https => $u1, $id], [ssh => $u2, $id]], $want);
     # returns the one control tracks, or the refusal naming both
+
+=head2 _pinned_remote
+
+    my $resolved = _pinned_remote($pin, \@listed, $want);
+
+The remote the clone's own C<genesis.remote> names (D118). It is not checked
+against the repository, because the pin is for a remote whose URL the
+identity cannot match, such as a mirror on another host. A pin naming a
+remote the clone does not have is refused rather than passed over for the
+match, because it was set on purpose.
+
+Plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$pin>
+
+The remote the pin names.
+
+=item C<\@listed>
+
+The clone's remotes, each as C<[$remote, $url, $identity]>.
+
+=item C<$want>
+
+The configured repository's identity, or C<undef>.
+
+=back
+
+B<Returns:> C<{remote, identity, how =E<gt> 'pinned'}>, or the C<absent_pin>
+refusal from L</_remote_refusal>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _pinned_remote('mirror', [[mirror => 'https://git.corp.example/m/r.git', $id]], $want);
+    # returns {remote => 'mirror', identity => $want, how => 'pinned'}
+
+=head2 _warn_outside_pin
+
+    _warn_outside_pin($pin);
+
+Warns that a C<genesis.remote> set outside the clone, in the user's or the
+system's git configuration, is ignored, because it would pin every repository
+on the machine, and gives the C<git config --local> form that pins this clone.
+
+Plain function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$pin>
+
+The remote the outside setting names.
+
+=back
+
+B<Returns:> Nothing useful.
+
+B<Errors:> None; it warns.
+
+B<Examples:>
+
+    _warn_outside_pin('mirror');
+    # warns, ending "git config --local genesis.remote mirror"
 
 =head2 _remote_refusal
 
     my $words = _remote_refusal($kind, %opts);
 
 The words for a remote L</_resolve_remote> cannot settle, each listing the
-clone's remotes with the repository each points at, since the operator's next
-step is to change one of them or the configuration.
+clone's remotes with the URL each is configured with and the repository it
+points at, or that it names none, since the operator's next step is to change
+one of them, the configuration, or the pin. Each remedy is given as a command,
+with the remote's name filled in where the clone has one remote and
+C<E<lt>remoteE<gt>> standing in where it has several.
 
 Plain function, not a method.
 
@@ -2827,16 +2910,42 @@ B<Parameters:>
 
 =item C<$kind>
 
-C<none>, a clone with no remote at all; C<unmatched>, no remote naming the
-repository, with C<git remote add> and C<git remote set-url> as the remedies
-where C<want> is given; C<several>, remotes naming more than one repository
-with none configured; C<ambiguous>, several remotes naming the repository
-and control's upstream naming none of them, with
-C<git branch --set-upstream-to> as the remedy.
+=over 4
+
+=item *
+
+C<none>, a clone with no remote at all, with C<git remote add> as the remedy,
+its URL composed from the configured repository.
+
+=item *
+
+C<absent_pin>, a C<genesis.remote> naming a remote the clone lacks, with
+C<git config --local --unset genesis.remote> and the pin set to a listed
+remote as the remedies.
+
+=item *
+
+C<unmatched>, no remote naming the repository, with C<git remote add>,
+C<git remote set-url> and the pin as the remedies where C<want> is given, and
+the C<repository> key and the pin where it is not.
+
+=item *
+
+C<several>, remotes naming more than one repository with none configured,
+with the C<repository> key and the pin as the remedies.
+
+=item *
+
+C<ambiguous>, several remotes naming the repository and control's upstream
+naming none of them, with C<git branch --set-upstream-to> and the pin as the
+remedies.
+
+=back
 
 =item C<%opts>
 
-C<control>, C<want>, and C<listed>, an arrayref of C<[$remote, $identity]>.
+C<control>, C<want>, C<pin>, and C<listed>, an arrayref of
+C<[$remote, $url, $identity]>.
 
 =back
 
@@ -2847,7 +2956,7 @@ B<Errors:> None.
 
 B<Examples:>
 
-    _remote_refusal(several => listed => [[origin => $fork], [upstream => $org]]);
+    _remote_refusal(several => listed => [[origin => $u1, $fork], [upstream => $u2, $org]]);
     # returns "This clone's remotes point at more than one repository, ..."
 
 =head2 _topology_here
@@ -3561,14 +3670,15 @@ Returns the resolved source-control values as a hash reference, whose keys
 are C<remote>, C<uri>, C<repository>, C<control_branch>, and C<pr_prefix>.
 Precedence is explicit over derived over default.
 
-The remote is L</_resolve_remote>'s answer, the clone's remote that points at
-the repository, and its refusals are raised here at C<CONFIG>; it is never
-the first C<git remote>, which is alphabetical order. The repository is the
-one written in the configuration, as C<owner/repo> or as a URL, or else the
-repository the resolved remote points at, or the GitHub C<owner/repo> its
-URL carries, github.com or GitHub Enterprise alike; either way it is read
+The remote is L</_resolve_remote>'s answer, the clone's own pin or the
+clone's remote that points at the repository, and its refusals are raised
+here at C<CONFIG>; it is never the first C<git remote>, which is alphabetical
+order. The repository is the one written in the configuration, as
+C<owner/repo> or as a URL, or else the repository the resolved remote points
+at, or the C<owner/repo> its URL carries, on any host; either way it is read
 through L</_repository_identity>, the identity is kept beside it as
-C<identity>, and any other host must name it explicitly. An empty C<pr_prefix>
+C<identity>, and a remote whose URL carries no C<owner/repo>, such as a path,
+needs it named explicitly. An empty C<pr_prefix>
 is refused, because it would give the pull request branch the deployment
 branch's own name. The prefix checked is the one in the configuration being
 loaded, not L</pr_prefix>'s answer from control, because this runs as that
@@ -3658,11 +3768,11 @@ passed over, and the host is lowercased; owner and repo keep their spelling,
 which the API and the messages use, and L</_identity_key> folds them for
 comparison.
 
-GitHub Enterprise parses the same way as github.com, because its URLs carry
-the pair in the same shape and only the host differs. The host is what says
-GitHub: every https URL on earth has two path segments, so a URL that names
-some other forge answers C<undef>, which is the MVP's refusal of any host that
-is not GitHub under D102.
+Any host parses the same way as github.com, GitHub Enterprise included,
+because a GitHub-compatible host need not carry "github" in its name (D118).
+Whether a host speaks GitHub's API is a question for the API, not for its
+name. A filesystem path or a C<file://> URL carries no host and answers
+C<undef>.
 
 Plain function, not a method.
 
@@ -3691,7 +3801,10 @@ B<Examples:>
     # returns {host => 'github.example.com', owner => 'team', repo => 'bosh'}
 
     my $identity = _repository_identity('https://git.example.com/team/bosh.git');
-    # returns undef -- that host is not GitHub
+    # returns {host => 'git.example.com', owner => 'team', repo => 'bosh'}
+
+    my $identity = _repository_identity('/srv/git/bosh.git');
+    # returns undef -- a path names no repository
 
 =head2 _identity_key
 

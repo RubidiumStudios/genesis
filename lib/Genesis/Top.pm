@@ -1279,11 +1279,13 @@ sub _control_commit {
 # _resolve_remote - the remote this clone's pipeline lives on (D118) {{{
 #
 # A remote is found by the repository it points at, not by its name, since
-# the name and the protocol are each cloner's own.  One remote is used
-# whatever its URL, unless it names a repository other than the configured
-# one.  Among several, the ones naming the repository are kept, the
-# configured one or else the one they all agree on, and control's upstream
-# chooses between spellings of it; a fork is never chosen by tracking.
+# the name and the protocol are each cloner's own.  The clone's own pin,
+# genesis.remote in its .git/config, is read first and wins.  Otherwise one
+# remote is used whatever its URL, unless it names a repository other than
+# the configured one.  Among several, the ones naming the repository are
+# kept, the configured one or else the one they all agree on, and control's
+# upstream chooses between spellings of it; a fork is never chosen by
+# tracking.
 #
 # It answers a refusal rather than raising one, because _control_commit asks
 # before the configuration is validated, and in repositories with no
@@ -1300,14 +1302,46 @@ sub _resolve_remote {
 		my $named   = $config->get('pipeline.source_control.remote');
 		my $written = $config->get('pipeline.source_control.repository');
 		my $want    = defined $written ? _repository_identity($written) : undef;
-		my @names   = $git->remote_names;
-		my %id      = map {($_ => $self->_remote_identity($_))} @names;
+		my ($pin, $outside) = $git->remote_pin;
+		my @listed  = map {
+			[$_, $git->configured_url($_), $self->_remote_identity($_)]
+		} $git->remote_names;
+
+		_warn_outside_pin($outside) if defined $outside && !defined $pin;
 
 		  defined $named ? {remote => $named, how => 'configured'}
-		: !@names        ? {refusal => _remote_refusal(none => control => $control)}
-		: @names == 1    ? _only_remote($names[0], $id{$names[0]}, $want)
-		:                  _matched_remote($git, $control, \@names, \%id, $want);
+		: defined $pin   ? _pinned_remote($pin, \@listed, $want)
+		: !@listed       ? {refusal => _remote_refusal(none => want => $want)}
+		: @listed == 1   ? _only_remote($listed[0], $want)
+		:                  _matched_remote($git, $control, \@listed, $want);
 	};
+}
+
+# }}}
+# _pinned_remote - the remote the clone's own genesis.remote names {{{
+#
+# Read before the match and not checked against the repository, because the
+# pin is for a remote whose URL the identity cannot match.  A pin naming no
+# remote is refused rather than passed over, since it was set on purpose.
+sub _pinned_remote {
+	my ($pin, $listed, $want) = @_;
+	my ($entry) = grep {$_->[0] eq $pin} @$listed;
+	return {refusal => _remote_refusal(absent_pin => pin => $pin,
+			listed => $listed)} unless $entry;
+	return {remote => $pin, identity => $want // $entry->[2], how => 'pinned'};
+}
+
+# }}}
+# _warn_outside_pin - say why a genesis.remote set outside the clone is ignored {{{
+sub _warn_outside_pin {
+	my ($pin) = @_;
+	warning(
+		"#C{genesis.remote} is set to #C{%s} outside this clone, in your own or ".
+		"the system's git configuration, which would pin every repository on ".
+		"this machine, so it is ignored.  To pin this clone's pipeline remote, ".
+		"set it in this clone alone:\n\n  git config --local genesis.remote %s\n",
+		$pin, $pin
+	);
 }
 
 # }}}
@@ -1343,9 +1377,10 @@ sub _ssh_host_resolved {
 # }}}
 # _only_remote - a clone's single remote, unless it names another repository {{{
 sub _only_remote {
-	my ($remote, $identity, $want) = @_;
+	my ($entry, $want) = @_;
+	my ($remote, undef, $identity) = @$entry;
 	return {refusal => _remote_refusal(unmatched =>
-			want => $want, listed => [[$remote, $identity]])}
+			want => $want, listed => [$entry])}
 		if $want && $identity && _identity_key($want) ne _identity_key($identity);
 	return {remote => $remote, identity => $want // $identity, how => 'only'};
 }
@@ -1353,86 +1388,108 @@ sub _only_remote {
 # }}}
 # _matched_remote - among several remotes, the one naming the repository {{{
 sub _matched_remote {
-	my ($git, $control, $names, $id, $want) = @_;
-	my @listed = map {[$_, $id->{$_}]} @$names;
+	my ($git, $control, $listed, $want) = @_;
+	my %id = map {($_->[0] => $_->[2])} @$listed;
+	my @names = map {$_->[0]} @$listed;
 
 	my @matched;
 	if ($want) {
 		my $key = _identity_key($want);
-		@matched = grep {$id->{$_} && _identity_key($id->{$_}) eq $key} @$names;
+		@matched = grep {$id{$_} && _identity_key($id{$_}) eq $key} @names;
 	} else {
 		my %by;
-		push @{$by{_identity_key($id->{$_})}}, $_ for grep {$id->{$_}} @$names;
-		return {refusal => _remote_refusal(several => listed => \@listed)}
+		push @{$by{_identity_key($id{$_})}}, $_ for grep {$id{$_}} @names;
+		return {refusal => _remote_refusal(several => listed => $listed)}
 			if keys(%by) > 1;
 		@matched = map {@$_} values %by;
 	}
 	return {refusal => _remote_refusal(unmatched => want => $want,
-			listed => \@listed)} unless @matched;
+			listed => $listed)} unless @matched;
 
 	my $chosen = @matched == 1 ? $matched[0] : do {
 		my $upstream = $git->branch_upstream_remote($control);
 		(defined $upstream && grep {$_ eq $upstream} @matched) ? $upstream : undef;
 	};
+	my %matched = map {($_ => 1)} @matched;
 	return {refusal => _remote_refusal(ambiguous => control => $control,
-			listed => [map {[$_, $id->{$_}]} sort @matched])}
+			listed => [grep {$matched{$_->[0]}} @$listed])}
 		unless defined $chosen;
-	return {remote => $chosen, identity => $want // $id->{$chosen}, how => 'matched'};
+	return {remote => $chosen, identity => $want // $id{$chosen}, how => 'matched'};
 }
 
 # }}}
 # _remote_refusal - the words for a remote _resolve_remote cannot settle {{{
 #
-# Each lists the clone's remotes with the repository each points at, since
-# the operator's next step is to change one of them or the configuration.
+# Each lists the clone's remotes with the URL each is configured with and the
+# repository it points at, since the operator's next step is to change one of
+# them, the configuration, or the pin, and each gives those steps as commands
+# with the names filled in where there is one name to fill.
 sub _remote_refusal {
 	my ($kind, %o) = @_;
-	my $name  = sub {join('/', @{$_[0]}{qw/owner repo/})};
-	my $lines = join('', map {
-		my ($remote, $identity) = @$_;
-		sprintf("  #C{%s}  %s\n", $remote, $identity
+	my $name   = sub {join('/', @{$_[0]}{qw/owner repo/})};
+	my @listed = @{$o{listed} || []};
+	my $lines  = join('', map {
+		my ($remote, $url, $identity) = @$_;
+		sprintf("  #C{%s}  %s  (%s)\n", $remote, $url // '(no url)', $identity
 			? $name->($identity) . " on $identity->{host}"
-			: 'names no GitHub repository');
-	} @{$o{listed} || []});
+			: 'names no repository');
+	} @listed);
+	my $one = @listed == 1 ? $listed[0][0] : '<remote>';
+	my $url = $o{want}
+		? sprintf('git@%s:%s.git', $o{want}{host}, $name->($o{want}))
+		: '<url>';
+	my $pin = sprintf("  git config genesis.remote %s\n", $one);
 
 	if ($kind eq 'none') {
 		return sprintf(
-			"#C{pipeline.source_control.remote} could not be derived.\n".
-			"The control branch #C{%s} has no configured upstream and there is ".
-			"no remote named #C{origin}.  Name the remote explicitly.",
-			$o{control});
+			"This clone has no git remote, and the pipeline's branches live on ".
+			"one.  Add the repository the pipeline lives in:\n\n".
+			"  git remote add origin %s\n", $url);
+	}
+	if ($kind eq 'absent_pin') {
+		return sprintf(
+			"#C{genesis.remote} names #C{%s}, which is not a remote of this ".
+			"clone.  The clone's remotes are:\n\n%s\n".
+			"Take the pin off:\n\n  git config --local --unset genesis.remote\n\n".
+			"or set it to one of the remotes above:\n\n%s",
+			$o{pin}, $lines, $pin);
 	}
 	if ($kind eq 'several') {
 		return sprintf(
 			"This clone's remotes point at more than one repository, so which one ".
 			"the pipeline lives in cannot be told from them:\n\n%s\n".
 			"Set #C{pipeline.source_control.repository} in #C{.genesis/config} to ".
-			"the repository the pipeline lives in, which settles it for every clone.",
-			$lines);
+			"the repository the pipeline lives in, which settles it for every ".
+			"clone, or pin the remote for this clone alone:\n\n%s",
+			$lines, $pin);
 	}
 	if ($kind eq 'ambiguous') {
-		my ($first) = map {$_->[0]} @{$o{listed}};
+		my $first = $listed[0][0];
 		return sprintf(
 			"Remotes %s all point at #C{%s}, and the control branch's upstream ".
-			"names none of them:\n\n%s\nChoose one with ".
-			"#C{git branch --set-upstream-to=%s/%s %s}.",
-			join(' and ', map {"#C{$_->[0]}"} @{$o{listed}}),
-			$name->($o{listed}[0][1]), $lines, $first, $o{control}, $o{control});
+			"names none of them:\n\n%s\nChoose one by tracking it:\n\n".
+			"  git branch --set-upstream-to=%s/%s %s\n\n".
+			"or pin it for this clone alone:\n\n%s",
+			join(' and ', map {"#C{$_->[0]}"} @listed),
+			$name->($listed[0][2]), $lines, $first, $o{control}, $o{control},
+			$pin);
 	}
 	# no match
 	return sprintf(
-		"No remote of this clone points at the repository the pipeline lives ".
-		"in.  The clone's remotes are:\n\n%s\n".
+		"No remote of this clone points at a repository the pipeline can be ".
+		"told to live in.  The clone's remotes are:\n\n%s\n".
 		"Set #C{pipeline.source_control.repository} in #C{.genesis/config} to ".
-		"the repository the pipeline lives in.", $lines
+		"the repository the pipeline lives in, or pin the remote for this ".
+		"clone alone:\n\n%s", $lines, $pin
 	) unless $o{want};
-	my $url = sprintf('git@%s:%s.git', $o{want}{host}, $name->($o{want}));
 	return sprintf(
 		"No remote of this clone points at #C{%s} on #C{%s}, which ".
 		"#C{pipeline.source_control.repository} names.  The clone's remotes ".
-		"are:\n\n%s\nAdd one with #C{git remote add <name> %s}, or point one ".
-		"at it with #C{git remote set-url <remote> %s}.",
-		$name->($o{want}), $o{want}{host}, $lines, $url, $url);
+		"are:\n\n%s\nAdd one:\n\n  git remote add <name> %s\n\n".
+		"point one at it:\n\n  git remote set-url %s %s\n\n".
+		"or, for a remote that mirrors the repository on a host it cannot be ".
+		"matched to, pin it for this clone alone:\n\n%s",
+		$name->($o{want}), $o{want}{host}, $lines, $url, $one, $url, $pin);
 }
 
 # }}}
@@ -2866,14 +2923,12 @@ sub _automated_provider_configured {
 # }}}
 # _source_control - the resolved source-control values {{{
 #
-# Precedence is explicit over derived over default.  The remote is the
-# control branch's configured upstream, else origin where it exists, and
-# never "the first git remote", because that is alphabetical order and a
-# repository holding dev and origin would pick dev.  The repository is the
-# GitHub owner/repo the remote's URL carries; the MVP supports GitHub
-# alone, whether github.com or GitHub Enterprise, so any other host needs
-# the override and is refused by name without it, with no exception under
-# the manual provider.
+# Precedence is explicit over derived over default.  The remote is the one
+# _resolve_remote finds by the repository it points at, or the clone's own
+# pin, and never "the first git remote".  The repository is the configured
+# one, else the one the remote's URL names; a URL naming none, such as a
+# path, needs the repository named and is refused without it, with no
+# exception under the manual provider.
 sub _source_control {
 	my ($self) = @_;
 
@@ -2947,8 +3002,7 @@ sub _source_control {
 		bail({exitcode => CONFIG},
 			"#C{pipeline.source_control.repository} is #C{%s}, which names no ".
 			"repository.\nWrite it as #C{owner/repo}, or as the repository's ".
-			"https or ssh URL; the MVP supports GitHub, github.com or GitHub ".
-			"Enterprise.",
+			"https or ssh URL.",
 			$written
 		) unless $sc{identity};
 	} else {
@@ -2956,9 +3010,8 @@ sub _source_control {
 		$sc{identity} = $resolved->{identity} // _repository_identity($sc{uri});
 		bail({exitcode => CONFIG},
 			"#C{pipeline.source_control.repository} could not be derived from ".
-			"#C{%s}.\nThe MVP supports GitHub, github.com or GitHub Enterprise, ".
-			"and that URL carries no #C{owner/repo} pair.  Name the repository ".
-			"explicitly, or move the pipeline to a GitHub remote.",
+			"#C{%s}, which carries no #C{owner/repo} pair.\nName the repository ".
+			"the pipeline lives in, as #C{owner/repo} or as its URL.",
 			$sc{uri} // '<no remote url>'
 		) unless $sc{identity};
 	}
@@ -2974,16 +3027,10 @@ sub _source_control {
 # URL, or in either ssh form (D118), so a clone's remotes can be matched to it
 # under any protocol.  owner/repo alone means github.com.
 #
-# Enterprise parses the same way, because its URLs carry the pair in the
-# same shape and only the host differs.  The host is what says GitHub.
-# Any https URL at all carries two path segments, so without a host test
-# every forge on earth would parse and the refusal would never fire.
-#
-# The host test is a substring rather than a label boundary, and it is
-# deliberately loose, because it has to admit every Enterprise hostname an
-# operator might run and those are named freely.  A host that merely contains
-# the word therefore parses too, and the pair it yields then fails against the
-# configured API base, which is a later refusal rather than a wrong answer.
+# Any host parses the same way, because a GitHub-compatible host need not
+# carry "github" in its name, and whether it speaks GitHub's API is asked of
+# the API rather than read from the name.  A path or a file:// URL carries no
+# host and so names no repository.
 sub _repository_identity {
 	my ($text) = @_;
 	return undef unless defined $text && length $text;
@@ -2995,7 +3042,7 @@ sub _repository_identity {
 	} elsif ($text =~ m{^(?:ssh://)?[^@/]+\@([^:/]+)(?::\d+)?[:/]([^/]+)/([^/]+?)(?:\.git)?/?$}i) {
 		($host, $owner, $repo) = ($1, $2, $3);
 	}
-	return undef unless defined $host && $host =~ /github/i;
+	return undef unless defined $host;
 	return {host => lc($host), owner => $owner, repo => $repo};
 }
 

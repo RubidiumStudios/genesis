@@ -76,6 +76,31 @@ subtest 'the configuration is read once for every question about it' => sub {
 		'and later questions cost none');
 };
 
+subtest 'the pin is read with where it was set, in the same read' => sub {
+	plan tests => 5;
+	my $dir = repo();
+	run({dir => $dir}, 'git', 'remote', 'add', 'origin', 'git@github.com:org/repo.git');
+	run({dir => $dir}, 'git', 'config', '--global', 'genesis.remote', 'elsewhere');
+	my $git = Service::Git->new($dir);
+
+	my @pin;
+	my $calls = git_calls(sub {$git->remote_names; @pin = $git->remote_pin});
+	is_deeply(\@pin, [undef, 'elsewhere'],
+		'a pin set only globally is not the clone\'s, and is reported apart');
+	is($calls, 1, 'and it comes with the remotes, in one git call');
+
+	run({dir => $dir}, 'git', 'config', 'genesis.remote', 'origin');
+	is_deeply([$git->remote_pin], ['origin', 'elsewhere'],
+		"the clone's own pin is read from its .git/config");
+
+	run({dir => $dir}, 'git', 'config', '--global', '--unset', 'genesis.remote');
+	is_deeply([$git->remote_pin], ['origin', undef],
+		'and a pin set nowhere else leaves nothing beside it');
+
+	run({dir => $dir}, 'git', 'config', '--unset', 'genesis.remote');
+	is_deeply([$git->remote_pin], [undef, undef], 'and none at all is none');
+};
+
 subtest 'a remote the clone does not have answers nothing' => sub {
 	plan tests => 3;
 	my $dir = repo();

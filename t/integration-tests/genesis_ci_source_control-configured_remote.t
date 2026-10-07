@@ -16,6 +16,7 @@ use Harness::Propagation;
 use Test::More;
 
 use Genesis;
+use Genesis::Exit qw/CONFIG/;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
@@ -93,6 +94,57 @@ subtest 'a fork beside the canonical repository is never used' => sub {
 		'the delivery landed on the canonical repository');
 	is(ref_in($h->a, 'refs/remotes/origin/' . $h->slug('qa')), undef,
 		'and nothing was fetched from or pushed to the fork');
+};
+
+# Proves T357's commands: a clone whose only remote mirrors the repository on
+# another host is refused at load by every command, not by pipeline-apply
+# alone; a pin set only globally leaves the refusal standing and says why;
+# and the clone's own pin runs the commands against the mirror (D118).  The
+# mirror's URL names a host no identity can match, and an insteadOf rewrite
+# sends its traffic to the harness's bare repository.
+subtest 'a mirror is refused until this clone pins it' => sub {
+	# Twelve rows, and the restoration assertion of each of six runs.
+	plan tests => 18;
+
+	my $h = ready_harness(delivered => ['qa'], certified => ['lab', 'qa'],
+		kit => 'omega-v2.7.0');
+	my $due = commit_on_control($h,
+		files   => {'qa.yml' =>
+			"---\nkit:\n  name: dev\ngenesis:\n  env: qa\nn: 3\n"},
+		message => 'Tune qa through the mirror',
+		push    => 1,
+	);
+	certify($h, 'lab', control_commit => $due);
+
+	my $mirror = 'https://git.corp.example/mirrors/repo.git';
+	set_remotes($h, remotes => {mirror => $mirror}, upstream => 'mirror',
+		fetch => 0);
+	run({dir => $h->a}, 'git', 'config', "url.@{[$h->r]}.insteadOf", $mirror);
+
+	for my $argv (['propagate'], ['pipeline-status'], ['qa', 'deploy', '-y'],
+	              ['pipeline-apply', '-y']) {
+		my (undef, $err, $exit) = run_genesis($h, @$argv);
+		is($exit, CONFIG, "`genesis @$argv` is refused at CONFIG");
+		like($err, qr{\Q$mirror\E.*git config genesis\.remote mirror}s,
+			'naming the mirror and the pin that would name it')
+			or diag($err);
+	}
+
+	run({dir => $h->a}, 'git', 'config', '--global', 'genesis.remote', 'mirror');
+	my (undef, $err, $exit) = run_genesis($h, 'pipeline-status');
+	is($exit, CONFIG, 'pinned only globally, the refusal stands');
+	like($err, qr{git config --local genesis\.remote mirror},
+		'and a warning gives the form that pins this clone');
+	run({dir => $h->a}, 'git', 'config', '--global', '--unset', 'genesis.remote');
+
+	run({dir => $h->a}, 'git', 'config', 'genesis.remote', 'mirror');
+	(undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+	is($exit, 0, "pinned in the clone, propagate runs") or diag($err);
+
+	my ($subject) = run({dir => $h->r}, 'git', 'log', '-1', '--format=%s',
+		$h->slug('qa'));
+	like($subject, qr{\@\Q@{[substr($due, 0, 7)]}\E},
+		'and delivers through the mirror');
 };
 
 subtest 'pipeline-status reads the configured remote' => sub {

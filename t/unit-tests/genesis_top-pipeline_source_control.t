@@ -1,8 +1,10 @@
 #!perl
 # Proves T17, T18, T311, and T19: the source-control block declares the
 # two branch-naming keys with the pr/ default, it declares three tiers of
-# field, it refuses an empty pull request prefix, and it refuses a host
-# that is not GitHub with no exception under the manual provider.
+# field, it refuses an empty pull request prefix, and it refuses a remote
+# naming no repository with no exception under the manual provider, though
+# no host is judged by its name (D118).  T354 to T357 are proved at the
+# resolver below.
 use strict;
 use warnings;
 use utf8;
@@ -13,6 +15,7 @@ use helper;
 use Harness::Propagation;
 use Test::More;
 use Test::Exception;
+use Test::Output;
 
 use Genesis;
 use Genesis::Exit qw/CONFIG/;
@@ -130,17 +133,25 @@ subtest 'an empty control branch is refused' => sub {
 		'and a named one passes';
 };
 
-subtest 'the MVP supports GitHub and says so' => sub {
-	plan tests => 4;
+subtest 'a remote must name a repository, on any host' => sub {
+	plan tests => 5;
 
-	with_remote('https://git.example.com/team/bosh.git');
+	# A host is not judged by its name (D118), so what is refused at load is
+	# a URL carrying no owner/repo at all.
+	with_remote('/srv/git/bosh.git');
 	throws_ok {load_control("pipeline:\n  enabled: true", derive_repository => 1)}
 		qr/pipeline\.source_control\.repository/,
-		'a non-GitHub host is refused naming the key';
+		'a remote carrying no owner/repo is refused naming the key';
 	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  provider:', '    type: manual'), derive_repository => 1)}
 		qr/pipeline\.source_control\.repository/,
 		'and the manual provider takes no exception';
+
+	with_remote('https://git.example.com/team/bosh.git');
+	my $any = eval {load_control("pipeline:\n  enabled: true",
+		derive_repository => 1)};
+	is(($any ? $any->source_control_repository : "refused: $@"), 'team/bosh',
+		'a host without github in its name passes');
 
 	with_remote('https://github.example.com/team/bosh.git');
 	lives_ok {load_control("pipeline:\n  enabled: true", derive_repository => 1)}
@@ -191,7 +202,7 @@ subtest 'the uri row says whether git was asked' => sub {
 # Proves T57's parsing half under D118: a repository is one identity, host,
 # owner and repo, however it is written.
 subtest 'a repository is one identity however it is written' => sub {
-	plan tests => 10;
+	plan tests => 12;
 
 	my $id = \&Genesis::Top::_repository_identity;
 	my $want = {host => 'github.com', owner => 'team', repo => 'bosh'};
@@ -210,8 +221,11 @@ subtest 'a repository is one identity however it is written' => sub {
 	is_deeply($id->('https://github.example.com/team/bosh'),
 		{host => 'github.example.com', owner => 'team', repo => 'bosh'},
 		'an Enterprise host keeps its own name');
-	is($id->('https://git.example.com/team/bosh.git'), undef,
-		'a host that is not GitHub carries no identity in the MVP');
+	is_deeply($id->('https://git.example.com/team/bosh.git'),
+		{host => 'git.example.com', owner => 'team', repo => 'bosh'},
+		'a host is read whatever it is called, since its API says what it is');
+	is($id->('/srv/git/team/bosh.git'), undef, 'a filesystem path carries none');
+	is($id->('file:///srv/git/team/bosh.git'), undef, 'nor does a file URL');
 	is($id->('just-a-name'), undef, 'and neither does a bare word');
 };
 
@@ -262,17 +276,33 @@ sub resolved {
 	set_remotes($h, remotes => $o{remotes}, upstream => $o{upstream} // 0,
 		fetch => 0);
 	run({dir => $h->a}, 'git', 'config', @$_) for @{$o{git_config} || []};
+	run({dir => $h->a}, 'git', 'config', '--global', @$_)
+		for @{$o{global_config} || []};
 
 	local $ENV{GENESIS_IGNORE_EVAL} = '';
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
-	my $remote = eval {$top->source_control_remote};
-	my $error  = $@;
+	my ($remote, $error);
+	my $said = stderr_from {
+		$remote = eval {$top->source_control_remote};
+		$error  = $@;
+	};
 	my $repository = $remote ? $top->source_control_repository : undef;
+	my $how = $remote ? $top->_resolve_remote($top->control_branch)->{how} : undef;
 
 	run({dir => $h->a, passfail => 1}, 'git', 'config', '--unset-all', $_->[0])
 		for @{$o{git_config} || []};
+	run({dir => $h->a, passfail => 1}, 'git', 'config', '--global',
+		'--unset-all', $_->[0]) for @{$o{global_config} || []};
 	set_remotes($h, remotes => {origin => $origin}, upstream => 'origin');
-	return ($remote, $error, $repository);
+	return ($remote, $error, $repository, $how, $said);
+}
+
+# A refusal is wrapped for the terminal, so a command it gives may break
+# across lines; the phrase matches with any run of whitespace between words.
+sub phrase {
+	my ($text) = @_;
+	my $p = join('\s+', map {quotemeta} split /\s+/, $text);
+	return qr/$p/;
 }
 
 # Proves T354 at the resolver: the remote is the one that points at the
@@ -361,6 +391,124 @@ subtest 'two remotes for one repository' => sub {
 	my (undef, $error) = resolved(repository => 'team/bosh', remotes => \%remotes);
 	like($error, qr{\bhttps\b.*\bssh\b}s, 'with no upstream, both are named');
 	like($error, qr{set-upstream-to}, 'and the way to choose is given');
+};
+
+my $mirror = 'https://git.corp.example/mirrors/repo.git';
+my $canon  = 'git@github.com:team/bosh.git';
+
+# Proves T357 at the resolver: a remote that mirrors the repository on a host
+# the identity cannot match is refused, and the clone's own pin names it.
+subtest 'the pin, from the clone\'s own configuration' => sub {
+	plan tests => 9;
+
+	my ($remote, $error) = resolved(repository => 'team/bosh',
+		remotes => {mirror => $mirror});
+	is($remote, undef, 'a mirror on another host is not the repository');
+	like($error, phrase($mirror), 'the refusal lists the remote with its URL');
+	like($error, qr{git\s+remote\s+add\s+\S+\s+\Q$canon\E},
+		'and gives git remote add, with the URL filled in');
+	like($error, phrase("git remote set-url mirror $canon"),
+		'and git remote set-url, with the name filled in');
+	like($error, phrase('git config genesis.remote mirror'),
+		'and the pin, with the name filled in');
+
+	my (undef, undef, undef, $how);
+	($remote, undef, undef, $how) = resolved(repository => 'team/bosh',
+		remotes => {mirror => $mirror},
+		git_config => [['genesis.remote', 'mirror']]);
+	is($remote, 'mirror', 'pinned in the clone, the mirror is the remote');
+	is($how, 'pinned', 'and the answer says it was pinned');
+
+	($remote) = resolved(repository => 'team/bosh',
+		remotes => {origin => $canon, mirror => $mirror},
+		git_config => [['genesis.remote', 'mirror']]);
+	is($remote, 'mirror', 'the pin is read before the match');
+
+	($remote) = resolved(remotes => {origin => $canon, mirror => $mirror},
+		git_config => [['genesis.remote', 'mirror']]);
+	is($remote, 'mirror',
+		'and settles remotes naming two repositories with none configured');
+};
+
+# Proves the D118 note of 2026-10-05: a pin naming no remote is refused, never
+# passed over for the match.
+subtest 'a pin naming a remote the clone lacks is refused' => sub {
+	plan tests => 5;
+
+	my ($remote, $error) = resolved(repository => 'team/bosh',
+		remotes => {origin => $canon},
+		git_config => [['genesis.remote', 'nowhere']]);
+	is($remote, undef, 'the matching remote is not taken in its place');
+	like($error, qr{genesis\.remote}, 'the refusal names the pin');
+	like($error, qr{\bnowhere\b}, 'and the remote it names');
+	like($error, phrase("origin $canon"),
+		'and lists the remotes the clone has, with their URLs');
+	like($error, phrase('git config --local --unset genesis.remote'),
+		'and gives the way to take the pin off');
+};
+
+# Proves T357's scope: only the clone's own configuration pins.
+subtest 'a pin set only globally is ignored, and says so' => sub {
+	plan tests => 7;
+
+	my ($remote, $error, undef, undef, $said) = resolved(
+		repository => 'team/bosh', remotes => {mirror => $mirror},
+		global_config => [['genesis.remote', 'mirror']]);
+	is($remote, undef, 'a global pin does not name the remote');
+	like($error, phrase('git config genesis.remote mirror'),
+		'the refusal stands, with its remedies');
+	like($said, qr{genesis\.remote}, 'a warning names the global setting');
+	like($said, phrase('every repository'),
+		'and says why it is ignored');
+	like($said, phrase('git config --local genesis.remote mirror'),
+		'and gives the form that pins this clone');
+
+	(undef, undef, undef, undef, $said) = resolved(repository => 'team/bosh',
+		remotes => {origin => $canon},
+		global_config => [['genesis.remote', 'mirror']]);
+	like($said, qr{genesis\.remote},
+		'it warns where the match settles the remote too');
+
+	($remote, undef, undef, undef, $said) = resolved(
+		repository => 'team/bosh', remotes => {mirror => $mirror},
+		git_config    => [['genesis.remote', 'mirror']],
+		global_config => [['genesis.remote', 'elsewhere']]);
+	unlike($said // '', qr{genesis\.remote},
+		"and says nothing where the clone's own pin is set");
+};
+
+# Proves T354 to T357's refusals: each lists the clone's remotes with their
+# URLs and the repository each points at, and gives its remedies.
+subtest 'every refusal lists the remotes and gives its remedies' => sub {
+	plan tests => 12;
+
+	my $fork = 'git@github.com:me/bosh.git';
+	my (undef, $error) = resolved(
+		remotes => {origin => $fork, upstream => $canon});
+	like($error, phrase("origin $fork"), 'several repositories: each URL');
+	like($error, qr{me/bosh.*team/bosh}s, 'with the repository each names');
+	like($error, qr{pipeline\.source_control\.repository}, 'the key that settles it');
+	like($error, phrase('git config genesis.remote <remote>'),
+		'and the pin, with a placeholder among several remotes');
+
+	(undef, $error) = resolved(repository => 'team/bosh',
+		remotes => {https => 'https://github.com/team/bosh.git', ssh => $canon});
+	like($error, phrase("ssh $canon"), 'two spellings: each URL');
+	like($error, qr{set-upstream-to}, "the upstream that chooses");
+	like($error, phrase('git config genesis.remote <remote>'), 'and the pin');
+
+	(undef, $error) = resolved(repository => 'team/bosh',
+		remotes => {fork => $fork, path => '/srv/git/bosh.git'});
+	like($error, phrase('path /srv/git/bosh.git'), 'no match: each URL');
+	like($error, phrase('names no repository'),
+		'a URL naming none says so, without judging a host');
+	like($error, phrase("git remote set-url <remote> $canon"),
+		'and the remedies take a placeholder among several remotes');
+
+	(undef, $error) = resolved(repository => 'team/bosh', remotes => {});
+	like($error, qr{no\s+git\s+remote}i, 'no remote at all says so');
+	like($error, qr{git\s+remote\s+add\s+\S+\s+\Q$canon\E},
+		'and gives git remote add with the repository filled in');
 };
 
 subtest 'a required flag can be a predicate' => sub {

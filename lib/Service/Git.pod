@@ -2043,6 +2043,29 @@ B<Examples:>
   my $url = $git->remote_url('upstream');
   # returns '/srv/r.git' where url./srv/r.git.insteadOf names upstream's URL
 
+=head2 remote_pin
+
+  my ($pin, $outside) = $git->remote_pin;
+
+The C<genesis.remote> pin (D118): the remote this clone's own C<.git/config>
+names, and separately one named in the user's or the system's configuration,
+answered from the configuration L</_config> read once. Only the first pins;
+the second would pin every repository on the machine, so it is answered apart
+for L<Genesis::Top/_resolve_remote> to warn about and ignore.
+
+B<Parameters:> None.
+
+B<Returns:> Two values, the clone's own pin and the one set outside it, each
+C<undef> where none is set.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my ($pin, $outside) = $git->remote_pin;
+  # returns ('mirror', undef) after `git config genesis.remote mirror`
+  # returns (undef, 'mirror') after `git config --global genesis.remote mirror`
+
 =head2 remote_names
 
   my @remotes = $git->remote_names;
@@ -2964,11 +2987,14 @@ B<Examples:>
 
   my $config = $git->_config;
 
-The clone's remotes, their URLs, the branches' upstreams and git's
-C<insteadOf> rewrites, read in one C<git config --get-regexp> and kept on the
-handle. L</remote_names>, L</configured_url>, L</branch_upstream_remote>,
-L</has_remote> and L</remote_url> all answer from it, because each was a git
-process of its own and a command asks them many times.
+The clone's remotes, their URLs, the branches' upstreams, git's
+C<insteadOf> rewrites and the C<genesis.remote> pin, read in one
+C<git config --show-scope --get-regexp> and kept on the handle.
+L</remote_names>, L</configured_url>, L</branch_upstream_remote>,
+L</has_remote>, L</remote_url> and L</remote_pin> all answer from it, because
+each was a git process of its own and a command asks them many times. The
+scope is read so the pin can be told apart by where it was set: C<local> and
+C<worktree> are the clone's own, anything else is outside it.
 
 It is read again only when L</_config_stamp> says a configuration file
 changed, so a change made outside the handle, by a test or by an operator in
@@ -2977,8 +3003,9 @@ another shell, is seen at the next question.
 B<Parameters:> None.
 
 B<Returns:> A hashref of C<remotes> (name to configured URL), C<order> (the
-names), C<upstream> (branch to remote), and C<rewrites> (an arrayref of
-C<[$insteadof, $base]>).
+names), C<upstream> (branch to remote), C<rewrites> (an arrayref of
+C<[$insteadof, $base]>), and C<pin> (C<local> and C<outside>, each the
+remote a C<genesis.remote> there names, where one is set).
 
 B<Errors:> None. A configuration with none of these keys answers empty.
 
