@@ -4,6 +4,8 @@
 # genesis.pipeline.manual under a provider whose optional_git_triggers
 # capability is false, and the pages under docs/ci no longer present the
 # superseded configuration and command surface as the one an operator meets.
+# Proves T359: the reference documents the repository, the match, and the
+# pin where an operator would look for them.
 #
 use strict;
 use warnings;
@@ -145,6 +147,27 @@ subtest 'the prose these pages are held to' => sub {
 			&& $one =~ /retired/i,
 		'the four retired command names sit in one paragraph that calls them retired'
 	) or diag(sprintf("%d paragraph(s) name a retired command, expected 1.", scalar @blocks));
+};
+
+# The pin lives in a file nobody commits, so an operator who has not met the
+# refusal finds it here or nowhere (D118).
+subtest 'the reference documents the repository, the match and the pin' => sub {
+	plan tests => 9;
+
+	my $body = slurp('docs/ci/user/configuration-reference.md');
+	my $sc = section_of($body, qr/^#{2,3} `?pipeline\.source_control`?\s*$/);
+
+	isnt($sc, '', 'the reference has a source-control section');
+	like($sc, qr{repository:\s+\S+/\S+\s}, 'repository is shown as owner/repo');
+	like($sc, qr{repository:\s+(?:https://|git\@)\S+}, 'and as a URL');
+	like($sc, qr/whichever of the clone's remotes points at/,
+		'the remote is whichever of the clone\'s remotes points at it');
+	like($sc, qr/any name and any protocol/, 'under any name and protocol');
+	like($sc, qr/git config genesis\.remote <remote>/, 'the pin is given');
+	like($sc, qr{clone's own `\.git/config`, never globally},
+		'set in the clone\'s own .git/config and never globally');
+	like($sc, qr/internal mirror/, 'with an internal mirror as its example');
+	like($sc, qr/git config --unset genesis\.remote/, 'and how to remove it');
 };
 
 done_testing();

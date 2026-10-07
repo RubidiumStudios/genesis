@@ -29,6 +29,41 @@ Where the ability is absent the key is refused at configuration load, by name, a
 
 An environment whose deploy job waits for a person certifies nothing until that person acts, so its descendants stay held meanwhile, and `genesis pipeline-status` prints the reason as `awaiting its trigger` beside the ancestor that holds them.
 
+## pipeline.source_control
+
+Says which repository the pipeline lives in and how CI reaches it. The block is read from the working tree's own `.genesis/config` rather than from control, because it says where control is, so it has to be known before control can be read.
+
+```yaml
+pipeline:
+  source_control:
+    repository: team/bosh-deployments
+    # or, as its URL, on any host:
+    #   repository: https://git.example.com/team/bosh-deployments.git
+    #   repository: git@git.example.com:team/bosh-deployments.git
+    control_branch: control
+    pr_prefix:      pr/
+    auth:
+      type:  ssh            # or https
+      vault: secret/ci/git
+    identity:
+      name:  Genesis CI
+      email: ci@example.com
+```
+
+`repository` names the repository, written as `owner/repo`, which means github.com, or as the repository's https or ssh URL, which carries its own host. Every form names one repository, so they are interchangeable. It can be left out where the clone's remotes leave no doubt which repository they point at.
+
+The remote is not configured. A remote's name and its protocol are each cloner's own choice, made when they clone and before `.genesis/config` is there to read, so the remote Genesis reads, refreshes and publishes through is whichever of the clone's remotes points at the repository, under any name and any protocol. A clone with one remote uses it, unless its URL names a different repository. Where two remotes point at the repository, the one the control branch tracks is used. Where the remotes point at more than one repository and `repository` is unset, as with a fork beside the original, the configuration load refuses rather than guess, because a clone of a fork tracks the fork. `pipeline.source_control.remote` is no longer read, and a configuration that still sets it is refused, naming what replaces it.
+
+A remote whose URL cannot be matched to the repository, such as an internal mirror on another host, is pinned instead:
+
+```
+git config genesis.remote <remote>
+```
+
+For example, a clone whose `mirror` remote points at `https://git.corp.example/mirrors/bosh-deployments.git` runs `git config genesis.remote mirror`. The pin lives in the clone's own `.git/config`, never globally, so it is never committed and never cloned. A `genesis.remote` set with `git config --global` is ignored with a warning, because it would pin every repository on the machine. The pin is read before the match and wins, and a pin naming a remote the clone does not have is refused rather than passed over. `genesis pipeline-describe` shows how the remote was found, `matched`, `pinned` or `derived`, and for a pin it names the clone's `.git/config` as where it lives. Remove the pin with `git config --unset genesis.remote`.
+
+CI clones the repository by a URL composed from `repository` and `auth.type`: `git@<host>:<owner>/<repo>.git` for `ssh`, the default, and `https://<host>/<owner>/<repo>.git` for `https`. `uri` overrides it, for a host that cannot be reached that way.
+
 ## Top-Level Structure
 
 ```yaml

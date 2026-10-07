@@ -1657,10 +1657,21 @@ sub source_control_resolved {
 	my ($self) = @_;
 
 	my $sc = $self->_source_control;
-	my %derived = map {($_ => 1)} qw/remote uri repository/;
+	my %derived = map {($_ => 1)} qw/uri repository/;
 
-	my @rows;
-	for my $key (qw/remote uri repository control_branch pr_prefix/) {
+	# The remote is never written in the configuration (D118), so its row
+	# says how it was found instead: matched by the repository it points
+	# at, pinned in the clone, or derived as the clone's one remote.  A pin
+	# lives in a file nobody commits, so the row says whose it is.
+	my %how = (matched => 'matched', pinned => 'pinned', only => 'derived');
+	my @rows = ({
+		key    => 'remote',
+		value  => $sc->{remote_how} eq 'pinned'
+			? "$sc->{remote} (genesis.remote in this clone's .git/config)"
+			: $sc->{remote},
+		source => $how{$sc->{remote_how}},
+	});
+	for my $key (qw/uri repository control_branch pr_prefix/) {
 		my $value = $sc->{$key};
 		push @rows, {
 			key   => $key,
@@ -3002,7 +3013,8 @@ sub _source_control {
 	my $resolved = $self->_resolve_remote($sc{control_branch});
 	bail({exitcode => CONFIG}, $resolved->{refusal} =~ s/%/%%/gr)
 		if $resolved->{refusal};
-	$sc{remote} = $resolved->{remote};
+	$sc{remote}     = $resolved->{remote};
+	$sc{remote_how} = $resolved->{how};
 
 	# Set on the handle every caller of the repository shares, so the remote
 	# operations take it without being told.

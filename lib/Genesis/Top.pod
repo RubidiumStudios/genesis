@@ -1999,7 +1999,14 @@ drifted away from what git says is visible rather than silent.
 Each row is a hash reference carrying C<key>, C<value>, and C<source>. The
 source is C<explicit> where the operator wrote the key, C<derived> where git
 answered for it, C<unset> where the key takes a derivation that was never
-run, and C<default> where the key takes no derivation at all. A row with no
+run, and C<default> where the key takes no derivation at all.
+
+The remote is never written in the configuration (D118), so its row says
+how L</_resolve_remote> found it: C<matched> by the repository it points at,
+C<pinned> by the clone's own C<genesis.remote>, or C<derived> as the clone's
+one remote. A pinned remote's value names where the pin lives, as
+C<mirror (genesis.remote in this clone's .git/config)>, because nothing
+committed carries it. A row with no
 value carries C<(none)>, which is what the uri row shows wherever
 C<pipeline.source_control.repository> was named, since L</source_control_uri>
 is then never asked of git. The explicit tier is read with
@@ -2034,7 +2041,7 @@ Every one of them exits C<Genesis::Exit::CONFIG>.
 B<Examples:>
 
     my $rows = $top->source_control_resolved();
-    # [{key => 'remote', value => 'origin', source => 'derived'}, ...]
+    # [{key => 'remote', value => 'origin', source => 'matched'}, ...]
 
 =head2 applied_record_path
 
@@ -3779,7 +3786,9 @@ load rather than at the first read. The remote is also set on L</git>'s
 shared handle as its L<Service::Git/pipeline_remote>, so every remote
 operation on the repository takes it without being told.
 
-B<Returns:> A hash reference of the five resolved values.
+B<Returns:> A hash reference of the five resolved values, with C<identity>
+beside C<repository> and C<remote_how> beside C<remote>, which is how
+L</_resolve_remote> found it and what L</source_control_resolved> reports.
 
 B<Errors:>
 

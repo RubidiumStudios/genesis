@@ -107,6 +107,43 @@ subtest 'pipeline-describe shows what resolved and how' => sub {
 		'and an unset key shows as default');
 };
 
+# Proves D118's report: the remote says how it was found, matched by the
+# repository it points at or pinned in this clone, and a pin says where it
+# was set, since nothing committed carries it.
+subtest 'pipeline-describe shows whether the remote was matched or pinned' => sub {
+	# Five rows, and the restoration of each of the two runs.
+	plan tests => 7;
+
+	# The urls are read and never talked to, so they go in without a fetch.
+	my $h = make_harness(envs => ['qa'],
+		source_control => {repository => 'team/bosh-deployments'});
+	set_remotes($h,
+		remotes => {
+			aaa    => 'git@github.com:someone/elsewhere.git',
+			origin => 'https://github.com/team/bosh-deployments.git',
+		},
+		upstream => 'origin',
+		fetch    => 0,
+	);
+
+	my ($out, undef, $exit) = run_genesis($h, 'pipeline-describe');
+	is($exit, 0, 'the command succeeds');
+	like($out, qr{remote\s+matched\s+origin},
+		'a remote found by the repository it points at shows as matched');
+
+	my $mirror = 'https://git.corp.example/mirrors/bosh-deployments.git';
+	set_remotes($h, remotes => {mirror => $mirror}, upstream => 'mirror',
+		fetch => 0);
+	run({dir => $h->a}, 'git', 'config', 'genesis.remote', 'mirror');
+
+	($out, undef, $exit) = run_genesis($h, 'pipeline-describe');
+	is($exit, 0, 'the command succeeds with the pin');
+	like($out, qr{remote\s+pinned\s+mirror},
+		'a remote the clone pins shows as pinned');
+	like($out, qr{this clone's \.git/config},
+		"and says the pin is this clone's own");
+};
+
 subtest 'a long url cannot carry its tier off the line' => sub {
 	# The five are the restoration the run asserts for itself and the four
 	# rows below it.
@@ -134,7 +171,7 @@ subtest 'a long url cannot carry its tier off the line' => sub {
 	like($out, qr{\Q$uri\E}, 'the url is shown whole');
 	like($out, qr{^ +uri +derived *$}m,
 		'the key and the tier it resolved from share a line');
-	unlike($out, qr{^ *(?:explicit|derived|unset|default) *$}m,
+	unlike($out, qr{^ *(?:explicit|derived|matched|pinned|unset|default) *$}m,
 		'and no tier is left standing on a line with nothing to name it');
 };
 
