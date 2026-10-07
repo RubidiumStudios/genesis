@@ -1699,7 +1699,7 @@ B<Errors:> None.
 B<Examples:>
 
     my $name = $top->pipeline_name();
-    # returns 'lmelt-control' where the repository names its pipeline
+    # returns 'acme-control' where the repository names its pipeline
 
     my $name = $top->pipeline_name();
     # returns undef where pipeline.name is unset
@@ -1944,7 +1944,7 @@ Every one of them exits C<Genesis::Exit::CONFIG>.
 B<Examples:>
 
     my $uri = $top->source_control_uri();
-    # returns 'https://github.com/fivetwenty-io/lmelt.git'
+    # returns 'https://github.com/team/bosh-deployments.git'
 
 =head2 source_control_repository
 
@@ -1986,7 +1986,7 @@ Every one of them exits C<Genesis::Exit::CONFIG>.
 B<Examples:>
 
     my $repo = $top->source_control_repository();
-    # returns 'fivetwenty-io/lmelt'
+    # returns 'team/bosh-deployments'
 
 =head2 source_control_resolved
 

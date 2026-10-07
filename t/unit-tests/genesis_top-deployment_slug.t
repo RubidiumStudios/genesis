@@ -92,7 +92,7 @@ subtest 'the object form delegates and the renderings agree' => sub {
 subtest 'two roots sharing an environment name compose their own branches' => sub {
 	plan tests => 4;
 
-	my $name = 'lmelt-vsphere-canwest-1-mgmt';
+	my $name = 'acme-vsphere-west-1-mgmt';
 	my $h = make_harness(
 		envs => [$name], type => 'bosh', root => 'bosh', vault => 0,
 	);

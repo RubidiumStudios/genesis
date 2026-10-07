@@ -81,27 +81,27 @@ subtest 'a delivery mirrors the set and carries the marker' => sub {
 subtest 'a second deployment root shares an environment name' => sub {
 	plan tests => 7;
 
-	my $h = make_harness(envs => ['lmelt-vsphere-canwest-1-mgmt'], vault => 0);
+	my $h = make_harness(envs => ['acme-vsphere-west-1-mgmt'], vault => 0);
 	my $root = add_deployment_root($h, type => 'vault',
-		envs => ['lmelt-vsphere-canwest-1-mgmt']);
+		envs => ['acme-vsphere-west-1-mgmt']);
 
 	is($root, 'vault', 'the second root answers its repository-relative path');
 	ok(-f $h->a."/vault/.genesis/config",
 		'the second root carries a configuration the real code path wrote');
-	ok(scalar(grep {$_ eq 'vault/lmelt-vsphere-canwest-1-mgmt.yml'}
+	ok(scalar(grep {$_ eq 'vault/acme-vsphere-west-1-mgmt.yml'}
 		@{tree_of($h->a, $h->control)}),
 		"control's tree carries the second root's environment file");
 
-	init_branch($h, 'lmelt-vsphere-canwest-1-mgmt');
-	init_branch($h, 'lmelt-vsphere-canwest-1-mgmt', type => 'vault');
+	init_branch($h, 'acme-vsphere-west-1-mgmt');
+	init_branch($h, 'acme-vsphere-west-1-mgmt', type => 'vault');
 
-	is($h->slug('lmelt-vsphere-canwest-1-mgmt'),
-		'lmelt-vsphere-canwest-1-mgmt/bosh', 'the bosh root names its own slug');
-	is($h->slug('lmelt-vsphere-canwest-1-mgmt', type => 'vault'),
-		'lmelt-vsphere-canwest-1-mgmt/vault', 'the vault root names its own slug');
+	is($h->slug('acme-vsphere-west-1-mgmt'),
+		'acme-vsphere-west-1-mgmt/bosh', 'the bosh root names its own slug');
+	is($h->slug('acme-vsphere-west-1-mgmt', type => 'vault'),
+		'acme-vsphere-west-1-mgmt/vault', 'the vault root names its own slug');
 
-	for my $branch (qw(lmelt-vsphere-canwest-1-mgmt/bosh
-	                   lmelt-vsphere-canwest-1-mgmt/vault)) {
+	for my $branch (qw(acme-vsphere-west-1-mgmt/bosh
+	                   acme-vsphere-west-1-mgmt/vault)) {
 		my $ok = run({dir => $h->r, passfail => 1},
 			'git', 'show-ref', '--verify', '--quiet', "refs/heads/$branch");
 		ok($ok, "R carries $branch");

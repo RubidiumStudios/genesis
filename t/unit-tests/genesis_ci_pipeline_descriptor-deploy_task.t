@@ -19,8 +19,8 @@ $ENV{NOCOLOR}         = 1;
 use_ok 'Genesis::CI::Compiler::AST';
 use_ok 'Genesis::CI::Compiler::PipelineDescriptor';
 
-my $UPSTREAM = 'lmelt-vsphere-canwest-1-mgmt';
-my $ENV_NAME = 'lmelt-vsphere-canwest-1-lab';
+my $UPSTREAM = 'acme-vsphere-west-1-mgmt';
+my $ENV_NAME = 'acme-vsphere-west-1-lab';
 
 # =========================================================================
 # Helpers
@@ -57,7 +57,7 @@ sub _ast {
 		integrations => {
 			source_control => {
 				provider   => 'github',
-				repository => 'lmelt/bosh',
+				repository => 'acme/bosh',
 				($o{root} ? (root => $o{root}) : ()),
 			},
 			vault => { url => 'https://vault.example.com' },

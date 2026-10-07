@@ -44,7 +44,7 @@ subtest 'empty input returns undef' => sub {
 subtest 'single propagation marker: subject only, no SHA prefix' => sub {
 	# git log is newest-first
 	my @log = (
-		'env_sha1 [pipeline] control@a1b2c3d4e5f6 -> lmelt-vsphere-canwest-1-mgmt',
+		'env_sha1 [pipeline] control@a1b2c3d4e5f6 -> acme-vsphere-west-1-mgmt',
 	);
 	my $got = Genesis::Commands::Env::_format_pipeline_reason(\@log, $short, $subject_of);
 	is($got, 'Refactor bosh envs to hierarchical config');
@@ -53,9 +53,9 @@ subtest 'single propagation marker: subject only, no SHA prefix' => sub {
 subtest 'multi-commit: count header + bulleted subjects, oldest-first' => sub {
 	# log is newest-first, and reason should reverse it to oldest-first
 	my @log = (
-		'env_sha3 [pipeline] control@c3d4e5f6a1b2 -> lmelt-vsphere-canwest-1-mgmt',
-		'env_sha2 [pipeline] control@b2c3d4e5f6a1 -> lmelt-vsphere-canwest-1-mgmt',
-		'env_sha1 [pipeline] control@a1b2c3d4e5f6 -> lmelt-vsphere-canwest-1-mgmt',
+		'env_sha3 [pipeline] control@c3d4e5f6a1b2 -> acme-vsphere-west-1-mgmt',
+		'env_sha2 [pipeline] control@b2c3d4e5f6a1 -> acme-vsphere-west-1-mgmt',
+		'env_sha1 [pipeline] control@a1b2c3d4e5f6 -> acme-vsphere-west-1-mgmt',
 	);
 	my $got = Genesis::Commands::Env::_format_pipeline_reason(\@log, $short, $subject_of);
 	is($got, join("\n",
@@ -68,9 +68,9 @@ subtest 'multi-commit: count header + bulleted subjects, oldest-first' => sub {
 
 subtest 'non-marker lines are skipped' => sub {
 	my @log = (
-		'env_sha2 [pipeline] control@b2c3d4e5f6a1 -> lmelt-vsphere-canwest-1-mgmt',
+		'env_sha2 [pipeline] control@b2c3d4e5f6a1 -> acme-vsphere-west-1-mgmt',
 		'env_sha1b Hotfix on env branch',
-		'env_sha1 [pipeline] control@a1b2c3d4e5f6 -> lmelt-vsphere-canwest-1-mgmt',
+		'env_sha1 [pipeline] control@a1b2c3d4e5f6 -> acme-vsphere-west-1-mgmt',
 	);
 	my $got = Genesis::Commands::Env::_format_pipeline_reason(\@log, $short, $subject_of);
 	is($got, join("\n",
@@ -88,7 +88,7 @@ subtest 'a bare subject line still answers' => sub {
 	# anchored either way round, so the line is read as it arrived first and
 	# with its leading field removed second.
 	my @log = (
-		'[pipeline] control@a1b2c3d4e5f6 -> lmelt-vsphere-canwest-1-mgmt',
+		'[pipeline] control@a1b2c3d4e5f6 -> acme-vsphere-west-1-mgmt',
 	);
 	my $got = Genesis::Commands::Env::_format_pipeline_reason(\@log, $short, $subject_of);
 	is($got, 'Refactor bosh envs to hierarchical config',

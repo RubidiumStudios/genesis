@@ -413,7 +413,7 @@ sub build_from_env_files {
 	closedir $dh;
 
 	# Pass 1: enumerate valid environments (Top::has_env filters out
-	# shared parent config files like lmelt.yml that lack `genesis.env`
+	# shared parent config files like acme.yml that lack `genesis.env`
 	# and kit info) and collect their genesis.pipeline data, read through
 	# the environment's merged hierarchy (D117), so a key a site file
 	# carries reaches every environment beneath it.

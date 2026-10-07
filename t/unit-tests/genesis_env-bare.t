@@ -22,8 +22,8 @@ use Genesis::Env;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-my $LEAF = 'lmelt-vsphere-canwest-1-mgmt';
-my $SITE = 'lmelt-vsphere-canwest';
+my $LEAF = 'acme-vsphere-west-1-mgmt';
+my $SITE = 'acme-vsphere-west';
 # A per-environment pipeline key the site file carries and the leaf
 # does not.  It is a key no capability gates, because these rows are
 # about where a value is found rather than about what a provider can
@@ -84,12 +84,12 @@ subtest 'the merged read finds an inherited key the leaf lacks' => sub {
 
 	my $h   = inherited_harness(envs => [$LEAF], type => 'bosh', vault => 0,
 		site => $SITE, pipeline_keys => {track_additional_files => $TRACKED},
-		leaf_keys => {prior_env => 'lmelt-vsphere-canwest-1-lab'});
+		leaf_keys => {prior_env => 'acme-vsphere-west-1-lab'});
 	# The predecessor the leaf names is an environment of the repository, as
 	# every prior_env has to be where the shape is read.
 	commit_on_control($h, message => 'the predecessor the leaf names', push => 1,
-		files => {'lmelt-vsphere-canwest-1-lab.yml'
-			=> "---\ngenesis:\n  env: lmelt-vsphere-canwest-1-lab\n"});
+		files => {'acme-vsphere-west-1-lab.yml'
+			=> "---\ngenesis:\n  env: acme-vsphere-west-1-lab\n"});
 	my $top = Genesis::Top->new($h->a, no_vault => 1);
 
 	# The compiler's leaf-only reader, the hazard's shape, is gone (D117):
@@ -102,7 +102,7 @@ subtest 'the merged read finds an inherited key the leaf lacks' => sub {
 	is_deeply(scalar($env->lookup('genesis.pipeline.track_additional_files')), $TRACKED,
 		'the merged read returns the site file value');
 	is($env->lookup('genesis.pipeline.prior_env'),
-		'lmelt-vsphere-canwest-1-lab',
+		'acme-vsphere-west-1-lab',
 		'and the nearer file still wins for a key the leaf sets');
 };
 
@@ -111,7 +111,7 @@ subtest 'the merged read is the same from either branch' => sub {
 
 	my $h = inherited_harness(envs => [$LEAF], type => 'bosh', vault => 0,
 		site => $SITE, pipeline_keys => {track_additional_files => $TRACKED},
-		leaf_keys => {prior_env => 'lmelt-vsphere-canwest-1-lab'});
+		leaf_keys => {prior_env => 'acme-vsphere-west-1-lab'});
 
 	# The delivery was published from copy B, so copy A knows the deployment
 	# branch by its remote-tracking ref alone and cannot stand on it until

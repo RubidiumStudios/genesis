@@ -44,7 +44,7 @@ invocation.  C<dev-pipeline-compile> starts at the AST, so:
 =item *
 
 A synthetic topology can be hand-written as JSON and rendered directly.
-Test fixtures such as F<t/fixtures/ci/lmelt-topology.json> double as
+Test fixtures such as F<t/fixtures/ci/acme-topology.json> double as
 C<dev-pipeline-compile> inputs.
 
 =item *
@@ -269,7 +269,7 @@ B<Examples:>
   print Genesis::Commands::Dev::render($descriptor, 'yaml');
   # ---
   # jobs:
-  #   - name: lmelt-vsphere-canwest-1-lab-bosh
+  #   - name: acme-vsphere-west-1-lab-bosh
   # ...
 
   print Genesis::Commands::Dev::render($descriptor, 'json');

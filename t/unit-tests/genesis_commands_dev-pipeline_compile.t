@@ -15,9 +15,9 @@ $ENV{NOCOLOR}         = 1;
 use_ok 'Genesis::Commands::Dev';
 use_ok 'Genesis::CI::Compiler::AST';
 
-my $FIXTURE = 't/fixtures/ci/lmelt-topology.json';
-my $MGMT    = 'lmelt-vsphere-canwest-1-mgmt';
-my $LAB     = 'lmelt-vsphere-canwest-1-lab';
+my $FIXTURE = 't/fixtures/ci/acme-topology.json';
+my $MGMT    = 'acme-vsphere-west-1-mgmt';
+my $LAB     = 'acme-vsphere-west-1-lab';
 
 # ======================================================================
 # load_ast_file

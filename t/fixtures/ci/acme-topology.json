@@ -12,7 +12,7 @@
    "integrations" : {
       "source_control" : {
          "provider" : "github",
-         "repository" : "lmelt/bosh",
+         "repository" : "acme/bosh",
          "root" : "bosh"
       },
       "vault" : {
@@ -27,7 +27,7 @@
    "resources" : {},
    "scripts" : {},
    "targets" : {
-      "lmelt-vsphere-canwest-1-lab" : {
+      "acme-vsphere-west-1-lab" : {
          "connection" : {
             "auth" : {
                "client_id" : "admin",
@@ -45,40 +45,40 @@
          "graph" : {
             "edges" : [
                {
-                  "from" : "lmelt-vsphere-canwest-1-mgmt",
-                  "to" : "lmelt-vsphere-canwest-1-lab"
+                  "from" : "acme-vsphere-west-1-mgmt",
+                  "to" : "acme-vsphere-west-1-lab"
                }
             ],
             "nodes" : {
-               "lmelt-vsphere-canwest-1-lab" : {
-                  "alias" : "lmelt-vsphere-canwest-1-lab",
+               "acme-vsphere-west-1-lab" : {
+                  "alias" : "acme-vsphere-west-1-lab",
                   "auto" : 1,
-                  "bosh_parent" : "lmelt-vsphere-canwest-1-mgmt",
+                  "bosh_parent" : "acme-vsphere-west-1-mgmt",
                   "bosh_upgrade_lock" : 0,
-                  "genesis_env" : "lmelt-vsphere-canwest-1-lab",
+                  "genesis_env" : "acme-vsphere-west-1-lab",
                   "manual" : 0,
                   "redeploy" : "",
                   "redeploy_cron_start" : "",
                   "redeploy_cron_stop" : "",
                   "require_pr" : 0,
                   "signal_prefix" : "",
-                  "stage_name" : "lmelt-vsphere-canwest-1-lab",
+                  "stage_name" : "acme-vsphere-west-1-lab",
                   "status_signal" : "",
                   "type" : "bosh"
                },
-               "lmelt-vsphere-canwest-1-mgmt" : {
-                  "alias" : "lmelt-vsphere-canwest-1-mgmt",
+               "acme-vsphere-west-1-mgmt" : {
+                  "alias" : "acme-vsphere-west-1-mgmt",
                   "auto" : 0,
                   "bosh_parent" : "",
                   "bosh_upgrade_lock" : 1,
-                  "genesis_env" : "lmelt-vsphere-canwest-1-mgmt",
+                  "genesis_env" : "acme-vsphere-west-1-mgmt",
                   "manual" : 1,
                   "redeploy" : "",
                   "redeploy_cron_start" : "",
                   "redeploy_cron_stop" : "",
                   "require_pr" : 0,
                   "signal_prefix" : "",
-                  "stage_name" : "lmelt-vsphere-canwest-1-mgmt",
+                  "stage_name" : "acme-vsphere-west-1-mgmt",
                   "status_signal" : "",
                   "type" : "bosh"
                }

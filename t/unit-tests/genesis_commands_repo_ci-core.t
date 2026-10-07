@@ -110,7 +110,7 @@ subtest 'v3 config validates with CI disabled' => sub {
 subtest 'v3 config validates with CI enabled and provider' => sub {
 	my $dir = make_v3_repo(workdir("v3-enabled"), pipeline => {
 		enabled  => 'true',
-		provider => { type => 'concourse', target => 'pipes/lmelt', url => 'https://pipes.example.com', team => 'lmelt' },
+		provider => { type => 'concourse', target => 'pipes/acme', url => 'https://pipes.example.com', team => 'acme' },
 		name => 'bosh',
 		automation_blocks(),
 	});
@@ -119,7 +119,7 @@ subtest 'v3 config validates with CI enabled and provider' => sub {
 	ok $top->pipeline_enabled, "pipeline_enabled is true";
 	ok !$top->manual_pipeline, "a concourse pipeline is not the manual one";
 	is $top->config->get('pipeline.provider.type'), 'concourse', "provider type is concourse";
-	is $top->config->get('pipeline.provider.target'), 'pipes/lmelt', "provider target correct";
+	is $top->config->get('pipeline.provider.target'), 'pipes/acme', "provider target correct";
 	is $top->config->get('pipeline.name'), 'bosh', "pipeline name correct";
 };
 

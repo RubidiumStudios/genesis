@@ -30,11 +30,11 @@ subtest 'the remote is the one pointing at the repository' => sub {
 	# it.  The urls are here to be read and never to be talked to, so the
 	# remotes go in without a fetch and the row stays on this machine.
 	my $h = make_harness(envs => ['qa'], vault => 0,
-		source_control => {repository => 'fivetwenty-io/lmelt'});
+		source_control => {repository => 'team/bosh-deployments'});
 	set_remotes($h,
 		remotes  => {
-			origin => 'https://github.com/fivetwenty-io/lmelt.git',
-			dev    => 'https://github.com/fivetwenty-io/dev-side.git',
+			origin => 'https://github.com/team/bosh-deployments.git',
+			dev    => 'https://github.com/team/dev-side.git',
 		},
 		upstream => 'dev',
 		fetch    => 0,
@@ -51,9 +51,9 @@ subtest 'repository parses owner and repo from either url shape' => sub {
 	plan tests => 3;
 
 	for my $url (
-		'https://github.com/fivetwenty-io/lmelt.git',
-		'git@github.com:fivetwenty-io/lmelt.git',
-		'https://github.com/fivetwenty-io/lmelt',
+		'https://github.com/team/bosh-deployments.git',
+		'git@github.com:team/bosh-deployments.git',
+		'https://github.com/team/bosh-deployments',
 	) {
 		# The harness seeds a repository of its own, because copy A is cloned
 		# from a bare repository at a filesystem path and nearly every row
@@ -71,7 +71,7 @@ subtest 'repository parses owner and repo from either url shape' => sub {
 			fetch => 0);
 		my $top = Genesis::Top->new($h->a, no_vault => 1);
 
-		is($top->source_control_repository, 'fivetwenty-io/lmelt',
+		is($top->source_control_repository, 'team/bosh-deployments',
 			"owner/repo parses from $url");
 	}
 };
@@ -89,7 +89,7 @@ subtest 'pipeline-describe shows what resolved and how' => sub {
 		source_control => {
 			control_branch => undef,
 			pr_prefix      => undef,
-			repository     => 'fivetwenty-io/mirror',
+			repository     => 'team/mirror',
 		},
 	);
 	# The repository is the override, so nothing here has to read the url
@@ -101,7 +101,7 @@ subtest 'pipeline-describe shows what resolved and how' => sub {
 	is($exit, 0, 'the command succeeds');
 	like($out, qr{remote\s+derived\s+origin},
 		'the derived remote shows how it resolved');
-	like($out, qr{repository\s+explicit\s+fivetwenty-io/mirror},
+	like($out, qr{repository\s+explicit\s+team/mirror},
 		'the override shows as explicit and wins over the derivation');
 	like($out, qr{control_branch\s+default\s+control},
 		'and an unset key shows as default');
@@ -112,10 +112,10 @@ subtest 'a long url cannot carry its tier off the line' => sub {
 	# rows below it.
 	plan tests => 5;
 
-	# Fifty-five characters, which is an ordinary length for a remote url
-	# and more than what is left of an eighty-column line once the key and
-	# the tier have had their columns.
-	my $uri = 'https://github.com/fivetwenty-io/genesis-deployments.git';
+	# Sixty characters, which is an ordinary length for a remote url and
+	# more than what is left of an eighty-column line once the key and the
+	# tier have had their columns.
+	my $uri = 'https://github.com/example-team/bosh-genesis-deployments.git';
 
 	my $h = make_harness(
 		envs           => ['qa'],

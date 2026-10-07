@@ -1627,8 +1627,8 @@ B<Examples:>
   _describe_source_control($top);
   # Source control
   #   remote         derived origin
-  #   uri            derived https://github.com/fivetwenty-io/lmelt.git
-  #   repository     derived fivetwenty-io/lmelt
+  #   uri            derived https://github.com/team/bosh-deployments.git
+  #   repository     derived team/bosh-deployments
   #   control_branch default control
   #   pr_prefix      default pr/
 

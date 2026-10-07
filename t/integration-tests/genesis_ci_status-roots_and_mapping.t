@@ -20,7 +20,7 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
-my $SHARED = 'lmelt-vsphere-canwest-1-mgmt';
+my $SHARED = 'acme-vsphere-west-1-mgmt';
 
 # An environment file that parses and cannot be loaded, which is the situation
 # the mapping table's error line names.  It names a kit this repository does
@@ -60,8 +60,8 @@ subtest 'two roots sharing an environment name never share a reading' => sub {
 	$h->ready_envs(envs => [$SHARED], type => 'vault', root => 'vault',
 		certified => []);
 
-	set_repo_config($h, 'pipeline.name', 'canwest-bosh');
-	set_repo_config($h, 'pipeline.name', 'canwest-vault', root => 'vault');
+	set_repo_config($h, 'pipeline.name', 'west-bosh');
+	set_repo_config($h, 'pipeline.name', 'west-vault', root => 'vault');
 	refresh($h, 'a');
 
 	my ($bosh_out, undef, $bosh_exit) = run_genesis($h, 'pipeline-status', '--json');
@@ -74,8 +74,8 @@ subtest 'two roots sharing an environment name never share a reading' => sub {
 	my $bosh  = decode_json($bosh_out);
 	my $vault = decode_json($vault_out);
 
-	is($bosh->{pipeline}, 'canwest-bosh', 'each root carries its own label');
-	is($vault->{pipeline}, 'canwest-vault', 'and the second names itself');
+	is($bosh->{pipeline}, 'west-bosh', 'each root carries its own label');
+	is($vault->{pipeline}, 'west-vault', 'and the second names itself');
 	is($bosh->{type}, 'bosh', 'the deployment type stands beside the label');
 	is($vault->{type}, 'vault', 'and it is the type that tells the roots apart');
 

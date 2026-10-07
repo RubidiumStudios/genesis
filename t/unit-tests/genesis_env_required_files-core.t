@@ -18,9 +18,9 @@ my $root = tempdir(CLEANUP => 1);
 make_path("$root/cloud-config");
 make_path("$root/overrides");
 for my $rel (qw(
-	cloud-config/lmelt.yml
-	cloud-config/lmelt-vsphere-canwest-1-mgmt.yml
-	cloud-config/lmelt-vsphere-canwest-1-lab.yml
+	cloud-config/acme.yml
+	cloud-config/acme-vsphere-west-1-mgmt.yml
+	cloud-config/acme-vsphere-west-1-lab.yml
 	overrides/net.yml
 	overrides/storage.yml
 )) {
@@ -42,10 +42,10 @@ subtest '<env> placeholder substitution' => sub {
 	is_deeply(
 		[Genesis::Env->_resolve_track_additional_files(
 			['cloud-config/<env>.yml'],
-			'lmelt-vsphere-canwest-1-mgmt',
+			'acme-vsphere-west-1-mgmt',
 			$root,
 		)],
-		['cloud-config/lmelt-vsphere-canwest-1-mgmt.yml'],
+		['cloud-config/acme-vsphere-west-1-mgmt.yml'],
 	);
 };
 
@@ -73,13 +73,13 @@ subtest 'glob expansion is relative to git root' => sub {
 subtest 'placeholder + glob combine naturally' => sub {
 	# <env> expanded first, then glob
 	my @got = Genesis::Env->_resolve_track_additional_files(
-		['cloud-config/lmelt-vsphere-canwest-1-*.yml'],
+		['cloud-config/acme-vsphere-west-1-*.yml'],
 		'ignored',
 		$root,
 	);
 	is_deeply(\@got, [
-		'cloud-config/lmelt-vsphere-canwest-1-lab.yml',
-		'cloud-config/lmelt-vsphere-canwest-1-mgmt.yml',
+		'cloud-config/acme-vsphere-west-1-lab.yml',
+		'cloud-config/acme-vsphere-west-1-mgmt.yml',
 	]);
 };
 
@@ -90,11 +90,11 @@ subtest 'duplicates are de-duplicated; output sorted' => sub {
 			'overrides/*.yml',           # also matches overrides/net.yml
 			'cloud-config/<env>.yml',
 		],
-		'lmelt-vsphere-canwest-1-mgmt',
+		'acme-vsphere-west-1-mgmt',
 		$root,
 	);
 	is_deeply(\@got, [
-		'cloud-config/lmelt-vsphere-canwest-1-mgmt.yml',
+		'cloud-config/acme-vsphere-west-1-mgmt.yml',
 		'overrides/net.yml',
 		'overrides/storage.yml',
 	]);

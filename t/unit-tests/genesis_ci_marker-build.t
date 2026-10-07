@@ -32,8 +32,8 @@ subtest 'the builder renders the subject a marker carries' => sub {
 		'[pipeline] control@a1b2c3d4e5f6 -> qa',
 		'the subject names the control commit and the receiving environment');
 
-	is(Genesis::CI::Marker::build('a1b2c3d', 'lmelt-vsphere-canwest-1-mgmt'),
-		'[pipeline] control@a1b2c3d -> lmelt-vsphere-canwest-1-mgmt',
+	is(Genesis::CI::Marker::build('a1b2c3d', 'acme-vsphere-west-1-mgmt'),
+		'[pipeline] control@a1b2c3d -> acme-vsphere-west-1-mgmt',
 		'the sha is written exactly as the caller resolved it');
 
 	is(Genesis::CI::Marker::build('a1b2c3d', 'qa'),

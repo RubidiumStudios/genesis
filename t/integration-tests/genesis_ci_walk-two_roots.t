@@ -17,7 +17,7 @@ use Genesis::CI::Walk ();
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-my $ENV_NAME = 'lmelt-vsphere-canwest-1-mgmt';
+my $ENV_NAME = 'acme-vsphere-west-1-mgmt';
 
 subtest 'each root walks the branch its own slug names' => sub {
 	# Six rows, and one restoration assertion for each of the two runs.
