@@ -134,14 +134,12 @@ Only the control branch is fetched. A deployment branch's tip answers a
 question no pre-deploy command asks, and fetching one is what let a
 branch-exists check read a ref that is now derived.
 
-The remote is L<Genesis::Top/source_control_remote> (D29). A clone that has
-no local control branch is left alone, by returning rather than by refusing,
-because materialising one is a repair, the pre-flight owns it, and the
-pre-flight reports the creation as it makes it. A fetch here would take that
-repair silently. A remote the configuration names and the clone lacks is left
-alone too, because it is a configuration fault rather than a network one, and
-the command's own refusal names the remote where this one would tell the
-operator to try again.
+The remote is L<Genesis::Top/source_control_remote>, which the
+configuration load has already found among the clone's remotes or refused
+(D118), so the clone always has it. A clone that has no local control branch
+is left alone, by returning rather than by refusing, because materialising
+one is a repair, the pre-flight owns it, and the pre-flight reports the
+creation as it makes it. A fetch here would take that repair silently.
 
 B<Parameters:>
 
@@ -157,8 +155,8 @@ The C<Service::Git> handle on the repository the command is running in.
 
 =back
 
-B<Returns:> 1 when the refs are current, when there is no local control
-branch to refresh, or when the clone lacks the remote. Anything else exits.
+B<Returns:> 1 when the refs are current, or when there is no local control
+branch to refresh. Anything else exits.
 
 B<Errors:>
 

@@ -1298,10 +1298,8 @@ sub _resolve_remote {
 		my $config = $self->config;
 		my $git    = $self->git;
 
-		# The key D118 retires is honoured until its own refusal lands.
-		my $named   = $config->get('pipeline.source_control.remote');
 		my $written = $config->get('pipeline.source_control.repository');
-		my $want    = defined $written ? _repository_identity($written) : undef;
+		my $want    = defined $written ? repository_identity($written) : undef;
 		my ($pin, $outside) = $git->remote_pin;
 		my @listed  = map {
 			[$_, $git->configured_url($_), $self->_remote_identity($_)]
@@ -1309,8 +1307,7 @@ sub _resolve_remote {
 
 		_warn_outside_pin($outside) if defined $outside && !defined $pin;
 
-		  defined $named ? {remote => $named, how => 'configured'}
-		: defined $pin   ? _pinned_remote($pin, \@listed, $want)
+		  defined $pin   ? _pinned_remote($pin, \@listed, $want)
 		: !@listed       ? {refusal => _remote_refusal(none => want => $want)}
 		: @listed == 1   ? _only_remote($listed[0], $want)
 		:                  _matched_remote($git, $control, \@listed, $want);
@@ -1356,7 +1353,7 @@ sub _remote_identity {
 	my ($self, $remote) = @_;
 	my $git = $self->git;
 	for my $url ($git->configured_url($remote), $git->remote_url($remote)) {
-		my $identity = _repository_identity(_ssh_host_resolved($git, $url));
+		my $identity = repository_identity(_ssh_host_resolved($git, $url));
 		return $identity if $identity;
 	}
 	return undef;
@@ -2357,6 +2354,7 @@ sub _validate_config {
 		});
 
 	} elsif ($is_integer && $config_version == 3){
+		$self->_refuse_retired_remote;
 		$self->config->validate($self->_repo_config_schema());
 		$self->{__config_disk_version} = 3;
 
@@ -2676,9 +2674,8 @@ sub _pipeline_config_schema {
 					# checkout.  The deployment root takes no key, being a fact
 					# of the checkout, and neither does the branch a command
 					# runs from, that being runtime state.
-					remote     => {type => 'string', description => "The remote CI clones from; derived from the control branch's upstream"},
-					uri        => {type => 'string', description => "That remote's fetch URL"},
-					repository => {type => 'string', description => "The GitHub owner/repo the API targets"},
+					uri        => {type => 'string', description => "The URL CI clones from, where it cannot be composed from the repository"},
+					repository => {type => 'string', description => "The repository the pipeline lives in, as owner/repo or its URL"},
 
 					# Defaulted, and read through one accessor apiece.
 					control_branch      => {type => 'string',  default => DEFAULT_CONTROL_BRANCH, description => "The control branch's name"},
@@ -2818,6 +2815,29 @@ sub _refuse_v2_pipeline {
 		"becomes one you can write."
 	) if $self->config->is_set('pipeline');
 	return 1;
+}
+
+# }}}
+# _refuse_retired_remote - a committed remote name is refused, with what replaces it {{{
+#
+# A remote's name is each clone's own, so the pipeline finds its remote by
+# the repository it points at (D118), and the key that named it is refused
+# rather than read as an alias (D28).  Asked before the schema, so the
+# operator hears what replaces the key and not that it was never known.
+sub _refuse_retired_remote {
+	my ($self) = @_;
+	my $named = $self->config->get('pipeline.source_control.remote');
+	return 1 unless defined $named;
+	bail({exitcode => CONFIG},
+		"#C{pipeline.source_control.remote} is set to #C{%s} in ".
+		"#C{.genesis/config}, and is no longer read.  A remote's name is each ".
+		"clone's own, so the pipeline finds its remote by the repository it ".
+		"points at.\n\nRemove the key, and set ".
+		"#C{pipeline.source_control.repository} to the repository the pipeline ".
+		"lives in wherever the clone's remotes do not settle it.  To keep using ".
+		"#C{%s} in this clone, pin it there:\n\n  git config genesis.remote %s\n",
+		$named, $named, $named
+	);
 }
 
 # }}}
@@ -2998,7 +3018,7 @@ sub _source_control {
 	# Written as owner/repo or as a URL, the repository is one identity
 	# (D118), and the API is handed its owner/repo whichever was written.
 	if (defined(my $written = $config->get('pipeline.source_control.repository'))) {
-		$sc{identity} = _repository_identity($written);
+		$sc{identity} = repository_identity($written);
 		bail({exitcode => CONFIG},
 			"#C{pipeline.source_control.repository} is #C{%s}, which names no ".
 			"repository.\nWrite it as #C{owner/repo}, or as the repository's ".
@@ -3007,7 +3027,7 @@ sub _source_control {
 		) unless $sc{identity};
 	} else {
 		$sc{uri} //= $git->remote_url($sc{remote});
-		$sc{identity} = $resolved->{identity} // _repository_identity($sc{uri});
+		$sc{identity} = $resolved->{identity} // repository_identity($sc{uri});
 		bail({exitcode => CONFIG},
 			"#C{pipeline.source_control.repository} could not be derived from ".
 			"#C{%s}, which carries no #C{owner/repo} pair.\nName the repository ".
@@ -3021,7 +3041,7 @@ sub _source_control {
 }
 
 # }}}
-# _repository_identity - host, owner and repo, however the repository is written {{{
+# repository_identity - host, owner and repo, however the repository is written {{{
 #
 # A repository is one identity whether it is written owner/repo, as an https
 # URL, or in either ssh form (D118), so a clone's remotes can be matched to it
@@ -3031,7 +3051,7 @@ sub _source_control {
 # carry "github" in its name, and whether it speaks GitHub's API is asked of
 # the API rather than read from the name.  A path or a file:// URL carries no
 # host and so names no repository.
-sub _repository_identity {
+sub repository_identity {
 	my ($text) = @_;
 	return undef unless defined $text && length $text;
 	my ($host, $owner, $repo);

@@ -391,6 +391,11 @@ sub dump_yaml {
 # holds one, because the pipeline descriptor asks this class for the
 # spelling rather than asking an instance of it, and a class name has no
 # AST to fall back to.
+#
+# A version 3 source-control block names no provider, and its clone URL is
+# composed from the repository, on its own host, in the form auth.type
+# says, so it never has to be kept in step with the repository by hand
+# (D118).  A uri is the override for a host that cannot be composed.
 sub git_uri {
 	my ($self, $source_control) = @_;
 	$source_control ||= (ref($self) && $self->{ast})
@@ -404,11 +409,15 @@ sub git_uri {
 		return sprintf("git\@github.com:%s.git", $repo);
 	} elsif ($provider eq 'gitlab') {
 		return sprintf("git\@gitlab.com:%s.git", $repo);
-	} elsif ($source_control->{uri}) {
-		return $source_control->{uri};
-	} else {
-		return $repo;
 	}
+	return $source_control->{uri} if $source_control->{uri};
+
+	require Genesis::Top;
+	my $identity = Genesis::Top::repository_identity($repo) or return $repo;
+	my $path = "$identity->{owner}/$identity->{repo}";
+	return (($source_control->{auth} || {})->{type} // 'ssh') eq 'https'
+		? sprintf('https://%s/%s.git', $identity->{host}, $path)
+		: sprintf('git@%s:%s.git',     $identity->{host}, $path);
 }
 
 # }}}

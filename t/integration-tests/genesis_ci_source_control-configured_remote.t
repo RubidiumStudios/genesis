@@ -2,8 +2,8 @@
 # Proves T57's "never the first entry of git remote" for the commands that
 # use the remote, not only for the value describe reports: with a second
 # remote that git lists ahead of origin, propagate refreshes from, checks
-# control against, and publishes to the remote pipeline.source_control.remote
-# resolves to, and pipeline-status reads the same one (D29).
+# control against, and publishes to the remote the clone pins, and
+# pipeline-status reads the same one (D29, D118).
 use strict;
 use warnings;
 use utf8;
@@ -22,11 +22,14 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
 # mirror sorts ahead of origin, as dev does, and stays empty: a command that
-# took the first remote git lists would find no control there.
+# took the first remote git lists would find no control there.  Both remotes
+# are paths, which name no repository, so the clone's own pin is what names
+# origin, as the committed remote key did before D118 retired it.
 sub two_remotes {
 	my $h = ready_harness(delivered => ['qa'], certified => ['lab', 'qa'],
-		kit => 'omega-v2.7.0', source_control => {remote => 'origin'});
+		kit => 'omega-v2.7.0');
 	my $mirror = second_remote($h, name => 'mirror');
+	run({dir => $h->a}, 'git', 'config', 'genesis.remote', 'origin');
 	return ($h, $mirror);
 }
 

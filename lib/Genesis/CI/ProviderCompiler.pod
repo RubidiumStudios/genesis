@@ -504,10 +504,15 @@ B<Examples:>
 
 =head2 git_uri($source_control)
 
-The clone URI a source control declaration describes. GitHub and GitLab
-are spelled as SSH URIs from the repository name, an explicit C<uri> is
-taken as written, and anything else falls back to the repository name
-itself.
+The clone URI a source control declaration describes. A legacy declaration
+naming C<github> or C<gitlab> as its provider is spelled as an SSH URI from
+the repository name. Otherwise an explicit C<uri> is taken as written, and
+without one the URI is composed from the repository (D118): the repository,
+written as C<owner/repo> or as a URL, is read through
+L<Genesis::Top/repository_identity>, and the URI is that repository on its own
+host in the form C<auth.type> names, C<git@host:owner/repo.git> for C<ssh>,
+the default, and C<https://host/owner/repo.git> for C<https>. A repository
+that names none, such as a path, is returned as written.
 
 B<Parameters:>
 
@@ -527,6 +532,12 @@ B<Examples:>
 
     $compiler->git_uri({provider => 'github', repository => 'org/repo'});
     # 'git@github.com:org/repo.git'
+
+    $compiler->git_uri({repository => 'org/repo', auth => {type => 'https'}});
+    # 'https://github.com/org/repo.git'
+
+    $compiler->git_uri({repository => 'https://git.corp.example/org/repo.git'});
+    # 'git@git.corp.example:org/repo.git'
 
 =head2 secret_ref($ref)
 

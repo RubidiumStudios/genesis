@@ -73,46 +73,44 @@ subtest 'a branch the clone alone holds is published' => sub {
 		'and the run reports it as published rather than created');
 };
 
-subtest 'the publish goes to the remote the configuration names' => sub {
+subtest 'the publish goes to the remote the clone pins' => sub {
 	# Three rows, and one for the run's own restoration assertion.
 	plan tests => 4;
 
 	# git lists remotes alphabetically, so dev stands ahead of origin, and a
 	# stage that published to the first remote it found would publish there
-	# rather than to the remote pipeline.source_control.remote names.
-	my $h = make_harness(envs => ['qa'], source_control => {remote => 'origin'});
+	# rather than to the remote the clone's own genesis.remote names.  Both
+	# are paths, which name no repository, so the pin is what decides.
+	my $h = make_harness(envs => ['qa']);
 	my $other = second_remote($h, name => 'dev');
+	run({dir => $h->a}, 'git', 'config', 'genesis.remote', 'origin');
 
 	my (undef, undef, $exit) = run_genesis($h, 'pipeline-apply');
 	is($exit, 0, 'the apply exits 0');
 
 	ok(remote_sha($h, 'qa/bosh'),
-		'the branch landed on the remote the configuration names');
+		'the branch landed on the remote the clone pins');
 	is_deeply([sort keys %{refs_in($other, prefix => 'refs/heads')}], [],
 		'and nothing was pushed to the remote git happens to list first');
 };
 
-subtest 'a clone without the configured remote is refused before anything is cut' => sub {
-	# Four rows, and one for the run's own restoration assertion.
-	plan tests => 5;
+subtest 'a committed remote name is refused before anything is cut' => sub {
+	# Three rows, and one for the run's own restoration assertion.
+	plan tests => 4;
 
-	# The remote is named in the configuration and absent from the clone,
-	# which is how a repository reaches the stage with nowhere to publish
-	# to.  A repository that names no remote either is turned away earlier
-	# still, by the source-control derivation, and that is a different
-	# refusal about a different thing.
+	# The configuration still names its remote, which D118 retired, so the
+	# load refuses it for every command, and the apply never reaches the
+	# stage that cuts a branch.  A clone with no remote that names the
+	# repository is refused at the load too, under T357.
 	my $h = make_harness(envs => ['qa'], source_control => {remote => 'origin'});
-	drop_remotes($h);
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
 	my $said = unfolded($out, $err);
 
 	is($exit, Genesis::Exit::CONFIG,
-		'the refusal exits Genesis::Exit::CONFIG, because a missing remote is configuration');
-	like($said, qr/no git remote named origin/,
-		'the refusal names the remote it looked for');
-	like($said, qr/No branch was created/,
-		'and says that nothing was written');
+		'the refusal exits Genesis::Exit::CONFIG, because the key is configuration');
+	like($said, qr/pipeline\.source_control\.remote/,
+		'the refusal names the retired key');
 	is(ref_in($h->a, 'refs/heads/qa/bosh'), undef,
 		'no orphan is left standing behind the refusal');
 };

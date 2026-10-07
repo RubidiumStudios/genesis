@@ -1740,9 +1740,9 @@ sub _compile_pipeline {
 # creation would refuse to recreate it and the operator would be left with a
 # branch that never reaches anybody else.
 #
-# Every question and every write names the remote that
-# pipeline.source_control.remote resolves to, because that is the repository's
-# own answer to where its branches live.  Reading whichever remote git happens
+# Every question and every write names the remote source_control_remote
+# finds by the repository it points at, or the clone's own pin, because that
+# is where the repository's branches live.  Reading whichever remote git happens
 # to list first would ask the wrong repository on a clone that has two, and
 # git lists them alphabetically rather than in the order the operator added
 # them.
@@ -1756,31 +1756,6 @@ sub _compile_pipeline {
 # it would publish and leaves the clone and the remote as it found them.
 sub _apply_init_branches {
 	my ($top, $git, %opts) = @_;
-
-	# The derivation behind this bails on its own where it cannot settle a
-	# name, so what comes back here is always a name.  Whether the clone has
-	# a remote by that name is a separate question, and this is where it is
-	# asked.
-	my $remote = $top->source_control_remote;
-
-	# R is the home of every deployment branch, so a repository with nowhere
-	# to publish to is turned away before the first branch is written rather
-	# than after it.  Creating one and then failing on the publish would leave
-	# an orphan standing in the clone and would leave every environment behind
-	# the first with nothing at all.  A remote the clone does not have is
-	# configuration rather than a crash, so the refusal carries the
-	# configuration code.
-	bail(
-		{exitcode => CONFIG},
-		"Refusing to apply.  This repository has no git remote named ".
-		"#C{%s}, which is the remote #C{pipeline.source_control.remote} ".
-		"resolves to, so there is nowhere to publish the deployment ".
-		"branches to.\n\n".
-		"Add that remote, or point #C{pipeline.source_control.remote} at a ".
-		"remote the clone has, then run #C{genesis pipeline-apply} again.  ".
-		"No branch was created and no pipeline was set.",
-		$remote
-	) unless $git->has_remote($remote);
 
 	# The command names itself and what it has not written yet, because the
 	# refresh defaults its wording to propagate and would otherwise tell the

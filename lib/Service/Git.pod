@@ -332,8 +332,7 @@ B<Examples:>
 
 =head2 session
 
-  my $session = $git->session(control => $top->control_branch,
-      remote => $top->source_control_remote);
+  my $session = $git->session(control => $top->control_branch);
 
 The one branch session for this handle, built on the first ask and returned
 unchanged afterwards. Every branch change Genesis makes goes through it.
@@ -1931,8 +1930,8 @@ answered from the configuration L</_config> read once.
 This is the answer to "which remote does this branch belong to", and the
 first entry of C<git remote> is not: that one is alphabetical order, so a
 repository holding both C<dev> and C<origin> answers C<dev>.
-L<Genesis::Top/source_control_remote> asks here, after the configured
-C<pipeline.source_control.remote> and before falling back to C<origin>.
+L<Genesis::Top/source_control_remote> asks here to choose between remotes
+that name the same repository.
 
 B<Parameters:>
 

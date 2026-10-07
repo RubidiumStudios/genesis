@@ -81,12 +81,6 @@ sub refresh_control {
 	# out of this assertion.
 	return 1 unless $git->branch_exists('refs/heads/' . $control);
 
-	# A remote the configuration names and this clone lacks is a
-	# configuration fault, not a network one, so the refresh stands aside
-	# and the command's own refusal names the remote, rather than this one
-	# telling the operator to try again.
-	return 1 unless $git->has_remote($remote);
-
 	my (undef, $result) = $git->fetch_branches([$control]);
 	return 1 if $result->{ok};
 

@@ -970,6 +970,32 @@ subtest 'ProviderCompiler - git_uri' => sub {
 		'https://custom.git/repo.git', "custom URI is returned as-is";
 };
 
+# Proves T358's second half: under a v3 source-control block the clone URL
+# is composed from the repository and the credential type, so it never has
+# to be kept in step with the repository by hand (D118).
+subtest 'ProviderCompiler - git_uri composes the clone URL from the repository' => sub {
+	plan tests => 6;
+	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(
+		ast => Genesis::CI::Compiler::AST->new());
+
+	is $provider->git_uri({repository => 'org/repo', auth => {type => 'ssh'}}),
+		'git@github.com:org/repo.git', 'an ssh credential clones over ssh';
+	is $provider->git_uri({repository => 'org/repo', auth => {type => 'https'}}),
+		'https://github.com/org/repo.git', 'an https credential clones over https';
+	is $provider->git_uri({repository => 'org/repo'}),
+		'git@github.com:org/repo.git', 'and ssh is the default, as auth.type is';
+	is $provider->git_uri({repository => 'https://git.corp.example/org/repo.git',
+			auth => {type => 'ssh'}}),
+		'git@git.corp.example:org/repo.git',
+		"a repository written as a URL keeps its host, in the credential's form";
+	is $provider->git_uri({repository => 'git@git.corp.example:org/repo.git',
+			auth => {type => 'https'}}),
+		'https://git.corp.example/org/repo.git', 'whichever form it was written in';
+	is $provider->git_uri({repository => 'org/repo', auth => {type => 'ssh'},
+			uri => 'https://mirror.example/org/repo.git'}),
+		'https://mirror.example/org/repo.git', 'and a uri set is emitted as written';
+};
+
 subtest 'ProviderCompiler - dump_yaml' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new();
 	my $provider = Genesis::CI::ProviderCompiler::Concourse->new(ast => $ast);

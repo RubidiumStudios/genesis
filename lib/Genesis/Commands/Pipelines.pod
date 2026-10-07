@@ -126,9 +126,10 @@ provider, because a deployment branch is what a delivery is written to
 whether or not anything hosts a pipeline. It creates each missing branch as
 an orphan named by the deployment slug, publishes it, and leaves a branch the
 remote already carries where it is. The remote it asks and publishes to is
-the one C<pipeline.source_control.remote> resolves to, and not whichever
-remote git happens to list first, so a clone with two of them still writes
-where the repository says its branches live.
+the one L<Genesis::Top/source_control_remote> finds by the repository it
+points at, or the clone's own pin, and not whichever remote git happens to
+list first, so a clone with two of them still writes where the repository's
+branches live.
 
 With the branches in place the run asks the repository to protect them.
 Control and every deployment branch are told to block force pushes and to
@@ -273,12 +274,6 @@ B<Errors:>
 
 Calls C<bail()> with C<Genesis::Exit/CONFIG> when C<pipeline.enabled> is
 false or absent, naming the key and saying that nothing was written.
-
-Calls C<bail()> with C<Genesis::Exit/CONFIG> when the clone has no git remote
-by the name C<pipeline.source_control.remote> resolves to, naming that remote,
-because there is then nowhere to publish a deployment branch to.  The refusal
-comes before the first branch is created, so no branch is left standing behind
-it.
 
 Calls C<bail()> with C<Genesis::Exit/CONFIG> when the control branch is not
 in the clone, naming the branch and saying that no branch was created and no
@@ -1320,15 +1315,12 @@ The name is the deployment slug, so two deployment roots serving one
 environment get a branch each rather than contending for one ref.
 
 Every question and every write names the remote that
-C<Genesis::Top/source_control_remote> answers with, which is what
-C<pipeline.source_control.remote> resolves to. Reading whichever remote git
-lists first would ask the wrong repository on a clone that has two, since git
-lists them alphabetically rather than in the order they were added.
-
-A clone with no remote by that name is refused before the first branch is
-created, because every deployment branch lives on the remote and a run that
-created one and then failed to publish it would leave an orphan standing in
-the clone and every environment behind the first with nothing.
+C<Genesis::Top/source_control_remote> answers with, the one that points at the
+repository or the clone's own pin. Reading whichever remote git lists first
+would ask the wrong repository on a clone that has two, since git lists them
+alphabetically rather than in the order they were added. A clone with no
+remote to publish to never reaches the stage, because the configuration load
+refuses it first (D118).
 
 The refresh runs next, so what the remote carries is read from refs this run
 brought down rather than from whatever the clone happened to hold.
@@ -1381,13 +1373,6 @@ three lists, naming what the run would have done rather than what it did.
 B<Errors:>
 
 =over 4
-
-=item *
-
-A refusal at C<CONFIG> when the clone has no git remote by the name
-C<pipeline.source_control.remote> resolves to, naming that remote and saying
-that there is nowhere to publish the deployment branches to and that no branch
-was created. It is raised before anything is written.
 
 =item *
 

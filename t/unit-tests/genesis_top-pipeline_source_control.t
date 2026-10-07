@@ -84,8 +84,9 @@ subtest 'the block declares three tiers and refuses runtime state' => sub {
 	my $top = load_control("pipeline:\n  enabled: true");
 	my $sc  = $top->_repo_config_schema->{pipeline}{schema}{source_control}{schema};
 	is_deeply [sort grep {!$sc->{$_}{required}} keys %$sc],
-		[qw/control_branch control_requires_pr pr_prefix remote repository uri/],
-		'the overridable and defaulted fields are the six the design names';
+		[qw/control_branch control_requires_pr pr_prefix repository uri/],
+		'the overridable and defaulted fields are the five the design names, '.
+		'with no remote among them (D118)';
 	is_deeply [sort grep {$sc->{$_}{required}} keys %$sc],
 		[qw/auth identity/],
 		'auth and identity are the required pair';
@@ -96,7 +97,7 @@ subtest 'the block declares three tiers and refuses runtime state' => sub {
 		'manual tolerates an absent auth and identity';
 	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
 		'  provider:', '    type: concourse', '    target: ci',
-		'  source_control:', '    remote: origin'))}
+		'  source_control:', '    control_branch: control'))}
 		qr/pipeline\.source_control: missing required key/,
 		'an automated provider requires them';
 
@@ -204,7 +205,7 @@ subtest 'the uri row says whether git was asked' => sub {
 subtest 'a repository is one identity however it is written' => sub {
 	plan tests => 12;
 
-	my $id = \&Genesis::Top::_repository_identity;
+	my $id = \&Genesis::Top::repository_identity;
 	my $want = {host => 'github.com', owner => 'team', repo => 'bosh'};
 	is_deeply($id->('team/bosh'), $want, 'owner/repo assumes github.com');
 	is_deeply($id->('https://github.com/team/bosh'), $want, 'an https URL');
@@ -509,6 +510,28 @@ subtest 'every refusal lists the remotes and gives its remedies' => sub {
 	like($error, qr{no\s+git\s+remote}i, 'no remote at all says so');
 	like($error, qr{git\s+remote\s+add\s+\S+\s+\Q$canon\E},
 		'and gives git remote add with the repository filled in');
+};
+
+# Proves T358's first half: the committed remote name is gone, and a
+# configuration still carrying it is refused by name, with what replaces it,
+# rather than read as an alias (D118, D28).
+subtest 'the committed remote name is refused, naming what replaces it' => sub {
+	plan tests => 4;
+
+	my $body = join("\n", 'pipeline:', '  enabled: true',
+		'  source_control:', '    remote: origin');
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+	my $top = eval {load_control($body)};
+	my $error = $top ? '' : $@;
+	$error = eval {$top->source_control_remote; ''} // $@ if $top;
+
+	like($error, qr/pipeline\.source_control\.remote/, 'the key is named');
+	like($error, qr/pipeline\.source_control\.repository/,
+		'with the repository as what replaces it');
+	like($error, phrase('git config genesis.remote origin'),
+		"and the clone's own pin for the name it carried");
+	unlike($error, qr/unknown configuration key/,
+		'refused as retired, not as a key never heard of');
 };
 
 subtest 'a required flag can be a predicate' => sub {
