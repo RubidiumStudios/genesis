@@ -91,9 +91,10 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			absent  => [qw/no-fetch/],
 		},
 		'pipeline-apply' => {
-			class   => Genesis::Commands::PRE_DEPLOY,
-			options => [qw/dry-run|n yes|y/],
-			absent  => [qw/platform|provider|p=s no-fetch/],
+			class        => Genesis::Commands::PRE_DEPLOY,
+			options      => [qw/dry-run|n yes|y/],
+			absent       => [qw/platform|provider|p=s no-fetch/],
+			control_only => 1,
 		},
 		# The two describing commands take --from, the one way to read the
 		# pipeline's shape anywhere but control, and only they take it, so a
@@ -154,6 +155,14 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			$surface{$cmd}{fast_forward}
 				? "$cmd brings its deployment branch forward"
 				: "$cmd moves no ref of its own");
+
+		# The apply alone runs only on control (D113, T346); every other
+		# pre-deploy command in the sweep keeps D81's feature branches.
+		is(command_properties($cmd)->{control_only} ? 1 : 0,
+			$surface{$cmd}{control_only} // 0,
+			$surface{$cmd}{control_only}
+				? "$cmd runs only on control"
+				: "$cmd does not require control");
 
 		is(scalar(keys %opts), $surface{$cmd}{exactly},
 			"$cmd declares only the options read above")

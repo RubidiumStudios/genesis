@@ -228,6 +228,9 @@ sub define_command { # {{{
 		branch_fast_forward => 0,
 		commits            => undef,
 		refresh            => undef,
+		# A pre-deploy command that runs only on control, in step with the
+		# remote, rather than on control or a permitted feature branch.
+		control_only       => 0,
 	};
 
 	$PROPS{$name} = {%$default_props, %$props};
@@ -813,7 +816,8 @@ sub _gate_branch_class {
 		require Genesis::BranchClass;
 		Genesis::BranchClass::assert_pre_deploy($top, $git,
 			refresh => $refresh, adding => $adding,
-			commits => command_properties()->{commits});
+			commits => command_properties()->{commits},
+			control_only => command_properties()->{control_only});
 		return $fn->();
 	}
 

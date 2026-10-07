@@ -298,7 +298,35 @@ sub assert_pre_deploy {
 	return 1 unless defined $branch;
 
 	my $class = classify_branch($top, $branch);
+
+	# A command that runs only on control (D113) refuses every other branch,
+	# a detached HEAD included, naming what it found.  A clone with no control
+	# branch at all is let through, because the command's own refusal of that
+	# says more than "check it out" can.
+	if ($opts{control_only} && $class ne 'control'
+	    && $git->branch_exists($top->control_branch)) {
+		bail({exitcode => DATAERR},
+			"This command runs only with #C{%s} checked out, and this clone ".
+			"stands on %s.  It reads the pipeline's shape from #C{%s} and ".
+			"records the commit it applied from, so a branch's own shape is ".
+			"never what it applies.\n\n".
+			"    git checkout %s\n\n".
+			"Nothing was written.",
+			$top->control_branch,
+			$branch eq 'HEAD' ? 'a detached HEAD' : "#C{$branch}",
+			$top->control_branch, $top->control_branch
+		);
+	}
+
 	if ($class eq 'control') {
+		# Control must also be in step with the remote, because the commit the
+		# command records must be one every clone can fetch (D113, D30).
+		if ($opts{control_only}) {
+			require Genesis::CI::Preflight;
+			Genesis::CI::Preflight::require_control($top, $git,
+				action => 'apply', outcome => 'Nothing was written.');
+		}
+
 		# Where control requires a pull request, a command that commits
 		# on control expects a feature branch instead, because a commit
 		# made here has no way to reach control through a pull request.

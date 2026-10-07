@@ -275,6 +275,13 @@ B<Errors:>
 Calls C<bail()> with C<Genesis::Exit/CONFIG> when C<pipeline.enabled> is
 false or absent, naming the key and saying that nothing was written.
 
+Refused at C<Genesis::Exit/DATAERR> by the dispatch gate when the clone
+stands anywhere but control, naming the branch it found and the checkout of
+control, and when control is ahead of or behind the remote, in D30's words
+(D113).  The apply reads the shape it applies from control and records the
+commit it applied from, so it runs on control alone, in step with the
+remote.  See L<Genesis::BranchClass/assert_pre_deploy($top, $git, %opts)>.
+
 Calls C<bail()> with C<Genesis::Exit/CONFIG> when the control branch is not
 in the clone, naming the branch and saying that no branch was created and no
 record was written.  The apply records the commit it applied from, and git

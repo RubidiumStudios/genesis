@@ -424,6 +424,12 @@ commands make none.  It is declared only alongside C<branch_class =E<gt>
 PRE_DEPLOY>, since that is the one gate that reads it.  Defaults to
 C<undef>.
 
+=item C<control_only> - Boolean.  True where the command runs only with
+control checked out and in step with the remote, rather than on control or
+a permitted feature branch.  C<pipeline-apply> alone declares it (D113),
+because it reads the shape it applies from control and records the commit
+it applied from.  Read only by the C<PRE_DEPLOY> gate.  Defaults to 0.
+
 =item C<branch_fast_forward> - Boolean.  True where the gate may bring the
 environment's deployment branch up to its remote-tracking ref before it
 switches onto it, which C<deploy> alone declares.  A clone that has not

@@ -73,6 +73,7 @@ subtest 'force pushes and non-linear history are blocked everywhere' => sub {
 	my $h  = make_harness(envs => ['qa', 'prod'], github => 1);
 	my $gh = $h->gh;
 	write_env_file($h, 'prod', pipeline => {require_pr => 'true'});
+	push_from($h, 'a', $h->control);
 
 	my (undef, undef, $exit) = run_genesis($h, 'pipeline-apply');
 	is($exit, 0, 'the apply exits 0');

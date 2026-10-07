@@ -358,7 +358,18 @@ commands all run there as before. C<pipeline-apply> matters most, because it
 is the command that applies the protection this key derives, and a refusal
 that caught it would leave an operator no way to turn the protection on.
 
-A detached HEAD is allowed through, because it is neither control nor
+A command that passes C<control_only =E<gt> 1>, which is C<pipeline-apply>
+alone (D113), runs on control and nowhere else. Every other branch is
+refused, a feature branch and a detached HEAD included, naming what the
+clone stands on and the checkout of control that fixes it. On control it
+must also be in step with the remote, through
+L<Genesis::CI::Preflight/require_control>, which refuses C<ahead> as
+unpushed and C<behind> as stale in D30's words, because the commit the
+apply records must be one every clone can fetch. A clone with no control
+branch at all is let through, so the apply's own C<CONFIG> refusal names
+the missing branch.
+
+Otherwise a detached HEAD is allowed through, because it is neither control nor
 derived and neither remedy the predicate offers can be carried out on it. A
 repository that has lost its control branch is repaired by the pre-flight,
 which re-creates it from the remote, and a clone that never had one is
@@ -385,7 +396,8 @@ under C<--no-refresh> and C<pipeline-describe>, which answers out of the
 repository's own files. C<commits> says whether the command makes a commit
 on control, which only the C<control_requires_pr> refusal below reads.
 C<adding> is the environment name the command is about to create, and it is
-passed straight to C<permitted_feature_branch>.
+passed straight to C<permitted_feature_branch>. C<control_only> says the
+command runs on control alone, in step with the remote.
 
 =back
 
@@ -405,6 +417,18 @@ command changes what will be delivered.>
 I<add-prod does not descend from the tip of control, and this command
 changes what will be delivered.> The remedy follows, and the exit is
 C<Genesis::Exit::DATAERR>.
+
+=item Refuses any branch but control, for a command that runs only there.
+
+I<This command runs only with control checked out, and this clone stands on
+feature/reshape.> The checkout of control follows, and the exit is
+C<Genesis::Exit::DATAERR>.
+
+=item Refuses control out of step with the remote, for the same command.
+
+Raised through L<Genesis::CI::Preflight/require_control>: I<The control
+branch control is ahead of origin/control by 1 commit, which is
+unpublished.>, or behind it and stale, at C<Genesis::Exit::DATAERR>.
 
 =item Refuses control where a pull request is required, for a command that
 commits there.

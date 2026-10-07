@@ -37,6 +37,7 @@ subtest 'the set is the union of the declared and the discovered' => sub {
 		genesis  => {reads_exodus       => ['dev', 'ops']},
 		pipeline => {track_dependencies => ['vault', 'dev/bosh', 'bosh']},
 	);
+	push_from($h, 'a', $h->control);
 	certify($h, 'dev', commit => 'abc123', type => 'bosh');
 	certify($h, 'ops', commit => 'def456', type => 'bosh');
 
@@ -59,6 +60,7 @@ subtest 'the deployment excludes its own exodus path' => sub {
 	# drop it.
 	my $h = make_harness(envs => ['qa'], kit => 'exodus-reader');
 	write_env_file($h, 'qa', genesis => {reads_exodus => ['qa', 'dev']});
+	push_from($h, 'a', $h->control);
 	certify($h, 'dev', commit => 'abc123', type => 'bosh');
 
 	run_genesis($h, 'pipeline-apply');
@@ -80,6 +82,7 @@ subtest 'an environment that will not render is warned about, not refused' => su
 		genesis  => {requires_exodus    => ['prod']},
 		pipeline => {track_dependencies => ['vault']},
 	);
+	push_from($h, 'a', $h->control);
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
 	my $said = unfolded($out, $err);
@@ -114,6 +117,7 @@ subtest 'an environment that will not load keeps its declared set' => sub {
 	write_env_file($h, 'qa',
 		pipeline => {track_dependencies => ['vault', 'lab/bosh']},
 	);
+	push_from($h, 'a', $h->control);
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
 	my $said = unfolded($out, $err);

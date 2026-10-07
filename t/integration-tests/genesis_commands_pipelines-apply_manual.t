@@ -27,6 +27,7 @@ subtest 'the manual provider gets everything but a pipeline' => sub {
 	my $h  = make_harness(envs => ['qa', 'prod'], provider => 'manual', github => 1);
 	my $gh = github_double($h, admin => 1);
 	write_env_file($h, 'prod', pipeline => {prior_env => 'qa'});
+	push_from($h, 'a', $h->control);
 
 	no_secret($h->env_path('qa') . '/pipeline:discovery',
 		'no environment is known before the apply runs');

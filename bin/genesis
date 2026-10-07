@@ -2093,6 +2093,9 @@ define_command("pipeline-apply", {
 	alias          => [qw(pipeline-push)],
 	function_group => Genesis::Commands::PIPELINE,
 	branch_class   => Genesis::Commands::PRE_DEPLOY,
+	# The apply reads the shape from control and records the commit it
+	# applied from, so it runs on control alone, in step with the remote.
+	control_only   => 1,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	arguments      => [
