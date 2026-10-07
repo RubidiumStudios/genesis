@@ -124,7 +124,8 @@ subtest 'the record is written, replaced, and deleted' => sub {
 
 	is(proposed_for($h, 'prod'), undef,
 		'and deleted when the walk finds it merged');
-	ok(!$git->branch_exists($pr), 'with the branch gone beside it');
+	ok($git->branch_exists($pr),
+		'while the branch stands, since the run deletes no branch (D111)');
 };
 
 done_testing;

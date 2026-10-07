@@ -907,17 +907,18 @@ where neither this repository nor the remote holds it, and the session
 records the absence so a run that is declined or aborted can take it off
 again.
 
-An environment with nothing due takes C<retire_branch> instead, ahead of
-everything below, where the branch still stands on either side or a proposed
-record still points at a proposal. R's copy is asked for through the expected
-tip, which is the value this arm has just read off that very ref.
+An environment with nothing due answers C<idempotent> ahead of everything
+below, and its proposed record is deleted, because the walk found a marker at
+or past the commit it proposes. The pull request branch is left standing on
+R and in the clone (D111): the run never deletes a branch it is not
+recreating, and the next delivery rebuilds this one in place under its lease
+whether it stands or not. A preview deletes nothing.
 
-An environment holding commits is never retired, whatever stands on either
-side. The walk sends every held commit to C<held> and leaves nothing pending,
-so an environment waiting on the merge of its own open pull request arrives
-here with nothing due, and a retirement would take the branch, the pull
-request, and the proposed record away while the report settled the
-environment as held and named the merge it was waiting for.
+An environment holding commits keeps its proposed record. The walk sends
+every held commit to C<held> and leaves nothing pending, so an environment
+waiting on the merge of its own open pull request arrives here with nothing
+due, and clearing its record would forget the proposal the hold is waiting
+on.
 
 An environment whose pull request a reviewer has approved takes C<freeze>
 instead, ahead of everything below, so nothing is built and nothing is
@@ -1041,59 +1042,6 @@ B<Examples:>
     deliver($session, $record, env => $env, commits => \@pending,
         state => {state => 'approved', number => 42});
     # returns undef, having frozen the branch and held every due commit
-
-=head2 retire_branch($session, $record [, %opts])
-
-    my $word = Genesis::CI::PullRequest::retire_branch($session, $record,
-        env      => $env,
-        rejected => $state->{rejected});
-
-Deletes the environment's pull request branch locally and marks it for
-deletion on the remote, takes any closed attempt's branch with it, and deletes
-the proposed record. Called when nothing is due for the environment, which is
-the case after the pull request merges or after a rejection.
-
-A rejection leaves no persistent state, and neither does a merge, so a branch
-with nothing due has nothing left to say. The local refs go now, because
-nothing later in the run reads one and a leftover is what made the next
-cycle's branch creation die on a name that already existed. The remote refs go
-through the publish instead, one push each, so what this writes onto the
-record is the list C<_nothing_due_specs> reads rather than the removal itself.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$session>
-
-The run's open branch session, which the local deletions go through.
-
-=item C<$record>
-
-The walk's per-environment record. Its C<pr> is the pull request object, whose
-C<action> is set to C<delete> and whose C<retire> becomes the list of branches
-the remote still carries.
-
-=item C<%opts>
-
-C<env> is the L<Genesis::Env> whose proposed record is deleted, C<rejected> is
-the arrayref of closed-unmerged pull requests, whose head branches go with the
-environment's own, and C<dry_run> marks the same branches and takes none of
-them off.
-
-=back
-
-B<Returns:> C<idempotent>, always.
-
-B<Examples:>
-
-    retire_branch($session, $record, env => $env, rejected => []);
-    # returns 'idempotent', with pr/qa/bosh gone from the clone, listed
-    # under $record->{pr}{retire}, and the proposed record deleted
-
-    retire_branch($session, $record, env => $env, dry_run => 1);
-    # returns 'idempotent', having listed the same branches and deleted
-    # nothing at all
 
 =head2 client_for_run($top [, %opts])
 
@@ -1536,43 +1484,6 @@ B<Examples:>
 
     sync_pull_request($github, 'acme/deployments', $record, env => $env);
     # returns undef, where nothing was rebuilt and there is nothing to open
-
-=head1 INTERNAL FUNCTIONS
-
-=head2 _nothing_due_specs(%args)
-
-    my @specs = Genesis::CI::PullRequest::_nothing_due_specs(
-        git => $git, records => $record->{environments});
-
-Returns the deletion push specs for the branches this run retires, each leased
-against the tip the refresh read, so a branch somebody moved refuses its own
-deletion and records why.
-
-A removal is a push like any other, so it joins the publish set rather than
-happening inside the walk, and the spec is the shape C<Service::Git::push>
-already understands.
-
-B<Parameters:>
-
-=over 4
-
-=item C<%args>
-
-C<git> is the repository the tips are read from, under its
-L<Service::Git/pipeline_remote>, and C<records> is the arrayref of
-per-environment records, of which the ones whose C<pr> carries the action
-C<delete> are the ones read.
-
-=back
-
-B<Returns:> A list of specs, each carrying C<branch>, C<kind>, C<env>,
-C<delete>, and C<expect>. The list is empty where nothing was retired.
-
-B<Examples:>
-
-    _nothing_due_specs(git => $git, records => $envs);
-    # returns ({branch => 'pr/qa/bosh', kind => 'pr', env => 'qa',
-    #           delete => 1, expect => '9f1c...'})
 
 =head1 SEE ALSO
 

@@ -1766,9 +1766,7 @@ sub push {
 # _push_one - push a single ref and report what git did with it {{{
 #
 # The refspec is written out in full, so git is asked for the branch and never
-# for a name it could resolve some other way.  A spec asking for a removal
-# writes the empty source side instead, which is how git is told to take a
-# branch off the remote.
+# for a name it could resolve some other way.
 #
 # The push is asked for its porcelain form, because what the caller reports is
 # the ref git named rather than one the caller composed out of the branch it
@@ -1795,9 +1793,7 @@ sub _push_one {
 	_refuse_rewrite($branch, $remote)
 		if exists $spec->{expect} && $kind ne 'pr';
 
-	my $refspec = $spec->{delete}
-		? ":refs/heads/$branch"
-		: "refs/heads/$branch:refs/heads/$branch";
+	my $refspec = "refs/heads/$branch:refs/heads/$branch";
 
 	# A pull request branch takes its lease against the tip the run read, so
 	# the rewrite lands only where nobody has written since, and NULL_SHA

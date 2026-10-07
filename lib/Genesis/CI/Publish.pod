@@ -321,8 +321,8 @@ The remote, by name, which names the remote-tracking ref the range starts at.
 
 =item C<$spec>
 
-One ref spec. It carries C<branch>, and a spec carrying C<delete> is a removal
-rather than a range.
+One ref spec, carrying C<branch>. The run never removes a branch (D111), so
+every spec is a range.
 
 =back
 
@@ -330,8 +330,7 @@ B<Returns:> A hashref carrying C<count> as the number of commits the push
 would send, C<commits> as their subjects, C<changed> and C<deleted> as file
 counts, and C<new_branch> where the remote has no such branch yet. A new
 branch carries its counts and an empty C<commits>, because its history is as
-long as the repository's and the showing is a sentence rather than a log. A
-removal reports C<removal> and nothing else.
+long as the repository's and the showing is a sentence rather than a log.
 
 B<Errors:> Raises a bug where the branch has no local ref, naming the branch
 and the remote. There are two such branches, and each is refused in its own
@@ -361,9 +360,6 @@ B<Examples:>
     # on a branch origin has never held, returns
     # { new_branch => 1, count => 12, commits => [], changed => 8,
     #   deleted => 0 }
-
-    publish_delta($git, 'origin', {branch => 'pr/qa/bosh', delete => 1});
-    # returns { removal => 1 }
 
 =head1 INTERNAL FUNCTIONS
 

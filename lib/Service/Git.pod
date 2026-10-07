@@ -2576,9 +2576,9 @@ The remote to push to, by name. Optional: it defaults to L</pipeline_remote>.
 An arrayref of specs. Each carries C<branch>, and may carry C<kind>, which is
 C<deployment>, C<pr>, or C<control> and which reads as C<deployment> where a
 spec leaves it out. A spec may also carry C<expect>, the tip a
-C<--force-with-lease> is taken against, which only a C<pr> ref may have, and
-C<delete>, which pushes the deletion refspec instead. An empty list, or none
-at all, is a no-op and not a failure.
+C<--force-with-lease> is taken against, which only a C<pr> ref may have. No
+spec removes a branch, because a run never deletes one (D111). An empty list,
+or none at all, is a no-op and not a failure.
 
 =back
 
@@ -3221,9 +3221,7 @@ Pushes one ref and answers what git did with it.
 
 The refspec is written out in full, as C<refs/heads/NAME:refs/heads/NAME>, so
 git is asked for the branch and never for a name it could resolve some other
-way. A spec carrying C<delete> writes the empty source side instead, which is
-how git is told to take the branch off the remote. Called once per spec by
-L</push>, which is the only caller.
+way. Called once per spec by L</push>, which is the only caller.
 
 The push is asked for its porcelain form, because a caller reports the ref git
 itself named and the porcelain line is the only place git says what that ref

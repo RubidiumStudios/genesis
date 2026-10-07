@@ -805,8 +805,8 @@ sub propagate {
 			next if $env_record->{error};
 			# An environment that delivers into a pull request is loaded
 			# whether or not anything is due for it, because the arm is
-			# asked either way and a branch or a proposed record left over
-			# from a pull request that has since merged is its to retire.
+			# asked either way and a proposed record left over from a pull
+			# request that has since merged is its to clear.
 			next unless @{$env_record->{pending}}
 				|| $topo->{nodes}{$env_record->{env}}{require_pr};
 			$env_of{$env_record->{env}} = $top->load_env($env_record->{env});
@@ -851,8 +851,8 @@ sub propagate {
 				my @pending = @{$env_record->{pending}};
 
 				# The arm is asked even where nothing is due, because a
-				# branch and a proposed record left over from a pull request
-				# that has since merged are its to retire.
+				# proposed record left over from a pull request that has
+				# since merged is its to clear (D111).
 				my $env = $env_of{$env_name} ||= $top->load_env($env_name);
 				Genesis::CI::Walk::walk_one(
 					session => $session,
@@ -961,15 +961,6 @@ sub propagate {
 				env    => $env_name,
 			} unless $dry_run;
 		}
-
-		# The removals, which are the pull request branches this run retires.
-		# They are gathered once the walk is over rather than beside each arm,
-		# because a removal is a push like any other and every push waits for
-		# the whole walk to finish.
-		push @publish_specs, Genesis::CI::PullRequest::_nothing_due_specs(
-			git     => $git,
-			records => $record->{environments},
-		) unless $dry_run;
 
 		# This is the run's third stage.  The publish is held to the end of
 		# the walk, so a run that failed halfway has put nothing on the

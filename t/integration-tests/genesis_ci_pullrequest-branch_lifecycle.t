@@ -1,8 +1,9 @@
 #!/usr/bin/env perl
-# Proves T267, T333, and T187: nothing due deletes the pull request branch on
-# R and locally with the proposed record, the deletion goes as its own push
-# with the tip it leases against, and a local branch R no longer carries is
-# deleted rather than pushed from, so the next cycle opens cleanly.
+# Proves T267 and T333: nothing due leaves the pull request branch standing on
+# R and locally, deletes the proposed record alone, and pushes nothing, so the
+# next delivery rebuilds the branch in place (D111); and a local branch R no
+# longer carries is deleted rather than pushed from, so the next cycle opens
+# cleanly.
 #
 # An environment holding every due commit is the shape that looks like nothing
 # due and is not, so it has a row of its own here: it keeps its branch, its
@@ -34,8 +35,9 @@ use Genesis;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
-subtest 'nothing due deletes the branch and the record' => sub {
-	plan tests => 11;
+subtest 'nothing due leaves the branch standing and deletes the record' => sub {
+	# Twelve rows, and the restoration assertion of each of three runs.
+	plan tests => 15;
 
 	my $h   = ready(envs => ['qa'], kit => 'omega-v2.7.0');
 	my $gh  = $h->{gh};
@@ -54,8 +56,8 @@ subtest 'nothing due deletes the branch and the record' => sub {
 	my $number   = $proposed ? $proposed->{number} : undef;
 
 	# A closed pull request of somebody else's, whose branch is on R before
-	# the run and is not one this environment ever opened, so the assertion
-	# that it survives says the retirement reaches only what it owns.
+	# the run and is not one this environment ever opened, which the run
+	# reports and leaves where it stands whatever its state.
 	my $stale = gh_pull_request($gh, env => 'qa', head => "$pr-old",
 		base => $h->slug('qa'), review => 'none');
 	gh_close_pr($gh, $stale, merged => 0);
@@ -68,27 +70,40 @@ subtest 'nothing due deletes the branch and the record' => sub {
 	# and nothing is due any more.
 	gh_merge_pr($gh, $number, method => 'rebase');
 	squash_merge($h, 'qa', keep_marker => 1);
+	my $on_r  = remote_sha($h, $pr);
+	my $old_r = remote_sha($h, "$pr-old");
 
 	my $git_faulted = fault_git($h);
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
 	is($exit, 0, 'the run succeeded');
 
 	refresh($h, 'a');
-	ok(!remote_sha($h, $pr), 'the branch is gone from R');
-	ok(!$git->branch_exists($pr), 'and gone locally');
-	ok(remote_sha($h, "$pr-old"),
-		'while a branch it never opened is left exactly where it was');
+	is(remote_sha($h, $pr), $on_r, 'the branch stands on R where it was');
+	ok($git->branch_exists($pr), 'and stands locally');
+	is(remote_sha($h, "$pr-old"), $old_r,
+		'and a branch it never opened is left exactly where it was');
 
 	is(record_at($h, $h->env_path('qa').'/proposed'), undef,
-		'the proposed record was deleted');
+		'the proposed record alone was deleted');
 	like($err, qr/qa: idempotent/, 'and the environment is idempotent');
+	is(scalar(grep {$_->[0] eq 'push'} step_log($git_faulted)), 0,
+		'nothing was pushed, so no removal went to R');
 
-	my ($call) = grep {$_->[0] eq 'push'} step_log($git_faulted);
-	my %args = @{$call}[1 .. $#$call];
-	my ($removal) = grep {$_->{branch} eq $pr} @{$args{refs}};
-	ok($removal->{delete}, 'the removal went as a deletion on its own push');
-	ok(defined $removal->{expect},
-		'leased against the tip the refresh read, so a moved branch refuses');
+	# Something new is due, so the standing branch is rebuilt in place from
+	# the deployment branch's tip under its lease, and a new pull request
+	# opens on it: the branch left standing cost this delivery nothing.
+	due_commit($h, 'qa', params => {instances => 3},
+		message => 'Raise it again');
+	($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	is($exit, 0, 'the next run with something due succeeded');
+
+	refresh($h, 'a');
+	isnt(remote_sha($h, $pr), $on_r, 'and rebuilt the branch on R');
+	is($git->sha("$pr~1"), $git->sha("origin/".$h->slug('qa')),
+		"from the deployment branch's current tip");
+	my $again = record_at($h, $h->env_path('qa').'/proposed');
+	ok($again && $again->{number} && $again->{number} != $number,
+		'and opened a new pull request on it');
 };
 
 subtest 'a leftover local branch is deleted rather than pushed from' => sub {
@@ -125,7 +140,7 @@ subtest 'a leftover local branch is deleted rather than pushed from' => sub {
 	is(scalar @created, 2, 'and a fresh pull request was opened for it');
 };
 
-subtest 'a preview retires nothing' => sub {
+subtest 'a preview clears nothing' => sub {
 	plan tests => 7;
 
 	my $h   = ready(envs => ['qa'], kit => 'omega-v2.7.0');

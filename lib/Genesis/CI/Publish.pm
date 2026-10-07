@@ -219,11 +219,6 @@ sub confirm_publish {
 		scalar(@$specs), @$specs == 1 ? '' : 'es';
 	for my $spec (@$specs) {
 		my $delta = publish_delta($git, $remote, $spec);
-		if ($delta->{removal}) {
-			info "\n  #C{%s}: to be removed from #C{%s}, nothing is due",
-				$spec->{branch}, $remote;
-			next;
-		}
 		# The count is the delta's own rather than the length of the list
 		# beneath it, because a branch the remote has never held carries its
 		# whole history and prints no line per commit.
@@ -258,7 +253,6 @@ sub confirm_publish {
 sub publish_delta {
 	my ($git, $remote, $spec) = @_;
 	my $branch = $spec->{branch};
-	return {removal => 1} if $spec->{delete};
 
 	# resolve_branch is the tree's one reader of where a branch stands
 	# against its remote, and no-remote is its word for a branch only the
