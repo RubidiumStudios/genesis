@@ -121,6 +121,30 @@ subtest 'a repository with no commits' => sub {
 	is($exit, DATAERR, "it exits DATAERR, since the repository's state is the input");
 };
 
+subtest 'an unborn HEAD in a repository with commits is not an empty one' => sub {
+	plan tests => 4;
+	require Genesis::CI::Preflight;
+
+	# The tree stands on a branch with no commit yet while its other branches
+	# have commits, as a clone does whose checked-out branch was deleted under
+	# it.  There is still no branch to come back to, so it is a problem, but
+	# the repository is not empty, and the index reads as added files only
+	# because HEAD names nothing to compare it against.
+	my $h   = make_harness(envs => ['qa']);
+	my $git = $h->git('a');
+	run({dir => $h->a, onfailure => 'Failed to stand on an unborn branch'},
+		'git', 'checkout', '-q', '--orphan', 'feature/unborn');
+
+	my @problems = $git->preflight_problems;
+	is($problems[0] && $problems[0]{code}, DATAERR, 'it is DATAERR');
+	like($problems[0] && $problems[0]{text}, qr{feature/unborn.*no commits yet}s,
+		'naming the branch the tree stands on');
+	unlike($problems[0] && $problems[0]{text}, qr/repository at .* has no commits/s,
+		'and not calling the repository one with no commits');
+	is(scalar(Genesis::CI::Preflight::repository_problems($git)), 1,
+		'nor are the files the index holds called uncommitted changes');
+};
+
 subtest 'current_branch names no branch where HEAD names none' => sub {
 	plan tests => 3;
 

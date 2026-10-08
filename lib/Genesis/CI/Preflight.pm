@@ -84,11 +84,14 @@ sub refuse_once {
 # with uncommitted changes, which the session's begin refuses with the same
 # words.  None of them invalidates another question, so they are collected
 # with the rest (D115, noted 2026-10-07); dubious ownership is refused on the
-# spot by the git handle, since git answers nothing after it.
+# spot by the git handle, since git answers nothing after it.  On an unborn
+# HEAD the tree is not asked about, because with no commit to compare against
+# every file the index holds reads as a change; the pre-flight's own problem
+# names the branch it stands on.
 sub repository_problems {
 	my ($git) = @_;
 	my @problems = $git->preflight_problems;
-	return @problems if $git->is_clean;
+	return @problems if !defined $git->sha('HEAD') || $git->is_clean;
 
 	my $status = $git->status;
 	my @dirty  = sort grep {$status->{$_} !~ /^\?\?/} keys %$status;

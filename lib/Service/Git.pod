@@ -1019,8 +1019,11 @@ The questions L</preflight> asks, answered rather than raised, so that D115's
 first stage can report them beside every other problem a run finds. A
 repository with no commits and a process with no committer identity each come
 back as a hashref of C<code> and C<text>, the text being the words the refusal
-had; both are asked, so a repository with neither reports both. A working tree
-git refuses under C<safe.directory> is still refused on the spot, because git
+had; both are asked, so a repository with neither reports both. A repository
+is empty only when no ref reaches a commit. A tree standing on an unborn branch
+beside branches that have commits is told which branch it stands on instead,
+at the same C<DATAERR>, since it too has no branch to come back to. A working tree git
+refuses under C<safe.directory> is still refused on the spot, because git
 answers nothing after it.
 
 B<Parameters:> None.
@@ -1043,6 +1046,11 @@ B<Examples:>
   my @problems = $git->preflight_problems;
   # returns ({code => 78, text => 'This process has no committer identity, ...'})
   # where no identity is set, and () where all is well
+
+  my @problems = $git->preflight_problems;
+  # returns ({code => 65, text => 'The working tree at ... stands on
+  # feature/x, a branch with no commits yet, ...'}) on an unborn branch in a
+  # repository that has commits
 
 =head2 status
 

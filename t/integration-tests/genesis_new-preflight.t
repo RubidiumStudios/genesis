@@ -101,15 +101,15 @@ for my $case (@cases) {
 	};
 }
 
-subtest 'both callers fail on a repository with no commits' => sub {
-	# The third shape the pre-flight classifies, and it is built here
-	# rather than through the harness.  fixture_preflight refuses to build
-	# it in a copy, because both copies carry the seeding commit, and the
-	# repository it builds beside the harness is no deployment root and can
-	# hold no delivered branch, so no whole command can run in one.  An
-	# orphan checkout is the same state read through the same question,
-	# because HEAD resolves to nothing there, which is what the pre-flight
-	# asks git and classifies the failure of.
+subtest 'both callers fail on a branch with no commits' => sub {
+	# The third shape the pre-flight classifies, built here rather than
+	# through the harness.  A repository with no commits at all is no
+	# deployment root and can hold no delivered branch, so no whole command
+	# can run in one, and the unit rows prove that refusal.  An orphan
+	# checkout in a repository that has commits is the shape a whole command
+	# meets: HEAD resolves to nothing, so there is no branch to come back to,
+	# and the refusal names the branch rather than calling the repository
+	# empty.
 	my $matches = qr/no commits/i;
 
 	my $h = make_harness(envs => ['qa'], type => 'bosh',
@@ -140,7 +140,8 @@ subtest 'both callers fail on a repository with no commits' => sub {
 		'both callers printed the same line from the same helper');
 	is($sexit, $exit, 'and both exited on the same code');
 
-	like($err, qr/git commit/, 'and the fix is a command to run');
+	like(unfolded($err), qr/Switch to a branch that has commits/,
+		'and the fix names the branch to stand on');
 };
 
 done_testing;

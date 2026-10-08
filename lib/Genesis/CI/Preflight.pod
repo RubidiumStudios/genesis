@@ -293,6 +293,10 @@ C<begin> refuses with. Untracked files are not changes. None of them leaves
 another question without valid input, so the run collects them with the rest
 (D115, noted 2026-10-07).
 
+On an unborn HEAD the working tree is not asked about: with no commit to
+compare against, every file the index holds reads as a change, and the
+pre-flight's own problem already names the branch the tree stands on.
+
 B<Parameters:>
 
 =over 4
@@ -321,6 +325,10 @@ B<Examples:>
     repository_problems($git);
     # returns (problem(DATAERR, "Working tree has uncommitted changes, ...  - qa.yml\n"))
     # where qa.yml was edited and not committed
+
+    repository_problems($git);
+    # returns only the pre-flight's unborn-branch problem on an unborn branch
+    # in a repository with commits, whatever the index holds
 
 =head2 local_only_commits($git, $branch)
 

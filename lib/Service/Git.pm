@@ -680,12 +680,26 @@ sub preflight_problems {
 	if ($rc) {
 		_refuse_dubious_ownership($said, $self->{root});
 
-		push @problems, {code => DATAERR, text => sprintf(
-			"The repository at #C{%s} has no commits, so there is no branch to ".
-			"leave and nothing to come back to.\n\n".
-			"    git commit --allow-empty -m 'Initial commit'\n\n".
-			"Make the first commit, then run this command again.",
-			$self->{root})};
+		# An unborn HEAD is not an empty repository: a tree standing on a
+		# branch with no commit yet may sit beside branches that have them,
+		# and is told which branch it stands on rather than that nothing was
+		# ever committed.
+		my ($any) = run({dir => $self->{root}, stderr => 0},
+			'git', 'rev-list', '-n1', '--all');
+		push @problems, {code => DATAERR, text => (defined $any && $any =~ /\S/)
+			? sprintf(
+				"The working tree at #C{%s} stands on #C{%s}, a branch with no ".
+				"commits yet, so there is no branch to leave and nothing to come ".
+				"back to.\n\n".
+				"Switch to a branch that has commits, or make this branch's first ".
+				"commit, then run this command again.",
+				$self->{root}, $self->checked_out_branch // 'HEAD')
+			: sprintf(
+				"The repository at #C{%s} has no commits, so there is no branch to ".
+				"leave and nothing to come back to.\n\n".
+				"    git commit --allow-empty -m 'Initial commit'\n\n".
+				"Make the first commit, then run this command again.",
+				$self->{root})};
 	}
 
 	# Identity is asked for separately, because a repository with commits
