@@ -406,6 +406,49 @@ B<Examples:>
   # returns where control is ahead, for the preview to warn about, and
   # refuses behind and diverged as it does for a run that writes
 
+=head2 control_problems($top, $git, %opts)
+
+  my @problems = Genesis::CI::Preflight::control_problems($top, $git,
+      tracking      => 'refs/genesis/preflight/origin',
+      creates_local => 1);
+
+The questions L</require_control($top, $git, %opts)> asks, each answered as a
+problem in the words its refusal had, the frame left to the one refusal
+(D115): control nowhere at all at C<CONFIG>, and local only, missing locally,
+ahead, behind or diverged at C<DATAERR>. Control's divergence is a gate,
+because every question that reads control is left without a control anyone
+can trust while it stands.
+
+B<Parameters:>
+
+=over 4
+
+=item C<tracking>
+
+Optional. The view of R control is measured against, as for
+L<Service::Git/resolve_branch>, which D115's run gives as its snapshot.
+
+=item C<creates_local>
+
+Optional. True where the run will create a control the clone lacks from what
+it read of R, so its absence is no problem.
+
+=item C<permit_ahead>, C<unverifiable>
+
+As for L</require_control($top, $git, %opts)>.
+
+=back
+
+B<Returns:> A list of at most one problem, empty where control stands in step.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  control_problems($top, $git, tracking => 'refs/genesis/preflight/origin');
+  # returns (problem(DATAERR, "The control branch control is behind ..."))
+  # where R gained a commit control has not
+
 =head2 assert_not_disowned($top, %opts)
 
   my $applied = Genesis::CI::Preflight::assert_not_disowned($top,
@@ -958,6 +1001,26 @@ B<Examples:>
 
 Every public entry of this module goes above this heading, under
 C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
+
+=head2 _control_standing($top, $git, %opts)
+
+  my ($div, @problems) = _control_standing($top, $git, %opts);
+
+Control's divergence and the problem it makes, which
+L</require_control($top, $git, %opts)> frames and refuses with and
+L</control_problems($top, $git, %opts)> hands back.
+
+B<Parameters:> As for L</control_problems($top, $git, %opts)>.
+
+B<Returns:> The divergence from L<Service::Git/resolve_branch>, or C<undef>
+where control is nowhere, followed by at most one problem.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my ($div, @problems) = _control_standing($top, $git);
+  # returns ({state => 'in-sync', ...}) where control stands in step
 
 =head2 _provider_gate_warning($top, %how)
 

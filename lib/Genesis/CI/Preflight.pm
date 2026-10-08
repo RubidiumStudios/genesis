@@ -183,46 +183,80 @@ sub require_control {
 	push @events, sprintf('created control from %s/%s', $remote, $control)
 		if grep {$_ eq $control} @{($opts{refreshed} || {})->{created} || []};
 
-	my $div = $git->resolve_branch($control,
-		unverifiable => ($opts{unverifiable} ? 1 : 0));
+	my ($div, @problems) = _control_standing($top, $git, %opts);
+	my $refuse = sub {
+		bail({exitcode => $_[0]{code}}, '%s',
+			sprintf('Refusing to %s.  %s  %s', $action, $_[0]{text}, $outcome));
+	};
 
-	bail({exitcode => CONFIG},
-		"Refusing to %s.  The control branch #C{%s} exists neither on #C{%s} ".
-		"nor locally, and the environment files live on it, so nothing can ".
-		"read the topology.  Create it by hand, with the repository scaffold ".
-		"for a new repository or as the migration describes for a move to v3, ".
-		"push it, then run the command again.  %s",
-		$action, $control, $remote, $outcome
-	) unless defined $div;
+	$refuse->($problems[0]) unless defined $div;
 
 	my $state = {divergence => $div, events => \@events};
 	return $state if ($opts{on_divergence} // 'refuse') eq 'report';
-	return $state if $div->{state} eq 'in-sync';
+	$refuse->($problems[0]) if @problems;
+	return $state;
+}
 
-	bail({exitcode => DATAERR},
-		"Refusing to %s.  The control branch #C{%s} exists here and not on ".
+# }}}
+# control_problems - control's standing against R, answered rather than raised {{{
+#
+# The questions require_control asks, each answered as a problem in the words
+# its refusal had, with the frame left to the one refusal (D115).  tracking
+# names the view of R, which D115's run gives as its snapshot, and
+# creates_local says the run will create a control the clone lacks, so its
+# absence is no problem.  Control's divergence is a gate: every question that
+# reads control is left unasked where it stands.
+sub control_problems {
+	my ($top, $git, %opts) = @_;
+	my (undef, @problems) = _control_standing($top, $git, %opts);
+	return @problems;
+}
+
+# }}}
+# _control_standing - control's divergence, and the problems it makes {{{
+sub _control_standing {
+	my ($top, $git, %opts) = @_;
+	my $control = $top->control_branch;
+	my $remote  = $top->source_control_remote;
+
+	my $div = $git->resolve_branch($control,
+		unverifiable => ($opts{unverifiable} ? 1 : 0),
+		(defined $opts{tracking} ? (tracking => $opts{tracking}) : ()));
+
+	return (undef, problem(CONFIG, sprintf(
+		"The control branch #C{%s} exists neither on #C{%s} ".
+		"nor locally, and the environment files live on it, so nothing can ".
+		"read the topology.  Create it by hand, with the repository scaffold ".
+		"for a new repository or as the migration describes for a move to v3, ".
+		"push it, then run the command again.",
+		$control, $remote))) unless defined $div;
+
+	return ($div) if $div->{state} eq 'in-sync';
+
+	return ($div, problem(DATAERR, sprintf(
+		"The control branch #C{%s} exists here and not on ".
 		"#C{%s}, so nothing it holds can be read by a deploy on another ".
 		"machine.  Push it with #C{git push -u %s %s}, then run the command ".
-		"again.  %s",
-		$action, $control, $remote, $remote, $control, $outcome
-	) if $div->{state} eq 'no-remote';
+		"again.",
+		$control, $remote, $remote, $control))) if $div->{state} eq 'no-remote';
 
-	# The remote has control and this clone does not, which is the one case the
-	# refresh closes by writing the local ref.  The refresh gives the branch the
-	# working tree stands on the tracking refspec and nothing else, so a tree
-	# standing on an unborn control leaves the ref unwritten and the query
-	# answers here.  The refusal says the creation did not happen, rather than
-	# reading a staleness out of two counts that are both zero.
-	bail({exitcode => DATAERR},
-		"Refusing to %s.  The control branch #C{%s} is on #C{%s/%s} and not in ".
-		"this clone.  The refresh writes the local ref for a branch the remote ".
-		"has and this clone lacks, so something stopped it here, and a working ".
-		"tree standing on #C{%s} with no commit on it is what usually does.  ".
-		"Write the ref with #C{git checkout -B %s %s/%s}, then run the command ".
-		"again.  %s",
-		$action, $control, $remote, $control, $control, $control, $remote, $control,
-		$outcome
-	) if $div->{state} eq 'no-local';
+	# The remote has control and this clone does not.  A run that creates the
+	# local branch from what it read of R, as D115's does, has nothing to say
+	# about that.  Otherwise the refresh was the one that writes the local ref,
+	# so something stopped it, and a working tree standing on an unborn control
+	# is what usually does; the refusal says the creation did not happen,
+	# rather than reading a staleness out of two counts that are both zero.
+	if ($div->{state} eq 'no-local') {
+		return ($div) if $opts{creates_local};
+		return ($div, problem(DATAERR, sprintf(
+			"The control branch #C{%s} is on #C{%s/%s} and not in ".
+			"this clone.  The refresh writes the local ref for a branch the remote ".
+			"has and this clone lacks, so something stopped it here, and a working ".
+			"tree standing on #C{%s} with no commit on it is what usually does.  ".
+			"Write the ref with #C{git checkout -B %s %s/%s}, then run the command ".
+			"again.",
+			$control, $remote, $control, $control, $control, $remote, $control)));
+	}
 
 	# The preview refuses nothing it can warn about instead, so a caller
 	# that is only going to report says so here.  A control branch that is
@@ -231,7 +265,7 @@ sub require_control {
 	# push settles is whether another machine could resolve the markers a
 	# real run would write.  Staleness is not like that, so behind and
 	# diverged are refused here as they are for a run that writes.
-	return $state if $opts{permit_ahead} && $div->{state} eq 'ahead';
+	return ($div) if $opts{permit_ahead} && $div->{state} eq 'ahead';
 
 	# The number governs the verb in every one of these, because a refusal
 	# that reads "by 1 commit, which are unpublished" is read past rather
@@ -259,11 +293,10 @@ sub require_control {
 		: sprintf("Rebase with #C{git pull --rebase %s %s} and push with ".
 		          "#C{git push %s %s}", $remote, $control, $remote, $control);
 
-	bail({exitcode => DATAERR},
-		"Refusing to %s.  The control branch #C{%s} %s.  Genesis never moves ".
-		"control.  %s, then run the command again.  %s",
-		$action, $control, $counts, $remedy, $outcome
-	);
+	return ($div, problem(DATAERR, sprintf(
+		"The control branch #C{%s} %s.  Genesis never moves ".
+		"control.  %s, then run the command again.",
+		$control, $counts, $remedy)));
 }
 
 # }}}

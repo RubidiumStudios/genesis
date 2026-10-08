@@ -106,6 +106,76 @@ subtest 'a gate names the questions it left unasked' => sub {
 	is($r->{raised}[0][0]{exitcode}, DATAERR, 'at the code of what was found');
 };
 
+# A teammate's T, a bare R, and the operator's clone L of it, with R then
+# moved on by one commit on control and a snapshot of R taken into L.
+sub moved_world {
+	require Genesis;
+	require Service::Git;
+	my $base = helper::workdir() . sprintf('/pf-%d-%06d', $$, int(rand(1_000_000)));
+	my ($t, $r, $l) = ("$base/t", "$base/r.git", "$base/l");
+	mkdir_or_fail($base);
+	mkdir_or_fail($t);
+	my $git_in = sub {Genesis::run({dir => shift, onfailure => 'git failed'}, 'git', @_)};
+	my $commit = sub {
+		my ($dir, $file) = @_;
+		put_file("$dir/$file", "$file\n");
+		$git_in->($dir, 'add', $file);
+		$git_in->($dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', $file);
+	};
+	$git_in->($t, 'init', '-q', '-b', 'control');
+	$commit->($t, 'first');
+	$git_in->($base, 'clone', '-q', '--bare', $t, $r);
+	$git_in->($t, 'remote', 'add', 'origin', $r);
+	$git_in->($base, 'clone', '-q', $r, $l);
+	$commit->($t, 'second');
+	$git_in->($t, 'push', '-q', 'origin', 'control');
+
+	my $git = Service::Git->new($l);
+	$git->pipeline_remote('origin');
+	$git->snapshot_remote(branches => ['control'], globs => []);
+	return {l => $l, git => $git, commit => sub {$commit->($l, shift)}, run => $git_in};
+}
+
+my $SNAP = 'refs/genesis/preflight/origin';
+{
+	package Stub::Top;
+	sub new { my ($c, %o) = @_; bless {control => 'control', %o}, $c }
+	sub control_branch { $_[0]{control} }
+	sub source_control_remote { 'origin' }
+}
+
+subtest "control's standing is read against the snapshot" => sub {
+	plan tests => 9;
+	my $w   = moved_world();
+	my $top = Stub::Top->new;
+	my $problems = sub {[Genesis::CI::Preflight::control_problems($top, $w->{git},
+		tracking => $SNAP, @_)]};
+
+	my $behind = $problems->();
+	is(scalar @$behind, 1, 'control behind R is one problem');
+	is($behind->[0]{code}, DATAERR, 'at DATAERR');
+	like($behind->[0]{text}, qr/behind #C\{origin\/control\} by 1 commit, so it is stale/,
+		'in the words the refusal had');
+	unlike($behind->[0]{text}, qr/Refusing to|Nothing was written/,
+		'with the frame left to the one refusal');
+
+	$w->{run}->($w->{l}, 'merge', '-q', '--ff-only', "$SNAP/control");
+	$w->{commit}->('local');
+	like($problems->()->[0]{text}, qr/ahead of #C\{origin\/control\} by 1 commit, which is unpublished/,
+		'control ahead of R is unpublished');
+	is(scalar @{$problems->(permit_ahead => 1)}, 0, 'which a preview permits');
+
+	$w->{run}->($w->{l}, 'checkout', '-q', '--detach');
+	$w->{run}->($w->{l}, 'branch', '-q', '-D', 'control');
+	is(scalar @{$problems->(creates_local => 1)}, 0,
+		'a control the clone lacks is none where the run creates it');
+	is($problems->()->[0]{code}, DATAERR, 'and a problem where it does not');
+
+	my $nowhere = [Genesis::CI::Preflight::control_problems(
+		Stub::Top->new(control => 'nothing'), $w->{git}, tracking => $SNAP)];
+	is($nowhere->[0]{code}, CONFIG, 'a control nowhere at all is CONFIG');
+};
+
 subtest 'a percent sign in a problem is not read as a format' => sub {
 	plan tests => 1;
 	my $r = refused(action => 'propagate', outcome => 'Nothing was written.',
