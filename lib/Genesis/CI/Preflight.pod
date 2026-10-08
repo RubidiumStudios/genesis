@@ -60,6 +60,130 @@ is reported as a warning saying the report assumes it.
 
 =head1 FUNCTIONS
 
+=head2 problem($code, $text)
+
+    my $p = Genesis::CI::Preflight::problem(CONFIG,
+        'The pipeline has never been applied.  Run #C{genesis pipeline-apply}.');
+
+One thing a check found, with the code its refusal carries. A check that
+answers rather than refuses hands back problems, and the run refuses once with
+every one of them through L</refuse_once(%opts)> (D115). The text is the
+paragraph the check's own refusal said, without the "Refusing to ..." frame
+or the outcome, so a run with one problem reads as it did before.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$code>
+
+The C<Genesis::Exit> code the problem alone would refuse with.
+
+=item C<$text>
+
+The paragraph naming the problem and its remedy.
+
+=back
+
+B<Returns:> A hashref of C<code> and C<text>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    problem(DATAERR, 'The working tree has uncommitted changes.');
+    # returns {code => 65, text => 'The working tree has uncommitted changes.'}
+
+=head2 exit_code_for(@problems)
+
+    my $code = Genesis::CI::Preflight::exit_code_for(@problems);
+
+The code a refusal naming these problems exits with: the highest-ranked
+problem's, in the order D106 gives as noted on 2026-10-07, C<CONFIG>,
+C<NOPERM>, C<DATAERR>, C<UNAVAILABLE>, C<TEMPFAIL>. A person must fix or
+configure before a retry helps, which outranks a fault the next run clears,
+and a permission is a person's decision too, ranked just below the
+configuration it cannot carry.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@problems>
+
+Problems from L</problem($code, $text)>.
+
+=back
+
+B<Returns:> The code, or the one problem's own code where it is unranked, or
+C<undef> for no problems.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    exit_code_for(problem(DATAERR, $a), problem(CONFIG, $b));
+    # returns CONFIG
+
+=head2 refuse_once(%opts)
+
+    Genesis::CI::Preflight::refuse_once(
+        action   => 'propagate',
+        outcome  => 'Nothing was written.',
+        problems => \@problems);
+
+One refusal naming every problem the run found, so an operator meets them all
+at once rather than fixing one only to meet the next (D115). It is framed as
+the stage's refusals always were: "Refusing to E<lt>actionE<gt>.", each
+problem's paragraph in the order found, then the outcome. A gate that ended
+the questions early says which it left unasked and why, rather than guessing at
+answers its failure made meaningless. The text goes through a C<'%s'> format,
+because C<bail> reads its argument as one and a branch name can carry a
+percent sign.
+
+B<Parameters:>
+
+=over 4
+
+=item C<problems>
+
+The problems found. An empty list refuses nothing.
+
+=item C<action>, C<outcome>
+
+The act refused, as in "Refusing to propagate.", and the closing sentence,
+such as "Nothing was written."
+
+=item C<not_checked>
+
+Optional. A hashref of C<because>, the gate that failed, and C<checks>, the
+questions it left unasked, said as "Not checked, because E<lt>becauseE<gt>:
+E<lt>checksE<gt>."
+
+=back
+
+B<Returns:> 1 where there are no problems.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+The composed refusal, at L</exit_code_for(@problems)>'s code, where any
+problem stands.
+
+=back
+
+B<Examples:>
+
+    refuse_once(action => 'propagate', outcome => 'Nothing was written.',
+        problems => [problem(DATAERR, $dirty), problem(CONFIG, $never)]);
+    # exits CONFIG: "Refusing to propagate.  <dirty>  <never>  Nothing was written."
+
+    refuse_once(action => 'propagate', problems => []);
+    # returns 1
+
 =head2 local_only_commits($git, $branch)
 
   my @stranded = Genesis::CI::Preflight::local_only_commits($git, $branch);

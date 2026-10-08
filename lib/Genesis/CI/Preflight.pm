@@ -13,7 +13,7 @@ use Genesis::CI::Marker;
 # imported rather than named in full, because Genesis::Exit exports nothing
 # by default and a fully qualified constant in a package nobody has loaded is
 # a bareword that dies where it stands.
-use Genesis::Exit qw/ABORTED CONFIG DATAERR NOPERM TEMPFAIL/;
+use Genesis::Exit qw/ABORTED CONFIG DATAERR NOPERM TEMPFAIL UNAVAILABLE/;
 
 # The gate below asks the operator a question, and the two modules that own
 # asking are imported by the names it calls rather than in full, so the
@@ -21,6 +21,63 @@ use Genesis::Exit qw/ABORTED CONFIG DATAERR NOPERM TEMPFAIL/;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_line/;
 
+# problem - one thing a check found, with the code its refusal carries {{{
+#
+# A check that answers rather than refuses hands back problems, and the run
+# refuses once with every one of them (D115).  The text is the paragraph the
+# check's own refusal said, so a run with one problem reads as it did before.
+sub problem {
+	my ($code, $text) = @_;
+	return {code => $code, text => $text};
+}
+
+# }}}
+# exit_code_for - the code a refusal naming these problems exits with {{{
+#
+# A person must fix or configure before a retry helps, and that outranks a
+# fault the next run clears (D106); a permission is a person's decision too,
+# ranked just below the configuration it cannot carry (D106, noted 2026-10-07).
+my @RANK = (CONFIG, NOPERM, DATAERR, UNAVAILABLE, TEMPFAIL);
+sub exit_code_for {
+	my (@problems) = @_;
+	my %found = map {($_->{code} => 1)} @problems;
+	for my $code (@RANK) {
+		return $code if $found{$code};
+	}
+	return $problems[0] ? $problems[0]{code} : undef;
+}
+
+# }}}
+# refuse_once - one refusal naming every problem the run found {{{
+#
+# Framed as the stage's refusals always were, "Refusing to <action>." then
+# each problem's paragraph then the outcome, so an operator meets every
+# problem at once rather than fixing one only to meet the next.  A gate that
+# ended the questions early says which it left unasked and why, rather than
+# guessing at answers its failure made meaningless.  The composed text goes
+# through a '%s' format, because bail reads its argument as one and a branch
+# name can carry a percent sign.
+sub refuse_once {
+	my (%opts) = @_;
+	my @problems = @{$opts{problems} || []};
+	return 1 unless @problems;
+
+	my @paragraphs = map {$_->{text}} @problems;
+	if (my $skipped = $opts{not_checked}) {
+		my @checks = @{$skipped->{checks} || []};
+		my $list = @checks > 1
+			? join(', ', @checks[0 .. $#checks - 1]) . " and $checks[-1]"
+			: $checks[0];
+		push @paragraphs, sprintf('Not checked, because %s: %s.',
+			$skipped->{because}, $list) if @checks;
+	}
+
+	bail({exitcode => exit_code_for(@problems)}, '%s',
+		join('  ', sprintf('Refusing to %s.', $opts{action}), @paragraphs,
+			$opts{outcome} // ()));
+}
+
+# }}}
 # local_only_commits - the commits a branch holds and no remote has {{{
 #
 #   my @commits = Genesis::CI::Preflight::local_only_commits($git, $branch);
