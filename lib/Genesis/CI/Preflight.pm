@@ -78,6 +78,28 @@ sub refuse_once {
 }
 
 # }}}
+# repository_problems - what the clone itself must have before a run {{{
+#
+# The pre-flight's empty repository and missing identity, and a working tree
+# with uncommitted changes, which the session's begin refuses with the same
+# words.  None of them invalidates another question, so they are collected
+# with the rest (D115, noted 2026-10-07); dubious ownership is refused on the
+# spot by the git handle, since git answers nothing after it.
+sub repository_problems {
+	my ($git) = @_;
+	my @problems = $git->preflight_problems;
+	return @problems if $git->is_clean;
+
+	my $status = $git->status;
+	my @dirty  = sort grep {$status->{$_} !~ /^\?\?/} keys %$status;
+	push @problems, problem(DATAERR, sprintf(
+		"Working tree has uncommitted changes, and this command switches ".
+		"branches.\n\nCommit or stash them first:\n%s",
+		join('', map {"  - $_\n"} @dirty)));
+	return @problems;
+}
+
+# }}}
 # local_only_commits - the commits a branch holds and no remote has {{{
 #
 #   my @commits = Genesis::CI::Preflight::local_only_commits($git, $branch);

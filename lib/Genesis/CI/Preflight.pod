@@ -184,6 +184,47 @@ B<Examples:>
     refuse_once(action => 'propagate', problems => []);
     # returns 1
 
+=head2 repository_problems($git)
+
+    my @problems = Genesis::CI::Preflight::repository_problems($git);
+
+What the clone itself must have before a run: the problems
+L<Service::Git/preflight_problems> answers, a repository with no commits and
+a process with no committer identity, and a working tree with uncommitted
+changes at C<DATAERR>, listing every changed path in the words the session's
+C<begin> refuses with. Untracked files are not changes. None of them leaves
+another question without valid input, so the run collects them with the rest
+(D115, noted 2026-10-07).
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The C<Service::Git> handle on the clone.
+
+=back
+
+B<Returns:> A list of problems from L</problem($code, $text)>, empty for a
+healthy, clean clone.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dubious ownership, refused on the spot by the git handle at C<CONFIG>.
+
+=back
+
+B<Examples:>
+
+    repository_problems($git);
+    # returns (problem(DATAERR, "Working tree has uncommitted changes, ...  - qa.yml\n"))
+    # where qa.yml was edited and not committed
+
 =head2 local_only_commits($git, $branch)
 
   my @stranded = Genesis::CI::Preflight::local_only_commits($git, $branch);

@@ -971,7 +971,8 @@ a CI task that carries one in its environment passes.
 
 Returns the handle, so it chains. The branch session calls it in C<begin>, and
 C<genesis new>, which opens no session, calls it directly; they share this one
-helper rather than each classifying its own failures.
+helper rather than each classifying its own failures. It refuses with the
+first problem L</preflight_problems> answers, which asks the same questions.
 
 B<Parameters:> None.
 
@@ -1009,6 +1010,39 @@ B<Examples:>
   $git->preflight;
   # exits CONFIG naming the safe.directory command, where the working tree
   # is owned by another user
+
+=head2 preflight_problems
+
+  my @problems = $git->preflight_problems;
+
+The questions L</preflight> asks, answered rather than raised, so that D115's
+first stage can report them beside every other problem a run finds. A
+repository with no commits and a process with no committer identity each come
+back as a hashref of C<code> and C<text>, the text being the words the refusal
+had; both are asked, so a repository with neither reports both. A working tree
+git refuses under C<safe.directory> is still refused on the spot, because git
+answers nothing after it.
+
+B<Parameters:> None.
+
+B<Returns:> A list of problems, empty for a healthy working tree.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Git refuses to work in %s because it is owned by another user." >> --
+exits C<CONFIG>, as for L</preflight>.
+
+=back
+
+B<Examples:>
+
+  my @problems = $git->preflight_problems;
+  # returns ({code => 78, text => 'This process has no committer identity, ...'})
+  # where no identity is set, and () where all is well
 
 =head2 status
 

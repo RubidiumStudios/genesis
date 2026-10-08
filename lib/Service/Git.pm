@@ -658,6 +658,20 @@ sub is_clean {
 # becomes a message naming the fix rather than a failed checkout.
 sub preflight {
 	my ($self) = @_;
+	my ($first) = $self->preflight_problems;
+	bail({exitcode => $first->{code}}, '%s', $first->{text}) if $first;
+	return $self;
+}
+
+# }}}
+# preflight_problems - the same questions, answered rather than raised {{{
+#
+# D115 asks these first and reports them beside every other problem a run
+# finds, so each comes back as a problem in the words its refusal had.  Dubious
+# ownership is still refused on the spot, because git answers nothing after it.
+sub preflight_problems {
+	my ($self) = @_;
+	my @problems;
 
 	my ($out, $rc, $err) = run({ dir => $self->{root}, passfail => 0 },
 		'git', 'rev-parse', '--verify', 'HEAD');
@@ -666,12 +680,12 @@ sub preflight {
 	if ($rc) {
 		_refuse_dubious_ownership($said, $self->{root});
 
-		bail({exitcode => DATAERR},
+		push @problems, {code => DATAERR, text => sprintf(
 			"The repository at #C{%s} has no commits, so there is no branch to ".
 			"leave and nothing to come back to.\n\n".
 			"    git commit --allow-empty -m 'Initial commit'\n\n".
 			"Make the first commit, then run this command again.",
-			$self->{root});
+			$self->{root})};
 	}
 
 	# Identity is asked for separately, because a repository with commits
@@ -686,16 +700,16 @@ sub preflight {
 	$name  ||= $ENV{GIT_COMMITTER_NAME}  // $ENV{GIT_AUTHOR_NAME}  // '';
 	$email ||= $ENV{GIT_COMMITTER_EMAIL} // $ENV{GIT_AUTHOR_EMAIL} // '';
 
-	bail({exitcode => CONFIG},
+	push @problems, {code => CONFIG, text => sprintf(
 		"This process has no committer identity, so git cannot record a ".
 		"commit in #C{%s}.\n\n".
 		"    git config user.name  \"Your Name\"\n".
 		"    git config user.email \"you\@example.com\"\n\n".
 		"Set both, then run this command again.",
-		$self->{root}
-	) unless length($name) && length($email);
+		$self->{root})}
+		unless length($name) && length($email);
 
-	return $self;
+	return @problems;
 }
 
 # }}}

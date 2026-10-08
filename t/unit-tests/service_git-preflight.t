@@ -150,6 +150,68 @@ subtest 'current_branch names no branch where HEAD names none' => sub {
 		'while a detached HEAD still answers HEAD, as git says it');
 };
 
+# D115 asks these before anything else and reports them with every other
+# problem it finds, so they are answered rather than raised, in the words the
+# refusal had; dubious ownership stays a refusal, because git declines every
+# question after it.
+subtest 'the problems are answered, not raised, for the run to collect' => sub {
+	plan tests => 6;
+
+	my @carried = qw/
+		GIT_COMMITTER_NAME GIT_AUTHOR_NAME
+		GIT_COMMITTER_EMAIL GIT_AUTHOR_EMAIL
+	/;
+	local @ENV{@carried};
+	delete @ENV{@carried};
+
+	my $h = make_harness(envs => ['qa']);
+
+	my $nobody = Service::Git->new(fixture_preflight($h, 'no_identity'));
+	my @who = do {
+		local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
+		$nobody->preflight_problems;
+	};
+	is(scalar @who, 1, 'a missing identity is one problem');
+	is($who[0] && $who[0]{code}, CONFIG, 'at CONFIG');
+	like($who[0] && $who[0]{text}, qr/no committer identity.*git config user\.name/s,
+		'in the words the refusal had');
+
+	my $empty = Service::Git->new(fixture_preflight($h, 'no_commits'));
+	my @none = $empty->preflight_problems;
+	is($none[0] && $none[0]{code}, DATAERR, 'a repository with no commits is DATAERR');
+	like($none[0] && $none[0]{text}, qr/has no commits/, 'naming it');
+
+	is(scalar($h->git('a')->preflight_problems), 0, 'and a healthy one has none');
+};
+
+subtest 'dubious ownership is still refused on the spot' => sub {
+	plan tests => 1;
+	my $h    = make_harness(envs => ['qa']);
+	my $path = fixture_preflight($h, 'safe_directory');
+	my $git  = Service::Git->new($path);
+	local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
+	my (undef, $exit) = bail_from(sub { $git->preflight_problems });
+	is($exit, CONFIG, 'because git answers nothing after it');
+};
+
+subtest 'a dirty working tree is a problem for the run to collect' => sub {
+	plan tests => 4;
+	require Genesis::CI::Preflight;
+
+	my $h   = make_harness(envs => ['qa']);
+	my $git = $h->git('a');
+	is(scalar(Genesis::CI::Preflight::repository_problems($git)), 0,
+		'a clean tree has none');
+
+	put_file($h->a . '/qa.yml', "---\nchanged: 1\n");
+	my @dirty = Genesis::CI::Preflight::repository_problems($git);
+	is($dirty[0] && $dirty[0]{code}, DATAERR,
+		'uncommitted changes are DATAERR, a state a person must clear');
+	like($dirty[0] && $dirty[0]{text}, qr/uncommitted changes/, 'named as such');
+	like($dirty[0] && $dirty[0]{text}, qr/\bqa\.yml\b/, 'with the path that changed');
+	run({dir => $h->a}, 'git', 'checkout', '--', 'qa.yml');
+};
+
 subtest 'a healthy working tree passes and returns the handle' => sub {
 	plan tests => 2;
 
