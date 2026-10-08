@@ -2270,6 +2270,13 @@ defaults to L</pipeline_remote>, and a call with neither is a bug.
 Set this where the caller did not refresh before asking, and the flag comes
 back on the answer. It changes neither the state nor either count.
 
+=item C<tracking>
+
+Optional. The ref prefix the remote's copy is read under, in place of
+C<refs/remotes/E<lt>remoteE<gt>>. D115's questions name the snapshot
+L</snapshot_remote> took, so a branch is measured against what R holds now
+without its tracking ref having moved.
+
 =back
 
 B<Returns:> A hashref carrying C<state>, C<ahead>, C<behind>, and
@@ -2311,6 +2318,11 @@ B<Examples:>
 
   my $div = $git->resolve_branch('nowhere/bosh', remote => 'origin');
   # returns undef, because no state describes a branch that is nowhere
+
+  my $div = $git->resolve_branch('control',
+      tracking => 'refs/genesis/preflight/origin');
+  # returns {state => 'behind', behind => 1, ...} where R gained a commit
+  # the clone's tracking ref has not seen
 
 =head2 delete_branch
 

@@ -180,6 +180,25 @@ subtest 'clearing removes the namespace and nothing else' => sub {
 	is(operator_state($w->{l}), $before, 'and the operator\'s refs are as they were');
 };
 
+# D115's questions read the snapshot rather than T, so a branch's standing is
+# measured against whichever the caller names.
+subtest 'a branch is measured against the snapshot when asked to be' => sub {
+	plan tests => 5;
+	my $w   = world();
+	my $git = handle($w);
+	$git->snapshot_remote(branches => ['control'], globs => ['*/bosh']);
+
+	is($git->resolve_branch('control')->{state}, 'in-sync',
+		"against T, control stands where the clone last fetched it");
+	my $snap = $git->resolve_branch('control', tracking => $NS);
+	is($snap->{state}, 'behind', 'against the snapshot it is behind R');
+	is($snap->{behind}, 1, 'by the one commit R gained');
+	is($git->resolve_branch('pr/qa/bosh', tracking => $NS)->{state}, 'no-local',
+		'a branch new on R is no-local against the snapshot');
+	is($git->resolve_branch('gone/bosh', tracking => $NS), undef,
+		'and a branch R lost, with no local ref, is nowhere');
+};
+
 subtest 'a namespace of its own leaves the run\'s alone' => sub {
 	plan tests => 2;
 	my $w   = world();

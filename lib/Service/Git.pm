@@ -1506,8 +1506,11 @@ sub resolve_branch {
 	my $remote       = $self->_remote_for($opts{remote}, 'resolve_branch');
 	my $unverifiable = $opts{unverifiable} ? 1 : 0;
 
+	# The remote's copy is T unless the caller names another view of R, as
+	# D115's questions name the snapshot they were asked against.
+	my $theirs   = ($opts{tracking} // "refs/remotes/$remote") =~ s{/+$}{}r;
 	my $local    = $self->_ref_exists("refs/heads/$branch");
-	my $tracking = $self->_ref_exists("refs/remotes/$remote/$branch");
+	my $tracking = $self->_ref_exists("$theirs/$branch");
 
 	return undef unless $local || $tracking;
 
@@ -1519,7 +1522,7 @@ sub resolve_branch {
 
 	my ($out) = run({dir => $self->{root}, onfailure => "Failed to compare '$branch' with '$remote/$branch'"},
 		'git', 'rev-list', '--left-right', '--count',
-		"refs/heads/$branch...refs/remotes/$remote/$branch");
+		"refs/heads/$branch...$theirs/$branch");
 	my ($ahead, $behind) = (($out // '') =~ /(\d+)\s+(\d+)/);
 	($ahead, $behind) = (0, 0) unless defined $ahead;
 
