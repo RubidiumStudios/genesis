@@ -20,6 +20,9 @@ $ENV{NOCOLOR} = 1;
 # instance, and it does not put them back, so the one row that drives the
 # real reader keeps a copy of it from before anything is overridden.
 my $real_checked_out = \&Service::Git::checked_out_branch;
+# The stub below answers git's complaint as its own third value whatever the
+# call asked for, so the one row that reads a real failure keeps the real run.
+my $real_run = \&Service::Git::run;
 
 # Build a Service::Git instance pointed at any path (we never invoke the
 # real git subprocess; run() is stubbed per-test).
@@ -119,6 +122,44 @@ subtest 'fetch_branches - success returns ($self, kind=success)' => sub {
 	is $result->{kind}, 'success', 'kind=success on rc=0';
 	cmp_deeply $result->{fetched}, [qw(qa lab)], 'both branches reported fetched';
 	cmp_deeply $result->{absent},  [],           'nothing absent';
+};
+
+subtest 'fetch_branches - both remote reads keep git\'s complaint apart' => sub {
+	# run folds stderr into the output unless asked not to, and a failure is
+	# classified from the complaint alone, so the probe and the fetch each
+	# ask for it apart.
+	plan tests => 2;
+	reset_stub();
+	install_run_stub();
+	override_inspections(checked_out => 'control');
+	queue_heads(qw(qa));
+	queue_local_heads();
+	push @run_results, ['', 0, ''];     # fetch
+	queue_after(local => [qw(qa)], tracking => []);
+
+	make_git()->fetch_branches([qw(qa)], 'origin');
+
+	is $run_calls[0][0]{stderr}, 0, 'the probe asks for stderr apart';
+	is $run_calls[2][0]{stderr}, 0, 'and so does the fetch';
+};
+
+subtest 'fetch_branches - git\'s own complaint reaches the result' => sub {
+	plan tests => 2;
+	no warnings qw(redefine once);
+	local *Service::Git::run                = $real_run;
+	local *Service::Git::checked_out_branch = $real_checked_out;
+
+	my $root = workdir() . "/gone-remote-$$";
+	mkdir_or_fail($root);
+	$real_run->({dir => $root, onfailure => 'Failed to init'}, 'git', 'init', '-q');
+	$real_run->({dir => $root, onfailure => 'Failed to add the remote'},
+		'git', 'remote', 'add', 'origin', "$root-gone.git");
+
+	my (undef, $result) = Service::Git->new($root)->fetch_branches(['control'], 'origin');
+
+	is $result->{ok}, 0, 'a remote that is not there is a failure';
+	like $result->{err}, qr/does not appear to be a git repository/,
+		'and the result carries what git said about it';
 };
 
 # ======================================================================

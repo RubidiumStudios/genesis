@@ -2506,8 +2506,9 @@ C<refs/heads/team/qa>.
 B<Failures are classified rather than merely reported.> In list context the
 result distinguishes a network problem from an authentication problem from
 anything else, so a caller can tell an operator which one they are looking
-at. Both stages are classified the same way. Scalar context returns C<$self>
-alone, which is what earlier callers expect.
+at. Both stages are classified the same way, each reading git's stderr apart
+from its output, so the classification and C<err> are what git said. Scalar
+context returns C<$self> alone, which is what earlier callers expect.
 
 Outside a controlling terminal, C<GIT_TERMINAL_PROMPT=0> is set on both the
 probe and the fetch, so a missing credential fails immediately instead of

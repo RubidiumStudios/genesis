@@ -1667,7 +1667,9 @@ sub fetch_branches {
 
 	# A refspec naming a branch the remote lacks aborts the entire fetch.
 	# Patterns are fully qualified: ls-remote matches the tail of a ref.
-	my ($out, $rc, $err) = run({%opts},
+	# Both remote reads take git's complaint apart from the output, because
+	# a failure is classified from the complaint alone.
+	my ($out, $rc, $err) = run({%opts, stderr => 0},
 		'git', 'ls-remote', '--heads', $remote,
 		map {"refs/heads/$_"} @want);
 	return wantarray
@@ -1704,7 +1706,7 @@ sub fetch_branches {
 		my $here = $self->checked_out_branch;
 		$is_local{$here} = 1 if defined $here;
 
-		my ($fout, $frc, $ferr) = run({%opts}, 'git', 'fetch', $remote,
+		my ($fout, $frc, $ferr) = run({%opts, stderr => 0}, 'git', 'fetch', $remote,
 			(map {"+refs/heads/$_:refs/remotes/$remote/$_"}
 				grep { $is_local{$_}} @present),
 			(map {"+refs/heads/$_:refs/heads/$_"}
