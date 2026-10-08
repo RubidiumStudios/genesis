@@ -259,6 +259,54 @@ subtest 'every pull request environment\'s collision is named' => sub {
 	is($branch_of->{prod}, 'pr-prod/bosh', 'and the branch of one that collides with nothing');
 };
 
+subtest 'the applied record is asked for, and its absence named' => sub {
+	plan tests => 6;
+	no warnings qw/once redefine/;
+	local *Stub::Top::applied_record_path = sub {'/secret/exodus/_pipelines/bosh'};
+
+	local *Stub::Top::applied_record = sub {undef};
+	my ($none, @never) = Genesis::CI::Preflight::applied_record_problems(Stub::Top->new);
+	is($never[0] && $never[0]{code}, CONFIG, 'a pipeline never applied is CONFIG');
+	like($never[0] && $never[0]{text}, qr/pipeline-apply\} has never been run.*_pipelines\/bosh/s,
+		'naming the record it looked for');
+	unlike($never[0] && $never[0]{text}, qr/Nothing was written/, 'with the outcome left to the one refusal');
+
+	local *Stub::Top::applied_record = sub {die "permission denied\n"};
+	my (undef, @unread) = Genesis::CI::Preflight::applied_record_problems(Stub::Top->new);
+	is($unread[0] && $unread[0]{code}, UNAVAILABLE, 'a vault that would not say is UNAVAILABLE');
+	like($unread[0] && $unread[0]{text}, qr/Could not read the applied record.*permission denied/s,
+		'with what it said');
+
+	local *Stub::Top::applied_record = sub {{control_commit => 'abc'}};
+	my ($record, @fine) = Genesis::CI::Preflight::applied_record_problems(Stub::Top->new);
+	is_deeply([$record, scalar @fine], [{control_commit => 'abc'}, 0], 'and a record read is no problem');
+};
+
+subtest "GitHub's refusals are answered as problems, the first ending the reads" => sub {
+	plan tests => 5;
+	require Genesis::CI::PullRequest;
+	no warnings qw/once redefine/;
+	my $asked = 0;
+	local *Genesis::CI::PullRequest::state_for_scope = sub {
+		my ($top, %o) = @_;
+		for my $env (@{$o{envs}}) {
+			$asked++;
+			$o{refuse}->({exitcode => UNAVAILABLE},
+				"Could not read the review state of #C{%s}'s pull request.", $env->{env});
+			last if $o{stop} && $o{stop}->();
+		}
+		return ('client', 'team/bosh', {});
+	};
+
+	my ($github, @problems) = Genesis::CI::Preflight::github_problems(
+		Stub::Top->new, envs => [{env => 'qa'}, {env => 'prod'}]);
+	is(scalar @problems, 1, 'one problem');
+	is($problems[0]{code}, UNAVAILABLE, 'at its own code');
+	like($problems[0]{text}, qr/review state of #C\{qa\}/, 'in its own words');
+	is($asked, 1, 'and an API that would not answer is not asked again');
+	is($github->{owner_repo}, 'team/bosh', 'with what was read handed back');
+};
+
 subtest 'a percent sign in a problem is not read as a format' => sub {
 	plan tests => 1;
 	my $r = refused(action => 'propagate', outcome => 'Nothing was written.',

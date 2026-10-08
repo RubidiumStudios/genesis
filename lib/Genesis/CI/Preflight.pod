@@ -184,6 +184,72 @@ B<Examples:>
     refuse_once(action => 'propagate', problems => []);
     # returns 1
 
+=head2 applied_record_problems($top)
+
+    my ($applied, @problems) = Genesis::CI::Preflight::applied_record_problems($top);
+
+The applied record, read from the vault, and why the run cannot have it (D109):
+no record at all, which means the pipeline was never applied or the mount
+holding it is gone, at C<CONFIG>; and a vault that would not say, at
+C<UNAVAILABLE>, which is not taken for a record that is not there. Each is in
+the words the run's refusal had, the outcome left to the one refusal. Nothing
+else a run asks reads the vault, so neither is a gate.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment root, whose L<Genesis::Top/applied_record> is read.
+
+=back
+
+B<Returns:> The record, or C<undef>, then at most one problem.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my ($applied, @problems) = applied_record_problems($top);
+    # returns (undef, problem(CONFIG, "genesis pipeline-apply has never been run ..."))
+    # where the vault holds no record
+
+=head2 github_problems($top, %opts)
+
+    my ($github, @problems) = Genesis::CI::Preflight::github_problems($top,
+        envs => \@pull_request_envs);
+
+The GitHub client the run needs and what its pull request environments' review
+states are, read through L<Genesis::CI::PullRequest/state_for_scope($top [, %opts])> as the run
+reads them, with its refusals answered as problems rather than raised (D55):
+no C<owner/repo> to open pull requests against and a token naming no user, at
+C<CONFIG>, and a review state the API would not give, at C<UNAVAILABLE>. The
+first problem ends the reads, because an API that refused one environment will
+not answer the rest (D115, noted 2026-10-07). A run with no token is warned and
+carries on, as before; that is no problem.
+
+B<Parameters:>
+
+=over 4
+
+=item C<envs>
+
+The pull request environments, as C<state_for_scope> takes them.
+
+=back
+
+B<Returns:> A hashref of C<client>, C<owner_repo> and C<state_of>, then the
+problems.
+
+B<Errors:> None of its own.
+
+B<Examples:>
+
+    my ($github, @problems) = github_problems($top, envs => \@envs);
+    # returns ({client => undef, ...}, problem(UNAVAILABLE, "Could not read the review state ..."))
+    # where the API would not answer
+
 =head2 prefix_problems($top, %opts)
 
     my ($branch_of, @problems) = Genesis::CI::Preflight::prefix_problems($top,

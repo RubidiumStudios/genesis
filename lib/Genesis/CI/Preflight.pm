@@ -100,6 +100,61 @@ sub repository_problems {
 }
 
 # }}}
+# applied_record_problems - the applied record, and why the run cannot read it {{{
+#
+# With no applied record the pipeline has never been applied here, or the
+# mount that held it is gone, and either way the run has nothing to route
+# from (D109).  A vault that would not say is not taken for a record that is
+# not there.  Nothing else a run asks reads the vault, so neither is a gate.
+sub applied_record_problems {
+	my ($top) = @_;
+	my $path    = $top->applied_record_path;
+	my $applied = eval {$top->applied_record};
+
+	return (undef, problem(UNAVAILABLE, sprintf(
+		"Could not read the applied record at #C{%s}: %s\n\n".
+		"The run reads which commit the pipeline was applied from before it ".
+		"decides anything, so it will not guess at one.",
+		$path, $@ =~ s/\s+$//r))) if $@;
+
+	return (undef, problem(CONFIG, sprintf(
+		"#C{genesis pipeline-apply} has never been run against this ".
+		"repository: the vault holds no applied record at #C{%s}, so there is ".
+		"no pipeline to propagate through.\n\n".
+		"Run #C{genesis pipeline-apply} to apply the pipeline and record the ".
+		"commit it was applied from, then run this again.",
+		$path))) unless $applied;
+
+	return ($applied);
+}
+
+# }}}
+# github_problems - the GitHub client the run needs, and why it cannot have it {{{
+#
+# The pull request environments' review states are read through
+# state_for_scope, as the run reads them, with its refusals recorded as
+# problems rather than raised (D55).  The first problem ends the reads,
+# because an API that refused one environment will not answer the rest and a
+# second refusal would only repeat the first (D115, noted 2026-10-07).
+sub github_problems {
+	my ($top, %opts) = @_;
+	require Genesis::CI::PullRequest;
+
+	my @problems;
+	my ($github, $owner_repo, $state_of) = Genesis::CI::PullRequest::state_for_scope(
+		$top,
+		envs   => $opts{envs} || [],
+		refuse => sub {
+			my ($how, $format, @args) = @_;
+			push @problems, problem($how->{exitcode}, sprintf($format, @args));
+		},
+		stop   => sub {scalar @problems});
+
+	return ({client => $github, owner_repo => $owner_repo, state_of => $state_of},
+		@problems);
+}
+
+# }}}
 # prefix_problems - every pull request branch's collision, all of them {{{
 #
 # The pull request prefix is asked of every environment that delivers by pull
