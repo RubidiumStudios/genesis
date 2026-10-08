@@ -1154,6 +1154,52 @@ sub _register_net {
 }
 
 # }}}
+# take_lock - the switch lock, before anything has begun {{{
+#
+# D115 takes the lock first, before it reads R or asks anything, and switches
+# only once every question has passed, so the lock is taken here without a
+# switch, and the switch that follows finds it held and takes nothing more.
+# The lock file is Genesis's own, so taking it changes nothing the operator
+# has.  A holder refuses at TEMPFAIL, naming itself, before anything moves.
+sub take_lock {
+	my ($self) = @_;
+	return $self->_take_lock;
+}
+
+# }}}
+# release_lock - let go of a lock taken for a run that never began {{{
+#
+# A run that refuses before it begins has no session to finish, so it lets
+# go here.  A session that began lets go when it finishes or aborts, which
+# restore the operator's branch first; letting go before that would open the
+# working tree to another run while this one still stands on its branch.
+sub release_lock {
+	my ($self) = @_;
+	bug("Service::Git::Session::release_lock was called on an active session, ".
+	    "which lets go of its lock when it finishes or aborts")
+		if $self->{active};
+	return $self->_release_lock;
+}
+
+# }}}
+# lock_holder - who holds a working tree's switch lock, read without taking it {{{
+#
+# pipeline-status never takes the lock, and says when a run holds it, so the
+# holder is read from the file: the pid on the first line and the command on
+# the second.  A file emptied on release names nobody, and a pid that no
+# longer runs is no holder, since the kernel let the flock go when it died.
+sub lock_holder {
+	my ($class, $git) = @_;
+	my $path = $git->git_dir . '/genesis-session.lock';
+	open(my $fh, '<', $path) or return undef;
+	my ($pid, $command) = map {chomp; $_} grep {defined} (scalar <$fh>, scalar <$fh>);
+	close $fh;
+	return undef unless defined $pid && $pid =~ /^\d+$/;
+	return undef unless kill(0, $pid) || $!{EPERM};
+	return {pid => $pid, command => $command};
+}
+
+# }}}
 # _take_lock - the switch flock, on genesis-session.lock {{{
 #
 # Per working tree, because git_dir resolves under .git/worktrees/<name>/

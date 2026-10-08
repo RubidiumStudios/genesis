@@ -3,7 +3,9 @@
 # a command that never switches proceeds under a held lock; T69, the kernel
 # releases the lock when its holder dies; T71, the lock is per working tree
 # and nothing is handed to the child; and T75, a switch that removes the
-# current directory finishes at the repository root.
+# current directory finishes at the repository root.  Under D115 the lock is
+# also taken before a session begins and kept by its switch, let go by a run
+# that refuses before it begins, and read for its holder without being taken.
 use strict;
 use warnings;
 use utf8;
@@ -242,6 +244,103 @@ subtest 'the lock file stops naming a holder once it is released' => sub {
 	ok(eval {$second->begin; $second->switch($h->slug('qa')); 1},
 		'and a later session takes the same file again');
 	$second->finish;
+};
+
+# D115 takes the lock first, before it reads R or asks anything, and
+# switches only once every question has passed, so the lock is taken
+# without a switch and the switch that follows reuses it.
+subtest 'the lock is taken before the session begins and kept by its switch' => sub {
+	plan tests => 6;
+
+	my $h   = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $git  = $h->git('a');
+	my $path = $git->git_dir . '/genesis-session.lock';
+
+	my $session = $git->session(control => $h->control, remote => 'origin');
+	$session->take_lock;
+	is(read_first_line($path), "$$", 'the lock names us before anything began');
+	is($git->current_branch, $h->control, 'and nothing switched to take it');
+
+	my $second = fork_and_switch($h, $h->slug('qa'));
+	like($second->{err}, qr/\b$$\b/, 'a second process is refused naming us');
+	is($second->{exit}, TEMPFAIL, 'at TEMPFAIL');
+
+	$session->begin;
+	ok(eval {$session->switch($h->slug('qa')); 1},
+		'the switch that follows reuses the lock it holds');
+	$session->finish;
+	is(read_first_line($path), '', 'and finishing lets it go');
+};
+
+subtest 'a lock taken for a run that refuses before it begins is let go' => sub {
+	plan tests => 3;
+
+	my $h   = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $git  = $h->git('a');
+	my $path = $git->git_dir . '/genesis-session.lock';
+
+	my $session = $git->session(control => $h->control, remote => 'origin');
+	$session->take_lock;
+	$session->release_lock;
+	is(read_first_line($path), '', 'the file names nobody');
+
+	my $second = fork_and_switch($h, $h->slug('qa'));
+	is($second->{exit}, 0, 'and another process takes the lock')
+		or diag($second->{err});
+	ok(!$session->active, 'the session that let go never began');
+};
+
+subtest 'taking a lock another holds refuses before anything moves' => sub {
+	plan tests => 4;
+
+	my $h   = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $git = $h->git('a');
+
+	my $pid = hold_session_lock($h, copy => 'a', command => 'genesis propagate');
+	my $session = $git->session(control => $h->control, remote => 'origin');
+	my $here = getcwd();
+	my $err = exception(sub { $session->take_lock });
+
+	like($err, qr/\b$pid\b/, "the refusal names the holder's pid");
+	like($err, qr/genesis propagate/, 'and its command');
+	is($git->current_branch, $h->control, 'nothing switched');
+	is(getcwd(), $here, 'and we stand where we were');
+	release_session_lock($h, $pid);
+};
+
+# pipeline-status never takes the lock (D115), and says when a run holds it,
+# so the holder is read from the file without the lock being taken.
+subtest 'the holder is read from the file without taking the lock' => sub {
+	plan tests => 6;
+
+	my $h   = make_harness(envs => ['qa']);
+	init_branch($h, 'qa');
+	my $git = $h->git('a');
+
+	is(Service::Git::Session->lock_holder($git), undef, 'nobody holds a fresh clone');
+
+	my $pid = hold_session_lock($h, copy => 'a', command => 'genesis propagate');
+	my $holder = Service::Git::Session->lock_holder($git);
+	is($holder && $holder->{pid}, $pid, 'a live holder is named by its pid');
+	is($holder && $holder->{command}, 'genesis propagate', 'and its command');
+
+	my $second = fork_and_switch($h, $h->slug('qa'));
+	is($second->{exit}, TEMPFAIL, 'and reading took nothing from it');
+
+	# Killed hard, the holder cannot empty the file, so it names a process
+	# that is gone, which is no holder at all.
+	release_session_lock($h, $pid, hard => 1);
+	is(Service::Git::Session->lock_holder($git), undef,
+		'a file naming a process that is gone names no holder');
+
+	my $session = $git->session(control => $h->control, remote => 'origin');
+	$session->take_lock;
+	$session->release_lock;
+	is(Service::Git::Session->lock_holder($git), undef,
+		'and neither does a file emptied on release');
 };
 
 sub read_first_line {

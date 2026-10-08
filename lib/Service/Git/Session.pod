@@ -335,6 +335,104 @@ B<Examples:>
   $session->switch('pr/qa/bosh', create_from => 'qa/bosh');
   # cuts pr/qa/bosh from qa/bosh and stands on it, where nobody holds it yet
 
+=head2 take_lock
+
+  $session->take_lock;
+
+Takes the working tree's switch lock before anything has begun. D115 takes it
+first, before it reads R or asks anything, and switches only once every
+question has passed, so the lock is taken here without a switch, and the
+switch that follows finds it held and takes nothing more. The lock file is
+Genesis's own, so taking it changes nothing the operator has.
+
+B<Parameters:> None.
+
+B<Returns:> The session.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Another Genesis process is using this working tree."> at
+C<Genesis::Exit::TEMPFAIL>, naming the holder's pid and command, where another
+process holds the lock. Nothing has moved: no branch, and not the working
+directory.
+
+=back
+
+B<Examples:>
+
+  $session->take_lock;
+  # the lock file names this process, and no branch has changed
+
+=head2 release_lock
+
+  $session->release_lock;
+
+Lets go of a lock taken for a run that refuses before its session begins,
+emptying the file first so it names nobody. A session that began lets go when
+it finishes or aborts, which restore the operator's branch first, so this
+refuses an active session rather than open the working tree to another run
+while this one still stands on its branch.
+
+B<Parameters:> None.
+
+B<Returns:> The session. A session holding no lock is answered unchanged.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+A bug where the session is active.
+
+=back
+
+B<Examples:>
+
+  $session->take_lock;
+  $session->release_lock;
+  # the lock file names nobody, and another process may take it
+
+=head2 lock_holder($git)
+
+  my $holder = Service::Git::Session->lock_holder($git);
+
+Who holds a working tree's switch lock, read from the lock file without the
+lock being taken, which is how C<pipeline-status> says that a run is in
+progress without ever making that run fail (D115). The pid is the file's
+first line and the command its second. A file emptied on release names
+nobody, and a pid that no longer runs is no holder, since the kernel let the
+flock go when it died.
+
+Class method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The C<Service::Git> handle whose working tree's lock is read.
+
+=back
+
+B<Returns:> A hashref of C<pid> and C<command>, or C<undef> where nobody holds
+the lock.
+
+B<Errors:> None. A lock file that cannot be read names nobody.
+
+B<Examples:>
+
+  Service::Git::Session->lock_holder($git);
+  # returns {pid => 4242, command => 'genesis propagate'} during a propagate
+
+  Service::Git::Session->lock_holder($git);
+  # returns undef where the file names a process that is gone
+
 =head2 finish
 
   $session->finish;
@@ -1561,8 +1659,9 @@ shape it already expects. A file that names nobody is therefore a lock nobody
 holds, and a pid written there that is no longer running is a holder that died
 without releasing, which the kernel has already dropped the C<flock> for.
 
-Taking it twice in one session is a no-op, so a session that has already
-switched switches again without asking for what it holds.
+Taking it twice in one session is a no-op, so a session that already holds
+it, through L</take_lock> or an earlier switch, switches without asking for
+what it holds.
 
 There is no break-lock option. The kernel drops the C<flock> when its holder
 dies, so an abandoned lock cannot arise and a refusal always names a process
