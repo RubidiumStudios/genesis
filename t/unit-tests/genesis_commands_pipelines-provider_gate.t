@@ -136,4 +136,54 @@ subtest '-y never answers the gate' => sub {
 	ok($result, 'and the answer that was given is the one that carries it');
 };
 
+# D115 collects the gate's non-interactive outcomes with every other problem
+# and asks the terminal only once every question has passed, so the gate's
+# two halves are asked apart.
+subtest 'the gate\'s refusals are answered as problems' => sub {
+	plan tests => 6;
+	no warnings 'redefine';
+
+	my @none = Genesis::CI::Preflight::provider_gate_problems($top, {});
+	is(scalar @none, 1, 'no --force is one problem');
+	is($none[0] && $none[0]{code}, Genesis::Exit::NOPERM(), 'at NOPERM');
+	like($none[0] && $none[0]{text}, qr/Run it with #C\{--force\} at a terminal/,
+		'in the words the refusal had');
+	unlike($none[0] && $none[0]{text}, qr/Nothing was written/,
+		'with the outcome left to the one refusal');
+
+	local *Genesis::CI::Preflight::in_controlling_terminal = sub {0};
+	my @blind = Genesis::CI::Preflight::provider_gate_problems($top, {force => 1});
+	like($blind[0] && $blind[0]{text}, qr/needs a terminal/,
+		'--force with no terminal is the other');
+
+	local *Genesis::CI::Preflight::in_controlling_terminal = sub {1};
+	my @asked = Genesis::CI::Preflight::provider_gate_problems($top, {force => 1});
+	is(scalar @asked, 0, 'and --force at a terminal is none, the question coming later');
+};
+
+subtest 'the confirmation is asked on its own' => sub {
+	plan tests => 2;
+	no warnings 'redefine';
+	local *Genesis::CI::Preflight::in_controlling_terminal = sub {1};
+	local *Genesis::CI::Preflight::prompt_for_boolean = sub {0};
+
+	my ($said, $code) = refusal_from(sub {
+		Genesis::CI::Preflight::confirm_provider_gate($top, {force => 1});
+	});
+	is($code, ABORTED, 'a no is ABORTED');
+	like($said, qr/Aborted at your request/, 'in the words it had');
+};
+
+subtest 'nothing is asked of a manual provider or a dry run' => sub {
+	plan tests => 2;
+	my $manual = top_for(make_harness(envs => ['qa'], provider => 'manual', vault => 0));
+	my @owned = Genesis::CI::Preflight::provider_gate_problems($manual, {});
+	is(scalar @owned, 0, 'the manual provider owns nothing to gate');
+	my @problems;
+	stderr_like(sub {
+		@problems = Genesis::CI::Preflight::provider_gate_problems($top, {},
+			dry_run => 1);
+	}, qr/owns propagation/, 'a dry run warns');
+};
+
 done_testing;

@@ -381,35 +381,62 @@ sub assert_not_disowned {
 # operator who takes the break-glass knows the dependents are not woken.
 sub assert_provider_gate {
 	my ($top, $opts, %how) = @_;
+	my ($first) = provider_gate_problems($top, $opts, %how);
+	bail({exitcode => $first->{code}}, '%s  %s',
+		$first->{text}, $how{outcome} // 'Nothing was written.') if $first;
+	return confirm_provider_gate($top, $opts, %how);
+}
 
-	my $provider = $top->pipeline_provider_type;
-	return 1 unless defined $provider && $provider ne 'manual';
-	return 1 if $ENV{GENESIS_PIPELINE_TASK};
-
-	my $owns    = $how{owns}    // 'propagation for this repository';
-	my $outcome = $how{outcome} // 'Nothing was written.';
-	my $warning = sprintf(
-		"The #C{%s} pipeline owns %s.  Running it by hand does the pipeline's ".
-		"work without taking any of the pipeline's locks, so the pipeline has ".
-		"no way to see you.",
-		$provider, $owns
-	);
+# }}}
+# provider_gate_problems - the gate's refusals, answered rather than raised {{{
+#
+# The outcomes that need no terminal, no --force and --force with no terminal
+# to give it at, come back as problems in the words their refusals had, the
+# outcome left to the one refusal that frames them (D115).  A dry run is
+# warned and passes, because a preview writes nothing.
+sub provider_gate_problems {
+	my ($top, $opts, %how) = @_;
+	my $warning = _provider_gate_warning($top, %how) or return ();
 
 	if ($how{dry_run}) {
 		warning($warning);
-		return 1;
+		return ();
 	}
-
-	bail({exitcode => NOPERM},
-		"%s\n\nRun it with #C{--force} at a terminal if you mean to.  %s",
-		$warning, $outcome
-	) unless $opts->{force};
-
-	bail({exitcode => NOPERM},
+	return problem(NOPERM, sprintf(
+		"%s\n\nRun it with #C{--force} at a terminal if you mean to.", $warning))
+		unless $opts->{force};
+	return problem(NOPERM, sprintf(
 		"%s\n\n#C{--force} needs a terminal, because the acknowledgement ".
-		"cannot be given without one.  %s",
-		$warning, $outcome
-	) unless in_controlling_terminal();
+		"cannot be given without one.", $warning))
+		unless in_controlling_terminal();
+	return ();
+}
+
+# }}}
+# _provider_gate_warning - what the pipeline owns, or nothing where none does {{{
+sub _provider_gate_warning {
+	my ($top, %how) = @_;
+	my $provider = $top->pipeline_provider_type;
+	return undef unless defined $provider && $provider ne 'manual';
+	return undef if $ENV{GENESIS_PIPELINE_TASK};
+	return sprintf(
+		"The #C{%s} pipeline owns %s.  Running it by hand does the pipeline's ".
+		"work without taking any of the pipeline's locks, so the pipeline has ".
+		"no way to see you.",
+		$provider, $how{owns} // 'propagation for this repository'
+	);
+}
+
+# }}}
+# confirm_provider_gate - the acknowledgement at a terminal, asked last {{{
+#
+# Asked once every question has passed, so nobody confirms a run that then
+# refuses (D115).  It assumes provider_gate_problems found nothing.
+sub confirm_provider_gate {
+	my ($top, $opts, %how) = @_;
+	my $warning = _provider_gate_warning($top, %how) or return 1;
+	return 1 if $how{dry_run};
+	my $outcome = $how{outcome} // 'Nothing was written.';
 
 	warning($warning);
 

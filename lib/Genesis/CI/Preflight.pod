@@ -527,6 +527,12 @@ A pipeline job, which Genesis recognises by C<GENESIS_PIPELINE_TASK> in the
 environment, skips the gate, and a repository under the manual provider never
 meets it, the operator there being the pipeline.
 
+It is the two halves D115 asks apart, joined: it refuses with the first
+problem L</provider_gate_problems($top, $opts, %how)> answers, followed by
+the outcome, and otherwise asks L</confirm_provider_gate($top, $opts, %how)>.
+The deploy calls it whole; the propagate run asks the halves apart, so the
+confirmation comes after every other question.
+
 The typed acknowledgement says what the deploy does not do as well as what to
 do before it. It recommends pausing the pipeline and waiting for quiescence
 on the target environment, on its director, and on every pipeline that
@@ -600,6 +606,60 @@ B<Examples:>
   # [FATAL] The concourse pipeline owns propagation for this repository.
   #         Run it with --force at a terminal if you mean to.  Nothing was
   #         written.
+
+=head2 provider_gate_problems($top, $opts, %how)
+
+  my @problems = Genesis::CI::Preflight::provider_gate_problems($top, $opts);
+
+The gate's refusals that need no terminal, answered as problems in the words
+they had, with the outcome left to the one refusal that frames them (D115):
+no C<--force>, and C<--force> with no terminal to acknowledge at, each at
+C<NOPERM>. A dry run is warned and passes, and a manual provider or a pipeline
+job owns nothing to gate.
+
+B<Parameters:> As for L</assert_provider_gate($top, $opts, %how)>.
+
+B<Returns:> A list of problems, empty where the gate has nothing to refuse.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  provider_gate_problems($top, {});
+  # returns (problem(NOPERM, "The concourse pipeline owns ...  Run it with --force ..."))
+
+  provider_gate_problems($top, {force => 1});
+  # returns () at a terminal, the acknowledgement coming later
+
+=head2 confirm_provider_gate($top, $opts, %how)
+
+  Genesis::CI::Preflight::confirm_provider_gate($top, $opts, %how);
+
+The acknowledgement at a terminal, which D115 asks once every other question
+has passed, so nobody confirms a run that then refuses. It warns what the
+pipeline owns, then asks the yes-or-no question, or the typed phrase where
+C<acknowledge> names one. It assumes
+L</provider_gate_problems($top, $opts, %how)> found nothing.
+
+B<Parameters:> As for L</assert_provider_gate($top, $opts, %how)>.
+
+B<Returns:> 1, where the operator agreed or nothing needed asking.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Aborted at your request."> or C<"Aborted.">, followed by the outcome, at
+C<Genesis::Exit::ABORTED>, where the operator declines.
+
+=back
+
+B<Examples:>
+
+  confirm_provider_gate($top, {force => 1});
+  # warns, asks "Proceed anyway? [y|n]", and returns 1 on a yes
 
 =head2 initial_state($top, $git, %opts)
 
@@ -898,6 +958,26 @@ B<Examples:>
 
 Every public entry of this module goes above this heading, under
 C<FUNCTIONS>.  What follows documents the subs this module keeps to itself.
+
+=head2 _provider_gate_warning($top, %how)
+
+  my $warning = _provider_gate_warning($top, owns => 'deploys of this environment');
+
+The sentence saying what an automated provider's pipeline owns and why a run by
+hand cannot be seen by it, which both halves of the gate say. A manual
+provider, or a run inside the pipeline's own job, owns nothing to gate.
+
+B<Parameters:> C<$top>, and C<owns> as for
+L</assert_provider_gate($top, $opts, %how)>.
+
+B<Returns:> The sentence, or C<undef> where there is nothing to gate.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _provider_gate_warning($top);
+  # returns "The #C{concourse} pipeline owns propagation for this repository.  ..."
 
 =head2 _illegal_state_refusal
 
