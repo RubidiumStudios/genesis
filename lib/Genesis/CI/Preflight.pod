@@ -184,6 +184,37 @@ B<Examples:>
     refuse_once(action => 'propagate', problems => []);
     # returns 1
 
+=head2 prefix_problems($top, %opts)
+
+    my ($branch_of, @problems) = Genesis::CI::Preflight::prefix_problems($top,
+        topology => $topology);
+
+Every pull request branch's collision, for every environment that delivers by
+pull request, in the topology's order, each answered as a C<CONFIG> problem
+through L<Genesis::Top/pr_branch_problems>. Every collision
+is named, so an operator who changes the prefix is not told about a second one
+by the next run (D115).
+
+B<Parameters:>
+
+=over 4
+
+=item C<topology>
+
+The pipeline's topology, read from control.
+
+=back
+
+B<Returns:> A hashref of environment to its pull request branch, then the
+problems.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my ($branch_of, @problems) = prefix_problems($top, topology => $topo);
+    # returns ({qa => 'pr/qa/bosh'}) where nothing collides
+
 =head2 repository_problems($git)
 
     my @problems = Genesis::CI::Preflight::repository_problems($git);

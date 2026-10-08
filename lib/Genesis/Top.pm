@@ -1082,28 +1082,52 @@ sub branch_for {
 # names through envs.
 sub pr_branch_for {
 	my ($self, $env_name, %opts) = @_;
+	my ($branch, @collisions) = $self->_pr_branch_collisions($env_name, %opts);
+	bail({exitcode => CONFIG}, @{$collisions[0]}) if @collisions;
+	return $branch;
+}
+
+# }}}
+# pr_branch_problems - the join, with every collision answered as a problem {{{
+#
+# D115 collects every collision with every other problem a run finds, so the
+# branch comes back beside each collision's refusal as a CONFIG problem.
+sub pr_branch_problems {
+	my ($self, $env_name, %opts) = @_;
+	my ($branch, @collisions) = $self->_pr_branch_collisions($env_name, %opts);
+	return ($branch, map {
+		{code => CONFIG, text => sprintf($_->[0], @{$_}[1 .. $#$_])}
+	} @collisions);
+}
+
+# }}}
+# _pr_branch_collisions - the join, and each name it collides with {{{
+#
+# Each collision is its refusal as a format and its arguments, so the one
+# that refuses passes the names through as arguments and the one that answers
+# composes the same words.
+sub _pr_branch_collisions {
+	my ($self, $env_name, %opts) = @_;
 	my $branch = $self->pr_prefix . $self->deployment_slug_for($env_name);
 	my @envs   = $opts{envs} ? @{$opts{envs}} : $self->pipeline_env_names;
 
-	bail(
-		{exitcode => CONFIG},
+	my @collisions = map {[
 		"The pull request branch for #C{%s} would be #R{%s}, which is the ".
 		"deployment branch of the environment #C{%s}.\n".
 		"Change #C{pipeline.source_control.pr_prefix} to a prefix no ".
 		"environment name begins with.",
 		$env_name, $branch, $_
-	) for grep {$branch eq $self->branch_for($_)} @envs;
+	]} grep {$branch eq $self->branch_for($_)} @envs;
 
-	bail(
-		{exitcode => CONFIG},
+	push @collisions, [
 		"The pull request branch for #C{%s} would be #R{%s}, which is the ".
 		"control branch.\n".
 		"Change #C{pipeline.source_control.pr_prefix} so the two names ".
 		"cannot meet.",
 		$env_name, $branch
-	) if $branch eq $self->control_branch;
+	] if $branch eq $self->control_branch;
 
-	return $branch;
+	return ($branch, @collisions);
 }
 
 # }}}

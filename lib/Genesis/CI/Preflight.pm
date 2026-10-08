@@ -100,6 +100,28 @@ sub repository_problems {
 }
 
 # }}}
+# prefix_problems - every pull request branch's collision, all of them {{{
+#
+# The pull request prefix is asked of every environment that delivers by pull
+# request, in the topology's order, and every collision is answered, so an
+# operator who changes the prefix is not told about a second collision by the
+# next run.  The branch of each environment comes back too, for the run that
+# proceeds to deliver into.
+sub prefix_problems {
+	my ($top, %opts) = @_;
+	my $topology = $opts{topology};
+	my @names    = keys %{$topology->{nodes}};
+
+	my (%branch_of, @problems);
+	for my $env (grep {$topology->{nodes}{$_}{require_pr}} @{$topology->{order}}) {
+		my ($branch, @found) = $top->pr_branch_problems($env, envs => \@names);
+		$branch_of{$env} = $branch;
+		push @problems, @found;
+	}
+	return (\%branch_of, @problems);
+}
+
+# }}}
 # local_only_commits - the commits a branch holds and no remote has {{{
 #
 #   my @commits = Genesis::CI::Preflight::local_only_commits($git, $branch);

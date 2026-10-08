@@ -238,6 +238,27 @@ subtest "control's standing is read against the snapshot" => sub {
 	is($nowhere->[0]{code}, CONFIG, 'a control nowhere at all is CONFIG');
 };
 
+subtest 'every pull request environment\'s collision is named' => sub {
+	plan tests => 4;
+	no warnings qw/once redefine/;
+	local *Stub::Top::pr_branch_problems = sub {
+		my ($self, $env) = @_;
+		return ("pr-$env/bosh", $env eq 'prod' ? () :
+			problem(CONFIG, "The pull request branch for $env collides."));
+	};
+	my $topology = {
+		order => [qw(lab qa prod)],
+		nodes => {lab => {require_pr => 1}, qa => {require_pr => 1},
+		          prod => {require_pr => 1}},
+	};
+	my ($branch_of, @problems) = Genesis::CI::Preflight::prefix_problems(
+		Stub::Top->new, topology => $topology);
+	is(scalar @problems, 2, 'every collision, not the first');
+	like($problems[0]{text}, qr/for lab/, 'in the order of the topology');
+	like($problems[1]{text}, qr/for qa/, 'each of them');
+	is($branch_of->{prod}, 'pr-prod/bosh', 'and the branch of one that collides with nothing');
+};
+
 subtest 'a percent sign in a problem is not read as a format' => sub {
 	plan tests => 1;
 	my $r = refused(action => 'propagate', outcome => 'Nothing was written.',

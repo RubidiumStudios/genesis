@@ -80,6 +80,25 @@ subtest 'a prefix that collides is refused by name' => sub {
 			. join(', ', map {ref($_) ? ref($_) : $_} @{$raised[0] || []}));
 };
 
+# D115 collects every collision with every other problem, so the join is
+# asked for its problems as well as refused on them.
+subtest 'a collision is answered as a problem' => sub {
+	plan tests => 4;
+
+	my $h = make_harness(
+		envs => ['lab', 'pr-lab'], pr_prefix => 'pr-', vault => 0,
+	);
+	my $top = Genesis::Top->new($h->a, no_vault => 1);
+
+	my ($branch, @problems) = $top->pr_branch_problems('lab');
+	is($branch, 'pr-lab/bosh', 'the branch the join would take');
+	is(scalar @problems, 1, 'one collision');
+	is($problems[0] && $problems[0]{code}, Genesis::Exit::CONFIG(), 'at CONFIG');
+	like($problems[0] && $problems[0]{text},
+		qr/pr-lab\/bosh.*deployment branch of the environment #C\{pr-lab\}/s,
+		'naming the branch and the environment that owns it');
+};
+
 subtest 'the refusal exits CONFIG' => sub {
 	plan tests => 1;
 

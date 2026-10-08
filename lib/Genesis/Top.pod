@@ -992,6 +992,27 @@ B<Examples:>
     my $branch = $top->pr_branch_for('lab');
     # exits Genesis::Exit::CONFIG, naming pr-lab/bosh
 
+=head2 pr_branch_problems
+
+    my ($branch, @problems) = $top->pr_branch_problems('lab', envs => \@names);
+
+The join L</pr_branch_for> makes, with every collision
+answered as a C<CONFIG> problem in the words its refusal had, rather than the
+first refused, so D115's first stage can report every collision at once.
+
+B<Parameters:> As for L</pr_branch_for>.
+
+B<Returns:> The composed branch, then the problems, empty where the branch
+collides with nothing.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    # with pr_prefix 'pr-' and an environment named pr-lab
+    my ($branch, @problems) = $top->pr_branch_problems('lab');
+    # returns ('pr-lab/bosh', {code => 78, text => 'The pull request branch for ...'})
+
 =head2 version
 
     my $v = $top->version;
@@ -3845,6 +3866,27 @@ B<Examples:>
     #          pr_prefix => 'pr/',
     #          identity => {host => 'github.com', owner => 'team',
     #                       repo => 'bosh'}}
+
+=head2 _pr_branch_collisions
+
+    my ($branch, @collisions) = $top->_pr_branch_collisions('lab');
+
+The composed pull request branch and every name it collides with, each as its
+refusal's format and arguments, so L</pr_branch_for> refuses with the names
+passed as arguments and L</pr_branch_problems> composes the same words.
+
+B<Parameters:> As for L</pr_branch_for>.
+
+B<Returns:> The branch, then one arrayref per collision: a deployment branch
+of some environment, or control.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my ($branch, @collisions) = $top->_pr_branch_collisions('lab');
+    # returns ('pr-lab/bosh', ['The pull request branch for #C{%s} ...',
+    #                          'lab', 'pr-lab/bosh', 'pr-lab'])
 
 =head2 _identity_key
 
