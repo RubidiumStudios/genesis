@@ -124,6 +124,7 @@ sub moved_world {
 	};
 	$git_in->($t, 'init', '-q', '-b', 'control');
 	$commit->($t, 'first');
+	$git_in->($t, 'branch', $_) for qw(qa/bosh lab/bosh);
 	$git_in->($base, 'clone', '-q', '--bare', $t, $r);
 	$git_in->($t, 'remote', 'add', 'origin', $r);
 	$git_in->($base, 'clone', '-q', $r, $l);
@@ -132,8 +133,10 @@ sub moved_world {
 
 	my $git = Service::Git->new($l);
 	$git->pipeline_remote('origin');
-	$git->snapshot_remote(branches => ['control'], globs => []);
-	return {l => $l, git => $git, commit => sub {$commit->($l, shift)}, run => $git_in};
+	$git->snapshot_remote(branches => ['control'], globs => ['*/bosh']);
+	return {l => $l, t => $t, git => $git, run => $git_in,
+		commit    => sub {$commit->($l, shift)},
+		commit_in => $commit};
 }
 
 my $SNAP = 'refs/genesis/preflight/origin';
@@ -142,7 +145,66 @@ my $SNAP = 'refs/genesis/preflight/origin';
 	sub new { my ($c, %o) = @_; bless {control => 'control', %o}, $c }
 	sub control_branch { $_[0]{control} }
 	sub source_control_remote { 'origin' }
+	sub branch_for { "$_[1]/bosh" }
 }
+
+# Every ref the clone has, so a row can say the questions moved none of them.
+sub refs_of {
+	my ($dir) = @_;
+	my ($out) = Genesis::run({dir => $dir}, 'git', 'for-each-ref',
+		'--format=%(refname) %(objectname)', 'refs/heads', 'refs/remotes');
+	return $out;
+}
+
+subtest "the initial state is classified against the snapshot, moving nothing" => sub {
+	plan tests => 7;
+	my $w   = moved_world();
+	my ($l, $t, $run) = @{$w}{qw/l t run/};
+
+	# qa/bosh carries a hand commit, dev/bosh was cut here and never pushed,
+	# and lab/bosh is behind R by a commit T has not seen.
+	$run->($l, 'branch', '-q', $_, "origin/$_") for qw(qa/bosh lab/bosh);
+	$run->($l, 'checkout', '-q', 'qa/bosh');
+	$w->{commit}->('by-hand');
+	$run->($l, 'checkout', '-q', '-b', 'dev/bosh');
+	$run->($l, 'checkout', '-q', 'control');
+	$run->($t, 'checkout', '-q', 'lab/bosh');
+	$w->{commit_in}->($t, 'lab-moves');
+	$run->($t, 'push', '-q', 'origin', 'lab/bosh');
+	$w->{git}->snapshot_remote(branches => ['control'], globs => ['*/bosh']);
+	my $before = refs_of($l);
+
+	my ($state, @problems) = Genesis::CI::Preflight::initial_state_problems(
+		Stub::Top->new, $w->{git}, envs => [qw(qa lab dev)], tracking => $SNAP);
+
+	is(scalar @problems, 2, 'two branches no run may start from');
+	is_deeply([map {$_->{code}} @problems], [DATAERR, DATAERR], 'each at DATAERR');
+	like($problems[0]{text}, qr/#C\{dev\/bosh\} has no counterpart/,
+		'the branch R never had, first, as the stage asks');
+	like($problems[1]{text}, qr/qa\/bosh/, 'then the hand commit');
+	is($state->{branches}{lab}{state}, 'behind',
+		'a branch behind R is measured against the snapshot, not T');
+	is_deeply([map {$_->{branch}} @{$state->{reset} || []}], [],
+		'no marker-only branch to reset');
+	is(refs_of($l), $before, 'and nothing was moved to ask');
+};
+
+subtest 'a commit R has and T has not seen is no hand commit' => sub {
+	plan tests => 2;
+	my $w = moved_world();
+	my ($l, $t, $run) = @{$w}{qw/l t run/};
+
+	$run->($t, 'checkout', '-q', 'lab/bosh');
+	$w->{commit_in}->($t, 'lab-moves');
+	$run->($t, 'push', '-q', 'origin', 'lab/bosh');
+	$w->{git}->snapshot_remote(branches => ['control'], globs => ['*/bosh']);
+	$run->($l, 'branch', '-q', 'lab/bosh', "$SNAP/lab/bosh");
+
+	my ($state, @problems) = Genesis::CI::Preflight::initial_state_problems(
+		Stub::Top->new, $w->{git}, envs => ['lab'], tracking => $SNAP);
+	is(scalar @problems, 0, 'a branch at what R holds carries nothing of its own');
+	is($state->{branches}{lab}{state}, 'in-sync', 'and stands in step with R');
+};
 
 subtest "control's standing is read against the snapshot" => sub {
 	plan tests => 9;

@@ -116,7 +116,13 @@ sub repository_problems {
 # the newest marker within a walk of one, so this module carries no second
 # reader of its own.
 sub local_only_commits {
-	my ($git, $branch) = @_;
+	my ($git, $branch, %opts) = @_;
+
+	# A view of R the caller names, as D115's snapshot, is excluded beside the
+	# tracking refs, so a commit R has and the tracking ref has not yet seen is
+	# not taken for one only this clone holds.
+	my @also = defined $opts{tracking}
+		? ('--glob=' . ($opts{tracking} =~ s{/+$}{}r) . '/*') : ();
 
 	# stderr => 0, because the default folds git's standard error into
 	# what comes back and the loop below reads every line as a commit
@@ -128,7 +134,7 @@ sub local_only_commits {
 			stderr    => 0,
 			onfailure => "Failed to list local-only commits on '$branch'",
 		},
-		'git', 'log', '--format=%H%x00%h%x00%s', $branch, '--not', '--remotes');
+		'git', 'log', '--format=%H%x00%h%x00%s', $branch, '--not', '--remotes', @also);
 
 	my @commits;
 	for my $line (grep { /\S/ } split /\n/, ($out // '')) {
@@ -558,98 +564,12 @@ sub initial_state {
 	# wording stays on the other.
 	my $assume = $opts{dry_run} || $opts{read_only};
 
-	my (@local_only, @unrelated);
-	for my $env (@{$opts{envs} // []}) {
-		my $branch = $top->branch_for($env);
-		my $div    = $git->resolve_branch($branch);
-
-		# Neither side has it, so the environment is awaiting pipeline-apply,
-		# which is the walk's outcome and not a refusal here.
-		next unless defined $div;
-
-		$state->{branches}{$env} = {
-			branch         => $branch,
-			state          => $div->{state},
-			ahead          => $div->{ahead},
-			behind         => $div->{behind},
-			reset          => 0,
-			fast_forwarded => 0,
-			# The ref a dry run would have moved the branch to, and undef
-			# under a real run, which has moved it already, with the name
-			# of the move beside it.  The stage makes two, and they differ
-			# in what they cost the branch, so a reader that cares which
-			# one it was asks rather than inferring it from the counts.
-			# The reset's own count rides with them, because the caveat the
-			# preview says about it names the number and the only other
-			# place that number is said is above the banner.
-			assumed         => undef,
-			assumed_move    => undef,
-			assumed_commits => undef,
-			# Whether this branch and the remote's of the same name share a
-			# commit.  The divergence states cannot tell an orphan from an
-			# ordinary divergence, because both sides hold the name and both
-			# sides are ahead of nothing, so the answer is recorded here for
-			# the reader that has to tell them apart.
-			unrelated       => 0,
-		};
-
-		# Nothing downstream of this stage makes a deployment branch any
-		# more, so a branch this clone holds and the remote has never had
-		# is one a person cut, which is what the refusal below says it is.
-		# genesis pipeline-apply is the one command that cuts a deployment
-		# branch, and it publishes what it cuts, so a branch the remote has
-		# never had did not come from there.
-		push(@local_only, {env => $env, branch => $branch}), next
-			if $div->{state} eq 'no-remote';
-
-		# A branch the remote has and this clone lacks is never asked the
-		# ancestry question.  There is no refs/heads/<branch> for git to
-		# answer it with, and shares_history reads a ref it cannot resolve
-		# as no shared history, so the branch would be refused with a text
-		# written for a different fault.  Nothing reaches here in that state
-		# today, because the refresh creates the local ref from the tracking
-		# ref before this stage runs, and the refresh is the assumption.
-		# The one command allowed to skip it is `genesis pipeline-status`,
-		# so the step that hands this stage to that command is the step that
-		# has to say what a branch in this state means there.
-		next if $div->{state} eq 'no-local';
-
-		next if shares_history($git, $branch, $remote);
-		push @unrelated, $branch;
-		$state->{branches}{$env}{unrelated} = 1;
-	}
-
-	# Each branch's local-only commits, classified.  A marker means the walk
-	# reproduces the commit, so the branch may be reset; no marker means a
-	# hand edit that belongs on control, so the whole run refuses.
-	#
-	# A branch already refused for its origin is not asked.  Every commit on
-	# a branch the remote has never had is local-only by construction, and so
-	# is every commit on an orphan, so asking would name each of them a hand
-	# edit as well and say the same branch twice in one refusal under two
-	# headings.  What such a branch needs is the remedy its own class gives.
-	my %illegitimate = map {($_ => 1)}
-		(map {$_->{branch}} @local_only), @unrelated;
-
-	my (@reset, @hand);
-	for my $env (@{$opts{envs} // []}) {
-		my $record = $state->{branches}{$env} or next;
-		my $branch = $record->{branch};
-		next if $record->{state} eq 'no-local';
-		next if $illegitimate{$branch};
-
-		my @commits = local_only_commits($git, $branch);
-		next unless @commits;
-
-		if (grep {!defined $_->{marker}} @commits) {
-			push @hand, {branch  => $branch,
-			             ahead   => $record->{ahead},
-			             behind  => $record->{behind},
-			             commits => [grep {!defined $_->{marker}} @commits]};
-			next;
-		}
-		push @reset, {env => $env, branch => $branch, commits => \@commits};
-	}
+	my ($local_only, $unrelated, $hand, $reset) =
+		_classify_initial_state($top, $git, $state, %opts);
+	my @local_only = @$local_only;
+	my @unrelated  = @$unrelated;
+	my @hand       = @$hand;
+	my @reset      = @$reset;
 
 	# One refusal for every class, because a repository can hold a branch of
 	# each and an operator who fixes one class only to meet the next on the
@@ -769,6 +689,136 @@ sub initial_state {
 }
 
 # }}}
+# initial_state_problems - the stage's questions, answered and moving nothing {{{
+#
+# What initial_state asks of every deployment branch, read against the view of
+# R the caller names, which D115's run gives as its snapshot, and answered as
+# problems, one per paragraph of the refusal it would have raised, so the one
+# refusal that frames them reads word for word as that refusal did.  Nothing is
+# moved: the resets and fast-forwards it found are left on the state, under
+# reset and in each branch's standing, for the run to make once it proceeds.
+sub initial_state_problems {
+	my ($top, $git, %opts) = @_;
+	my $remote = $top->source_control_remote;
+	my $state  = {branches => {}, events => []};
+
+	my ($local_only, $unrelated, $hand, $reset) =
+		_classify_initial_state($top, $git, $state, %opts);
+	$state->{reset} = $reset;
+
+	return ($state, map {problem(DATAERR, $_)}
+		_local_only_refusal($remote, $local_only),
+		_unrelated_refusal($remote, $unrelated),
+		_hand_commit_refusal($remote, $hand));
+}
+
+# }}}
+# _classify_initial_state - every deployment branch's standing, and its class {{{
+#
+# Records each branch's standing on the state, and answers the branches the
+# remote never had, the ones sharing no ancestor with the remote's, the ones
+# carrying a commit no marker accounts for, and the ones whose local-only
+# commits all carry markers and may be reset.  tracking names the view of R the
+# branches are measured against, T where it is not given.
+sub _classify_initial_state {
+	my ($top, $git, $state, %opts) = @_;
+	my $remote = $top->source_control_remote;
+	my %view   = defined $opts{tracking} ? (tracking => $opts{tracking}) : ();
+
+	my (@local_only, @unrelated);
+	for my $env (@{$opts{envs} // []}) {
+		my $branch = $top->branch_for($env);
+		my $div    = $git->resolve_branch($branch, %view);
+
+		# Neither side has it, so the environment is awaiting pipeline-apply,
+		# which is the walk's outcome and not a refusal here.
+		next unless defined $div;
+
+		$state->{branches}{$env} = {
+			branch         => $branch,
+			state          => $div->{state},
+			ahead          => $div->{ahead},
+			behind         => $div->{behind},
+			reset          => 0,
+			fast_forwarded => 0,
+			# The ref a dry run would have moved the branch to, and undef
+			# under a real run, which has moved it already, with the name
+			# of the move beside it.  The stage makes two, and they differ
+			# in what they cost the branch, so a reader that cares which
+			# one it was asks rather than inferring it from the counts.
+			# The reset's own count rides with them, because the caveat the
+			# preview says about it names the number and the only other
+			# place that number is said is above the banner.
+			assumed         => undef,
+			assumed_move    => undef,
+			assumed_commits => undef,
+			# Whether this branch and the remote's of the same name share a
+			# commit.  The divergence states cannot tell an orphan from an
+			# ordinary divergence, because both sides hold the name and both
+			# sides are ahead of nothing, so the answer is recorded here for
+			# the reader that has to tell them apart.
+			unrelated       => 0,
+		};
+
+		# Nothing downstream of this stage makes a deployment branch any
+		# more, so a branch this clone holds and the remote has never had
+		# is one a person cut, which is what the refusal below says it is.
+		# genesis pipeline-apply is the one command that cuts a deployment
+		# branch, and it publishes what it cuts, so a branch the remote has
+		# never had did not come from there.
+		push(@local_only, {env => $env, branch => $branch}), next
+			if $div->{state} eq 'no-remote';
+
+		# A branch the remote has and this clone lacks is never asked the
+		# ancestry question.  There is no refs/heads/<branch> for git to
+		# answer it with, and shares_history reads a ref it cannot resolve
+		# as no shared history, so the branch would be refused with a text
+		# written for a different fault.  The refresh creates the local ref
+		# from the tracking ref before this stage runs, and D115's run creates
+		# it once it proceeds, so a branch in this state is one to create.
+		next if $div->{state} eq 'no-local';
+
+		next if shares_history($git, $branch, $remote, %view);
+		push @unrelated, $branch;
+		$state->{branches}{$env}{unrelated} = 1;
+	}
+
+	# Each branch's local-only commits, classified.  A marker means the walk
+	# reproduces the commit, so the branch may be reset; no marker means a
+	# hand edit that belongs on control, so the whole run refuses.
+	#
+	# A branch already refused for its origin is not asked.  Every commit on
+	# a branch the remote has never had is local-only by construction, and so
+	# is every commit on an orphan, so asking would name each of them a hand
+	# edit as well and say the same branch twice in one refusal under two
+	# headings.  What such a branch needs is the remedy its own class gives.
+	my %illegitimate = map {($_ => 1)}
+		(map {$_->{branch}} @local_only), @unrelated;
+
+	my (@reset, @hand);
+	for my $env (@{$opts{envs} // []}) {
+		my $record = $state->{branches}{$env} or next;
+		my $branch = $record->{branch};
+		next if $record->{state} eq 'no-local';
+		next if $illegitimate{$branch};
+
+		my @commits = local_only_commits($git, $branch, %view);
+		next unless @commits;
+
+		if (grep {!defined $_->{marker}} @commits) {
+			push @hand, {branch  => $branch,
+			             ahead   => $record->{ahead},
+			             behind  => $record->{behind},
+			             commits => [grep {!defined $_->{marker}} @commits]};
+			next;
+		}
+		push @reset, {env => $env, branch => $branch, commits => \@commits};
+	}
+
+	return (\@local_only, \@unrelated, \@hand, \@reset);
+}
+
+# }}}
 # shares_history - has this branch a commit in common with its counterpart {{{
 #
 # Asked through run with passfail on and stderr off rather than through
@@ -780,10 +830,11 @@ sub initial_state {
 # which are a pair with no common commit and a ref this clone cannot resolve,
 # are states this stage refuses rather than passes over.
 sub shares_history {
-	my ($git, $branch, $remote) = @_;
+	my ($git, $branch, $remote, %opts) = @_;
+	my $theirs = ($opts{tracking} // "refs/remotes/$remote") =~ s{/+$}{}r;
 	return run({dir => $git->root, passfail => 1, stderr => 0},
 		'git', 'merge-base', "refs/heads/$branch",
-		"refs/remotes/$remote/$branch") ? 1 : 0;
+		"$theirs/$branch") ? 1 : 0;
 }
 
 # }}}
