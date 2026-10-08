@@ -1718,6 +1718,134 @@ sub fetch_branches {
 }
 
 # }}}
+# snapshot_remote - read R into a namespace of its own, moving nothing else {{{
+#
+# The read D115 asks every question against.  R's branches land under a
+# namespace nothing else writes, cleared first so a run killed part way leaves
+# nothing a later run reads.  No local branch, tracking ref or fetch record
+# moves: --refmap= stops git updating the tracking refs on its own beside the
+# refspecs it was given, and --no-write-fetch-head keeps FETCH_HEAD as it was.
+#
+# The globs are what let the read come before the topology: every branch of a
+# deployment type is */<type>, deployment and pull request branches alike.  A
+# named branch R lacks aborts a whole fetch where a glob matching nothing does
+# not, so that rare case asks R which named branches it has and reads again.
+sub snapshot_remote {
+	my ($self, %opts) = @_;
+	my $remote   = $self->_remote_for($opts{remote}, 'snapshot_remote');
+	my $ns       = $self->_snapshot_namespace(%opts, remote => $remote);
+	my @branches = @{$opts{branches} || []};
+	my @globs    = @{$opts{globs}    || []};
+
+	$self->clear_snapshot(namespace => $ns);
+
+	my %env;
+	$env{GIT_TERMINAL_PROMPT} = '0' unless in_controlling_terminal();
+	# git's complaint is read apart from its output, because the one failure
+	# this answers rather than raises is told by what git said.
+	my %run = (dir => $self->{root}, stderr => 0, (%env ? (env => \%env) : ()));
+	my $fetch = sub {
+		my @refspecs = map {"+refs/heads/$_:$ns/$_"} @_, @globs;
+		return (undef, 0, '') unless @refspecs;
+		return run({%run}, 'git', 'fetch', '--no-tags', '--refmap=',
+			'--no-write-fetch-head', '--no-auto-maintenance', $remote, @refspecs);
+	};
+
+	my ($out, $rc, $err) = $fetch->(@branches);
+	if ($rc && ($err // '') =~ /couldn't find remote ref/) {
+		my ($heads, $lrc, $lerr) = run({%run},
+			'git', 'ls-remote', '--heads', $remote, map {"refs/heads/$_"} @branches);
+		($rc, $err) = ($lrc, $lerr);
+		unless ($lrc) {
+			my %on_remote = map {m{\srefs/heads/(\S+)\s*$} ? ($1 => 1) : ()}
+				split /\n/, ($heads // '');
+			($out, $rc, $err) = $fetch->(grep {$on_remote{$_}} @branches);
+		}
+	}
+	if ($rc) {
+		$self->clear_snapshot(namespace => $ns);
+		return {ok => 0, kind => _classify_remote_error($err), err => $err // '',
+		        absent => []};
+	}
+
+	my $held = $self->snapshot_refs(namespace => $ns);
+	return {ok => 1, kind => 'success', absent => [grep {!$held->{$_}} @branches]};
+}
+
+# }}}
+# snapshot_refs - the branches a snapshot holds, and the commit each names {{{
+sub snapshot_refs {
+	my ($self, %opts) = @_;
+	my $ns = $self->_snapshot_namespace(%opts);
+	my ($out) = run({dir => $self->{root}, stderr => 0},
+		'git', 'for-each-ref', '--format=%(refname)%09%(objectname)', "$ns/");
+	my %held;
+	for (split /\n/, ($out // '')) {
+		my ($ref, $sha) = split /\t/;
+		$held{substr($ref, length("$ns/"))} = $sha;
+	}
+	return \%held;
+}
+
+# }}}
+# clear_snapshot - remove a snapshot's namespace and nothing else {{{
+sub clear_snapshot {
+	my ($self, %opts) = @_;
+	my $ns   = $self->_snapshot_namespace(%opts);
+	my @refs = sort keys %{$self->snapshot_refs(namespace => $ns)};
+	return $self unless @refs;
+	run({dir => $self->{root}, stdin => join('', map {"delete $ns/$_\n"} @refs),
+		onfailure => "Failed to clear the snapshot under $ns"},
+		'git', 'update-ref', '--stdin');
+	return $self;
+}
+
+# }}}
+# promote_snapshot - bring a snapshot into the tracking refs in one step {{{
+#
+# One update-ref transaction sets each named branch's tracking ref to what the
+# snapshot read, deletes the tracking ref of a named branch R no longer has,
+# and removes the namespace, so the clone sees all of it or none of it.  Only
+# the names given are touched: a tracking ref outside them is not this run's
+# to prune, and no local branch moves.
+sub promote_snapshot {
+	my ($self, %opts) = @_;
+	my $remote = $self->_remote_for($opts{remote}, 'promote_snapshot');
+	my $ns     = $self->_snapshot_namespace(%opts, remote => $remote);
+	my $held   = $self->snapshot_refs(namespace => $ns);
+	my $track  = $self->_ref_names("refs/remotes/$remote/");
+
+	my @lines = ("start\n");
+	for my $name (@{$opts{names} || []}) {
+		if (defined $held->{$name}) {
+			push @lines, "update refs/remotes/$remote/$name $held->{$name}\n";
+		} elsif ($track->{$name}) {
+			push @lines, "delete refs/remotes/$remote/$name\n";
+		}
+		delete $self->{_branch_cache}{"$remote/$name"};
+	}
+	push @lines, map {"delete $ns/$_\n"} sort keys %$held;
+	push @lines, "prepare\n", "commit\n";
+
+	run({dir => $self->{root}, stdin => join('', @lines),
+		onfailure => "Failed to bring the snapshot of $remote into its tracking refs"},
+		'git', 'update-ref', '--stdin');
+	return $self;
+}
+
+# }}}
+# _snapshot_namespace - where a snapshot lives {{{
+#
+# The run's own is refs/genesis/preflight/<remote>; a caller that must not meet
+# the run, as pipeline-status, names one of its own.
+sub _snapshot_namespace {
+	my ($self, %opts) = @_;
+	return $opts{namespace} =~ s{/+$}{}r if defined $opts{namespace};
+	my $remote = $self->_remote_for($opts{remote}, 'snapshot');
+	return "refs/genesis/preflight/$remote";
+}
+
+# }}}
 # _classify_remote_error - bucket a git transport error for the caller {{{
 sub _classify_remote_error {
 	my ($err) = @_;

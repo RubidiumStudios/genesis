@@ -2530,6 +2530,177 @@ B<Examples:>
   $git->fetch_branches([], 'origin');
   # returns $self -- nothing to fetch is a success, not a failure
 
+=head2 snapshot_remote
+
+  my $result = $git->snapshot_remote(
+      branches => ['control'], globs => ['*/bosh']);
+
+Reads R into a namespace of its own, which D115 asks every question against,
+and moves nothing the operator has: no local branch, no remote-tracking ref,
+not C<HEAD>, the index, the working tree, or C<FETCH_HEAD>. The namespace is
+cleared first, so a run killed part way leaves nothing a later run reads.
+
+The fetch passes C<--refmap=>, which stops git updating the remote-tracking
+refs on its own beside the refspecs it was given, C<--no-write-fetch-head>,
+and C<--no-auto-maintenance>. The globs are what let the read come before the
+topology is known, because every branch of a deployment type is
+C<*/E<lt>typeE<gt>>, deployment and pull request branches alike. A named
+branch R lacks would abort the whole fetch where a glob matching nothing does
+not, so that rare case asks R which named branches it has and reads again.
+
+B<Parameters:>
+
+=over 4
+
+=item C<branches>
+
+Branches read by name, such as control.
+
+=item C<globs>
+
+Branch patterns read as patterns, such as C<*/bosh>.
+
+=item C<remote>
+
+The remote. Optional: it defaults to L</pipeline_remote>.
+
+=item C<namespace>
+
+Where the snapshot lives. Optional: it defaults to
+C<refs/genesis/preflight/E<lt>remoteE<gt>>, the run's own; a caller that must
+never meet the run, as C<pipeline-status>, names one of its own.
+
+=back
+
+B<Returns:> A hashref of C<ok>, C<kind> (C<success>, or the bucket
+L</_classify_remote_error> puts a failure in), C<err> on failure, and
+C<absent>, the named branches R does not have. A failed read leaves the
+namespace empty.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Service::Git-E<gt>snapshot_remote needs its remote by name"> -- a bug,
+where neither the call nor the handle names a remote.
+
+=back
+
+B<Examples:>
+
+  my $r = $git->snapshot_remote(branches => ['control'], globs => ['*/bosh']);
+  # returns {ok => 1, kind => 'success', absent => []}, with
+  # refs/genesis/preflight/origin/control and .../qa/bosh written
+
+  my $r = $git->snapshot_remote(branches => ['control'], globs => ['*/bosh']);
+  # returns {ok => 0, kind => 'network', err => '...', absent => []}
+  # where R cannot be reached, with the namespace left empty
+
+=head2 snapshot_refs
+
+  my $held = $git->snapshot_refs;
+
+The branches a snapshot holds, each with the commit it names.
+
+B<Parameters:>
+
+=over 4
+
+=item C<namespace>
+
+Optional, as for L</snapshot_remote>.
+
+=back
+
+B<Returns:> A hashref of branch name to commit, empty where no snapshot is
+held.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my $held = $git->snapshot_refs;
+  # returns {control => '9f1c...', 'qa/bosh' => '3a7e...'}
+
+=head2 clear_snapshot
+
+  $git->clear_snapshot;
+
+Removes a snapshot's namespace and nothing else, in one C<update-ref --stdin>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<namespace>
+
+Optional, as for L</snapshot_remote>.
+
+=back
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to clear the snapshot under %s"> -- where git refuses the update.
+
+=back
+
+B<Examples:>
+
+  $git->clear_snapshot(namespace => 'refs/genesis/preflight/status-4242/origin');
+  # removes that status run's snapshot and leaves the run's alone
+
+=head2 promote_snapshot
+
+  $git->promote_snapshot(names => [qw(control qa/bosh pr/qa/bosh)]);
+
+Brings a snapshot into the remote-tracking refs in one C<update-ref --stdin>
+transaction, so the clone sees all of it or none of it. Each named branch's
+tracking ref is set to what the snapshot read; a named branch the snapshot does
+not hold loses its tracking ref, because R no longer has it; and the namespace
+is removed in the same transaction. A tracking ref outside the names given is
+not this run's to prune, and no local branch moves.
+
+B<Parameters:>
+
+=over 4
+
+=item C<names>
+
+The branches to promote, which are the ones control's shape names.
+
+=item C<remote>, C<namespace>
+
+Optional, as for L</snapshot_remote>.
+
+=back
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to bring the snapshot of %s into its tracking refs"> -- where git
+refuses the transaction, which then changed nothing.
+
+=back
+
+B<Examples:>
+
+  $git->promote_snapshot(names => [qw(control qa/bosh gone/bosh)]);
+  # moves origin/control and origin/qa/bosh to what R had, deletes
+  # origin/gone/bosh where R no longer has it, and removes the namespace
+
 =head2 push
 
   my $results = $git->push(remote => 'origin', refs => [
@@ -3173,6 +3344,32 @@ B<Examples:>
 
   _refuse_dubious_ownership('fatal: Needed a single revision', '/repo');
   # returns, leaving the caller to classify an empty repository
+
+=head2 _snapshot_namespace
+
+  my $ns = $git->_snapshot_namespace(%opts);
+
+Where a snapshot lives: the C<namespace> given, without a trailing slash, or
+the run's own, C<refs/genesis/preflight/E<lt>remoteE<gt>>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<namespace>, C<remote>
+
+As for L</snapshot_remote>.
+
+=back
+
+B<Returns:> The namespace, as a ref prefix with no trailing slash.
+
+B<Errors:> The bug L</snapshot_remote> names, where no remote can be found.
+
+B<Examples:>
+
+  $git->_snapshot_namespace;
+  # returns 'refs/genesis/preflight/origin'
 
 =head2 _classify_remote_error
 
