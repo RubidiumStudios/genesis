@@ -128,44 +128,6 @@ sub _fault {
 	die(($armed->{message} // "the harness failed $step on call $n") . "\n")
 		if $kind eq 'fail';
 
-	# 'transport' answers the way the real method answers a remote it cannot
-	# reach, which is a classified result and not a death.  fetch_branches
-	# never dies on the remote: `git ls-remote` failing is an rc it turns into
-	# {ok => 0, kind => ...}, and the caller composes its refusal out of that
-	# kind.  A double that died there could not reach the classifier the
-	# refusal is written from, so the one shape the product has for an
-	# unreachable remote would have been unprovable through a whole command.
-	# The real classifier is asked, so the double reports the kind the product
-	# would report for the same stderr rather than a kind of its own.
-	#
-	# The five keys beside it are copied from Service::Git::fetch_branches,
-	# which composes this same shape on both of its failure paths.  A row in
-	# t/unit-tests/harness_propagation-faults.t reads a real failure out of
-	# that sub and holds this answer to the same keys, so a key added there
-	# cannot leave this one answering a shape the product never produces.
-	if ($kind eq 'transport') {
-		# The shape below is fetch_branches's and nobody else's, so arming
-		# transport on another step would hand that step's caller a result
-		# it never returns.  push promises an arrayref, for one, and a row
-		# that got a hashref instead would fail somewhere well away from
-		# the fixture that caused it.  sever_remote already arms transport
-		# on fetch_branches alone; this is for a row that arms it by hand.
-		die "the harness answers a transport fault for fetch_branches, ".
-		    "not for $step\n" unless $step eq 'fetch_branches';
-
-		require Service::Git;
-		my $err = ($armed->{message} // "the harness severed $step on call $n")."\n";
-		my $result = {
-			ok      => 0,
-			kind    => Service::Git::_classify_remote_error($err),
-			err     => $err,
-			fetched => [],
-			created => [],
-			absent  => [],
-		};
-		return wantarray ? ($self, $result) : $self;
-	}
-
 	die "the harness does not know the fault kind '$kind'\n";
 }
 

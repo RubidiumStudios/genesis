@@ -3524,6 +3524,32 @@ while [ -n "\$dir" ] && [ "\$dir" != "/" ] && [ "\$dir" != "." ]; do
   fi
   dir="\$(dirname "\$dir")"
 done
+# A severed remote fails every call that reaches it, from the call the
+# harness named onward, with the text a real one prints (sever_remote).  The
+# count is kept across every process the run spawns.
+sever="$self->{tmp}/severed"
+if [ -f "\$sever" ]; then
+  sub=
+  skip=
+  for arg in "\$@"; do
+    if [ -n "\$skip" ]; then skip=; continue; fi
+    case "\$arg" in
+      -C|-c) skip=1 ;;
+      -*) ;;
+      *) sub="\$arg"; break ;;
+    esac
+  done
+  case "\$sub" in
+    fetch|ls-remote|push)
+      n=\$(( \$(cat "\$sever.count" 2>/dev/null || echo 0) + 1 ))
+      echo "\$n" > "\$sever.count"
+      if [ "\$n" -ge "\$(sed -n 1p "\$sever")" ]; then
+        sed -n '2,\$p' "\$sever" >&2
+        exit 128
+      fi
+      ;;
+  esac
+fi
 exec "@{[_real_tool('git')]}" "\$@"
 EOS
 	return "$bin/git";
@@ -4067,26 +4093,26 @@ sub reset_steps {
 }
 
 # }}}
-# sever_remote - make every remote step fail as an unreachable remote would {{{
+# sever_remote - make every call to the remote fail as an unreachable one would {{{
+#
+# The remote is severed in git itself, through the fixture git run_genesis
+# puts first on the path, rather than in the methods that reach it.  So every
+# way the product reaches the remote is cut, a way added later included, and
+# each answers as the real method answers a remote it cannot reach: a fetch
+# or a probe comes back classified and a push comes back refused.  The fixture
+# git fails fetch, ls-remote and push and passes every other command through.
 #
 # The text is the one a real unreachable remote emits, because the code that
 # tells a network failure from an authentication one reads stderr, and a row
-# asserts that the run named the network as the reason.  The after option
-# severs the remote partway through a run, which the unsurvivable rows need.
+# asserts that the run named the network as the reason.  kind names which
+# failure the remote gives: network by default, and auth for the refusal that
+# names the credentials.
 #
-# The refresh is severed as a transport failure rather than as a death,
-# because that is what the real method does with a remote it cannot reach.
-# `git ls-remote` comes back with an rc, and fetch_branches turns it into a
-# classified result for the caller to refuse on.  A push and a remote delete
-# do die, so those two keep the death they always had.
-#
-# kind names which failure the remote gives, because Service::Git tells them
-# apart by reading stderr and each one has a refusal of its own.  It is
-# network by default, which is the shape most rows want, and auth is what
-# gives the refusal that names the credentials a row to stand on.
+# after names the call to the remote that fails first, counted across every
+# process the run spawns, so a remote can go away partway through a run.  The
+# count starts again with each severing.
 sub sever_remote {
 	my ($self, %opts) = @_;
-	my $git = $self->{"_fault_git_a"} // $self->fault_git;
 	my $kind = $opts{kind} // 'network';
 	die "sever_remote knows the network and auth failures, not $kind\n"
 		unless $kind eq 'network' || $kind eq 'auth';
@@ -4094,20 +4120,26 @@ sub sever_remote {
 		? "fatal: Authentication failed for '$self->{r}'"
 		: "fatal: unable to access '$self->{r}': "
 		  . "Could not resolve host: the remote is unreachable";
-	fail_on($git, 'fetch_branches', $opts{after} // 1,
-		from => 1, message => $message, kind => 'transport');
-	fail_on($git, 'push', $opts{after} // 1, from => 1, message => $message);
+
+	$self->_preflight_git;
+	unlink "$self->{tmp}/severed.count";
+	helper::put_file("$self->{tmp}/severed",
+		sprintf("%d\n%s\n", $opts{after} // 1, $message));
 	return $self;
 }
 
 # }}}
-# restore_remote - disarm the remote steps again {{{
+# restore_remote - reach the remote again {{{
+#
+# A row that armed fetch_branches or push in the fault plan by hand has it
+# cleared here too, which is how such a row puts the remote back.
 sub restore_remote {
 	my ($self) = @_;
-	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN} or return $self;
+	unlink "$self->{tmp}/severed", "$self->{tmp}/severed.count";
+	my $file = $ENV{GENESIS_HARNESS_GIT_PLAN};
 	_with_plan($file, sub {
 		delete $_[0]->{$_} for qw/fetch_branches push/;
-	});
+	}) if $file && -f $file;
 	return $self;
 }
 

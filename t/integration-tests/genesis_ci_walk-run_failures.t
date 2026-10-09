@@ -114,13 +114,11 @@ subtest 'an unreachable remote ends the run at TEMPFAIL' => sub {
 	my $h   = three_envs();
 	my $due = tune_all_three($h);
 
-	# The refresh at the head of the run is the first call on the remote and
-	# it stands, so the remote goes away partway through, which is the state
-	# an unsurvivable failure is raised from.  The push is armed from its own
-	# first call, because a run makes one push and it comes after the
-	# refresh, so a remote severed once the refresh is done is one no push of
-	# this run could have reached.
-	sever_remote($h, after => 2);
+	# The refresh at the head of the run stands, and the remote goes away
+	# partway through, which is the state an unsurvivable failure is raised
+	# from.  The push is armed from its own first call, because a run makes
+	# one push and it comes after the refresh, so failing every push is the
+	# remote going away once the refresh is done.
 	fail_on($h->fault_git, 'push', 1, from => 1,
 		message => "fatal: unable to access '@{[$h->r]}': "
 			. "Could not resolve host: the remote is unreachable");
@@ -168,7 +166,6 @@ subtest 'a rejected credential is named rather than the network' => sub {
 
 	# The refresh at the head of the run stands, and the push is armed with
 	# the text git writes when the remote turns the credential down.
-	sever_remote($h, after => 2);
 	fail_on($h->fault_git, 'push', 1, from => 1,
 		message => "fatal: Authentication failed for '@{[$h->r]}'");
 

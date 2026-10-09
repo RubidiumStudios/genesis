@@ -1305,20 +1305,29 @@ is what that phase caused rather than what the first one left behind.
 
 =head2 sever_remote($h, %opts)
 
-Makes every remote step fail with the text a real remote emits, which the code
-that tells a network failure from an authentication one reads off stderr.
-C<after> severs the remote partway through a run rather than from its first
-call.  C<kind> names which failure it gives, and it is C<network> by default
-and C<auth> for the credentials the refresh refuses on, so a row proving one
-refusal is not written against the other's words.
+Makes every call to the remote fail with the text a real remote emits, which
+the code that tells a network failure from an authentication one reads off
+stderr.  The severing is in git itself: the fixture git that C<run_genesis>
+puts first on the path fails C<fetch>, C<ls-remote> and C<push> and passes
+every other command through.  It names no method, so every way the product
+reaches the remote is cut, one added later included, and each method answers
+as it answers a real remote it cannot reach.  A row calling into the library
+puts C<preflight_bin> first on its own path for the length of the row.
+
+C<after> names the call to the remote that fails first, counted across every
+process the run spawns, so the remote can go away partway through a run; the
+count starts again with each severing.  C<kind> names which failure it gives,
+and it is C<network> by default and C<auth> for the credentials the refresh
+refuses on, so a row proving one refusal is not written against the other's
+words.
 
 =head2 restore_remote($h)
 
-Disarms the two remote steps C<sever_remote> armed, which are
-C<fetch_branches> and C<push>, and returns the harness.  It reads the plan out
-of the environment and answers without doing anything where no plan was ever
-armed.  A row reaches for it where the remote has to come back partway
-through, so that a later phase can reach it again.
+Reaches the remote again, and returns the harness.  A row that armed
+C<fetch_branches> or C<push> in the fault plan by hand has that cleared too,
+which is how such a row puts the remote back.  A row reaches for it where the
+remote has to come back partway through, so that a later phase can reach it
+again.
 
 =head2 hold_session_lock($h, %opts)
 

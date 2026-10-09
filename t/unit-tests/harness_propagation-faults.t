@@ -202,65 +202,75 @@ subtest 'a step stands above the steps it takes' => sub {
 subtest 'the remote can be severed and restored' => sub {
 	plan tests => 4;
 
+	# The remote is severed in git itself, so the real method meets it and
+	# answers as it would answer an unreachable remote.  run_genesis puts the
+	# fixture git first for a whole command; a row calling into the library
+	# puts it first itself.
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	init_branch($h, 'qa');
-
-	my $git = fault_git($h);
+	local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
+	my $git = $h->git('a');
 	sever_remote($h);
 
-	ok(!eval {$git->push(remote => 'origin',
-			refs => [{branch => $h->control}]); 1},
-		'a push to a severed remote dies');
-	like($@, qr/Could not resolve host/,
+	my ($pushed) = @{$git->push(remote => 'origin', refs => [{branch => $h->control}])};
+	is($pushed->{ok}, 0, 'a push to a severed remote fails');
+	like($pushed->{stderr}, qr/Could not resolve host/,
 		'with the text a real unreachable remote emits');
 	my $remote = $h->r;
-	like($@, qr/\Q$remote\E/, 'and it names the remote it could not reach');
+	like($pushed->{stderr}, qr/\Q$remote\E/, 'and it names the remote it could not reach');
 
 	restore_remote($h);
-	reset_steps($git);
-	ok(eval {$git->push(remote => 'origin',
-			refs => [{branch => $h->control}]); 1},
-		'and the push works again once the remote is restored');
+	($pushed) = @{$git->push(remote => 'origin', refs => [{branch => $h->control}])};
+	is($pushed->{ok}, 1, 'and the push works again once the remote is restored');
 };
 
-subtest 'the severed refresh answers the shape the real one answers' => sub {
-	plan tests => 5;
+subtest 'every read of a severed remote meets it, whatever method reads' => sub {
+	plan tests => 6;
 
-	# The double composes fetch_branches' failure result by hand, because a
-	# severed remote has to reach the caller as a classified result rather
-	# than as a death, which is what the real method does with a remote it
-	# cannot reach.  Written out by hand it can drift, and a key the product
-	# added would leave the double answering a shape the product never
-	# produces while every row built on it still passed.  This row reads both
-	# shapes and holds them to the same keys.
+	# Severing names no method, so a method added later that reaches the
+	# remote is severed with the rest rather than reading a remote the row
+	# thought was gone.  Each read classifies what git said, as it would for
+	# a real remote it could not reach.
 	my $h = make_harness(envs => ['qa'], vault => 0);
 	init_branch($h, 'qa');
-
-	# The real failure comes from a remote that is not there, which git
-	# ls-remote reports as a return code rather than a death, so the method
-	# classifies it and hands it back.  The read happens before the double is
-	# armed, because Service::Git answers every caller with one instance per
-	# repository and arming re-blesses that instance.
-	set_remotes($h, remotes => {origin => $h->r . '-gone.git'}, fetch => 0);
-	my (undef, $real) = $h->git('a')->fetch_branches([$h->control], 'origin');
-	is($real->{ok}, 0, 'the real method answers a failure rather than dying');
-
-	my $git = fault_git($h);
+	local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
+	my $git = $h->git('a');
 	sever_remote($h);
-	my (undef, $severed) = $git->fetch_branches([$h->control], 'origin');
-	restore_remote($h);
 
-	is_deeply([sort keys %$severed], [sort keys %$real],
-		'the double answers on exactly the keys the real method answers on');
-	# The names alone would not catch a list turning into something else, so
-	# the kind of value under each name is weighed beside it and the three
-	# empty lists have to stay lists.
-	is_deeply([map {ref $severed->{$_}} sort keys %$severed],
-		[map {ref $real->{$_}} sort keys %$real],
-		'and with the same kind of value under each of them');
-	is($severed->{ok}, 0, 'with ok false, as the real one has it');
-	is($severed->{kind}, 'network',
-		'and the kind the armed text classifies as, read from the product');
+	my (undef, $refresh) = $git->fetch_branches([$h->control], 'origin');
+	is($refresh->{kind}, 'network', 'the refresh reads it as the network');
+	my $snapshot = $git->snapshot_remote(remote => 'origin', branches => [$h->control]);
+	is($snapshot->{kind}, 'network', 'and so does the snapshot');
+	ok($git->sha($h->control), 'while a read of this clone alone still answers');
+
+	sever_remote($h, kind => 'auth');
+	(undef, $refresh) = $git->fetch_branches([$h->control], 'origin');
+	is($refresh->{kind}, 'auth', 'severed as a refused credential, it reads as auth');
+	$snapshot = $git->snapshot_remote(remote => 'origin', branches => [$h->control]);
+	is($snapshot->{kind}, 'auth', 'in the snapshot too');
+
+	restore_remote($h);
+	(undef, $refresh) = $git->fetch_branches([$h->control], 'origin');
+	is($refresh->{ok}, 1, 'and restored, the refresh reads the remote again');
+};
+
+subtest 'a remote severed partway lets the calls before it through' => sub {
+	plan tests => 2;
+
+	# after names the call to the remote that fails first, counted across
+	# every process the run spawns.  The refresh is two of them, the probe
+	# and the fetch.
+	my $h = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	local $ENV{PATH} = $h->preflight_bin . ":$ENV{PATH}";
+	my $git = $h->git('a');
+	sever_remote($h, after => 3);
+
+	my (undef, $first) = $git->fetch_branches([$h->control], 'origin');
+	is($first->{ok}, 1, 'the refresh before the severing goes through');
+	my (undef, $second) = $git->fetch_branches([$h->control], 'origin');
+	is($second->{kind}, 'network', 'and the one after it meets the severed remote');
+	restore_remote($h);
 };
 
 subtest 'the session lock is held by a child and dropped with it' => sub {
