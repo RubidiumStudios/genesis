@@ -2,6 +2,8 @@
 # Proves T154, T164, T167, and T177: a broken environment ends itself and
 # the run walks on, every environment in scope still ends with an outcome,
 # a partial delivery is reset to T, and a blueprint error records failed.
+# Also T116's no-write half for a failed environment: a dry run records the
+# failure as a writing run does and moves no branch in L.
 use strict;
 use warnings;
 use utf8;
@@ -187,6 +189,42 @@ subtest 'a blueprint error records failed and the run goes on' => sub {
 	like($err, qr/^\s*lab: (?:propagated|would propagate)/m,
 		'the run went on and delivered to lab');
 	unlike($err, qr/not yet/i, 'no outcome word reading not yet appears');
+};
+
+subtest 'a dry run records the same failure and moves no branch' => sub {
+	plan tests => 4;
+
+	# A failed environment is handled the same way with and without
+	# --dry-run, recorded failed while the run goes on, but only a writing
+	# run has a partial delivery to put back.  qa's branch carries a
+	# marker-only local commit, which a writing run would reset in its
+	# pre-flight and a preview only assumes reset, so a preview that put
+	# the failed branch back to T would make the very write it assumed.
+	#
+	# The failure has to come in the delivery itself, since every error a
+	# real repository can raise there has already ended the environment
+	# during the walk, where nothing is put back.  The preview switches to
+	# each branch it delivers to, control first and then lab and qa, so
+	# the third switch is qa's, and it is the one armed.
+	my $h  = ready_harness(envs => ['lab', 'qa'], kit => 'omega-v2.7.0',
+		tracked => ['ops/shared.yml']);
+	my $qa = $h->slug('qa');
+	my $marker_only = local_only_commit($h, $qa,
+		marker => ref_in($h->a, 'refs/heads/' . $h->control));
+	stand_on($h, $h->control);
+	commit_on_control($h, files => {'ops/shared.yml' => "---\nshared: 1\n"},
+		message => 'Bump shared ops', push => 1);
+
+	my $git = fault_git($h);
+	fail_on($git, 'checkout', 3, message => 'could not switch to qa/bosh');
+
+	my (undef, $err) = run_genesis($h, 'propagate', '--dry-run');
+
+	like($err, qr/qa.*failed/s, 'qa records failed, as a writing run would');
+	like($err, qr/^\s*lab: (?:propagated|would propagate)/m,
+		'and the preview went on to lab');
+	is(ref_in($h->a, "refs/heads/$qa"), $marker_only,
+		"qa's branch still stands at the commit the preview found it at");
 };
 
 done_testing;

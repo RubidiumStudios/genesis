@@ -127,7 +127,7 @@ subtest 'anything else is confined to the environment that raised it' => sub {
 	my $session = Recording::Session->new;
 	my $record  = a_record();
 
-	my $err = raised_by(session => $session, record => $record,
+	my $err = raised_by(session => $session, record => $record, writes => 1,
 		deliver => sub {die "the blueprint hook exited 1\n"});
 
 	is($err, undef, 'nothing is left for the caller to end the run on');
@@ -166,7 +166,7 @@ subtest 'only a pull request branch this run stood on goes back' => sub {
 	# the branch the restore exists for.
 	my $stood = Recording::Session->new(switched => ['pr/qa/bosh']);
 	my $one   = a_record(pr => {branch => 'pr/qa/bosh'});
-	raised_by(session => $stood, record => $one,
+	raised_by(session => $stood, record => $one, writes => 1,
 		deliver => sub {die "the blueprint hook exited 1\n"});
 	is_deeply($stood->{restored}, ['pr/qa/bosh'],
 		'the branch the arm stood on goes back through the restore');
@@ -178,13 +178,30 @@ subtest 'only a pull request branch this run stood on goes back' => sub {
 	# this run never cut would delete a branch somebody else made.
 	my $never = Recording::Session->new;
 	my $two   = a_record(pr => {branch => 'pr/qa/bosh'});
-	raised_by(session => $never, record => $two,
+	raised_by(session => $never, record => $two, writes => 1,
 		deliver => sub {die "the environment could not be loaded\n"});
 	is_deeply($never->{restored}, [],
 		'a branch this run never stood on is left where it is');
 	is_deeply($never->{discarded}, ['qa/bosh'],
 		'while the deployment branch still goes back');
 	is($two->{outcome}, 'failed', 'and the environment records failed');
+};
+
+subtest 'a call that writes nothing puts nothing back' => sub {
+	plan tests => 3;
+
+	# A dry run hands its session over and writes nothing, so a failure is
+	# recorded as a writing run records it and no branch is put back: the
+	# preview has no partial delivery to remove, and a reset to T would be
+	# the very move it only assumes (D96, noted 2026-10-09; D44).
+	my $session = Recording::Session->new(switched => ['pr/qa/bosh']);
+	my $record  = a_record(pr => {branch => 'pr/qa/bosh'});
+	raised_by(session => $session, record => $record, writes => 0,
+		deliver => sub {die "the blueprint hook exited 1\n"});
+
+	is($record->{outcome}, 'failed', 'the environment records failed');
+	is_deeply($session->{discarded}, [], 'its deployment branch is not put back');
+	is_deeply($session->{restored}, [], 'nor its pull request branch');
 };
 
 done_testing;

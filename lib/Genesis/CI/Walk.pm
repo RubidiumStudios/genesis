@@ -802,8 +802,8 @@ sub apply_hold {
 # with_vault or a load_env failure belongs there too.  An environment that
 # ends any of those three ways records the one outcome.
 #
-# The session is handed in only where something may have been written, and
-# what it is asked for is the per-branch discard rather than abort: abort
+# The session is used only where the call writes, and what it is asked for
+# is the per-branch discard rather than abort: abort
 # ends the session and the run with it, which would leave every environment
 # below this one unattempted, which is the shape this sub exists to stop.
 # An environment that delivers into a pull request writes on that branch and
@@ -858,7 +858,12 @@ sub walk_one {
 	# run's on the branch.  Handing the restore one of those would take off a
 	# local branch somebody else made, since the restore's own last arm reads
 	# a branch with no remote tip and no recorded tip as one this run cut.
-	if ($session) {
+	#
+	# Only a call that writes.  A call that writes nothing has nothing of
+	# its own on the branch, and putting the branch back to T would make the
+	# very move a dry run only assumes, so a session handed to a call that
+	# does not write is left alone.
+	if ($session && $args{writes}) {
 		$session->discard($record->{branch});
 		$session->restore_branch($record->{pr}{branch})
 			if $record->{pr} && $record->{pr}{branch}
