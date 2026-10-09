@@ -36,30 +36,25 @@ Harness::Propagation::run(
 	{dir => $h->a, onfailure => 'Failed to cut the off-branch'},
 	'git', 'checkout', '-q', '-b', 'elsewhere');
 
-subtest 'propagate switches to the configured name and comes back' => sub {
-	# The off-control refusal is gone, so what this row used to read out of
-	# a refusal it now reads out of the switch.  A run started on
-	# `elsewhere` stands itself on trunk, and a reader that fell back to the
-	# schema default would look for a branch called `control`, find it
-	# neither here nor on the remote, and say so by name.
-	plan tests => 4;
+subtest 'propagate reads the configured name and comes back' => sub {
+	# The off-control refusal is gone.  A run started on `elsewhere` asks
+	# its first questions of control by the name the repository declared,
+	# and a reader that fell back to the schema default would look for a
+	# branch called `control`, find it neither here nor on the remote, and
+	# say so by name.
+	plan tests => 3;
 
-	# The run reaches the applied record and stops there, which is after the
-	# switch and before anything that would name a branch out loud, so the
-	# branch it stood on is read off the step log rather than out of a
-	# message.  Both halves of the title are then asserted.
-	my $git = fault_git($h);
+	# With no vault the run stops at its first questions, the applied record
+	# among them, before it switches anywhere (D115).  The switch to a
+	# configured name is proved where a run gets that far, in
+	# genesis_ci_walk-session.t.
 	my $w = snapshot_w($h);
 	my (undef, $err) = $h->run_genesis({restore => 0}, 'propagate');
-
-	my @checkouts = map {$_->[1]} grep {$_->[0] eq 'checkout'} step_log($git);
-	ok(scalar(grep {$_ eq 'trunk'} @checkouts),
-		'the run stood itself on the branch the repository declared');
 
 	unlike $err, qr/must be run from/,
 		'standing off the control branch is a refusal no longer';
 	unlike $err, qr/control branch control/,
-		'the switch read the branch the repository declared, not the default';
+		'the run read the branch the repository declared, not the default';
 	assert_w_restored($w, 'the operator is back on the branch they ran from');
 };
 

@@ -33,7 +33,7 @@ subtest 'a marker-only local commit is reset and reported as an event' => sub {
 
 	# The kit is here because the walk loads the environment before it
 	# prints an outcome for it, and the row below reads that outcome column.
-	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	my $h  = make_harness(envs => ['qa'], kit => 'omega-v2.7.0', applied => 1);
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -109,7 +109,7 @@ subtest 'a hand commit refuses the whole run and writes nothing' => sub {
 	# Nine rows, and one more for the run's own restoration assertion.
 	plan tests => 10;
 
-	my $h = make_harness(envs => ['qa', 'lab', 'prod', 'sandbox']);
+	my $h = make_harness(envs => ['qa', 'lab', 'prod', 'sandbox'], applied => 1);
 	my $qa = $h->slug('qa');
 
 	init_branch($h, $_) for qw/qa lab prod sandbox/;
@@ -151,7 +151,7 @@ subtest 'a stray branch and a hand commit are named in one refusal' => sub {
 	# Six rows, and one more for the run's own restoration assertion.
 	plan tests => 7;
 
-	my $h   = make_harness(envs => ['qa', 'lab']);
+	my $h   = make_harness(envs => ['qa', 'lab'], applied => 1);
 	my $qa  = $h->slug('qa');
 	my $lab = $h->slug('lab');
 
@@ -198,7 +198,7 @@ subtest 'no option adopts the remote over a hand commit' => sub {
 	# what it puts in front of the operator.
 	plan tests => 5;
 
-	my $h  = make_harness(envs => ['qa']);
+	my $h  = make_harness(envs => ['qa'], applied => 1);
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -228,7 +228,7 @@ subtest 'the straggler, reproduced' => sub {
 	# Three rows, and one more for the run's own restoration assertion.
 	plan tests => 4;
 
-	my $h  = make_harness(envs => ['qa']);
+	my $h  = make_harness(envs => ['qa'], applied => 1);
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -258,7 +258,7 @@ subtest 'the divergence with no exit, reproduced' => sub {
 	# assertions.
 	plan tests => 6;
 
-	my $h  = make_harness(envs => ['qa']);
+	my $h  = make_harness(envs => ['qa'], applied => 1);
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -280,7 +280,7 @@ subtest 'the divergence with no exit, reproduced' => sub {
 	is($h->git('a')->resolve_branch($qa, remote => 'origin')->{state}, 'in-sync',
 		'a marker-only commit reset itself rather than refusing the run');
 
-	my $h2  = make_harness(envs => ['qa']);
+	my $h2  = make_harness(envs => ['qa'], applied => 1);
 	my $qa2 = $h2->slug('qa');
 	init_branch($h2, 'qa');
 	refresh($h2, 'a', $qa2);

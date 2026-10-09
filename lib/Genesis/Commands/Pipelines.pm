@@ -525,28 +525,34 @@ sub propagate {
 	# never had a pipeline passes both and meets the pre-flight, which is
 	# where a repository with nothing configured belongs.
 	Genesis::CI::Preflight::assert_not_disowned($top, command => 'propagate');
-	# The gate is the deploy's as well, so it lives beside the other shared
-	# refusal and takes this run's words for what the pipeline owns from its
-	# defaults.  --dry-run is passed by the name the gate reads it under,
-	# because the option's own spelling is this command line's and not a
-	# fact about the gate.
-	Genesis::CI::Preflight::assert_provider_gate($top, $opts,
-		dry_run => $dry_run);
 
 	my $git     = Service::Git->new('.');
 	my $control = $top->control_branch;
 
-	# The run's first stage begins here, and control is its first question,
-	# because the topology is read from control and a control nobody refreshed
-	# makes every later answer worthless.  It stands ahead of the branch
-	# check, since a branch that exists nowhere is not one the operator can be
-	# asked to stand on.
+	# Every question first, against a snapshot of R, changing nothing the
+	# operator has, and one refusal naming every problem (D115).  A run that
+	# proceeds has the snapshot promoted into T and the local branches it needs
+	# created, so what follows reads T as the questions read R, and the refresh
+	# below is the result handed back rather than a second fetch.  A dry run
+	# asks the same questions and, finding nothing, previews as it always has
+	# until it reads the snapshot itself.
 	#
-	# The refresh brings R into T for every branch in scope, control included,
-	# before the first read of any of them.  There is no flag, because a
-	# report that quietly rested on a stale tracking ref is the thing this
-	# removes.
-	my $refreshed = $top->fetch_pipeline_envs($git, command => 'propagate');
+	# The pull request branch of every environment that delivers into one
+	# comes back with it, named from control's files, every collision among
+	# them having been refused with the rest.
+	my $checked = _propagate_check_first($top, $git, $opts);
+	my %pr_branch_of = %{$checked->{pr_branch_of} || {}};
+
+	# Control's standing is settled again against T, which now holds what the
+	# questions read, and stands ahead of the branch check, since a branch
+	# that exists nowhere is not one the operator can be asked to stand on.
+	#
+	# A dry run, and a repository the first stage did not ask, still bring R
+	# into T here, for every branch in scope, before the first read of any of
+	# them.  There is no flag, because a report that quietly rested on a stale
+	# tracking ref is the thing this removes.
+	my $refreshed = $checked->{refreshed}
+		// $top->fetch_pipeline_envs($git, command => 'propagate');
 	# The stage's events are not printed here.  The whole list is printed
 	# once, where the deployment branches are settled, and a line printed
 	# twice is worse than a line printed late.
@@ -573,35 +579,6 @@ sub propagate {
 	# applies to a dry run as it does to a writing one, because a dry run
 	# switches to control like any other run and the clean assertion sits on
 	# the switch.
-
-	# The pull request branch of every environment is named once, before the
-	# session opens, because pr_branch_for refuses a prefix that collides
-	# with a deployment branch or with control and that refusal exits CONFIG.
-	# Raised below the switch it would die inside the run's own eval, where
-	# the named exit becomes a bare 1 and the operator is told nothing about
-	# the key they have to change.
-	#
-	# The topology is read once for the whole loop rather than once per
-	# environment, because building it walks every environment file.
-	#
-	# This reading is the working tree's, and a run started from a feature
-	# branch reads that branch's environment files rather than control's, so
-	# the same question is asked a second time below once the session has
-	# stood the run on control.  Neither reading is redundant: the first is
-	# what keeps the exit named for a repository whose control is checked
-	# out, and the second is what catches a collision that exists only in
-	# control's files.
-	#
-	# The environment names go in with each ask, because the refusal compares
-	# the composed branch against every deployment branch in the pipeline and
-	# would otherwise build a topology of its own for each environment it is
-	# asked about.
-	my $pr_topology = $top->pipeline_topology;
-	my @pr_names    = keys %{$pr_topology->{nodes}};
-	$top->pr_branch_for($_, envs => \@pr_names) for grep {
-		$pr_topology->{nodes}{$_}{require_pr}
-	} @{$pr_topology->{order}};
-
 	my $session = open_control_session($top, $git);
 
 	# A refusal from here on owes the operator their branch back before it
@@ -620,29 +597,6 @@ sub propagate {
 	# itself, from the same reader, so the record it hands back carries them
 	# and nothing here keeps a second copy.
 	my @dag_order = @{$topo->{order}};
-
-	# The collision, asked again on control's own files.  The pre-session
-	# reading above answers about whatever branch the operator was standing
-	# on, so a prefix that collides only in control's files would otherwise
-	# reach pr_branch_for inside the walk, where its named exit becomes a
-	# bare 1.  The refusal goes through the closure, which closes the session
-	# first, so the operator is back on their branch and the exit survives.
-	#
-	# What it composes is kept, because the pre-flight below wants the same
-	# names and asking a second time rebuilds the topology once per
-	# environment.  The message it caught is quoted through bail_text: a bail
-	# raised inside an eval arrives already bannered and already wrapped, and
-	# re-raising it whole put a second [FATAL] in the middle of a paragraph.
-	my %pr_branch_of;
-	my @control_names = keys %{$topo->{nodes}};
-	for my $env_name (grep {$topo->{nodes}{$_}{require_pr}} @dag_order) {
-		my $pr_branch = eval {
-			$top->pr_branch_for($env_name, envs => \@control_names)
-		};
-		$refuse->({exitcode => CONFIG}, "%s", bail_text($@))
-			unless defined $pr_branch;
-		$pr_branch_of{$env_name} = $pr_branch;
-	}
 
 	# The rest of the first stage, now that the topology is known.  Every
 	# refusal below is collected before anything is written, so a run that
@@ -749,10 +703,16 @@ sub propagate {
 	# pull request sync at the end of the run.  The walk takes the client
 	# alone and never the pair, because the recovery reads the merged pull
 	# requests out of the answer this run already has.
-	my ($github, $owner_repo, $pr_state) =
-		Genesis::CI::PullRequest::state_for_scope($top,
+	#
+	# The first stage has read all of it already, as one of its questions,
+	# so the run takes that answer rather than asking GitHub again; the read
+	# here is for a run the first stage did not ask, which has no pipeline.
+	my ($github, $owner_repo, $pr_state) = $checked->{github}
+		? @{$checked->{github}}{qw/client owner_repo state_of/}
+		: Genesis::CI::PullRequest::state_for_scope($top,
 			envs   => \@in_scope,
 			refuse => $refuse);
+	$pr_state ||= {};
 	my %pr_state_of = %$pr_state;
 
 	my @publish_specs;
@@ -1606,6 +1566,152 @@ sub resume {
 # }}}
 ### The Session {{{
 
+# _propagate_check_first - propagate's first stage: every question, then act {{{
+#
+# The lock comes first, so nothing else switches this working tree while the
+# questions are asked, and R is read into a namespace of its own, so asking
+# moves no local branch and no tracking ref (D115).  Every question is asked
+# against that read, and the problems they find are refused once, together.
+# A failure that leaves later questions without anything true to read ends
+# the asking there, and the refusal names what it left unasked.
+#
+# A run that finds nothing confirms the provider's gate, the one question put
+# to a person, and only then acts: the snapshot is promoted into T in one
+# step and the control and deployment branches the clone lacks are created
+# from it.  What it hands back carries, under refreshed, the result of the
+# refresh it replaces, with the pull request branch of each environment that
+# delivers into one and the GitHub client and review states the questions
+# read, so the run asks GitHub nothing a second time.  A dry run lets go of
+# the read and the lock, and hands back all but refreshed.
+sub _propagate_check_first {
+	my ($top, $git, $opts) = @_;
+	return {} unless $top->pipeline_enabled;
+
+	my $dry_run = $opts->{'dry-run'} ? 1 : 0;
+	my $control = $top->control_branch;
+	my $remote  = $top->source_control_remote;
+	my $ns      = "refs/genesis/preflight/$remote";
+	my $session = $git->session(control => $control);
+	$session->take_lock;
+
+	my (@problems, $not_checked, $github);
+	my ($topology, $pr_branch_of) = ({nodes => {}, order => []}, {});
+
+	push @problems, Genesis::CI::Preflight::repository_problems($git);
+
+	my $read = $git->snapshot_remote(remote => $remote, namespace => $ns,
+		branches => [$control], globs => ['*/' . $top->type]);
+
+	my (undef, @unapplied) = Genesis::CI::Preflight::applied_record_problems($top);
+	push @problems, @unapplied;
+
+	my @reads_control = (
+		'whether a provider pipeline owns propagation',
+		'the environments',
+		'the pull request branches',
+		'the deployment branches',
+		'the pull request reviews');
+
+	if (!$read->{ok}) {
+		my $because = $read->{kind} eq 'network'
+			? 'the network or the remote is unreachable'
+			: $read->{kind} eq 'auth'
+			? 'the remote rejected our credentials'
+			: 'the remote failed the request';
+		push @problems, Genesis::CI::Preflight::problem(TEMPFAIL, sprintf(
+			"Failed to reach #C{%s} to read the pipeline branches, because %s, ".
+			"so nothing this command reads can be shown to be current.\n\n%s\n\n".
+			"Restore access to #C{%s} and run the command again.",
+			$remote, $because, ($read->{err} || 'no further detail') =~ s/\s+$//r,
+			$remote));
+		$not_checked = {
+			because => "nothing could be read from #C{$remote}",
+			checks  => ["control's standing", @reads_control]};
+	} elsif (my @standing = Genesis::CI::Preflight::control_problems($top, $git,
+			tracking      => $ns,
+			creates_local => 1,
+			permit_ahead  => $dry_run)) {
+		push @problems, @standing;
+		$not_checked = {
+			because => 'the topology is read from control',
+			checks  => \@reads_control};
+	} else {
+		$top->read_shape_from("$ns/$control");
+		push @problems, Genesis::CI::Preflight::provider_gate_problems($top, $opts,
+			dry_run => $dry_run);
+
+		$topology = $top->pipeline_topology;
+		push @problems, Genesis::CI::Preflight::problem(CONFIG,
+			"No environments with pipeline metadata found.")
+			unless %{$topology->{nodes}};
+
+		my @prefix;
+		($pr_branch_of, @prefix) = Genesis::CI::Preflight::prefix_problems($top,
+			topology => $topology);
+		my (undef, @initial) = Genesis::CI::Preflight::initial_state_problems($top, $git,
+			envs     => $topology->{order},
+			tracking => $ns);
+		push @problems, @prefix, @initial;
+
+		# The reviews are read by pull request branch, so a branch that
+		# collides would be asked about under a name that is not its own.
+		if (@prefix) {
+			$not_checked = {
+				because => 'the pull request branches collide',
+				checks  => ['the pull request reviews']};
+		} else {
+			my @github;
+			($github, @github) = Genesis::CI::Preflight::github_problems($top,
+				envs => [map {{
+					env       => $_,
+					branch    => $top->branch_for($_),
+					pr_branch => $pr_branch_of->{$_},
+				}} grep {$topology->{nodes}{$_}{require_pr}} @{$topology->{order}}]);
+			push @problems, @github;
+		}
+	}
+
+	if (@problems || $dry_run) {
+		$git->clear_snapshot(namespace => $ns);
+		$session->release_lock;
+		Genesis::CI::Preflight::refuse_once(
+			problems => \@problems,
+			action   => 'run #C{genesis propagate}',
+			outcome  => 'Nothing was written.',
+			($not_checked ? (not_checked => $not_checked) : ()));
+		return {pr_branch_of => $pr_branch_of, github => $github};
+	}
+
+	Genesis::CI::Preflight::confirm_provider_gate($top, $opts, dry_run => $dry_run);
+
+	# Control and the deployment branches, which are what the refresh brought
+	# into T.  A pull request branch's tracking ref is left where the run last
+	# published it, because that is the tip a publish leases against, and a
+	# branch moved on R since is the move the lease exists to catch.
+	my @branches = ($control, map {$top->branch_for($_)} @{$topology->{order}});
+	my $held     = $git->snapshot_refs(namespace => $ns);
+	$git->promote_snapshot(remote => $remote, namespace => $ns,
+		names => \@branches);
+
+	# What the refresh made, made from what the questions read.  The branch the
+	# tree stands on is never written, even unborn, as the refresh never did.
+	my $here = $git->checked_out_branch // '';
+	my (@fetched, @created, @absent);
+	for my $branch (@branches) {
+		push(@absent, $branch), next unless defined $held->{$branch};
+		push @fetched, $branch;
+		next if $branch eq $here || $git->branch_exists("refs/heads/$branch");
+		$git->create_branch($branch, $held->{$branch});
+		push @created, $branch;
+	}
+	return {
+		refreshed    => {ok => 1, kind => 'success', fetched => \@fetched,
+		                 created => \@created, absent => \@absent},
+		pr_branch_of => $pr_branch_of,
+		github       => $github};
+}
+
+# }}}
 # open_control_session - begin a session and stand it on control {{{
 #
 # The run switches to control inside its session rather than refusing off it,

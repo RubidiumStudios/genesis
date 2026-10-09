@@ -39,7 +39,7 @@ subtest 'a hand commit refuses, and refuses again on an unaided retry' => sub {
 	# Five rows, and one more for each run's own restoration assertion.
 	plan tests => 7;
 
-	my $h  = make_harness(envs => ['qa']);
+	my $h  = make_harness(envs => ['qa'], applied => 1);
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');

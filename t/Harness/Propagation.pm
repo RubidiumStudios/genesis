@@ -823,6 +823,12 @@ sub make_harness {
 	$self->fixture_vault if $opts{vault};
 	$self->github_double if $opts{github};
 
+	# A run asks for the applied record with every other question, so a row
+	# about something else that wants a run to get as far as its own subject
+	# has the pipeline applied at the seeding commit.
+	$self->fixture_applied(control => $self->git('a')->sha($self->{control}))
+		if $opts{applied};
+
 	return $self;
 }
 

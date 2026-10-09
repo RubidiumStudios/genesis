@@ -98,7 +98,7 @@ subtest 'a run that cannot reach the remote fails at pre-flight' => sub {
 	# Five rows, and one more for the run's own restoration assertion.
 	plan tests => 6;
 
-	my $h    = make_harness(envs => ['qa', 'prod']);
+	my $h    = make_harness(envs => ['qa', 'prod'], applied => 1);
 	my $slug = $h->slug('qa');
 	init_branch($h, $_) for qw/qa prod/;
 	refresh($h, 'a', $slug);

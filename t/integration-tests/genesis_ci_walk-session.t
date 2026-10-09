@@ -43,8 +43,11 @@ subtest 'the walk reads control and not the branch it was run from' => sub {
 	# restoration in its own words rather than asking for it again here.
 	plan tests => 3;
 
+	# Control is called trunk rather than the schema default, so a run that
+	# switched to a branch by the default name would read nothing of what
+	# this row put on control.
 	my $h = ready_harness(delivered => [], certified => ['lab'],
-		kit => 'omega-v2.7.0');
+		kit => 'omega-v2.7.0', control => 'trunk');
 	# The change is appended to the file control already carries, so the
 	# environment keeps the shape the topology is read out of and the only
 	# thing this row varies is which branch the run reads it from.

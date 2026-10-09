@@ -27,7 +27,7 @@ subtest 'an unpushed control commit refuses the run as unpushed' => sub {
 	# Seven rows, and one more for the run's own restoration assertion.
 	plan tests => 8;
 
-	my $h    = make_harness(envs => ['qa', 'prod']);
+	my $h    = make_harness(envs => ['qa', 'prod'], applied => 1);
 	my $slug = $h->slug('qa');
 	init_branch($h, $_) for qw/qa prod/;
 	refresh($h, 'a', $slug, $h->slug('prod'));
@@ -59,7 +59,7 @@ subtest 'a teammate ahead on control refuses the run as stale' => sub {
 	# Five rows, and one more for the run's own restoration assertion.
 	plan tests => 6;
 
-	my $h = make_harness(envs => ['qa']);
+	my $h = make_harness(envs => ['qa'], applied => 1);
 	init_branch($h, 'qa');
 
 	my $before_l = ref_in($h->a, "refs/heads/@{[$h->control]}");
@@ -150,7 +150,7 @@ subtest 'the unrefreshed control branch, reproduced' => sub {
 	# Four rows, and one more for the run's own restoration assertion.
 	plan tests => 5;
 
-	my $h    = make_harness(envs => ['qa']);
+	my $h    = make_harness(envs => ['qa'], applied => 1);
 	my $slug = $h->slug('qa');
 	init_branch($h, 'qa');
 	refresh($h, 'a', $slug);
@@ -178,7 +178,7 @@ subtest 'a control branch the remote has never had refuses the run' => sub {
 	# Four rows, and one more for the run's own restoration assertion.
 	plan tests => 5;
 
-	my $h = make_harness(envs => ['qa']);
+	my $h = make_harness(envs => ['qa'], applied => 1);
 	init_branch($h, 'qa');
 
 	# Control is cut here and published nowhere, which is the repository an
@@ -225,7 +225,7 @@ subtest 'control on the remote that the refresh could not write refuses' => sub 
 	# Four rows, and one more for the run's own restoration assertion.
 	plan tests => 5;
 
-	my $h = make_harness(envs => ['qa']);
+	my $h = make_harness(envs => ['qa'], applied => 1);
 	init_branch($h, 'qa');
 	refresh($h, 'a', $h->slug('qa'));
 
@@ -251,7 +251,7 @@ subtest 'a control diverged both ways refuses the run' => sub {
 	# Four rows, and one more for the run's own restoration assertion.
 	plan tests => 5;
 
-	my $h = make_harness(envs => ['qa']);
+	my $h = make_harness(envs => ['qa'], applied => 1);
 	init_branch($h, 'qa');
 
 	# The two rows at the top of this file take the halves one at a time,

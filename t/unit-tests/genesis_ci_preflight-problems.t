@@ -207,7 +207,7 @@ subtest 'a commit R has and T has not seen is no hand commit' => sub {
 };
 
 subtest "control's standing is read against the snapshot" => sub {
-	plan tests => 9;
+	plan tests => 10;
 	my $w   = moved_world();
 	my $top = Stub::Top->new;
 	my $problems = sub {[Genesis::CI::Preflight::control_problems($top, $w->{git},
@@ -232,6 +232,13 @@ subtest "control's standing is read against the snapshot" => sub {
 	is(scalar @{$problems->(creates_local => 1)}, 0,
 		'a control the clone lacks is none where the run creates it');
 	is($problems->()->[0]{code}, DATAERR, 'and a problem where it does not');
+
+	# The run cannot create the branch the tree stands on, unborn, so the
+	# absence is still answered there.
+	$w->{run}->($w->{l}, 'checkout', '-q', '--orphan', 'control');
+	like(($problems->(creates_local => 1)->[0] // {})->{text} // '',
+		qr/not in\s+this clone/,
+		'nor where the tree stands on control unborn, which no run can create');
 
 	my $nowhere = [Genesis::CI::Preflight::control_problems(
 		Stub::Top->new(control => 'nothing'), $w->{git}, tracking => $SNAP)];

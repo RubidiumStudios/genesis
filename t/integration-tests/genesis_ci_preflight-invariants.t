@@ -38,7 +38,7 @@ subtest 'no path force-writes the local control ref' => sub {
 	# Three rows, and one more for the run's own restoration assertion.
 	plan tests => 4;
 
-	my $h  = make_harness(envs => ['qa']);
+	my $h  = make_harness(envs => ['qa'], applied => 1);
 	my $qa = $h->slug('qa');
 	init_branch($h, 'qa');
 	refresh($h, 'a', $qa);
@@ -102,7 +102,7 @@ subtest 'the only forced write onto a deployment branch is the reset' => sub {
 	# Two rows, and one more for the run's own restoration assertion.
 	plan tests => 3;
 
-	my $h  = make_harness(envs => ['qa']);
+	my $h  = make_harness(envs => ['qa'], applied => 1);
 	my $qa = $h->slug('qa');
 	init_branch($h, 'qa');
 	refresh($h, 'a', $qa);

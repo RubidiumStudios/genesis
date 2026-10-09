@@ -265,6 +265,7 @@ subtest 'a pipeline never applied refuses the run and not the report' => sub {
 	certify($h, 'lab', control_commit => $due);
 	my $slug = $h->slug('qa');
 	my $on_r = ref_in($h->r, "refs/heads/$slug");
+	my $in_a = ref_in($h->a, "refs/heads/$slug");
 	break_vault($h, envs => [], applied => 1);
 
 	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
@@ -276,12 +277,10 @@ subtest 'a pipeline never applied refuses the run and not the report' => sub {
 	# Read off the raw stream, because a line's start is what marks an
 	# environment's outcome and unfolding joins the lines.
 	unlike($err, qr/^\s*(?:lab|qa): /m, 'before any environment is walked');
-	# The pre-flight ahead of the refusal fast-forwards a clone branch that
-	# is behind R, as it does ahead of every refusal after it, so the clone's
-	# branch is read against R rather than against where it stood: the run
-	# wrote nothing of its own, and the clone holds only what R holds.
+	# The refusal comes before anything moves (D115), so the clone's branch
+	# is read against where it stood before the run, not against R.
 	is(ref_in($h->r, "refs/heads/$slug"), $on_r, 'and nothing reaches R');
-	is(ref_in($h->a, "refs/heads/$slug"), $on_r,
+	is(ref_in($h->a, "refs/heads/$slug"), $in_a,
 		'nor is anything committed in the clone');
 
 	my (undef, $dry_err, $dry_exit) =

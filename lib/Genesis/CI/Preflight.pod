@@ -542,7 +542,8 @@ L<Service::Git/resolve_branch>, which D115's run gives as its snapshot.
 =item C<creates_local>
 
 Optional. True where the run will create a control the clone lacks from what
-it read of R, so its absence is no problem.
+it read of R, so its absence is no problem. A tree standing on control unborn
+is still answered, because no run writes the branch the tree stands on.
 
 =item C<permit_ahead>, C<unverifiable>
 

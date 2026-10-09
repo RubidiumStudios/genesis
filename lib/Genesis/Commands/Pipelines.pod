@@ -1708,6 +1708,102 @@ B<Examples:>
   #   { kind => 'unreset-branch', branch => 'qa/bosh',
   #     remote => 'origin' } ]
 
+=head2 _propagate_check_first
+
+  my $checked = _propagate_check_first($top, $git, $opts);
+
+The first stage of C<genesis propagate> (D115): every question the run asks
+before it acts, asked against a snapshot of R, and refused once with every
+problem found. The switch lock is taken first, so nothing else switches the
+working tree while the questions are asked, and R is read into
+C<refs/genesis/preflight/E<lt>remoteE<gt>> by
+L<Service::Git/snapshot_remote>, so asking moves no local branch and no
+tracking ref.
+
+The questions, in order: the clone itself
+(L<Genesis::CI::Preflight/repository_problems($git)>); the snapshot; the
+applied record; control's standing against the snapshot; the provider's gate;
+whether any environment carries pipeline metadata; every pull request prefix
+collision; the initial state of every deployment branch, against the
+snapshot; and the GitHub client and review states the pull request
+environments need. A snapshot that failed ends the asking, since every later
+question reads R; so does a control that does not stand where R has it, since
+the topology is read from control; and so does a prefix collision for the
+reviews alone, which are read by pull request branch. Each names what it left
+unasked in the refusal.
+
+A run that finds nothing confirms the provider's gate at a terminal, the one
+question put to a person, and only then acts: the snapshot is promoted into
+the tracking refs of control and every deployment branch in one
+C<update-ref> transaction, and the ones of those the clone lacks are created
+locally from it, the branch the tree stands on excepted. A pull request
+branch's tracking ref is left where the run last published it, because that
+is the tip a publish leases against. A dry run lets go of the snapshot and
+the lock and changes nothing.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> the run was opened on.
+
+=item C<$git>
+
+The C<Service::Git> handle on the clone.
+
+=item C<$opts>
+
+The command's options; C<dry-run> and C<force> are read.
+
+=back
+
+B<Returns:> A hashref. C<refreshed> is the result the refresh it replaces
+would have returned (C<ok>, C<kind>, C<fetched>, C<created>, C<absent>),
+present only where a real run proceeded. C<pr_branch_of> maps each
+environment that delivers by pull request to its branch. C<github> is
+C<{client, owner_repo, state_of}> as the questions read it, so the run asks
+GitHub nothing a second time. A repository with no enabled pipeline answers
+an empty hashref, having asked nothing.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Refusing to run genesis propagate.  ...  Nothing was written."> - one
+refusal naming every problem, through
+L<Genesis::CI::Preflight/refuse_once(%opts)>, at the highest-ranked code
+among them (CONFIG, NOPERM, DATAERR, UNAVAILABLE, TEMPFAIL). The snapshot is
+cleared and the lock let go first.
+
+=item *
+
+C<"Another Genesis process is using this working tree."> - exits
+C<TEMPFAIL>, from the lock, before anything is read.
+
+=item *
+
+C<"Aborted at your request.  Nothing was written."> - exits C<ABORTED> where
+the operator declines the provider's gate.
+
+=back
+
+B<Examples:>
+
+  my $checked = _propagate_check_first($top, $git, {});
+  # returns {refreshed => {ok => 1, kind => 'success',
+  #          fetched => ['control', 'qa/bosh'], created => ['control'],
+  #          absent => []}, pr_branch_of => {}, github => {...}}
+  # having promoted R's control and qa/bosh and created control locally
+
+  _propagate_check_first($top, $git, {});
+  # bails "Refusing to run genesis propagate.  genesis pipeline-apply has
+  # never been run ...  qa/bosh carries 1 commit ...  Nothing was written."
+  # exiting CONFIG, with every ref as it was
+
 =head2 _protection_rules_for
 
   my $rules = _protection_rules_for($top, $branch, control => 1);

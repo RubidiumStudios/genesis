@@ -328,12 +328,14 @@ sub _control_standing {
 
 	# The remote has control and this clone does not.  A run that creates the
 	# local branch from what it read of R, as D115's does, has nothing to say
-	# about that.  Otherwise the refresh was the one that writes the local ref,
+	# about that, unless the tree stands on control unborn, which no run
+	# writes.  Otherwise the refresh was the one that writes the local ref,
 	# so something stopped it, and a working tree standing on an unborn control
 	# is what usually does; the refusal says the creation did not happen,
 	# rather than reading a staleness out of two counts that are both zero.
 	if ($div->{state} eq 'no-local') {
-		return ($div) if $opts{creates_local};
+		return ($div) if $opts{creates_local}
+			&& ($git->checked_out_branch // '') ne $control;
 		return ($div, problem(DATAERR, sprintf(
 			"The control branch #C{%s} is on #C{%s/%s} and not in ".
 			"this clone.  The refresh writes the local ref for a branch the remote ".

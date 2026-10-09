@@ -27,7 +27,7 @@ subtest 'a local branch the remote never had refuses the run' => sub {
 	# Eight rows, and one more for the run's own restoration assertion.
 	plan tests => 9;
 
-	my $h   = make_harness(envs => ['qa', 'lab']);
+	my $h   = make_harness(envs => ['qa', 'lab'], applied => 1);
 	my $qa  = $h->slug('qa');
 	my $lab = $h->slug('lab');
 
@@ -67,7 +67,7 @@ subtest 'a local branch sharing no ancestor with the remote refuses the run' => 
 	# Seven rows, and one more for the run's own restoration assertion.
 	plan tests => 8;
 
-	my $h  = make_harness(envs => ['qa']);
+	my $h  = make_harness(envs => ['qa'], applied => 1);
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -104,7 +104,7 @@ subtest 'the reset never applies across unrelated histories' => sub {
 	# Two rows, and one more for the run's own restoration assertion.
 	plan tests => 3;
 
-	my $h  = make_harness(envs => ['qa']);
+	my $h  = make_harness(envs => ['qa'], applied => 1);
 	my $qa = $h->slug('qa');
 
 	init_branch($h, 'qa');
@@ -131,7 +131,7 @@ subtest 'a branch of each class is named in one refusal' => sub {
 	# Six rows, and one more for the run's own restoration assertion.
 	plan tests => 7;
 
-	my $h   = make_harness(envs => ['qa', 'lab']);
+	my $h   = make_harness(envs => ['qa', 'lab'], applied => 1);
 	my $qa  = $h->slug('qa');
 	my $lab = $h->slug('lab');
 
