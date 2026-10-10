@@ -1647,7 +1647,13 @@ sub _propagate_check_first {
 			because => 'the topology is read from control',
 			checks  => \@reads_control};
 	} else {
-		$top->read_shape_from("$ns/$control");
+		# A preview with control ahead assumes its commits pushed, so it reads
+		# the shape from the control it stands on, which is where its commits
+		# and its environment files come from too (D30, noted 2026-10-10).
+		my $ahead = $dry_run && ((
+			$git->resolve_branch($control, tracking => $ns) // {})->{state} // ''
+		) eq 'ahead';
+		$top->read_shape_from($ahead ? "refs/heads/$control" : "$ns/$control");
 		push @problems, Genesis::CI::Preflight::provider_gate_problems($top, $opts,
 			dry_run => $dry_run);
 

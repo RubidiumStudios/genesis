@@ -118,6 +118,34 @@ subtest "the preview's lines say what would happen, not what did" => sub {
 	like($said, qr/assumes\s+\Q$qa\E\s+is\s+reset/, 'and each still earns its caveat');
 };
 
+subtest 'a preview with control ahead reads the shape it stands on' => sub {
+	# Three rows, and the run's own restoration assertion.
+	plan tests => 4;
+
+	# Under R's shape qa follows lab, which has not deployed the shared
+	# bump, so qa is held behind it.  An unpushed commit on control makes qa
+	# a root.  The preview assumes that commit pushed, so it reads the shape
+	# from the control it stands on, and qa is no longer held (D30, noted
+	# 2026-10-10).
+	my $h = two_stage();
+	stand_on($h, $h->control);
+	commit_on_control($h,
+		files => {'qa.yml' => join("\n", '---', 'kit:', '  name:    dev',
+			'  version: latest', '  features: []', 'genesis:', '  env: qa',
+			'  pipeline:', '    track_additional_files:',
+			'      - ops/shared.yml', '')},
+		message => 'qa follows nobody', push => 0);
+
+	my (undef, $err) = run_genesis($h, 'propagate', '--dry-run');
+	my $said = unfolded($err);
+
+	like($said, qr/assumes the commit on \Q@{[$h->control]}\E is pushed/,
+		'the preview warns that it assumes the push');
+	like($err, qr/^\s*qa: would propagate/m,
+		'and routes qa as the pushed shape would, a root');
+	unlike($err, qr/^\s*qa: held/m, 'not held behind lab, as R\'s shape has it');
+};
+
 subtest 'a preview refuses a clone with no local control' => sub {
 	# Four rows, and the run's own restoration assertion.
 	plan tests => 5;

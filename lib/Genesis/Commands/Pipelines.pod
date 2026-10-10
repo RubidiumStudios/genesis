@@ -1744,7 +1744,11 @@ is the tip a publish leases against.
 A dry run asks the same questions and has the snapshot promoted the same
 way, so its preview reads what the questions read with no second fetch, but
 it creates no branch and keeps the lock until its report (D115, noted
-2026-10-09). A preview stands on control and creates nothing, so where the
+2026-10-09). A preview with control ahead of R assumes those commits pushed,
+so it reads the shape from the local control it stands on rather than from
+the snapshot, and its topology, its control commits and its environment
+files come from one control (D30, noted 2026-10-10). A preview stands on
+control and creates nothing, so where the
 clone has no local control it is refused at C<DATAERR> with the rest (D44,
 noted 2026-10-09).
 
