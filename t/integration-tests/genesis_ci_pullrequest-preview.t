@@ -103,4 +103,23 @@ subtest 'a preview with no token says what it could not read' => sub {
 	is(scalar gh_calls($gh), 0, 'it made no call at all');
 };
 
+subtest 'a preview with no token says what a real run would write' => sub {
+	plan tests => 3;
+
+	# The warning a run with no token gives says its branches are still
+	# written and published.  A preview writes neither, so it says what a
+	# real run would do, as its other lines do (D44, noted 2026-10-09).
+	my $h = ready(kit => 'omega-v2.7.0');
+	due_commit($h, 'prod', params => {instances => 2},
+		message => 'Raise the cf instance count');
+
+	my ($out, $err) = run_genesis($h, {no_token => 1}, 'propagate', '--dry-run');
+	my $said = unfolded($out, $err);
+
+	like($said, qr/would still write and publish/,
+		'the preview says a real run would still write and publish the branches');
+	unlike($said, qr/are still written and published/,
+		'and never that they are');
+};
+
 done_testing;

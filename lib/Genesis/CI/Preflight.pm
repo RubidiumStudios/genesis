@@ -146,12 +146,13 @@ sub github_problems {
 	my @problems;
 	my ($github, $owner_repo, $state_of) = Genesis::CI::PullRequest::state_for_scope(
 		$top,
-		envs   => $opts{envs} || [],
-		refuse => sub {
+		envs    => $opts{envs} || [],
+		dry_run => $opts{dry_run},
+		refuse  => sub {
 			my ($how, $format, @args) = @_;
 			push @problems, problem($how->{exitcode}, sprintf($format, @args));
 		},
-		stop   => sub {scalar @problems});
+		stop    => sub {scalar @problems});
 
 	return ({client => $github, owner_repo => $owner_repo, state_of => $state_of},
 		@problems);

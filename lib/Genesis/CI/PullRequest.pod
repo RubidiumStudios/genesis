@@ -871,6 +871,11 @@ there. A client that could not be read once is not one a caller should keep
 asking, and a caller that means to stop says so rather than reading every
 environment and throwing the rest away.
 
+=item C<dry_run>
+
+True for a preview, and handed to L</client_for_run($top [, %opts])>, so a
+preview with no token is told what a real run would write.
+
 =back
 
 B<Returns:> Three values, the client, the pair, and a hash reference of
@@ -1075,7 +1080,8 @@ so only an answered call is refused here.
 
 A run given no token carries on and says so. Its branches are still written
 and published, and the next run with a token opens the pull requests they are
-waiting for.
+waiting for. A preview writes neither, so under C<dry_run> it says what a real
+run would do instead (D44, noted 2026-10-09).
 
 B<Parameters:>
 
@@ -1094,7 +1100,9 @@ an open session passes so the operator is put back on their branch before they
 are told why the run stopped. A closure that records the refusal and returns
 rather than exiting is answered C<undef>, because there is then no pair to
 point a client at and no token an owner could be named for; C<genesis
-pipeline-status> hands one in for exactly that reason.
+pipeline-status> hands one in for exactly that reason. C<dry_run> is true for
+a preview, whose warning for a missing token says what a real run would write
+rather than what it writes.
 
 =back
 

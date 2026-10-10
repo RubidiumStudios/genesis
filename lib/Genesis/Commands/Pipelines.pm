@@ -710,8 +710,9 @@ sub propagate {
 	my ($github, $owner_repo, $pr_state) = $checked->{github}
 		? @{$checked->{github}}{qw/client owner_repo state_of/}
 		: Genesis::CI::PullRequest::state_for_scope($top,
-			envs   => \@in_scope,
-			refuse => $refuse);
+			envs    => \@in_scope,
+			dry_run => $dry_run,
+			refuse  => $refuse);
 	$pr_state ||= {};
 	my %pr_state_of = %$pr_state;
 
@@ -1679,7 +1680,8 @@ sub _propagate_check_first {
 		} else {
 			my @github;
 			($github, @github) = Genesis::CI::Preflight::github_problems($top,
-				envs => [map {{
+				dry_run => $dry_run,
+				envs    => [map {{
 					env       => $_,
 					branch    => $top->branch_for($_),
 					pr_branch => $pr_branch_of->{$_},

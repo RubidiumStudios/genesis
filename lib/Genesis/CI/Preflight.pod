@@ -237,6 +237,11 @@ B<Parameters:>
 
 The pull request environments, as C<state_for_scope> takes them.
 
+=item C<dry_run>
+
+True for a preview, and handed on to C<state_for_scope>, so a preview with no
+token is told what a real run would write.
+
 =back
 
 B<Returns:> A hashref of C<client>, C<owner_repo> and C<state_of>, then the

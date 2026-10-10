@@ -535,7 +535,8 @@ sub state_for_scope {
 		records => [map {{
 			pr => $_->{pr_branch} ? {branch => $_->{pr_branch}} : undef,
 		}} @$envs],
-		refuse  => $refuse);
+		refuse  => $refuse,
+		dry_run => $opts{dry_run});
 	return (undef, undef, {}) unless $github;
 
 	my $owner_repo = $top->source_control_repository;
@@ -798,13 +799,18 @@ sub client_for_run {
 	# The run carries on without a token and says so, and everything the API
 	# would have decided is left to the next run that has one.  A writing
 	# run still publishes each branch; what it cannot do is open or update
-	# the pull request that names it.
+	# the pull request that names it.  A preview writes neither, so it says
+	# what a real run would do (D44, noted 2026-10-09).
 	unless ($ENV{GITHUB_AUTH_TOKEN}) {
-		warning(
-			"#C{GITHUB_AUTH_TOKEN} is not set, so no pull request is opened ".
-			"for the environments whose policy asks for one.  Their branches ".
-			"are still written and published, and the next run with a token ".
-			"opens the pull requests."
+		warning($opts{dry_run}
+			? "#C{GITHUB_AUTH_TOKEN} is not set, so a real run would open no ".
+			  "pull request for the environments whose policy asks for one.  ".
+			  "It would still write and publish their branches, and the next ".
+			  "run with a token opens the pull requests."
+			: "#C{GITHUB_AUTH_TOKEN} is not set, so no pull request is opened ".
+			  "for the environments whose policy asks for one.  Their branches ".
+			  "are still written and published, and the next run with a token ".
+			  "opens the pull requests."
 		);
 		return undef;
 	}
