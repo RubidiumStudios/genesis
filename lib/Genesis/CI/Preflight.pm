@@ -448,31 +448,15 @@ sub assert_not_disowned {
 
 	my $command = $opts{command} // 'propagate';
 	my $outcome = $opts{outcome} // 'Nothing was written.';
-	my $in_job  = $opts{in_job}
-		// 'A job never acts on what its own configuration disowns.';
 	my $sha     = $applied->{control_commit} // '<unknown>';
 	my $at      = $applied->{at} // '<unknown>';
 
-	bail({exitcode => CONFIG},
-		"Refusing to run #C{genesis %s}.  #C{GENESIS_PIPELINE_TASK} is set, so ".
-		"this runs inside the pipeline's own job, and the pipeline is disabled ".
-		"in #C{.genesis/config} while the applied record says ".
-		"#C{pipeline-apply} applied it from control\@%s at %s.  %s  Set ".
-		"#C{pipeline.enabled: true} again, or tear the pipeline down by hand, ".
-		"which has no command yet.  %s",
-		$command, $sha, $at, $in_job, $outcome
-	) if $ENV{GENESIS_PIPELINE_TASK};
-
-	bail({exitcode => CONFIG},
-		"Refusing to run #C{genesis %s}.  The pipeline is disabled in ".
-		"#C{.genesis/config}, but the applied record says ".
-		"#C{pipeline-apply} applied it from control\@%s at %s, so the ".
-		"configuration disowns a pipeline that is still live, still ".
-		"watching its branches, and still deploying.  Set ".
-		"#C{pipeline.enabled: true} again, or tear the pipeline down by ".
-		"hand, which has no command yet.  %s",
-		$command, $sha, $at, $outcome
-	) unless ($opts{locally} // 'refuse') eq 'warn';
+	my ($disowned) = disowned_problems($top, $applied, %opts);
+	bail({exitcode => CONFIG}, '%s',
+		sprintf('Refusing to run #C{genesis %s}.  %s  %s',
+			$command, $disowned->{text}, $outcome)
+	) if $ENV{GENESIS_PIPELINE_TASK}
+		|| ($opts{locally} // 'refuse') ne 'warn';
 
 	warning(
 		"Warning: the pipeline is disabled in #C{.genesis/config}, but the ".
@@ -482,6 +466,58 @@ sub assert_not_disowned {
 		$sha, $at
 	);
 	return $applied;
+}
+
+# }}}
+# disowned_problems - the disowned pipeline, answered rather than raised {{{
+#
+# The refusal assert_not_disowned raises, as a problem in its words with the
+# frame left to the caller, for D115's run to collect with the rest.  Nothing
+# where the pipeline is enabled or no applied record exists.  in_job gives the
+# words for the pipeline's own job, as assert_not_disowned takes them.
+sub disowned_problems {
+	my ($top, $applied, %opts) = @_;
+	return () if $top->pipeline_enabled || !$applied;
+
+	my $sha = $applied->{control_commit} // '<unknown>';
+	my $at  = $applied->{at} // '<unknown>';
+
+	return problem(CONFIG, sprintf(
+		"#C{GENESIS_PIPELINE_TASK} is set, so this runs inside the pipeline's ".
+		"own job, and the pipeline is disabled in #C{.genesis/config} while the ".
+		"applied record says #C{pipeline-apply} applied it from control\@%s at ".
+		"%s.  %s  Set #C{pipeline.enabled: true} again, or tear the pipeline ".
+		"down by hand, which has no command yet.",
+		$sha, $at,
+		$opts{in_job} // 'A job never acts on what its own configuration disowns.'
+	)) if $ENV{GENESIS_PIPELINE_TASK};
+
+	return problem(CONFIG, sprintf(
+		"The pipeline is disabled in #C{.genesis/config}, but the applied ".
+		"record says #C{pipeline-apply} applied it from control\@%s at %s, so ".
+		"the configuration disowns a pipeline that is still live, still ".
+		"watching its branches, and still deploying.  Set ".
+		"#C{pipeline.enabled: true} again, or tear the pipeline down by hand, ".
+		"which has no command yet.",
+		$sha, $at));
+}
+
+# }}}
+# pipeline_problems - a pipeline that is not enabled, for propagate {{{
+#
+# A pipeline the shape says is not enabled is refused, where it was applied as
+# the disowned pipeline and where it never was by the key, since there is no
+# pipeline to propagate through and the remedy is to enable and apply it (D64,
+# noted 2026-10-10).  Nothing where the pipeline is enabled.
+sub pipeline_problems {
+	my ($top, $applied, %opts) = @_;
+	return () if $top->pipeline_enabled;
+	return disowned_problems($top, $applied, %opts) if $applied;
+	return problem(CONFIG,
+		"#C{pipeline.enabled} is false or absent in #C{.genesis/config}, so there ".
+		"is no pipeline to propagate through.  Set #C{pipeline.enabled: true} on ".
+		"control, commit it, push it, run #C{genesis pipeline-apply}, then run ".
+		"this again.");
 }
 
 # }}}

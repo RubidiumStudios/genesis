@@ -672,6 +672,87 @@ B<Examples:>
   #           applied record says pipeline-apply applied it from
   #           control@a1b2c3d at 2026-09-15 11:04:22 +0000.
 
+=head2 disowned_problems($top, $applied, %opts)
+
+    my @problems = Genesis::CI::Preflight::disowned_problems($top, $applied);
+
+The refusal L</assert_not_disowned($top, %opts)> raises, answered as a
+problem in its words with the frame left to the caller, so D115's run collects
+it with the rest. Inside the pipeline's own job, where C<GENESIS_PIPELINE_TASK>
+is set, it carries the job's words; otherwise the words for a run by hand.
+C<assert_not_disowned> refuses with this same text, so both read as one.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top>, whose shape says whether the pipeline is enabled.
+
+=item C<$applied>
+
+The applied record, or undef where none exists.
+
+=item C<%opts>
+
+C<in_job>, the sentence the job's refusal carries, as for
+C<assert_not_disowned>.
+
+=back
+
+B<Returns:> one problem at C<CONFIG> where the pipeline is disabled and an
+applied record stands; otherwise an empty list.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    disowned_problems($top, {control_commit => 'a1b2c3d', at => '...'});
+    # returns (problem(CONFIG, "The pipeline is disabled in .genesis/config,
+    #   but the applied record says pipeline-apply applied it from
+    #   control@a1b2c3d ...")) where pipeline.enabled is false
+
+=head2 pipeline_problems($top, $applied, %opts)
+
+    my @problems = Genesis::CI::Preflight::pipeline_problems($top, $applied);
+
+A pipeline the shape says is not enabled, answered for C<genesis propagate>
+(D64, noted 2026-10-10). Where an applied record stands it is the disowned
+pipeline, through L</disowned_problems($top, $applied, %opts)>. Where none
+does, the problem names the key, since there is no pipeline to propagate
+through and the remedy is to enable it, push it, and apply it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top>, whose shape the caller has read at control as R holds it.
+
+=item C<$applied>
+
+The applied record, or undef where none exists.
+
+=item C<%opts>
+
+As for C<disowned_problems>.
+
+=back
+
+B<Returns:> one problem at C<CONFIG> where the pipeline is not enabled;
+otherwise an empty list.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    pipeline_problems($top, undef);
+    # returns (problem(CONFIG, "pipeline.enabled is false or absent in
+    #   .genesis/config, so there is no pipeline to propagate through. ..."))
+    # where the pipeline is disabled and was never applied
+
 =head2 assert_provider_gate($top, $opts, %how)
 
   Genesis::CI::Preflight::assert_provider_gate($top, $options,

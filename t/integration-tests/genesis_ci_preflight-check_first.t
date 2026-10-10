@@ -4,7 +4,10 @@
 # or acts (D115, D106).  A refused run leaves the operator's clone exactly as
 # it found it, every ref included, with no snapshot left behind, and a run
 # that proceeds promotes what it read of R into the tracking refs and repairs
-# the branches as the initial state classified them.
+# the branches as the initial state classified them.  Also D64's refusals of
+# a pipeline not enabled, as noted 2026-10-10: the disowned one collected with
+# the rest, the never-applied one naming the key, and a control with no
+# pipeline section refused without reading R.
 use strict;
 use warnings;
 use utf8;
@@ -131,6 +134,67 @@ subtest 'a refused run leaves the clone as it found it, and the next one acts' =
 			'refs/heads/' . $h->slug('qa')),
 		'qa/bosh was brought up to what R holds');
 	is(snapshots_left($h), '', 'and no snapshot is left behind');
+};
+
+# Whether the pipeline is enabled is one of the questions, asked of control
+# as R holds it, and a disabled one ends the questions about the pipeline
+# (D64 and D115, noted 2026-10-10).
+subtest 'a disowned pipeline is named with the other problems' => sub {
+	# Five rows.  The run's own restoration assertion is turned off, because
+	# the working tree is left dirty on purpose and put back by hand below.
+	plan tests => 5;
+
+	# The working tree's uncommitted change is a problem of the clone, asked
+	# whatever the pipeline is, so it is named beside the disowned pipeline.
+	# The deployment branches are the pipeline's, so they are named as not
+	# checked rather than asked about.
+	my $h = make_harness(envs => ['qa'], pipeline => 0);
+	fixture_applied($h, control => $h->git('a')->sha($h->control));
+	put_file($h->a . '/qa.yml', "---\nchanged: 1\n");
+
+	my (undef, $err, $exit) = run_genesis($h, {restore => 0}, 'propagate');
+	my $said = unfolded($err);
+	run({dir => $h->a}, 'git', 'checkout', '--', 'qa.yml');
+
+	is($exit, Genesis::Exit::CONFIG, 'the run exits CONFIG');
+	like($said, qr/disowns a pipeline that is still live/, 'naming the disowned pipeline');
+	like($said, qr/uncommitted changes/, 'and the uncommitted change, in the same refusal');
+	like($said, qr/Not checked, because the pipeline is not enabled:.*deployment branches/,
+		'leaving the pipeline\'s own questions unasked');
+	is(() = $said =~ /Refusing to /g, 1, 'which is one refusal');
+};
+
+subtest 'a disabled pipeline never applied names the key' => sub {
+	# Six rows, and the restoration assertion of each of the two runs.
+	plan tests => 8;
+
+	my $h = make_harness(envs => ['qa'], pipeline => 0);
+
+	for my $args (['propagate'], ['propagate', '--dry-run']) {
+		my (undef, $err, $exit) = run_genesis($h, @$args);
+		my $said = unfolded($err);
+		my $what = join(' ', @$args);
+		is($exit, Genesis::Exit::CONFIG, "$what exits CONFIG");
+		like($said, qr/pipeline\.enabled\S* is false or absent/, "$what names the key");
+		unlike($said, qr/No environments with pipeline metadata/,
+			"$what does not say the environments have no metadata");
+	}
+};
+
+subtest 'a control with no pipeline section is refused without reading R' => sub {
+	# Two rows, and the run's own restoration assertion.
+	plan tests => 3;
+
+	# The remote is severed, so a run that read R before refusing would
+	# meet it and say so instead.
+	my $h = make_harness(envs => ['qa'], pipeline => 'none');
+	sever_remote($h);
+	my (undef, $err, $exit) = run_genesis($h, 'propagate');
+	restore_remote($h);
+
+	is($exit, Genesis::Exit::CONFIG, 'the run exits CONFIG');
+	like(unfolded($err), qr/no pipeline is configured on control/,
+		'saying no pipeline is configured on control');
 };
 
 done_testing;

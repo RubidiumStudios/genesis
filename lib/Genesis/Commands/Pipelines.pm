@@ -516,16 +516,6 @@ sub propagate {
 	my $opts    = get_options;
 	my $dry_run = $opts->{'dry-run'};
 	my $top     = Genesis::Top->new('.');
-
-	# Both refusals stand ahead of everything else the run does, because a
-	# refusal raised after a walk has started is worse than no refusal at
-	# all.  The disowned pipeline comes first, since a repository whose
-	# configuration contradicts its own applied record has nothing useful
-	# to say about which provider owns the propagation.  A repository that
-	# never had a pipeline passes both and meets the pre-flight, which is
-	# where a repository with nothing configured belongs.
-	Genesis::CI::Preflight::assert_not_disowned($top, command => 'propagate');
-
 	my $git     = Service::Git->new('.');
 	my $control = $top->control_branch;
 
@@ -1596,10 +1586,30 @@ sub resume {
 # noted 2026-10-09).
 sub _propagate_check_first {
 	my ($top, $git, $opts) = @_;
-	return {} unless $top->pipeline_enabled;
 
 	my $dry_run = $opts->{'dry-run'} ? 1 : 0;
 	my $control = $top->control_branch;
+
+	# A control that configures no pipeline at all has nothing to ask R about,
+	# and the remote the snapshot needs is one a pipeline section names, so it
+	# is refused at once, from the local control the run would stand on (D64,
+	# noted 2026-10-10).  Whether a configured pipeline is enabled is R's to
+	# say, and is asked below.
+	if ($git->branch_exists("refs/heads/$control")) {
+		# The deployment root's own config, which sits under the root's prefix
+		# where the root is not the repository's top, as _topology_at reads it.
+		my $path = (($git->prefixed(''))[0] // '') . '.genesis/config';
+		my $blob = $git->read_blobs("refs/heads/$control", $path)->{$path};
+		my $config = $blob ? eval {load_yaml($blob->{content})} : undef;
+		bail({exitcode => CONFIG},
+			"Refusing to run #C{genesis propagate}, because no pipeline is ".
+			"configured on control: #C{.genesis/config} on #C{%s} has no ".
+			"#C{pipeline} section.  Configure one on control, commit and push it, ".
+			"run #C{genesis pipeline-apply}, then run this again.  Nothing was ".
+			"written.", $control)
+			unless ref($config) eq 'HASH' && exists $config->{pipeline};
+	}
+
 	my $remote  = $top->source_control_remote;
 	my $ns      = "refs/genesis/preflight/$remote";
 	my $session = $git->session(control => $control);
@@ -1613,8 +1623,10 @@ sub _propagate_check_first {
 	my $read = $git->snapshot_remote(remote => $remote, namespace => $ns,
 		branches => [$control], globs => ['*/' . $top->type]);
 
-	my (undef, @unapplied) = Genesis::CI::Preflight::applied_record_problems($top);
-	push @problems, @unapplied;
+	# The record is read here and its problems named below, because whether
+	# its absence is a problem of its own waits on whether the pipeline is
+	# enabled at all.
+	my ($applied, @unapplied) = Genesis::CI::Preflight::applied_record_problems($top);
 
 	my @reads_control = (
 		'whether a provider pipeline owns propagation',
@@ -1635,6 +1647,7 @@ sub _propagate_check_first {
 			"Restore access to #C{%s} and run the command again.",
 			$remote, $because, ($read->{err} || 'no further detail') =~ s/\s+$//r,
 			$remote));
+		push @problems, @unapplied;
 		$not_checked = {
 			because => "nothing could be read from #C{$remote}",
 			checks  => ["control's standing", @reads_control]};
@@ -1643,7 +1656,7 @@ sub _propagate_check_first {
 			creates_local => $dry_run ? 0 : 1,
 			preview       => $dry_run,
 			permit_ahead  => $dry_run)) {
-		push @problems, @standing;
+		push @problems, @standing, @unapplied;
 		$not_checked = {
 			because => 'the topology is read from control',
 			checks  => \@reads_control};
@@ -1655,38 +1668,50 @@ sub _propagate_check_first {
 			$git->resolve_branch($control, tracking => $ns) // {})->{state} // ''
 		) eq 'ahead';
 		$top->read_shape_from($ahead ? "refs/heads/$control" : "$ns/$control");
-		push @problems, Genesis::CI::Preflight::provider_gate_problems($top, $opts,
-			dry_run => $dry_run);
 
-		$topology = $top->pipeline_topology;
-		push @problems, Genesis::CI::Preflight::problem(CONFIG,
-			"No environments with pipeline metadata found.")
-			unless %{$topology->{nodes}};
-
-		my @prefix;
-		($pr_branch_of, @prefix) = Genesis::CI::Preflight::prefix_problems($top,
-			topology => $topology);
-		my (undef, @initial) = Genesis::CI::Preflight::initial_state_problems($top, $git,
-			envs     => $topology->{order},
-			tracking => $ns);
-		push @problems, @prefix, @initial;
-
-		# The reviews are read by pull request branch, so a branch that
-		# collides would be asked about under a name that is not its own.
-		if (@prefix) {
+		# Whether the pipeline is enabled is the shape's to say, and one that is
+		# not ends the questions about it, the applied record's absence among
+		# them, since the refusal says to apply it (D64, noted 2026-10-10).
+		if (my @off = Genesis::CI::Preflight::pipeline_problems($top, $applied)) {
+			push @problems, @off, grep {$_->{code} != CONFIG} @unapplied;
 			$not_checked = {
-				because => 'the pull request branches collide',
-				checks  => ['the pull request reviews']};
+				because => 'the pipeline is not enabled',
+				checks  => \@reads_control};
 		} else {
-			my @github;
-			($github, @github) = Genesis::CI::Preflight::github_problems($top,
-				dry_run => $dry_run,
-				envs    => [map {{
-					env       => $_,
-					branch    => $top->branch_for($_),
-					pr_branch => $pr_branch_of->{$_},
-				}} grep {$topology->{nodes}{$_}{require_pr}} @{$topology->{order}}]);
-			push @problems, @github;
+			push @problems, @unapplied;
+			push @problems, Genesis::CI::Preflight::provider_gate_problems($top, $opts,
+				dry_run => $dry_run);
+
+			$topology = $top->pipeline_topology;
+			push @problems, Genesis::CI::Preflight::problem(CONFIG,
+				"No environments with pipeline metadata found.")
+				unless %{$topology->{nodes}};
+
+			my @prefix;
+			($pr_branch_of, @prefix) = Genesis::CI::Preflight::prefix_problems($top,
+				topology => $topology);
+			my (undef, @initial) = Genesis::CI::Preflight::initial_state_problems($top, $git,
+				envs     => $topology->{order},
+				tracking => $ns);
+			push @problems, @prefix, @initial;
+
+			# The reviews are read by pull request branch, so a branch that
+			# collides would be asked about under a name that is not its own.
+			if (@prefix) {
+				$not_checked = {
+					because => 'the pull request branches collide',
+					checks  => ['the pull request reviews']};
+			} else {
+				my @github;
+				($github, @github) = Genesis::CI::Preflight::github_problems($top,
+					dry_run => $dry_run,
+					envs    => [map {{
+						env       => $_,
+						branch    => $top->branch_for($_),
+						pr_branch => $pr_branch_of->{$_},
+					}} grep {$topology->{nodes}{$_}{require_pr}} @{$topology->{order}}]);
+				push @problems, @github;
+			}
 		}
 	}
 

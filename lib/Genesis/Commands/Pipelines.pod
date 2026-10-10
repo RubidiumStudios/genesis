@@ -1721,9 +1721,17 @@ C<refs/genesis/preflight/E<lt>remoteE<gt>> by
 L<Service::Git/snapshot_remote>, so asking moves no local branch and no
 tracking ref.
 
+A local control whose C<.genesis/config> has no C<pipeline> section is refused
+at C<CONFIG> before any of that, since there is no pipeline to ask R about
+(D64, noted 2026-10-10).
+
 The questions, in order: the clone itself
 (L<Genesis::CI::Preflight/repository_problems($git)>); the snapshot; the
-applied record; control's standing against the snapshot; the provider's gate;
+applied record; control's standing against the snapshot; whether the
+pipeline is enabled, read from the shape
+(L<Genesis::CI::Preflight/pipeline_problems($top, $applied, %opts)>), which
+where it is not is either the disowned pipeline or the key named, and ends
+the questions about the pipeline; the provider's gate;
 whether any environment carries pipeline metadata; every pull request prefix
 collision; the initial state of every deployment branch, against the
 snapshot; and the GitHub client and review states the pull request
@@ -1790,6 +1798,13 @@ refusal naming every problem, through
 L<Genesis::CI::Preflight/refuse_once(%opts)>, at the highest-ranked code
 among them (CONFIG, NOPERM, DATAERR, UNAVAILABLE, TEMPFAIL). The snapshot is
 cleared and the lock let go first.
+
+=item *
+
+C<"Refusing to run genesis propagate, because no pipeline is configured on
+control: ..."> - exits C<CONFIG> where the local control's
+C<.genesis/config> has no C<pipeline> section, before the lock is taken or R
+is read.
 
 =item *
 
