@@ -336,6 +336,16 @@ sub _control_standing {
 	if ($div->{state} eq 'no-local') {
 		return ($div) if $opts{creates_local}
 			&& ($git->checked_out_branch // '') ne $control;
+
+		# A preview stands on control as a run does and creates nothing, so a
+		# clone without control has nothing for it to stand on (D44, noted
+		# 2026-10-09).
+		return ($div, problem(DATAERR, sprintf(
+			"The control branch #C{%s} is on #C{%s/%s} and not in this clone, ".
+			"and a preview creates nothing, so it has no control to stand on.  ".
+			"Create it with #C{git checkout %s}, or run #C{genesis propagate} ".
+			"without #C{--dry-run}, which creates it, then preview again.",
+			$control, $remote, $control, $control))) if $opts{preview};
 		return ($div, problem(DATAERR, sprintf(
 			"The control branch #C{%s} is on #C{%s/%s} and not in ".
 			"this clone.  The refresh writes the local ref for a branch the remote ".
@@ -690,7 +700,8 @@ sub initial_state {
 	# branch that rule 3 of the class table admits beside the session's abort.
 	for my $r (@reset) {
 		my $tracking = sprintf('refs/remotes/%s/%s', $remote, $r->{branch});
-		my $line = sprintf('reset %s to %s/%s, discarding %s that the walk reproduces',
+		my $line = sprintf('%s %s to %s/%s, discarding %s that the walk reproduces',
+			$assume ? 'would reset' : 'reset',
 			$r->{branch}, $remote, $r->{branch}, _commits(scalar @{$r->{commits}}));
 
 		# The assumption is recorded rather than warned about here, because the
@@ -742,7 +753,8 @@ sub initial_state {
 		my $div = $git->resolve_branch($branch);
 		next unless $div && $div->{state} eq 'behind';
 
-		my $line = sprintf('fast-forwarded %s to %s/%s, %s behind',
+		my $line = sprintf('%s %s to %s/%s, %s behind',
+			$assume ? 'would fast-forward' : 'fast-forwarded',
 			$branch, $remote, $branch, _commits($div->{behind}));
 
 		my $tracking = sprintf('refs/remotes/%s/%s', $remote, $branch);
@@ -765,6 +777,22 @@ sub initial_state {
 			$record->{behind} = 0;
 		}
 		push @{$state->{events}}, $line;
+	}
+
+	# A branch R has and this clone lacks is one a run creates from T before
+	# the stage begins, so only a caller that moves nothing meets one here.  It
+	# is read at T, as the created branch would stand, and the creation is
+	# assumed and named like the other two moves (D44, noted 2026-10-09).
+	if ($assume) {
+		for my $env (@{$opts{envs} // []}) {
+			my $record = $state->{branches}{$env} or next;
+			next unless $record->{state} eq 'no-local';
+			my $branch = $record->{branch};
+			$record->{assumed}      = sprintf('refs/remotes/%s/%s', $remote, $branch);
+			$record->{assumed_move} = 'create';
+			push @{$state->{events}}, sprintf('would create %s from %s/%s',
+				$branch, $remote, $branch);
+		}
 	}
 
 	return $state;

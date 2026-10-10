@@ -189,6 +189,30 @@ subtest "the initial state is classified against the snapshot, moving nothing" =
 	is(refs_of($l), $before, 'and nothing was moved to ask');
 };
 
+subtest 'a preview assumes the branches the clone lacks are created' => sub {
+	plan tests => 4;
+
+	# The clone has control alone, and R and T have qa/bosh and lab/bosh.  A
+	# run creates both before its stage; a preview creates neither and reads
+	# each at T, naming the creation in the conditional (D44, noted
+	# 2026-10-09).
+	my $w      = moved_world();
+	my $before = refs_of($w->{l});
+
+	my $state = Genesis::CI::Preflight::initial_state(Stub::Top->new, $w->{git},
+		envs      => [qw(qa lab)],
+		refreshed => {ok => 1, kind => 'success', created => []},
+		control   => {divergence => {state => 'in-sync'}, events => []},
+		dry_run   => 1);
+
+	is($state->{branches}{qa}{assumed}, 'refs/remotes/origin/qa/bosh',
+		'the branch is read at T');
+	is($state->{branches}{qa}{assumed_move}, 'create', 'as an assumed creation');
+	like(join("\n", @{$state->{events}}), qr{would create qa/bosh from origin/qa/bosh},
+		'named as one that would be made');
+	is(refs_of($w->{l}), $before, 'and nothing was created');
+};
+
 subtest 'a commit R has and T has not seen is no hand commit' => sub {
 	plan tests => 2;
 	my $w = moved_world();
@@ -243,6 +267,23 @@ subtest "control's standing is read against the snapshot" => sub {
 	my $nowhere = [Genesis::CI::Preflight::control_problems(
 		Stub::Top->new(control => 'nothing'), $w->{git}, tracking => $SNAP)];
 	is($nowhere->[0]{code}, CONFIG, 'a control nowhere at all is CONFIG');
+};
+
+subtest 'a preview has no control to stand on where the clone has none' => sub {
+	plan tests => 2;
+
+	# A preview stands on control as a run does and creates nothing, so the
+	# control a run would create from T is a problem for it (D44, noted
+	# 2026-10-09).
+	my $w = moved_world();
+	$w->{run}->($w->{l}, 'checkout', '-q', '--detach');
+	$w->{run}->($w->{l}, 'branch', '-q', '-D', 'control');
+	my ($found) = Genesis::CI::Preflight::control_problems(Stub::Top->new,
+		$w->{git}, tracking => $SNAP, preview => 1);
+
+	is($found && $found->{code}, DATAERR, 'at DATAERR');
+	like($found && $found->{text}, qr/a preview creates nothing.*git checkout control/s,
+		'saying a preview creates nothing, and how to create it');
 };
 
 subtest 'every pull request environment\'s collision is named' => sub {

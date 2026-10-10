@@ -3,7 +3,9 @@
 # leave walk_one for the run to end on, and everything else is confined to
 # the environment that raised it.  The two run-ending rows are what cover the
 # two names is_run_fatal accepts, and the third row is the contrast that
-# stops the other two passing because walk_one re-raised everything.
+# stops the other two passing because walk_one re-raised everything.  Also
+# T116's no-write half for a failed environment: a call that writes nothing,
+# as a dry run's, records the failure and puts no branch back.
 use strict;
 use warnings;
 use utf8;

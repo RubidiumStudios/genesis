@@ -562,8 +562,19 @@ sub preview_warnings {
 			next;
 		}
 
+		if ($kind eq 'uncreated-branch') {
+			warning(
+				"#Y{This preview assumes }#C{%s}#Y{ is created first.}\n".
+				"This clone does not have it yet, and a real run creates it ".
+				"from #C{%s/%s} before it walks, so what follows is what would ".
+				"happen once it has.",
+				$caveat->{branch}, $caveat->{remote}, $caveat->{branch}
+			);
+			next;
+		}
+
 		bug("Genesis::CI::Report::preview_warnings was handed the warning ".
-			"'%s', which is none of the three kinds a record may carry",
+			"'%s', which is none of the four kinds a record may carry",
 			$kind);
 	}
 

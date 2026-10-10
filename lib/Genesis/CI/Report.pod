@@ -529,11 +529,12 @@ B<Parameters:>
 =item C<$record>
 
 The run's record.  Its C<warnings> key holds a list of caveats, each a hashref
-with a C<kind> of C<unpushed-control>, C<unreset-branch>, or
-C<unmoved-branch>, the C<branch> the caveat is about, the C<remote> it is
+with a C<kind> of C<unpushed-control>, C<unreset-branch>, C<unmoved-branch>,
+or C<uncreated-branch>, the C<branch> the caveat is about, the C<remote> it is
 measured against, and C<commits>, which is how many commits are unpushed, how
 many the reset would discard, or how many the branch is behind by.  A
-missing C<commits> reads as one.  A record with no C<warnings> key warns about
+missing C<commits> reads as one, and the creation's caveat names none, since
+a branch the clone lacks has no commits of its own to count.  A record with no C<warnings> key warns about
 nothing, which is every run that is not a preview.
 
 =back
@@ -541,7 +542,7 @@ nothing, which is every run that is not a preview.
 B<Returns:> True.
 
 B<Errors:> Raises a bug where a caveat carries a C<kind> that is none of the
-three, because a caveat nobody can print is a defect in whoever wrote the
+four, because a caveat nobody can print is a defect in whoever wrote the
 record rather than something to pass over in silence.
 
 B<Examples:>
@@ -560,6 +561,14 @@ B<Examples:>
   #   A real run resets it to origin/qa/bosh before it walks, discarding
   #   1 commit, so what follows is what would happen once that reset has
   #   run.
+
+  Genesis::CI::Report::preview_warnings({warnings => [
+      {kind => 'uncreated-branch', branch => 'lab/bosh', remote => 'origin'},
+  ]});
+  #   This preview assumes lab/bosh is created first.
+  #   This clone does not have it yet, and a real run creates it from
+  #   origin/lab/bosh before it walks, so what follows is what would happen
+  #   once it has.
 
 =head2 release_command
 

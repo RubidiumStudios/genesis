@@ -545,6 +545,13 @@ Optional. True where the run will create a control the clone lacks from what
 it read of R, so its absence is no problem. A tree standing on control unborn
 is still answered, because no run writes the branch the tree stands on.
 
+=item C<preview>
+
+Optional. True for a preview, which stands on control as a run does and
+creates nothing, so a control the clone lacks is answered as a C<DATAERR>
+problem naming C<git checkout E<lt>controlE<gt>> or a real run, either of
+which creates it (D44, noted 2026-10-09).
+
 =item C<permit_ahead>, C<unverifiable>
 
 As for L</require_control($top, $git, %opts)>.
@@ -881,21 +888,30 @@ have left the branch on, and the state and the counts stay as the
 classification wrote them, because nothing moved.  A caller taking a diff base
 off such a record takes C<assumed> where it is set, so a report says what a
 real run would deliver rather than naming files a teammate has already
-delivered.  C<assumed_move> names which of the stage's two moves it was,
-C<reset> or C<fast-forward>, so a caller that cares which one the branch
+delivered.  C<assumed_move> names which move it was, C<reset>,
+C<fast-forward>, or C<create>, so a caller that cares which one the branch
 escaped asks rather than inferring it from the counts, and
 C<assumed_commits> says how many local commits a reset would discard.  A
 fast-forward discards nothing, so it leaves that count unset.
+
+The third move is the creation a run makes before the stage begins.  A branch
+R has and this clone lacks reaches the stage only under C<dry_run> or
+C<read_only>, since a run has created it by then, and it is read at its
+tracking ref, as the created branch would stand, with C<assumed_move> set to
+C<create> (D44, noted 2026-10-09).  Under either, each event line is in the
+conditional, "would reset", "would fast-forward", "would create", because
+nothing moved.
 
 The reset's assumption is not warned about here.  The preview says it under its
 own banner, through C<Genesis::CI::Report::preview_warnings>, and a caveat
 printed above that banner is one the operator meets before they have been told
 they are reading a preview.  The fast-forward keeps a caveat of its own on that
 banner, beside the reset's and the unpushed control's, and it takes the same
-sentence shape, "This preview assumes ... is fast-forwarded first", so an
-operator who meets all three reads one kind of sentence.  The event line beside
-either move is printed under both kinds of run, so nothing about what would be
-done goes unsaid.
+sentence shape, "This preview assumes ... is fast-forwarded first", as the
+creation's does, "... is created first", so an operator who meets all four
+reads one kind of sentence.  The event line beside each move is printed under
+both kinds of run, in the tense of what happened, so nothing about what would
+be done goes unsaid and nothing reads as done that was not.
 
 Once the stage has run, a deployment branch in scope is C<in-sync> or it has
 no local ref at all.  That is what lets the walk take its diff base from the

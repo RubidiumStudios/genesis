@@ -1656,10 +1656,11 @@ refused had this been a run that writes, and a deployment branch carrying an
 assumed reset is one the pre-flight would have moved to its tracking ref
 before the walk.  Neither is asked of git a second time here.
 
-The reset is told from the fast-forward by the name the pre-flight left on
-the record, and each takes a caveat of its own, C<unreset-branch> for the one
-and C<unmoved-branch> for the other, because what a real run would do to the
-branch is different in each case.
+The reset, the fast-forward and the creation are told apart by the name the
+pre-flight left on the record, and each takes a caveat of its own,
+C<unreset-branch>, C<unmoved-branch> and C<uncreated-branch>, because what a
+real run would do to the branch is different in each case (D44, noted
+2026-10-09).
 
 Each caveat carries its own count, which the renderer says the noun and the
 verb of.  Both numbers were read once already, one by the control check and
@@ -1738,8 +1739,14 @@ the tracking refs of control and every deployment branch in one
 C<update-ref> transaction, and the ones of those the clone lacks are created
 locally from it, the branch the tree stands on excepted. A pull request
 branch's tracking ref is left where the run last published it, because that
-is the tip a publish leases against. A dry run lets go of the snapshot and
-the lock and changes nothing.
+is the tip a publish leases against.
+
+A dry run asks the same questions and has the snapshot promoted the same
+way, so its preview reads what the questions read with no second fetch, but
+it creates no branch and keeps the lock until its report (D115, noted
+2026-10-09). A preview stands on control and creates nothing, so where the
+clone has no local control it is refused at C<DATAERR> with the rest (D44,
+noted 2026-10-09).
 
 B<Parameters:>
 
@@ -1761,7 +1768,8 @@ The command's options; C<dry-run> and C<force> are read.
 
 B<Returns:> A hashref. C<refreshed> is the result the refresh it replaces
 would have returned (C<ok>, C<kind>, C<fetched>, C<created>, C<absent>),
-present only where a real run proceeded. C<pr_branch_of> maps each
+present wherever a run or a preview proceeded, with C<created> empty for a
+preview. C<pr_branch_of> maps each
 environment that delivers by pull request to its branch. C<github> is
 C<{client, owner_repo, state_of}> as the questions read it, so the run asks
 GitHub nothing a second time. A repository with no enabled pipeline answers

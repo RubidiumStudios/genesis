@@ -534,8 +534,8 @@ sub propagate {
 	# proceeds has the snapshot promoted into T and the local branches it needs
 	# created, so what follows reads T as the questions read R, and the refresh
 	# below is the result handed back rather than a second fetch.  A dry run
-	# asks the same questions and, finding nothing, previews as it always has
-	# until it reads the snapshot itself.
+	# asks the same questions and has the snapshot promoted too, so it previews
+	# from what they read, but creates, resets and fast-forwards nothing.
 	#
 	# The pull request branch of every environment that delivers into one
 	# comes back with it, named from control's files, every collision among
@@ -547,10 +547,10 @@ sub propagate {
 	# questions read, and stands ahead of the branch check, since a branch
 	# that exists nowhere is not one the operator can be asked to stand on.
 	#
-	# A dry run, and a repository the first stage did not ask, still bring R
-	# into T here, for every branch in scope, before the first read of any of
-	# them.  There is no flag, because a report that quietly rested on a stale
-	# tracking ref is the thing this removes.
+	# A repository the first stage did not ask still brings R into T here,
+	# for every branch in scope, before the first read of any of them.  There
+	# is no flag, because a report that quietly rested on a stale tracking ref
+	# is the thing this removes.
 	my $refreshed = $checked->{refreshed}
 		// $top->fetch_pipeline_envs($git, command => 'propagate');
 	# The stage's events are not printed here.  The whole list is printed
@@ -887,7 +887,11 @@ sub propagate {
 				record  => $env_record,
 				writes  => $dry_run ? 0 : 1,
 				deliver => sub {
-					$session->switch($branch);
+					# A preview reads the branch where it stands, or at
+					# the ref the pre-flight would have moved it to, and
+					# never checks it out, since a checkout of a branch the
+					# clone lacks would create it (D44, noted 2026-10-09).
+					$session->switch($branch) unless $dry_run;
 					Genesis::CI::Walk::deliver_pending(
 						session => $session,
 						env     => $env,
@@ -895,10 +899,12 @@ sub propagate {
 						dry_run => $dry_run,
 						# The ref the pre-flight would have moved this
 						# branch to, which it sets under a dry run alone
-						# because a dry run makes none of its writes.  The
-						# walk already takes its base from it, and the
-						# delivery is the other reader that wants one.
-						base    => $initial->{branches}{$env_name}{assumed},
+						# because a dry run makes none of its writes, and
+						# the branch itself where it would move nothing.
+						base    => $dry_run
+							? ($initial->{branches}{$env_name}{assumed}
+								// "refs/heads/$branch")
+							: undef,
 					);
 				},
 			);
@@ -1219,12 +1225,13 @@ sub _preview_warnings {
 		commits => $divergence->{ahead} || 1,
 	} if ($divergence->{state} // '') eq 'ahead';
 
-	# The two moves the stage assumes rather than makes, each in the order
+	# The three moves the stage assumes rather than makes, each in the order
 	# the topology gives, so an operator reads the caveats in the order the
 	# report goes on to name the environments.
 	my %kind_of = (
 		reset          => 'unreset-branch',
 		'fast-forward' => 'unmoved-branch',
+		create         => 'uncreated-branch',
 	);
 	for my $env (@$order) {
 		my $branch = $initial->{branches}{$env} or next;
@@ -1581,8 +1588,11 @@ sub resume {
 # from it.  What it hands back carries, under refreshed, the result of the
 # refresh it replaces, with the pull request branch of each environment that
 # delivers into one and the GitHub client and review states the questions
-# read, so the run asks GitHub nothing a second time.  A dry run lets go of
-# the read and the lock, and hands back all but refreshed.
+# read, so the run asks GitHub nothing a second time.  A dry run promotes
+# the snapshot too, so the preview reads what the questions read, and keeps
+# the lock, but creates no branch; a clone with no local control is refused
+# it, since a preview stands on control and creates nothing (D115 and D44,
+# noted 2026-10-09).
 sub _propagate_check_first {
 	my ($top, $git, $opts) = @_;
 	return {} unless $top->pipeline_enabled;
@@ -1629,7 +1639,8 @@ sub _propagate_check_first {
 			checks  => ["control's standing", @reads_control]};
 	} elsif (my @standing = Genesis::CI::Preflight::control_problems($top, $git,
 			tracking      => $ns,
-			creates_local => 1,
+			creates_local => $dry_run ? 0 : 1,
+			preview       => $dry_run,
 			permit_ahead  => $dry_run)) {
 		push @problems, @standing;
 		$not_checked = {
@@ -1671,7 +1682,7 @@ sub _propagate_check_first {
 		}
 	}
 
-	if (@problems || $dry_run) {
+	if (@problems) {
 		$git->clear_snapshot(namespace => $ns);
 		$session->release_lock;
 		Genesis::CI::Preflight::refuse_once(
@@ -1679,7 +1690,6 @@ sub _propagate_check_first {
 			action   => 'run #C{genesis propagate}',
 			outcome  => 'Nothing was written.',
 			($not_checked ? (not_checked => $not_checked) : ()));
-		return {pr_branch_of => $pr_branch_of, github => $github};
 	}
 
 	Genesis::CI::Preflight::confirm_provider_gate($top, $opts, dry_run => $dry_run);
@@ -1694,13 +1704,15 @@ sub _propagate_check_first {
 		names => \@branches);
 
 	# What the refresh made, made from what the questions read.  The branch the
-	# tree stands on is never written, even unborn, as the refresh never did.
+	# tree stands on is never written, even unborn, as the refresh never did,
+	# and a preview writes none: it reads a branch the clone lacks from T.
 	my $here = $git->checked_out_branch // '';
 	my (@fetched, @created, @absent);
 	for my $branch (@branches) {
 		push(@absent, $branch), next unless defined $held->{$branch};
 		push @fetched, $branch;
-		next if $branch eq $here || $git->branch_exists("refs/heads/$branch");
+		next if $dry_run
+			|| $branch eq $here || $git->branch_exists("refs/heads/$branch");
 		$git->create_branch($branch, $held->{$branch});
 		push @created, $branch;
 	}
