@@ -1624,6 +1624,54 @@ sub pipeline_section {
 # so its records are read where the environment's own would be.
 sub pipeline_env {
 	my ($self, $name) = @_;
+	my $shape = $self->_shape_with_vault;
+	require Genesis::Env;
+	return Genesis::Env->bare($name, $shape);
+}
+
+# }}}
+# control_env - an environment loaded whole from control's tree {{{
+#
+# The full load a run makes, kit and all, from the tree control was read
+# from rather than the tree in front of the command, for a reader that must
+# not read the working tree at all: pipeline-status, which a propagate in the
+# same clone may be switching between branches (D112; D115, noted
+# 2026-10-07).  The shape's scratch tree holds only what the topology reads,
+# so the deployment root at the shape's commit is written out over it whole
+# the first time one is asked for.
+sub control_env {
+	my ($self, $name) = @_;
+	my $shape = $self->_shape_with_vault;
+	return $self->load_env($name) if $shape == $self;
+
+	unless ($shape->{__whole_tree}) {
+		my $git    = $self->git;
+		my $prefix = ($git->prefixed(''))[0] // '';
+		my $commit = $self->shape_commit;
+		require File::Temp;
+		my $archive = File::Temp->new(SUFFIX => '.tar');
+		run({dir => $git->root,
+			onfailure => "Failed to read the deployment root at $commit"},
+			'git', 'archive', '--format=tar', '-o', "$archive", $commit,
+			($prefix eq '' ? () : $prefix));
+		my $depth = ($prefix =~ tr{/}{});
+		run({dir => $shape->path,
+			onfailure => "Failed to write out the deployment root at $commit"},
+			'tar', '-x', '-f', "$archive",
+			($depth ? ('--strip-components', $depth) : ()));
+		$shape->{__whole_tree} = 1;
+	}
+	return $shape->load_env($name);
+}
+
+# }}}
+# _shape_with_vault - the shape's Top, with the repository's vault lent {{{
+#
+# A tree read out of git has no vault of its own, so the repository's vault
+# is lent to it once, and an environment read from it reads its records where
+# its own would be read.
+sub _shape_with_vault {
+	my ($self) = @_;
 	my $shape = $self->_shape;
 	unless ($shape == $self || $shape->{__vault_lent}) {
 		my $vault = eval {$self->vault};
@@ -1633,8 +1681,7 @@ sub pipeline_env {
 		}
 		$shape->{__vault_lent} = 1;
 	}
-	require Genesis::Env;
-	return Genesis::Env->bare($name, $shape);
+	return $shape;
 }
 
 # }}}

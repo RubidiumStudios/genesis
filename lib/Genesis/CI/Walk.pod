@@ -179,6 +179,16 @@ The map is an option because the walk does not yet read the branch state for
 itself.  L</walk_base> has taken the base out of it, and the rest goes once
 the walk reads the branch state through the one reader as well.
 
+=item C<from_control>
+
+Optional.  True for a reader that reads control as R holds it, which is
+C<pipeline-status>: the walk routes from the commit the shape was read at
+rather than the local control branch, through L</read_durable_state>, and
+loads every environment from control's tree with
+L<Genesis::Top/control_env>, never from the working tree (D112; D115, noted
+2026-10-07).  A run stands on control and routes from it, so it leaves this
+out.
+
 =item C<state>
 
 Optional.  The answer L</read_durable_state> already gave, where the caller
@@ -419,6 +429,12 @@ below closes with.  A run that writes and a command that only reports owe the
 operator different accounts of where they stopped, and "nothing was written"
 says nothing at all to somebody who asked for a report and never expected a
 write, so C<pipeline-status> hands in its own.
+
+=item C<from_control>
+
+Optional.  True where the control commit is the one the shape was read at,
+L<Genesis::Top/shape_commit>, rather than the local control branch's, so an
+unpushed commit is in effect for nobody (D112).  L</plan> passes it through.
 
 =back
 

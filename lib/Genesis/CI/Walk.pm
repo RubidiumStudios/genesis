@@ -79,7 +79,14 @@ sub read_durable_state {
 		or bug("Genesis::CI::Walk::read_durable_state needs a git handle");
 
 	my $control     = $top->control_branch;
-	my $control_sha = $git->sha($control);
+
+	# A caller that reads control as R holds it, which is pipeline-status,
+	# routes from the commit the shape was read at, so the walk and the
+	# topology describe one control and an unpushed commit is in effect for
+	# neither (D112).  A run stands on control and routes from it.
+	my $control_sha = $args{from_control}
+		? ($top->shape_commit // $git->sha($control))
+		: $git->sha($control);
 
 	# A caller standing inside a session owes the operator their branch back
 	# before it says why the run stopped, so it hands in a closure that closes
@@ -1077,11 +1084,12 @@ sub plan {
 		for grep {exists $opts{$_}} $opts{state} ? qw/provider refreshed/ : ();
 
 	my $state = $opts{state} || read_durable_state(
-		top       => $top,
-		git       => $git,
-		provider  => $opts{provider},
-		refreshed => $opts{refreshed},
-		outcome   => $opts{outcome},
+		top          => $top,
+		git          => $git,
+		provider     => $opts{provider},
+		refreshed    => $opts{refreshed},
+		outcome      => $opts{outcome},
+		from_control => $opts{from_control},
 	);
 
 	my $control     = $state->{control}{branch};
@@ -1119,7 +1127,14 @@ sub plan {
 			# not carry, such as an ancestor of the one a deploy stands on, is
 			# read from control's tree, which carries every environment of
 			# the pipeline (D112).
-			$env_of{$name} = -f $top->path("$name.yml")
+			#
+			# A caller that reads control as R holds it loads every
+			# environment from control's tree, with the full load a run makes,
+			# and never from the working tree, which a propagate in the same
+			# clone may be switching (D112; D115, noted 2026-10-07).
+			$env_of{$name} = $opts{from_control}
+				? eval {$top->control_env($name)}
+				: -f $top->path("$name.yml")
 				? eval {$top->load_env($name)}
 				: eval {$top->pipeline_env($name)};
 			$load_error{$name} = _load_error($@) unless $env_of{$name};

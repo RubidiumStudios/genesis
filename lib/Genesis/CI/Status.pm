@@ -132,6 +132,10 @@ sub status_records {
 		branches  => $initial->{branches},
 		composed  => \@composed,
 		refreshed => $refresh ? 1 : 0,
+		# One control for everything this report reads, the one the shape
+		# was read at, and every environment loaded from its tree rather
+		# than the working tree (D112; D115, noted 2026-10-07).
+		from_control => 1,
 		# The walk makes the squash recovery for itself out of these two.
 		# A deployment branch whose pull request went in as a squash carries
 		# no marker of its own, and the merged pull request in the answer
