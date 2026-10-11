@@ -20,18 +20,21 @@ it asks the pre-flight for its branch records read-only, so a branch a run
 would have fast-forwarded stands exactly where it stood and a branch in a
 state a run would refuse is described here rather than refused.
 
-The refresh it does by default is not nothing, though.  It materialises a
-local ref for every pipeline branch the remote already holds and this clone
-lacks.  Only control's creation is raised as an event; the rest are made in
-silence.  Those refs come from the remote rather than from anything this
-module decided, and C<refresh> set false leaves them alone.
+The read of R it makes by default creates nothing.  It reads R once into a
+namespace of its own, takes the pipeline's shape from R's control there, and
+brings control and the deployment branches that shape names into the
+remote-tracking refs in one step; no local branch is created, and a pull
+request branch's tracking ref is left where the last publish put it (D115,
+noted 2026-10-11).  Where a live propagate holds the switch lock, it leaves
+the tracking refs to that run, reads them as it left them, and raises an event
+saying the run is in progress.  C<refresh> set false reads the refs as they
+stand and asks R nothing.
 
 The events are handed to the caller rather than printed.  A module that wrote
 to a terminal mid-computation would be no use to a caller that wanted the
-record alone, so C<on_events> is called with them the moment the control check
-answers, which is before the walk runs.  That ordering matters: a walk that
-refuses would otherwise end the command with the control ref the refresh
-created unaccounted for.  That one channel is the whole of it, and the lines
+record alone, so C<on_events> is called with them the moment they are known,
+which is before the walk runs, so a walk that refuses does not end the
+command with them unsaid.  That one channel is the whole of it, and the lines
 are not left on the record as well, because the record has a fixed shape and
 C<--json> emits it whole.
 
@@ -59,8 +62,9 @@ C<worst_class> reads them in.
 
   my $record = Genesis::CI::Status::status_records($top, git => $git);
 
-Returns the canonical record for the deployment root it is handed.  It
-refreshes the remote-tracking refs unless told not to, asks the pre-flight for
+Returns the canonical record for the deployment root it is handed.  It reads
+R into the remote-tracking refs unless told not to, through
+L</_read_remote($top, $git, %opts)>, asks the pre-flight for
 control and for the branch records, and hands both to the propagation walk, so
 this command and C<genesis propagate> read one answer rather than two.  The
 event lines the refresh raised are reported on standard error as it goes, and
@@ -628,6 +632,59 @@ B<Examples:>
       Genesis::CI::Status::_unconsulted('GitHub did not answer');
   # says on standard error that the column is read from each proposed
   # record, and answers (undef, {})
+
+=head2 _read_remote($top, $git, %opts)
+
+  my $refreshed = _read_remote($top, $git, on_events => $cb);
+
+The status's one read of R (D115, noted 2026-10-11). Where the switch lock
+names a live holder, it touches nothing and calls C<on_events> with a line
+naming the propagate in progress and saying local branches may be
+mid-delivery. Otherwise it reads R into
+C<refs/genesis/preflight/status-E<lt>pidE<gt>/E<lt>remoteE<gt>>, reads the
+pipeline's shape from R's control there, and promotes control and the
+deployment branches that shape names into the remote-tracking refs, which
+removes the namespace. It creates no local branch and leaves pull request
+branches' tracking refs alone.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top>, whose shape is pointed at R's control.
+
+=item C<$git>
+
+The C<Service::Git> handle on the clone.
+
+=item C<%opts>
+
+C<on_events>, the caller's callback for event lines.
+
+=back
+
+B<Returns:> the refresh result the pre-flight reads, C<ok>, C<kind>,
+C<fetched>, C<created> (always empty) and C<absent>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Refusing to run genesis pipeline-status.  Failed to reach ..."> - exits
+C<TEMPFAIL> where R cannot be read, naming C<--no-refresh> as the way to
+report from what the clone last read.
+
+=back
+
+B<Examples:>
+
+  _read_remote($top, $git, on_events => sub { print "$_\n" for @_ });
+  # returns {ok => 1, kind => 'success', fetched => ['control', 'qa/bosh'],
+  #          created => [], absent => []}, having moved only tracking refs
 
 =head2 _mark_unverifiable($record)
 

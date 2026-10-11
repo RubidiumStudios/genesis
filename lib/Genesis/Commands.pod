@@ -236,8 +236,9 @@ so the gate leaves it where it stands.
 C<refresh> is optional and says what the command wants of the refresh the
 gate would otherwise make on its behalf, which every pipeline command takes
 before it reads anything. C<'optional'> is a refresh the operator may skip,
-which they do with C<--no-refresh>, and the gate makes it wherever they did
-not; C<pipeline-status> declares it. C<'never'> is a command that answers out
+which they do with C<--no-refresh>, and which the command makes itself, once,
+so the gate makes none for it and asks R a question only where the operator
+did not skip it; C<pipeline-status> declares it (D115, noted 2026-10-11). C<'never'> is a command that answers out
 of the repository's own files, holds no ref a refresh could make current, and
 offers no flag to ask with, so the gate makes none for it at all;
 C<pipeline-describe> declares it. A command that declares nothing is
@@ -449,8 +450,8 @@ The gate reads it through L</deployed_target>, which resolves the commit and
 hands it to the branch session.  Defaults to C<'tip'>.
 
 =item C<refresh> - What the command wants of the branch-class gate's
-refresh, either C<'optional'>, which the operator skips with
-C<--no-refresh>, or C<'never'>, which makes none at all.
+refresh, either C<'optional'>, which the command makes itself and the
+operator skips with C<--no-refresh>, or C<'never'>, which makes none at all.
 C<pipeline-status> declares the first and C<pipeline-describe> the second.
 It is declared only alongside C<branch_class =E<gt> PRE_DEPLOY>, since that
 is the one gate that reads it.  Defaults to C<undef>, which is refreshed as

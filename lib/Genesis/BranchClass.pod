@@ -336,9 +336,13 @@ therefore says nothing about whether it refreshed.
 
 Its one option that decides that is C<refresh>, which the gate passes as
 false for a command whose registration declares a refresh mode: C<< refresh
-=E<gt> 'optional' >> given C<--no-refresh>, which is C<pipeline-status>, and
-C<< refresh =E<gt> 'never' >>, which is C<pipeline-describe>. Nothing else
-may skip it, because the descent condition below is read through the
+=E<gt> 'optional' >>, which is C<pipeline-status>, which reads R itself once
+(D115, noted 2026-10-11), and C<< refresh =E<gt> 'never' >>, which is
+C<pipeline-describe>. A second option, C<network>, says whether the gate may
+ask R anything at all, as the feature-branch check does where T lacks control;
+it is false for C<pipeline-status> under C<--no-refresh> and for
+C<pipeline-describe>, and follows C<refresh> where it is not given. Nothing
+else may skip the refresh, because the descent condition below is read through the
 remote-tracking ref and a stale one would let a feature branch cut from an
 older control tip pass a check it should fail. The declaration is read at
 the registration rather than from a list of command names, so the gate, the

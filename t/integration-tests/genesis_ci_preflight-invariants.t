@@ -196,8 +196,8 @@ subtest 'every divergence refusal names the branch and both counts' => sub {
 };
 
 subtest 'one class action leaves the other two classes alone' => sub {
-	# Nine rows, and one more for each of the two runs.
-	plan tests => 11;
+	# Ten rows, and one more for each of the two runs.
+	plan tests => 12;
 
 	# The kit is here so the walk can reach an environment at all.  Each
 	# environment is loaded before it is diffed, and a kitless harness leaves
@@ -218,21 +218,26 @@ subtest 'one class action leaves the other two classes alone' => sub {
 	# make the row below it bite.
 	push_from($h, 'a', $pr) if $h->git('a')->branch_exists($pr);
 
-	# The control action: create the local ref from the remote.  The working
-	# tree steps off control onto control's own commit rather than onto a
-	# deployment branch, because git refuses to fetch into the branch it is
-	# standing on and a deployment branch carries none of the repository's
-	# configuration.
+	# A status over a clone with no local control takes no action on any
+	# class (D115, noted 2026-10-11).  The working tree steps off control
+	# onto control's own commit rather than onto a deployment branch, which
+	# carries none of the repository's configuration.
 	stand_on($h, ref_in($h->a, "refs/heads/@{[$h->control]}"));
 	delete_local($h, 'a', $h->control);
 	my $before_qa   = ref_in($h->a, "refs/heads/$qa");
 	my $before_prod = ref_in($h->a, "refs/heads/$prod");
 	run_genesis($h, 'pipeline-status');
+	is(ref_in($h->a, "refs/heads/@{[$h->control]}"), undef,
+		'the status created no control');
 	is(ref_in($h->a, "refs/heads/$qa"), $before_qa,
-		'creating control moved no deployment branch');
+		'moved no deployment branch');
 	is(ref_in($h->a, "refs/heads/$prod"), $before_prod, 'nor the other one');
 	is(ref_in($h->a, "refs/heads/$pr"), undef,
-		'and it made no pull request branch');
+		'and made no pull request branch');
+
+	# Control back by hand for the rest of the row, which stands on it.
+	run({dir => $h->a, onfailure => 'Failed to recreate control'}, 'git', 'branch',
+		$h->control, 'refs/remotes/origin/' . $h->control);
 
 	# The deployment-branch action: fast-forward one of them.
 	stand_on($h, $h->control);

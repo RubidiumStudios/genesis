@@ -16,7 +16,7 @@ use Genesis::Term qw/csprintf/;
 # The one refusal code this module has to tell apart, which is what says
 # whether GitHub itself went quiet or the settings for reaching it are
 # missing, and the two get different words.
-use Genesis::Exit qw/UNAVAILABLE/;
+use Genesis::Exit qw/UNAVAILABLE TEMPFAIL/;
 use Genesis::CI::Walk ();
 use Genesis::CI::Preflight ();
 # Genesis::CI::Report owns every word an operator reads about an outcome, so
@@ -34,6 +34,7 @@ use Genesis::CI::PullRequest ();
 # prefix a second time.
 use Genesis::CI::Marker ();
 use Service::Git;
+use Service::Git::Session ();
 
 our @EXPORT_OK = qw/status_records render_tree render_json/;
 
@@ -75,7 +76,7 @@ sub status_records {
 	my $refresh = exists $opts{refresh} ? $opts{refresh} : 1;
 
 	my $refreshed = $refresh
-		? $top->fetch_pipeline_envs($git, command => 'pipeline-status')
+		? _read_remote($top, $git, on_events => $opts{on_events})
 		: undef;
 
 	# The status reports every state and resolves none, so a diverged control
@@ -247,6 +248,66 @@ sub status_records {
 	$record = _mark_unverifiable($record) unless $refresh;
 
 	return $record;
+}
+
+# }}}
+# _read_remote - read R once into T, creating nothing {{{
+#
+# The status reads R into a namespace of its own, takes the shape from R's
+# control there, and brings control and the deployment branches into T in one
+# step, which removes the namespace; it creates no local branch and takes no
+# lock (D115, noted 2026-10-11).  Where a live propagate holds the lock, it
+# leaves T to that run and says so.  A remote it cannot reach is refused at
+# TEMPFAIL, naming --no-refresh as the way to report from what T holds.
+sub _read_remote {
+	my ($top, $git, %opts) = @_;
+
+	# A propagate in this clone has just read R into T and may be moving
+	# local branches now, so the status leaves T to it and says so, rather
+	# than contending with it for a ref.
+	if (my $holder = Service::Git::Session->lock_holder($git)) {
+		$opts{on_events}->(sprintf(
+			"a propagate is in progress (process %s: %s), so T is read as it ".
+			"left it, and local branches may be mid-delivery",
+			$holder->{pid}, $holder->{command} // 'genesis propagate'))
+			if $opts{on_events};
+		return {ok => 1, kind => 'success', fetched => [], created => [],
+		        absent => []};
+	}
+
+	my $remote  = $top->source_control_remote;
+	my $control = $top->control_branch;
+	my $ns      = "refs/genesis/preflight/status-$$/$remote";
+	my $read    = $git->snapshot_remote(remote => $remote, namespace => $ns,
+		branches => [$control], globs => ['*/' . $top->type]);
+
+	unless ($read->{ok}) {
+		my $because = $read->{kind} eq 'network'
+			? 'the network or the remote is unreachable'
+			: $read->{kind} eq 'auth'
+			? 'the remote rejected our credentials'
+			: 'the remote failed the request';
+		bail({exitcode => TEMPFAIL},
+			"Refusing to run #C{genesis pipeline-status}.  Failed to reach #C{%s} ".
+			"to read the pipeline branches, because %s, so nothing this command ".
+			"reads can be shown to be current.\n\n%s\n\nRestore access to #C{%s} ".
+			"and run the command again, or run it with #C{--no-refresh} to report ".
+			"from what this clone last read.",
+			$remote, $because, ($read->{err} || 'no further detail') =~ s/\s+$//r,
+			$remote);
+	}
+
+	# The shape is read from R's control, so the deployment branches brought
+	# into T are the ones R's control names today.  A pull request branch's T
+	# is left alone, since it is the tip the next publish leases against.
+	my $held = $git->snapshot_refs(namespace => $ns);
+	$top->read_shape_from("$ns/$control") if defined $held->{$control};
+	my @branches = ($control, map {$top->branch_for($_)} $top->pipeline_env_names);
+	$git->promote_snapshot(remote => $remote, namespace => $ns, names => \@branches);
+
+	return {ok => 1, kind => 'success', created => [],
+	        fetched => [grep { defined $held->{$_}} @branches],
+	        absent  => [grep {!defined $held->{$_}} @branches]};
 }
 
 # }}}

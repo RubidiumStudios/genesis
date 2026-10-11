@@ -783,17 +783,18 @@ sub _gate_branch_class {
 		# command declares.
 		#
 		# pipeline-status declares an optional refresh, which is one the
-		# operator skips with --no-refresh and which the gate makes
-		# wherever they did not.  pipeline-describe declares that it never
-		# refreshes, because it answers out of the repository's own files
-		# and a fetch would refuse offline what it can always read from
-		# disk.  The option is still the gate's to read, since the
-		# registration says the refresh may be skipped and the flag is how
-		# an operator says to skip it.
-		my $mode = command_properties()->{refresh} // '';
-		my $refresh = $mode eq 'never' ? 0
+		# operator skips with --no-refresh, and which the command makes
+		# itself, once, so the gate makes none for it (D115, noted
+		# 2026-10-11); the gate may still ask R a question where the
+		# operator did not skip it.  pipeline-describe declares that it
+		# never refreshes, because it answers out of the repository's own
+		# files and a fetch would refuse offline what it can always read
+		# from disk, so the gate makes no network call for it at all.
+		my $mode    = command_properties()->{refresh} // '';
+		my $network = $mode eq 'never' ? 0
 		            : $mode eq 'optional' && get_options()->{'no-refresh'} ? 0
 		            : 1;
+		my $refresh = $mode eq 'optional' ? 0 : $network;
 
 		# Whether the command commits goes down too.  The refusal is
 		# about a commit that cannot reach control through a pull
@@ -815,7 +816,7 @@ sub _gate_branch_class {
 
 		require Genesis::BranchClass;
 		Genesis::BranchClass::assert_pre_deploy($top, $git,
-			refresh => $refresh, adding => $adding,
+			refresh => $refresh, network => $network, adding => $adding,
 			commits => command_properties()->{commits},
 			control_only => command_properties()->{control_only});
 		return $fn->();

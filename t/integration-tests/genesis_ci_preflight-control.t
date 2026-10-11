@@ -78,9 +78,9 @@ subtest 'a teammate ahead on control refuses the run as stale' => sub {
 		'control was not moved in either direction');
 };
 
-subtest 'control on the remote alone is created and reported' => sub {
-	# Five rows, and one more for the run's own restoration assertion.
-	plan tests => 6;
+subtest 'control on the remote alone is reported, not created' => sub {
+	# Four rows, and one more for the run's own restoration assertion.
+	plan tests => 5;
 
 	my $h = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
@@ -108,16 +108,13 @@ subtest 'control on the remote alone is created and reported' => sub {
 
 	my (undef, $err, $exit) = run_genesis($h, 'pipeline-status');
 
+	# A status creates no branch (D115, noted 2026-10-11): it reports control
+	# as R has it and leaves the clone without a local ref.
 	is($exit, 0, 'the command carries on normally');
-	is(ref_in($h->a, "refs/heads/@{[$h->control]}"),
-		ref_in($h->r, $h->control),
-		'the local ref is created from what the remote holds');
-	isnt(ref_in($h->a, "refs/heads/@{[$h->control]}"), $stood_on,
-		'and not from the commit the working tree was standing on');
-	# Genesis accounts for itself on standard error, so the event line comes
-	# back in the second value rather than the first.
-	like($err, qr{created\s+control\s+from\s+origin/control},
-		'and the creation is reported as an event line');
+	is(ref_in($h->a, "refs/heads/@{[$h->control]}"), undef,
+		'and creates no local control ref');
+	unlike($err, qr{created\s+control\s+from},
+		'so no creation is reported');
 };
 
 subtest 'control nowhere refuses every pipeline command' => sub {

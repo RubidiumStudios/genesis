@@ -275,10 +275,12 @@ sub assert_pre_deploy {
 	# where a command ends says nothing about whether it refreshed.
 	#
 	# The caller passes refresh => 0 for a command whose registration
-	# declares that its refresh is the operator's to skip or that it never
-	# makes one, which is pipeline-status under --no-refresh and
-	# pipeline-describe, which answers from the repository's own files.  The
-	# gate reads that declaration; nothing here knows either command's name.
+	# declares that it makes its own refresh, or that it never makes one,
+	# which is pipeline-status and pipeline-describe.  network => 0 says the
+	# gate may not ask R anything either, which is pipeline-status under
+	# --no-refresh and pipeline-describe; where it is not given it follows
+	# refresh.  The gate reads that declaration; nothing here knows either
+	# command's name.
 	refresh_control($top, $git)
 		unless defined($opts{refresh}) && !$opts{refresh};
 
@@ -381,7 +383,8 @@ sub assert_pre_deploy {
 
 	my ($ok, $reason, $remedy) = permitted_feature_branch(
 		$top, $git, $branch,
-		adding => $opts{adding}, refresh => $opts{refresh}
+		adding  => $opts{adding},
+		refresh => $opts{network} // $opts{refresh}
 	);
 	return 1 if $ok;
 
