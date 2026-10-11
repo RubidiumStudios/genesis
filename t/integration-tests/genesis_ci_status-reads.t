@@ -22,6 +22,7 @@ use Test::More;
 use Genesis;
 use Genesis::Exit;
 use JSON::PP qw/decode_json/;
+use POSIX ();
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
@@ -174,6 +175,35 @@ subtest 'a status reads a branch the clone lacks at T' => sub {
 	is(scalar @{$row->{pending} || []}, 1, 'with the commit due to it pending');
 	is($row->{divergence}{state}, 'no-local', 'its want in the clone recorded');
 	ok(!defined ref_in($h->a, "refs/heads/$lab"), 'and no local branch created');
+};
+
+subtest 'a status sweeps what a killed status left, and no more' => sub {
+	# Two rows, and the run's own restoration assertion.
+	plan tests => 3;
+
+	# A status killed between its read and its promotion leaves its
+	# namespace behind.  A later status removes it once its process is gone,
+	# and leaves alone the namespace of a status still running (D115, noted
+	# and corrected 2026-10-11).  The dead pid is a child that has exited;
+	# the live one is this test's own.
+	my $h = moved_on_r();
+	my $dead = fork() // die "cannot fork: $!\n";
+	POSIX::_exit(0) unless $dead;
+	waitpid($dead, 0);
+	my $sha = ref_in($h->a, 'refs/heads/' . $h->control);
+	for my $pid ($dead, $$) {
+		run({dir => $h->a, onfailure => 'Failed to plant a namespace'}, 'git',
+			'update-ref', "refs/genesis/preflight/status-$pid/origin/control", $sha);
+	}
+
+	run_genesis($h, 'pipeline-status');
+
+	ok(!defined ref_in($h->a, "refs/genesis/preflight/status-$dead/origin/control"),
+		'a dead status\'s namespace is swept');
+	ok(defined ref_in($h->a, "refs/genesis/preflight/status-$$/origin/control"),
+		'a live one is left alone');
+	run({dir => $h->a}, 'git', 'update-ref', '-d',
+		"refs/genesis/preflight/status-$$/origin/control");
 };
 
 subtest 'a status that cannot reach R fails naming the network' => sub {

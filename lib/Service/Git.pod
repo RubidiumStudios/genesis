@@ -2712,6 +2712,31 @@ B<Examples:>
   $git->clear_snapshot(namespace => 'refs/genesis/preflight/status-4242/origin');
   # removes that status run's snapshot and leaves the run's alone
 
+=head2 sweep_status_snapshots
+
+  $git->sweep_status_snapshots;
+
+Removes what a stopped C<genesis pipeline-status> left behind. A status reads
+R into C<refs/genesis/preflight/status-E<lt>pidE<gt>/E<lt>remoteE<gt>> and
+removes it as it promotes, so a namespace is left only by a status stopped in
+between. Every such namespace whose process no longer runs is deleted in one
+C<update-ref> transaction; a running status's is left alone, by the test the
+switch lock's holder is read with (D115, noted and corrected 2026-10-11).
+
+It is housekeeping, so a sweep that loses a race with another status's sweep
+is left at that rather than raised.
+
+B<Parameters:> None.
+
+B<Returns:> C<$self>.
+
+B<Errors:> None raised.
+
+B<Examples:>
+
+  $git->sweep_status_snapshots;
+  # refs/genesis/preflight/status-4242/origin/* gone where process 4242 is
+
 =head2 promote_snapshot
 
   $git->promote_snapshot(names => [qw(control qa/bosh pr/qa/bosh)]);

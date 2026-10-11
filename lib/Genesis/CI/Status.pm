@@ -279,6 +279,8 @@ sub _read_remote {
 		        absent => []};
 	}
 
+	$git->sweep_status_snapshots;
+
 	my $remote  = $top->source_control_remote;
 	my $control = $top->control_branch;
 	my $ns      = "refs/genesis/preflight/status-$$/$remote";

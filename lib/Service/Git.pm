@@ -1834,6 +1834,28 @@ sub clear_snapshot {
 }
 
 # }}}
+# sweep_status_snapshots - remove what a stopped pipeline-status left {{{
+#
+# A status reads R into a namespace named for its own process and removes it
+# as it promotes, so one is left only by a status stopped in between.  A
+# later status removes those whose process is gone, and leaves a running
+# one's alone (D115, noted and corrected 2026-10-11).  It is housekeeping, so
+# a sweep that loses a race with another status's is left at that.
+sub sweep_status_snapshots {
+	my ($self) = @_;
+	my ($out) = run({dir => $self->{root}, stderr => 0},
+		'git', 'for-each-ref', '--format=%(refname)', 'refs/genesis/preflight/');
+	my @left = grep {
+		m{^refs/genesis/preflight/status-(\d+)/} && !(kill(0, $1) || $!{EPERM})
+	} split /\n/, ($out // '');
+	return $self unless @left;
+
+	run({dir => $self->{root}, passfail => 1, stdin => join('', map {"delete $_\n"} @left)},
+		'git', 'update-ref', '--stdin');
+	return $self;
+}
+
+# }}}
 # promote_snapshot - bring a snapshot into the tracking refs in one step {{{
 #
 # One update-ref transaction sets each named branch's tracking ref to what the
