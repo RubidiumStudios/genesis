@@ -79,6 +79,15 @@ sub status_records {
 		? _read_remote($top, $git, on_events => $opts{on_events})
 		: undef;
 
+	# An applied record standing while pipeline.enabled is false means the
+	# configuration disowns a pipeline that is still live, still watching its
+	# branches, and still deploying, and every pipeline command refuses it,
+	# this one included (D64, T287).  Whether it is enabled is the shape's to
+	# say, so it is asked here, once the read above has pointed the shape at
+	# R's control, and not of a T the clone may not have refreshed (D112).
+	Genesis::CI::Preflight::assert_not_disowned($top,
+		command => 'pipeline-status');
+
 	# The status reports every state and resolves none, so a diverged control
 	# is a line in the report rather than a refusal, and the one answer that
 	# leaves the command nothing to read is still refused.

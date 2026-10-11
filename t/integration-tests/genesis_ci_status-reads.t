@@ -206,6 +206,30 @@ subtest 'a status sweeps what a killed status left, and no more' => sub {
 		"refs/genesis/preflight/status-$$/origin/control");
 };
 
+subtest 'a status refuses a pipeline R disowns, though T has not seen it' => sub {
+	# Two rows, and the run's own restoration assertion.
+	plan tests => 3;
+
+	# The pipeline stands applied, and a teammate disables it on R, which
+	# the clone has not fetched.  Whether it is enabled is the shape's to
+	# say, read from control as R holds it (D112), so the status refuses the
+	# disowned pipeline as T287 has it (D64), and not the stale T's answer.
+	my $h       = moved_on_r();
+	my $control = $h->control;
+	my ($config) = run({dir => $h->r}, 'git', 'show',
+		"refs/heads/$control:.genesis/config");
+	$config =~ s/^(\s+enabled:\s*)\S+/${1}0/m;
+	commit_from_b($h, branch => $control,
+		files => {'.genesis/config' => $config}, message => 'disable the pipeline');
+	push_from($h, 'b', $control);
+
+	my (undef, $err, $exit) = run_genesis($h, 'pipeline-status');
+
+	is($exit, Genesis::Exit::CONFIG, 'the status refuses at CONFIG');
+	like(unfolded($err), qr/disowns a pipeline that is still live/,
+		'naming the disowned pipeline');
+};
+
 subtest 'a status that cannot reach R fails naming the network' => sub {
 	# Two rows, and the run's own restoration assertion.
 	plan tests => 3;

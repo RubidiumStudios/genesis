@@ -210,6 +210,25 @@ whole.
 B<Returns:> the record, as a hash reference, in the shape
 L<Genesis::CI::Walk/plan> answers with.
 
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Refusing to run genesis pipeline-status.  The pipeline is disabled ...">
+- exits C<CONFIG> through C<Genesis::CI::Preflight::assert_not_disowned>,
+where an applied record stands while the shape, read from R's control once
+the command has read R, says the pipeline is not enabled (D64, T287).
+
+=item *
+
+C<"Refusing to run genesis pipeline-status.  Failed to reach ..."> - exits
+C<TEMPFAIL> through L</_read_remote($top, $git, %opts)> where R cannot be
+read.
+
+=back
+
 B<Examples:>
 
   # The report as the operator asked for it, without a fetch.

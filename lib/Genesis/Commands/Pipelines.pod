@@ -436,9 +436,11 @@ The one thing the command refuses is a disowned pipeline.  An applied record
 standing while C<pipeline.enabled> is false means the configuration disowns a
 pipeline that is still live, still watching its branches, and still deploying,
 so the command refuses at C<CONFIG> with the two remedies beside it, as every
-other pipeline command does.  The refusal stands above everything else, so
-nothing of the report reaches standard output ahead of it and no environment
-is reported at all.
+other pipeline command does.  The refusal stands ahead of the report, so
+nothing of it reaches standard output and no environment is reported at all.
+Whether the pipeline is enabled is asked once the command has read R, of the
+shape R's control holds, so a pipeline a teammate disowned on R is refused
+though the clone's tracking refs have not seen it (D112; D64).
 
 The header names the control commit the pipeline was applied from.  Where the
 pipeline-defining paths have changed since, it says so, names each changed

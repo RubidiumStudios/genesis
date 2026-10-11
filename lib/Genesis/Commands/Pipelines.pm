@@ -306,14 +306,8 @@ sub pipeline_status {
 
 	my $top = Genesis::Top->new('.');
 
-	# An applied record standing while pipeline.enabled is false means the
-	# configuration disowns a pipeline that is still live, still watching its
-	# branches, and still deploying.  Every pipeline command refuses that
-	# repository, this one included, and it refuses above everything else, so
-	# nothing of the report reaches standard output ahead of the refusal.
-	Genesis::CI::Preflight::assert_not_disowned($top,
-		command => 'pipeline-status');
-
+	# A disowned pipeline is refused by the read model, once it has read the
+	# shape from R's control, and before anything reaches standard output.
 	my $git     = Service::Git->new('.');
 	my $refresh = get_options->{'no-refresh'} ? 0 : 1;
 
