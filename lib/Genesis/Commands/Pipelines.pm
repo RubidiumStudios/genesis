@@ -304,6 +304,23 @@ sub apply {
 # renders it as JSON or as the tree.  It writes nothing.
 sub pipeline_status {
 
+	# A propagate in this clone stands on a deployment branch while it
+	# delivers, and that branch holds no .genesis/config, so there is nothing
+	# here for a status to open.  Where the lock file names such a run, the
+	# status says so rather than that this is no repository at all (D115,
+	# noted 2026-10-12).
+	unless (Genesis::Top->is_repo('.')) {
+		require Service::Git::Session;
+		my $holder = eval {Service::Git::Session->lock_holder(Service::Git->new('.'))};
+		bail({exitcode => TEMPFAIL},
+			"Refusing to run #C{genesis pipeline-status}.  A propagate is in progress ".
+			"in this clone (process %s: %s), and it stands on a deployment branch ".
+			"while it delivers, so there is no pipeline here to read.  Run ".
+			"#C{genesis pipeline-status} again once it finishes, or from another clone.",
+			$holder->{pid}, $holder->{command} // 'genesis propagate'
+		) if $holder;
+	}
+
 	my $top = Genesis::Top->new('.');
 
 	# A disowned pipeline is refused by the read model, once it has read the

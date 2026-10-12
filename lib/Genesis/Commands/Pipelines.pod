@@ -500,6 +500,27 @@ B<Returns:> Exits 0 after printing, C<CONFIG> where the configuration disowns
 a live pipeline, or C<UNAVAILABLE> where vault cannot be reached.  See
 L<Genesis::CI::Status> for the record's shape and its two renderings.
 
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Refusing to run genesis pipeline-status.  A propagate is in progress in
+this clone ..."> - exits C<TEMPFAIL> where the working tree holds no
+deployment root because a propagate in the same clone stands on a deployment
+branch to deliver to it, naming that run's process and command and saying to
+run the status again once it finishes or from another clone (D115, noted
+2026-10-12; T360).  With no live propagate, the tree is refused as no Genesis
+deployment repository, as before.
+
+=item *
+
+The disowned pipeline at C<CONFIG>, and a remote that cannot be read at
+C<TEMPFAIL>, through L<Genesis::CI::Status/status_records($top, %opts)>.
+
+=back
+
 B<Examples:>
 
   # The tree, refreshed first

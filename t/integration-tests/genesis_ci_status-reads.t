@@ -1,5 +1,8 @@
 #!/usr/bin/env perl
-# Proves T349's status half, as rewritten on 2026-10-11, and D115's note of
+# Proves T360, a status beside a propagate in the same clone, which renders
+# while the run stands on control and refuses naming the run while it
+# delivers (D115, noted 2026-10-12).  Also T349's status half, as rewritten
+# on 2026-10-11, and D115's note of
 # that day: genesis pipeline-status reads R once, brings T up to it for
 # control and the deployment branches, and creates no branch; it leaves a
 # pull request branch's T alone, since that is the tip the next publish
@@ -228,6 +231,50 @@ subtest 'a status refuses a pipeline R disowns, though T has not seen it' => sub
 	is($exit, Genesis::Exit::CONFIG, 'the status refuses at CONFIG');
 	like(unfolded($err), qr/disowns a pipeline that is still live/,
 		'naming the disowned pipeline');
+};
+
+subtest 'T360: a status beside a propagate in the same clone' => sub {
+	# Ten rows, and the restoration assertion of each of the two runs.
+	plan tests => 12;
+
+	my $h  = moved_on_r();
+	my $qa = $h->slug('qa');
+	my $t  = ref_in($h->a, "refs/remotes/origin/$qa");
+	my $holder = hold_session_lock($h);
+
+	# Between its deliveries the run stands on control, and so does the
+	# status: it renders, names the run, and leaves T to it.
+	my (undef, $err, $exit) = run_genesis($h, 'pipeline-status');
+	my $said = unfolded($err);
+	is($exit, 0, 'on control the status renders') or diag($err);
+	like($said, qr/propagate is in progress.*\b$holder\b/, 'naming the propagate');
+	is(ref_in($h->a, "refs/remotes/origin/$qa"), $t,
+		'and leaving T where the run left it, though R has moved');
+
+	# While it delivers, the run stands on a deployment branch, which holds
+	# no .genesis/config and is a branch a pre-deploy command refuses, so the
+	# status refuses, naming the run (D115, noted 2026-10-12).
+	run({dir => $h->a, onfailure => 'Failed to stand on qa/bosh'},
+		'git', 'checkout', '-q', $qa);
+	my ($heads) = run({dir => $h->a}, 'git', 'for-each-ref',
+		'--format=%(refname) %(objectname)', 'refs/heads', 'refs/remotes');
+	my $on_r = ref_in($h->r, "refs/heads/$qa");
+
+	(undef, $err, $exit) = run_genesis($h, 'pipeline-status');
+	$said = unfolded($err);
+	release_session_lock($h, $holder);
+
+	is($exit, Genesis::Exit::TEMPFAIL, 'on a deployment branch it refuses at TEMPFAIL');
+	like($said, qr/propagate is in progress/, 'saying a propagate is in progress');
+	like($said, qr/\b$holder\b.*genesis propagate|genesis propagate.*\b$holder\b/,
+		'naming its process and command');
+	like($said, qr/once it finishes/, 'saying to run the status again once it finishes');
+	like($said, qr/another clone/, 'or from another clone');
+	my ($after) = run({dir => $h->a}, 'git', 'for-each-ref',
+		'--format=%(refname) %(objectname)', 'refs/heads', 'refs/remotes');
+	is($after, $heads, 'and no local branch or tracking ref moved');
+	is(ref_in($h->r, "refs/heads/$qa"), $on_r, 'nor anything on R');
+	run({dir => $h->a}, 'git', 'checkout', '-q', $h->control);
 };
 
 subtest 'a status that cannot reach R fails naming the network' => sub {
