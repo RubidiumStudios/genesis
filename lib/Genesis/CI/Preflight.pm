@@ -521,6 +521,24 @@ sub pipeline_problems {
 }
 
 # }}}
+# assert_pipeline_enabled - a pipeline that is not enabled, for hold and release {{{
+#
+# A hold only stops a propagation, and a pipeline that is not enabled has none
+# to stop, so the hold commands refuse it as propagate does, and the release
+# refuses too, for consistency (D64, noted 2026-10-13).  The disowned pipeline
+# is assert_not_disowned's, asked first, so this answers only the pipeline
+# that was never applied.  nothing_to finishes the sentence for the caller.
+sub assert_pipeline_enabled {
+	my ($top, %opts) = @_;
+	return 1 if $top->pipeline_enabled;
+	bail({exitcode => CONFIG},
+		"#C{pipeline.enabled} is false or absent in #C{.genesis/config}, so ".
+		"there is no pipeline to %s.  Set #C{pipeline.enabled: true} on control, ".
+		"commit it, and push it, then run this again.",
+		$opts{nothing_to} // 'act on');
+}
+
+# }}}
 # assert_provider_gate - the break-glass past a pipeline that owns the work {{{
 #
 #   Genesis::CI::Preflight::assert_provider_gate($top, $options,

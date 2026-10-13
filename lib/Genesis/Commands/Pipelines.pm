@@ -359,9 +359,10 @@ sub pipeline_status {
 # is.  The two forms differ in what fills the list and in nothing else, so the
 # body is written once.
 #
-# The refusal of a disowned pipeline is the group's and not ours, and the
-# legacy gate runs before we are reached, so there is no third refusal here on
-# pipeline.enabled saying what those two already say.
+# A pipeline that is not enabled is refused, because a hold only stops a
+# propagation and such a pipeline has none to stop (D64, noted 2026-10-13).
+# The disowned pipeline, disabled with an applied record, is asked first and
+# keeps its own refusal.
 sub pipeline_hold {
 	my @args = @_;
 	my $opts = get_options();
@@ -369,6 +370,7 @@ sub pipeline_hold {
 
 	Genesis::CI::Preflight::assert_not_disowned($top,
 		command => 'pipeline-hold');
+	Genesis::CI::Preflight::assert_pipeline_enabled($top, nothing_to => 'hold');
 
 	# Both `genesis <env> pipeline-hold` and `genesis pipeline-hold
 	# "<reason>"` arrive here carrying one argument, and only the repository
@@ -450,9 +452,9 @@ sub pipeline_hold {
 # there, since set_top_path hands the prefix on as the basename of the file it
 # resolved and an operator may have written the suffix themselves.
 #
-# The refusal of a disowned pipeline belongs to the group and not to us, as it
-# does for the hold, and the legacy gate runs before we are reached, so there
-# is no third refusal here on pipeline.enabled.
+# A pipeline that is not enabled is refused as the hold refuses it, for
+# consistency, so a record left from when it was enabled is cleared by enabling
+# it again (D64, noted 2026-10-13).  The disowned pipeline is asked first.
 sub pipeline_release {
 	my @args = @_;
 	my $opts = get_options();
@@ -460,6 +462,8 @@ sub pipeline_release {
 
 	Genesis::CI::Preflight::assert_not_disowned($top,
 		command => 'pipeline-release');
+	Genesis::CI::Preflight::assert_pipeline_enabled($top,
+		nothing_to => 'release a hold on');
 
 	command_usage(1,
 		sprintf(
@@ -2232,12 +2236,11 @@ sub _refuse_disabled_pipeline {
 # nothing.  The topology is the same enumeration the walk reads, so the run
 # and the two commands never disagree about what the root holds.
 #
-# pipeline_topology answers every field empty where the pipeline is disabled
-# or where no environment file declares one, so an empty order is the one
-# state worth a sentence, since a command that silently held nothing would
-# read as success.  The sentence names both causes, because the two are
-# indistinguishable from here and an operator whose pipeline is switched off
-# would otherwise be sent to read their environment files.
+# pipeline_topology answers every field empty where no environment file
+# declares one, so an empty order is the one state worth a sentence, since a
+# command that silently held nothing would read as success.  A disabled
+# pipeline empties it too, but both callers refuse that first in its own words
+# (D64, noted 2026-10-13), so the sentence names the one cause left.
 sub _root_environments {
 	my ($top) = @_;
 
@@ -2245,8 +2248,7 @@ sub _root_environments {
 	bail(
 		{exitcode => CONFIG},
 		"No environments with pipeline metadata were found in this ".
-		"deployment root.  Either #C{pipeline.enabled} is false in ".
-		"#C{.genesis/config}, or no environment file here declares a ".
+		"deployment root: no environment file here declares a ".
 		"#C{genesis.pipeline} block."
 	) unless @envs;
 	return @envs;

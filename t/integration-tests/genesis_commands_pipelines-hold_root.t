@@ -114,38 +114,33 @@ subtest 'the reason is still required without an environment' => sub {
 };
 
 subtest 'the whole-root forms refuse where the root selects nothing' => sub {
-	# Eight rows, and one more for each of the two runs' own restoration
+	# Six rows, and one more for each of the two runs' own restoration
 	# assertions.  Both commands are asked, because both read the root
 	# through one sub and the POD promises the refusal for each of them.
 	#
 	# Every row discriminates: without the refusal each command's loop runs
 	# over an empty list, exits 0, and prints nothing, which is the silent
-	# success this subtest exists to keep out.  The two cause rows per
-	# command hold the sentence to naming both of the things that put a root
-	# in this state, since an operator whose pipeline is merely switched off
-	# would otherwise be sent to read their environment files.
-	plan tests => 10;
+	# success this subtest exists to keep out.  The root is enabled and holds
+	# no environment file, because a switched-off pipeline is refused before
+	# the root is read, in its own words (D64, noted 2026-10-13, and T362).
+	plan tests => 8;
 
-	my $h = make_harness(envs => ['prod'], pipeline => 0);
+	my $h = make_harness(envs => []);
 
 	my ($out, $err, $exit) = run_genesis($h,
 		'pipeline-hold', 'freezing the fleet for the audit');
 	is($exit, Genesis::Exit::CONFIG, 'it exits CONFIG');
 	like(unfolded($out, $err), qr/No environments with pipeline metadata/i,
 		'and says that the root selects none rather than holding nothing quietly');
-	like(unfolded($out, $err), qr/pipeline\.enabled/,
-		'and names the switched-off pipeline as one of the two causes');
 	like(unfolded($out, $err), qr/genesis\.pipeline/,
-		'and the undeclared metadata as the other');
+		'and names the undeclared metadata as the cause');
 
 	my ($said, $why, $refused) = run_genesis($h, 'pipeline-release');
 	is($refused, Genesis::Exit::CONFIG, 'the release exits CONFIG too');
 	like(unfolded($said, $why), qr/No environments with pipeline metadata/i,
 		'and is refused in the same words, through the same sub');
-	like(unfolded($said, $why), qr/pipeline\.enabled/,
-		'naming the switched-off pipeline as the hold does');
 	like(unfolded($said, $why), qr/genesis\.pipeline/,
-		'and the undeclared metadata beside it');
+		'naming the undeclared metadata as the hold does');
 };
 
 subtest "the second root's own no-argument forms stop at that root" => sub {

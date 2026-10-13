@@ -753,6 +753,46 @@ B<Examples:>
     #   .genesis/config, so there is no pipeline to propagate through. ..."))
     # where the pipeline is disabled and was never applied
 
+=head2 assert_pipeline_enabled($top, %opts)
+
+    Genesis::CI::Preflight::assert_pipeline_enabled($top, nothing_to => 'hold');
+
+Refuses a pipeline that is not enabled, for C<genesis pipeline-hold> and
+C<genesis pipeline-release> in both their forms (D64, noted 2026-10-13). A hold
+only stops a propagation, and a pipeline that is not enabled has none to stop,
+so the hold is refused as C<genesis propagate> is, and the release is refused
+too, for consistency. Whether it is enabled is read from the shape, control at
+T, where both commands read the rest of the pipeline under D112. The caller
+asks L</assert_not_disowned($top, %opts)> first, so a disabled pipeline with an
+applied record keeps the disowned refusal, and this answers only the one that
+was never applied.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> the command runs in.
+
+=item C<%opts>
+
+C<nothing_to> finishes the sentence "so there is no pipeline to ...", as
+C<hold> or C<release a hold on>. It defaults to C<act on>.
+
+=back
+
+B<Returns:> 1 where the pipeline is enabled.
+
+B<Errors:> Bails at C<CONFIG> where it is not, naming C<pipeline.enabled> and
+the remedy: set it on control, commit it, and push it.
+
+B<Examples:>
+
+    assert_pipeline_enabled($top, nothing_to => 'release a hold on');
+    # bails "pipeline.enabled is false or absent in .genesis/config, so there
+    #   is no pipeline to release a hold on. ..." where the pipeline is off
+
 =head2 assert_provider_gate($top, $opts, %how)
 
   Genesis::CI::Preflight::assert_provider_gate($top, $options,

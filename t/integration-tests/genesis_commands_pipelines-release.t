@@ -160,13 +160,16 @@ subtest 'a deploy with -y leaves the hold standing' => sub {
 	# together say that clearing a hold is something only the release does.
 	#
 	# The deploy is the real one, taken to success, which deployable_prod
-	# owns the recipe for.  The pipeline is off, because a pipeline-managed
-	# deploy looks for a branch the harness does not stand up, and the
-	# applied record goes with it, since a disabled pipeline that still
-	# carries one is the state both hold commands refuse.
-	plan tests => 7;
+	# owns the recipe for.  The pipeline is on, because both hold commands
+	# refuse one that is not (D64, noted 2026-10-13), so prod is delivered
+	# and certified at the seeding commit and a propagate puts the
+	# parameters deployable_prod writes onto prod's own branch, the one the
+	# deploy stands on.  The hold goes on after the propagate, which it
+	# would otherwise hold.  One more row for that run's restoration.
+	plan tests => 8;
 
-	my $h    = deployable_prod(pipeline => 0, applied => 0);
+	my $h    = deployable_prod(delivered => ['prod'], certified => ['prod']);
+	run_genesis($h, 'propagate', '-y');
 	run_genesis($h, 'prod', 'pipeline-hold', 'waiting on the capacity report');
 	my $path = $h->env_path('prod').'/hold';
 

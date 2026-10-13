@@ -396,6 +396,7 @@ integration-tests/genesis_commands_pipelines-apply_manual.t  # the manual provid
 integration-tests/genesis_commands_pipelines-hold.t          # pipeline-hold records the hold, and the walk stops delivering behind it
 integration-tests/genesis_commands_pipelines-release.t       # pipeline-release deletes the record, and nothing else clears a hold
 integration-tests/genesis_commands_pipelines-hold_root.t     # the no-argument hold and release cover one deployment root and leave a second one alone
+integration-tests/genesis_commands_pipelines-hold_disabled.t # hold and release, in both forms, refuse a pipeline that is not enabled
 integration-tests/genesis_commands_pipelines-hold_trailer.t  # a delivered hold trailer writes the hold record, and a rejected push takes none
 integration-tests/genesis_commands_pipelines-hold_readers.t  # the status table, the run's report, and the deploy name one hold in one sentence
 integration-tests/genesis_ci_preflight-control.t             # control exists, and it stands in step with the remote
