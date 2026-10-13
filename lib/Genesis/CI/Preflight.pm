@@ -608,9 +608,20 @@ sub confirm_provider_gate {
 
 	warning($warning);
 
+	# The run holds the switch lock while it asks, so a prompt nobody answers
+	# gives up rather than holding the clone (D115, noted 2026-10-07).
+	local $Genesis::UI::PROMPT_TIMEOUT = Genesis::UI::prompt_timeout();
+	my $nobody = sub {
+		bail({exitcode => ABORTED},
+			"Nobody answered within %s, so the run stops and lets go of this ".
+			"clone.  %s", Genesis::UI::prompt_timeout_words(), $outcome);
+	};
+
 	unless ($how{acknowledge}) {
+		my $yes = prompt_for_boolean("Proceed anyway? [y|n]", 0);
+		$nobody->() unless defined $yes;
 		bail({exitcode => ABORTED}, "Aborted at your request.  %s", $outcome)
-			unless prompt_for_boolean("Proceed anyway? [y|n]", 0);
+			unless $yes;
 		return 1;
 	}
 
@@ -626,8 +637,9 @@ sub confirm_provider_gate {
 		"fans out to the deployments that read this one.",
 		sprintf("Type '%s' to continue", $how{acknowledge}), ''
 	);
+	$nobody->() unless defined $answer;
 	bail({exitcode => ABORTED}, "Aborted.  %s", $outcome)
-		unless ($answer // '') eq $how{acknowledge};
+		unless $answer eq $how{acknowledge};
 
 	return 1;
 }

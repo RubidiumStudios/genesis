@@ -117,6 +117,29 @@ subtest 'a no at the terminal aborts' => sub {
 		'and it says the run wrote nothing on its way out');
 };
 
+subtest 'a confirmation nobody answers times out' => sub {
+	plan tests => 3;
+
+	# The run holds the switch lock while it asks, so a prompt nobody
+	# answers gives up and lets go of the clone (D115, noted 2026-10-07).
+	no warnings 'redefine';
+	local *Genesis::CI::Preflight::in_controlling_terminal = sub {1};
+	local $ENV{GENESIS_PROMPT_TIMEOUT} = 1;
+
+	my ($said, $code) = ('', undef);
+	output_from {
+		($said, $code) = with_silent_stdin(sub {
+			refusal_from(sub {
+				Genesis::CI::Preflight::assert_provider_gate($top, {force => 1})
+			})
+		});
+	};
+
+	is($code, ABORTED, 'it exits ABORTED');
+	like($said, qr/Nobody answered within/, 'saying nobody answered');
+	like($said, qr/lets go of this clone/, 'and that the run lets go of the clone');
+};
+
 subtest '-y never answers the gate' => sub {
 	plan tests => 2;
 

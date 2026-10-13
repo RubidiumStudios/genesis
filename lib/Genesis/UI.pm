@@ -25,6 +25,32 @@ use List::Util qw//;
 
 my $stdin_eof = 0; # whether the last read in __prompt_for_line hit EOF
 
+# The seconds a prompt waits before it gives up and answers nothing, for a
+# caller that sets it around its own prompt.  A prompt asked while a run holds
+# the switch lock sets it, so a terminal nobody is at cannot hold the clone
+# (D115, noted 2026-10-07 and 2026-10-13); every other prompt waits as before.
+our $PROMPT_TIMEOUT;
+
+# prompt_timeout - how long such a prompt waits, in seconds {{{
+#
+# Ten minutes, which GENESIS_PROMPT_TIMEOUT overrides with a whole number of
+# seconds.
+sub prompt_timeout {
+	my $seconds = $ENV{GENESIS_PROMPT_TIMEOUT};
+	return (defined $seconds && $seconds =~ /^\d+$/ && $seconds > 0) ? $seconds + 0 : 600;
+}
+
+# }}}
+# prompt_timeout_words - the same time, as a refusal says it {{{
+sub prompt_timeout_words {
+	my $seconds = prompt_timeout();
+	return $seconds % 60
+		? sprintf('%d second%s', $seconds, $seconds == 1 ? '' : 's')
+		: sprintf('%d minute%s', $seconds / 60, $seconds == 60 ? '' : 's');
+}
+
+# }}}
+
 # __bail_on_eof - stop when the last read hit EOF, since no answer is coming
 sub __bail_on_eof {
 	my ($prompt) = @_;
@@ -163,7 +189,29 @@ sub __prompt_for_line {
 		# piped input) we read normally so test harnesses keep working.
 		my $hidden = $hide_response && in_controlling_terminal();
 		system('stty', '-echo') if $hidden;
-		my $in = <STDIN>;
+		my $in;
+		if (my $limit = $PROMPT_TIMEOUT) {
+			# A caller that set a limit is answered nothing once it passes,
+			# and says what that means itself.
+			my $timed_out = !eval {
+				local $SIG{ALRM} = sub {die "prompt timed out\n"};
+				alarm($limit);
+				$in = <STDIN>;
+				alarm(0);
+				1;
+			};
+			alarm(0);
+			if ($timed_out) {
+				system('stty', 'echo') if $hidden;
+				# Matched by its start, since a die handler such as Carp::Always
+				# appends a trace to the message.
+				die $@ unless $@ =~ /^prompt timed out\b/;
+				__prompt_print("\n");
+				return undef;
+			}
+		} else {
+			$in = <STDIN>;
+		}
 		if ($hidden) {
 			system('stty', 'echo');
 			# Their Enter was not echoed; emit one so the next line of
@@ -235,6 +283,8 @@ sub prompt_for_boolean {
 	}
 	while (1) {
 		my $answer = __prompt_for_line($val_prompt,undef,undef,$default,'allow_blank');
+		# A prompt whose time ran out answers nothing, and the caller decides.
+		return undef unless defined $answer;
 		return ($invert ? $f : $t) if $answer =~ $true_re;
 		return ($invert ? $t : $f) if $answer =~ $false_re;
 		__bail_on_eof($val_prompt) if $answer eq '';

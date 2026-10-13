@@ -296,6 +296,34 @@ sub reset_stdin {
 	close $stdin_r;
 	return;
 }
+
+# with_silent_stdin - run code with standard input nobody ever answers
+#
+# set_stdin closes its writer, so a read meets the end of the input at once.
+# This keeps the writer open and writes nothing, so a read waits as it would
+# at a terminal nobody is at, which is what a prompt's timeout is about.  A
+# guard alarm stops a read that never gives up, so a missing timeout fails the
+# row rather than hanging the run.
+sub with_silent_stdin {
+	my ($code, $guard) = @_;
+	pipe(my $r, my $w) or die "can't create pipe: $!";
+	open my $orig, '<&', \*STDIN or die "can't dup STDIN: $!";
+	open STDIN, '<&', $r or die "can't dup pipe to STDIN: $!";
+	my @out = eval {
+		local $SIG{ALRM} = sub {die "the read never gave up\n"};
+		alarm($guard // 10);
+		my @got = $code->();
+		alarm(0);
+		@got;
+	};
+	my $died = $@;
+	alarm(0);
+	open STDIN, '<&', $orig or die "can't restore STDIN: $!";
+	close $w;
+	close $r;
+	die $died if $died;
+	return wantarray ? @out : $out[0];
+}
 sub mkdir_or_fail {
 	my ($dir) = @_;
 	unless (-d $dir) {;

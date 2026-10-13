@@ -275,7 +275,11 @@ Answers the ask without putting it. The showing happens either way.
 
 =back
 
-B<Returns:> 1 to publish, and 0 where the operator declined.
+B<Returns:> 1 to publish, and 0 where the operator declined or nobody answered
+within L<Genesis::UI/prompt_timeout>. The run holds the switch lock while it
+asks, so a confirmation nobody answers gives up, warns that nothing is
+published and that the run puts back what it wrote and lets go of the clone,
+and answers as a no (D115, noted 2026-10-13).
 
 B<Errors:> None of its own. The delta reader and the prompt raise as they do
 for every other caller, and a prompt that reaches the end of standard input

@@ -101,6 +101,30 @@ subtest '-y suppresses the ask and never the showing' => sub {
 	unlike($said, qr{Publish these branches\?}, 'and nothing was asked');
 };
 
+subtest 'a confirmation nobody answers is a no' => sub {
+	plan tests => 3;
+
+	# The run holds the switch lock while it asks, so a confirmation nobody
+	# answers gives up, answers no, and says why (D115, noted 2026-10-13).
+	no warnings 'redefine';
+	local *Genesis::CI::Publish::in_controlling_terminal = sub {1};
+	local $ENV{GENESIS_PROMPT_TIMEOUT} = 1;
+
+	my $go = 'unanswered';
+	my ($out, $err) = output_from {
+		$go = eval {
+			with_silent_stdin(sub {
+				Genesis::CI::Publish::confirm_publish($git, 'origin', \@specs)
+			});
+		} // "died: $@";
+	};
+	my $said = unfolded($out, $err);
+
+	is($go, 0, 'it publishes nothing') or diag($go);
+	like($said, qr/Nobody answered within/, 'saying nobody answered');
+	like($said, qr/lets go of this clone/, 'and that the run lets go of the clone');
+};
+
 subtest 'with no terminal the delta goes to the log and the run proceeds' => sub {
 	plan tests => 4;
 	no warnings 'redefine';

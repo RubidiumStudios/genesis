@@ -78,7 +78,9 @@ user's answer.
 
 B<Returns:> A JSON boolean object. Yes-responses return the JSON true constant;
 no-responses return the JSON false constant (reversed when C<$invert> is true).
-The returned values are suitable for direct use in JSON serialization.
+The returned values are suitable for direct use in JSON serialization. Where
+the caller set C<$Genesis::UI::PROMPT_TIMEOUT> and nobody answered within it,
+C<undef>, and the caller decides what that means (see L</prompt_timeout>).
 
 B<Examples:>
 
@@ -223,6 +225,49 @@ B<Examples:>
         "region",
     );
     # Prompt reads: "Select region >"
+
+=head2 prompt_timeout
+
+    local $Genesis::UI::PROMPT_TIMEOUT = Genesis::UI::prompt_timeout();
+
+How long a prompt asked while a run holds the switch lock waits for an answer,
+in seconds: ten minutes, which C<GENESIS_PROMPT_TIMEOUT> overrides with a whole
+number of seconds (D115, noted 2026-10-07 and 2026-10-13). A caller sets
+C<$Genesis::UI::PROMPT_TIMEOUT> to it with C<local> around its own prompt, and
+the read then gives up once the time passes, so a terminal nobody is at cannot
+hold the clone. L</prompt_for_boolean> and L</prompt_for_line> answer C<undef>
+then. Every other prompt, with the variable unset, waits as it always has.
+
+B<Parameters:> None.
+
+B<Returns:> The number of seconds.
+
+B<Errors:> None. A value that is not a positive whole number is ignored.
+
+B<Examples:>
+
+    $ENV{GENESIS_PROMPT_TIMEOUT} = 30;
+    Genesis::UI::prompt_timeout();        # 30
+
+=head2 prompt_timeout_words
+
+    my $words = Genesis::UI::prompt_timeout_words();
+
+The time L</prompt_timeout> gives, as a sentence says it: whole minutes when it
+divides into them, seconds otherwise.
+
+B<Parameters:> None.
+
+B<Returns:> A string such as "10 minutes", "1 minute" or "30 seconds".
+
+B<Errors:> None.
+
+B<Examples:>
+
+    Genesis::UI::prompt_timeout_words();  # "10 minutes"
+
+    $ENV{GENESIS_PROMPT_TIMEOUT} = 90;
+    Genesis::UI::prompt_timeout_words();  # "90 seconds"
 
 =head2 prompt_for_line
 

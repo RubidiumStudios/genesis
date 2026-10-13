@@ -902,6 +902,13 @@ B<Errors:>
 C<"Aborted at your request."> or C<"Aborted.">, followed by the outcome, at
 C<Genesis::Exit::ABORTED>, where the operator declines.
 
+=item *
+
+C<"Nobody answered within ..., so the run stops and lets go of this clone.">,
+followed by the outcome, at C<Genesis::Exit::ABORTED>, where nobody answers
+either prompt within L<Genesis::UI/prompt_timeout>, since the run holds the
+switch lock while it asks (D115, noted 2026-10-07).
+
 =back
 
 B<Examples:>

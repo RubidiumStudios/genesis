@@ -234,7 +234,19 @@ sub confirm_publish {
 
 	return 1 if $opts{yes};
 	return 1 unless in_controlling_terminal();
-	return prompt_for_boolean("Publish these branches? [y|n]", 1) ? 1 : 0;
+
+	# The run holds the switch lock while it asks, so a confirmation nobody
+	# answers gives up and is a no, which puts back what the run wrote (D115,
+	# noted 2026-10-13).
+	local $Genesis::UI::PROMPT_TIMEOUT = Genesis::UI::prompt_timeout();
+	my $yes = prompt_for_boolean("Publish these branches? [y|n]", 1);
+	unless (defined $yes) {
+		warning("Nobody answered within %s, so nothing is published: the run puts ".
+			"back what it wrote and lets go of this clone.",
+			Genesis::UI::prompt_timeout_words());
+		return 0;
+	}
+	return $yes ? 1 : 0;
 }
 
 # }}}
