@@ -4,7 +4,8 @@
 # or acts (D115, D106).  A refused run leaves the operator's clone exactly as
 # it found it, every ref included, with no snapshot left behind, and a run
 # that proceeds promotes what it read of R into the tracking refs and repairs
-# the branches as the initial state classified them.  Also D64's refusals of
+# the branches as the initial state classified them.  Also T315's D115 half,
+# a deployment branch the clone lacks created in the second stage.  Also D64's refusals of
 # a pipeline not enabled, as noted 2026-10-10: the disowned one collected with
 # the rest, the never-applied one naming the key, and a control with no
 # pipeline section refused without reading R.
@@ -134,6 +135,26 @@ subtest 'a refused run leaves the clone as it found it, and the next one acts' =
 			'refs/heads/' . $h->slug('qa')),
 		'qa/bosh was brought up to what R holds');
 	is(snapshots_left($h), '', 'and no snapshot is left behind');
+};
+
+subtest 'a proceeding run creates a deployment branch the clone lacks' => sub {
+	# Three rows, and the run's own restoration assertion.
+	plan tests => 4;
+
+	# T315's D115 half: the read of R moves nothing until the run proceeds,
+	# and a run that proceeds creates in its second stage the deployment
+	# branches the clone lacks, from what it read (noted 2026-10-13).
+	my $h  = two_stage();
+	my $qa = $h->slug('qa');
+	stand_on($h, $h->control);
+	delete_local($h, 'a', $qa);
+
+	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	is($exit, 0, 'the run proceeds') or diag($err);
+	ok(defined ref_in($h->a, "refs/heads/$qa"), 'creating the branch the clone lacked');
+	is(ref_in($h->a, "refs/heads/$qa"), ref_in($h->r, "refs/heads/$qa"),
+		'at what R holds');
 };
 
 # Whether the pipeline is enabled is one of the questions, asked of control
