@@ -48,7 +48,7 @@ A feature branch is permitted only where all three of these hold, and the refusa
 
 3. **The branch is not named for an environment.** A branch called `prod2` occupies the ref that a deployment branch for an environment named `prod2` would need, so the two could never stand side by side. Rename the branch.
 
-Genesis refreshes control before it classifies your branch, whether it ends up permitting the branch or refusing it, so where a command ends tells you nothing about whether it fetched. Two commands make no fetch of their own, which are `genesis pipeline-status` under `--no-refresh` and `genesis pipeline-describe`, and both answer from what the repository already holds.
+Genesis refreshes control before it classifies your branch, whether it ends up permitting the branch or refusing it, so where a command ends tells you nothing about whether it fetched. Two commands are the exception. `genesis pipeline-status` reads the remote itself, once, so the check makes no refresh for it, and under `--no-refresh` neither makes any network call. `genesis pipeline-describe` makes none at all, and answers from what the repository already holds.
 
 A detached HEAD is neither control nor derived, and it is allowed through. A repository with no commits at all is refused earlier, by the pre-flight, which names the commit that fixes it.
 

@@ -83,9 +83,13 @@ genesis propagate [options]
 
 The run takes no environment argument. It walks control forward from every deployment branch's newest marker and routes each commit on its own, in control order. A commit is delivered to an environment when nothing upstream of it is still waiting to deploy the files that commit touches, and is held with its reason when something is. The run switches to the control branch inside its own session and leaves you on the branch you started on.
 
+Before anything moves, the run reads the remote once and asks every question it depends on: your working tree, the remote itself, the applied record, control's standing against the remote, whether the pipeline is enabled, the provider, the pull request branches, every deployment branch's state, and the pull request reviews. Where any of them fails, it refuses once, naming every problem it found, at the most serious exit code among them, and nothing in your clone has moved, not even the remote-tracking refs. A question that cannot be answered because an earlier one failed, such as everything read from control when control has moved under you, is named as not checked. Only a run that finds nothing brings what it read into the remote-tracking refs, creates the branches it needs, and walks.
+
+A pipeline that is not enabled is refused at `CONFIG`. Where `pipeline-apply` has applied it, the refusal is the disowned pipeline's; where it never has, the refusal names `pipeline.enabled`. A control branch whose configuration has no `pipeline` section is refused before the remote is read at all.
+
 ### Options
 
-`--dry-run` or `-n` reports what each environment would receive, per control commit, and writes nothing.
+`--dry-run` or `-n` reports what each environment would receive, per control commit, and writes nothing. It asks the same questions and refuses the same way. It brings the remote-tracking refs up to what it read of the remote, so it previews exactly what a run would read, but it creates, resets, and fast-forwards no branch. Each move a run would make before it walks is named as one the preview assumes: an unpushed control commit, a marker-only commit a run would reset, a branch a run would fast-forward, and a branch a run would create. With control ahead of the remote, the preview reads the pipeline as your unpushed control has it. A clone with no local control branch is refused, because a preview stands on control and creates nothing; check it out, or run without `--dry-run`, which creates it.
 
 `--yes` or `-y` publishes without asking. The verified delta for every environment is shown either way.
 
@@ -99,11 +103,15 @@ Reports where every environment of this deployment root stands.
 genesis pipeline-status [options]
 ```
 
-Each environment carries one reading of whether what its branch holds has been deployed, and the routing the walk decided stands beside it, so this command and `genesis propagate` can never disagree about what is held and why. The command writes nothing.
+Each environment carries one reading of whether what its branch holds has been deployed, and the routing the walk decided stands beside it, so this command and `genesis propagate` can never disagree about what is held and why.
+
+The command reads the remote once and brings the remote-tracking refs for control and the deployment branches up to it. It creates no local branch, moves no branch you have, and leaves a pull request branch's remote-tracking ref where the last publish put it. It reports control as the remote holds it, whatever branch you stand on: every environment is read from control's own files, with the same load a propagate makes, never from your working tree, and an unpushed control commit is not in effect. Where the remote cannot be reached it fails at `TEMPFAIL`, naming the network, and `--no-refresh` is the way to report without it.
+
+The command takes no lock, so it never makes a propagate fail. Where a propagate in this clone is running, it leaves the remote-tracking refs to that run, reads them as the run left them, and says the run is in progress. While that run stands on a deployment branch to deliver to it, your working tree has no deployment root to read, so the status refuses at `TEMPFAIL`, naming the run, and says to run it again once the run finishes or from another clone.
 
 ### Options
 
-`--no-refresh` reports from the remote-tracking refs this clone already has, without refreshing them first. The header then says the report is stale, the routing summary and the divergence cell are marked unverifiable, and every reading that rests on those refs alone is qualified where it is printed. This is the only command that takes the option.
+`--no-refresh` reports from the remote-tracking refs this clone already has, without reading the remote. The header then says the report is stale, the routing summary and the divergence cell are marked unverifiable, and every reading that rests on those refs alone is qualified where it is printed. This is the only command that takes the option.
 
 `--json` emits the canonical status record instead of the tree. The tree renders the same record, so the two never disagree.
 
