@@ -847,7 +847,7 @@ sub client_for_run {
 	# it at UNAVAILABLE as an API that went quiet (D119, noted 2026-10-13).
 	my $who = eval {$github->get_authorized_user};
 	if (Service::Github::Host::refused($@)) {
-		($opts{refuse} || \&bail)->({exitcode => $@->{exitcode}}, '%s', $@->{message});
+		_refuse_foreign_host($@, %opts);
 		return undef;
 	}
 	unless ($@ || $who) {
@@ -962,7 +962,7 @@ sub refuse_unreadable {
 	# A host that does not answer as GitHub is no API that went quiet, and it
 	# keeps its own code and words (D119, noted 2026-10-13).
 	if (Service::Github::Host::refused($why)) {
-		($opts{refuse} || \&bail)->({exitcode => $why->{exitcode}}, '%s', $why->{message});
+		_refuse_foreign_host($why, %opts);
 		return;
 	}
 
@@ -975,6 +975,22 @@ sub refuse_unreadable {
 		"pull request branch.\n\n%s",
 		$env, (length $said ? $said : 'The API did not answer.')
 	);
+}
+
+# }}}
+# _refuse_foreign_host - a host that does not answer as GitHub, in its own words {{{
+#
+# The caller's closure is handed the host beside the code, because a report
+# that softens every refusal into one sentence has to tell this CONFIG from the
+# token's (D119, noted 2026-10-13).  bail is handed the code alone, since its
+# options go on to the logger.
+sub _refuse_foreign_host {
+	my ($refusal, %opts) = @_;
+	return $opts{refuse}->(
+		{exitcode => $refusal->{exitcode}, host => $refusal->{host}},
+		'%s', $refusal->{message}
+	) if $opts{refuse};
+	bail({exitcode => $refusal->{exitcode}}, '%s', $refusal->{message});
 }
 
 # }}}

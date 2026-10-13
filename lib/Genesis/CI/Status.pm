@@ -618,11 +618,12 @@ sub render_tree {
 # This command never refuses on any of it.  The one refusal pipeline-status
 # keeps is the disowned pipeline, and the column already has to report a
 # proposed record flagged as possibly outdated where no token was there to
-# validate it with.  All three refusals the two subs below raise are
+# validate it with.  All four refusals the two subs below raise are
 # therefore rendered that same way, which are an API that will not answer, a
-# repository that resolves no owner and repository pair, and a token GitHub
-# will not name an owner for, and the run says once which of them it met.  A
-# writing run still refuses on all three, because a run about to open a pull
+# repository that resolves no owner and repository pair, a token GitHub will
+# not name an owner for, and a host that does not answer as GitHub, and the
+# run says once which of them it met.  A writing run still refuses on all
+# four, because a run about to open a pull
 # request branch cannot guess what a reviewer decided, which is why the
 # refusal closure is handed in from here rather than softened where the
 # refusals live.
@@ -650,16 +651,21 @@ sub _pull_request_state {
 	# anything else is read as the configuration case rather than taken
 	# apart as a hashref and died on.
 	#
-	# Three refusals reach here today.  A fourth raised at CONFIG would be
-	# read as the token case, because the pair resolves by the time this
-	# command runs, Genesis::Top having refused a repository that names none
-	# long before the column is read.
+	# A fourth is a host that answered, but not as GitHub (D119, noted
+	# 2026-10-13).  It is CONFIG like the token's, and the host it carries
+	# beside the code is what tells the two apart.  A fifth raised at CONFIG
+	# with no host would be read as the token case, because the pair
+	# resolves by the time this command runs, Genesis::Top having refused a
+	# repository that names none long before the column is read.
 	my $unconsulted;
 	my $refuse = sub {
 		my ($spec) = @_;
 		my $code = ref $spec eq 'HASH' ? ($spec->{exitcode} // 0) : 0;
+		my $host = ref $spec eq 'HASH' ? $spec->{host} : undef;
 		$unconsulted //= $code == UNAVAILABLE
 			? 'GitHub did not answer'
+			: defined $host
+				? "$host does not answer as GitHub"
 			: $top->source_control_repository
 				? 'GitHub named no owner for the token this run carries'
 				: 'This repository delivers into pull requests and resolves '.

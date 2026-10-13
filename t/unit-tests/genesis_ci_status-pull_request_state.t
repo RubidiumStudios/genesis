@@ -131,4 +131,38 @@ subtest 'a token GitHub names no owner for leaves the column unread' => sub {
 		'and no state is carried for any environment');
 };
 
+# A client whose host answered twice and neither time as GitHub, which is
+# refused at CONFIG like the token case but is the repository's host rather
+# than the token the operator set (D119, noted 2026-10-13).
+{
+	package Foreign::Github;
+	sub new { return bless {}, shift }
+	sub base_url { return 'https://forge.example/api/v3' }
+	sub get_authorized_user {
+		Service::Github::Host::refuse('forge.example',
+			'https://forge.example/api/v3/user', '404 Not Found');
+	}
+}
+
+subtest 'a host that does not answer as GitHub leaves the column unread' => sub {
+	plan tests => 5;
+
+	local $ENV{GITHUB_AUTH_TOKEN} = 'a-token';
+	no warnings 'once';
+	local *Service::Github::new = sub { return Foreign::Github->new };
+
+	my ($said, $raised, $github, $state_of) = asked(Paired::Top->new);
+
+	is($raised, '', 'the report is not ended by the host');
+	# What the operator has to change is the repository's host or the
+	# provider, so the sentence names the host, and it goes red against the
+	# token sentence a CONFIG refusal reads as otherwise.
+	like($said, qr/forge\.example does not answer as GitHub.*pull request column/s,
+		'and standard error says the host is not GitHub');
+	unlike($said, qr/token/, 'and says nothing of the token');
+	is($github, undef, 'no client goes to the walk');
+	is_deeply($state_of, {},
+		'and no state is carried for any environment');
+};
+
 done_testing;

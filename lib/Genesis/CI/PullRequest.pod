@@ -1504,6 +1504,45 @@ B<Examples:>
     sync_pull_request($github, 'acme/deployments', $record, env => $env);
     # returns undef, where nothing was rebuilt and there is nothing to open
 
+=head1 INTERNAL FUNCTIONS
+
+=head2 _refuse_foreign_host($refusal, %opts)
+
+    _refuse_foreign_host($@, %opts) if Service::Github::Host::refused($@);
+
+Refuses a host that answered twice and neither time as GitHub, in
+L<Service::Github::Host/refuse>'s words and at its code, C<CONFIG> (D119,
+noted 2026-10-13). L</client_for_run($top [, %opts])> and
+L</refuse_unreadable($env, $why, %opts)> both route it here.
+
+A caller's C<refuse> closure is handed C<{exitcode =E<gt> CONFIG, host =E<gt>
+$host}>, because a report that softens every refusal into one sentence, as
+C<genesis pipeline-status> does, has to tell this C<CONFIG> from the token's.
+C<bail> is handed the code alone, since its options go on to the logger.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$refusal>
+
+The C<Service::Github::Host::Refusal> an C<eval> caught.
+
+=item C<%opts>
+
+C<refuse>, the caller's own refusal closure, used in place of C<bail>.
+
+=back
+
+B<Returns:> What the closure returns, where one was given.
+
+B<Errors:> Without a closure, the refusal itself, at C<CONFIG>.
+
+B<Examples:>
+
+    _refuse_foreign_host($@, refuse => $refuse);
+    # $refuse gets ({exitcode => 78, host => 'forge.example'}, '%s', $message)
+
 =head1 SEE ALSO
 
 L<Genesis::CI::Walk>, L<Genesis::CI::Publish>, L<Genesis::CI::Marker>,

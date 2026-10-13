@@ -586,11 +586,14 @@ The third of them, a repository that resolves no C<owner/repo> pair, is one
 this command never meets, because C<Genesis::Top> refuses such a repository at
 C<Genesis::Exit/CONFIG> before the column is read at all. The closure answers
 it anyway, so a later change to that order reads as a sentence rather than as
-a report with no reason on it. The run then says once, on
-standard error, which of the three it met and what the column is reading
+a report with no reason on it. The fourth is a repository whose host answered,
+but not as GitHub (D119, noted 2026-10-13): it arrives at C<CONFIG> as the
+token's does, carrying the host beside the code, and the sentence names the
+host rather than the token. The run then says once, on
+standard error, which of the four it met and what the column is reading
 instead, and every environment the client would have served renders as the
 no-token case does, reading its proposed record and flagged as possibly
-outdated. C<genesis propagate> still refuses on all three, because a run that
+outdated. C<genesis propagate> still refuses on all four, because a run that
 is about to write a pull request branch cannot guess what a reviewer decided.
 
 B<Parameters:>
