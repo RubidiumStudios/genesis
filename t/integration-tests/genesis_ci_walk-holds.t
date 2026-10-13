@@ -120,7 +120,11 @@ subtest 'a held pull request environment reads held and not idempotent' => sub {
 	# arm answers idempotent for any environment with nothing due, and a
 	# word written onto the record from there is the first thing the
 	# report's own settling reads, which takes the qualifier with it.
-	my $h = chained_harness(certified => ['qa']);
+	#
+	# The GitHub double gives the run a token, because a run with a pull
+	# request environment and none refuses before it walks (D55, noted
+	# 2026-10-13), and this row is about the walk.
+	my $h = chained_harness(certified => ['qa'], github => 1);
 
 	my $due = commit_on_control($h,
 		files   => {'qa.yml' => env_file(env => 'qa', prior => 'lab',

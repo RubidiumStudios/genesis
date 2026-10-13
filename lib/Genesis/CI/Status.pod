@@ -73,9 +73,8 @@ the record itself is the return value.
 It reads GitHub for one thing alone, which is the pull request each
 environment whose policy asks for one has open. The client is built by
 C<Genesis::CI::PullRequest::client_for_run>, and only where
-C<GITHUB_AUTH_TOKEN> is set, because a client built without one warns that the
-run's branches are still written and published and this command writes
-nothing. What the read answers is carried onto the walk's own records by
+C<GITHUB_AUTH_TOKEN> is set, because a client asked for without one refuses, as
+a writing run must, and this command writes nothing. What the read answers is carried onto the walk's own records by
 C<Genesis::CI::PullRequest::carry_state>, and an environment whose pull
 request a reviewer has approved is frozen by
 C<Genesis::CI::PullRequest::freeze>, so the report and the propagation run
@@ -573,11 +572,10 @@ which C<genesis propagate> asks with a selection of its own. The selection
 here is the environments in scope that would deliver into a pull request, and
 no others.
 
-It asks for a client only where C<GITHUB_AUTH_TOKEN> is set. A client built
-without one warns that the run's branches are still written and published,
-which is false of a command that writes nothing, and a missing token is the
-fallback the pull request column is built for rather than something to warn an
-operator about.
+It asks for a client only where C<GITHUB_AUTH_TOKEN> is set. A client asked
+for without one refuses, as a writing run must (D55, noted 2026-10-13), and a
+missing token is the fallback the pull request column is built for rather than
+something to refuse a report on.
 
 No refusal the two subs raise ends this command. Both take a closure that
 records why the API went unasked and returns, so an API that will not answer

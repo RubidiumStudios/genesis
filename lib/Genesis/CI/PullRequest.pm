@@ -533,7 +533,8 @@ sub state_for_scope {
 
 	my $github = client_for_run($top,
 		records => [map {{
-			pr => $_->{pr_branch} ? {branch => $_->{pr_branch}} : undef,
+			env => $_->{env},
+			pr  => $_->{pr_branch} ? {branch => $_->{pr_branch}} : undef,
 		}} @$envs],
 		refuse  => $refuse,
 		dry_run => $opts{dry_run});
@@ -796,22 +797,35 @@ sub client_for_run {
 		return undef;
 	}
 
-	# The run carries on without a token and says so, and everything the API
-	# would have decided is left to the next run that has one.  A writing
-	# run still publishes each branch; what it cannot do is open or update
-	# the pull request that names it.  A preview writes neither, so it says
-	# what a real run would do (D44, noted 2026-10-09).
+	# Without a token the review state cannot be read, and what a reviewer
+	# decided is what decides whether a pull request branch is rebuilt or
+	# frozen, so a writing run refuses rather than guess, at CONFIG because
+	# no retry sets a token (D55, noted 2026-10-13).  A preview writes
+	# nothing and runs on, saying what a real run would do (D44).  Only an
+	# environment that delivers into a pull request asks for the review, so
+	# a run whose clients are wanted for proposed records alone is not
+	# refused for them.
 	unless ($ENV{GITHUB_AUTH_TOKEN}) {
-		warning($opts{dry_run}
-			? "#C{GITHUB_AUTH_TOKEN} is not set, so a real run would open no ".
-			  "pull request for the environments whose policy asks for one.  ".
-			  "It would still write and publish their branches, and the next ".
-			  "run with a token opens the pull requests."
-			: "#C{GITHUB_AUTH_TOKEN} is not set, so no pull request is opened ".
-			  "for the environments whose policy asks for one.  Their branches ".
-			  "are still written and published, and the next run with a token ".
-			  "opens the pull requests."
-		);
+		my @delivering = map {$_->{env} // ()} grep {$_->{pr}} @$records;
+		return undef unless grep {$_->{pr}} @$records;
+		my $named = @delivering ? join(', ', map {"#C{$_}"} @delivering) : 'this run';
+		if ($opts{dry_run}) {
+			warning(
+				"#C{GITHUB_AUTH_TOKEN} is not set, so this preview cannot read ".
+				"the review state of the pull requests %s deliver%s into, and a ".
+				"real run would refuse until it is set.",
+				$named, @delivering == 1 ? 's' : '');
+			return undef;
+		}
+		($opts{refuse} || \&bail)->(
+			{exitcode => Genesis::Exit::CONFIG},
+			"#C{GITHUB_AUTH_TOKEN} is not set, so this run cannot read the ".
+			"review state of the pull requests %s deliver%s into, and it will ".
+			"not guess what to do with %s pull request branch%s.\n\n".
+			"Set #C{GITHUB_AUTH_TOKEN} to a token that can read the ".
+			"repository's pull requests, and run this again.",
+			$named, @delivering == 1 ? 's' : '',
+			@delivering == 1 ? 'its' : 'their', @delivering == 1 ? '' : 'es');
 		return undef;
 	}
 

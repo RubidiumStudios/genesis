@@ -609,11 +609,10 @@ sub render_tree {
 # The answer is keyed by environment, and an environment it holds no key for
 # is one nothing was read about.
 #
-# The client is asked for only where a token exists to build it with.  Built
-# without one it warns that the run's branches are still written and published,
-# which is false of a command that writes nothing at all, and a missing token
-# is the fallback the pull request column is built for rather than something to
-# warn an operator about.
+# The client is asked for only where a token exists to build it with.  Asked
+# without one it refuses, as a writing run must (D55, noted 2026-10-13), and a
+# missing token is the fallback the pull request column is built for rather
+# than something to refuse a report on.
 #
 # This command never refuses on any of it.  The one refusal pipeline-status
 # keeps is the disowned pipeline, and the column already has to report a

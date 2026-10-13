@@ -113,8 +113,11 @@ subtest 'an environment that takes a pull request is delivered onto its own bran
 
 	# pr mode writes genesis.pipeline.require_pr on the environment file,
 	# which is the per-environment key that says a delivery has to arrive as
-	# a proposal rather than as a push.
-	my $h = ready_harness(envs => ['qa'], mode => 'pr',
+	# a proposal rather than as a push.  The GitHub double gives the run a
+	# token, because a run with a pull request environment and none refuses
+	# before it walks (D55, noted 2026-10-13), and this row is about the
+	# delivery.
+	my $h = ready_harness(envs => ['qa'], mode => 'pr', github => 1,
 		kit => 'omega-v2.7.0');
 	# The kit is triggering content of every environment's set, so the
 	# commit routes to qa without the environment file being rewritten and
