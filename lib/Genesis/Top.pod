@@ -2060,6 +2060,31 @@ B<Examples:>
     my $repo = $top->source_control_repository();
     # returns 'team/bosh-deployments'
 
+=head2 github_client
+
+    my $github = $top->github_client();
+
+A L<Service::Github> client for the host the repository is on, with the
+repository's owner as its organisation (D119). A repository on github.com is
+called at C<https://api.github.com>, and one on any other host at
+C<https://E<lt>hostE<gt>/api/v3>, where its answers say whether it is GitHub
+at all (L<Service::Github::Host>). The pull request lifecycle's client and
+C<pipeline-apply>'s branch protection are both built here, so neither is
+built for github.com whatever the repository's host.
+
+B<Parameters:> None.
+
+B<Returns:> A C<Service::Github> object. Building it makes no call.
+
+B<Errors:> Those of L</source_control_repository>, raised by
+L</_source_control> when the identity cannot be resolved.
+
+B<Examples:>
+
+    my $github = $top->github_client();
+    # for git@git.corp.example:team/bosh.git, base_url is
+    # 'https://git.corp.example/api/v3'
+
 =head2 source_control_resolved
 
     my $rows = $top->source_control_resolved();

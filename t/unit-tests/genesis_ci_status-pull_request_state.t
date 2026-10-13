@@ -42,6 +42,9 @@ $ENV{NOCOLOR} = 1;
 	package Paired::Top;
 	sub new { return bless {}, shift }
 	sub source_control_repository { return 'owner/repo' }
+	# The client is built by Top for the repository's host (D119), and a row
+	# that stands a client in replaces Service::Github::new, so this asks it.
+	sub github_client { return Service::Github->new(org => 'owner', host => 'github.com') }
 }
 
 # A client GitHub answers for without naming anybody, which client_for_run

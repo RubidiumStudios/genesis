@@ -22,7 +22,6 @@ use Genesis::CI::RunFailure qw/one_line/;
 use Genesis::CI::Status;
 use Genesis::CI::Walk;
 use Service::Git;
-use Service::Github;
 use Service::Vault::Remote;
 
 use File::Basename qw/dirname/;
@@ -153,7 +152,6 @@ sub apply {
 	# protection is the one stage an operator can apply later.
 	if ($ENV{GITHUB_AUTH_TOKEN}) {
 		my $owner_repo = $top->source_control_repository;
-		my ($gh_owner) = split m{/}, $owner_repo, 2;
 		my @branches = ({
 			branch => $top->control_branch,
 			rules  => _protection_rules_for($top, $top->control_branch,
@@ -178,7 +176,7 @@ sub apply {
 			};
 		}
 		_apply_branch_protection(
-			Service::Github->new(org => $gh_owner), $owner_repo,
+			$top->github_client, $owner_repo,
 			branches => \@branches,
 			dry_run  => $dry_run,
 		);

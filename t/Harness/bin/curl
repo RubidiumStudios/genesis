@@ -75,10 +75,46 @@ if ($state->{unreachable}) {
 	exit 6;
 }
 
+# The host a request went to, read the way D119 reads it: github.com's API is
+# api.github.com, and every other host's is the host itself.  A host the state
+# names no kind for answers as GitHub, so a row that never declares one meets
+# the double it always has.
+my $host = !defined $url                               ? undef
+	: $url =~ m{^https?://api\.github\.com(?:[/:?]|$)}i ? 'github.com'
+	: $url =~ m{^https?://([^/:?]+)}                     ? lc $1
+	:                                                      undef;
+my $kind = (defined $host && $state->{hosts}{$host})
+	? ($state->{hosts}{$host}{kind} // 'github') : 'github';
+
+if ($kind eq 'silent') {
+	printf STDERR "curl: (7) Failed to connect to %s port 443 after 0 ms: ".
+		"Couldn't connect to server\n", $host;
+	exit 7;
+}
+
 my $answer = [];
 my $status = 200;
 
-if (!defined $url) {
+if ($kind eq 'other') {
+	# Something that answers, but not as GitHub: no GitHub headers, and a page
+	# rather than JSON, which is what a forge or a proxy at the wrong base
+	# gives.  No route below is reached, because nothing there is GitHub's.
+	my $headers = "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n";
+	if ($head) {
+		print $headers;
+		exit 0;
+	}
+	print STDERR $headers;
+	my $page = "<html><body>Not Found</body></html>";
+	if (defined $outfile) {
+		open my $fh, '>', $outfile or exit 2;
+		print $fh $page;
+		close $fh;
+	} else {
+		print $page;
+	}
+	exit 0;
+} elsif (!defined $url) {
 	$status = 404;
 	$answer = {message => 'No url was given to the fixture curl'};
 } elsif ($url =~ m{/repos/[^/]+/[^/]+/pulls/(\d+)/reviews(?:\?|$)}) {
@@ -203,7 +239,16 @@ if (!defined $url) {
 	$answer = {login => $state->{user} // 'harness'};
 }
 
-my $line = sprintf("HTTP/1.1 %d %s\r\n\r\n", $status, $REASON{$status} // 'OK');
+# GitHub's headers go on every answer, a 404 included, as they do on the real
+# API, and an enterprise host carries its version beside them (D119).
+my $line = sprintf("HTTP/1.1 %d %s\r\n", $status, $REASON{$status} // 'OK')
+	. "X-GitHub-Request-Id: HARNESS:$$\r\n"
+	. "X-GitHub-Media-Type: github.v3; format=json\r\n"
+	. ($kind eq 'enterprise'
+		? sprintf("X-GitHub-Enterprise-Version: %s\r\n",
+			$state->{hosts}{$host}{version} // '3.14.0')
+		: '')
+	. "Content-Type: application/json; charset=utf-8\r\n\r\n";
 if ($head) {
 	print $line;
 } else {

@@ -175,6 +175,43 @@ subtest 'a call that names a file gets the body there' => sub {
 		'and wrote the body into rather than onto stdout');
 };
 
+subtest 'each host answers as the kind a row gave it' => sub {
+	plan tests => 9;
+
+	my $h  = make_harness(envs => ['prod'], vault => 0, github => 1);
+	my $gh = $h->gh;
+	gh_host($gh, 'git.corp.example', kind => 'enterprise', version => '3.15.2');
+	gh_host($gh, 'forge.example',    kind => 'other');
+	gh_host($gh, 'down.example',     kind => 'silent');
+	gh_host($gh, 'github.com',       kind => 'other');
+
+	local $ENV{PATH} = join ':', $gh->{bin}, $ENV{PATH};
+	my $ask = sub {[curl('GET', $_[0])]};
+
+	# GitHub's headers go on every answer from a host nobody declared, as
+	# they do on the real API, and a declared enterprise adds its version.
+	my $plain = $ask->('http://api.github.test/user');
+	like($plain->[3], qr/^X-GitHub-Request-Id: /mi, 'an undeclared host answers as GitHub');
+	unlike($plain->[3], qr/^X-GitHub-Enterprise-Version:/mi, 'and names no enterprise version');
+
+	my $ghes = $ask->('https://git.corp.example/api/v3/user');
+	like($ghes->[3], qr/^X-GitHub-Media-Type: /mi, 'an enterprise host answers as GitHub');
+	like($ghes->[3], qr/^X-GitHub-Enterprise-Version: 3\.15\.2\r?$/mi,
+		'and carries the version it was given');
+
+	my $forge = $ask->('https://forge.example/api/v3/user');
+	is($forge->[0], 404, 'another host answers, with a 404');
+	unlike($forge->[3], qr/X-GitHub-/i, 'and none of GitHub\'s headers');
+	like($forge->[2], qr/<html>/, 'and a page rather than JSON');
+
+	is($ask->('https://down.example/api/v3/user')->[0], 599,
+		'a silent host does not answer at all');
+
+	# api.github.com is github.com's API, so it answers as github.com does.
+	unlike($ask->('https://api.github.com/user')->[3], qr/X-GitHub-/i,
+		'a request to api.github.com answers as the host github.com');
+};
+
 subtest 'six calls at once keep every change and every line' => sub {
 	plan tests => 3;
 

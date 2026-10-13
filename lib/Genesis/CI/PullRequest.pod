@@ -1108,20 +1108,27 @@ rather than what it writes.
 
 B<Returns:> A C<Service::Github> client, or C<undef> where the run needs none,
 where no token is set, and where a refusal closure that returns has been
-given one of the two refusals below.
+given one of the three refusals below.
 
 B<Errors:> Refuses with C<CONFIG> where an environment would deliver into a
 pull request and C<pipeline.source_control.repository> is neither set nor
 derivable from a git remote, naming the key to write. Refuses with C<CONFIG>
 again where the authentication call is answered and the answer names no user,
-because what the operator has to change is the token they set. Both refusals
-go through C<refuse> where the caller gave one. An authentication call that is
-not answered raises nothing here.
+because what the operator has to change is the token they set. Refuses with
+C<CONFIG> a third time where the repository's host answered the
+authentication call twice and neither time as GitHub, in
+L<Service::Github::Host/refuse>'s words (D119, noted 2026-10-13). Every
+refusal goes through C<refuse> where the caller gave one. An authentication
+call that is not answered raises nothing here.
+
+The client is L<Genesis::Top/github_client>'s, built for the host the
+repository is on, so a GitHub Enterprise repository is called at its own
+C</api/v3>.
 
 B<Examples:>
 
     client_for_run($top, records => [{pr => {branch => 'pr/prod/bosh'}}]);
-    # returns a Service::Github built against the owner of the pair
+    # returns a Service::Github built for the repository's host and owner
 
     client_for_run($top, records => [{pr => undef, proposed => undef}]);
     # returns undef, and the run makes no call to the API
@@ -1256,7 +1263,11 @@ the caller has a session to close first.
 
 B<Returns:> Nothing. It does not return.
 
-B<Errors:> The refusal itself, at C<UNAVAILABLE>.
+B<Errors:> The refusal itself, at C<UNAVAILABLE>. A C<$why> that is
+L<Service::Github::Host>'s refusal, a host that answered twice and neither
+time as GitHub, keeps its own code, C<CONFIG>, and its own words, because what
+the operator has to change is the repository's host or the provider and not
+the state of an API (D119, noted 2026-10-13).
 
 B<Examples:>
 

@@ -815,8 +815,7 @@ sub client_for_run {
 		return undef;
 	}
 
-	my ($owner) = split m{/}, $owner_repo, 2;
-	my $github = Service::Github->new(org => $owner);
+	my $github = $top->github_client;
 
 	# The client authenticates once as it is built, which is what makes one
 	# client serve the whole run rather than one per environment, and it asks
@@ -842,7 +841,15 @@ sub client_for_run {
 	# endpoint will not name an owner for is one no reader here can trust, so
 	# handing it back would answer with a state the refusal has just said
 	# nothing can be concluded from.
+	#
+	# A host that answered twice and neither time as GitHub is refused at its
+	# own code, through the same closure, because a reader below would refuse
+	# it at UNAVAILABLE as an API that went quiet (D119, noted 2026-10-13).
 	my $who = eval {$github->get_authorized_user};
+	if (Service::Github::Host::refused($@)) {
+		($opts{refuse} || \&bail)->({exitcode => $@->{exitcode}}, '%s', $@->{message});
+		return undef;
+	}
 	unless ($@ || $who) {
 		($opts{refuse} || \&bail)->(
 			{exitcode => Genesis::Exit::CONFIG},
@@ -951,6 +958,13 @@ sub pr_state {
 # middle of a paragraph and two wrap widths in one message.
 sub refuse_unreadable {
 	my ($env, $why, %opts) = @_;
+
+	# A host that does not answer as GitHub is no API that went quiet, and it
+	# keeps its own code and words (D119, noted 2026-10-13).
+	if (Service::Github::Host::refused($why)) {
+		($opts{refuse} || \&bail)->({exitcode => $why->{exitcode}}, '%s', $why->{message});
+		return;
+	}
 
 	my $said = bail_text($why);
 

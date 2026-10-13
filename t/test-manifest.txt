@@ -34,6 +34,7 @@ unit-tests/ipv4-core.t
 unit-tests/boolean-core.t
 unit-tests/service_github-core.t
 unit-tests/service_github-mocked.t
+unit-tests/service_github-host.t         # a host's answers say whether it is GitHub; the cache, the retry once, and the refusal
 unit-tests/service_bosh-base.t
 unit-tests/service_bosh-create_env_proxy.t
 unit-tests/service_bosh-director.t
@@ -442,6 +443,7 @@ integration-tests/genesis_ci_pullrequest-aggregate.t          # two due commits 
 integration-tests/genesis_ci_pullrequest-align.t              # the pull request branch is levelled with what the remote carries now
 integration-tests/genesis_ci_pullrequest-branch_lifecycle.t   # nothing due takes the branch off R and out of the clone together
 integration-tests/genesis_ci_pullrequest-client_and_record.t  # one GitHub client serves a whole run, and only where one is needed
+integration-tests/genesis_ci_github-host_judgement.t          # a host is judged GitHub by its answers, called at its own base, and cached unless it is github.com
 integration-tests/genesis_ci_pullrequest-preview.t            # the dry run says what it would title the pull request, with a token and without
 integration-tests/genesis_ci_pullrequest-proposed_record.t    # a run that opens a pull request writes the run's own pointer to it
 integration-tests/genesis_ci_pullrequest-publish.t            # each branch is pushed against the tip the run read, and only the moved one is refused

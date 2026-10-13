@@ -58,7 +58,7 @@ our @EXPORT = qw/
 	shuttle_spy shuttle_requests
 
 	github_double gh_pull_request gh_close_pr gh_merge_pr
-	gh_protection gh_unreachable gh_reachable gh_no_token gh_calls
+	gh_protection gh_host gh_unreachable gh_reachable gh_no_token gh_calls
 
 	automation_blocks automation_block_lines load_with automated_config
 	compilable_pipeline shuttle
@@ -4440,6 +4440,25 @@ sub gh_protection {
 		$state->{admin} = ($opts{admin} ? 1 : 0) if defined $opts{admin};
 		$state->{protection}{$opts{branch}} = $opts{settings} if $opts{branch};
 		return $state->{protection};
+	});
+}
+
+# }}}
+# gh_host - what one host answers as {{{
+#
+# A host answers as github unless a row says otherwise: enterprise carries
+# X-GitHub-Enterprise-Version beside GitHub's headers, other answers a page
+# without them, and silent does not connect (D119).  github.com is the host a
+# request to api.github.com goes to.
+sub gh_host {
+	my ($gh, $host, %opts) = @_;
+	my $self = $gh->{harness};
+	return $self->_gh_change(sub {
+		$_[0]->{hosts}{lc $host} = {
+			kind => $opts{kind} // 'github',
+			(defined $opts{version} ? (version => $opts{version}) : ()),
+		};
+		return undef;
 	});
 }
 

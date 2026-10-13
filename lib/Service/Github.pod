@@ -117,6 +117,15 @@ The GitHub (or GitHub Enterprise) domain. Defaults to C<'github.com'>.
 The GitHub organisation whose repositories are queried. Defaults to
 C<'genesis-community'>.
 
+=item host
+
+The host the repository is on, for a client the pipeline builds (D119). The
+client is then called at L<Service::Github::Host/base_for>'s base for it,
+C<https://api.github.com> for github.com and C<https://E<lt>hostE<gt>/api/v3>
+for any other, and its pipeline calls are judged by their answers through
+L</_api>. A client built without a host keeps C<api.E<lt>domainE<gt>>, which is
+what the kit providers use.
+
 =item tls
 
 TLS mode for HTTPS connections. Accepted values are C<'yes'> (verify
@@ -152,6 +161,10 @@ B<Examples:>
   );
   # Returns: a Service::Github object
 
+  # A pipeline's client, for the host its repository is on
+  my $gh = Service::Github->new(org => 'acme', host => 'git.corp.example');
+  # base_url: 'https://git.corp.example/api/v3'
+
 =head1 METHODS
 
 =head2 label
@@ -174,9 +187,11 @@ B<Examples:>
 
   my $url = $gh->base_url();
 
-Returns the base API URL used for all GitHub API requests. The scheme is
-C<https://> unless TLS mode is C<'no'>, in which case C<http://> is used.
-The host is always prefixed with C<api.>, e.g. C<https://api.github.com>.
+Returns the base API URL used for all GitHub API requests. A client built
+with a C<host> is called at that host's base, C<https://api.github.com> for
+github.com and C<https://E<lt>hostE<gt>/api/v3> for any other (D119).
+Otherwise the scheme is C<https://> unless TLS mode is C<'no'>, in which case
+C<http://> is used, and the domain is prefixed with C<api.>.
 
 B<Returns:> A string such as C<'https://api.github.com'>.
 
@@ -185,6 +200,9 @@ B<Examples:>
   my $gh = Service::Github->new();
   print $gh->base_url();
   # Returns: 'https://api.github.com'
+
+  Service::Github->new(host => 'git.corp.example')->base_url;
+  # Returns: 'https://git.corp.example/api/v3'
 
 =head2 repos_url
 
@@ -1528,6 +1546,56 @@ B<Examples:>
   # returns (0, 'HTTP 403 - Forbidden') for a token without admin
 
 =head1 INTERNAL METHODS
+
+=head2 _api
+
+  my ($code, $line, $body, $headers, $err) = $gh->_api($method, $url, @curl_args);
+
+One API call, judged by the host's answer (D119, noted 2026-10-13). It takes
+and answers what C<Genesis::curl> does, and the seven calls the pipeline makes,
+L</get_authorized_user>, L</list_prs>, L</pr_reviews>, L</create_pr>,
+L</update_pr>, L</list_rulesets> and L</set_ruleset>, go through it.
+
+A client built without a C<host>, or for github.com, passes every answer
+through untouched. For any other host:
+
+=over 4
+
+=item *
+
+an answer carrying GitHub's headers records the host through
+L<Service::Github::Host/record> and goes to the caller, a C<404> included,
+because GitHub's own C<404> is the API answering;
+
+=item *
+
+an answer without them, or a C<410>, forgets the host and the call is made once
+more;
+
+=item *
+
+a second answer without them is refused at C<CONFIG> through
+L<Service::Github::Host/refuse>;
+
+=item *
+
+a call that got no answer (status C<599>) goes to the caller unretried, whose
+readers refuse it at C<UNAVAILABLE> as they always have.
+
+=back
+
+B<Parameters:> As C<Genesis::curl>'s positional form.
+
+B<Returns:> What C<Genesis::curl> returns for the answer kept.
+
+B<Errors:> Refuses at C<CONFIG> a host that answered twice and neither time as
+GitHub: a C<bail> outside an C<eval>, and a C<Service::Github::Host::Refusal>
+inside one.
+
+B<Examples:>
+
+  my ($code, $line, $data) = $self->_api(
+    "GET", $self->rulesets_url($owner_repo), undef, undef, 0, $self->{creds});
 
 =head2 _next_page
 

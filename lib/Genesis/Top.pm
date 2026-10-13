@@ -1712,6 +1712,21 @@ sub source_control_repository {
 }
 
 # }}}
+# github_client - a GitHub client for the host the repository is on {{{
+#
+# Built for the identity's host, so a GitHub Enterprise repository is called
+# at its own /api/v3 and its answers say whether it is GitHub at all (D119).
+sub github_client {
+	my ($self) = @_;
+	require Service::Github;
+	my $identity = $self->_source_control->{identity};
+	return Service::Github->new(
+		org  => $identity->{owner},
+		host => $identity->{host},
+	);
+}
+
+# }}}
 # source_control_resolved - every source-control value and its tier {{{
 #
 # What pipeline-describe prints, so an override that has drifted away from

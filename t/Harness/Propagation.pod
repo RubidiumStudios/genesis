@@ -1446,6 +1446,19 @@ set, so a row can read the settings back.  C<branch> and C<settings> name one
 branch's protection, and C<admin> off makes every protection call answer 403,
 which is the non-admin case.
 
+=head2 gh_host($gh, $host, %opts)
+
+Declares what one host answers as (D119). A host answers as C<github> unless a
+row says otherwise: C<kind =E<gt> 'enterprise'> adds
+C<X-GitHub-Enterprise-Version>, from C<version> (default C<3.14.0>), beside
+GitHub's headers; C<'other'> answers a C<404> page without them; and
+C<'silent'> does not connect, so the caller's C<curl> fails as for a host that
+is down. A request to C<api.github.com> goes to the host C<github.com>, and
+any other request goes to the host its URL names.
+
+    gh_host($gh, 'git.corp.example', kind => 'enterprise', version => '3.15.2');
+    gh_host($gh, 'git.corp.example', kind => 'other');
+
 =head2 gh_unreachable($gh)
 
 Takes the API away, so every call reads as a failed C<curl> rather than as an

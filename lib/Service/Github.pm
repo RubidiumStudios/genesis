@@ -5,6 +5,7 @@ use warnings;
 use Genesis;
 use Genesis::UI;
 use Genesis::Term qw/csprintf/;
+use Service::Github::Host;
 
 use JSON::PP;
 use Time::HiRes qw/gettimeofday/;
@@ -29,9 +30,12 @@ sub new {
 	} elsif ($ENV{GITHUB_AUTH_TOKEN}) {
 		$creds ="Bearer $ENV{GITHUB_AUTH_TOKEN}"
 	}
+	# A client built for a repository's host is called at that host's API and
+	# judges its answers (D119); one built without a host keeps api.<domain>.
 	bless({
 		domain => $config{domain} || DEFAULT_DOMAIN,
 		org    => $config{org}    || DEFAULT_ORG,
+		host   => defined $config{host} ? lc $config{host} : undef,
 		creds  => $creds,
 		tls    => $tls,
 		label  => $config{label}
@@ -48,7 +52,7 @@ sub get_authorized_user {
 	my ($self) = @_;
 	return unless $self->{creds};
 	if ($self->{creds} =~ /^Bearer (.+)$/ || $self->{creds} =~ /^([^:]+):(.+)$/) {
-		my ($code,$msg,$data) = curl(
+		my ($code,$msg,$data) = $self->_api(
 			"GET", $self->base_url . "/user",
 			undef, undef, 0, $self->{creds}
 		);
@@ -121,7 +125,36 @@ sub release_version_urls {
 # base_url - the base url under which all requests are made {{{
 sub base_url {
 	my ($self) = @_;
+	return Service::Github::Host::base_for($self->{host}) if defined $self->{host};
 	sprintf("%s://api.%s", ($self->{tls} eq 'no' ? "http" : "https"), $self->{domain});
+}
+
+# }}}
+# _api - one call, judged by the host's answer {{{
+#
+# Takes and answers what Genesis::curl does.  A client built for a host other
+# than github.com records the host from an answer carrying GitHub's headers,
+# and an answer without them, or a 410, clears the host and is asked once
+# more.  A second answer without them is refused at CONFIG.  GitHub's own 404
+# is the API answering and goes to the caller, and a call that got no answer
+# is not asked again (D119, noted 2026-10-13).
+sub _api {
+	my ($self, @args) = @_;
+	my @answer = curl(@args);
+	my $host = $self->{host};
+	return @answer unless defined $host && $host ne 'github.com';
+
+	for my $retry (0, 1) {
+		my ($code, $line, undef, $headers) = @answer;
+		return @answer if $code == 599;
+		if (Service::Github::Host::is_github($headers) && ($retry || $code != 410)) {
+			Service::Github::Host::record($host, $headers);
+			return @answer;
+		}
+		Service::Github::Host::forget($host);
+		Service::Github::Host::refuse($host, $args[1], $line) if $retry;
+		@answer = curl(@args);
+	}
 }
 
 # }}}
@@ -519,7 +552,7 @@ sub list_prs {
 
 	my @all_prs;
 	while ($url) {
-		my ($code, $msg, $data, $headers) = curl("GET", $url, undef, undef, 0, $self->{creds});
+		my ($code, $msg, $data, $headers) = $self->_api("GET", $url, undef, undef, 0, $self->{creds});
 		bail(
 			"Failed to list pull requests for #C{%s}: HTTP %s - %s",
 			$owner_repo, $code, $msg
@@ -574,7 +607,7 @@ sub pr_reviews {
 	my @all;
 	while ($url) {
 		my ($code, $msg, $data, $headers) =
-			curl("GET", $url, undef, undef, 0, $self->{creds});
+			$self->_api("GET", $url, undef, undef, 0, $self->{creds});
 		bail(
 			"Failed to read the review state of pull request #%d for #C{%s}: ".
 			"HTTP %s - %s", $number, $owner_repo, $code, $msg
@@ -707,7 +740,7 @@ sub create_pr {
 		base  => $opts{base},
 	});
 
-	my ($code, $msg, $data) = curl(
+	my ($code, $msg, $data) = $self->_api(
 		"POST", $self->pulls_url($owner_repo),
 		{'Content-Type' => 'application/json'}, $payload, 0, $self->{creds}
 	);
@@ -739,7 +772,7 @@ sub update_pr {
 	$update{state} = $opts{state} if defined $opts{state};
 
 	my $payload = JSON::PP->new->encode(\%update);
-	my ($code, $msg, $data) = curl(
+	my ($code, $msg, $data) = $self->_api(
 		"PATCH", $self->pulls_url($owner_repo, $number),
 		{'Content-Type' => 'application/json'}, $payload, 0, $self->{creds}
 	);
@@ -776,7 +809,7 @@ sub list_rulesets {
 	my ($self, $owner_repo) = @_;
 	bail("Missing owner/repo for list_rulesets") unless $owner_repo;
 
-	my ($code, $msg, $data) = curl(
+	my ($code, $msg, $data) = $self->_api(
 		"GET", $self->rulesets_url($owner_repo), undef, undef, 0, $self->{creds}
 	);
 	return [] unless $code == 200;
@@ -812,7 +845,7 @@ sub set_ruleset {
 		rules => $opts{rules} || [],
 	});
 
-	my ($code, $msg) = curl(
+	my ($code, $msg) = $self->_api(
 		($standing ? "PUT" : "POST"),
 		$self->rulesets_url($owner_repo, $standing ? $standing->{id} : undef),
 		{'Content-Type' => 'application/json'}, $payload, 0, $self->{creds}

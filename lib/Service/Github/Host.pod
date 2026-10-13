@@ -1,0 +1,359 @@
+=head1 NAME
+
+Service::Github::Host - whether a host speaks GitHub's API, from its own answers
+
+=head1 SYNOPSIS
+
+  use Service::Github::Host;
+
+  Service::Github::Host::base_for('git.corp.example');
+  # 'https://git.corp.example/api/v3'
+
+  if (Service::Github::Host::is_github($headers)) {
+    Service::Github::Host::record('git.corp.example', $headers);
+  } else {
+    Service::Github::Host::forget('git.corp.example');
+  }
+
+  my $known = Service::Github::Host::known('git.corp.example');
+  # {base => 'https://git.corp.example/api/v3', kind => 'enterprise',
+  #  version => '3.15.2', seen => '2026-10-13T17:20:00Z'}
+
+=head1 DESCRIPTION
+
+A repository's host is judged GitHub by the headers on the answers to the
+pipeline's own API calls, and never by its name (D119, noted 2026-10-13).
+Nothing is asked only to find out, so a run whose home starts empty, as a CI
+container's does on every job, pays no call for the question.
+
+An answer is GitHub's when it carries C<X-GitHub-Request-Id> or
+C<X-GitHub-Media-Type>, matched without regard to case. github.com and GitHub
+Enterprise Server send both on every answer, a C<404> included, and a proxy or
+another forge sends neither.
+
+github.com is never judged or cached: its base, C<https://api.github.com>, and
+its kind are known. Any other host is called at C<https://E<lt>hostE<gt>/api/v3>,
+GitHub Enterprise Server's base, and remembered in
+C<~/.genesis/cache/github-hosts.yml> with its base, its kind, the version it
+answered with, and when it was seen. The cache never expires, because a host
+does not change what it is, and it is never written into the clone's
+C<.git/config>, which is the operator's.
+
+L<Service::Github/_api> is the one caller that judges answers. This module
+holds the rule, the cache, and the refusal.
+
+=head1 FUNCTIONS
+
+=head2 base_for
+
+  my $base = Service::Github::Host::base_for($host);
+
+The API a host is called at.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$host>
+
+The host the repository is on, in any case.
+
+=back
+
+B<Returns:> C<https://api.github.com> for github.com, and
+C<https://E<lt>hostE<gt>/api/v3>, the host folded to lower case, for any other.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  Service::Github::Host::base_for('github.com');        # 'https://api.github.com'
+  Service::Github::Host::base_for('Git.Corp.Example');  # 'https://git.corp.example/api/v3'
+
+=head2 is_github
+
+  my $yes = Service::Github::Host::is_github($headers);
+
+Whether an answer's headers are GitHub's.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$headers>
+
+The raw response headers, as C<Genesis::curl> returns them.
+
+=back
+
+B<Returns:> 1 when they carry C<X-GitHub-Request-Id> or C<X-GitHub-Media-Type>
+in any case, and 0 otherwise, an undefined value included.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  Service::Github::Host::is_github("x-github-request-id: 44F3:35330\r\n");  # 1
+  Service::Github::Host::is_github("Content-Type: text/html\r\n");          # 0
+
+=head2 enterprise_version
+
+  my $version = Service::Github::Host::enterprise_version($headers);
+
+The GitHub Enterprise Server version an answer names.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$headers>
+
+The raw response headers.
+
+=back
+
+B<Returns:> The value of C<X-GitHub-Enterprise-Version>, or C<undef> where the
+answer carries none, as github.com's never do.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  Service::Github::Host::enterprise_version("X-GitHub-Enterprise-Version: 3.15.2\r\n");
+  # '3.15.2'
+
+=head2 cache_path
+
+  my $path = Service::Github::Host::cache_path();
+
+Where the hosts seen are remembered.
+
+B<Parameters:> None.
+
+B<Returns:> C<$HOME/.genesis/cache/github-hosts.yml>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  Service::Github::Host::cache_path();
+  # '/home/ops/.genesis/cache/github-hosts.yml'
+
+=head2 known
+
+  my $entry = Service::Github::Host::known($host);
+
+What a host is known to be.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$host>
+
+The host, in any case.
+
+=back
+
+B<Returns:> For github.com, C<{base =E<gt> 'https://api.github.com', kind =E<gt>
+'github'}>, without reading the cache. For any other host, a copy of its cache
+entry (C<base>, C<kind>, C<version> where one was answered, C<seen>), or
+C<undef> for a host not seen.
+
+B<Errors:> None of its own. A cache file C<spruce> cannot read is taken as
+empty.
+
+B<Examples:>
+
+  Service::Github::Host::known('github.com');
+  # {base => 'https://api.github.com', kind => 'github'}
+
+  Service::Github::Host::known('git.never.seen');
+  # undef
+
+=head2 record
+
+  Service::Github::Host::record($host, $headers);
+
+Remembers a host from an answer that was GitHub's: its base, its kind
+(C<enterprise> where the answer named a version, C<github> otherwise), the
+version, and when it was seen. github.com is never recorded. The file is
+written only when what it says of the host would change, so a run's calls after
+its first cost no write.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$host>
+
+The host the answer came from.
+
+=item C<$headers>
+
+The answer's raw headers, which the caller has judged GitHub's.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> Bails when the cache file cannot be put in place.
+
+B<Examples:>
+
+  Service::Github::Host::record('git.corp.example',
+    "X-GitHub-Request-Id: 1\r\nX-GitHub-Enterprise-Version: 3.15.2\r\n");
+
+=head2 forget
+
+  Service::Github::Host::forget($host);
+
+Stops remembering one host, and leaves every other entry alone. A host not in
+the cache is left as it is, and the file is not written.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$host>
+
+The host to forget.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> Bails when the cache file cannot be put in place.
+
+B<Examples:>
+
+  Service::Github::Host::forget('git.corp.example');
+
+=head2 refused
+
+  if (Service::Github::Host::refused($@)) { ... }
+
+Whether an error is this module's refusal, so a reader that catches every
+failure and refuses at C<UNAVAILABLE> can keep this one's code and words.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$error>
+
+What an C<eval> caught.
+
+=back
+
+B<Returns:> 1 for a C<Service::Github::Host::Refusal>, and 0 otherwise.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my $who = eval {$github->get_authorized_user};
+  if (Service::Github::Host::refused($@)) {
+    $refuse->({exitcode => $@->{exitcode}}, '%s', $@->{message});
+  }
+
+=head2 refuse
+
+  Service::Github::Host::refuse($host, $url, $answered);
+
+Refuses a host that answered twice and neither time as GitHub, at C<CONFIG>,
+naming the host, the URL asked, what came back, and the base GitHub's API would
+be at, with the two remedies: name the repository on its GitHub host, or use
+the C<manual> provider, which calls no API.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$host>
+
+The host.
+
+=item C<$url>
+
+The URL the call asked.
+
+=item C<$answered>
+
+The status line that came back, as C<404 Not Found>.
+
+=back
+
+B<Returns:> Never.
+
+B<Errors:> Outside an C<eval>, a C<bail> at C<CONFIG>. Inside one, it dies with
+a C<Service::Github::Host::Refusal>, a hash carrying C<exitcode>, C<message>
+and C<host>, which reads as its message wherever it is printed.
+
+B<Examples:>
+
+  Service::Github::Host::refuse('forge.example',
+    'https://forge.example/api/v3/user', '404 Not Found');
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _hosts
+
+  my $hosts = _hosts();
+
+The cache file's hosts, read again only when the file's device, inode, size or
+modification time has changed since this process last read or wrote it, so a
+run reads the file once and still sees a write another process made.
+
+B<Parameters:> None.
+
+B<Returns:> A hashref of host to entry, shared with the module; callers copy
+what they hand out.
+
+B<Errors:> None of its own.
+
+B<Examples:>
+
+  my $entry = _hosts()->{'git.corp.example'};
+
+=head2 _write
+
+  _write($hosts);
+
+Puts the hosts in the cache file, whole: written beside it and renamed over it,
+so a reader in another process meets the old file or the new one and never half
+of either. The directory is made where it is missing.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$hosts>
+
+A hashref of host to entry.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> Bails when the file cannot be renamed into place.
+
+B<Examples:>
+
+  _write({'git.corp.example' => {base => '...', kind => 'enterprise'}});
+
+=head1 LIMITATIONS
+
+Two processes recording different hosts at once can each write a file that
+lacks the other's entry. The loser's host is judged again from its next answer
+and recorded then, at no extra call, so the cost is a write and not a
+misjudgement.
+
+The version is kept so that a floor can be set later without another
+decision; nothing reads it yet.
+
+=head1 SEE ALSO
+
+L<Service::Github>, L<Genesis::Top/github_client>
+
+=cut
