@@ -101,7 +101,7 @@ subtest 'a committed remote name is refused before anything is cut' => sub {
 	# The configuration still names its remote, which D118 retired, so the
 	# load refuses it for every command, and the apply never reaches the
 	# stage that cuts a branch.  A clone with no remote that names the
-	# repository is refused at the load too, under T357.
+	# repository is refused too, under T357, where the remote is first used.
 	my $h = make_harness(envs => ['qa'], source_control => {remote => 'origin'});
 
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');

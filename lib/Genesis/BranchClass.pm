@@ -323,7 +323,8 @@ sub assert_pre_deploy {
 	if ($class eq 'control') {
 		# Control must also be in step with the remote, because the commit the
 		# command records must be one every clone can fetch (D113, D30).
-		if ($opts{control_only}) {
+		# Unasked where the remote may not be, as in a dry run without one.
+		if ($opts{control_only} && ($opts{network} // 1)) {
 			require Genesis::CI::Preflight;
 			Genesis::CI::Preflight::require_control($top, $git,
 				action => 'apply', outcome => 'Nothing was written.');

@@ -1311,22 +1311,29 @@ sub _require_remote {
 
 # }}}
 # pipeline_remote - the remote this repository's pipeline lives on {{{
-#
-# Genesis::Top resolves it once, from the source-control block (D29, D118),
-# and sets it here, on the handle every caller of the repository shares, so
-# the remote operations below take it without being told and no caller has
-# to carry it.  Nothing here guesses it: a handle nobody set it on refuses.
 sub pipeline_remote {
 	my ($self, @set) = @_;
 	$self->{pipeline_remote} = $set[0] if @set;
-	return $self->{pipeline_remote};
+	return $self->{pipeline_remote} if @set || defined $self->{pipeline_remote};
+
+	# Resolving is judging (D118), so it runs once, on the first read.
+	my $resolve = $self->{pipeline_remote_resolver} or return undef;
+	return $self->{pipeline_remote} //= $resolve->();
+}
+
+# }}}
+# pipeline_remote_resolver - how the pipeline remote is found on first use {{{
+sub pipeline_remote_resolver {
+	my ($self, $resolve) = @_;
+	$self->{pipeline_remote_resolver} = $resolve;
+	return $self;
 }
 
 # }}}
 # _remote_for - the remote a call names, else the one the handle carries {{{
 sub _remote_for {
 	my ($self, $remote, $method) = @_;
-	return _require_remote($remote // $self->{pipeline_remote}, $method);
+	return _require_remote($remote // $self->pipeline_remote, $method);
 }
 
 # }}}

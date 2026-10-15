@@ -986,7 +986,14 @@ sub path {
 sub git {
 	my ($self) = @_;
 	require Service::Git;
-	return Service::Git->new($self->path);
+	my $git = Service::Git->new($self->path);
+
+	# Weak, because the handle is shared and outlives any one Top.
+	Scalar::Util::weaken(my $top = $self);
+	return $git->pipeline_remote_resolver(sub {
+		return undef unless $top && $top->config->get('pipeline.enabled');
+		return $top->_source_control->{remote};
+	});
 }
 
 # }}}
@@ -1691,14 +1698,27 @@ sub source_control_remote {
 # source_control_uri - the url a pipeline task clones {{{
 sub source_control_uri {
 	my ($self) = @_;
-	return $self->_source_control->{uri};
+	return $self->_source_control_identified->{uri};
 }
 
 # }}}
 # source_control_repository - the owner/repo the GitHub API targets {{{
 sub source_control_repository {
 	my ($self) = @_;
-	return $self->_source_control->{repository};
+	return $self->_source_control_identified->{repository};
+}
+
+# }}}
+# _source_control_identified - the source control, refused only where the repository is unknown {{{
+sub _source_control_identified {
+	my ($self) = @_;
+	my $sc = $self->_source_control_found;
+	return $sc if $sc->{identity};
+	bail({exitcode => CONFIG},
+		"#C{pipeline.source_control.repository} is not set, and could not be ".
+		"derived from this clone:\n\n%s\n\nName the repository the pipeline ".
+		"lives in, as #C{owner/repo} or as its URL.",
+		($sc->{refusal} // 'no remote names it') =~ s/%/%%/gr);
 }
 
 # }}}
@@ -1709,7 +1729,7 @@ sub source_control_repository {
 sub github_client {
 	my ($self) = @_;
 	require Service::Github;
-	my $identity = $self->_source_control->{identity};
+	my $identity = $self->_source_control_identified->{identity};
 	return Service::Github->new(
 		org  => $identity->{owner},
 		host => $identity->{host},
@@ -1732,7 +1752,7 @@ sub github_client {
 sub source_control_resolved {
 	my ($self) = @_;
 
-	my $sc = $self->_source_control;
+	my $sc = $self->_source_control_found;
 	my %derived = map {($_ => 1)} qw/uri repository/;
 
 	# The remote is never written in the configuration (D118), so its row
@@ -1742,18 +1762,20 @@ sub source_control_resolved {
 	my %how = (matched => 'matched', pinned => 'pinned', only => 'derived');
 	my @rows = ({
 		key    => 'remote',
-		value  => $sc->{remote_how} eq 'pinned'
+		value  => !defined $sc->{remote}
+			? sprintf('(none): no remote points at %s', $sc->{repository} // 'a repository')
+			: $sc->{remote_how} eq 'pinned'
 			? "$sc->{remote} (genesis.remote in this clone's .git/config)"
 			: $sc->{remote},
-		source => $how{$sc->{remote_how}},
+		source => defined $sc->{remote} ? $how{$sc->{remote_how}} : 'missing',
 	});
 	for my $key (qw/uri repository control_branch pr_prefix/) {
 		my $value = $sc->{$key};
 		push @rows, {
-			key   => $key,
+			key    => $key,
 			# A value that never resolved shows as (none) rather than as a
 			# blank column the reader has to interpret.
-			value => $value // '(none)',
+			value  => $value // '(none)',
 			# A derived key with no value was never derived.  The url is
 			# asked of git only where the repository has to come out of it,
 			# so calling that row derived would tell the reader git
@@ -2754,11 +2776,11 @@ sub _pipeline_config_schema {
 					# of the checkout, and neither does the branch a command
 					# runs from, that being runtime state.
 					uri        => {type => 'string', description => "The URL CI clones from, where it cannot be composed from the repository"},
-					repository => {type => 'string', description => "The repository the pipeline lives in, as owner/repo or its URL"},
+					repository => {type => 'string', check => \&_repository_rule, description => "The repository the pipeline lives in, as owner/repo or its URL"},
 
 					# Defaulted, and read through one accessor apiece.
-					control_branch      => {type => 'string',  default => DEFAULT_CONTROL_BRANCH, description => "The control branch's name"},
-					pr_prefix           => {type => 'string',  default => 'pr/', description => 'The pull request branch prefix'},
+					control_branch      => {type => 'string',  default => DEFAULT_CONTROL_BRANCH, check => \&_control_branch_rule, description => "The control branch's name"},
+					pr_prefix           => {type => 'string',  default => 'pr/', check => \&_pr_prefix_rule, description => 'The pull request branch prefix'},
 					control_requires_pr => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Whether control accepts direct pushes'},
 
 					# CI only, and required wherever a pipeline task has to
@@ -2999,104 +3021,102 @@ sub _automated_provider_configured {
 }
 
 # }}}
-# _source_control - the resolved source-control values {{{
-#
-# Precedence is explicit over derived over default.  The remote is the one
-# _resolve_remote finds by the repository it points at, or the clone's own
-# pin, and never "the first git remote".  The repository is the configured
-# one, else the one the remote's URL names; a URL naming none, such as a
-# path, needs the repository named and is refused without it, with no
-# exception under the manual provider.
+# _source_control - the resolved source-control values, refused where the clone cannot give them {{{
 sub _source_control {
 	my ($self) = @_;
+	my $sc = $self->_source_control_found;
+	bail({exitcode => CONFIG}, $sc->{refusal} =~ s/%/%%/gr) if $sc->{refusal};
+	return $sc;
+}
 
+# }}}
+# source_control_problem - why this clone cannot give the pipeline's remote, or undef {{{
+sub source_control_problem {
+	my ($self) = @_;
+	return $self->_source_control_found->{refusal};
+}
+
+# }}}
+# _source_control_found - the source-control values, and what the clone could not give {{{
+sub _source_control_found {
+	my ($self) = @_;
 	return $self->{__source_control} if $self->{__source_control};
 
 	require Service::Git;
+	my $config  = $self->config;
+	my $written = $config->get('pipeline.source_control.repository');
 
-	# The nested read terminates rather than recursing, because _memoize
-	# installs the configuration object before _validate_config runs, so
-	# this call and the two accessors below it meet the memo and not the
-	# validation that is still on the stack above them.
-	my $config = $self->config;
-
-	# The control branch through its accessor, which reads the file in front
-	# of the command.  The pull request prefix is read off that file too
-	# rather than through its accessor, which answers control's value under
-	# D112: what this validates is the file being loaded, and reading control
-	# here would make every command in a pipeline repository pay for a read
-	# of control as it loads.
+	# pr_prefix off this file, not control's (D112): see the POD.
 	my %sc = (
 		control_branch => $self->control_branch,
-		pr_prefix      => $config->get(
-			'pipeline.source_control.pr_prefix', DEFAULT_PR_PREFIX),
+		pr_prefix      => $config->get('pipeline.source_control.pr_prefix', DEFAULT_PR_PREFIX),
+		uri            => $config->get('pipeline.source_control.uri'),
+		identity       => defined $written ? repository_identity($written) : undef,
 	);
+	my $found = sub {
+		$sc{repository} = join('/', @{$sc{identity}}{qw/owner repo/}) if $sc{identity};
+		return $self->{__source_control} = \%sc;
+	};
 
-	bail({exitcode => CONFIG},
-		"#C{pipeline.source_control.control_branch} must not be empty.\n".
-		"The control branch is the branch every pipeline command reads the ".
-		"repository from, so there is nothing to name without it."
-	) unless defined $sc{control_branch} && length $sc{control_branch};
+	# Before the handle is built, whose constructor refuses the path instead.
+	unless (Service::Git->is_inside_work_tree($self->path)) {
+		$sc{refusal} = sprintf(
+			"#C{pipeline} is enabled, but #C{%s} is not a git checkout.\n".
+			"A pipeline is a set of branches, so the deployment repository has ".
+			"to be under git before one can be configured.",
+			$self->path);
+		return $found->();
+	}
 
-	bail({exitcode => CONFIG},
-		"#C{pipeline.source_control.pr_prefix} must not be empty.\n".
-		"An empty prefix gives the pull request branch the deployment ".
-		"branch's own name, so the two could not be told apart."
-	) unless length $sc{pr_prefix};
-
-	# Asked before the handle is built, because the constructor refuses a
-	# path under no git control with a message about the path, and what an
-	# operator who turned a pipeline on needs to hear is what a pipeline
-	# needs a repository for.
-	bail({exitcode => CONFIG},
-		"#C{pipeline} is enabled, but #C{%s} is not a git checkout.\n".
-		"A pipeline is a set of branches, so the deployment repository has ".
-		"to be under git before one can be configured.",
-		$self->path
-	) unless Service::Git->is_inside_work_tree($self->path);
-
-	my $git = $self->git;
-
+	my $git      = $self->git;
 	my $resolved = $self->_resolve_remote($sc{control_branch});
-	bail({exitcode => CONFIG}, $resolved->{refusal} =~ s/%/%%/gr)
-		if $resolved->{refusal};
-	$sc{remote}     = $resolved->{remote};
-	$sc{remote_how} = $resolved->{how};
-
-	# Set on the handle every caller of the repository shares, so the remote
-	# operations take it without being told.
+	if ($resolved->{refusal}) {
+		$sc{refusal} = $resolved->{refusal};
+		return $found->();
+	}
+	@sc{qw/remote remote_how/} = @{$resolved}{qw/remote how/};
 	$git->pipeline_remote($sc{remote});
 
-	$sc{uri} = $config->get('pipeline.source_control.uri');
-
-	# The repository is the only value derived from the url, and asking git
-	# for the url costs a fork on every command, so where the operator named
-	# the repository the url is left alone.  That is the one way the uri
-	# comes back undef, and the one way a report shows it as (none).
-	#
-	# Written as owner/repo or as a URL, the repository is one identity
-	# (D118), and the API is handed its owner/repo whichever was written.
-	if (defined(my $written = $config->get('pipeline.source_control.repository'))) {
-		$sc{identity} = repository_identity($written);
-		bail({exitcode => CONFIG},
-			"#C{pipeline.source_control.repository} is #C{%s}, which names no ".
-			"repository.\nWrite it as #C{owner/repo}, or as the repository's ".
-			"https or ssh URL.",
-			$written
-		) unless $sc{identity};
-	} else {
+	# The url is asked of git only where the repository must come from it.
+	unless (defined $written) {
 		$sc{uri} //= $git->remote_url($sc{remote});
 		$sc{identity} = $resolved->{identity} // repository_identity($sc{uri});
-		bail({exitcode => CONFIG},
+		$sc{refusal} = sprintf(
 			"#C{pipeline.source_control.repository} could not be derived from ".
 			"#C{%s}, which carries no #C{owner/repo} pair.\nName the repository ".
 			"the pipeline lives in, as #C{owner/repo} or as its URL.",
 			$sc{uri} // '<no remote url>'
 		) unless $sc{identity};
 	}
-	$sc{repository} = join('/', @{$sc{identity}}{qw/owner repo/});
+	return $found->();
+}
 
-	return $self->{__source_control} = \%sc;
+# }}}
+# _repository_rule - pipeline.source_control.repository names a repository {{{
+sub _repository_rule {
+	my ($written) = @_;
+	return undef if repository_identity($written);
+	return "is #C{$written}, which names no repository.  Write it as ".
+		"#C{owner/repo}, or as the repository's https or ssh URL.";
+}
+
+# }}}
+# _control_branch_rule - pipeline.source_control.control_branch is not empty {{{
+sub _control_branch_rule {
+	my ($branch) = @_;
+	return undef if length $branch;
+	return "must not be empty.  The control branch is the branch every ".
+		"pipeline command reads the repository from, so there is nothing to ".
+		"name without it.";
+}
+
+# }}}
+# _pr_prefix_rule - pipeline.source_control.pr_prefix is not empty {{{
+sub _pr_prefix_rule {
+	my ($prefix) = @_;
+	return undef if length $prefix;
+	return "must not be empty.  An empty prefix gives the pull request branch ".
+		"the deployment branch's own name, so the two could not be told apart.";
 }
 
 # }}}
@@ -3250,8 +3270,6 @@ sub _validate_pipeline_config {
 	# Before anything reads the shape, because a shape key still holding ((
 	# would be read as its own text.
 	$self->_validate_shape_values;
-
-	$self->_source_control;
 
 	# Before the environment blocks are read for their shape, because a key
 	# with no ability behind it is a fact about the provider rather than

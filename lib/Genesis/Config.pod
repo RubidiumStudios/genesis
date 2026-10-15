@@ -645,6 +645,25 @@ element after splitting.
 
 For C<type => 'semver'>: when true, C<undef> is accepted without error.
 
+=item C<check>
+
+A code reference for a rule the type cannot state, such as that a string
+names a repository or is not empty. It is called with the key's value once
+the value has passed its type, and returns a message, without the key, when
+the value breaks the rule, or C<undef> when it does not. The message is
+reported as C<#R{key}: message>, gathered with every other problem rather
+than ending the validation, and it is judged wherever the schema is, at
+load and before every save. A rule that needs more than the value -- the
+clone, the network, the rest of the configuration -- does not belong here.
+
+    repository => {
+        type  => 'string',
+        check => sub {
+            Genesis::Top::repository_identity($_[0]) ? undef
+                : "names no repository; write it as owner/repo or as its URL"
+        },
+    },
+
 =back
 
 C<boolean> and C<array> values are normalized in-place during validation

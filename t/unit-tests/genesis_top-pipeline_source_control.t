@@ -137,14 +137,17 @@ subtest 'an empty control branch is refused' => sub {
 subtest 'a remote must name a repository, on any host' => sub {
 	plan tests => 5;
 
-	# A host is not judged by its name (D118), so what is refused at load is
-	# a URL carrying no owner/repo at all.
+	# A host is not judged by its name (D118), so what is refused is a URL
+	# carrying no owner/repo at all.  The clone is asked where the repository
+	# is first used, not at load (noted 2026-10-15), so the rows ask for it.
 	with_remote('/srv/git/bosh.git');
-	throws_ok {load_control("pipeline:\n  enabled: true", derive_repository => 1)}
+	throws_ok {load_control("pipeline:\n  enabled: true", derive_repository => 1)
+			->source_control_repository}
 		qr/pipeline\.source_control\.repository/,
 		'a remote carrying no owner/repo is refused naming the key';
 	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
-		'  provider:', '    type: manual'), derive_repository => 1)}
+		'  provider:', '    type: manual'), derive_repository => 1)
+			->source_control_repository}
 		qr/pipeline\.source_control\.repository/,
 		'and the manual provider takes no exception';
 

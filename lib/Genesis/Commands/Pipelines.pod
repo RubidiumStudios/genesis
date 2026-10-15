@@ -1355,8 +1355,12 @@ C<Genesis::Top/source_control_remote> answers with, the one that points at the
 repository or the clone's own pin. Reading whichever remote git lists first
 would ask the wrong repository on a clone that has two, since git lists them
 alphabetically rather than in the order they were added. A clone with no
-remote to publish to never reaches the stage, because the configuration load
-refuses it first (D118).
+remote to publish to is refused where the remote is first used, by the
+dispatch gate's refresh, before this stage (D118, noted 2026-10-15). The
+exception is a dry run in such a clone, which the gate lets through: it
+reads the clone alone, makes no fetch, and treats no branch as standing on
+a remote it has not got, so every branch it holds is one it would publish
+and every other one it would create.
 
 The refresh runs next, so what the remote carries is read from refs this run
 brought down rather than from whatever the clone happened to hold.

@@ -348,6 +348,7 @@ unit-tests/genesis_commands_pipelines-provider_gate.t  # the propagate provider 
 unit-tests/genesis_commands_pipelines-hold_surface.t  # the two hold commands register in the pipeline group as pre-deploy, take its disowned refusal, and leave one renderer of the held qualifier
 unit-tests/genesis_top-config_v1_to_v2_upgrade.t  # v1 -> v2 deployment-repo config auto-upgrade path
 unit-tests/genesis_top-config_writers.t           # a writer saves only what the load accepts, judged on the result
+unit-tests/genesis_top-repository_judged.t         # the repository's syntax at load, the clone's checks at first use
 unit-tests/genesis_ui-prompt_for_password.t  # password prompt
 unit-tests/genesis_ui-prompt_output_stream.t  # prompts write to stderr and the terminal, never stdout
 unit-tests/genesis_ui-prompt_timeout.t        # a prompt asked under the switch lock gives up when its time is up
@@ -380,6 +381,7 @@ integration-tests/genesis_env_manifest-vaultless_reach.t  # the shape's merge re
 integration-tests/genesis_top-ci_yml_soft_gate.t              # stale ci.yml warns rather than blocks
 integration-tests/genesis_commands-pipeline_ci_yml_gate.t     # pipeline commands gated on a legacy ci.yml
 integration-tests/genesis_pipeline_config-validation_at_load.t # every command meets the same pipeline refusal at load
+integration-tests/genesis_pipeline_config-repository_where_judged.t # a pipeline is rehearsed before its remote exists
 integration-tests/genesis_config-repair_at_load.t             # genesis config repairs what every other command refuses at load
 integration-tests/genesis_exit-command_codes.t                # usage exits 2, prerequisites exit 86, no invented codes
 integration-tests/genesis_commands-git_floor.t                # the declared git floor is 2.34.1, for every command

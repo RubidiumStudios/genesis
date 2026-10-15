@@ -267,13 +267,22 @@ B<Examples:>
   $git->pipeline_remote($remote);
   my $remote = $git->pipeline_remote;
 
-The remote this repository's pipeline lives on. L<Genesis::Top> resolves it
-once, from the source-control block (D29, D118), and sets it here when the
-configuration loads, on the handle every caller of the repository shares, so
-L</fetch_branches>, L</resolve_branch>, L</push> and the other remote
-operations take it without being told. An explicit remote still wins.
-Nothing here guesses it: a handle nobody set it on refuses a remote
-operation as a bug.
+The remote this repository's pipeline lives on, held on the handle every
+caller of the repository shares, so L</fetch_branches>, L</resolve_branch>,
+L</push> and the other remote operations take it without being told. An
+explicit remote passed to an operation still wins.
+
+B<It is resolved on its first read, not when the configuration loads.>
+L<Genesis::Top/git> installs a resolver through L</pipeline_remote_resolver>,
+and the first read runs it once and keeps the answer. Resolving is judging
+(D118, noted 2026-10-15): the clone's refusals -- not a git checkout, no
+remote, no remote pointing at the repository -- come from whatever first
+uses the remote, so no command has to know to ask, and a command that never
+touches the remote never meets them. A remote set explicitly is taken as it
+stands and the resolver is never run, which is the seam tests use to stand
+a handle on a remote of their choosing. With no remote set and no resolver,
+or a resolver that answers nothing, the read answers C<undef> and a remote
+operation refuses as a bug, as before.
 
 B<Parameters:>
 
@@ -285,14 +294,48 @@ The remote to set.
 
 =back
 
-B<Returns:> The remote set on the handle, or C<undef> where none is.
+B<Returns:> The remote set or resolved on the handle, or C<undef> where
+there is none.
 
-B<Errors:> None.
+B<Errors:> Whatever the resolver raises; under L<Genesis::Top>, the
+clone's refusals at C<Genesis::Exit::CONFIG>.
 
 B<Examples:>
 
   $git->pipeline_remote('upstream');
   $git->fetch_branches(['control']);    # fetches from upstream
+
+  my $git = $top->git;
+  $git->fetch_branches(['control']);    # resolves, and judges, the remote first
+
+=head2 pipeline_remote_resolver
+
+  $git->pipeline_remote_resolver(sub { ... });
+
+Installs the code L</pipeline_remote> runs on its first read when no remote
+has been set. L<Genesis::Top/git> installs one that answers the remote its
+source control resolves, or nothing when the configuration does not enable
+a pipeline. The handle is shared and outlives any one Top, so the installer
+holds the Top weakly.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$resolve>
+
+A code reference taking no arguments and answering a remote's name or
+C<undef>.
+
+=back
+
+B<Returns:> The handle, so the call can be chained.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my $git = Service::Git->new($root)->pipeline_remote_resolver(sub {'origin'});
 
 =head2 git_dir
 

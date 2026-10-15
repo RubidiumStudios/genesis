@@ -115,12 +115,12 @@ subtest 'set_kit_provider refuses a result the load would refuse' => sub {
 	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
 };
 
-subtest 'a writer judges the source control it would save, not the one it loaded' => sub {
+subtest 'a writer judges the repository it would save by its rule' => sub {
 	plan tests => 3;
 
-	# The load worked out where the pipeline lives and kept the answer.  A
-	# writer that has since changed the repository has to be judged on the
-	# new value, not on the answer kept from before.
+	# The repository's syntax is the schema's own rule for the key (T365), so
+	# a writer that has changed it since the load is judged on the new value.
+	# Whether a remote points at it is not the writer's to ask.
 	my $dir = writer_repo('writer-source-control');
 	my $before = slurp("$dir/.genesis/config");
 	my $top = loaded_top($dir);

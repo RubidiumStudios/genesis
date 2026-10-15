@@ -310,16 +310,19 @@ subtest 'control is resolved in one git call, and a commit written out once' => 
 	# at that commit reuses it.
 	plan tests => 3;
 
-	# Each Top is built outside the count, because loading a configuration
-	# resolves source control for its validation, which is not this read.
+	# Each Top is built, and its source control resolved, outside the count.
+	# The remote is resolved where it is first used (D118, noted 2026-10-15),
+	# and resolving it is not the read this row measures.
 	my $h = three_stage();
 	my $one = top_in($h);
+	$one->source_control_remote;
 	my $first = git_calls(sub {$one->pipeline_topology});
 	cmp_ok($first, '<=', 4,
 		'the first read resolves control, finds the repository, lists the tree '
 		.'and reads its files, in four');
 
 	my $two = top_in($h);
+	$two->source_control_remote;
 	my $second = git_calls(sub {$two->pipeline_topology});
 	is($second, 1, 'a second command at the same commit resolves control and no more');
 

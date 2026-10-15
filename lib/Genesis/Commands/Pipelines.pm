@@ -67,7 +67,7 @@ sub apply {
 	# operator enabled and chose a provider for.
 	my $platform = $top->pipeline_provider_type // 'manual';
 
-	my $git = Service::Git->new('.');
+	my $git = $top->git;
 
 	# The propagate run has a preview that writes nothing of its own, and a
 	# preview worth reading follows the same rule everywhere.  The flag is
@@ -1912,18 +1912,22 @@ sub _compile_pipeline {
 sub _apply_init_branches {
 	my ($top, $git, %opts) = @_;
 
+	# A dry run without a remote (D118) reads the clone alone: nothing stands
+	# on a remote it has not got.
+	my $remote = !($opts{dry_run} && defined $top->source_control_problem);
+
 	# The command names itself and what it has not written yet, because the
 	# refresh defaults its wording to propagate and would otherwise tell the
 	# operator to re-run a command they never ran.
 	$top->fetch_pipeline_envs($git,
 		command => 'pipeline-apply',
-		outcome => 'No branch was created and no pipeline was set.');
+		outcome => 'No branch was created and no pipeline was set.') if $remote;
 
 	my %report = (created => [], published => [], standing => []);
 	for my $name (@{$top->pipeline_topology->{order}}) {
 		my $branch = $top->branch_for($name);
 
-		if ($git->remote_branch_exists($branch)) {
+		if ($remote && $git->remote_branch_exists($branch)) {
 			info("  #Gi{standing} #C{%s}", $branch);
 			push @{$report{standing}}, $branch;
 			next;

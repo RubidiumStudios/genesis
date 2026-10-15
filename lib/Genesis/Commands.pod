@@ -2248,6 +2248,13 @@ registration to declare that it needs no refresh, the way it declares its
 class, and the attribute that gives a registration such a declaration takes
 these names onto it, C<pipeline-status> included.
 
+A C<--dry-run> in a clone that cannot give the pipeline's remote is also
+passed along with C<< refresh => 0, network => 0 >> (D118, noted
+2026-10-15): it warns, quoting L<Genesis::Top/source_control_problem>, that
+no remote is used and control is read as the clone holds it, rather than
+refusing, because a dry run writes nothing the remote has to agree with.
+Every other run meets the clone's refusal where it first uses the remote.
+
 Whether the command commits on control goes down as C<< commits => ... >>,
 read straight off the registration. The C<control_requires_pr> refusal is
 asked of that rather than of the class, and that attribute pattern absorbs

@@ -203,9 +203,10 @@ subtest 'a repository with no remote never reaches the control check' => sub {
 	my $h = make_harness(envs => ['qa']);
 	init_branch($h, 'qa');
 
-	# Every remote goes.  The configuration refuses first, where the source
-	# control's remote is derived, so no command reaches the control check at
-	# all.  That is why the check composes its own remedy without a command
+	# Every remote goes.  The first use of the remote refuses, where the
+	# source control's remote is resolved (D118, noted 2026-10-15), and the
+	# refresh asks for it before the control check, so no command reaches
+	# the control check at all.  That is why the check composes its own remedy without a command
 	# where it has no remote to name: the words that stand in for a remote are
 	# a guard against printing them inside a command, and not a path an
 	# operator can walk.

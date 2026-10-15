@@ -100,8 +100,8 @@ subtest 'a fork beside the canonical repository is never used' => sub {
 };
 
 # Proves T357's commands: a clone whose only remote mirrors the repository on
-# another host is refused at load by every command, not by pipeline-apply
-# alone; a pin set only globally leaves the refusal standing and says why;
+# another host is refused by every command that uses the remote, not by
+# pipeline-apply alone; a pin set only globally leaves the refusal standing and says why;
 # and the clone's own pin runs the commands against the mirror (D118).  The
 # mirror's URL names a host no identity can match, and an insteadOf rewrite
 # sends its traffic to the harness's bare repository.

@@ -991,44 +991,34 @@ subtest 'config --set version refuses a version Genesis does not support' => sub
 	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
 };
 
-# A repository whose remote is a path, so nothing can derive the
-# repository the pipeline lives in, with the pipeline not yet turned on.
-sub path_remote_repo {
-	my ($name) = @_;
-	my $dir = config_repo($name, enabled => 0);
-	run({dir => $dir}, 'git', 'remote', 'set-url', 'origin', "$dir/../no-such-remote.git");
-	return $dir;
-}
-
 subtest 'config refuses a result the next command would refuse' => sub {
 	plan tests => 3;
 
-	# The schema accepts an enabled manual pipeline, but the load goes on to
-	# ask where the pipeline lives, and a path remote cannot say.  A writer
-	# that judged by the schema alone saved a file every command refused.
-	my $dir = path_remote_repo('config-enable-underivable');
+	# The schema accepts the repository store, but the load goes on to ask
+	# whether a pipeline can use it, and one cannot.  A writer that judged by
+	# the schema alone saved a file every command refused.
+	my $dir = config_repo('config-store-under-pipeline');
 	my $before = slurp("$dir/.genesis/config");
 	pushd $dir;
-	prepare_command('config', '--set', 'pipeline.enabled', 'true');
+	prepare_command('config', '--set', 'manifest_store', 'repository');
 	build_command_environment;
 	my ($code, $err) = run_config();
 	popd;
 
 	is($code, Genesis::Exit::CONFIG, 'the run is refused at the configuration exit');
-	like($err, qr/could not be derived/, "in the load's own words");
+	like($err, qr/cannot be used under a pipeline/, "in the load's own words");
 	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
 };
 
 subtest 'config judges the end of the run, not the steps through it' => sub {
 	plan tests => 2;
 
-	# Turning the pipeline on before naming the repository would be refused
-	# on its own; in one run with the repository beside it, it is not.
-	my $dir = path_remote_repo('config-enable-with-repository');
+	# The repository store under the enabled pipeline would be refused on
+	# its own; in one run that also turns the pipeline off, it is not.
+	my $dir = config_repo('config-store-with-pipeline-off');
 	pushd $dir;
-	prepare_command('config', '--set', 'pipeline.enabled', 'true',
-	                          '--set', 'pipeline.source_control.repository',
-	                          'genesis/test-kit-deployments');
+	prepare_command('config', '--set', 'manifest_store', 'repository',
+	                          '--set', 'pipeline.enabled', 'false');
 	build_command_environment;
 	my ($code, $err) = run_config();
 	popd;
@@ -1036,6 +1026,24 @@ subtest 'config judges the end of the run, not the steps through it' => sub {
 	is($code, 0, 'the run goes through');
 	my ($load) = loads_cleanly($dir);
 	is($load, 0, 'and the next command loads what it saved');
+};
+
+subtest 'config refuses a repository that does not parse' => sub {
+	plan tests => 3;
+
+	# Syntax needs only the value, so it is judged on the write as at the
+	# load (T365), whatever the clone's remotes are.
+	my $dir = config_repo('config-set-unparseable-repository');
+	my $before = slurp("$dir/.genesis/config");
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.source_control.repository', 'not a repo');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, Genesis::Exit::CONFIG, 'the run is refused at the configuration exit');
+	like($err, qr/pipeline\.source_control\.repository/, 'naming the key');
+	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
 };
 
 subtest 'config refuses a retired key in the load\'s own words' => sub {

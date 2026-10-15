@@ -1067,9 +1067,10 @@ pipeline:
     repository: team/test
 EOF
 
-	# A tree written out of a commit is not a git checkout, and an enabled
-	# pipeline is refused outside one, so the ordinary reader dies on the
-	# first configuration read rather than on construction.
+	# The file is version 2 and carries a pipeline section, which the
+	# ordinary reader refuses on the first configuration read rather than on
+	# construction.  The clone is no longer asked at load (D118, noted
+	# 2026-10-15), so a version 3 file outside git would load here.
 	my $plain = Genesis::Top->new($tmp, no_vault => 1);
 	ok(!defined(eval {$plain->type}),
 		"a plain Top refuses the configuration when it is read");

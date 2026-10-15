@@ -371,7 +371,10 @@ L<Genesis::CI::Preflight/require_control>, which refuses C<ahead> as
 unpushed and C<behind> as stale in D30's words, because the commit the
 apply records must be one every clone can fetch. A clone with no control
 branch at all is let through, so the apply's own C<CONFIG> refusal names
-the missing branch.
+the missing branch. Where C<network> is false the in-step check is not asked,
+because it needs the remote; the gate passes that for a dry run in a clone
+that has no usable remote (D118, noted 2026-10-15), which reads control as
+the clone holds it and records nothing.
 
 Otherwise a detached HEAD is allowed through, because it is neither control nor
 derived and neither remedy the predicate offers can be carried out on it. A

@@ -801,6 +801,15 @@ sub _gate_branch_class {
 		            : 1;
 		my $refresh = $mode eq 'optional' ? 0 : $network;
 
+		# A dry run needs no remote (D118): it says what is missing, and reads
+		# control as this clone holds it.
+		if ($network && get_options()->{'dry-run'}
+				&& defined(my $problem = $top->source_control_problem)) {
+			warning("No remote is used by this dry run, so control is read as this clone holds it:\n\n%s",
+				$problem =~ s/%/%%/gr);
+			($network, $refresh) = (0, 0);
+		}
+
 		# Whether the command commits goes down too.  The refusal is
 		# about a commit that cannot reach control through a pull
 		# request, and most pre-deploy commands make none:

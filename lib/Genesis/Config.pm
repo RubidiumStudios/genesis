@@ -928,6 +928,9 @@ sub _validate_key {
 	} else {
 		push @errors, "#R{$key}: unknown schema type $type";
 	}
+	if (!@errors && $schema->{check} && defined(my $problem = $schema->{check}->($value))) {
+		push @errors, "#R{$key}: $problem";
+	}
 	return @errors;
 }
 

@@ -751,9 +751,18 @@ B<Examples:>
 The handle on the repository this deployment root lives in. It is the one
 handle every caller of the repository shares, since L<Service::Git> keeps one
 per root and answers a path it has resolved before from memory, so a reader
-holding a Top asks here rather than building one from a path. For a pipeline
-it carries the remote L</source_control_remote> resolved, which
-L</_source_control> sets on it as L<Service::Git/pipeline_remote>.
+holding a Top asks here rather than building one from a path.
+
+B<It installs the resolver for the pipeline's remote on the handle>
+(L<Service::Git/pipeline_remote_resolver>), so the remote is resolved, and
+judged, by whatever first uses it, a fetch, a push, a refresh of control,
+rather than when the configuration loads (D118, noted 2026-10-15). The
+resolver answers the remote L</_source_control> resolves, and nothing where
+this file does not enable a pipeline, so outside a pipeline a remote
+operation that names no remote is refused as before. It holds the Top
+weakly, because the handle is shared and outlives any one Top. A handle
+built from a path with L<Service::Git/new> instead has no resolver, so a
+pipeline command takes its handle from here.
 
 B<Parameters:> None.
 
@@ -1950,19 +1959,16 @@ B<Examples:>
 
     my $remote = $top->source_control_remote();
 
-Which remote this pipeline derives its url from.
+Which remote this pipeline lives on: the one L</_resolve_remote> finds by the
+repository it points at, or the clone's own pin (D118). It is never "the
+first configured remote", because C<git remote> lists them alphabetically and
+a repository holding C<dev> and C<origin> would pick C<dev>.
 
-Precedence is explicit over derived over default. The derivation is the
-control branch's configured upstream, and then C<origin> where it exists.
-
-It is never "the first configured remote", because C<git remote> lists them
-alphabetically and a repository holding C<dev> and C<origin> would pick
-C<dev>.
-
-The resolution, and every refusal it can raise, belongs to
-L</_source_control>, which settles all five values at once and keeps the
-answer. The refusal is raised by the first reader that touches the block, so
-it lands here whenever nothing has asked for a source-control value before.
+B<It is the clone's judgement, made here.> The load no longer asks the clone
+(D118, noted 2026-10-15), so the first reader of the remote -- this, or the
+git handle's resolver, which calls this -- is where a clone with no git, no
+remote, or no remote pointing at the repository is refused. The answer, or
+the refusal, is kept, so it is reached once per Top.
 
 B<Parameters:> None.
 
@@ -1974,19 +1980,13 @@ B<Errors:>
 
 =item *
 
-C<"pipeline.source_control.control_branch must not be empty.">,
-C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
-enabled, but %s is not a git checkout.">,
-the remote refusals of L</_remote_refusal>,
+C<"pipeline is enabled, but %s is not a git checkout.">, the remote
+refusals of L</_remote_refusal>, and
 C<"pipeline.source_control.repository could not be derived from %s, which
-carries no owner/repo pair.">, and
-C<"pipeline.source_control.repository is %s, which names no repository."> -
-raised by L</_source_control>, whichever of the five values the caller asked
-for, because it settles all of them at once.
+carries no owner/repo pair."> - raised by L</_source_control> at
+C<Genesis::Exit::CONFIG>.
 
 =back
-
-Every one of them exits C<Genesis::Exit::CONFIG>.
 
 B<Examples:>
 
@@ -2009,31 +2009,17 @@ in the uri row, which it labels C<unset> rather than C<derived> because git
 was never asked. Without that override a url git cannot answer for is refused
 rather than returned, because the repository then has nothing to parse.
 
+It answers wherever the repository is known, written or derived, whether or
+not the clone has a usable remote, through L</_source_control_identified>;
+the clone is refused here only where the repository has to come from it.
+
 B<Parameters:> None.
 
 B<Returns:> The url, as a string, or undef where
 C<pipeline.source_control.repository> was named and neither
 C<pipeline.source_control.uri> nor git supplied one.
 
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"pipeline.source_control.control_branch must not be empty.">,
-C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
-enabled, but %s is not a git checkout.">,
-the remote refusals of L</_remote_refusal>,
-C<"pipeline.source_control.repository could not be derived from %s, which
-carries no owner/repo pair.">, and
-C<"pipeline.source_control.repository is %s, which names no repository."> -
-raised by L</_source_control>, whichever of the five values the caller asked
-for, because it settles all of them at once.
-
-=back
-
-Every one of them exits C<Genesis::Exit::CONFIG>.
+B<Errors:> Those of L</_source_control_identified>.
 
 B<Examples:>
 
@@ -2053,29 +2039,16 @@ L</repository_identity>, so this answers C<owner/repo> whichever was
 written. Any host parses the same way, GitHub Enterprise included. A remote
 whose url does not carry the pair, such as a path, needs the key set.
 
+A written repository is answered whether or not the clone has a remote,
+because the API, the compiler and the protection a dry run reports need the
+repository and not the clone (D118, noted 2026-10-15). Its syntax was judged
+at load, by the schema's rule for the key.
+
 B<Parameters:> None.
 
 B<Returns:> The pair, as a string.
 
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"pipeline.source_control.control_branch must not be empty.">,
-C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
-enabled, but %s is not a git checkout.">,
-the remote refusals of L</_remote_refusal>,
-C<"pipeline.source_control.repository could not be derived from %s, which
-carries no owner/repo pair.">, and
-C<"pipeline.source_control.repository is %s, which names no repository."> -
-raised by L</_source_control>, whichever of the five values the caller asked
-for, because it settles all of them at once.
-
-=back
-
-Every one of them exits C<Genesis::Exit::CONFIG>.
+B<Errors:> Those of L</_source_control_identified>.
 
 B<Examples:>
 
@@ -2098,8 +2071,8 @@ B<Parameters:> None.
 
 B<Returns:> A C<Service::Github> object. Building it makes no call.
 
-B<Errors:> Those of L</source_control_repository>, raised by
-L</_source_control> when the identity cannot be resolved.
+B<Errors:> Those of L</_source_control_identified>, when the repository is
+neither written nor derivable.
 
 B<Examples:>
 
@@ -2125,11 +2098,17 @@ how L</_resolve_remote> found it: C<matched> by the repository it points at,
 C<pinned> by the clone's own C<genesis.remote>, or C<derived> as the clone's
 one remote. A pinned remote's value names where the pin lives, as
 C<mirror (genesis.remote in this clone's .git/config)>, because nothing
-committed carries it. A row with no
-value carries C<(none)>, which is what the uri row shows wherever
+committed carries it. B<A remote the clone cannot give is reported, not
+refused> (D118, noted 2026-10-15): its row carries the tier C<missing> and
+the value C<(none): no remote points at E<lt>repositoryE<gt>>, so a pipeline
+can be described before its remote exists. A row with no
+value carries C<(none)> rather than a blank column the reader has to
+interpret, which is what the uri row shows wherever
 C<pipeline.source_control.repository> was named, since L</source_control_uri>
-is then never asked of git. The explicit tier is read with
-C<Genesis::Config::is_set> rather than with C<get>, because the schema fills
+is then never asked of git. A derived key with no value is C<unset>, not
+C<derived>, because git was never asked. The explicit tier is read with
+C<Genesis::Config::is_set> rather than with C<get>, the way
+L</_validate_capability_gates> reads it, because the schema fills
 C<control_branch> and C<pr_prefix> in for every repository and a filled
 default is the schema's answer rather than anybody's choice.
 
@@ -2138,29 +2117,34 @@ B<Parameters:> None.
 B<Returns:> An array reference of five rows, in the order C<remote>, C<uri>,
 C<repository>, C<control_branch>, C<pr_prefix>.
 
-B<Errors:>
-
-=over 4
-
-=item *
-
-C<"pipeline.source_control.control_branch must not be empty.">,
-C<"pipeline.source_control.pr_prefix must not be empty.">, C<"pipeline is
-enabled, but %s is not a git checkout.">,
-the remote refusals of L</_remote_refusal>, and
-C<"pipeline.source_control.repository could not be derived from %s, which
-carries no owner/repo pair."> -
-raised by L</_source_control>, which this reader calls like the three
-single-value readers beside it.
-
-=back
-
-Every one of them exits C<Genesis::Exit::CONFIG>.
+B<Errors:> None of the clone's: they are reported in the remote row. It
+reads L</_source_control_found>.
 
 B<Examples:>
 
     my $rows = $top->source_control_resolved();
     # [{key => 'remote', value => 'origin', source => 'matched'}, ...]
+
+=head2 source_control_problem
+
+    my $problem = $top->source_control_problem;
+
+Why this clone cannot give the pipeline's remote, as the sentence
+L</_source_control> would refuse with, or C<undef> where it can. It refuses
+nothing, so a caller that can go on without the remote -- the dispatch gate,
+for a dry run -- asks here first.
+
+B<Parameters:> None.
+
+B<Returns:> The sentence, or C<undef>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    if (defined(my $problem = $top->source_control_problem)) {
+        warning("No remote is used by this dry run ...:\n\n%s", $problem);
+    }
 
 =head2 applied_record_path
 
@@ -4024,56 +4008,21 @@ B<Examples:>
 
     my $sc = $top->_source_control();
 
-Returns the resolved source-control values as a hash reference, whose keys
-are C<remote>, C<uri>, C<repository>, C<control_branch>, and C<pr_prefix>.
-Precedence is explicit over derived over default.
+L</_source_control_found>'s values, with what the clone could not give
+raised at C<Genesis::Exit::CONFIG>. This is the clone's judgement (D118,
+noted 2026-10-15): it runs where the remote is first used, through
+L</source_control_remote> or the git handle's resolver, and never at load.
+The file's own rules for these keys -- that C<repository> parses, that
+C<control_branch> and C<pr_prefix> are not empty -- are the schema's
+(L</_repository_rule>, L</_control_branch_rule>, L</_pr_prefix_rule>), and
+are judged at load and before every save.
 
-The remote is L</_resolve_remote>'s answer, the clone's own pin or the
-clone's remote that points at the repository, and its refusals are raised
-here at C<CONFIG>; it is never the first C<git remote>, which is alphabetical
-order. The repository is the one written in the configuration, as
-C<owner/repo> or as a URL, or else the repository the resolved remote points
-at, or the C<owner/repo> its URL carries, on any host; either way it is read
-through L</repository_identity>, the identity is kept beside it as
-C<identity>, and a remote whose URL carries no C<owner/repo>, such as a path,
-needs it named explicitly. An empty C<pr_prefix>
-is refused, because it would give the pull request branch the deployment
-branch's own name. The prefix checked is the one in the configuration being
-loaded, not L</pr_prefix>'s answer from control, because this runs as that
-configuration's validation and reading control there would make every
-command in a pipeline repository pay for a read of control as it loads. An
-empty C<control_branch> is refused beside it,
-because nothing can be read from a branch with no name. Every refusal exits
-C<Genesis::Exit::CONFIG>.
-
-The url is asked of git only where C<repository> was not configured, since
-the repository is the one value derived from the url and asking costs a fork
-on every command. So a configured repository is the only way C<uri> comes
-back undef.
-
-The answer is resolved once and kept, so the refusals land at configuration
-load rather than at the first read. The remote is also set on L</git>'s
-shared handle as its L<Service::Git/pipeline_remote>, so every remote
-operation on the repository takes it without being told.
-
-B<Returns:> A hash reference of the five resolved values, with C<identity>
-beside C<repository> and C<remote_how> beside C<remote>, which is how
-L</_resolve_remote> found it and what L</source_control_resolved> reports.
+B<Returns:> The hash reference L</_source_control_found> answers, without a
+C<refusal>.
 
 B<Errors:>
 
 =over 4
-
-=item *
-
-C<"pipeline.source_control.pr_prefix must not be empty"> - raised when the
-override is present and holds an empty string.
-
-=item *
-
-C<"pipeline.source_control.control_branch must not be empty"> - raised on
-the same terms, because a branch with no name names nothing to read the
-repository from.
 
 =item *
 
@@ -4100,11 +4049,6 @@ C<"pipeline.source_control.repository could not be derived"> - raised when
 the remote's URL carries no GitHub C<owner/repo> pair and no override names
 one. There is no exception under the manual provider.
 
-=item *
-
-C<"pipeline.source_control.repository is %s, which names no repository"> -
-raised when the configured value is neither C<owner/repo> nor a GitHub URL.
-
 =back
 
 B<Examples:>
@@ -4115,6 +4059,150 @@ B<Examples:>
     #          pr_prefix => 'pr/',
     #          identity => {host => 'github.com', owner => 'team',
     #                       repo => 'bosh'}}
+
+=head2 _source_control_found
+
+    my $sc = $top->_source_control_found;
+
+The source-control values, and what the clone could not give, without
+refusing anything. Its keys are C<remote>, C<remote_how>, C<uri>,
+C<repository>, C<identity>, C<control_branch> and C<pr_prefix>, and
+C<refusal> where the clone could not give the remote or the repository: the
+sentence L</_source_control> refuses with. The answer is resolved once and
+kept, refusal and all.
+
+Precedence is explicit over derived over default. The remote is
+L</_resolve_remote>'s answer, the clone's own pin or the clone's remote that
+points at the repository; it is never the first C<git remote>, which is
+alphabetical order. The repository is the one written in the configuration,
+as C<owner/repo> or as a URL, or else the repository the resolved remote
+points at, or the C<owner/repo> its URL carries, on any host; either way it
+is read through L</repository_identity> and its identity kept beside it. A
+written repository is identified even where the clone has no remote or no
+git at all, which is what lets a dry run and the describe report go on
+without one. The remote is set on L</git>'s shared handle as its
+L<Service::Git/pipeline_remote>, so every remote operation on the
+repository takes it without being told.
+
+C<pr_prefix> is read off the configuration being judged, not through
+L</pr_prefix>, which answers control's value under D112, because reading
+control here would make every command in a pipeline repository pay for a
+read of control. The url is asked of git only where C<repository> was not
+configured, since the repository is the one value derived from the url and
+asking costs a fork; so a configured repository is the only way C<uri> comes
+back undef. The git checkout is asked about before the handle is built,
+because the handle's constructor refuses the path with a message about the
+path, and what an operator who turned a pipeline on needs to hear is what a
+pipeline needs a repository for.
+
+B<Parameters:> None.
+
+B<Returns:> The hash reference described above.
+
+B<Errors:> None of its own.
+
+B<Examples:>
+
+    my $sc = $top->_source_control_found;
+    # in a clone with no remote, and repository: org/repo written:
+    # {repository => 'org/repo', identity => {...}, control_branch => 'control',
+    #  pr_prefix => 'pr/', refusal => "This clone has no git remote, ..."}
+
+=head2 _source_control_identified
+
+    my $sc = $top->_source_control_identified;
+
+L</_source_control_found>'s values wherever the repository is known, written
+or derived, whether or not the clone has a usable remote. It is what
+L</source_control_uri>, L</source_control_repository> and L</github_client>
+read, because each needs the repository and not the clone (D118, noted
+2026-10-15). Where the repository is neither written nor derivable, it
+refuses naming C<pipeline.source_control.repository> and saying why the
+clone could not give it.
+
+B<Parameters:> None.
+
+B<Returns:> The hash reference, with C<identity> and C<repository> set.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"pipeline.source_control.repository is not set, and could not be derived
+from this clone: ..."> - at C<Genesis::Exit::CONFIG>, followed by the
+clone's own sentence.
+
+=back
+
+B<Examples:>
+
+    my $repo = $top->_source_control_identified->{repository};
+    # 'org/repo' from the configuration, with no remote at all
+
+=head2 _repository_rule
+
+    repository => {type => 'string', check => \&_repository_rule}
+
+The schema's own rule for C<pipeline.source_control.repository>, as
+L<Genesis::Config/validate>'s C<check> hook takes it: the value must parse,
+through L</repository_identity>, to a host, owner and repo. It needs only
+the value, so it is judged at load and before every save, gathered with the
+schema's other problems (D118, noted 2026-10-15), whether or not the
+pipeline is enabled.
+
+B<Parameters:> The written value.
+
+B<Returns:> A message without the key, or C<undef> when the value names a
+repository.
+
+B<Errors:> None; the schema reports the message as C<#R{key}: message>.
+
+B<Examples:>
+
+    Genesis::Top::_repository_rule('org/repo');     # undef
+    Genesis::Top::_repository_rule('not a repo');   # "is not a repo, which names no repository.  ..."
+
+=head2 _control_branch_rule
+
+    control_branch => {type => 'string', check => \&_control_branch_rule}
+
+The schema's own rule for C<pipeline.source_control.control_branch>: it must
+not be empty, because nothing can be read from a branch with no name. It is
+judged at load and before every save whether or not the pipeline is enabled,
+since an empty value written into the file is wrong either way; before it
+was a schema rule it ran only under an enabled pipeline.
+
+B<Parameters:> The written value.
+
+B<Returns:> A message without the key, or C<undef>.
+
+B<Errors:> None; the schema reports the message as C<#R{key}: message>.
+
+B<Examples:>
+
+    Genesis::Top::_control_branch_rule('control');  # undef
+    Genesis::Top::_control_branch_rule('');         # "must not be empty.  ..."
+
+=head2 _pr_prefix_rule
+
+    pr_prefix => {type => 'string', check => \&_pr_prefix_rule}
+
+The schema's own rule for C<pipeline.source_control.pr_prefix>: it must not
+be empty, because an empty prefix gives the pull request branch the
+deployment branch's own name. Judged as L</_control_branch_rule> is.
+
+B<Parameters:> The written value.
+
+B<Returns:> A message without the key, or C<undef>.
+
+B<Errors:> None; the schema reports the message as C<#R{key}: message>.
+
+B<Examples:>
+
+    Genesis::Top::_pr_prefix_rule('pr/');           # undef
+    Genesis::Top::_pr_prefix_rule('');              # "must not be empty.  ..."
 
 =head2 _pr_branch_collisions
 
@@ -4355,9 +4443,11 @@ order. Both halves of the deployment slug are checked as git ref components
 by L</_validate_slug_components>, first, because they name the branches
 everything else here is about. Then every key that shapes the pipeline is
 checked by L</_validate_shape_values> to have resolved from the
-environment's own files, before anything reads the shape. Then the
-source-control block is resolved,
-which is where the derivations and their refusals are raised. The configured
+environment's own files, before anything reads the shape. The source
+control is not resolved here: whether the clone is a git checkout with a
+remote that points at the repository is asked where the remote is first
+used (L</_source_control>), and the file's own rules for those keys are the
+schema's (D118, noted 2026-10-15). The configured
 provider's own rules are not among the checks here: the provider block
 declares the type that decides it, so C<Genesis::Config::validate> has
 already dispatched the block to that provider and gathered what it said with
@@ -4369,7 +4459,7 @@ mount is where that store keeps the pipeline's applied record. Last, every
 environment the deployment root holds has its C<genesis.pipeline> block
 checked, read merged through L</_merged_env_params>. The refusals
 themselves belong to L</_validate_slug_components>, to
-L</_validate_shape_values>, to L</_source_control>,
+L</_validate_shape_values>,
 to L</_validate_capability_gates>, to
 L</_validate_manifest_store>, to L</_validate_one_exodus_mount>, and to
 L</_validate_env_pipeline_block>.
