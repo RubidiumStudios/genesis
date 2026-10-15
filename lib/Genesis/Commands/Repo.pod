@@ -547,6 +547,13 @@ Accepts a provider either as an object or as a bare type name, taking the
 object's own C<config> when given one, so the same call works whether the
 provider was selected interactively or defaulted.
 
+The section is judged by L<Genesis::Top/_validate_config_to_save> before it
+is saved, as every writer's result is (D28, noted 2026-10-15). That needs no
+remote, since the clone is asked where the remote is first used (D118, noted
+2026-10-15), so the scaffold is judged before C<git init> has run and saved
+in a repository with no remote at all. A provider type whose required keys
+the scaffold does not write is refused rather than saved.
+
 B<Parameters:>
 
 =over 4
@@ -562,6 +569,9 @@ C<provider>, either an object or a type string.
 =back
 
 B<Returns:> Nothing; the config is written to disk.
+
+B<Errors:> Any refusal L<Genesis::Top/_validate_config_to_save> makes, at
+C<Genesis::Exit::CONFIG>; nothing is written.
 
 B<Examples:>
 

@@ -649,6 +649,7 @@ sub _create_pipeline_scaffold {
 	);
 
 	$top->config->set('pipeline', \%pipeline);
+	$top->_validate_config_to_save;
 	$top->config->save;
 }
 

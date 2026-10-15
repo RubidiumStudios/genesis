@@ -134,4 +134,62 @@ subtest 'a writer judges the repository it would save by its rule' => sub {
 	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
 };
 
+# A new repository's configuration as Genesis::Top->create leaves it, before
+# genesis init --with-ci writes the pipeline section, in a clone that has no
+# remote yet, which is how init leaves it.
+sub scaffold_repo {
+	my ($name) = @_;
+	scrub_git_env();
+	my $dir = workdir($name);
+	mkdir_or_fail("$dir/.genesis");
+	mkfile_or_fail("$dir/.genesis/config", <<'EOF');
+---
+creator_version: 3.2.0
+deployment_type: test-kit
+manifest_store: exodus
+version: 3
+EOF
+	run({dir => $dir}, 'git', 'init', '-q');
+	return $dir;
+}
+
+subtest "init's pipeline scaffold is judged before it is saved" => sub {
+	plan tests => 3;
+
+	# The scaffold takes any provider type, and an automated one written
+	# with none of the keys it requires is a file the load refuses.
+	require Genesis::Commands::Repo;
+	my $dir = scaffold_repo('writer-scaffold-refused');
+	my $before = slurp("$dir/.genesis/config");
+	my $top = Genesis::Top->new($dir, no_vault => 1);
+	$top->config;
+
+	my ($code, $err) = write_with {
+		Genesis::Commands::Repo::_create_pipeline_scaffold($top, provider => 'concourse')
+	};
+
+	is($code, Genesis::Exit::CONFIG, 'the save is refused at the configuration exit');
+	like($err, qr/missing required key|is required/, "naming what the provider requires");
+	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
+};
+
+subtest "init's manual scaffold saves, with no remote to judge" => sub {
+	plan tests => 2;
+
+	# What init itself writes, judged as any writer's result is.  The clone
+	# has no remote, and the judgement no longer asks it for one (T365).
+	require Genesis::Commands::Repo;
+	my $dir = scaffold_repo('writer-scaffold-manual');
+	my $top = Genesis::Top->new($dir, no_vault => 1);
+	$top->config;
+
+	my ($code, $err) = write_with {
+		Genesis::Commands::Repo::_create_pipeline_scaffold($top)
+	};
+	is($code, undef, 'the scaffold is saved');
+
+	my ($load) = write_with { Genesis::Top->new($dir, no_vault => 1)->config };
+	is($load, undef, 'and the next command loads it');
+};
+
 done_testing;
