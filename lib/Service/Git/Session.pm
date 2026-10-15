@@ -611,11 +611,16 @@ sub restore_branch {
 		# switch is the only thing there is to put it back to.  A hard reset
 		# is what puts the tree back with the ref where we are standing on the
 		# branch, and set_branch_ref refuses that case by name.
+		#
+		# The writers go through the door, because an abort has closed the
+		# session by the time it puts a branch back (D46, noted 2026-10-15).
 		my $found = $self->{switched}{$branch};
 		if (defined $found) {
-			($git->current_branch // '') eq $branch
-				? $git->reset_hard($found)
-				: $git->set_branch_ref($branch, $found);
+			$self->_through_the_door(sub {
+				($git->current_branch // '') eq $branch
+					? $git->reset_hard($found)
+					: $git->set_branch_ref($branch, $found);
+			});
 		} else {
 			# Neither the remote nor this run's own record has a tip for it,
 			# so the branch is one this run created and putting it back is
@@ -641,7 +646,9 @@ sub restore_branch {
 						: $git->checkout($origin->{branch});
 				});
 			}
-			$git->delete_branch($branch) if $git->branch_exists($branch);
+			$self->_through_the_door(sub {
+				$git->delete_branch($branch) if $git->branch_exists($branch);
+			});
 			$put_back = 'deleted';
 		}
 	}
@@ -971,7 +978,10 @@ sub _record_commit {
 # session, and this is what a session is from the handle's side: the
 # door is open for exactly as long as one of the verbs is running, and it
 # closes again however that verb ends, because the flag is localised
-# rather than set and cleared.
+# rather than set and cleared.  The three forced writers take the same door,
+# and an active session opens it for them too (D46, noted 2026-10-15), so a
+# verb that runs after the session has closed, as the abort's restore does,
+# opens it here.
 sub _through_the_door {
 	my ($self, $code) = @_;
 	my $git = $self->{git};

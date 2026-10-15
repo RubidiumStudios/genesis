@@ -2,7 +2,10 @@
 # Proves T76: the session's verbs are the only branch changers left, so
 # track_branch and Service::Git's own restore_branch have no callers, DESTROY
 # restores nothing, and checkout is reached through the session alone.  The
-# session's own restore_branch is a verb of the session and is allowed.
+# session's own restore_branch is a verb of the session and is allowed.  The
+# three writers that force a ref, delete one, or discard a tree refuse at
+# SOFTWARE outside a session verb or a begun, unfinished session, and are
+# called only where D46 admits them (D46, noted 2026-10-15).
 use strict;
 use warnings;
 use utf8;
@@ -136,6 +139,117 @@ subtest 'nothing outside the session checks a branch out' => sub {
 	}
 	is_deeply(\%allowed, {},
 		'and the one-way allowance has no member left in the tree');
+};
+
+# The three writers that force a ref, delete one, or discard a tree are behind
+# the session's door too (D46, noted 2026-10-15).  Each is asked with its
+# refusal captured, because inside an eval bail dies with a wrapped sentence
+# and the exit code it named is only in the arguments it was handed.
+sub writer_refusals {
+	my ($git, $branch, $target) = @_;
+	my %raised;
+	no warnings qw/once redefine/;
+	local *Service::Git::bail = sub {
+		my $how = ref $_[0] eq 'HASH' ? shift : {};
+		my ($format, @args) = @_;
+		die {code => $how->{exitcode}, said => sprintf($format, @args)};
+	};
+	for my $call (
+		[reset_hard     => sub {$git->reset_hard('HEAD')}],
+		[set_branch_ref => sub {$git->set_branch_ref($branch, $target)}],
+		[delete_branch  => sub {$git->delete_branch($branch)}],
+	) {
+		my ($name, $code) = @$call;
+		$raised{$name} = eval {$code->(); 1} ? undef : $@;
+	}
+	return \%raised;
+}
+
+subtest 'the three writers refuse outside a session' => sub {
+	plan tests => 11;
+
+	my $h   = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $git = $h->git('a');
+	my $qa  = $h->slug('qa');
+	my $was = $git->sha($qa);
+	my $to  = $git->sha("$qa~1") // $git->sha($h->control);
+
+	my $raised = writer_refusals($git, $qa, $to);
+	for my $name (qw/reset_hard set_branch_ref delete_branch/) {
+		my $r = $raised->{$name};
+		is((ref $r eq 'HASH' ? $r->{code} : undef), Genesis::Exit::SOFTWARE,
+			"$name refuses at SOFTWARE") or diag(explain $r);
+		like((ref $r eq 'HASH' ? $r->{said} : "$r"), qr/session/i,
+			'naming the session');
+	}
+	is($git->sha($qa), $was, 'and the branch was neither moved nor deleted');
+	ok($git->is_clean, 'and the tree was not touched');
+
+	# A session that has finished has closed its door, so a call after it
+	# meets the same refusal as a call with no session at all.
+	my $session = $git->session(control => $h->control, remote => 'origin');
+	$session->begin;
+	$session->finish;
+	my $after = writer_refusals($git, $qa, $to);
+	is(scalar(grep {ref $after->{$_} eq 'HASH'
+			&& ($after->{$_}{code} // 0) == Genesis::Exit::SOFTWARE}
+		qw/reset_hard set_branch_ref delete_branch/), 3,
+		'a finished session opens the door for none of them');
+	is($git->sha($qa), $was, 'and still nothing moved');
+	ok($git->branch_exists($qa), 'and nothing was deleted');
+};
+
+subtest 'inside a begun session the writers go through' => sub {
+	plan tests => 4;
+
+	my $h   = make_harness(envs => ['qa'], vault => 0);
+	init_branch($h, 'qa');
+	my $git = $h->git('a');
+	my $qa  = $h->slug('qa');
+	my $was = $git->sha($qa);
+
+	my $session = $git->session(control => $h->control, remote => 'origin');
+	$session->begin;
+	ok(eval {$git->set_branch_ref($qa, $git->sha($h->control)); 1},
+		'set_branch_ref goes through inside the session') or diag($@);
+	ok(eval {$git->reset_hard('HEAD'); 1},
+		'and so does reset_hard') or diag($@);
+	$session->finish;
+
+	# The session's own reset after it has finished is the publish's, for a
+	# branch the remote refused, and it goes through the session's verb.
+	ok(eval {$session->reset_branch($qa); 1},
+		'the session resets a branch after it has finished, through its own verb')
+		or diag($@);
+	is($git->sha($qa), $was, 'putting the branch back where the remote has it');
+};
+
+subtest 'the writers are called only where D46 admits them' => sub {
+	plan tests => 2;
+
+	# The session's own files are set aside by sources(), and the three
+	# callers D46 admits inside an open session are pinned by file and count,
+	# so a new caller, or a second call inside an admitted file, turns this
+	# red rather than joining the allowance unseen.
+	my %calls;
+	for my $file (sources()) {
+		my $text = get_file($file);
+		for my $writer (qw/reset_hard set_branch_ref delete_branch/) {
+			my $n = () = $text =~ /->\Q$writer\E\(/g;
+			$calls{$file}{$writer} = $n if $n;
+		}
+	}
+	is_deeply(\%calls, {
+		'lib/Genesis/CI/PullRequest.pm' => {reset_hard => 3, delete_branch => 1},
+		'lib/Genesis/CI/Preflight.pm'   => {set_branch_ref => 2},
+		'lib/Genesis/Commands.pm'       => {set_branch_ref => 1},
+	}, 'the pull request arm, the initial state and the branch gate, and no other')
+		or diag(explain \%calls);
+
+	my @detached = grep {get_file($_) =~ /->checkout_detached\(/} sources();
+	is_deeply(\@detached, [],
+		'and nothing outside the session stands on a commit directly');
 };
 
 subtest 'the propagate run drives a session end to end' => sub {

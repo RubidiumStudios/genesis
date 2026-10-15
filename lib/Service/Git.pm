@@ -369,6 +369,26 @@ sub checkout {
 }
 
 # }}}
+# _require_session - refuse a forced write from outside the session {{{
+#
+# The three writers that force a ref, delete one, or discard a tree are behind
+# the session's door as checkout is, and the door is open inside one of the
+# session's verbs and for as long as a session on this handle has begun and
+# not finished or aborted (D46, noted 2026-10-15).  Every place the design
+# admits a forced move is one of those, so a call from anywhere else is a
+# defect, and SOFTWARE says so rather than blaming anything the operator typed.
+sub _require_session {
+	my ($self, $what) = @_;
+	return 1 if $self->{_in_session};
+	return 1 if $self->{_session} && $self->{_session}->active;
+	bail({exitcode => SOFTWARE},
+		"#C{%s} was called outside a branch session in #C{%s}.\n\n".
+		"A forced move of a branch, or a discarded working tree, happens only ".
+		"inside the session, so that the session can put back what it moved.",
+		$what, $self->{root});
+}
+
+# }}}
 # reset_hard - put the checked-out branch's tree, index, and tip at a ref {{{
 #
 # The pull request branch is derived state, rebuilt from the deployment branch
@@ -377,6 +397,7 @@ sub checkout {
 # the directory we are standing in.
 sub reset_hard {
 	my ($self, $ref) = @_;
+	$self->_require_session('reset_hard');
 	run({dir => $self->{root}, onfailure => "Failed to reset to '$ref'"},
 		'git', 'reset', '--hard', $ref);
 	delete $self->{_branch_cache};
@@ -441,6 +462,7 @@ sub create_branch {
 # the working tree beside it would be worse than a refusal.
 sub set_branch_ref {
 	my ($self, $branch, $ref) = @_;
+	$self->_require_session('set_branch_ref');
 
 	# SOFTWARE, because a caller that asks to move the branch the tree is
 	# standing on has a defect in it.  Every caller the design admits knows
@@ -1606,6 +1628,7 @@ sub checked_out_branch {
 # remote no longer carries is exactly what breaks the next cycle.
 sub delete_branch {
 	my ($self, $branch) = @_;
+	$self->_require_session('delete_branch');
 	return $self if ($self->current_branch // '') eq $branch;
 	run({dir => $self->{root},
 			onfailure => "Failed to delete local branch '$branch'"},

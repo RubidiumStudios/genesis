@@ -41,9 +41,14 @@ subtest 'it forces a branch the tree is not standing on' => sub {
 	isnt(ref_in($h->a, "refs/heads/$slug"), $tracking,
 		'the branch starts somewhere the tracking ref is not');
 
+	# Inside a session, because the writer is behind the session's door
+	# (D46, noted 2026-10-15), and what this row weighs is the write itself.
 	my $git = $h->git('a');
+	my $session = $git->session(control => $h->control, remote => 'origin');
+	$session->begin;
 	is($git->set_branch_ref($slug, "refs/remotes/origin/$slug"), $git,
 		'the write answers with the handle');
+	$session->finish;
 	is(ref_in($h->a, "refs/heads/$slug"), $tracking,
 		'and the branch now stands where the tracking ref stands');
 };
@@ -62,8 +67,14 @@ subtest 'it refuses the branch the working tree is standing on' => sub {
 	# refusal is about.
 	my $before = ref_in($h->a, "refs/heads/$slug");
 
+	# Inside a session, as above, so the refusal weighed is the checked-out
+	# branch's and not the closed door's.
+	my $git = $h->git('a');
+	my $session = $git->session(control => $h->control, remote => 'origin');
+	$session->begin;
 	my ($err, $exit) = bail_from(sub {
-		$h->git('a')->set_branch_ref($slug, "refs/remotes/origin/$slug")});
+		$git->set_branch_ref($slug, "refs/remotes/origin/$slug")});
+	$session->finish;
 
 	like($err, qr/Refusing\s+to\s+force/, 'the write refuses');
 	like($err, qr/\Q$slug\E/, 'and names the branch');

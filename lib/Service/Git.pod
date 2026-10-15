@@ -475,6 +475,11 @@ B<Errors:>
 
 =item *
 
+A refusal at C<SOFTWARE> when called outside the session, through
+L</_require_session> (D46, noted 2026-10-15).
+
+=item *
+
 C<"Failed to reset to '%s'"> -- raised via C<run>'s C<onfailure>. C<%s> is
 the ref.
 
@@ -623,6 +628,11 @@ B<Returns:> C<$self>.
 B<Errors:>
 
 =over 4
+
+=item *
+
+A refusal at C<SOFTWARE> when called outside the session, through
+L</_require_session> (D46, noted 2026-10-15).
 
 =item *
 
@@ -2362,6 +2372,11 @@ B<Errors:>
 
 =item *
 
+A refusal at C<SOFTWARE> when called outside the session, through
+L</_require_session> (D46, noted 2026-10-15).
+
+=item *
+
 C<"Failed to delete local branch '%s'"> -- raised via C<run>'s C<onfailure>.
 C<%s> is the branch name.
 
@@ -3291,6 +3306,50 @@ B<Examples:>
   my $before = $git->_config_stamp;
   # ... git remote add upstream ...
   $git->_config_stamp ne $before;    # true
+
+=head2 _require_session
+
+  $self->_require_session('reset_hard');
+
+Refuses a forced write from outside the session. L</reset_hard>,
+L</set_branch_ref> and L</delete_branch> force a ref, delete one, or discard a
+tree, and they sit behind the session's door as L</checkout> does (D46, noted
+2026-10-15). The door is open inside one of the session's verbs, which set
+C<_in_session> for as long as they run, and for as long as a session on this
+handle is active, that is, begun and not finished or aborted. Every place the
+design admits a forced move is one of those, so a call from anywhere else is a
+defect in the caller.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$what>
+
+The writer asking, which the refusal names.
+
+=back
+
+B<Returns:> 1 where the door is open.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+A refusal at C<SOFTWARE>, naming the writer and the repository, where neither
+a verb nor an active session opens the door.
+
+=back
+
+B<Examples:>
+
+  my $session = $git->session(control => 'control', remote => 'origin');
+  $session->begin;
+  $git->set_branch_ref('qa/bosh', 'refs/remotes/origin/qa/bosh');  # goes through
+  $session->finish;
+  $git->delete_branch('pr/qa/bosh');  # refused at SOFTWARE
 
 =head2 _require_remote
 
