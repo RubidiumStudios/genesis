@@ -213,6 +213,11 @@ C<pipeline.provider.type> walks into nested sections.
 B<A key naming a section prints that section as YAML> rather than
 stringifying the reference.  A scalar prints bare, with no YAML framing,
 so C<$(genesis config manifest_store)> yields the value and nothing else.
+A boolean prints as C<true> or C<false>, as the file writes it.  It is
+held as a C<JSON::PP::Boolean> object, which is a reference, so it is
+tested for before the reference test: the YAML conversion refuses a
+document that is not a map, and a boolean sent there on its own fails to
+read (T368).
 
 B<Values go to standard output and everything else to standard error>,
 so the command composes in a pipeline.  This falls out of C<output()>

@@ -96,6 +96,28 @@ subtest 'config resolves a dotted path' => sub {
 	is($out, "manual\n", "walks into nested keys");
 };
 
+subtest 'config prints a boolean as the file writes it (T368)' => sub {
+	plan tests => 2;
+
+	# A boolean is held as an object, and the read sent every reference to
+	# YAML on its own, which refuses a document that is not a map.
+	my %read;
+	for my $enabled (1, 0) {
+		my $dir = config_repo("config-get-boolean-$enabled", enabled => $enabled);
+		pushd $dir;
+		prepare_command('config', 'pipeline.enabled');
+		build_command_environment;
+		local $ENV{GENESIS_IGNORE_EVAL} = 1;
+		my $out;
+		$out = stdout_from { exit_code { Genesis::Commands::Core::config('pipeline.enabled') } };
+		popd;
+		$read{$enabled} = $out;
+	}
+
+	is($read{1}, "true\n",  'true prints as true');
+	is($read{0}, "false\n", 'and false as false');
+};
+
 subtest 'config renders a non-scalar key as YAML' => sub {
 	plan tests => 1;
 

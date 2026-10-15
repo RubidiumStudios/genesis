@@ -10,6 +10,7 @@ use Genesis::Commands;
 use Genesis::Exit qw/CONFIG/;
 use Genesis::Top;
 use JSON::PP qw/encode_json/;
+use Scalar::Util ();
 use POSIX qw/strftime mktime/;
 
 sub config {
@@ -79,7 +80,12 @@ sub config {
 	}
 
 	my $value = $top->config->get($key);
-	output(ref($value) ? to_yaml($value) : $value);
+	output(
+		Scalar::Util::blessed($value) && $value->isa('JSON::PP::Boolean')
+			? ($value ? 'true' : 'false')
+		: ref($value) ? to_yaml($value)
+		: $value
+	);
 	return 0;
 }
 
