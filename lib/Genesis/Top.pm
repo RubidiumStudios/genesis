@@ -115,26 +115,12 @@ sub new {
 	bail("'$root' is not a Genesis deployment repository")
 		unless $class->is_repo($root);
 
-	# A tree written out of a commit is a reading surface rather than a
-	# repository, so it carries no vault of its own and it cannot answer the
-	# repository questions the configuration checks ask, such as whether an
-	# enabled pipeline sits in a git checkout with a remote behind it.  The
-	# caller that materialised it has already had those answers from the
-	# repository it is running in, so both are skipped together here rather
-	# than each being worked around at the call site.
+	# See the POD for materialised_tree and repair_config.
 	$opts{no_vault} = 1 if $opts{materialised_tree};
 
 	# Build the base object
 	my $self = $class->_build($root, %opts);
-
-	# A materialised tree is the pipeline's shape as one commit holds it, so
-	# it reads its shape off itself rather than off control, which is what
-	# stops the read of control from reading control again.
 	$self->{__materialised_tree} = 1 if $opts{materialised_tree};
-
-	# genesis config is how an operator repairs a configuration the load
-	# refuses, so it reads the file without the refusals and judges the
-	# configuration it would write instead.
 	$self->{__config_repair} = 1 if $opts{repair_config};
 
 	# Initialize vault connection and set environment variables
@@ -2400,20 +2386,7 @@ sub _validate_config {
 	return 1 if $self->{__materialised_tree};
 	my $config_version = $self->config->get(version => 1);
 
-	# Classify before comparing.  In modern repos the `version` field
-	# is either an integer schema number (1, 2, 3) or absent (which
-	# get(version => 1) defaults to 1).  But ancient pre-2018 repos
-	# -- before commit e9cad6ac introduced the dedicated
-	# `genesis_version:` field -- wrote the genesis RELEASE semver
-	# (e.g. "2.7.1") into the `version:` field itself.  Those configs
-	# are now extremely rare in practice but the defensive semver
-	# match is preserved here (and in _upgrade_config_to_v2's
-	# creator_version capture) to upgrade them cleanly if anyone
-	# still has one.
-	#
-	# Numeric `==` against a semver string warns ("Argument 'X.Y.Z'
-	# isn't numeric in numeric eq (==)"), so gate each `==` on an
-	# integer-shape check first.
+	# Classify before comparing: `==` on a semver string warns.
 	my $is_integer = ($config_version =~ /^\d+$/);
 	my $is_semver  = ($config_version =~ /^\d+\.\d+\.\d+(-[A-Za-z0-9_-]\.?\d+)?$/);
 
@@ -2437,20 +2410,11 @@ sub _validate_config {
 		$self->_refuse_v2_pipeline unless $self->{__config_repair}; # before the schema
 		$self->_check_config($self->_repo_config_schema_v2());
 
-		# Detect legacy ci.yml -- flag it so command dispatch can gate
-		# pipeline-consuming commands, but otherwise let the repo load.
-		# Non-pipeline commands (deploy, check, manifest, secrets ops)
-		# run unchanged in v2 mode.  Only pages with a top-level
-		# 'pipeline:' key are treated as legacy CI configs; env files
-		# named ci.yml (which start with 'kit:' or 'genesis:') don't
-		# trip the check.
 		my $ci_yml = $self->path('ci.yml');
 		$self->{__has_legacy_ci_yml} = 1
 			if -f $ci_yml && _is_legacy_ci_file($ci_yml);
 
-		# Augment in-memory with v3 defaults so downstream code sees
-		# a uniform v3 shape.  These go into the 'default' layer and
-		# will NOT be persisted to disk on save.
+		# Default layer: never saved.
 		$self->config->_update_source('default', 'pipeline', {
 			enabled => Genesis::Config::FALSE,
 		});
@@ -2460,27 +2424,11 @@ sub _validate_config {
 		$self->_refuse_retired_remote unless $self->{__config_repair};
 		$self->_check_config($self->_repo_config_schema());
 
-		# What follows refuses or warns about the file, and a repair is
-		# judged on what it would write.
+		# What follows refuses or warns; a repair is judged at its save.
 		return 1 if $self->{__config_repair};
 
-		# The checks a declarative schema cannot state run for every
-		# command and right after the schema.  Later work extends
-		# _validate_pipeline_config and never touches this call.
 		$self->_validate_pipeline_config;
 
-		# Detect legacy ci.yml alongside v3 config -- flag it for the
-		# dispatch gate.  Two sub-cases surface at load time:
-		#   * v3 config already declares a pipeline
-		#     -> stale ci.yml, warn once and keep going; the v3 config
-		#     wins downstream.
-		#   * v3 config has no pipeline configured -> flag as legacy CI so
-		#     pipeline commands gate on migration; other commands run.
-		#
-		# The configuration is memoized before _validate_config runs, so
-		# the read gets it back rather than re-entering the load.  It is
-		# this file's own key rather than control's, because the question
-		# is about the ci.yml sitting beside it.
 		my $ci_yml = $self->path('ci.yml');
 		if (-f $ci_yml && _is_legacy_ci_file($ci_yml)) {
 			if ($self->config->get('pipeline.enabled')) {
@@ -2512,10 +2460,6 @@ sub _validate_config {
 
 # }}}
 # _check_config - validate the configuration, or only read it for repair {{{
-#
-# A configuration read for repair still has its schema installed and its
-# defaults filled, so it answers reads as a valid one would, and the writer
-# can tell a declared key from a misspelling.
 sub _check_config {
 	my ($self, $schema) = @_;
 	return $self->config->problems($schema) if $self->{__config_repair};
@@ -2909,15 +2853,8 @@ sub _pipeline_config_schema {
 
 # }}}
 # _current_config_schema - the schema for the version the configuration says {{{
-#
-# Built on demand rather than read back off the config object.  The
-# configured provider's own fragment is merged as the schema is built, so
-# a command that changes the provider type changes the schema its keys
-# have to be judged against, and the copy the load left behind is a
-# version out of date.  Every writer that re-validates asks for this one.
 sub _current_config_schema {
 	my ($self) = @_;
-
 	my $version = $self->config->get(version => 1);
 	return ($version =~ /^\d+$/ && $version >= 3)
 		? $self->_repo_config_schema
@@ -2926,21 +2863,8 @@ sub _current_config_schema {
 
 # }}}
 # _refuse_v2_pipeline - a pipeline section is version 3 work {{{
-#
-# The version 2 schema declares the pipeline key, because the gate
-# _validate_config injects has to survive the first write, and declaring a
-# key is also what makes it writable.  So the write is refused on its own
-# and the declaration keeps its one job.
-#
-# is_set reads the loaded and set layers alone, so this sees a block
-# somebody wrote into the file and a block a command set in this run, and
-# never the injection, which goes in at default priority.
-#
-# The load meets a block that was already on disk, and a writer meets one
-# it set when it judges its result, which is the same judgement run again.
 sub _refuse_v2_pipeline {
 	my ($self) = @_;
-
 	return 1 unless ($self->{__config_version} // 0) == 2;
 	bail({exitcode => CONFIG},
 		"A pipeline section belongs to a version 3 repository configuration, ".

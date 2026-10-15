@@ -310,11 +310,6 @@ sub validate {
 	my ($self, $schema, $subject) = @_;
 	my @errors = $self->problems($schema);
 	return 1 unless @errors;
-
-	# An invalid configuration is a refusal and not a crash, so it carries
-	# CONFIG rather than the bare 1 a fatal system error uses.  A pipeline
-	# job reads the code to decide whether to retry, to page someone, or to
-	# stop.
 	bail({exitcode => CONFIG},
 		"Configuration validation failed for %s:%s",
 		$subject // sprintf('#C{%s}', $self->{path} // '<in-memory config>'),
@@ -322,19 +317,9 @@ sub validate {
 }
 # }}}
 # problems - what validate would refuse, without refusing it {{{
-#
-# Installs the schema and fills its defaults exactly as validate does, so a
-# configuration read for repair answers its reads the way a valid one would.
 sub problems {
 	my ($self, $schema) = @_;
 	$self->{schema} = $schema;
-
-	# Defaults are filled below and nothing is cleared first, because no
-	# part of the schema is built out of the configuration's own values
-	# any more.  A block whose shape depends on one of its values declares
-	# as much for itself and is dispatched during the walk, so there is no
-	# rebuild that could leave a previous provider's filled default
-	# standing in the store.
 	my @errors = ();
 
 	# Ensure all required keys are present, and all defaults are set

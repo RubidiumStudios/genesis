@@ -14,8 +14,6 @@ use POSIX qw/strftime mktime/;
 
 sub config {
 	my (@keys) = @_;
-	# Read for repair: a file the load refuses is the one an operator most
-	# needs this command for.  A write is judged on what it would save.
 	my $top = Genesis::Top->new('.', no_vault => 1, repair_config => 1);
 
 	my ($pairs, $from_files, $removals) =
@@ -33,17 +31,13 @@ sub config {
 		# Arity of 2 per occurrence, so the pairs arrive flat and even.
 		my @pairs = (@{$pairs || []}, _pairs_from_files($config, $from_files));
 
-		# The order the two were typed in is not recoverable, so either
-		# answer would be wrong half the time.
 		my @set_keys;
 		for (my $i = 0; $i < @pairs; $i += 2) {
 			push @set_keys, $pairs[$i];
 		}
 		my @contested;
 		for my $unset (@{$removals || []}) {
-			# A shared prefix is only an overlap when one path contains
-			# the other; pipeline.enabled and pipeline.provider are
-			# unrelated.
+			# Overlap is containment, not a shared prefix.
 			push @contested, map {"$_ / $unset"}
 				grep {$_ eq $unset || _contains($unset, $_) || _contains($_, $unset)}
 				@set_keys;
@@ -52,26 +46,14 @@ sub config {
 			"Cannot set and unset overlapping keys in one run: %s",
 			join(', ', map {"#Y{$_}"} @contested)
 		) if @contested;
-		# The pairs are applied twice around the schema rebuild, and they stay
-		# that way.  Writing pipeline.provider.type still changes which keys
-		# the block admits, and the block declares that dependency now rather
-		# than having a builder perform it, but a declared dependency is still
-		# a dependency, and the second pass is what lets a pair written after
-		# the type meet the schema that type selects.  The first pass puts the
-		# new type on the configuration, the rebuild declares the keys it
-		# brings, and the second pass coerces every value against the schema
-		# that is now true.  Without the second pass a boolean typed as false
-		# is stored as the string "false", which Perl reads as true, and the
-		# run saves the operator's own opposite.
+
+		# Twice around the rebuild, so every value meets the schema the run's
+		# own version and provider type select; see the POD.
 		_apply_pairs($config, \@pairs);
 		$config->schema($top->_current_config_schema) if $config->schema;
 		_apply_pairs($config, \@pairs);
 
-		# A key the file carries can always be removed, declared or not,
-		# because removing what nothing declares is the repair.  A key it
-		# does not carry is only a typo if no schema declares it either.
-		# Read after the rebuild, so a key the newly named provider declares
-		# is a key this run may also unset.
+		# Only an absent key no schema declares is a typo.
 		if (my @unknown = grep {
 			$config->schema && !$config->schema_has($_) && !$config->has($_)
 		} @{$removals || []}) {
@@ -91,9 +73,6 @@ sub config {
 	return output(to_yaml($top->config->get_all)) unless @keys;
 
 	my $key = $keys[0];
-
-	# Absent keys report on stderr and exit non-zero: a bare empty line on
-	# stdout would be indistinguishable from a key set to the empty string.
 	unless ($top->config->has($key)) {
 		error("#Y{%s} is #Ki{(unset)}", $key);
 		return 1;
