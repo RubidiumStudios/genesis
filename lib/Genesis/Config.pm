@@ -307,6 +307,25 @@ sub replace {
 # }}}
 # validate - validate the configuration against a schema {{{
 sub validate {
+	my ($self, $schema, $subject) = @_;
+	my @errors = $self->problems($schema);
+	return 1 unless @errors;
+
+	# An invalid configuration is a refusal and not a crash, so it carries
+	# CONFIG rather than the bare 1 a fatal system error uses.  A pipeline
+	# job reads the code to decide whether to retry, to page someone, or to
+	# stop.
+	bail({exitcode => CONFIG},
+		"Configuration validation failed for %s:%s",
+		$subject // sprintf('#C{%s}', $self->{path} // '<in-memory config>'),
+		join('', map {"\n[[".bullet('', inline => 1, indent => 0).">>$_"} @errors));
+}
+# }}}
+# problems - what validate would refuse, without refusing it {{{
+#
+# Installs the schema and fills its defaults exactly as validate does, so a
+# configuration read for repair answers its reads the way a valid one would.
+sub problems {
 	my ($self, $schema) = @_;
 	$self->{schema} = $schema;
 
@@ -344,21 +363,10 @@ sub validate {
 		push @errors, @key_errors if @key_errors;
 	}
 
-	if (@errors) {
-		# An invalid configuration is a refusal and not a crash, so it
-		# carries CONFIG rather than the bare 1 a fatal system error uses.
-		# A pipeline job reads the code to decide whether to retry, to page
-		# someone, or to stop.
-		bail({exitcode => CONFIG},
-			"Configuration validation failed for #C{%s}:%s",
-			$self->{path} // '<in-memory config>',
-			join('', map {"\n[[".bullet('', inline => 1, indent => 0).">>$_"} @errors));
-	}
-
 	# Invalidate contents cache after all validation is complete
 	delete $self->{_contents};
 
-	return 1;
+	return @errors;
 }
 # }}}
 # validate_subtree - validate one block against a schema {{{

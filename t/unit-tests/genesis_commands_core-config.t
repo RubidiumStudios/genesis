@@ -302,9 +302,9 @@ subtest 'config --unset accepts a key that is already unset' => sub {
 subtest 'config --unset rejects a key the schema does not know' => sub {
 	plan tests => 2;
 
-	# The check is validity, not presence: an unknown key is a typo, and
-	# the old presence check could never catch one because a typo is
-	# always absent.
+	# A key the file does not carry and no schema declares is a typo.  A
+	# presence check alone could never catch one, because a typo is always
+	# absent; a key the file does carry is removable, declared or not.
 	my $dir = config_repo('config-unset-bogus');
 	pushd $dir;
 	prepare_command('config', '--unset', 'manifest_stroe');
@@ -572,9 +572,10 @@ subtest 'config --unset of the whole section goes through' => sub {
 };
 
 subtest 'config --unset still refuses a key no schema declares' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my $dir = config_repo('config-unset-unknown');
+	my $before = slurp("$dir/.genesis/config");
 	pushd $dir;
 	prepare_command('config', '--unset', 'pipeline.provider.nonesuch');
 	build_command_environment;
@@ -592,6 +593,8 @@ subtest 'config --unset still refuses a key no schema declares' => sub {
 		"a key no schema declares is still refused by name");
 	is($code, Genesis::Exit::CONFIG,
 		"and the refusal carries the configuration exit code");
+	is(slurp("$dir/.genesis/config"), $before,
+		"and nothing is written");
 };
 
 subtest 'config --unset reads the schema the same run makes true' => sub {
@@ -678,6 +681,142 @@ subtest 'config --set-from-file reports a file it cannot read' => sub {
 	like($err.$raised, qr/no-such-file/, "names the file");
 	like(slurp("$dir/.genesis/config"), qr/manifest_store:\s*exodus/,
 		"writes nothing");
+};
+
+# A configuration the load refuses: the rc builds wrote a ci: block that no
+# schema declares, and every command but this one refuses the file because
+# of it.  genesis config is how an operator repairs it, so it has to be able
+# to read the file, and to write the file it is repairing.
+sub ci_repo {
+	my ($name) = @_;
+	my $dir = config_repo($name);
+	mkfile_or_fail("$dir/.genesis/config", <<'CFG');
+---
+ci:
+  enabled: true
+creator_version: 3.2.0
+deployment_type: test-kit
+manifest_store: exodus
+pipeline:
+  enabled: true
+  provider:
+    type: manual
+version: 3
+CFG
+	return $dir;
+}
+
+# Whether the next command could load the file, asked the way the next
+# command asks it: a Top over the directory, and its configuration.
+sub loads_cleanly {
+	my ($dir) = @_;
+	require Genesis::Top;
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+	my ($code, $err);
+	$err = stderr_from {
+		$code = exit_code { Genesis::Top->new($dir, no_vault => 1)->config };
+	};
+	return (defined $code ? $code : 0, $err);
+}
+
+subtest 'config reads a configuration the load refuses' => sub {
+	plan tests => 2;
+
+	my $dir = ci_repo('config-read-refused');
+	pushd $dir;
+	prepare_command('config', 'deployment_type');
+	build_command_environment;
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+	my ($out, $err, $code);
+	($out, $err) = output_from {
+		$code = exit_code { Genesis::Commands::Core::config('deployment_type') };
+	};
+	popd;
+
+	is($code, undef, "the read is not refused by the key it would be asked to repair");
+	is($out, "test-kit\n", "and prints the value it was asked for");
+};
+
+subtest 'config --unset repairs a configuration the load refuses' => sub {
+	plan tests => 5;
+
+	my $dir = ci_repo('config-unset-refused');
+	pushd $dir;
+	prepare_command('config', '--unset', 'ci');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, "a key the file carries can be unset, though no schema declares it");
+	my $cfg = slurp("$dir/.genesis/config");
+	unlike($cfg, qr/^ci:/m, "the block is gone from the file");
+	like($cfg, qr/^deployment_type:\s*test-kit$/m, "the rest of the file is left alone");
+	like($cfg, qr/type:\s*manual/, "including the pipeline section");
+
+	my ($load) = loads_cleanly($dir);
+	is($load, 0, "and the next command loads the file it leaves");
+};
+
+subtest 'config --unset removes a nested key the file carries and no schema declares' => sub {
+	plan tests => 2;
+
+	my $dir = config_repo('config-unset-carried-nested');
+	mkfile_or_fail("$dir/.genesis/config", <<'CFG');
+---
+creator_version: 3.2.0
+deployment_type: test-kit
+manifest_store: exodus
+pipeline:
+  enabled: true
+  provider:
+    nonesuch: x
+    type: manual
+version: 3
+CFG
+	pushd $dir;
+	prepare_command('config', '--unset', 'pipeline.provider.nonesuch');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, "what the file carries can be unset at any depth");
+	unlike(slurp("$dir/.genesis/config"), qr/nonesuch/, "and the key is gone");
+};
+
+subtest 'a run whose result the load would refuse writes nothing' => sub {
+	plan tests => 4;
+
+	my $dir = ci_repo('config-set-still-refused');
+	my $before = slurp("$dir/.genesis/config");
+	pushd $dir;
+	prepare_command('config', '--set', 'manifest_store', 'repository');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, Genesis::Exit::CONFIG,
+		"the run is refused at the configuration exit code");
+	like($err, qr/ci: unknown configuration key/,
+		"naming the key the result still carries");
+	like($err, qr/configuration this run would write/,
+		"as a problem with what the run would write, which has not been written");
+	is(slurp("$dir/.genesis/config"), $before, "and the file is as it was");
+};
+
+subtest 'config --set and --unset of a refused file are judged on the result' => sub {
+	plan tests => 3;
+
+	my $dir = ci_repo('config-unset-and-set-refused');
+	pushd $dir;
+	prepare_command('config', '--unset', 'ci', '--set', 'manifest_store', 'repository');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, "the result loads, so the run goes through");
+	my $cfg = slurp("$dir/.genesis/config");
+	unlike($cfg, qr/^ci:/m, "the unset is applied");
+	like($cfg, qr/manifest_store:\s*repository/, "and so is the set");
 };
 
 # A version 2 repository: no pipeline section on disk, and the older ci.yml

@@ -123,6 +123,18 @@ control out of it, since a tree written out of one control commit has
 nothing further to read and reading it that way is what stops a read of
 control from reading control again.
 
+=item C<repair_config>
+
+B<(optional)> When true, L</config> reads a version 2 or 3 configuration
+without refusing it. The schema is installed and its defaults filled, as
+for any load, and the version is recorded for L</_current_config_schema>,
+but nothing the file carries is refused: no unknown key, no retired key,
+no pipeline section in a version 2 file, and none of the checks that follow
+the schema. C<genesis config> is the caller, because a configuration every
+other command refuses is the one an operator most needs it for, and it
+judges the configuration it would write instead. A version 1 or
+unsupported version loads as it would without the option.
+
 =back
 
 B<Returns:> A new C<Genesis::Top> object.
@@ -3444,6 +3456,12 @@ check reads C<pipeline.enabled> off L</config> directly rather than through
 L</pipeline_enabled>'s shape, because the question is about the C<ci.yml>
 sitting beside this file, not about what control declares.
 
+On a Top opened with C<repair_config>, a version 2 or 3 configuration is
+read through L</_check_config> rather than validated, and nothing the file
+carries is refused or warned about: the retired-key refusal, the version 2
+pipeline refusal, and everything after the version 3 schema are skipped.
+The version is still recorded and the version 2 gate still injected.
+
 B<Returns:> C<1> on success. Raises on invalid or unsupported config versions.
 
 B<Errors:>
@@ -3469,6 +3487,46 @@ B<Examples:>
 
     $self->_validate_config;
     # Returns: 1 on success; raises on invalid schema
+
+=head2 _check_config
+
+    $self->_check_config($schema)
+
+Validates L</config> against C<$schema>, or, on a Top opened with
+C<repair_config>, only reads it against the schema through
+L<Genesis::Config/problems>: the schema installed and its defaults filled,
+with nothing refused. It is the one place L</_validate_config> chooses
+between the two.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$schema>
+
+The schema the configuration's version selects.
+
+=back
+
+B<Returns:> C<1> when validating and valid; the list of problems when
+reading for repair, which the caller does not use.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Configuration validation failed for #C{%s}:%s"> - raised at
+C<Genesis::Exit::CONFIG> by L<Genesis::Config/validate> when validating,
+never when reading for repair.
+
+=back
+
+B<Examples:>
+
+    $self->_check_config($self->_repo_config_schema);
+    # Returns: 1, or refuses; on a repair Top, fills defaults and returns
 
 =head2 _upgrade_config_to_v2
 

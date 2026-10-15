@@ -14,7 +14,9 @@ use POSIX qw/strftime mktime/;
 
 sub config {
 	my (@keys) = @_;
-	my $top = Genesis::Top->new('.', no_vault => 1);
+	# Read for repair: a file the load refuses is the one an operator most
+	# needs this command for.  A write is judged on what it would save.
+	my $top = Genesis::Top->new('.', no_vault => 1, repair_config => 1);
 
 	my ($pairs, $from_files, $removals) =
 		@{get_options()}{qw/set set-from-file unset/};
@@ -65,10 +67,14 @@ sub config {
 		$config->schema($top->_current_config_schema) if $config->schema;
 		_apply_pairs($config, \@pairs);
 
-		# Validity, not presence: a typo is always absent, so only the
-		# schema can catch one.  Read after the rebuild, so a key the newly
-		# named provider declares is a key this run may also unset.
-		if (my @unknown = grep {$config->schema && !$config->schema_has($_)} @{$removals || []}) {
+		# A key the file carries can always be removed, declared or not,
+		# because removing what nothing declares is the repair.  A key it
+		# does not carry is only a typo if no schema declares it either.
+		# Read after the rebuild, so a key the newly named provider declares
+		# is a key this run may also unset.
+		if (my @unknown = grep {
+			$config->schema && !$config->schema_has($_) && !$config->has($_)
+		} @{$removals || []}) {
 			bail(
 				{exitcode => CONFIG},
 				"Cannot unset unknown configuration key%s: %s",
@@ -90,8 +96,14 @@ sub config {
 		# the gate its load injects, and this run may have written a block
 		# under it.  The load has been and gone by now, so the refusal that
 		# guards the file on the way in is asked again here, on the way out.
+		#
+		# Nothing has been written, so the refusal names what this run would
+		# have written rather than the file, which is as it was.
 		$top->_refuse_v2_pipeline;
-		$config->validate($top->_current_config_schema) if $config->schema;
+		$config->validate($top->_current_config_schema, sprintf(
+			'the configuration this run would write (#C{%s} is left as it was)',
+			$config->path
+		)) if $config->schema;
 		$config->save;
 		return 0;
 	}

@@ -660,6 +660,13 @@ B<Parameters:>
 A hash reference describing the expected shape and constraints of the
 configuration.
 
+=item C<$subject>
+
+Optional. What the refusal says failed validation. It defaults to the
+config file path, wrapped in C<#C{}>. A caller validating a configuration
+it has not yet saved names that instead, because the file is not what was
+refused.
+
 =back
 
 B<Returns:> C<1> on success.
@@ -670,10 +677,9 @@ B<Errors:>
 
 =item *
 
-C<"Configuration validation failed for #C{%s}:%s"> - raised via C<bail()> at
-C<Genesis::Exit::CONFIG> if any validation errors are found. The first C<%s>
-is the config file path (wrapped in C<#C{}> for color highlighting); the
-second is a formatted bullet-list of all error messages.
+C<"Configuration validation failed for %s:%s"> - raised via C<bail()> at
+C<Genesis::Exit::CONFIG> if L</problems> finds any. The first C<%s> is
+C<$subject>; the second is a formatted bullet-list of all error messages.
 
 =back
 
@@ -695,6 +701,45 @@ B<Examples:>
         },
     });
     # Returns: 1 if valid, otherwise calls bail()
+
+    $cfg->validate($schema, 'the configuration this run would write');
+    # Refuses as "Configuration validation failed for the configuration
+    # this run would write:", followed by the bullets
+
+=head2 problems
+
+    my @errors = $cfg->problems($schema);
+
+Does everything L</validate> does except refuse. It installs the schema,
+fills environment overrides and defaults, coerces values, and returns the
+messages L</validate> would refuse with, in the same order.
+
+It exists for a reader that must not be refused by what it reads: the
+configuration C<genesis config> repairs is one the load would refuse, and
+it still answers reads with the defaults filled, and the writer still
+needs the schema installed to tell a declared key from a misspelling.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$schema>
+
+The schema, in the form L</validate> takes.
+
+=back
+
+B<Returns:> The list of error messages, each with its C<#R{}> markup;
+empty when the configuration is valid.
+
+B<Errors:> None of its own. A C<custom_struct> module the schema dispatches
+to may still raise.
+
+B<Examples:>
+
+    my @errors = $cfg->problems($top->_repo_config_schema);
+    # Returns: ('#R{ci}: unknown configuration key: expected one of ...')
+    # for a file carrying the rc builds' ci: block; the defaults are filled
 
 =head2 The C<custom_struct> schema type
 

@@ -133,6 +133,11 @@ sub new {
 	# stops the read of control from reading control again.
 	$self->{__materialised_tree} = 1 if $opts{materialised_tree};
 
+	# genesis config is how an operator repairs a configuration the load
+	# refuses, so it reads the file without the refusals and judges the
+	# configuration it would write instead.
+	$self->{__config_repair} = 1 if $opts{repair_config};
+
 	# Initialize vault connection and set environment variables
 	$self->_set_vault_env(%opts) unless $opts{materialised_tree};
 
@@ -2425,7 +2430,7 @@ sub _validate_config {
 		$self->_upgrade_config_to_v2($config_version, $upgrade_automatically);
 
 	} elsif ($is_integer && $config_version == 2){
-		$self->config->validate($self->_repo_config_schema_v2());
+		$self->_check_config($self->_repo_config_schema_v2());
 		$self->{__config_disk_version} = 2;
 
 		# Detect legacy ci.yml -- flag it so command dispatch can gate
@@ -2441,7 +2446,7 @@ sub _validate_config {
 
 		# A pipeline block written into a version 2 file is refused here,
 		# before the injection below puts one there itself.
-		$self->_refuse_v2_pipeline;
+		$self->_refuse_v2_pipeline unless $self->{__config_repair};
 
 		# Augment in-memory with v3 defaults so downstream code sees
 		# a uniform v3 shape.  These go into the 'default' layer and
@@ -2451,9 +2456,13 @@ sub _validate_config {
 		});
 
 	} elsif ($is_integer && $config_version == 3){
-		$self->_refuse_retired_remote;
-		$self->config->validate($self->_repo_config_schema());
+		$self->_refuse_retired_remote unless $self->{__config_repair};
+		$self->_check_config($self->_repo_config_schema());
 		$self->{__config_disk_version} = 3;
+
+		# What follows refuses or warns about the file, and a repair is
+		# judged on what it would write.
+		return 1 if $self->{__config_repair};
 
 		# The checks a declarative schema cannot state run for every
 		# command and right after the schema.  Later work extends
@@ -2499,6 +2508,18 @@ sub _validate_config {
 		);
 	}
 	return 1;
+}
+
+# }}}
+# _check_config - validate the configuration, or only read it for repair {{{
+#
+# A configuration read for repair still has its schema installed and its
+# defaults filled, so it answers reads as a valid one would, and the writer
+# can tell a declared key from a misspelling.
+sub _check_config {
+	my ($self, $schema) = @_;
+	return $self->config->problems($schema) if $self->{__config_repair};
+	return $self->config->validate($schema);
 }
 
 # }}}

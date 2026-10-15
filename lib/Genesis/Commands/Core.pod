@@ -164,19 +164,27 @@ declared type; see L</_pairs_from_files($config, $from_files)>.
 
 C<--unset> removes a key, and may also be repeated.
 
-B<A key that is not set is accepted; a key the schema does not define
-is not.> Unset states a desired end state, and a key that was never
-there already satisfies it -- so C<--unset a.b --unset a> is redundant
-rather than wrong.  The check that matters is validity: a misspelling
-is always absent, so only the schema can tell one from a key that
-simply is not in use.
+B<A key the file carries can always be unset; a key it does not carry
+is accepted unless no schema defines it either.> Unset states a desired
+end state, and a key that was never there already satisfies it -- so
+C<--unset a.b --unset a> is redundant rather than wrong.  A key that is
+absent and that no schema defines is a misspelling, and is refused.  A
+key the file carries is removed whether or not any schema defines it,
+because removing what nothing defines is how a refused file is repaired.
+
+B<The file is read, not judged.> The configuration is loaded through
+L<Genesis::Top/new> with C<repair_config>, so a file every other command
+refuses -- one carrying a key no schema defines, such as the C<ci:> block
+the release candidates of the pipeline work wrote -- can still be read
+and repaired here.  Defaults are filled as for any load.
 
 B<Nothing is written until the whole result validates.> Every set and
 unset is applied in memory, the configuration is checked, and only then
 is it persisted -- so a rejected value leaves the file exactly as it
 was rather than half-updated into a state L<Genesis::Top> would refuse
-to load.  The two can be combined in one run, and a key appearing in
-both is refused; see L</LIMITATIONS>.
+to load.  A run is judged by its result, not by the file it started
+from.  The two can be combined in one run, and a key appearing in both
+is refused; see L</LIMITATIONS>.
 
 B<The configuration is reported as Genesis will actually use it>, not as
 the file literally reads.  Schema defaults and environment overrides are
@@ -222,19 +230,20 @@ absent.  Deliberately not silent-and-zero: printing an empty line to
 standard output would be indistinguishable from a key legitimately set
 to the empty string, leaving a caller unable to tell the two apart.
 
-=item C<"Configuration validation failed for %s">
+=item C<"Configuration validation failed for the configuration this run would write (%s is left as it was):%s">
 
-Raised by L<Genesis::Config/validate> when a value written with
-C<--set> does not satisfy the schema.  The message names the offending
-key.  The file is left untouched.
+Raised at C<Genesis::Exit::CONFIG> by L<Genesis::Config/validate> when
+the result of the run's sets and unsets does not satisfy the schema,
+including a result that still carries a key the load refuses.  The
+message names each offending key, and the file it names is untouched.
 
 =item C<"Cannot unset unknown configuration key%s: %s">
 
-Raised at C<Genesis::Exit::CONFIG> when C<--unset> names a key the
-schema does not define.  Names every unrecognised key, not just the
-first.  The schema consulted is the one this run has made true, so a
-key belonging to a provider the same run names with C<--set> is a key
-the same run may unset.
+Raised at C<Genesis::Exit::CONFIG> when C<--unset> names a key the file
+does not carry and the schema does not define.  Names every unrecognised
+key, not just the first.  The schema consulted is the one this run has
+made true, so a key belonging to a provider the same run names with
+C<--set> is a key the same run may unset.
 
 =item C<"Cannot set and unset overlapping keys in one run: %s">
 
