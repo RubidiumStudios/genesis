@@ -148,13 +148,18 @@ C<'false'>, which Perl would treat as true.  See
 L<Genesis::Config/_coerce_to_schema_type>.
 
 B<The sets are applied twice, around a rebuild of the schema.> Part of
-the schema is built from the configuration's own values, because the
-provider's keys are declared by whichever provider
-C<pipeline.provider.type> names.  A run that writes that type therefore
-changes the schema its other values have to be judged against, so the
-first pass puts the new type in place, the schema is rebuilt and
-installed, and the second pass coerces everything against the schema
-that is now true.  See L</_apply_pairs($config, $pairs)>.
+the schema is selected by the configuration's own values: C<version>
+selects the version 2 or version 3 schema, and C<pipeline.provider.type>
+selects the provider whose keys are declared.  A run that writes either
+therefore changes the schema its other values have to be judged against,
+so the first pass puts the new values in place, the schema is rebuilt
+from them and installed, and the second pass coerces everything against
+the schema that is now true.  This is why C<--set version 3> may carry
+pipeline keys in the same run.  B<Do not collapse the passes:> with one
+pass, a boolean typed as C<false> for a key the same run's provider
+declares is stored as the string C<"false">, which Perl reads as true, so
+the run saves the operator's own opposite.  See
+L</_apply_pairs($config, $pairs)>.
 
 C<--set-from-file> takes a key and a path, and may be repeated.  It
 exists because a value worth putting in a file is usually one that is
@@ -179,12 +184,20 @@ the release candidates of the pipeline work wrote -- can still be read
 and repaired here.  Defaults are filled as for any load.
 
 B<Nothing is written until the whole result validates.> Every set and
-unset is applied in memory, the configuration is checked, and only then
-is it persisted -- so a rejected value leaves the file exactly as it
-was rather than half-updated into a state L<Genesis::Top> would refuse
-to load.  A run is judged by its result, not by the file it started
-from.  The two can be combined in one run, and a key appearing in both
-is refused; see L</LIMITATIONS>.
+unset is applied in memory, the result is judged once by
+L<Genesis::Top/_validate_config_to_save>, which runs the load's own
+checks, and only then is it persisted -- so a rejected value leaves the
+file exactly as it was rather than half-updated into a state
+L<Genesis::Top> would refuse to load.  A run is judged by its result,
+not by the file it started from or any state it passed through, so a
+run may enable the pipeline and name the repository it needs in the
+same invocation.  The judgement derives its schema from the result
+again, after the unsets, because an unset moves the schema as surely as
+a set does: clearing C<pipeline.provider.type> takes away the fragment
+declaring every other provider key, and a schema read from before that
+would accept keys nothing declares any more.  The two can be combined
+in one run, and a key appearing in both is refused; see
+L</LIMITATIONS>.
 
 B<The configuration is reported as Genesis will actually use it>, not as
 the file literally reads.  Schema defaults and environment overrides are
@@ -236,6 +249,15 @@ Raised at C<Genesis::Exit::CONFIG> by L<Genesis::Config/validate> when
 the result of the run's sets and unsets does not satisfy the schema,
 including a result that still carries a key the load refuses.  The
 message names each offending key, and the file it names is untouched.
+
+=item The load's other refusals
+
+The result also meets every refusal the load makes, in the load's own
+words and at C<Genesis::Exit::CONFIG>: a retired key, a pipeline section
+in a version 2 result (naming C<genesis config --set version 3>), an
+unsupported C<version>, and the checks an enabled pipeline makes beyond
+the schema, such as a repository that cannot be derived.  The file is
+untouched.
 
 =item C<"Cannot unset unknown configuration key%s: %s">
 

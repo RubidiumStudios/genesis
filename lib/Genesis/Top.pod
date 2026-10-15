@@ -399,8 +399,10 @@ key is cleared from the config (restoring the default). Otherwise the
 provider configuration is written and saved.
 
 Both branches (GenesisCommunity and custom provider) set C<updater_version>
-(when the config file exists on disk), call C<_validate_config()>, and save
-the config to disk.
+(when the config file exists on disk), judge the result with
+L</_validate_config_to_save>, and save the config to disk only if the
+next load would accept it. A refusal leaves the file as it was and comes
+back as the returned error.
 
 B<Parameters:>
 
@@ -585,6 +587,14 @@ B<Errors:>
 C<"Invalid call to Genesis::Top->set_vault"> - raised via C<bug()> when none
 of C<interactive>, C<target>, C<clear>, or a C<vault> that is a
 C<Service::Vault> is provided.
+
+=item *
+
+Any refusal L</_validate_config_to_save> makes, at
+C<Genesis::Exit::CONFIG>, when the configuration it would save -- the new
+C<secrets_provider>, or its removal -- is one the next load would refuse.
+Nothing is saved. Unless C<session_only> is given, both setting and
+clearing are judged this way.
 
 =back
 
@@ -3425,35 +3435,66 @@ B<Examples:>
 
     $self->_validate_config
 
-Validates C<.genesis/config> against the schema its C<version> selects,
-and runs on the first access to L</config>, so every command validates
-whether or not it is a pipeline command.
+Validates the configuration in memory against the schema its C<version>
+selects. L</config> calls it on the first load, so every command validates
+whether or not it is a pipeline command, and every writer calls it again,
+through L</_validate_config_to_save>, on the result it is about to save.
 
-A version 1 configuration, or an old-style semver string in the C<version>
-field, is upgraded to v2, interactively or automatically according to the RC
-settings.
+B<It judges every time it is asked, and reads the version off the
+configuration in memory.> There is no "already validated" guard: an
+earlier one marked the load done before validating, and turned every
+writer's check, and the version 1 upgrade's, into a no-op that returned
+at once. Reading the version off the configuration rather than off the
+file is what lets a writer that sets C<version> be judged by the rules of
+the version it writes. What a judgement records -- the version, and the
+legacy F<ci.yml> flag -- is recorded afresh each time, because a writer's
+judgement is of a different result. A Top over a materialised tree is
+never judged, and answers C<1>.
 
-A version 3 configuration is validated against L</_repo_config_schema>,
-which carries the C<pipeline> section, so C<genesis E<lt>envE<gt> deploy>
-and C<genesis propagate> meet the same refusal in the same words. A
-refusal exits C<Genesis::Exit::CONFIG>.
+A version 1 configuration is upgraded to v2, interactively or
+automatically according to the RC settings; see L</_upgrade_config_to_v2>.
+The C<version> field is classified before it is compared, as an integer or
+as a release semver: repositories written before the dedicated
+C<genesis_version> field put the Genesis release (such as C<2.7.1>) in
+C<version>, and they are treated as version 1. Comparing such a string
+with C<==> would warn, which is why the shape is checked first. The
+upgraded configuration is then judged as the version 2 configuration it
+now is.
 
-A version 2 configuration is validated against
-L</_repo_config_schema_v2>, and then has a version 3 shaped C<pipeline>
-gate injected at default priority, so that downstream readers meet one
-shape whichever version is on disk. The injection is never saved, and the
-version 2 schema declares the key it fills so that a later validation
-does not report it as a key nobody wrote.
+A version 3 configuration is first asked about the retired
+C<pipeline.source_control.remote>, so the operator hears what replaces it
+rather than that it was never declared, and then validated against
+L</_repo_config_schema>, which carries the C<pipeline> section, so
+C<genesis E<lt>envE<gt> deploy> and C<genesis propagate> meet the same
+refusal in the same words. The checks a declarative schema cannot state
+follow in L</_validate_pipeline_config>, which later work extends without
+touching this call, and then each registered section handler's
+C<validate_config_section>. A refusal exits C<Genesis::Exit::CONFIG>.
 
-This method does not itself refuse a version 2 configuration or a stale
-F<ci.yml>; it records what it found, and two other places act on the
-record. It sets the flag that L</has_legacy_ci_yml> reports, which
-C<Genesis::Commands::_gate_pipeline_on_legacy_ci_yml> reads to error for
-every pipeline command, naming the migration. And where a C<ci.yml> sits
+A version 2 configuration is first refused if it carries a C<pipeline>
+section of its own, through L</_refuse_v2_pipeline>. That comes B<before
+the schema>, so the operator hears where the section belongs and how to
+get there rather than that the keys under it were never declared, and
+before the injection below puts a pipeline default there itself. It is
+then validated against L</_repo_config_schema_v2>, and has a version 3
+shaped C<pipeline> gate injected at default priority, so that downstream
+readers meet one shape whichever version is on disk. The injection is
+never saved, and the version 2 schema declares the key it fills so that a
+later validation does not report it as a key nobody wrote.
+
+This method does not itself refuse a stale F<ci.yml>; it records what it
+found, and two other places act on the record. It sets the flag that
+L</has_legacy_ci_yml> reports, for a version 2 configuration beside a
+F<ci.yml> whose first significant key is C<pipeline:>, and for a version 3
+one that enables no pipeline. C<Genesis::Commands::_gate_pipeline_on_legacy_ci_yml>
+reads it to error for every pipeline command, naming the migration; other
+commands run. An environment file named F<ci.yml>, which starts with
+C<kit:> or C<genesis:>, does not trip it. And where a F<ci.yml> sits
 beside a version 3 configuration that already enables a pipeline, it warns
-here that the file is a stale leftover and lets the command through. That
-check reads C<pipeline.enabled> off L</config> directly rather than through
-L</pipeline_enabled>'s shape, because the question is about the C<ci.yml>
+that the file is a stale leftover and lets the command through, once per
+Top, since a writer's judgement runs the same check again. That check
+reads C<pipeline.enabled> off L</config> directly rather than through
+L</pipeline_enabled>'s shape, because the question is about the F<ci.yml>
 sitting beside this file, not about what control declares.
 
 On a Top opened with C<repair_config>, a version 2 or 3 configuration is
@@ -3517,9 +3558,10 @@ B<Errors:>
 
 =item *
 
-C<"Configuration validation failed for #C{%s}:%s"> - raised at
+C<"Configuration validation failed for %s:%s"> - raised at
 C<Genesis::Exit::CONFIG> by L<Genesis::Config/validate> when validating,
-never when reading for repair.
+never when reading for repair. The subject is the file, or, inside
+L</_validate_config_to_save>, the configuration the run would write.
 
 =back
 
@@ -3528,23 +3570,65 @@ B<Examples:>
     $self->_check_config($self->_repo_config_schema);
     # Returns: 1, or refuses; on a repair Top, fills defaults and returns
 
+=head2 _validate_config_to_save
+
+    $self->_validate_config_to_save;
+    $self->config->save;
+
+Judges what a writer is about to save. Every writer of
+F<.genesis/config> -- C<genesis config>, L</set_vault>,
+L</set_kit_provider>, L</create> -- calls it once, on its final result,
+immediately before it saves, and saves only if it returns (D28). Nothing
+is judged while the writer is still applying its changes, so a run may
+pass through states the load would refuse.
+
+B<It is the load's own judgement, not a list of the writer's.> It runs
+L</_validate_config> on the configuration in memory, with repair mode
+turned off, so a check added to the load reaches every writer. The
+writers' checks used to be a hand-kept subset of the load's, and
+C<genesis config> could save a file the next command refused.
+
+It drops what the load worked out from the configuration it loaded:
+L</_source_control> keeps its answer, and an answer about the loaded
+configuration is not an answer about the one being saved. Nothing has
+been written yet, so the schema's refusal names "the configuration this
+run would write" and says the file is left as it was.
+
+B<Parameters:> None.
+
+B<Returns:> C<1> when the result would load.
+
+B<Errors:> Every refusal L</_validate_config> makes, at
+C<Genesis::Exit::CONFIG>, with the schema's refusal worded as
+C<"Configuration validation failed for the configuration this run would
+write (%s is left as it was):%s">.
+
+B<Examples:>
+
+    $top->config->set('pipeline.enabled', 1);
+    $top->_validate_config_to_save;   # refuses if the next load would
+    $top->config->save;
+
 =head2 _upgrade_config_to_v2
 
     $self->_upgrade_config_to_v2($config_version, $upgrade_automatically)
 
 Constructs a new v2 configuration from the existing v1/semver config,
 shows a diff, and (depending on C<$upgrade_automatically> and the presence of
-a controlling terminal) prompts the user for confirmation before saving. The
-method always calls C<_validate_config()> on the candidate v2 config before
-proceeding.
+a controlling terminal) prompts the user for confirmation before saving.
+
+B<The candidate is judged before anything is shown, asked or saved> (D28),
+against L</_repo_config_schema_v2> through L<Genesis::Config/problems>.
+What the v1 file carried, such as C<kit_provider>, is copied over as it
+was found, so this is where a value the version 2 schema does not allow
+is caught; the refusal lists each problem. The judgement had been a
+recursive call to L</_validate_config> that a since-removed guard turned
+into a no-op, so an invalid v2 file was saved without a word.
 
 Modifies the object in-place: replaces C<$self-E<gt>{__config}> with the new
-v2 config object during validation, then calls C<< $self->config->replace($old_config) >>
-on success.
-
-B<Note:> C<_validate_config()> is called recursively on the new config object.
-C<bail()> inside C<_validate_config()> is the mechanism that stops execution
-when the new config is invalid.
+v2 config object, then calls C<< $self->config->replace($old_config) >>
+on success. L</_validate_config> then judges the saved result as the
+version 2 configuration it now is.
 
 B<Parameters:>
 
@@ -3570,8 +3654,9 @@ B<Errors:>
 
 =item *
 
-C<"Cannot upgrade Genesis deployment repo v1 configuration to v2.  Manual intervention required.">
-- raised when the candidate v2 config fails validation.
+C<"Cannot upgrade Genesis deployment repo v1 configuration to v2.  Manual intervention required:%s">
+- raised at C<Genesis::Exit::CONFIG> when the candidate v2 config fails
+validation, followed by a bullet for each problem. Nothing is saved.
 
 =item *
 
@@ -3745,16 +3830,22 @@ B<Returns:> A hash reference.
 
     my $schema = $top->_current_config_schema();
 
-Returns the configuration schema for the version this repository holds on
-disk, which is L</_repo_config_schema> for version 3 and
-L</_repo_config_schema_v2> for anything older.
+Returns the configuration schema for the C<version> the configuration in
+memory carries, which is L</_repo_config_schema> for version 3 or later
+and L</_repo_config_schema_v2> for anything older.
+
+B<The version is read off the configuration as it stands, not off the
+file.> A run that sets C<version> therefore reads its other values
+against the version it is writing from that point on, which is what lets
+C<genesis config --set version 3> carry pipeline keys in the same run. A
+version Genesis does not support gets the latest schema here, and is
+refused by name when the result is judged by L</_validate_config>.
 
 It is built afresh on every call rather than read back off the
 C<Genesis::Config>. Writing a new provider type changes which keys
 C<pipeline.provider> admits, because the block is declared on that type --
 see L</_pipeline_config_schema> -- so the copy the load left behind is a
-version out of date. Every writer that re-validates before saving asks for
-this one.
+version out of date.
 
 B<Returns:> A hash reference.
 
@@ -3762,9 +3853,10 @@ B<Returns:> A hash reference.
 
     $top->_refuse_v2_pipeline();
 
-Refuses, at C<Genesis::Exit::CONFIG>, a C<pipeline> section on a repository
-whose configuration is still version 2, naming the migration to version 3.
-Answers 1 and does nothing on a repository of any other version.
+Refuses, at C<Genesis::Exit::CONFIG>, a C<pipeline> section in a
+configuration judged as version 2, naming the command that migrates it,
+C<genesis config --set version 3>, and saying the pipeline keys can be
+set in the same run. Answers 1 and does nothing for any other version.
 
 L</_repo_config_schema_v2> declares the C<pipeline> key so that the gate
 L</_validate_config> injects survives the first write, and declaring a key
@@ -3776,9 +3868,10 @@ loaded and set layers alone, so this sees a block somebody wrote into the
 file and a block a command set in this run, and never the injection, which
 is filed at default priority.
 
-Both callers need it. The load meets a block that was already on disk, and
-a command that writes one meets it only after the load has been and gone,
-so a check in one place alone would let the other through.
+Its one caller is L</_validate_config>, which asks it before the schema.
+The load meets a block that was already on disk, and a writer meets one it
+set when L</_validate_config_to_save> judges its result, which is the same
+judgement run again.
 
 B<Returns:> 1.
 
@@ -3788,8 +3881,8 @@ B<Errors:>
 
 =item *
 
-C<"A pipeline section belongs to a version 3 repository configuration ..."> -
-raised when a version 2 repository carries or is given a C<pipeline> block.
+C<"A pipeline section belongs to a version 3 repository configuration ... with genesis config --set version 3; ..."> -
+raised when a version 2 configuration carries or is given a C<pipeline> block.
 
 =back
 

@@ -114,6 +114,24 @@ subtest 'PIPELINE command in a repo with legacy ci.yml -> bail' => sub {
 		'and names the file that declares them');
 };
 
+subtest 'the gate tells a version 2 repository how to reach version 3' => sub {
+	plan tests => 2;
+
+	# The pipeline block it sends the operator to write is refused in a
+	# version 2 file, so the first step has to be the version.
+	my $tmp = make_repo(name => 'gate-v2-names-migration', version => 2,
+		ci_yml => $legacy_pipeline_yml);
+	my $err = run_gate_in($tmp) // '';
+	like($err, qr/genesis\s+config\s+--set\s+version\s+3/,
+		'a version 2 repository is told the command that migrates it');
+
+	$tmp = make_repo(name => 'gate-v3-no-migration', version => 3,
+		ci_yml => $legacy_pipeline_yml);
+	$err = run_gate_in($tmp) // '';
+	unlike($err, qr/--set\s+version\s+3/,
+		'and a version 3 repository is not told to migrate again');
+};
+
 subtest 'PIPELINE command in a v3 repo with no ci.yml -> passes cleanly' => sub {
 	my $tmp = make_repo(name => 'gate-v3-clean', version => 3);
 	my $err = run_gate_in($tmp);

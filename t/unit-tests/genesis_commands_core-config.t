@@ -140,7 +140,9 @@ subtest 'config reports an unset key without pretending it is empty' => sub {
 subtest 'config --set persists a value' => sub {
 	plan tests => 1;
 
-	my $dir = config_repo('config-set');
+	# Disabled, because an enabled pipeline requires the exodus store and
+	# the row is about the write, not the pipeline.
+	my $dir = config_repo('config-set', enabled => 0);
 	pushd $dir;
 	prepare_command('config', '--set', 'manifest_store', 'repository');
 	build_command_environment;
@@ -363,7 +365,8 @@ subtest 'config allows set and unset of unrelated nested keys' => sub {
 subtest 'config --set-from-file reads a scalar, less one newline' => sub {
 	plan tests => 1;
 
-	my $dir = config_repo('config-from-file-scalar');
+	# Disabled, for the reason 'config --set persists a value' gives.
+	my $dir = config_repo('config-from-file-scalar', enabled => 0);
 	mkfile_or_fail("$dir/value.txt", "repository\n");
 	pushd $dir;
 	prepare_command('config', '--set-from-file', 'manifest_store', "$dir/value.txt");
@@ -688,9 +691,10 @@ subtest 'config --set-from-file reports a file it cannot read' => sub {
 # of it.  genesis config is how an operator repairs it, so it has to be able
 # to read the file, and to write the file it is repairing.
 sub ci_repo {
-	my ($name) = @_;
+	my ($name, %opts) = @_;
 	my $dir = config_repo($name);
-	mkfile_or_fail("$dir/.genesis/config", <<'CFG');
+	my $enabled = (exists $opts{enabled} ? $opts{enabled} : 1) ? 'true' : 'false';
+	mkfile_or_fail("$dir/.genesis/config", <<CFG);
 ---
 ci:
   enabled: true
@@ -698,7 +702,7 @@ creator_version: 3.2.0
 deployment_type: test-kit
 manifest_store: exodus
 pipeline:
-  enabled: true
+  enabled: $enabled
   provider:
     type: manual
 version: 3
@@ -806,7 +810,8 @@ subtest 'a run whose result the load would refuse writes nothing' => sub {
 subtest 'config --set and --unset of a refused file are judged on the result' => sub {
 	plan tests => 3;
 
-	my $dir = ci_repo('config-unset-and-set-refused');
+	# Disabled, for the reason 'config --set persists a value' gives.
+	my $dir = ci_repo('config-unset-and-set-refused', enabled => 0);
 	pushd $dir;
 	prepare_command('config', '--unset', 'ci', '--set', 'manifest_store', 'repository');
 	build_command_environment;
@@ -888,7 +893,7 @@ subtest 'config writes on a version 2 repository are not refused' => sub {
 };
 
 subtest 'a pipeline section is refused on a version 2 repository' => sub {
-	plan tests => 3;
+	plan tests => 4;
 
 	# The version 2 schema declares the pipeline key so that the default
 	# the load injects survives the first write.  Declaring a key is also
@@ -906,8 +911,147 @@ subtest 'a pipeline section is refused on a version 2 repository' => sub {
 		'the write is refused, at the configuration exit');
 	like($err, qr/pipeline section belongs to a version 3 repository/,
 		'and the refusal says where a pipeline section belongs');
+	like($err, qr/genesis config --set version 3/,
+		'and names the command that gets it there');
 	unlike(slurp("$dir/.genesis/config"), qr/^pipeline:/m,
 		'with nothing written to the file');
+};
+
+subtest 'config --set version 3 migrates a version 2 repository' => sub {
+	plan tests => 3;
+
+	# The version 3 schema is the version 2 schema with a version 3 and a
+	# pipeline section, so a version 2 file whose version reads 3 is a
+	# version 3 file.  The run is judged by the version it writes, not by
+	# the one it found.
+	my $dir = v2_repo('config-v2-to-v3');
+	pushd $dir;
+	prepare_command('config', '--set', 'version', '3');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, 'the version is set');
+	like(slurp("$dir/.genesis/config"), qr/^version:\s*['"]?3['"]?$/m,
+		'and saved');
+	my ($load) = loads_cleanly($dir);
+	is($load, 0, 'and the next command loads it as version 3');
+};
+
+subtest 'config migrates and writes a pipeline section in one run' => sub {
+	plan tests => 3;
+
+	# Setting the version changes the schema the run uses from that point,
+	# so the pipeline keys beside it are read as version 3 keys.
+	my $dir = v2_repo('config-v2-to-v3-with-pipeline');
+	pushd $dir;
+	prepare_command('config', '--set', 'version', '3',
+	                          '--set', 'pipeline.enabled', 'true');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, 'the run is not refused for a pipeline section it makes legal');
+	like(slurp("$dir/.genesis/config"), qr/^\s+enabled:\s*true$/m,
+		'the pipeline section is saved');
+	my ($load) = loads_cleanly($dir);
+	is($load, 0, 'and the next command loads it');
+};
+
+subtest 'config --set version 2 is refused while a pipeline section remains' => sub {
+	plan tests => 3;
+
+	my $dir = config_repo('config-v3-to-v2-with-pipeline');
+	my $before = slurp("$dir/.genesis/config");
+	pushd $dir;
+	prepare_command('config', '--set', 'version', '2');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, Genesis::Exit::CONFIG, 'the run is refused at the configuration exit');
+	like($err, qr/pipeline section belongs to a version 3 repository/,
+		'by the version 2 rule the result would be judged by');
+	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
+};
+
+subtest 'config --set version refuses a version Genesis does not support' => sub {
+	plan tests => 3;
+
+	my $dir = config_repo('config-unsupported-version');
+	my $before = slurp("$dir/.genesis/config");
+	pushd $dir;
+	prepare_command('config', '--set', 'version', '4');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, Genesis::Exit::CONFIG, 'the run is refused at the configuration exit');
+	like($err, qr/version 4 is not supported/, 'naming the version');
+	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
+};
+
+# A repository whose remote is a path, so nothing can derive the
+# repository the pipeline lives in, with the pipeline not yet turned on.
+sub path_remote_repo {
+	my ($name) = @_;
+	my $dir = config_repo($name, enabled => 0);
+	run({dir => $dir}, 'git', 'remote', 'set-url', 'origin', "$dir/../no-such-remote.git");
+	return $dir;
+}
+
+subtest 'config refuses a result the next command would refuse' => sub {
+	plan tests => 3;
+
+	# The schema accepts an enabled manual pipeline, but the load goes on to
+	# ask where the pipeline lives, and a path remote cannot say.  A writer
+	# that judged by the schema alone saved a file every command refused.
+	my $dir = path_remote_repo('config-enable-underivable');
+	my $before = slurp("$dir/.genesis/config");
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.enabled', 'true');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, Genesis::Exit::CONFIG, 'the run is refused at the configuration exit');
+	like($err, qr/could not be derived/, "in the load's own words");
+	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
+};
+
+subtest 'config judges the end of the run, not the steps through it' => sub {
+	plan tests => 2;
+
+	# Turning the pipeline on before naming the repository would be refused
+	# on its own; in one run with the repository beside it, it is not.
+	my $dir = path_remote_repo('config-enable-with-repository');
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.enabled', 'true',
+	                          '--set', 'pipeline.source_control.repository',
+	                          'genesis/test-kit-deployments');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, 'the run goes through');
+	my ($load) = loads_cleanly($dir);
+	is($load, 0, 'and the next command loads what it saved');
+};
+
+subtest 'config refuses a retired key in the load\'s own words' => sub {
+	plan tests => 3;
+
+	my $dir = config_repo('config-set-retired-remote');
+	my $before = slurp("$dir/.genesis/config");
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.source_control.remote', 'origin');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, Genesis::Exit::CONFIG, 'the run is refused at the configuration exit');
+	like($err, qr/is no longer read/, 'with the sentence that says what replaces it');
+	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
 };
 
 subtest 'a deployment root outside its repository exits 1' => sub {

@@ -83,27 +83,7 @@ sub config {
 		}
 		$config->clear($_) for grep {$config->has($_)} @{$removals || []};
 
-		# Validate before persisting: validate bails, so a rejected value
-		# leaves the file untouched rather than half-written.  Derived a
-		# second time, because an unset moves the schema as surely as a set
-		# does and this is the first look after the clears.  Clearing the
-		# provider type takes the fragment declaring every other provider
-		# key away with it, and a check reading the schema from before that
-		# removal would accept keys nothing declares any more and save a
-		# file the next command could not load.
-		#
-		# A version 2 repository declares the pipeline key for the sake of
-		# the gate its load injects, and this run may have written a block
-		# under it.  The load has been and gone by now, so the refusal that
-		# guards the file on the way in is asked again here, on the way out.
-		#
-		# Nothing has been written, so the refusal names what this run would
-		# have written rather than the file, which is as it was.
-		$top->_refuse_v2_pipeline;
-		$config->validate($top->_current_config_schema, sprintf(
-			'the configuration this run would write (#C{%s} is left as it was)',
-			$config->path
-		)) if $config->schema;
+		$top->_validate_config_to_save;
 		$config->save;
 		return 0;
 	}

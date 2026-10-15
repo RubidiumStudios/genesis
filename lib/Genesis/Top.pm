@@ -8,7 +8,7 @@ use Genesis;
 use Genesis qw/without_backtrace/;
 use Scalar::Util ();
 use Genesis::State;
-use Genesis::Term qw/in_controlling_terminal csprintf decolorize/;
+use Genesis::Term qw/in_controlling_terminal csprintf decolorize bullet/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_choice/;
 use Genesis::Env;
 use Genesis::Kit::Compiled;
@@ -126,7 +126,6 @@ sub new {
 
 	# Build the base object
 	my $self = $class->_build($root, %opts);
-	$self->{__config_validated} = 1 if $opts{materialised_tree};
 
 	# A materialised tree is the pipeline's shape as one commit holds it, so
 	# it reads its shape off itself rather than off control, which is what
@@ -235,7 +234,7 @@ sub create {
 		$self->config->set('kit_provider', $self->kit_provider->config)
 			unless ref($self->kit_provider) eq "Genesis::Kit::Provider::GenesisCommunity";
 
-		$self->_validate_config;
+		$self->_validate_config_to_save;
 		$self->config->save;
 		if ($kits_path) {
 			my $resolved_kits_path = $self->local_kits_path;
@@ -763,7 +762,7 @@ sub set_kit_provider {
 			$self->config->set('kit_provider', $self->kit_provider->config);
 		}
 		$self->config->set('updater_version', $Genesis::VERSION) if $self->config->exists();
-		$self->_validate_config;
+		$self->_validate_config_to_save;
 		$self->config->save;
 		info "done.";
 	};
@@ -894,11 +893,11 @@ sub set_vault {
 		$provider{strongbox} = $strongbox if defined($strongbox);
 		$self->config->set('secrets_provider', \%provider);
 		$self->config->set('updater_version', $Genesis::VERSION) if $self->config->exists();
-		$self->_validate_config;
-		$self->config->save;
 	} else {
-		$self->config->clear('secrets_provider',1);
+		$self->config->clear('secrets_provider');
 	}
+	$self->_validate_config_to_save;
+	$self->config->save;
 	return;
 }
 
@@ -2398,8 +2397,7 @@ sub download_kit {
 # _validate_config - validate the configuration of the repo {{{
 sub _validate_config {
 	my ($self) = @_;
-	return 1 if $self->{__config_validated};
-	$self->{__config_validated} = 1;
+	return 1 if $self->{__materialised_tree};
 	my $config_version = $self->config->get(version => 1);
 
 	# Classify before comparing.  In modern repos the `version` field
@@ -2428,10 +2426,16 @@ sub _validate_config {
 		) unless in_controlling_terminal || $upgrade_automatically ne 'no';
 
 		$self->_upgrade_config_to_v2($config_version, $upgrade_automatically);
+		return $self->_validate_config; # now version 2, judged as one
+	}
 
-	} elsif ($is_integer && $config_version == 2){
+	# Recorded afresh by each judgement; a writer's is of a different result.
+	delete $self->{__has_legacy_ci_yml};
+
+	if ($is_integer && $config_version == 2){
+		$self->{__config_version} = 2;
+		$self->_refuse_v2_pipeline unless $self->{__config_repair}; # before the schema
 		$self->_check_config($self->_repo_config_schema_v2());
-		$self->{__config_disk_version} = 2;
 
 		# Detect legacy ci.yml -- flag it so command dispatch can gate
 		# pipeline-consuming commands, but otherwise let the repo load.
@@ -2444,10 +2448,6 @@ sub _validate_config {
 		$self->{__has_legacy_ci_yml} = 1
 			if -f $ci_yml && _is_legacy_ci_file($ci_yml);
 
-		# A pipeline block written into a version 2 file is refused here,
-		# before the injection below puts one there itself.
-		$self->_refuse_v2_pipeline unless $self->{__config_repair};
-
 		# Augment in-memory with v3 defaults so downstream code sees
 		# a uniform v3 shape.  These go into the 'default' layer and
 		# will NOT be persisted to disk on save.
@@ -2456,9 +2456,9 @@ sub _validate_config {
 		});
 
 	} elsif ($is_integer && $config_version == 3){
+		$self->{__config_version} = 3;
 		$self->_refuse_retired_remote unless $self->{__config_repair};
 		$self->_check_config($self->_repo_config_schema());
-		$self->{__config_disk_version} = 3;
 
 		# What follows refuses or warns about the file, and a repair is
 		# judged on what it would write.
@@ -2488,7 +2488,7 @@ sub _validate_config {
 					"Legacy #C{%s} present alongside a v3 CI configuration; ".
 					"the v3 config wins.  Remove #C{%s} to clear this warning.",
 					$ci_yml, $ci_yml
-				);
+				) unless $self->{__warned_stale_ci_yml}++;
 			} else {
 				$self->{__has_legacy_ci_yml} = 1;
 			}
@@ -2519,7 +2519,20 @@ sub _validate_config {
 sub _check_config {
 	my ($self, $schema) = @_;
 	return $self->config->problems($schema) if $self->{__config_repair};
-	return $self->config->validate($schema);
+	return $self->config->validate($schema, $self->{__config_to_save});
+}
+
+# }}}
+# _validate_config_to_save - judge what a writer is about to save {{{
+sub _validate_config_to_save {
+	my ($self) = @_;
+	delete $self->{__source_control}; # an answer about the loaded config
+	local $self->{__config_repair} = 0;
+	local $self->{__config_to_save} = sprintf(
+		'the configuration this run would write (#C{%s} is left as it was)',
+		$self->path('.genesis/config')
+	);
+	return $self->_validate_config;
 }
 
 # }}}
@@ -2560,12 +2573,16 @@ sub _upgrade_config_to_v2 {
 		$new_config->set('allow_oversized_secrets', $self->config->get('allow_oversized_secrets'));
 	}
 
+	# Judged before anything is shown, asked or saved (D28).
+	if (my @problems = $new_config->problems($self->_repo_config_schema_v2)) {
+		bail({exitcode => CONFIG},
+			"Cannot upgrade Genesis deployment repo v1 configuration to v2.  ".
+			"Manual intervention required:%s",
+			join('', map {"\n[[".bullet('', inline => 1, indent => 0).">>$_"} @problems));
+	}
+
 	my $old_config = $self->config;
 	$self->{__config} = $new_config;
-
-	bail(
-		"Cannot upgrade Genesis deployment repo v1 configuration to v2.  Manual intervention required."
-	) unless $self->_validate_config;
 
 	# Show and ask permission to upgrade
 	if ($upgrade_automatically ne 'silent') {
@@ -2891,7 +2908,7 @@ sub _pipeline_config_schema {
 }
 
 # }}}
-# _current_config_schema - the schema for the version on disk {{{
+# _current_config_schema - the schema for the version the configuration says {{{
 #
 # Built on demand rather than read back off the config object.  The
 # configured provider's own fragment is merged as the schema is built, so
@@ -2901,8 +2918,8 @@ sub _pipeline_config_schema {
 sub _current_config_schema {
 	my ($self) = @_;
 
-	$self->config unless $self->{__config_disk_version};
-	return ($self->{__config_disk_version} // 0) >= 3
+	my $version = $self->config->get(version => 1);
+	return ($version =~ /^\d+$/ && $version >= 3)
 		? $self->_repo_config_schema
 		: $self->_repo_config_schema_v2;
 }
@@ -2919,18 +2936,17 @@ sub _current_config_schema {
 # somebody wrote into the file and a block a command set in this run, and
 # never the injection, which goes in at default priority.
 #
-# Both callers need it.  The load meets a block that was already on disk,
-# and a command that writes one meets it only after the load has been and
-# gone, so a check in one place alone would let the other through.
+# The load meets a block that was already on disk, and a writer meets one
+# it set when it judges its result, which is the same judgement run again.
 sub _refuse_v2_pipeline {
 	my ($self) = @_;
 
-	return 1 unless ($self->{__config_disk_version} // 0) == 2;
+	return 1 unless ($self->{__config_version} // 0) == 2;
 	bail({exitcode => CONFIG},
 		"A pipeline section belongs to a version 3 repository configuration, ".
 		"and this repository is still version 2.  Migrate ".
-		"#C{.genesis/config} to version 3 first, and the pipeline block ".
-		"becomes one you can write."
+		"#C{.genesis/config} to version 3 with #C{genesis config --set version 3}; ".
+		"the pipeline keys can be set in the same run."
 	) if $self->config->is_set('pipeline');
 	return 1;
 }

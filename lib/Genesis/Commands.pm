@@ -569,6 +569,10 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	return unless $top;                 # if Top load itself failed
 	return unless $top->has_legacy_ci_yml;
 
+	my $migrate = ($top->config->get('version') // '') eq '2'
+		? "     Set #g{version 3} in the same run if the file is still version 2:\n".
+		  "     #g{genesis config --set version 3 --set pipeline.<key> <value> ...}\n"
+		: "     #g{genesis config --set pipeline.<key> <value> ...} writes them.\n";
 	Genesis::bail({exitcode => CONFIG},
 		"This repository still has a legacy CI configuration at #C{ci.yml}.\n".
 		"Pipeline commands are unavailable until it is migrated to the v3\n".
@@ -577,6 +581,7 @@ sub _gate_pipeline_on_legacy_ci_yml {
 		"     git URI, the branch, the pipeline name and the vault URL.\n".
 		"  2. Write them into the #C{pipeline:} block of\n".
 		"     #C{.genesis/config}, which declares every one of them.\n".
+		$migrate.
 		"  3. Remove ci.yml (#g{git rm ci.yml}).\n\n".
 		"That restores pipeline commands."
 	);

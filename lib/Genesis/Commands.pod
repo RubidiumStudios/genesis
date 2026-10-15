@@ -2190,8 +2190,11 @@ B<Errors:>
 The full message names the values to carry across from the C<pipeline:>
 block, which are the provider, the git URI, the branch, the pipeline name
 and the vault URL, and it says to write them into the C<pipeline:> block of
-F<.genesis/config>, which declares every one of them.  The bail exits
-C<Genesis::Exit::CONFIG>.
+F<.genesis/config>, which declares every one of them, with
+C<genesis config --set>.  For a configuration still at version 2 it says
+to set C<version 3> in the same run, because a C<pipeline:> block is
+refused in a version 2 file; a version 3 one is not told to migrate
+again.  The bail exits C<Genesis::Exit::CONFIG>.
 
 =back
 

@@ -24,6 +24,8 @@ use lib 't';
 use helper;
 use Test::More;
 use Test::Deep;
+use Test::Output;
+use Test::Exit;
 use File::Path qw/make_path/;
 
 use_ok 'Genesis::Top';
@@ -162,6 +164,34 @@ EOF
 	is($top->type, 'bosh', 'type accessor');
 	is($top->config->get('creator_version'), '2.5.0',
 		'explicit creator_version preserved (not overwritten by Unknown sentinel)');
+};
+
+# ---------------------------------------------------------------------------
+# Case E: a v2 result that does not validate is refused, and not saved (T364)
+# ---------------------------------------------------------------------------
+
+subtest 'v1 whose v2 result would not load is refused' => sub {
+	plan tests => 3;
+
+	# The upgrade carries kit_provider over as it finds it, and the v2
+	# schema allows only two types.  The check on the result had been a
+	# no-op, so the refusal written for exactly this case could never fire.
+	my $v1 = <<'EOF';
+deployment_type: bosh
+kit_provider:
+  type: bogus
+EOF
+	my $repo = make_v1_repo('v1-invalid-result', $v1);
+	local $Genesis::VERSION = '3.2.0-rc.1';
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+
+	my $code;
+	my $err = stderr_from { $code = exit_code { Genesis::Top->new($repo)->type } };
+
+	ok(defined $code && $code != 0, 'the upgrade is refused');
+	like($err, qr/Cannot upgrade.*Manual intervention required/s,
+		'with the refusal written for it');
+	is(slurp_config($repo), $v1, 'and the v1 file is left as it was');
 };
 
 done_testing;
