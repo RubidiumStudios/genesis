@@ -1158,6 +1158,29 @@ EOF
 	is($c->get('deployment_type'), 'test-kit', "as are unrelated keys");
 };
 
+subtest 'a key with several types takes what any one takes, and refuses the rest (T367)' => sub {
+	plan tests => 6;
+
+	# creator_version's own declaration, which the load judges every file by.
+	my $schema = {v => {type => 'semver||"(development)"||"Unknown"'}};
+	my $problems = sub {
+		my ($value, $with) = @_;
+		return [Genesis::Config->new(undef, 0, {v => $value})->problems($with // $schema)];
+	};
+
+	is_deeply($problems->('3.2.0'), [], 'a release takes the first type');
+	is_deeply($problems->('3.2.0-rc.28+pipeline.abc'), [], 'a packed build takes it too');
+	is_deeply($problems->('(development)'), [], 'a literal takes the second');
+	is_deeply($problems->('Unknown'), [], 'and the third');
+	like(join('', @{$problems->('garbage')}), qr/v.*expected one of/,
+		'a value no type takes is refused, naming the types');
+
+	# 5 is both a string and a number, and matching more than one type is
+	# still matching one.
+	is_deeply($problems->(5, {v => {type => 'string||number'}}), [],
+		'a value every type takes is taken');
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

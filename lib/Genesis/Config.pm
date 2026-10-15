@@ -700,7 +700,7 @@ sub _validate_key {
 		my @types = split(/\|\|/, $type);
 		my $valid = 0;
 		for my $t (@types) {
-			if ($self->_validate_key($key, {type => $t})) {
+			if (!$self->_validate_key($key, {type => $t})) {
 				$valid = 1;
 				last;
 			}

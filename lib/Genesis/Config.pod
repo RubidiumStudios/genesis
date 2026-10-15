@@ -598,7 +598,9 @@ B<(required)> The expected type. Supported types are: C<string>, C<number>,
 C<integer>, C<boolean>, C<enum>, C<array>, C<hash>, C<hasharray>, C<semver>,
 C<null>, C<opaque>, C<custom_struct>, C<any>, and a literal string in double
 quotes (e.g., C<'"fixed"'>). Multiple types may be joined with C<||>
-(e.g., C<'string||null'>). C<custom_struct> has a section of its own
+(e.g., C<'string||null'>), and the value is taken when any one of them
+takes it, which includes a value more than one takes, and refused, naming
+the types, when none does. C<custom_struct> has a section of its own
 below, because a block that declares it names a module rather than a
 shape.
 
