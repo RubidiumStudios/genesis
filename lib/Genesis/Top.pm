@@ -1683,12 +1683,6 @@ sub _shape_with_vault {
 
 # }}}
 # source_control_remote - the remote the pipeline derives its url from {{{
-#
-# The public reader over the resolved block, so a caller asks for the one
-# value it wants instead of reaching into a private hash.  Precedence is
-# explicit over derived over default, and the derivation and every
-# refusal live in _source_control, which resolves once and keeps its
-# answer.
 sub source_control_remote {
 	my ($self) = @_;
 	return $self->_source_control->{remote};
@@ -1738,27 +1732,12 @@ sub github_client {
 
 # }}}
 # source_control_resolved - every source-control value and its tier {{{
-#
-# What pipeline-describe prints, so an override that has drifted away from
-# what git says is visible rather than silent.  A value is explicit where
-# the operator wrote the key, derived where git answered for it, unset
-# where a derivation was never run, and default where the key takes no
-# derivation at all.
-#
-# is_set decides the explicit tier rather than get, the way
-# _validate_capability_gates does, because the schema fills control_branch
-# and pr_prefix in for every repository and a filled default is the
-# schema's answer rather than anybody's choice.
 sub source_control_resolved {
 	my ($self) = @_;
 
 	my $sc = $self->_source_control_found;
 	my %derived = map {($_ => 1)} qw/uri repository/;
 
-	# The remote is never written in the configuration (D118), so its row
-	# says how it was found instead: matched by the repository it points
-	# at, pinned in the clone, or derived as the clone's one remote.  A pin
-	# lives in a file nobody commits, so the row says whose it is.
 	my %how = (matched => 'matched', pinned => 'pinned', only => 'derived');
 	my @rows = ({
 		key    => 'remote',
@@ -1773,13 +1752,7 @@ sub source_control_resolved {
 		my $value = $sc->{$key};
 		push @rows, {
 			key    => $key,
-			# A value that never resolved shows as (none) rather than as a
-			# blank column the reader has to interpret.
 			value  => $value // '(none)',
-			# A derived key with no value was never derived.  The url is
-			# asked of git only where the repository has to come out of it,
-			# so calling that row derived would tell the reader git
-			# answered when git was never asked.
 			source => $self->config->is_set("pipeline.source_control.$key")
 				? 'explicit'
 				: $derived{$key}
