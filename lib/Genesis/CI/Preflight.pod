@@ -255,6 +255,70 @@ B<Examples:>
     # returns ({client => undef, ...}, problem(UNAVAILABLE, "Could not read the review state ..."))
     # where the API would not answer
 
+=head2 host_repository_problems($top, $github)
+
+    my @problems = Genesis::CI::Preflight::host_repository_problems($top,
+        $top->github_client);
+
+The repository as its host answers for it, asked before anything is written
+by the runs that already call the host (D118, noted 2026-10-15): a
+C<pipeline-apply> with a token that is not a dry run, before any branch is
+cut, and a C<propagate> with a pull request environment and a token, before
+the review states are read, which it leaves unasked when it finds a problem.
+It is one call, L<Service::Github/repository>, answered as problems in D115's
+form rather than raised. A run that does not already call the host never asks,
+so no run needs a token it did not need before.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top>, whose L<Genesis::Top/source_control_repository> is asked
+about.
+
+=item C<$github>
+
+The client, from L<Genesis::Top/github_client>.
+
+=back
+
+B<Returns:> Nothing where the repository exists and the token can push to it;
+otherwise one problem:
+
+=over 4
+
+=item *
+
+At C<CONFIG>: the repository "does not exist, or this token cannot see it",
+for GitHub's C<404>, which is also its answer for a private repository the
+token has no access to.
+
+=item *
+
+At C<CONFIG>: "this token can read it but cannot push to it", where the
+answer's C<permissions.push> is false, since the pipeline's branches are
+pushed there.
+
+=item *
+
+At C<CONFIG>: any other answer, naming the code and the token.
+
+=item *
+
+At C<UNAVAILABLE>: a host that could not be reached.
+
+=back
+
+B<Errors:> None of its own; a host that does not answer as GitHub is refused
+by the host judgement (D119).
+
+B<Examples:>
+
+    my @problems = host_repository_problems($top, $top->github_client);
+    # () for a repository the token can push to
+
 =head2 prefix_problems($top, %opts)
 
     my ($branch_of, @problems) = Genesis::CI::Preflight::prefix_problems($top,

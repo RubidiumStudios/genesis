@@ -133,6 +133,13 @@ sub apply {
 	# compiled artifacts out still creates and publishes any deployment
 	# branch the remote lacks.  A dry run reports the same branches and
 	# writes none of them.  The POD says so where each option is described.
+	# The host is asked about the repository before anything is cut (D118).
+	Genesis::CI::Preflight::refuse_once(
+		problems => [Genesis::CI::Preflight::host_repository_problems($top, $top->github_client)],
+		action   => 'apply',
+		outcome  => 'No branch was created and no pipeline was set.',
+	) if $ENV{GITHUB_AUTH_TOKEN} && !$dry_run;
+
 	_apply_init_branches($top, $git, dry_run => $dry_run);
 
 	# The repository is asked to enforce the append-only rule Genesis observes
@@ -1713,6 +1720,14 @@ sub _propagate_check_first {
 			if (@prefix) {
 				$not_checked = {
 					because => 'the pull request branches collide',
+					checks  => ['the pull request reviews']};
+			} elsif ($ENV{GITHUB_AUTH_TOKEN}
+					and grep {$topology->{nodes}{$_}{require_pr}} @{$topology->{order}}
+					and my @host = Genesis::CI::Preflight::host_repository_problems($top, $top->github_client)) {
+				# The reviews are read from the repository the host just refused.
+				push @problems, @host;
+				$not_checked = {
+					because => 'the repository could not be asked about',
 					checks  => ['the pull request reviews']};
 			} else {
 				my @github;

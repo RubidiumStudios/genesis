@@ -58,7 +58,7 @@ our @EXPORT = qw/
 	shuttle_spy shuttle_requests
 
 	github_double gh_pull_request gh_close_pr gh_merge_pr
-	gh_protection gh_host gh_unreachable gh_reachable gh_no_token gh_calls
+	gh_protection gh_repository gh_host gh_unreachable gh_reachable gh_no_token gh_calls
 
 	automation_blocks automation_block_lines load_with automated_config
 	compilable_pipeline shuttle
@@ -4444,6 +4444,21 @@ sub gh_protection {
 }
 
 # }}}
+# gh_repository - what the repository itself answers {{{
+#
+# The repository exists and takes the token's pushes unless a row says it is
+# missing, which answers 404 with GitHub's headers, or that push is refused,
+# which answers it with permissions.push false (T366).
+sub gh_repository {
+	my ($gh, %opts) = @_;
+	my $self = $gh->{harness};
+	return $self->_gh_change(sub {
+		$_[0]->{repository} = {%{$_[0]->{repository} || {}}, %opts};
+		return undef;
+	});
+}
+
+# }}}
 # gh_host - what one host answers as {{{
 #
 # A host answers as github unless a row says otherwise: enterprise carries
@@ -4469,10 +4484,12 @@ sub gh_host {
 # a fact about the environment a run is given and not about the API, and it is
 # one shot: run_genesis consumes the flag, so the command after it carries the
 # token again and the fixture curl stays where it is.
+# only => 'pulls' fails the pull request and review calls alone, so a row
+# can reach the review reader past the repository question (T366).
 sub gh_unreachable {
-	my ($gh) = @_;
+	my ($gh, %opts) = @_;
 	my $self = $gh->{harness};
-	return $self->_gh_change(sub {$_[0]->{unreachable} = 1; return undef});
+	return $self->_gh_change(sub {$_[0]->{unreachable} = $opts{only} // 1; return undef});
 }
 
 sub gh_reachable {

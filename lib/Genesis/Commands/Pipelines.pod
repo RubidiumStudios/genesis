@@ -150,6 +150,14 @@ and which settings, and the run carries on. A run that carries no
 C<GITHUB_AUTH_TOKEN> skips the stage, names the variable, and carries on as
 well.
 
+A run that carries a token, and is not a dry run, asks the host about the
+repository first, before the branch stage cuts anything, through
+L<Genesis::CI::Preflight/host_repository_problems($top, $github)> (D118,
+noted 2026-10-15): a repository that does not exist, or that the token cannot
+see or cannot push to, is refused at C<CONFIG> with nothing written, rather
+than met as a C<404> or a refused push partway through. A dry run, and a run
+with no token, makes no call to ask.
+
 With the branches protected the run records what it applied, which is the
 control commit it read, the provider it applied, and the time. That record
 goes to the pipeline's own address in exodus under every provider, because it
@@ -1767,12 +1775,16 @@ where it is not is either the disowned pipeline or the key named, and ends
 the questions about the pipeline; the provider's gate;
 whether any environment carries pipeline metadata; every pull request prefix
 collision; the initial state of every deployment branch, against the
-snapshot; and the GitHub client and review states the pull request
+snapshot; with a token and a pull request environment, the repository as its
+host answers for it
+(L<Genesis::CI::Preflight/host_repository_problems($top, $github)>, D118
+noted 2026-10-15); and the GitHub client and review states the pull request
 environments need. A snapshot that failed ends the asking, since every later
 question reads R; so does a control that does not stand where R has it, since
-the topology is read from control; and so does a prefix collision for the
-reviews alone, which are read by pull request branch. Each names what it left
-unasked in the refusal.
+the topology is read from control; so does a prefix collision for the
+reviews alone, which are read by pull request branch; and so does a
+repository the host would not answer for, for the reviews alone, which are
+read from it. Each names what it left unasked in the refusal.
 
 A run that finds nothing confirms the provider's gate at a terminal, the one
 question put to a person, and only then acts: the snapshot is promoted into

@@ -159,6 +159,35 @@ sub github_problems {
 }
 
 # }}}
+# host_repository_problems - the repository as its host answers for it (D118) {{{
+sub host_repository_problems {
+	my ($top, $github) = @_;
+	my $repo = $top->source_control_repository;
+	my ($code, $info) = $github->repository($repo);
+
+	return problem(UNAVAILABLE, sprintf(
+		"Could not reach #C{%s} to ask about #C{%s}.\n\n".
+		"Check the network and run the command again.",
+		$github->base_url, $repo)) if $code == 599;
+	return problem(CONFIG, sprintf(
+		"#C{%s} at #C{%s} does not exist, or this token cannot see it.\n\n".
+		"GitHub answers a private repository the token has no access to as ".
+		"missing.  Check #C{pipeline.source_control.repository}, and that ".
+		"#C{GITHUB_AUTH_TOKEN} can read the repository.",
+		$repo, $github->base_url)) if $code == 404;
+	return problem(CONFIG, sprintf(
+		"#C{%s} at #C{%s} answered %d when asked about the repository.\n\n".
+		"Check that #C{GITHUB_AUTH_TOKEN} is valid for that host.",
+		$repo, $github->base_url, $code)) unless $code == 200;
+	return problem(CONFIG, sprintf(
+		"This token can read #C{%s} but cannot push to it, and the ".
+		"pipeline's branches are pushed there.\n\n".
+		"Give #C{GITHUB_AUTH_TOKEN} write access to the repository.",
+		$repo)) unless ($info->{permissions} || {})->{push};
+	return ();
+}
+
+# }}}
 # prefix_problems - every pull request branch's collision, all of them {{{
 #
 # The pull request prefix is asked of every environment that delivers by pull

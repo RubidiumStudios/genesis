@@ -800,6 +800,18 @@ sub rulesets_url {
 }
 
 # }}}
+# repository - what the host says of one repository, and of this token's access {{{
+sub repository {
+	my ($self, $owner_repo) = @_;
+	bail("Missing owner/repo for repository") unless $owner_repo;
+	my ($code, undef, $data) = $self->_api(
+		"GET", sprintf("%s/repos/%s", $self->base_url, $owner_repo),
+		undef, undef, 0, $self->{creds}
+	);
+	return ($code, $code == 200 ? (eval {load_json($data)} || {}) : undef);
+}
+
+# }}}
 # list_rulesets - the rulesets a repository carries {{{
 #
 # Answers with an empty list rather than bailing when the token may not

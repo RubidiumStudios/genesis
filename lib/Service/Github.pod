@@ -1437,6 +1437,38 @@ B<Examples:>
   my $url = $gh->rulesets_url('genesis-community/genesis', 7);
   # returns '.../repos/genesis-community/genesis/rulesets/7'
 
+=head2 repository
+
+  my ($code, $info) = $gh->repository('org/repo');
+
+What the host says of one repository, C<GET /repos/{owner}/{repo}>, and so
+of this token's access to it: the answer's C<permissions> carry C<pull>,
+C<push> and C<admin>. It goes through C<_api>, so a host that does not answer
+as GitHub is refused there (D119), and GitHub's own C<404> -- which is also
+its answer for a private repository the token cannot see -- comes back as a
+code rather than a refusal.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository, as C<owner/repo>.
+
+=back
+
+B<Returns:> The HTTP code, and the decoded answer where it was C<200>, else
+C<undef>. A host that could not be reached answers C<599>.
+
+B<Errors:> C<"Missing owner/repo for repository"> without one; and the host
+judgement's refusal for a host that is not GitHub.
+
+B<Examples:>
+
+  my ($code, $info) = $gh->repository('org/repo');
+  # (200, {full_name => 'org/repo', permissions => {push => JSON::PP::true, ...}})
+
 =head2 list_rulesets
 
   my $sets = $gh->list_rulesets($owner_repo);

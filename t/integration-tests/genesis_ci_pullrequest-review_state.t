@@ -50,7 +50,10 @@ subtest 'an unreadable review state refuses the run and writes nothing' => sub {
 		at => $h->slug('prod'), push => 1);
 
 	my $before_prod = remote_sha($h, $h->pr_branch('prod'));
-	gh_unreachable($gh);
+
+	# Only the pull request calls fail: the repository question is asked
+	# first and answered (T366), so the run reaches the review reader.
+	gh_unreachable($gh, only => 'pulls');
 
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
 	my $said = unfolded($out, $err);

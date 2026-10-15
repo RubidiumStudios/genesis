@@ -449,6 +449,7 @@ integration-tests/genesis_ci_pullrequest-align.t              # the pull request
 integration-tests/genesis_ci_pullrequest-branch_lifecycle.t   # nothing due takes the branch off R and out of the clone together
 integration-tests/genesis_ci_pullrequest-client_and_record.t  # one GitHub client serves a whole run, and only where one is needed
 integration-tests/genesis_ci_github-host_judgement.t          # a host is judged GitHub by its answers, called at its own base, and cached unless it is github.com
+integration-tests/genesis_ci_github-repository_preflight.t     # the host is asked about the repository before anything is written
 integration-tests/genesis_ci_pullrequest-preview.t            # the dry run says what it would title the pull request, with a token and without
 integration-tests/genesis_ci_pullrequest-no_token.t           # a writing run with no token refuses at CONFIG before writing; a preview says it would
 integration-tests/genesis_ci_pullrequest-proposed_record.t    # a run that opens a pull request writes the run's own pointer to it
