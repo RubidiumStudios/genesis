@@ -122,8 +122,12 @@ subtest 'the reading enum is the four, and error sits outside it' => sub {
 
 	my $broken = env_row($record, 'broken');
 	ok($broken->{error}, 'the failed row carries its error');
-	is($broken->{reading}, 'not-propagated',
-		'and it carries the reading the walk starts every record on');
+	# No reading at all, because error is not a reading and a row that did
+	# not load was never read (D94).  The field is null, as error is null on
+	# a row that loaded, so every row carries the same keys.
+	ok(exists $broken->{reading} && !defined $broken->{reading},
+		'and no reading at all')
+		or diag('reading: ' . ($broken->{reading} // '(absent)'));
 };
 
 subtest 'the tree renders the record in DAG order' => sub {

@@ -876,7 +876,10 @@ sub walk_one {
 			if $record->{pr} && $record->{pr}{branch}
 			&& $session->switched_to($record->{pr}{branch});
 	}
+	# A record that did not load was never read, so it carries its error and
+	# no reading, since error is not one of the four (D94).
 	$record->{error}   = _load_error($error);
+	$record->{reading} = undef;
 	$record->{outcome} = 'failed';
 	$record->{pending} = [];
 	return $record;
@@ -1233,6 +1236,7 @@ sub plan {
 			my $env = $env_for->($name);
 			unless ($env) {
 				$env_record->{error}   = $load_error{$name};
+				$env_record->{reading} = undef;
 				$env_record->{outcome} = 'failed';
 				return;
 			}
@@ -1303,6 +1307,7 @@ sub plan {
 
 			if ($certified->{state} eq 'unreadable') {
 				$env_record->{error}   = $certified->{error};
+				$env_record->{reading} = undef;
 				$env_record->{outcome} = 'failed';
 				return;
 			}

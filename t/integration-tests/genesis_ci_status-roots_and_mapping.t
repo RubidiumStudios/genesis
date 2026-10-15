@@ -127,7 +127,9 @@ subtest 'every line of the mapping table has its reading' => sub {
 			my $c = commit_on_control($h,
 				files => {'env.yml' => ghost_env_file('env')}, push => 1);
 			fixture_applied($h, control => $c);
-		 }, reading => 'not-propagated', routing => qr/load error/,
+		 # No reading, because a row that did not load was never read and
+		 # error is not a reading (D94, T278).
+		 }, reading => undef, routing => qr/load error/,
 		    divergence => 'in-sync'},
 
 		{name => 'delivered and deployed', build => sub {
