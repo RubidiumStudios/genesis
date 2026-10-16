@@ -231,6 +231,9 @@ sub define_command { # {{{
 		# A pre-deploy command that runs only on control, in step with the
 		# remote, rather than on control or a permitted feature branch.
 		control_only       => 0,
+		# A command that reads the working tree rather than control: 1, or
+		# the option that makes it so, such as 'dry-run' (D112).
+		preview            => 0,
 	};
 
 	$PROPS{$name} = {%$default_props, %$props};
@@ -765,7 +768,9 @@ sub _gate_branch_class {
 	}
 
 	# Outside a pipeline every command behaves as it always has, on any
-	# branch.
+	# branch.  A preview reads the working tree, so a control that fails the
+	# configuration checks gates nothing for it; the preview's banner names it.
+	return $fn->() if previewing() && $top->control_config_problems;
 	return $fn->() unless $top->pipeline_enabled;
 
 	# The secrets family is pre-deploy by class, and --as-deployed opts it
@@ -1067,6 +1072,12 @@ sub command_properties { # {{{
 		unless $cmd;
 
 	return $PROPS{$cmd};
+} # }}}
+
+sub previewing { # {{{
+	my $preview = command_properties()->{preview} or return 0;
+	return 1 if $preview eq '1';
+	return get_options()->{$preview} ? 1 : 0;
 } # }}}
 
 sub parse_options { # {{{

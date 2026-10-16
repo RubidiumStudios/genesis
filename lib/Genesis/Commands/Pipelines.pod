@@ -1776,9 +1776,12 @@ C<refs/genesis/preflight/E<lt>remoteE<gt>> by
 L<Service::Git/snapshot_remote>, so asking moves no local branch and no
 tracking ref.
 
-A local control whose C<.genesis/config> has no C<pipeline> section is refused
-at C<CONFIG> before any of that, since there is no pipeline to ask R about
-(D64, noted 2026-10-10).
+A control whose tree fails the configuration checks is refused at C<CONFIG>
+before any of that, through L<Genesis::Top/assert_control_readable>, naming
+control, its commit and each failure (D112, noted 2026-10-16).  A local
+control whose C<.genesis/config> has no C<pipeline> section is refused at
+C<CONFIG> next, since there is no pipeline to ask R about (D64, noted
+2026-10-10).
 
 The questions, in order: the clone itself
 (L<Genesis::CI::Preflight/repository_problems($git)>); the snapshot; the
@@ -2234,9 +2237,11 @@ B<Examples:>
 Warns, in D44's "This preview assumes" shape, of each gap
 L<Genesis::Top/worktree_gaps> finds: the root's uncommitted changes, assumed
 committed; a branch other than control, assumed merged into it; control's
-unpushed commits, assumed pushed; and commits on T this tree lacks, which the
-preview does not include.  The opening line names the root and control on T as
-last fetched.  Where there is no gap it prints nothing.
+unpushed commits, assumed pushed; commits on T this tree lacks, which the
+preview does not include; and control's own failures of the configuration
+checks, from L<Genesis::Top/control_config_problems>, which the preview does
+not read past.  The opening line names the root and control on T as last
+fetched.  Where there is no gap it prints nothing.
 
 B<Parameters:>
 

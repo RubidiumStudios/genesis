@@ -2096,6 +2096,7 @@ define_command("pipeline-apply", {
 	# The apply reads the shape from control and records the commit it
 	# applied from, so it runs on control alone, in step with the remote.
 	control_only   => 1,
+	preview        => 'dry-run',
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	arguments      => [
@@ -2151,6 +2152,7 @@ define_command("pipeline-graph", {
 		"Compiles the pipeline and writes a Mermaid flowchart to pipeline.md ".
 		"in the current directory.  Replaces `genesis graph`.",
 	function_group => Genesis::Commands::PIPELINE,
+	preview        => 1,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	options => [
@@ -2253,6 +2255,7 @@ define_command("pipeline-describe", {
 	# there is nothing for an operator to choose: the declaration is the
 	# choice, and the branch-class gate reads it.
 	refresh        => 'never',
+	preview        => 1,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	options => [

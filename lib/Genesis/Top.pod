@@ -1927,6 +1927,44 @@ B<Examples:>
     # {uncommitted => ['prod.yml'], tracking => {ref => 'origin/control',
     #  commit => '4cf1438...'}, ahead => 0, behind => 0}
 
+=head2 assert_control_readable
+
+    $top->assert_control_readable();
+
+Refuses where control's tree fails the configuration checks, for a command
+that reads control's files by another route before it reads the shape, as
+C<genesis propagate>'s first stage does.
+
+B<Parameters:> None.
+
+B<Returns:> 1.
+
+B<Errors:> As L</_refuse_invalid_shape>.
+
+B<Examples:>
+
+    $top->assert_control_readable;
+
+=head2 control_config_problems
+
+    my @failed = $top->control_config_problems();
+
+What control's own configuration fails, without refusing, so a preview's
+banner can name it while the preview reads the working tree.
+
+B<Parameters:> None.
+
+B<Returns:> The failures, each as the configuration checks word it; an empty
+list where control passes, cannot be read, or this Top is itself a
+materialised tree.
+
+B<Errors:> As L</_control_shape>.
+
+B<Examples:>
+
+    $top->control_config_problems;
+    # ('#R{ci}: unknown configuration key: expected one of ...')
+
 =head2 pipeline_section
 
     my $section = $top->pipeline_section();
@@ -2761,7 +2799,13 @@ B<Returns:> C<$self> for a materialised tree. Otherwise, the C<Genesis::Top>
 L</_read_shape> resolved, which may also be C<$self> where control could not
 be read from at all.
 
-B<Errors:> None directly; whatever L</_read_shape> raises propagates.
+A preview that has called L</read_shape_from_worktree> reads the tree in front
+of it here instead, and never reaches control.
+
+B<Errors:> Whatever L</_read_shape> raises propagates, and a shape whose tree
+fails the configuration checks is refused through L</_refuse_invalid_shape>
+at C<CONFIG> (D112, noted 2026-10-16), so no command that acts takes an
+unreadable control as one with no pipeline.
 
 B<Examples:>
 
@@ -2826,6 +2870,58 @@ B<Examples:>
     my $shape = $top->_read_shape();
     # a materialised Top over control's tree, or $self for a root git
     # knows nothing about
+
+The resolution itself is L</_control_shape>'s; this records the commit as the
+shape's and hands the tree back.
+
+=head2 _control_shape
+
+    my $at = $top->_control_shape();
+
+Control's tree as L</_read_shape> describes it, written out once per commit
+and kept for the process, without making it this Top's shape. A preview
+reads control through here to say what control fails, while its own shape
+stays the working tree.
+
+B<Parameters:> None.
+
+B<Returns:> As L</_read_shape>.
+
+B<Errors:> As L</_read_shape>.
+
+B<Examples:>
+
+    my $at = $top->_control_shape;
+    $at->{__config_problems};    # what control's configuration fails, if anything
+
+=head2 _refuse_invalid_shape
+
+    $top->_refuse_invalid_shape($shape);
+
+Refuses a shape whose tree failed the configuration checks, naming control or
+the ref C<--from> named, the commit, and each failure, and saying that a
+preview reads the fix from the working tree before it is committed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$shape>
+
+The materialised Top whose C<__config_problems> are listed.
+
+=back
+
+B<Returns:> Never.
+
+B<Errors:> Always bails at C<CONFIG>.
+
+B<Examples:>
+
+    $top->_refuse_invalid_shape($at);
+    # Control at 4cf1438 fails the configuration checks, so the pipeline's
+    # shape cannot be read from it:
+    #   - ci: unknown configuration key: ...
 
 =head2 _no_pipeline_shape
 
@@ -3295,7 +3391,10 @@ environment around this call and around the reads it makes afterwards.
 B<Parameters:> A C<Service::Git> for the repository, and the ref to read.
 
 B<Returns:> The topology and the C<Genesis::Top>, or the empty list where the
-ref carries no deployment root.
+ref carries no deployment root.  Where the tree's configuration fails the
+checks, L</_config_problems> words the failures onto the Top's
+C<__config_problems> and the topology is C<undef>, because a tree the load
+would refuse is never walked (D112, noted 2026-10-16).
 
 B<Errors:>
 
@@ -3644,6 +3743,28 @@ B<Examples:>
 
     $self->_check_config($self->_repo_config_schema);
     # Returns: 1, or refuses; on a repair Top, fills defaults and returns
+
+=head2 _config_problems
+
+    my @failed = $at->_config_problems();
+
+What this tree's configuration fails, by the schema its version selects, for a
+materialised tree, which L</_validate_config> passes over because it is
+opened over one commit and never saved.  It is how control's tree is judged
+by the load's checks (D112, noted 2026-10-16).  A version other than 2 or 3
+is one failure of its own.
+
+B<Parameters:> None.
+
+B<Returns:> The failures, as L<Genesis::Config/problems> words them; an empty
+list where the tree passes.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $at->_config_problems;
+    # ('#R{ci}: unknown configuration key: expected one of ...')
 
 =head2 _validate_config_to_save
 

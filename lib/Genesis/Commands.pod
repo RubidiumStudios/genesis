@@ -425,6 +425,11 @@ commands make none.  It is declared only alongside C<branch_class =E<gt>
 PRE_DEPLOY>, since that is the one gate that reads it.  Defaults to
 C<undef>.
 
+=item C<preview> - 1 for a command that always reads the working tree
+rather than control, or the name of the option that makes it do so, such as
+C<'dry-run'> for C<pipeline-apply>.  Read through L</previewing>.  Defaults
+to 0.
+
 =item C<control_only> - Boolean.  True where the command runs only with
 control checked out and in step with the remote, rather than on control or
 a permitted feature branch.  C<pipeline-apply> alone declares it (D113),
@@ -883,6 +888,27 @@ B<Examples:>
 
   my $props = command_properties('deploy');
   # Returns: { summary => '...', scope => 'env', ... }
+
+=head2 previewing
+
+  my $preview = previewing();
+
+True where the active command is a preview, which reads the working tree
+rather than control (D112, noted 2026-10-16): a command registered with
+C<preview =E<gt> 1>, or with C<preview> naming an option, such as
+C<'dry-run'>, that this run was given.  The branch-class gate lets a preview
+through a control whose configuration fails the checks, because the preview
+does not read it and its banner names the failures.
+
+B<Parameters:> None.
+
+B<Returns:> 1 or 0.
+
+B<Errors:> As L</command_properties>, where no command is active.
+
+B<Examples:>
+
+  previewing();    # 1 for pipeline-describe; 1 for pipeline-apply --dry-run
 
 =head2 branch_session
 

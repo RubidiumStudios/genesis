@@ -1622,6 +1622,7 @@ sub _propagate_check_first {
 
 	my $dry_run = $opts->{'dry-run'} ? 1 : 0;
 	my $control = $top->control_branch;
+	$top->assert_control_readable;
 
 	# A control that configures no pipeline at all has nothing to ask R about,
 	# and the remote the snapshot needs is one a pipeline section names, so it
@@ -2413,6 +2414,11 @@ sub _worktree_banner {
 		$the->($gaps->{ahead}), $control, $gaps->{ahead} == 1 ? 'is' : 'are') if $gaps->{ahead};
 	push @lines, sprintf("#Y{This preview does not include %s on }#C{%s}#Y{ that this tree lacks.}",
 		$the->($gaps->{behind}), $gaps->{tracking}{ref}) if $gaps->{behind};
+	if (my @failed = $top->control_config_problems) {
+		push @lines, sprintf("#Y{Control at }#C{%s}#Y{ fails the configuration checks, so this ".
+			"preview does not read it:}%s", substr($gaps->{tracking}{commit} // '', 0, 7),
+			join('', map {"\n  • $_"} @failed));
+	}
 	return unless @lines;
 
 	my $t = $gaps->{tracking};

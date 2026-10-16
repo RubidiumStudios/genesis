@@ -1159,7 +1159,43 @@ sub pipeline_enabled {
 sub _shape {
 	my ($self) = @_;
 	return $self if $self->{__materialised_tree};
-	return $self->{__shape} //= $self->_read_shape;
+	my $shape = $self->{__shape} //= $self->_read_shape;
+	$self->_refuse_invalid_shape($shape) if $shape->{__config_problems};
+	return $shape;
+}
+
+# }}}
+# _refuse_invalid_shape - refuse a shape whose tree fails the configuration checks {{{
+sub _refuse_invalid_shape {
+	my ($self, $shape) = @_;
+	my $at = substr($self->{__shape_commit} // '', 0, 7);
+	bail({exitcode => CONFIG},
+		"%s at #C{%s} fails the configuration checks, so the pipeline's shape ".
+		"cannot be read from it:\n%s\n\n".
+		"Fix the configuration on #C{%s} and push it.  A preview, such as ".
+		"#C{genesis pipeline-describe}, reads the fix from the working tree ".
+		"before it is committed.",
+		defined($self->{__shape_ref}) ? "#C{$self->{__shape_ref}}" : 'Control',
+		$at, join('', map {"\n  • $_"} @{$shape->{__config_problems}}),
+		$self->control_branch);
+}
+
+# }}}
+# assert_control_readable - refuse where control's tree fails the configuration checks {{{
+sub assert_control_readable {
+	my ($self) = @_;
+	$self->_shape;
+	return 1;
+}
+
+# }}}
+# control_config_problems - what control's own configuration fails, without refusing {{{
+sub control_config_problems {
+	my ($self) = @_;
+	return () if $self->{__materialised_tree};
+	my $at = $self->_control_shape;
+	return () if !$at || $at == $self;
+	return @{$at->{__config_problems} || []};
 }
 
 # }}}
@@ -1266,9 +1302,16 @@ sub worktree_gaps {
 my %SHAPE_AT;
 sub _read_shape {
 	my ($self) = @_;
+	my $sha = $self->{__shape_commit} = $self->_control_commit or return $self;
+	return $self->_control_shape($sha);
+}
 
-	my $sha = $self->_control_commit or return $self;
-	$self->{__shape_commit} = $sha;
+# }}}
+# _control_shape - control's tree, written out once per commit {{{
+sub _control_shape {
+	my ($self, $sha) = @_;
+
+	$sha //= $self->_control_commit or return $self;
 
 	require Cwd;
 	my $key = join("\0", Cwd::abs_path($self->path) // $self->path, $sha);
@@ -2052,6 +2095,10 @@ sub _topology_at {
 	# Top that comes back.
 	my $at = Genesis::Top->new($root, materialised_tree => 1);
 	$at->{__scratch_tree} = $scratch;
+	if (my @problems = $at->_config_problems) {
+		$at->{__config_problems} = \@problems;
+		return (undef, $at);
+	}
 	return ($at->pipeline_topology, $at);
 }
 
@@ -2510,6 +2557,17 @@ sub _check_config {
 	my ($self, $schema) = @_;
 	return $self->config->problems($schema) if $self->{__config_repair};
 	return $self->config->validate($schema, $self->{__config_to_save});
+}
+
+# }}}
+# _config_problems - what this tree's configuration fails, by its version's schema {{{
+sub _config_problems {
+	my ($self) = @_;
+	my $version = $self->config->get(version => 1);
+	return sprintf("#R{version}: %s is not a configuration version this Genesis ".
+		"reads, which are 2 and 3", $version) unless $version =~ /^[23]$/;
+	return $self->config->problems($version == 3
+		? $self->_repo_config_schema : $self->_repo_config_schema_v2);
 }
 
 # }}}
