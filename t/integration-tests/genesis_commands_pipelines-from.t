@@ -1,10 +1,11 @@
 #!perl
-# Proves T350: --from <ref> on pipeline-graph and pipeline-describe reads the
-# pipeline's shape at that ref, says so in a banner, and validates it as
-# control's would be, while every command that acts keeps reading control and
-# refuses the flag (D112).  The pipeline-status clause of step (c) is proved
-# in genesis_ci_status-control_shape.t, on a branch that switches the
-# pipeline off.
+# Proves T350: pipeline-graph and pipeline-describe preview the tree in front
+# of them, a feature branch included, and --from <ref> reads the shape at that
+# ref instead; both say so in a banner and validate the shape as control's
+# would be, while every command that acts keeps reading control and refuses
+# the flag (D112, noted 2026-10-16).  The pipeline-status clause of step (c)
+# is proved in genesis_ci_status-control_shape.t, on a branch that switches
+# the pipeline off.
 use strict;
 use warnings;
 use utf8;
@@ -52,37 +53,39 @@ sub graph {
 	return ($md, $err, $exit);
 }
 
-subtest '(a) the branch re-parents prod, and only --from shows it' => sub {
+subtest '(a) the branch re-parents prod, and the previews show it' => sub {
 	# Ten rows, and one restoration assertion for each of the four runs.
 	plan tests => 14;
 
 	my $h = on_feature_branch();
 	write_env_file($h, 'prod', pipeline => {prior_env => 'qa'});
-	my $head  = commit_here($h, 'prod follows qa here');
-	my $short = substr($head, 0, 7);
+	commit_here($h, 'prod follows qa here');
+	my $t     = 'origin/' . $h->control;
+	my $short = substr($h->git('a')->sha($t), 0, 7);
 
-	my ($md, $err, $exit) = graph($h, '--from', 'HEAD');
-	is($exit, 0, 'pipeline-graph --from HEAD succeeds') or diag($err);
-	like($md, qr{^\s*qa --> prod$}m, "and draws prod following qa, the ref's shape");
-	like($err, qr{shape from HEAD at \Q$short\E, not from control},
-		'under a banner naming the ref, its commit, and that it is not control');
+	my ($md, $err, $exit) = graph($h);
+	is($exit, 0, 'pipeline-graph on the branch succeeds') or diag($err);
+	like($md, qr{^\s*qa --> prod$}m, "and draws prod following qa, the branch's shape");
+	like(unfolded($err), qr{This preview assumes feature/reshape is merged into \Q${\ $h->control}\E},
+		'under a banner naming the branch as previewed as if merged into control');
 
-	my ($out, $derr, $dexit) = run_genesis($h, 'pipeline-describe', '--from', 'HEAD');
-	is($dexit, 0, 'pipeline-describe --from HEAD succeeds') or diag($derr);
+	my ($out, $derr, $dexit) = run_genesis($h, 'pipeline-describe');
+	is($dexit, 0, 'pipeline-describe on the branch succeeds') or diag($derr);
 	like($out, qr{^ {6}prod$}m, 'and shows prod under qa');
-	like($derr, qr{shape from HEAD at \Q$short\E, not from control},
+	like(unfolded($derr), qr{This preview assumes feature/reshape is merged},
 		'under the same banner');
 
-	($md, $err, $exit) = graph($h);
-	is($exit, 0, 'pipeline-graph without the flag succeeds') or diag($err);
+	($md, $err, $exit) = graph($h, '--from', $t);
+	is($exit, 0, "pipeline-graph --from $t succeeds") or diag($err);
 	like($md, qr{^\s*lab --> prod$}m, "and draws control's shape, prod following lab");
-	unlike($err, qr{not from control}, 'with no banner');
+	like($err, qr{shape from \Q$t\E at \Q$short\E, not from control},
+		'under a banner naming the ref and its commit');
 
-	($out) = run_genesis($h, 'pipeline-describe');
-	like($out, qr{^ {4}prod$}m, "pipeline-describe without it shows control's shape too");
+	($out) = run_genesis($h, 'pipeline-describe', '--from', $t);
+	like($out, qr{^ {4}prod$}m, "pipeline-describe --from $t shows control's shape too");
 };
 
-subtest '(b) a cycle at the ref is refused as it would be on control' => sub {
+subtest '(b) a cycle on the branch is refused as it would be on control' => sub {
 	# Three rows, and the run's own restoration assertion.
 	plan tests => 4;
 
@@ -91,13 +94,13 @@ subtest '(b) a cycle at the ref is refused as it would be on control' => sub {
 	write_env_file($h, 'lab',  pipeline => {prior_env => 'prod'});
 	commit_here($h, 'lab follows prod, closing a cycle');
 
-	my (undef, $err, $exit) = graph($h, '--from', 'HEAD');
-	is($exit, 78, 'pipeline-graph --from HEAD refuses at CONFIG');
+	my (undef, $err, $exit) = graph($h);
+	is($exit, 78, 'pipeline-graph refuses at CONFIG');
 	like($err, qr{prior_env forms a cycle}, 'naming the cycle');
 	like($err, qr{lab follows prod}, 'and the file that closes it');
 };
 
-subtest '(c) a pipeline disabled at the ref is reported as disabled there' => sub {
+subtest '(c) a pipeline disabled on the branch is reported as disabled there' => sub {
 	# Three rows, and the run's own restoration assertion.
 	plan tests => 4;
 
@@ -106,12 +109,12 @@ subtest '(c) a pipeline disabled at the ref is reported as disabled there' => su
 	my $config = Genesis::Config->new($h->a . '/.genesis/config');
 	$config->set('pipeline.enabled' => 0);
 	$config->save;
-	my $short = substr(commit_here($h, 'switch the pipeline off here'), 0, 7);
+	commit_here($h, 'switch the pipeline off here');
 
-	my ($out, $err, $exit) = run_genesis($h, 'pipeline-describe', '--from', 'HEAD');
-	is($exit, 0, 'pipeline-describe --from HEAD succeeds') or diag($err);
-	like($out, qr{pipeline is disabled at HEAD \($short\)},
-		'and reports the pipeline disabled at that ref');
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-describe');
+	is($exit, 0, 'pipeline-describe succeeds') or diag($err);
+	like($out, qr{pipeline is disabled in the working tree},
+		'and reports the pipeline disabled in its preview');
 	unlike($out, qr{Environment progression}, 'drawing no progression for it');
 };
 

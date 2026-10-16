@@ -1859,6 +1859,74 @@ B<Examples:>
     $top->read_shape_from('feature/reshape');
     $top->shape_ref();    # 'feature/reshape'
 
+=head2 read_shape_from_worktree
+
+    $top->read_shape_from_worktree();
+
+Makes the tree in front of the command the pipeline's shape for every read on
+this Top from here on, which is what a preview shows (D112, noted
+2026-10-16).  The commands that act never call it.  The tree is the one this
+Top was opened over, already judged by the load's checks, so nothing is
+written out and nothing is read again.  L</shape_commit> and L</shape_ref>
+answer C<undef> afterwards.
+
+B<Parameters:> None.
+
+B<Returns:> The Top.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $top->read_shape_from_worktree;
+    $top->pipeline_topology;    # the working tree's topology
+
+=head2 worktree_gaps
+
+    my $gaps = $top->worktree_gaps();
+
+What separates the deployment root's working tree from control on T, for a
+preview's banner.  Only the root's own paths are asked about, so a change in
+another deployment root of the same repository is not a gap here.  The
+divergence counts are control's, and are taken only where the clone stands on
+control; on another branch the branch itself is the gap.
+
+B<Parameters:> None.
+
+B<Returns:> A hashref:
+
+=over 4
+
+=item C<uncommitted>
+
+The root's shape files with a tracked change or untracked, relative to the
+root: F<.genesis/config>, the root's own YAML files, and F<dev/kit.yml>, which
+are the files L</read_shape_from> writes out.  Anything else in the root is
+not read by a preview, so it is not a gap in one.
+
+=item C<branch>
+
+The branch the clone stands on, where it is not control.
+
+=item C<tracking>
+
+C<{ref, commit}> for control on T, where the clone has a remote and T holds
+control.
+
+=item C<ahead>, C<behind>
+
+Control's counts against T, on control only.
+
+=back
+
+B<Errors:> None of its own; a git failure bails through L<Service::Git>.
+
+B<Examples:>
+
+    $top->worktree_gaps;
+    # {uncommitted => ['prod.yml'], tracking => {ref => 'origin/control',
+    #  commit => '4cf1438...'}, ahead => 0, behind => 0}
+
 =head2 pipeline_section
 
     my $section = $top->pipeline_section();

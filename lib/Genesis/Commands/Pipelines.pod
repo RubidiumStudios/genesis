@@ -230,7 +230,10 @@ to the pipeline's own name, when not specified.
 =item C<--dry-run>
 
 Report the whole run and write nothing to the repository, the remote, or the
-vault.  Every stage says what it would do and then stands aside, so the run
+vault.  The dry run is a preview: it reads the deployment root's working tree,
+on control or off it, and names every gap between that tree and control on T
+under a banner, where the real apply refuses each one (D112, D113, noted
+2026-10-16).  Every stage says what it would do and then stands aside, so the run
 names each branch it would create or publish, each branch it would protect
 and the settings it would send, the applied record it would write, and each
 environment's record with the dependencies it counted.  No branch is cut, no
@@ -1050,9 +1053,10 @@ repository is compiled first and the drawing comes off the compiler, with
 Concourse standing in as the platform, since nothing here chooses a provider
 and every compiler that emits a Concourse pipeline draws the same graph.
 
-With C<--from E<lt>refE<gt>> the shape is drawn as that ref holds it rather
-than as control does, as L</_shape_from_option($top)> describes, so a change to it
-can be checked before it is merged.
+The shape drawn is the deployment root's working tree, under a banner naming
+every gap between it and control on T, and with C<--from E<lt>refE<gt>> it is
+the shape that ref holds, as L</_preview_shape($top)> describes, so a change
+to it can be checked before it is committed or merged.
 
 B<Parameters:>
 
@@ -1094,9 +1098,10 @@ nothing for those derivations to read.  Any other repository is compiled and
 the compiler tells it, with Concourse standing in for the same reason
 L</pipeline_graph([$layout])> gives.
 
-With C<--from E<lt>refE<gt>> the shape is read at that ref rather than at
-control, as L</_shape_from_option($top)> describes, so a change to it can be
-checked before it is merged.
+The shape described is the deployment root's working tree, under a banner
+naming every gap between it and control on T, and with C<--from E<lt>refE<gt>>
+it is the shape that ref holds, as L</_preview_shape($top)> describes, so a
+change to it can be checked before it is committed or merged.
 
 B<Parameters:>
 
@@ -2183,21 +2188,24 @@ B<Examples:>
   _describe_topology($top, {}, []);
   # No environments with pipeline metadata found.
 
-=head2 _shape_from_option($top)
+=head2 _preview_shape($top)
 
-    _shape_from_option($top);
+    _preview_shape($top);
 
-Reads the pipeline's shape at the ref C<--from> names, for
-L</pipeline_graph([$layout])> and L</pipeline_describe([$layout])>, the only
-two commands that take the option.  It calls
+Reads the shape a preview shows, for L</pipeline_graph([$layout])>,
+L</pipeline_describe([$layout])> and the dry run of L</apply([$layout])>
+(D112, noted 2026-10-16).  With C<--from> it calls
 L<Genesis::Top/read_shape_from> and prints a banner on standard error naming
-the ref, its commit, and that the shape is not control's.  Without the option
-it does nothing, and the shape stays control's.
+the ref, its commit, and that the shape is not control's.  Without it, the
+shape is the deployment root's working tree, through
+L<Genesis::Top/read_shape_from_worktree>, and L</_worktree_banner($top)>
+names every gap between that tree and control on T.
 
-A shape switched off at the ref is reported as disabled there on standard
-output, and the command exits 0 having done nothing more, because the
-compiler both commands fall back to for a repository with no enabled pipeline
-reads the tree in front of the command, not the ref.
+A shape switched off at the ref, or in a working tree whose
+F<.genesis/config> has a C<pipeline> section, is reported as disabled there on
+standard output, and the command exits 0 having done nothing more.  A working
+tree with no C<pipeline> section at all is left to the command, which falls
+back to the compiler as it always has.
 
 B<Parameters:>
 
@@ -2209,15 +2217,47 @@ The deployment root whose shape is read.
 
 =back
 
-B<Returns:> Nothing; exits 0 where the pipeline is disabled at the ref.
+B<Returns:> Nothing; exits 0 where the pipeline is disabled in what it read.
 
 B<Errors:> What L<Genesis::Top/read_shape_from> raises: a ref that names no
 commit, or a shape invalid at it, at C<CONFIG>.
 
 B<Examples:>
 
-  _shape_from_option($top);
+  _preview_shape($top);
   # Reading the pipeline's shape from HEAD at 4cf1438, not from control.
+
+=head2 _worktree_banner($top)
+
+    _worktree_banner($top);
+
+Warns, in D44's "This preview assumes" shape, of each gap
+L<Genesis::Top/worktree_gaps> finds: the root's uncommitted changes, assumed
+committed; a branch other than control, assumed merged into it; control's
+unpushed commits, assumed pushed; and commits on T this tree lacks, which the
+preview does not include.  The opening line names the root and control on T as
+last fetched.  Where there is no gap it prints nothing.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment root being previewed.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:> None of its own.
+
+B<Examples:>
+
+  _worktree_banner($top);
+  # This preview reads the working tree of bosh/, not control on the remote.
+  #   origin/control at 4cf1438, as last fetched, is what a real apply reads.
+  # This preview assumes the uncommitted changes to prod.yml are committed.
 
 =head2 _topology_to_mermaid_md($top, $nodes, $edges)
 

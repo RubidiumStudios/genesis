@@ -107,6 +107,7 @@ sub apply {
 			'own directories'
 		: ''
 	) if $dry_run;
+	_preview_shape($top) if $dry_run;
 
 	# The apply records the commit it applied from, and Service::Git resolves
 	# a ref through git rev-parse, which folds its own error text into the
@@ -1365,7 +1366,7 @@ sub pipeline_graph {
 	my ($layout) = @_;
 
 	my $top = Genesis::Top->new('.');
-	_shape_from_option($top);
+	_preview_shape($top);
 
 	# For env-file topology, build the DAG directly.
 	if ($top->pipeline_enabled) {
@@ -1401,7 +1402,7 @@ sub pipeline_describe {
 	my ($layout) = @_;
 
 	my $top = Genesis::Top->new('.');
-	_shape_from_option($top);
+	_preview_shape($top);
 
 	# For env-file topology (manual provider or genesis-config CI),
 	# build the DAG directly without the full compiler/provider chain.
@@ -2371,25 +2372,58 @@ sub _dump_debug_artifacts {
 }
 
 # }}}
-# _shape_from_option - read the shape at --from, under a banner {{{
-#
-# A shape switched off at the ref is said so and the command ends there,
-# because the compiler the two commands fall back to otherwise reads the tree
-# in front of the command, not the ref.
-sub _shape_from_option {
+# _preview_shape - read the shape a preview shows, under its banner {{{
+sub _preview_shape {
 	my ($top) = @_;
 	my $ref = get_options->{from};
-	return unless defined $ref;
+	my $where;
+	if (defined $ref) {
+		$top->read_shape_from($ref);
+		my $short = substr($top->shape_commit, 0, 7);
+		info("Reading the pipeline's shape from #C{%s} at #C{%s}, not from control.",
+			$ref, $short);
+		return if $top->pipeline_enabled;
+		$where = "at #C{$ref} (#C{$short})";
+	} else {
+		$top->read_shape_from_worktree;
+		_worktree_banner($top);
+		return if $top->pipeline_enabled || !$top->config->is_set('pipeline');
+		$where = 'in the working tree';
+	}
 
-	$top->read_shape_from($ref);
-	my $short = substr($top->shape_commit, 0, 7);
-	info("Reading the pipeline's shape from #C{%s} at #C{%s}, not from control.",
-		$ref, $short);
-	return if $top->pipeline_enabled;
-
-	output("The pipeline is disabled at #C{%s} (#C{%s}): #C{pipeline.enabled} ".
-		"is not true in its #C{.genesis/config}.", $ref, $short);
+	output("The pipeline is disabled %s: #C{pipeline.enabled} is not true in ".
+		"its #C{.genesis/config}.", $where);
 	exit 0;
+}
+
+# }}}
+# _worktree_banner - name each gap between the previewed tree and control on T {{{
+sub _worktree_banner {
+	my ($top) = @_;
+	my $gaps    = $top->worktree_gaps;
+	my $control = $top->control_branch;
+	my $the     = sub {$_[0] == 1 ? 'the commit' : "the $_[0] commits"};
+
+	my @lines;
+	push @lines, sprintf("#Y{This preview assumes the uncommitted changes to }#C{%s}#Y{ are committed.}",
+		join(', ', @{$gaps->{uncommitted}})) if @{$gaps->{uncommitted}};
+	push @lines, sprintf("#Y{This preview assumes }#C{%s}#Y{ is merged into }#C{%s}#Y{.}",
+		$gaps->{branch}, $control) if $gaps->{branch};
+	push @lines, sprintf("#Y{This preview assumes %s on }#C{%s}#Y{ %s pushed.}",
+		$the->($gaps->{ahead}), $control, $gaps->{ahead} == 1 ? 'is' : 'are') if $gaps->{ahead};
+	push @lines, sprintf("#Y{This preview does not include %s on }#C{%s}#Y{ that this tree lacks.}",
+		$the->($gaps->{behind}), $gaps->{tracking}{ref}) if $gaps->{behind};
+	return unless @lines;
+
+	my $t = $gaps->{tracking};
+	warning(join("\n",
+		sprintf("#Y{This preview reads the working tree of }#C{%s}#Y{, not control on the remote.}%s",
+			($top->git->prefixed(''))[0] || './',
+			$t ? sprintf("  #C{%s} at #C{%s}, as last fetched, is what a real apply reads.",
+				$t->{ref}, substr($t->{commit}, 0, 7)) : ''),
+		'', @lines, '',
+		"A real apply reads only what is committed and in step with the remote, so ".
+		"what follows is what it would set once that is true."));
 }
 
 # }}}

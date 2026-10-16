@@ -832,7 +832,7 @@ sub _gate_branch_class {
 		Genesis::BranchClass::assert_pre_deploy($top, $git,
 			refresh => $refresh, network => $network, adding => $adding,
 			commits => command_properties()->{commits},
-			control_only => command_properties()->{control_only});
+			control_only => command_properties()->{control_only} && !get_options()->{'dry-run'});
 		return $fn->();
 	}
 

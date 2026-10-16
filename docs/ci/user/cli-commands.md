@@ -147,7 +147,7 @@ Compiles the pipeline and writes a Mermaid flowchart to `pipeline.md` in the cur
 genesis pipeline-graph
 ```
 
-This replaces `genesis graph`, which draws the legacy topology through Graphviz instead.
+This replaces `genesis graph`, which draws the legacy topology through Graphviz instead. It is a preview, as `pipeline-describe` describes.
 
 ## genesis pipeline-describe
 
@@ -155,9 +155,12 @@ Compiles the pipeline and prints an ordered environment progression with gate an
 
 ```
 genesis pipeline-describe
+genesis pipeline-describe --from origin/control
 ```
 
 It resolves the repository's own configuration out of files, so it holds no ref a refresh could make current and it takes no refresh flag. This replaces `genesis describe`.
+
+Like `pipeline-graph` and `pipeline-apply --dry-run`, it is a preview: it reads the deployment root's working tree, so a change can be checked before it is committed. Where that tree differs from control on the remote, a banner says how, one line per difference: uncommitted changes assumed committed, unpushed commits assumed pushed, commits on the remote the tree lacks, or a branch other than control assumed merged. `--from <ref>` previews any commit instead, such as `origin/control` for what a real apply would set now.
 
 ## genesis pipeline-diff
 

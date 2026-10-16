@@ -466,6 +466,7 @@ integration-tests/genesis_pipelines-describe_source_control.t  # the derived sou
 integration-tests/genesis_ci_source_control-configured_remote.t # propagate and pipeline-status use the configured remote, never the first git remote
 integration-tests/genesis_commands_pipelines-graph.t          # pipeline-graph draws the chain control holds
 integration-tests/genesis_commands_pipelines-from.t           # --from previews a shape at a ref, validated as control's, and only the describing commands take it
+integration-tests/genesis_commands_pipelines-preview_worktree.t # previews read the root's working tree and name every gap to control on T
 integration-tests/branch_class-pre_deploy_refusal.t           # a pre-deploy command refuses off a deployment, pull request, or artifacts branch
 integration-tests/branch_class-deployed_state.t               # a deployed-state command reads the environment's own branch
 integration-tests/genesis_new-no_session.t                    # genesis new opens no session, takes no switch lock, and restores no branch

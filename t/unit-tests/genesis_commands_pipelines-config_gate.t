@@ -61,11 +61,10 @@ subtest 'a leftover ci directory is ignored and never named' => sub {
 
 	# Two negatives alone would be satisfied by a run that failed early or
 	# printed nothing at all, so the positives come first and say the run
-	# reached the configuration section and read it.  What the run refuses
-	# over is what the operator wrote, so it exits the configuration code
-	# rather than the bare 1 a system error underneath us would leave.
-	is($exit, CONFIG, 'the run refused over its own configuration');
-	like($said, qr/Parsing pipeline configuration/i,
+	# read .genesis/config.  The section there is switched off, and a preview
+	# reports that rather than compiling it (T350, D112 noted 2026-10-16).
+	is($exit, 0, 'the run reported rather than refused');
+	like($said, qr/pipeline is disabled in the working tree/i,
 		'having read .genesis/config, which is the one source it has');
 
 	unlike($said, qr{\.genesis/ci\b},

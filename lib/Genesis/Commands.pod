@@ -429,7 +429,9 @@ C<undef>.
 control checked out and in step with the remote, rather than on control or
 a permitted feature branch.  C<pipeline-apply> alone declares it (D113),
 because it reads the shape it applies from control and records the commit
-it applied from.  Read only by the C<PRE_DEPLOY> gate.  Defaults to 0.
+it applied from.  Read only by the C<PRE_DEPLOY> gate, which drops it for a
+C<--dry-run>: a preview records nothing, so it may run off control and out of
+step, under its banner (D113, noted 2026-10-16).  Defaults to 0.
 
 =item C<branch_fast_forward> - Boolean.  True where the gate may bring the
 environment's deployment branch up to its remote-tracking ref before it

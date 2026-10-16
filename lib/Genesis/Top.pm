@@ -1207,6 +1207,44 @@ sub shape_ref {
 }
 
 # }}}
+# read_shape_from_worktree - read the pipeline's shape off the tree in front of the command {{{
+sub read_shape_from_worktree {
+	my ($self) = @_;
+	$self->{__shape} = $self;
+	Scalar::Util::weaken($self->{__shape});
+	delete @{$self}{qw/__shape_commit __shape_ref/};
+	return $self;
+}
+
+# }}}
+# worktree_gaps - what separates the deployment root's working tree from control on T {{{
+sub worktree_gaps {
+	my ($self) = @_;
+	my $git     = $self->git;
+	my $control = $self->control_branch;
+
+	# Only the files a shape is read from, as _topology_at reads them.
+	my ($prefix) = $git->prefixed('');
+	my $status   = $git->status(length($prefix // '') ? $prefix : ());
+	my %gaps     = (uncommitted => [sort grep {
+		$_ eq '.genesis/config' || $_ eq 'dev/kit.yml' || m{^[^/]+\.ya?ml$}
+	} $git->unprefixed(keys %$status)]);
+
+	my $branch = $git->current_branch;
+	$gaps{branch} = $branch if defined($branch) && $branch ne $control;
+
+	my $remote = eval {$self->source_control_remote};
+	return \%gaps unless defined($remote) && length($remote);
+	my $sha = $git->sha("refs/remotes/$remote/$control") or return \%gaps;
+	$gaps{tracking} = {ref => "$remote/$control", commit => $sha};
+
+	return \%gaps if exists $gaps{branch};
+	my $div = $git->resolve_branch($control, remote => $remote) // {};
+	@gaps{qw/ahead behind/} = map {$div->{$_} // 0} qw/ahead behind/;
+	return \%gaps;
+}
+
+# }}}
 # _read_shape - resolve control once and write its tree out {{{
 #
 # Control is read as R holds it when the command starts, so this runs once
