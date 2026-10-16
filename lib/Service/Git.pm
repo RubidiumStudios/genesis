@@ -1356,16 +1356,16 @@ sub _config {
 	# told apart by where it was set.
 	my ($out) = run({dir => $self->{root}, stderr => 0},
 		'git', 'config', '-z', '--show-scope', '--get-regexp',
-		'^(remote\..+\.url|branch\..+\.remote|url\..+\.insteadof|genesis\.remote)$');
+		'^(remote\..+\.url|branch\..+\.remote|url\..+\.insteadof|genesis\.remote|genesis\.fly-target)$');
 	my %data = (remotes => {}, order => [], upstream => {}, rewrites => [],
-		pin => {});
+		pin => {}, fly_pin => {});
 	my @fields = split /\0/, ($out // '');
 	while (my ($scope, $entry) = splice(@fields, 0, 2)) {
 		my ($key, $value) = split /\n/, ($entry // ''), 2;
 		next unless defined $value;
-		if ($key eq 'genesis.remote') {
+		if ($key eq 'genesis.remote' || $key eq 'genesis.fly-target') {
 			my $where = ($scope eq 'local' || $scope eq 'worktree') ? 'local' : 'outside';
-			$data{pin}{$where} = $value;
+			$data{$key eq 'genesis.remote' ? 'pin' : 'fly_pin'}{$where} = $value;
 		} elsif ($key =~ m{^remote\.(.+)\.url$}) {
 			push @{$data{order}}, $1 unless exists $data{remotes}{$1};
 			$data{remotes}{$1} //= $value;
@@ -1429,6 +1429,14 @@ sub remote_names {
 sub remote_pin {
 	my ($self) = @_;
 	my $pin = $self->_config->{pin};
+	return ($pin->{local}, $pin->{outside});
+}
+
+# }}}
+# fly_target_pin - the fly target this clone pins, and one set outside it {{{
+sub fly_target_pin {
+	my ($self) = @_;
+	my $pin = $self->_config->{fly_pin};
 	return ($pin->{local}, $pin->{outside});
 }
 

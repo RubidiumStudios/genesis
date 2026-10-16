@@ -140,6 +140,18 @@ sub apply {
 		outcome  => 'No branch was created and no pipeline was set.',
 	) if $ENV{GITHUB_AUTH_TOKEN} && !$dry_run;
 
+	# And the fly target, which is each operator's own (D86).
+	if ($platform eq 'concourse' && !$dry_run) {
+		my $found = $top->pipeline_provider(
+			(defined $opts->{target} ? (target => $opts->{target}) : ()),
+		)->target_found;
+		Genesis::CI::Preflight::refuse_once(
+			problems => [Genesis::CI::Preflight::problem(CONFIG, $found->{refusal})],
+			action   => 'apply',
+			outcome  => 'No branch was created and no pipeline was set.',
+		) if $found->{refusal};
+	}
+
 	_apply_init_branches($top, $git, dry_run => $dry_run);
 
 	# The repository is asked to enforce the append-only rule Genesis observes
@@ -1433,7 +1445,7 @@ sub diff {
 
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
-	my $target = _concourse_target($result, $opts, $name);
+	my $target = _concourse_target($result, $opts);
 
 	my $compiled = $output->{'pipeline.yml'}
 		or bail("Concourse provider did not produce pipeline.yml");
@@ -1477,7 +1489,7 @@ sub status {
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
-	my $target = _concourse_target($result, $opts, $name);
+	my $target = _concourse_target($result, $opts);
 
 	my ($json_out, $rc) = $result->{provider}->fly({target => $target},
 		'jobs', '-p', $name, '--json');
@@ -1537,7 +1549,7 @@ sub pause {
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
-	my $target = _concourse_target($result, $opts, $name);
+	my $target = _concourse_target($result, $opts);
 
 	if ($env) {
 		$result->{provider}->fly({ interactive => 1, target => $target,
@@ -1564,7 +1576,7 @@ sub resume {
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
-	my $target = _concourse_target($result, $opts, $name);
+	my $target = _concourse_target($result, $opts);
 
 	if ($env) {
 		$result->{provider}->fly({ interactive => 1, target => $target,
@@ -2455,6 +2467,13 @@ sub _describe_topology {
 	my $provider_type = $top->pipeline_provider_type // 'manual';
 	output "\n#G{Pipeline}: #C{%s}", $name;
 	output "  #Yi{Provider}: %s", $provider_type;
+	if ($provider_type eq 'concourse') {
+		# Reported, never refused: a describe says what is missing (D86).
+		my $found = $top->pipeline_provider->target_found;
+		output "  #Yi{Target}: %s", defined $found->{target}
+			? "#C{$found->{target}} ($found->{how})"
+			: '(none): ' . (split /\n/, $found->{refusal} // '')[0];
+	}
 	output "";
 
 	unless (%$nodes) {
@@ -2499,21 +2518,9 @@ sub _describe_topology {
 
 # }}}
 # _concourse_target - the fly target a command talks to {{{
-#
-# Target resolution: explicit --target CLI opt > pipeline.provider.target
-# config > pipeline name.  The target is the one thing the four commands
-# resolve themselves, because the option is theirs; the binary and the
-# insecure flag are the provider's, and its fly method supplies both.
 sub _concourse_target {
-	my ($result, $opts, $name) = @_;
-	# The resolved options are the compiler's, which is where
-	# provider_option reads them through the provider it holds.  A compile
-	# hands back a compiler and every compiler inherits provider_option
-	# from Genesis::CI::ProviderCompiler, so there is nothing here to ask
-	# about first.
-	return $opts->{target}
-		// $result->{compiler}->provider_option('target')
-		// $name;
+	my ($result, $opts) = @_;
+	return $opts->{target} // $result->{provider}->resolve_target;
 }
 
 # }}}

@@ -127,7 +127,8 @@ sub compile {
 	# block that disagrees would otherwise pick the class silently.
 	require Genesis::CI::Provider;
 	my $provider = Genesis::CI::Provider->new(
-		%$provider_opts, type => $provider_type
+		%$provider_opts, type => $provider_type,
+		($self->{top} ? (clone => $self->{top}->git) : ()),
 	);
 
 	# required, because a run that reached this stage has an artefact to

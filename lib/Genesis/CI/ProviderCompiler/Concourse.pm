@@ -192,7 +192,11 @@ sub normalize_provider_opts {
 sub describe_provider {
 	my ($self) = @_;
 
-	my $target    = $self->provider_option('target')        || '(not set)';
+	# Reported, never refused: a describe says what is missing (D86).
+	my $found     = $self->provider->target_found;
+	my $target    = defined $found->{target}
+		? "$found->{target} ($found->{how})"
+		: '(none): ' . (split /\n/, $found->{refusal} // '')[0];
 	my $team      = $self->provider_option('team') // $self->provider->team;
 	my $pipe_name = $self->provider_option('pipeline_name') || '(deployment type)';
 	my $expose    = $self->provider_option('expose')    ? 'yes' : 'no';
@@ -335,12 +339,8 @@ sub deploy {
 
 	# --- Resolve options from three tiers ---
 
-	# Target: call-site override > provider_opts > legacy layout
-	my $target = $opts{target}
-		// $self->provider_option('target')
-		// $self->{layout};
-	bail("No Concourse target specified.  Use --target to name the fly target for this run.")
-		unless $target;
+	# A target only where the caller names one; the provider's fly finds it otherwise (D86).
+	my $target = $opts{target};
 
 	# The provider answers its default where the configuration names none.
 	my $team = $opts{team}
@@ -376,12 +376,9 @@ sub deploy {
 		return;
 	}
 
-	# Every fly below is the provider's, which names the binary.  The
-	# target and the insecure answer travel with each call because both
-	# were resolved above with the caller's own options ahead of the
-	# repository's.
+	# Every fly below is the provider's, which names the binary and the target.
 	my $provider = $self->provider;
-	my %at       = (target => $target, insecure => $insecure);
+	my %at       = ((defined $target ? (target => $target) : ()), insecure => $insecure);
 
 	# Pause pipeline before updating (safe to do even when not found yet)
 	my ($out, $rc) = $provider->fly({%at}, 'pause-pipeline', '-p', $pipeline_name);

@@ -349,6 +349,7 @@ unit-tests/genesis_commands_pipelines-hold_surface.t  # the two hold commands re
 unit-tests/genesis_top-config_v1_to_v2_upgrade.t  # v1 -> v2 deployment-repo config auto-upgrade path
 unit-tests/genesis_top-config_writers.t           # a writer saves only what the load accepts, judged on the result
 unit-tests/genesis_top-repository_judged.t         # the repository's syntax at load, the clone's checks at first use
+unit-tests/genesis_ci_provider_concourse-target.t  # each operator's fly target resolved where fly needs one
 unit-tests/genesis_ui-prompt_for_password.t  # password prompt
 unit-tests/genesis_ui-prompt_output_stream.t  # prompts write to stderr and the terminal, never stdout
 unit-tests/genesis_ui-prompt_timeout.t        # a prompt asked under the switch lock gives up when its time is up
@@ -450,6 +451,7 @@ integration-tests/genesis_ci_pullrequest-branch_lifecycle.t   # nothing due take
 integration-tests/genesis_ci_pullrequest-client_and_record.t  # one GitHub client serves a whole run, and only where one is needed
 integration-tests/genesis_ci_github-host_judgement.t          # a host is judged GitHub by its answers, called at its own base, and cached unless it is github.com
 integration-tests/genesis_ci_github-repository_preflight.t     # the host is asked about the repository before anything is written
+integration-tests/genesis_ci_provider_concourse-target_commands.t # the fly target found where fly is needed, asked for before the apply writes
 integration-tests/genesis_ci_pullrequest-preview.t            # the dry run says what it would title the pull request, with a token and without
 integration-tests/genesis_ci_pullrequest-no_token.t           # a writing run with no token refuses at CONFIG before writing; a preview says it would
 integration-tests/genesis_ci_pullrequest-proposed_record.t    # a run that opens a pull request writes the run's own pointer to it

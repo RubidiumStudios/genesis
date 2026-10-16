@@ -5,6 +5,7 @@ use warnings;
 use base 'Genesis::CI::Provider';
 use Genesis;
 use Genesis::Config;
+use Genesis::Exit qw/CONFIG/;
 use Genesis::UI;
 
 use POSIX qw(mktime);
@@ -99,6 +100,7 @@ sub new {
 		insecure        => $config{insecure}        ? 1 : 0,
 		min_fly_version => $config{min_fly_version} || undef,
 		fly_bin_path    => $config{fly_bin_path}    || undef,
+		clone           => $config{clone},
 	}, $class);
 }
 
@@ -120,25 +122,92 @@ sub fly_command {
 
 # }}}
 # fly - run one fly command with the flags this provider's answers imply {{{
-#
-# Every fly this provider runs goes through here, so the binary is the one
-# fly_command names and -k follows the insecure setting in one place.  A
-# target is named only where the caller hands one, because fly --version
-# and fly targets take none.  The arguments reach bash as a list and never
-# as a string, so a path with a space in it and a team an operator named
-# both survive.  A leading hashref carries run's own options, plus target
-# and insecure for the caller that knows better than the object, which is
-# the wizard before its answers are stored.
+our %UNTARGETED = map {($_ => 1)} qw/--version targets login/; # take no target, or name their own
 sub fly {
 	my ($self, @args) = @_;
 	my %opts     = %{ref($args[0]) eq 'HASH' ? shift @args : {}};
 	my $target   = delete $opts{target};
 	my $insecure = exists $opts{insecure} ? delete $opts{insecure} : $self->{insecure};
+
+	# Resolving is judging (D86): the first fly that needs a target finds it.
+	$target //= $self->resolve_target if ref($self) && !$UNTARGETED{$args[0] // ''};
 	return run(\%opts, '"$@"',
 		$self->fly_command,
 		($insecure ? ('-k') : ()),
 		(defined $target ? ('-t', $target) : ()),
 		@args);
+}
+
+# }}}
+# resolve_target - this operator's fly target, refused where none is to be found {{{
+sub resolve_target {
+	my ($self) = @_;
+	my $found = $self->target_found;
+	bail({exitcode => CONFIG}, '%s', $found->{refusal}) if $found->{refusal};
+	return $found->{target};
+}
+
+# }}}
+# target_found - this operator's fly target and how it was found, or why none was {{{
+sub target_found {
+	my ($self) = @_;
+	return $self->{__target_found} //= do {
+		my ($pin, $outside) = $self->{clone} ? $self->{clone}->fly_target_pin : ();
+		_warn_outside_fly_pin($outside) if defined $outside && !defined $pin;
+		  defined $self->{target} ? {target => $self->{target}, how => 'flagged'}
+		: defined $pin            ? {target => $pin, how => 'pinned'}
+		:                           $self->_flyrc_match;
+	};
+}
+
+# }}}
+# _flyrc_match - the one ~/.flyrc target naming this Concourse and team {{{
+sub _flyrc_match {
+	my ($self) = @_;
+	my $url  = _api_url($self->{url});
+	my $team = $self->team;
+	my $flyrc = "$ENV{HOME}/.flyrc";
+	my $data  = -f $flyrc ? load_yaml_file($flyrc) : {};
+	my %all   = ref($data) eq 'HASH' && ref($data->{targets}) eq 'HASH' ? %{$data->{targets}} : ();
+	my @match = sort grep {
+		ref($all{$_}) eq 'HASH'
+		&& _api_url($all{$_}{api}) eq $url
+		&& ($all{$_}{team} // '') eq $team
+	} keys %all;
+
+	return {target => $match[0], how => 'matched'} if @match == 1;
+	return {refusal => sprintf(
+		"More than one fly target in #C{~/.flyrc} names #C{%s} as team #C{%s}: %s.\n\n".
+		"Choose one for this clone:\n\n  git config genesis.fly-target <target>\n\n".
+		"or name one for a run with #C{--target}.",
+		$url, $team, join(', ', map {"#C{$_}"} @match))} if @match;
+	my $name = _derive_target_name($url, $team);
+	return {refusal => sprintf(
+		"No fly target in #C{~/.flyrc} names #C{%s} as team #C{%s}, and this ".
+		"clone pins none.\n\nLog in to make one:\n\n  fly login -t %s -c %s -n %s\n\n".
+		"or name one for a run with #C{--target}, or pin one for this clone with ".
+		"#C{git config genesis.fly-target <target>}.",
+		$url, $team, $name, $url, $team)};
+}
+
+# }}}
+# _api_url - a Concourse URL as fly records it, without a trailing slash {{{
+sub _api_url {
+	my ($url) = @_;
+	return (($url // '') =~ s{/+$}{}r);
+}
+
+# }}}
+# _warn_outside_fly_pin - say why a genesis.fly-target set outside the clone is ignored {{{
+sub _warn_outside_fly_pin {
+	my ($pin) = @_;
+	warning(
+		"#C{genesis.fly-target} is set to #C{%s} outside this clone, in your own or ".
+		"the system's git configuration, which would pin every repository on this ".
+		"machine, so it is ignored.  To pin this clone's fly target, set it in this ".
+		"clone alone:\n\n  git config --local genesis.fly-target %s\n",
+		$pin, $pin
+	);
 }
 
 # }}}

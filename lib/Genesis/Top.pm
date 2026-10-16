@@ -1525,6 +1525,19 @@ sub pipeline_provider_type {
 }
 
 # }}}
+# pipeline_provider - the configured provider, holding this clone {{{
+sub pipeline_provider {
+	my ($self, %opts) = @_;
+	require Genesis::CI::Provider;
+	return Genesis::CI::Provider->new(
+		%{$self->_shape->config->get('pipeline.provider') || {}},
+		type  => $self->pipeline_provider_type // 'manual',
+		clone => $self->git,
+		%opts,
+	);
+}
+
+# }}}
 # manual_pipeline - whether the enabled pipeline is the manual one {{{
 #
 # True only when pipeline_provider_type is defined and equals manual, so

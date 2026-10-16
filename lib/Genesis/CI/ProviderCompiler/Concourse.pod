@@ -399,16 +399,19 @@ print rather than set, and C<yes> to skip the confirmation.
 
 An option the caller leaves out is resolved through C<provider_option>,
 so the team falls back to the operator's block and then to the provider's
-own C<team>, and nothing here reads a second copy of that default. The
-target comes from the options alone: the configuration names none, being
-each operator's own (D86, noted 2026-10-15).
+own C<team>, and nothing here reads a second copy of that default. A
+C<target> in the options is the C<--target> flag; without one, the
+provider's own C<fly> resolves this operator's target on the first call
+that needs it (D86, noted 2026-10-15). A dry run prints before any C<fly>
+runs, so it needs no target.
 
 =back
 
 B<Returns:> 1.
 
 B<Errors:> raises "Must call parse() before deploy()" when nothing has
-been read, "No Concourse target specified" when the options name none, "Cannot determine pipeline name" when nothing
+been read, the provider's refusal at C<CONFIG> when no target is to be
+found, "Cannot determine pipeline name" when nothing
 names the pipeline, and a message naming the C<fly> subcommand that
 failed when one does.
 

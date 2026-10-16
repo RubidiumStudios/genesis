@@ -2137,6 +2137,27 @@ B<Examples:>
   my $url = $git->remote_url('upstream');
   # returns '/srv/r.git' where url./srv/r.git.insteadOf names upstream's URL
 
+=head2 fly_target_pin
+
+  my ($pin, $outside) = $git->fly_target_pin;
+
+The fly target this clone pins as C<genesis.fly-target> in its own
+F<.git/config>, or worktree configuration, and one set anywhere else, read
+in the handle's one configuration read beside C<genesis.remote> (D86, noted
+2026-10-15). A pin set outside the clone would pin every repository on the
+machine, so a caller ignores it and says so.
+
+B<Parameters:> None.
+
+B<Returns:> The clone's pin, or C<undef>; then the one set outside it, or
+C<undef>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  my ($pin) = $git->fly_target_pin;   # 'ci' after git config genesis.fly-target ci
+
 =head2 remote_pin
 
   my ($pin, $outside) = $git->remote_pin;

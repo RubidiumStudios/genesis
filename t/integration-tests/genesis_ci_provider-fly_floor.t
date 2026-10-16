@@ -22,6 +22,11 @@ use File::Temp;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
+# The rows are about the fly, not the target, so this operator's ~/.flyrc
+# names the harness's Concourse and every row finds its target (D86).
+helper::put_file("$ENV{HOME}/.flyrc",
+	"targets:\n  harness:\n    api: https://ci.harness.example\n    team: main\n");
+
 sub flatten {
 	my ($text) = @_;
 	$text //= '';
@@ -269,7 +274,9 @@ subtest 'the provider the caller asked for is the provider it gets' => sub {
 	load_with($h, automated_config('github-actions'));
 	compilable_pipeline($h);
 
-	my ($out, $err, $exit) = run_genesis($h, 'pipeline-diff');
+	# --target, because a github-actions block names no Concourse for a
+	# ~/.flyrc entry to match (D86), and this row is about the type.
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-diff', '--target', 'harness');
 	my $said = flatten("$out\n$err");
 
 	unlike($said, qr/has no compiler for it yet/,

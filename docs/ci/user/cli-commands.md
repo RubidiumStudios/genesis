@@ -26,7 +26,7 @@ The optional positional argument selects which pipeline layout to deploy when yo
 
 `--dry-run` or `-n` generates the pipeline YAML and prints it to stdout without deploying to Concourse. Combine this with output redirection to save the generated YAML for review.
 
-`--target` or `-t` names the fly target to apply through for this run (as shown by `fly targets`). A target is an entry in one operator's `~/.flyrc`, so none is read from `.genesis/config`, which names the Concourse by its `url` and `team` instead.
+`--target` or `-t` names the fly target to apply through for this run (as shown by `fly targets`). A target is an entry in one operator's `~/.flyrc`, so none is read from `.genesis/config`, which names the Concourse by its `url` and `team` instead. Without `--target`, the target is this clone's own pin, set with `git config genesis.fly-target <target>` (in the clone's `.git/config`, never globally), or else the one `~/.flyrc` target whose URL and team are the configuration's. Two such targets are refused, naming both; none is refused with the `fly login` that makes one. The apply asks for the target before it writes anything.
 
 `--paused` or `-P` keeps the pipeline paused after uploading. By default, Genesis unpauses the pipeline after a successful `set-pipeline`.
 
@@ -167,7 +167,7 @@ Compiles the pipeline and compares it against the live pipeline fetched through 
 genesis pipeline-diff [options]
 ```
 
-It shows a unified diff, or reports that the two pipelines are identical. `--target` or `-t` names the Concourse target, defaulting to the pipeline name, and `--skip-vault` skips vault connectivity when compiling.
+It shows a unified diff, or reports that the two pipelines are identical. `--target` or `-t` names the fly target for the run, found otherwise as `pipeline-apply` finds it, and `--skip-vault` skips vault connectivity when compiling.
 
 ## The Provider Job Controls
 

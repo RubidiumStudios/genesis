@@ -158,6 +158,15 @@ see or cannot push to, is refused at C<CONFIG> with nothing written, rather
 than met as a C<404> or a refused push partway through. A dry run, and a run
 with no token, makes no call to ask.
 
+Under Concourse, and not in a dry run, the apply also asks for this
+operator's C<fly> target before it writes anything, through
+L<Genesis::Top/pipeline_provider> and
+L<Genesis::CI::Provider::Concourse/target_found()> (D86, noted
+2026-10-15): C<--target>, else the clone's C<genesis.fly-target> pin, else
+the one F<~/.flyrc> target whose URL and team are the configuration's. A run
+with none to be found is refused at C<CONFIG> with the C<fly login> that
+makes one, before any branch is cut, protection applied or record written.
+
 With the branches protected the run records what it applied, which is the
 control commit it read, the provider it applied, and the time. That record
 goes to the pipeline's own address in exodus under every provider, because it
@@ -2100,19 +2109,16 @@ B<Examples:>
   my @envs = _root_environments($top);
   # ('lab', 'qa', 'prod'), in the order the walk reads them
 
-=head2 _concourse_target($result, $opts, $name)
+=head2 _concourse_target($result, $opts)
 
-    my $target = _concourse_target($result, $opts, $name);
+    my $target = _concourse_target($result, $opts);
 
-The C<fly> target a command talks to, for the four commands that talk to
-Concourse.  It is the one thing those commands resolve themselves, because
-the C<--target> option is theirs; the binary and the insecure flag are the
-provider's, and L<Genesis::CI::Provider::Concourse/fly(\%opts, @args)>
-supplies both when the command hands it the target.
-
-The target is the C<--target> option where the operator gave one, then the
-configured provider target, read off the compiler the compile handed back,
-and then the pipeline's own name.
+The C<fly> target the four commands that talk to Concourse name in their
+own messages: the C<--target> option where the operator gave one, else the
+target the compile's provider resolves, from the clone's pin or the one
+matching F<~/.flyrc> target (D86, noted 2026-10-15). Nothing falls back to
+the pipeline's name, because a target is an entry in the operator's
+F<~/.flyrc>, not a name Genesis can make up.
 
 B<Parameters:>
 
@@ -2120,22 +2126,18 @@ B<Parameters:>
 
 =item C<$result>
 
-The compile's answer, whose C<compiler> key is what the provider options are
-read through.
+The compile's answer, whose C<provider> resolves the target.
 
 =item C<$opts>
 
 The command's own options.
 
-=item C<$name>
-
-The pipeline's name, which is the last fallback for the target.
-
 =back
 
 B<Returns:> The target, as a string.
 
-B<Errors:> None.
+B<Errors:> L<Genesis::CI::Provider::Concourse/resolve_target()>'s refusal,
+at C<Genesis::Exit::CONFIG>, where none is to be found.
 
 B<Examples:>
 

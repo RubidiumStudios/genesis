@@ -2595,7 +2595,9 @@ subtest 'Concourse - describe_provider returns structured hash' => sub {
 	ok ref($info{extras}) eq 'ARRAY', "extras is an arrayref";
 	ok grep { $_ eq 'Target' } @{$info{extras}}, "Target in extras";
 	ok grep { $_ eq 'Team'   } @{$info{extras}}, "Team in extras";
-	is $info{Target}, 'prod-concourse', "Target value correct";
+	# The provider's own target and how it was found, which concourse_compiler
+	# flags as test (D86); a compile builds both from one set of options.
+	is $info{Target}, 'test (flagged)', "Target value names the target and how it was found";
 	is $info{Team},   'genesis',        "Team value correct";
 };
 

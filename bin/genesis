@@ -2109,8 +2109,8 @@ define_command("pipeline-apply", {
 
 		'target|t=s' =>
 			"The fly target to apply through for this run (per `fly targets`).  ".
-			"A target is each operator's own, so none is read from ".
-			".genesis/config.",
+			"Without it, this clone's genesis.fly-target pin, else the one ".
+			"~/.flyrc target whose URL and team are the configuration's.",
 
 		'paused|P' =>
 			"Leave the pipeline paused after applying.",
@@ -2339,7 +2339,9 @@ define_command("pipeline-diff", {
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	options => [
 		'target|t=s' =>
-			"Concourse target name.  Defaults to the pipeline name.",
+			"The fly target for this run.  Without it, this clone's ".
+			"genesis.fly-target pin, else the one ~/.flyrc target whose URL ".
+			"and team are the configuration's.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
@@ -2361,7 +2363,9 @@ define_command("pipeline-jobs", {
 	],
 	options => [
 		'target|t=s' =>
-			"Concourse target name.  Defaults to the pipeline name.",
+			"The fly target for this run.  Without it, this clone's ".
+			"genesis.fly-target pin, else the one ~/.flyrc target whose URL ".
+			"and team are the configuration's.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
@@ -2383,7 +2387,9 @@ define_command("pipeline-pause", {
 	],
 	options => [
 		'target|t=s' =>
-			"Concourse target name.  Defaults to the pipeline name.",
+			"The fly target for this run.  Without it, this clone's ".
+			"genesis.fly-target pin, else the one ~/.flyrc target whose URL ".
+			"and team are the configuration's.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",
@@ -2405,7 +2411,9 @@ define_command("pipeline-resume", {
 	],
 	options => [
 		'target|t=s' =>
-			"Concourse target name.  Defaults to the pipeline name.",
+			"The fly target for this run.  Without it, this clone's ".
+			"genesis.fly-target pin, else the one ~/.flyrc target whose URL ".
+			"and team are the configuration's.",
 
 		'skip-vault' =>
 			"Skip vault connectivity when compiling.",

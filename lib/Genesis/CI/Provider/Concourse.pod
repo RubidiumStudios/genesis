@@ -104,9 +104,11 @@ B<Parameters:>
 
 =item C<%config>
 
-C<target>, C<url>, C<team>, and C<insecure> are the stored settings, and
+C<url>, C<team>, and C<insecure> are the stored settings, and
 C<min_fly_version> is the C<fly> version C</check_prereqs> insists on.
-C<team> defaults to C<main>.
+C<team> defaults to C<main>. C<target> is the C<--target> flag for this run,
+never a stored setting (D86), and C<clone> is the L<Service::Git> handle
+whose C<genesis.fly-target> pin L</target_found()> reads.
 
 =back
 
@@ -354,10 +356,13 @@ B<Parameters:>
 =item C<\%opts>
 
 Optional, and C<run>'s own options otherwise. C<target> names the
-C<fly> target and adds C<-t> for it; left out, no target is named, which
-is what C<--version> and C<targets> want. C<insecure> overrides the
-provider's own setting, for the wizard that knows the answer before it
-is stored.
+C<fly> target and adds C<-t> for it. B<Left out, the target is resolved
+here>, through L</resolve_target()>, for every subcommand but C<--version>,
+C<targets> and C<login>, which take none or name their own (D86, noted
+2026-10-15): the first C<fly> that needs a target finds it, and refuses
+where none is to be found, so no command has to know to ask. C<insecure>
+overrides the provider's own setting, for the wizard that knows the answer
+before it is stored.
 
 =item C<@args>
 
@@ -367,8 +372,9 @@ The subcommand and its arguments, as C<fly> takes them.
 
 B<Returns:> what C<run> returns, the output and the exit status.
 
-B<Errors:> none of its own; C<onfailure> in C<\%opts> is honoured as
-C<run> honours it.
+B<Errors:> L</resolve_target()>'s refusal, at C<Genesis::Exit::CONFIG>,
+where a subcommand needs a target and none is to be found; otherwise none
+of its own, and C<onfailure> in C<\%opts> is honoured as C<run> honours it.
 
 B<Examples:>
 
@@ -376,6 +382,60 @@ B<Examples:>
     $provider->fly({target => 'lab', interactive => 1,
                     onfailure => 'Could not pause the pipeline'},
                    'pause-pipeline', '-p', 'bosh');
+
+=head2 target_found()
+
+    my $found = $provider->target_found;
+    # {target => 'ci-main', how => 'matched'}, or {refusal => "..."}
+
+This operator's C<fly> target and how it was found, or why none was, without
+refusing anything (D86, noted 2026-10-15). The order is: the target the
+provider was given, which is the C<--target> flag, as C<flagged>; else the
+one this clone pins in its own F<.git/config> as C<genesis.fly-target>, as
+C<pinned>; else the one F<~/.flyrc> target whose C<api> and C<team> are the
+configuration's C<url> and C<team>, the URLs compared without a trailing
+slash, as C<matched>. A pin set only outside the clone, in a user's or the
+system's git configuration, is ignored with a warning giving the
+C<--local> form, because it would pin every repository on the machine. Two
+matching targets answer a refusal naming both and the pin that chooses
+between them; none answers a refusal with the exact
+C<fly login -t E<lt>nameE<gt> -c E<lt>urlE<gt> -n E<lt>teamE<gt>> that
+makes one, the name derived as L</init(%opts)> derives it, because a login
+is interactive and the operator's own act. The answer is kept, so the
+warning is given once.
+
+It is what a reporting command reads: C<pipeline-describe> shows the target
+and how it was found, or the problem, and C<pipeline-apply> asks it before
+it writes anything.
+
+B<Parameters:> None.
+
+B<Returns:> A hash reference: C<target> and C<how>, or C<refusal>.
+
+B<Errors:> None of its own.
+
+B<Examples:>
+
+    $provider->target_found->{how};   # 'pinned' after git config genesis.fly-target ci
+
+=head2 resolve_target()
+
+    my $target = $provider->resolve_target;
+
+L</target_found()>'s target, refused at C<Genesis::Exit::CONFIG> with its
+sentence where there is none. L</fly(\%opts, @args)> calls it for every
+subcommand that takes a target and was given none.
+
+B<Parameters:> None.
+
+B<Returns:> The target's name.
+
+B<Errors:> The refusal L</target_found()> answers, for two matching targets
+or none.
+
+B<Examples:>
+
+    my $target = $provider->resolve_target;   # 'ci-main'
 
 =head2 config()
 
@@ -457,6 +517,53 @@ B<Examples:>
     $provider = $provider->interactive_wizard($top);
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _flyrc_match()
+
+The one F<~/.flyrc> target whose C<api> and C<team> are this provider's
+C<url> and C<team>, the URLs compared without a trailing slash, as
+L</target_found()> answers it: the target as C<matched>, or a refusal for two
+or for none.
+
+B<Parameters:> None.
+
+B<Returns:> A hash reference, as L</target_found()> answers.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $provider->_flyrc_match;   # {target => 'ci-main', how => 'matched'}
+
+=head2 _api_url($url)
+
+A Concourse URL as C<fly> records it, without a trailing slash.
+
+B<Parameters:> The URL, or C<undef>.
+
+B<Returns:> The URL, or the empty string.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _api_url('https://ci.example.com/');   # 'https://ci.example.com'
+
+=head2 _warn_outside_fly_pin($pin)
+
+Warns that a C<genesis.fly-target> set outside the clone is ignored, and
+gives the C<--local> form that pins this clone alone, as D118's
+C<genesis.remote> pin does.
+
+B<Parameters:> The pin as set outside the clone.
+
+B<Returns:> Nothing.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _warn_outside_fly_pin('ci');
 
 =head2 _pipeline_enabled($siblings, $config)
 

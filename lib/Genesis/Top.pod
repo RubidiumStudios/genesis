@@ -1596,6 +1596,29 @@ B<Examples:>
     my $bool = $top->pipeline_enabled();
     # returns true in a repository with a pipeline, manual or not
 
+=head2 pipeline_provider
+
+    my $provider = $top->pipeline_provider(target => $opts->{target});
+
+The configured provider, built from the shape's C<pipeline.provider> block
+and holding this clone's L</git> handle, so a Concourse provider can read
+the clone's C<genesis.fly-target> pin when it resolves a target (D86, noted
+2026-10-15). Options given are passed on, after the block's, so a caller's
+C<--target> flag reaches the provider. It reads the configuration
+L</pipeline_provider_type> reads, so the two cannot disagree.
+
+B<Parameters:> Options for the provider's constructor, such as C<target>.
+
+B<Returns:> A L<Genesis::CI::Provider> of the configured type.
+
+B<Errors:> Those of L<Genesis::CI::Provider/new>, for a type nobody
+registered.
+
+B<Examples:>
+
+    my $found = $top->pipeline_provider->target_found;
+    # {target => 'ci-main', how => 'matched'}
+
 =head2 pipeline_provider_type
 
     my $type = $top->pipeline_provider_type();
