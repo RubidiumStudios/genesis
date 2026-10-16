@@ -2499,7 +2499,8 @@ subtest 'Concourse - provider_options_schema has correct structure' => sub {
 	ok exists $schema->{team},            "'team' key present";
 	ok exists $schema->{public},          "'public' key present";
 	ok exists $schema->{pause_after_set}, "'pause_after_set' key present";
-	is $schema->{team}{default}, 'main',  "team default is 'main'";
+	ok !exists $schema->{team}{default},  "team declares no default (D86)";
+	ok $schema->{team}{required},         "and is required while the pipeline is on";
 };
 
 # Every row below builds its compiler the way a caller does, through the
@@ -2516,7 +2517,7 @@ sub concourse_compiler {
 subtest 'Concourse - provider_options_defaults returns expected defaults' => sub {
 	my $defaults = concourse_compiler()->provider_options_defaults();
 	ok ref($defaults) eq 'HASH',          "defaults is a hash";
-	is $defaults->{team},            'main', "team default is 'main'";
+	ok !exists $defaults->{team},            "team has no default, being required (D86)";
 	is $defaults->{public},          0,      "public default is false";
 	is $defaults->{pause_after_set}, 0,      "pause_after_set default is false";
 };
@@ -2525,18 +2526,18 @@ subtest 'Concourse - provider_config omits default values' => sub {
 	# Only non-defaults should appear in config output
 	my $provider = concourse_compiler(
 		provider_opts => {
-			type   => 'concourse',
-			target => 'my-target',
-			team   => 'main',      # this IS the default, so it should be omitted
-			public => 0,           # this IS the default, so it should be omitted
+			type     => 'concourse',
+			team     => 'main',    # required, with no default, so it is kept
+			public   => 0,         # this IS the default, so it should be omitted
+			insecure => 0,         # this IS the default, so it should be omitted
 		},
 	);
 	my $config = $provider->provider_config();
 	ok ref($config) eq 'HASH',          "provider_config returns hash";
 	is $config->{type},   'concourse',  "type always present";
-	is $config->{target}, 'my-target',  "non-default target included";
-	ok !exists $config->{team},         "default team omitted";
+	is $config->{team},   'main',       "a required team is kept, having no default";
 	ok !exists $config->{public},       "default public omitted";
+	ok !exists $config->{insecure},     "default insecure omitted";
 };
 
 subtest 'Concourse - provider_config includes non-default values' => sub {
@@ -2555,7 +2556,7 @@ subtest 'Concourse - provider_config includes non-default values' => sub {
 subtest 'Concourse - provider_option applies defaults when not set' => sub {
 	my $provider = concourse_compiler();
 
-	is $provider->provider_option('team'),   'main', "team defaults to 'main'";
+	is $provider->provider_option('team'),   undef,  "team has no option default (D86)";
 	is $provider->provider_option('public'),  0,     "public defaults to 0";
 	is $provider->provider_option('target'), undef,  "target has no default";
 };
@@ -2573,9 +2574,10 @@ subtest 'Concourse - provider_option takes the default for a null value' => sub 
 	# rather than choosing nothing, so the fragment's default still
 	# answers.  Reading on presence rather than on definedness made a
 	# bare "team:" resolve to nothing at all.
-	my $provider = concourse_compiler(provider_opts => {team => undef});
-	is $provider->provider_option('team'), 'main',
-		"a null team resolves to the fragment's default";
+	# public, because team declares no default any more (D86).
+	my $provider = concourse_compiler(provider_opts => {public => undef});
+	is $provider->provider_option('public'), 0,
+		"a null public resolves to the fragment's default";
 };
 
 subtest 'Concourse - describe_provider returns structured hash' => sub {

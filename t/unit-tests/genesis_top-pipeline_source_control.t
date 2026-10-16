@@ -96,7 +96,8 @@ subtest 'the block declares three tiers and refuses runtime state' => sub {
 		'  provider:', '    type: manual'))}
 		'manual tolerates an absent auth and identity';
 	throws_ok {load_control(join("\n", 'pipeline:', '  enabled: true',
-		'  provider:', '    type: concourse', '    target: ci',
+		'  provider:', '    type: concourse',
+		'    url: https://ci.example.com', '    team: main',
 		'  source_control:', '    control_branch: control'))}
 		qr/pipeline\.source_control: missing required key/,
 		'an automated provider requires them';

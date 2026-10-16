@@ -110,7 +110,7 @@ subtest 'v3 config validates with CI disabled' => sub {
 subtest 'v3 config validates with CI enabled and provider' => sub {
 	my $dir = make_v3_repo(workdir("v3-enabled"), pipeline => {
 		enabled  => 'true',
-		provider => { type => 'concourse', target => 'pipes/acme', url => 'https://pipes.example.com', team => 'acme' },
+		provider => { type => 'concourse', url => 'https://pipes.example.com', team => 'acme' },
 		name => 'bosh',
 		automation_blocks(),
 	});
@@ -119,7 +119,7 @@ subtest 'v3 config validates with CI enabled and provider' => sub {
 	ok $top->pipeline_enabled, "pipeline_enabled is true";
 	ok !$top->manual_pipeline, "a concourse pipeline is not the manual one";
 	is $top->config->get('pipeline.provider.type'), 'concourse', "provider type is concourse";
-	is $top->config->get('pipeline.provider.target'), 'pipes/acme', "provider target correct";
+	is $top->config->get('pipeline.provider.url'), 'https://pipes.example.com', "provider url correct";
 	is $top->config->get('pipeline.name'), 'bosh', "pipeline name correct";
 };
 
@@ -138,7 +138,7 @@ subtest 'v3 config with ci.yml and CI configured warns' => sub {
 	# a bail.  The v3 config wins downstream.
 	my $dir = make_v3_repo(workdir("v3-conflict"), pipeline => {
 		enabled  => 'true',
-		provider => { type => 'concourse', target => 'pipes/test', url => 'https://ci.example.com', team => 'test' },
+		provider => { type => 'concourse', url => 'https://ci.example.com', team => 'test' },
 		automation_blocks(),
 	});
 	mkfile_or_fail("$dir/ci.yml", "---\npipeline:\n  layouts:\n    - sandbox\n");

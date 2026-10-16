@@ -2108,8 +2108,9 @@ define_command("pipeline-apply", {
 			"Suppress interactive confirmations (for automation).",
 
 		'target|t=s' =>
-			"Concourse target name (per `fly targets`).  Defaults to the ".
-			"pipeline name.",
+			"The fly target to apply through for this run (per `fly targets`).  ".
+			"A target is each operator's own, so none is read from ".
+			".genesis/config.",
 
 		'paused|P' =>
 			"Leave the pipeline paused after applying.",

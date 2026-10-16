@@ -1029,7 +1029,9 @@ sub _seed_pipeline_section {
 	$config->set('pipeline.enabled' => (ref $want eq 'HASH') ? 1 : ($want ? 1 : 0));
 	$config->set('pipeline.provider.type' => $self->{provider});
 	unless ($self->{provider} eq 'manual') {
-		$config->set('pipeline.provider.target' => 'harness');
+		# The Concourse by url and team, never a fly target (D86).
+		$config->set('pipeline.provider.url'  => 'https://ci.harness.example');
+		$config->set('pipeline.provider.team' => 'main');
 		$config->set('pipeline.source_control.auth.type' => 'ssh');
 		$config->set('pipeline.source_control.auth.vault' => 'secret/ci/git');
 		$config->set('pipeline.source_control.identity.name' => 'Genesis CI');
@@ -4979,12 +4981,13 @@ sub compilable_pipeline {
 #
 # The provider is concourse because the shuttle is only required where a
 # provider is automated, and a row about the shuttle is not a row about
-# which automation is in force.  Its target comes with it, that being a key
-# Concourse requires of its own block, so a row about the shuttle is not
-# refused for something the provider above it is missing.
+# which automation is in force.  Its url and team come with it, those being
+# keys Concourse requires of its own block (D86), so a row about the shuttle
+# is not refused for something the provider above it is missing.
 sub shuttle {
 	my ($backend, @lines) = @_;
-	return join("\n", _automation_preamble('concourse', 'target: ci'),
+	return join("\n", _automation_preamble('concourse',
+			'url: https://ci.example.com', 'team: main'),
 		'  shuttle:', "    backend: $backend",
 		(map {"    $_"} @lines),
 		automation_block_lines(without => ['shuttle']));

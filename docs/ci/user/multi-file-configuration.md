@@ -40,7 +40,6 @@ This block names the provider and carries the keys that provider declares. The t
 provider:
   type: concourse
   url: https://concourse.example.com
-  target: my-target
   team: main
   insecure: false
   min_fly_version: 7.9.0

@@ -341,7 +341,8 @@ subtest 'a configuration can be loaded through one pipeline block' => sub {
 	plan tests => 3;
 
 	my $h = make_harness(envs => ['qa'], vault => 0);
-	my $top = load_with($h, automated_config('concourse', 'target: ci'));
+	my $top = load_with($h, automated_config('concourse',
+		'url: https://ci.example.com', 'team: main'));
 	is($top->config->get('pipeline.provider.type'), 'concourse',
 		'the block reaches the Top the load returns');
 	is($top->config->get('pipeline.source_control.identity.name'),
@@ -384,7 +385,8 @@ subtest 'the shuttle shape writes the backend block a row hands it' => sub {
 		'    auth:', '      type: ssh', '      vault: secret/ci/git',
 		'    identity:', '      name: Genesis CI',
 		'      email: ci@genesis.example.com',
-		'  provider:', '    type: concourse', '    target: ci');
+		'  provider:', '    type: concourse',
+		'    url: https://ci.example.com', '    team: main');
 	my @rest = ('  vault:', '    url: https://vault.example.com',
 		'  locker:', '    url: https://locker.example.com');
 

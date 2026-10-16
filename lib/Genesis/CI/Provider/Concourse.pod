@@ -164,11 +164,16 @@ the description C<genesis config> renders as help.
 The keys are C<target>, C<url>, C<team>, C<insecure>, C<min_fly_version>, C<fly_bin_path>,
 C<public>, C<tagged>, C<task>, C<pause_after_set>, and C<group_commits>.
 
-C<team> is where the Concourse team's default lives, and it is the only
-home that default has. The class that emits the pipeline resolves the
-team through C<provider_option>, which reads the operator's block and
-falls back to what is declared here, so no second copy of C<main> stands
-anywhere.
+B<The block names the Concourse, not an operator's fly target> (D86, noted
+2026-10-15). C<url> and C<team> are required while C<pipeline.enabled> is
+true, through L</_pipeline_enabled($siblings, $config)>, and not before,
+so a block can be built a key at a time with the pipeline off. C<team>
+declares no default: a required key with a default would never be
+required. C<target> is declared only so that it is refused by name,
+through L</_target_retired($value)>,
+whether or not the pipeline is enabled: a target is an entry in one
+operator's F<~/.flyrc>, so a committed one means nothing on a teammate's
+machine, and each operator's is resolved where C<fly> is needed.
 
 C<fly_bin_path> names the C<fly> this repository is set with, a path or a
 bare name, so two repositories on two Concourse installations each keep
@@ -197,7 +202,7 @@ B<Returns:> a hash reference of key name to its declaration.
 B<Examples:>
 
     my $schema = Genesis::CI::Provider::Concourse->provider_options_schema;
-    $schema->{team}{default};                  # 'main'
+    $schema->{team}{required};                 # \&_pipeline_enabled
     $schema->{min_fly_version}{type};          # 'semver'
     $schema->{task}{schema}{privileged}{type}; # 'array'
 
@@ -217,16 +222,15 @@ B<Examples:>
 
 =head2 validate_config($config, $path, $discriminator)
 
-This provider's own rules for its block, which are the two a declaration
-cannot state, on top of the generic pass the base gives every block.
-C<SUPER> runs first, because the declaration is the floor rather than a
-subset of what is wanted checked.
+This provider's own rule for its block, the one a declaration cannot
+state, on top of the generic pass the base gives every block. C<SUPER>
+runs first, because the declaration is the floor rather than a subset of
+what is wanted checked.
 
-A target is required, and it is asked for only once the section the block
-sits in is switched on, which the base answers for every provider. A URL,
-where one is written, has to begin with C<http://> or C<https://>. Both
-keys are read off the block where the operator wrote them rather than off
-an object assembled out of the block first.
+A URL, where one is written, has to begin with C<http://> or C<https://>.
+It is read off the block where the operator wrote it rather than off an
+object assembled out of the block first. The required C<url> and C<team>,
+and the retired C<target>, are the declaration's (L</provider_options_schema()>).
 
 B<Parameters:>
 
@@ -253,7 +257,7 @@ B<Examples:>
 
     my @errors = Genesis::CI::Provider::Concourse->validate_config(
         $config, 'pipeline.provider');
-    # ("'target' is required for the Concourse provider")
+    # ("'url' must begin with http:// or https://") for url: ci.example.com
 
 =head1 INSTANCE METHODS
 
@@ -356,17 +360,19 @@ B<Examples:>
 
 =head2 config()
 
-What goes back into the C<ci.provider> section of F<.genesis/config>. The
-team is written only where it differs from the default, and the insecure
-flag only where it is set, so a repository records what somebody chose
-rather than what it was given.
+What goes back into the C<pipeline.provider> section of F<.genesis/config>.
+B<The target is never written>, though the object carries one for the
+login and the wizard: a target is one operator's (D86, noted 2026-10-15),
+and the block refuses it. The url is written where the provider has one,
+the team always, since the block requires it while the pipeline is on, and
+the insecure flag only where it is set.
 
 B<Returns:> the settings, as a list of key and value pairs.
 
 B<Examples:>
 
     my %stored = $provider->config;
-    # (type => 'concourse', target => 'prod', team => 'platform')
+    # (type => 'concourse', url => 'https://ci.example.com', team => 'platform')
 
 =head2 check_prereqs()
 
@@ -432,6 +438,39 @@ B<Examples:>
     $provider = $provider->interactive_wizard($top);
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _pipeline_enabled($siblings, $config)
+
+The C<required> predicate of C<url> and C<team>: true while
+C<pipeline.enabled> is.
+
+B<Parameters:> the block's siblings, unused, and the configuration.
+
+B<Returns:> C<1> or C<0>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _pipeline_enabled({}, $config);   # 1 once pipeline.enabled is true
+
+=head2 _target_retired($value)
+
+The C<check> rule of C<target>, which refuses any value, saying a target is
+each operator's own and naming what replaces it: C<url> and C<team> in the
+configuration, and, for each operator, C<--target>, a
+C<git config genesis.fly-target> pin in the clone, or the one F<~/.flyrc>
+target whose URL and team are the configuration's (D86, noted 2026-10-15).
+
+B<Parameters:> the written value, unused.
+
+B<Returns:> the refusal, without the key.
+
+B<Errors:> None; the schema reports it as C<pipeline.provider.target: ...>.
+
+B<Examples:>
+
+    _target_retired('ci');   # "is no longer read.  A fly target is ..."
 
 =head2 _load_fly_targets()
 

@@ -262,12 +262,13 @@ declared.
 The schema comes from the provider this compiler holds, which is why this
 is an instance method: a class method has no provider to ask.
 
-The Concourse team's default arrives this way, and this is the only way
-it arrives. This class once held a C<DEFAULT_TEAM> of its own and both
-copies had to be kept in step by hand. Every reader of the team here goes
-through C<provider_option>, which reads the operator's block and falls
-back to what the provider's schema declares, so the team a pipeline is
-set under and the team the declaration names are the same value.
+The Concourse team declares no default here: the block requires it while
+the pipeline is on (D86, noted 2026-10-15). Every reader of the team goes
+through C<provider_option>, which reads the operator's block, and then to
+the provider's own C<team>, which answers C<main> where a block names
+none, as a block built before the pipeline is turned on may not. The
+provider is the one home for that fallback; this class once held a
+C<DEFAULT_TEAM> of its own, and two copies had to be kept in step by hand.
 
 B<Returns:> a hash reference of key name to default value.
 
@@ -397,17 +398,17 @@ C<expose>, and C<insecure> the switches of the same names, C<dry-run> to
 print rather than set, and C<yes> to skip the confirmation.
 
 An option the caller leaves out is resolved through C<provider_option>,
-so the team falls back to the operator's block and then to the default
-the provider's schema declares, and nothing here reads a second copy of
-that default.
+so the team falls back to the operator's block and then to the provider's
+own C<team>, and nothing here reads a second copy of that default. The
+target comes from the options alone: the configuration names none, being
+each operator's own (D86, noted 2026-10-15).
 
 =back
 
 B<Returns:> 1.
 
 B<Errors:> raises "Must call parse() before deploy()" when nothing has
-been read, "No Concourse target specified" when neither the options nor
-the configuration name one, "Cannot determine pipeline name" when nothing
+been read, "No Concourse target specified" when the options name none, "Cannot determine pipeline name" when nothing
 names the pipeline, and a message naming the C<fly> subcommand that
 failed when one does.
 

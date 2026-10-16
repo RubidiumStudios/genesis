@@ -36,7 +36,8 @@ my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 sub automated_pipeline_block {
 	my (%opts) = @_;
 	my @lines = ('pipeline:', '  enabled: true',
-		'  provider:', '    type: concourse', '    target: ci');
+		'  provider:', '    type: concourse',
+		'    url: https://ci.example.com', '    team: main');
 	push @lines, @{$opts{provider_extra}} if $opts{provider_extra};
 	push @lines, '  source_control:',
 		'    repository: team/bosh',
@@ -142,7 +143,7 @@ subtest 'the provider-specific keys are validated per provider type' => sub {
 		'    task:', '      image: genesiscommunity/concourse',
 		'      version: latest']))}
 		'the four Concourse keys validate under Concourse';
-	throws_ok {load_with($h, automated_pipeline_block() =~ s/target: ci/target: ci\n    public: maybe/r)}
+	throws_ok {load_with($h, automated_pipeline_block() =~ s/team: main/team: main\n    public: maybe/r)}
 		qr/pipeline\.provider\.public: expected a boolean/,
 		'and their types are enforced';
 	throws_ok {load_with($h, join("\n", 'pipeline:', '  enabled: true',

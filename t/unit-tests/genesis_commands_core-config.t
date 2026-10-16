@@ -404,7 +404,7 @@ subtest 'config --set-from-file parses a collection' => sub {
 	plan tests => 2;
 
 	my $dir = config_repo('config-from-file-collection', enabled => 0);
-	mkfile_or_fail("$dir/provider.yml", "type: concourse\ntarget: prod\n");
+	mkfile_or_fail("$dir/provider.yml", "type: concourse\nurl: https://ci.example.com\n");
 	pushd $dir;
 	prepare_command('config', '--set-from-file', 'pipeline.provider', "$dir/provider.yml");
 	build_command_environment;
@@ -413,7 +413,7 @@ subtest 'config --set-from-file parses a collection' => sub {
 
 	my $cfg = slurp("$dir/.genesis/config");
 	like($cfg, qr/type:\s*concourse/, "the parsed structure is stored");
-	like($cfg, qr/target:\s*prod/,    "including its other keys");
+	like($cfg, qr/url:\s*https:\/\/ci\.example\.com/, "including its other keys");
 };
 
 subtest 'config --set coerces against the provider the same run names' => sub {
@@ -513,14 +513,14 @@ sub run_config {
 	return (defined $code ? $code : $rc, $err);
 }
 
-subtest "a provider's own rules wait for the section to be turned on" => sub {
+subtest "a provider's requirements wait for the section to be turned on" => sub {
 	plan tests => 4;
 
-	# The repository names Concourse and gives it no target, which is the
-	# one key that provider cannot run without.  Nobody has turned the
-	# pipeline on, so the rule has nothing to be about yet, and an operator
-	# building a provider block a key at a time is not refused for a key
-	# the block does not carry so far.
+	# The repository names Concourse and gives it no url, which that
+	# provider cannot run without (D86, noted 2026-10-15).  Nobody has turned
+	# the pipeline on, so the requirement has nothing to be about yet, and an
+	# operator building a provider block a key at a time is not refused for
+	# a key the block does not carry so far.
 	my $dir = concourse_repo('config-gate-off');
 	pushd $dir;
 	prepare_command('config', '--set', 'pipeline.provider.team', 'main');
@@ -529,12 +529,11 @@ subtest "a provider's own rules wait for the section to be turned on" => sub {
 	popd;
 
 	is($code, 0, 'a disabled pipeline takes a provider key without complaint');
-	unlike($err, qr/'target' is required/,
-		"and the provider's own rule says nothing while the section is off");
+	unlike($err, qr/missing required key url/,
+		"and the provider's requirement says nothing while the section is off");
 
 	# Turning the section on is what asks the provider to run, and the
-	# refusal that follows is the provider's own sentence rather than
-	# anything the framework composed for it.
+	# requirement is the schema's, declared on the provider's own fragment.
 	pushd $dir;
 	prepare_command('config', '--set', 'pipeline.enabled', 'true');
 	build_command_environment;
@@ -543,8 +542,8 @@ subtest "a provider's own rules wait for the section to be turned on" => sub {
 
 	is($code, Genesis::Exit::CONFIG,
 		'turning the section on is refused, at the configuration exit');
-	like($err, qr/'target' is required for the Concourse provider/,
-		"in the provider's own words");
+	like($err, qr/pipeline\.provider: missing required key url/,
+		"naming the key the provider requires");
 };
 
 subtest 'config --unset of the provider type orphans nothing and goes through' => sub {
@@ -844,6 +843,89 @@ subtest 'config --set and --unset of a refused file are judged on the result' =>
 	my $cfg = slurp("$dir/.genesis/config");
 	unlike($cfg, qr/^ci:/m, "the unset is applied");
 	like($cfg, qr/manifest_store:\s*repository/, "and so is the set");
+};
+
+# A Concourse pipeline with every key an enabled one needs except what a row
+# leaves out, written with the pipeline off so that a row turns it on.  It
+# names the Concourse by url and team, and no operator's fly target (D86).
+sub concourse_full_repo {
+	my ($name, %opts) = @_;
+	my $dir = config_repo($name, enabled => 0);
+	my $url = $opts{no_url} ? '' : "    url: https://ci.example.com\n";
+	mkfile_or_fail("$dir/.genesis/config", <<CFG);
+---
+creator_version: 3.2.0
+deployment_type: test-kit
+manifest_store: exodus
+pipeline:
+  enabled: false
+  provider:
+    type: concourse
+${url}    team: main
+  source_control:
+    repository: genesis/test-kit-deployments
+    auth:
+      type: ssh
+      vault: secret/ci/git
+    identity:
+      name: Genesis CI
+      email: ci\@genesis.example.com
+  shuttle:
+    backend: s3
+    bucket: pipes
+  vault:
+    url: https://vault.example.com
+  locker:
+    url: https://locker.example.com
+version: 3
+CFG
+	return $dir;
+}
+
+subtest 'Concourse is named by its url and team, with no target (T369)' => sub {
+	plan tests => 2;
+
+	my $dir = concourse_full_repo('config-concourse-url-team');
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.enabled', 'true');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, 'turning the pipeline on takes a Concourse with no target') or diag $err;
+	my ($load) = loads_cleanly($dir);
+	is($load, 0, 'and the next command loads it');
+};
+
+subtest 'Concourse without a url is refused by the schema (T369)' => sub {
+	plan tests => 2;
+
+	my $dir = concourse_full_repo('config-concourse-no-url', no_url => 1);
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.enabled', 'true');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, Genesis::Exit::CONFIG, 'the run is refused at the configuration exit');
+	like($err, qr/pipeline\.provider: missing required key url/, 'naming the key');
+};
+
+subtest 'a committed fly target is refused, with what replaces it (T369)' => sub {
+	plan tests => 4;
+
+	my $dir = concourse_full_repo('config-concourse-target');
+	my $before = slurp("$dir/.genesis/config");
+	pushd $dir;
+	prepare_command('config', '--set', 'pipeline.provider.target', 'ci');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, Genesis::Exit::CONFIG, 'the run is refused at the configuration exit');
+	like($err, qr/pipeline\.provider\.target/, 'naming the key');
+	like($err, qr/genesis\.fly-target/, 'and the clone pin that replaces it');
+	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
 };
 
 # A version 2 repository: no pipeline section on disk, and the older ci.yml

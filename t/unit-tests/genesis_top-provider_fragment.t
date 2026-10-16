@@ -36,7 +36,8 @@ my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 
 sub concourse {
 	my (@lines) = @_;
-	return automated_config('concourse', 'target: ci', @lines);
+	return automated_config('concourse',
+		'url: https://ci.example.com', 'team: main', @lines);
 }
 
 # Proves that the declaration and the check belong to one class, so the
@@ -86,14 +87,15 @@ subtest "the configured provider's fragment is what the block declares" => sub {
 	# coercion of a write, and the unknown-key check of a removal.
 	ok $top->config->schema_has('pipeline.provider.target'),
 		'a key the fragment declares is one the schema answers for';
-	is $top->config->_schema_for_key('pipeline.provider.team')->{default},
-		$fragment->{team}{default},
+	# insecure, because team is required and declares no default (D86).
+	is $top->config->_schema_for_key('pipeline.provider.insecure')->{default},
+		$fragment->{insecure}{default},
 		'with the default the fragment gave it';
 	ok length($top->config->_schema_for_key('pipeline.provider.target')
 			->{description}),
 		'and its description, which genesis config renders as help';
 
-	is $top->config->get('pipeline.provider.team'), $fragment->{team}{default},
+	ok defined $top->config->get('pipeline.provider.insecure'),
 		'the default resolves at load';
 
 	# Validation only walks into a hash that is present, so a nested block
@@ -110,8 +112,8 @@ subtest 'a key no fragment declares is refused by name' => sub {
 	throws_ok {load_with($h, concourse('nonesuch: 1'))}
 		qr/pipeline\.provider\.nonesuch: unknown configuration key/,
 		'an undeclared provider key is refused by name';
-	throws_ok {load_with($h, concourse('team: [a, b]'))}
-		qr/pipeline\.provider\.team: expected a string/,
+	throws_ok {load_with($h, concourse('fly_bin_path: [a, b]'))}
+		qr/pipeline\.provider\.fly_bin_path: expected a string/,
 		"and a declared key's type is enforced";
 };
 

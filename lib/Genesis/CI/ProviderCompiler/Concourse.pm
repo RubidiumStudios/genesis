@@ -193,7 +193,7 @@ sub describe_provider {
 	my ($self) = @_;
 
 	my $target    = $self->provider_option('target')        || '(not set)';
-	my $team      = $self->provider_option('team');
+	my $team      = $self->provider_option('team') // $self->provider->team;
 	my $pipe_name = $self->provider_option('pipeline_name') || '(deployment type)';
 	my $expose    = $self->provider_option('expose')    ? 'yes' : 'no';
 	my $paused    = $self->provider_option('pause_after_set') ? 'yes' : 'no';
@@ -339,17 +339,13 @@ sub deploy {
 	my $target = $opts{target}
 		// $self->provider_option('target')
 		// $self->{layout};
-	bail("No Concourse target specified.  Use --ci-target or set pipeline.provider.target in .genesis/config")
+	bail("No Concourse target specified.  Use --target to name the fly target for this run.")
 		unless $target;
 
-	# Team: call-site override > the resolved option
-	#
-	# There is no third tier.  provider_option falls back to the defaults
-	# the provider's own fragment declares, and team is one of them, so a
-	# repository that names no team is already answered DEFAULT_TEAM by
-	# the line above and an arm below it could never run.
+	# The provider answers its default where the configuration names none.
 	my $team = $opts{team}
-		// $self->provider_option('team');
+		// $self->provider_option('team')
+		// $self->provider->team;
 
 	# Pipeline name: call-site override > provider_opts > config name > deployment_type
 	my $pipeline_name = $opts{pipeline_name}

@@ -26,7 +26,7 @@ The optional positional argument selects which pipeline layout to deploy when yo
 
 `--dry-run` or `-n` generates the pipeline YAML and prints it to stdout without deploying to Concourse. Combine this with output redirection to save the generated YAML for review.
 
-`--target` or `-t` specifies the Concourse target name (as shown by `fly targets`). By default, the target name is derived from the layout name.
+`--target` or `-t` names the fly target to apply through for this run (as shown by `fly targets`). A target is an entry in one operator's `~/.flyrc`, so none is read from `.genesis/config`, which names the Concourse by its `url` and `team` instead.
 
 `--paused` or `-P` keeps the pipeline paused after uploading. By default, Genesis unpauses the pipeline after a successful `set-pipeline`.
 

@@ -157,7 +157,7 @@ subtest 'the provider offers the key and the key decides the layout' => sub {
 	# no such key to write and the schema refuses it by name as the
 	# configuration loads, before any programmatic check runs.
 	throws_ok {load_with($h, automated_config('concourse',
-		'target: ci', 'output_layout: multiple'))}
+		'url: https://ci.example.com', 'team: main', 'output_layout: multiple'))}
 		qr/pipeline\.provider\.output_layout: unknown configuration key/s,
 		'the key is refused where the provider declares no such key';
 

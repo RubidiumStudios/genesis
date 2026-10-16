@@ -276,7 +276,7 @@ B<Returns:> the value, or C<undef>.
 
 B<Examples:>
 
-    $compiler->provider_option('team');       # 'main', from the default
+    $compiler->provider_option('public');     # 0, from the default
     $compiler->provider_option('nonesuch');   # undef
 
 =head2 describe_provider()

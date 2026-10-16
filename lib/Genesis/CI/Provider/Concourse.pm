@@ -271,9 +271,10 @@ EOF
 # they are documented in the compiler class's cli_opts_help and POD.
 sub provider_options_schema {
 	return {
-		target   => {type => 'string',  description => 'Fly target alias (fly login -t <target>)'},
-		url      => {type => 'string',  description => 'Concourse API URL, used by fly login'},
-		team     => {type => 'string',  default => DEFAULT_TEAM, description => 'Concourse team name'},
+		# Declared to be refused by name, with what replaces it (D86).
+		target   => {type => 'string',  check => \&_target_retired, description => 'Retired: each operator resolves their own fly target'},
+		url      => {type => 'string',  required => \&_pipeline_enabled, description => 'Concourse API URL, used by fly login'},
+		team     => {type => 'string',  required => \&_pipeline_enabled, description => 'Concourse team name'},
 		insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS certificate verification'},
 
 		# The floor check_prereqs enforces, declared so that a
@@ -351,30 +352,38 @@ sub capabilities {
 }
 
 # }}}
-# validate_config - target or url, and a url that is one {{{
+# validate_config - a url that is one {{{
 #
 # The rules a declaration cannot state, on top of the generic pass the
 # base gives every block.  SUPER first, because the declaration is the
 # floor rather than a subset of what is wanted checked.
-#
-# The two keys are read off the block where the operator wrote them,
-# rather than off an object somebody assembled out of the block first.
 sub validate_config {
 	my ($class, $config, $path, $discriminator) = @_;
 	my @errors = $class->SUPER::validate_config($config, $path, $discriminator);
 
 	my $url = $config->get("$path.url");
-
-	# The key a pipeline cannot run without is asked for once the section
-	# the block sits in is switched on, and not before.  The base answers
-	# that question for every provider, so this rule reads the gate the
-	# same way the next provider's rule will.
-	push @errors, "'target' is required for the Concourse provider"
-		if $class->section_enabled($config, $path)
-		&& !$config->get("$path.target");
 	push @errors, "'url' must begin with http:// or https://"
 		if $url && $url !~ m{^https?://};
 	return @errors;
+}
+
+# }}}
+# _pipeline_enabled - url and team are required once the pipeline is on {{{
+sub _pipeline_enabled {
+	my ($siblings, $config) = @_;
+	return $config && $config->get('pipeline.enabled') ? 1 : 0;
+}
+
+# }}}
+# _target_retired - a committed fly target is refused, with what replaces it {{{
+sub _target_retired {
+	return "is no longer read.  A fly target is an entry in one operator's ".
+		"#C{~/.flyrc}, so a committed one means nothing on a teammate's machine.  ".
+		"Remove it, and name the Concourse with #C{pipeline.provider.url} and ".
+		"#C{pipeline.provider.team}.  Each operator's target is then the one ".
+		"#C{--target} names for a run, else the one this clone pins with ".
+		"#C{git config genesis.fly-target <target>}, else the one #C{~/.flyrc} ".
+		"target whose URL and team are the configuration's.";
 }
 
 # }}}
@@ -396,10 +405,10 @@ sub team {
 # config - returns hash for .genesis/config ci.provider section {{{
 sub config {
 	my ($self) = @_;
+	# The target is this operator's, so it is never written (D86).
 	my %cfg = (type => 'concourse');
-	$cfg{target}   = $self->{target}   if defined $self->{target};
 	$cfg{url}      = $self->{url}      if defined $self->{url};
-	$cfg{team}     = $self->{team}     if defined $self->{team} && $self->{team} ne DEFAULT_TEAM;
+	$cfg{team}     = $self->{team}     if defined $self->{team};
 	$cfg{insecure} = 1                 if $self->{insecure};
 	return %cfg;
 }

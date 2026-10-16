@@ -38,7 +38,8 @@ my $h = make_harness(envs => ['qa'], pipeline => 1, vault => 0);
 sub load_env_with {
 	my ($pipeline, %opts) = @_;
 	write_env_file($h, $opts{env} // 'qa', pipeline => $pipeline);
-	return load_with($h, automated_config('concourse', 'target: ci'));
+	return load_with($h, automated_config('concourse',
+		'url: https://ci.example.com', 'team: main'));
 }
 
 subtest 'the manual gate is a declared boolean' => sub {

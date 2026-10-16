@@ -135,7 +135,6 @@ subtest 'enabled with concourse is an automated pipeline' => sub {
 		'deployment_type'                    => 'bosh',
 		'pipeline.enabled'                   => 1,
 		'pipeline.provider.type'             => 'concourse',
-		'pipeline.provider.target'           => 'pipes/lab',
 		'pipeline.provider.url'              => 'https://pipes.example.com',
 		'pipeline.provider.team'             => 'lab',
 		'pipeline.shuttle.backend'           => 's3',

@@ -63,7 +63,8 @@ subtest 'the compiler holds the provider rather than a copy of it' => sub {
 
 	# The declaration comes through the held provider now, rather than
 	# through a forwarder that resolved the CLI class all over again.
-	ok exists $compiler->provider_options_defaults->{team},
+	# insecure, because team is required now and declares no default (D86).
+	ok exists $compiler->provider_options_defaults->{insecure},
 		'the options chain reads the declaration through that provider';
 
 	# The assertion the whole row exists for.  A copy taken at
@@ -101,7 +102,7 @@ subtest 'the compile hands back the provider beside its compiler' => sub {
 
 	my $h = make_harness(envs => ['qa'], provider => 'concourse', vault => 0);
 	my $top = load_with($h,
-		automated_config('concourse', 'target: ci', 'team: platform'));
+		automated_config('concourse', 'url: https://ci.example.com', 'team: platform'));
 
 	my $result = Genesis::CI::Compiler->new(top => $top)
 		->compile(provider => 'concourse');

@@ -179,15 +179,17 @@ subtest 'Concourse->init honours all opts (new-target path)' => sub {
 	is $p->{insecure}, 1,                'insecure set';
 };
 
-subtest 'Concourse->config omits default team' => sub {
+subtest 'Concourse->config writes the Concourse, never the target (D86)' => sub {
 	my $p = Genesis::CI::Provider::Concourse->new(
 		type   => 'concourse',
 		target => 'myci',
+		url    => 'https://ci.example.com',
 	);
 	my %cfg = $p->config;
-	is   $cfg{type},   'concourse', 'type present';
-	is   $cfg{target}, 'myci',      'target present';
-	ok !exists $cfg{team},     'default team omitted';
+	is   $cfg{type},   'concourse',              'type present';
+	ok !exists $cfg{target},                     'the target is the operator\'s, so it is not written';
+	is   $cfg{url},    'https://ci.example.com', 'url written';
+	is   $cfg{team},   'main',                   'team written, the default included, since it is required';
 	ok !exists $cfg{insecure}, 'insecure omitted when false';
 };
 
@@ -428,38 +430,43 @@ subtest 'validate_config: Manual refuses a key it never declared' => sub {
 		'and it names the key by its whole path';
 };
 
-subtest 'validate_config: Concourse passes with target' => sub {
+subtest 'validate_config: Concourse passes with url and team (D86)' => sub {
 	my @errors = refusals_for('Genesis::CI::Provider::Concourse',
-		type => 'concourse', target => 'my-ci');
-	is scalar @errors, 0, 'no errors when target is present';
+		type => 'concourse', url => 'https://ci.example.com', team => 'main');
+	is scalar @errors, 0, 'no errors when the Concourse is named';
 };
 
-subtest 'validate_config: Concourse fails without target' => sub {
+subtest 'validate_config: Concourse fails without url or team (D86)' => sub {
 	my @errors = refusals_for('Genesis::CI::Provider::Concourse',
 		type => 'concourse');
-	ok scalar @errors > 0, 'errors returned when target missing';
-	like $errors[0], qr/target.*required/i, 'error mentions target';
+	is scalar @errors, 2, 'one error for each key the enabled pipeline requires';
+	like join("\n", @errors), qr/missing required key url/,  'naming url';
+	like join("\n", @errors), qr/missing required key team/, 'and team';
 };
 
-subtest 'validate_config: Concourse passes with target and valid url' => sub {
+subtest 'validate_config: Concourse refuses a committed target (D86)' => sub {
 	my @errors = refusals_for('Genesis::CI::Provider::Concourse',
-		type => 'concourse', target => 'my-ci', url => 'https://ci.example.com');
-	is scalar @errors, 0, 'no errors with target and valid https url';
+		type => 'concourse', target => 'my-ci', url => 'https://ci.example.com',
+		team => 'main');
+	is scalar @errors, 1, 'one refusal';
+	like $errors[0], qr/pipeline\.provider\.target: is no longer read.*genesis\.fly-target/s,
+		'naming the key and what replaces it';
 };
 
 subtest 'validate_config: Concourse rejects malformed url' => sub {
 	my @errors = refusals_for('Genesis::CI::Provider::Concourse',
-		type => 'concourse', target => 'my-ci', url => 'not-a-url');
+		type => 'concourse', url => 'not-a-url', team => 'main');
 	ok scalar @errors > 0, 'error returned for malformed url';
 	like $errors[0], qr/url.*http/i, 'error mentions url format';
 };
 
 subtest 'validate_config: Concourse fills the keys it declared' => sub {
-	my $cfg = provider_block(type => 'concourse', target => 'my-ci');
+	my $cfg = provider_block(type => 'concourse', url => 'https://ci.example.com',
+		team => 'main');
 	my @errors = Genesis::CI::Provider::Concourse->validate_config(
 		$cfg, 'pipeline.provider', 'type');
 	is scalar @errors, 0, 'the block is valid';
-	is $cfg->get('pipeline.provider.team'), 'main',
+	ok defined $cfg->get('pipeline.provider.insecure'),
 		"and the fragment's default landed where every reader looks for it";
 };
 

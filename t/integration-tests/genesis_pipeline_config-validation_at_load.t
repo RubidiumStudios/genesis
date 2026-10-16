@@ -102,9 +102,10 @@ subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
 	# Four explicit rows and one for the run's own restoration assertion.
 	plan tests => 5;
 
-	# Concourse needs a fly target and this configuration names none, so
-	# the refusal comes from the provider's own validate_config rather than
-	# from the declarative schema above it.
+	# Concourse's url has to be one, a rule its declaration cannot state, and
+	# this configuration's has no scheme, so the refusal comes from the
+	# provider's own validate_config rather than from the declarative schema
+	# above it.
 	commit_on_control($h, files => {
 		'.genesis/config' => join("\n",
 			'---', 'deployment_type: bosh', 'version: "3"',
@@ -116,6 +117,7 @@ subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
 			'    identity:', '      name: Genesis CI',
 			'      email: ci@genesis.example.com',
 			'  provider:', '    type: concourse',
+			'    url: ci.example.com', '    team: main',
 			'  shuttle:', '    backend: s3', '    bucket: pipes',
 			'  vault:', '    url: https://vault.example.com',
 			'  locker:', '    url: https://locker.example.com', ''),
@@ -130,7 +132,7 @@ subtest "a provider's own rule refuses at load and exits CONFIG" => sub {
 	# naming the provider a second time.
 	unlike $err, qr/Invalid configuration for the/,
 		"with no second heading in front of the provider's own words";
-	like $err, qr/'target' is required for the Concourse provider/,
+	like $err, qr/'url' must begin with http:\/\/ or https:\/\//,
 		"and quotes the provider's own words";
 	is $exit, Genesis::Exit::CONFIG, 'and it exits CONFIG by name';
 };
@@ -149,7 +151,8 @@ subtest "a provider whose file will not load exits CONFIG" => sub {
 			'    auth:', '      type: ssh', '      vault: secret/ci/git',
 			'    identity:', '      name: Genesis CI',
 			'      email: ci@genesis.example.com',
-			'  provider:', '    type: concourse', '    target: ci',
+			'  provider:', '    type: concourse',
+			'    url: https://ci.example.com', '    team: main',
 			'  shuttle:', '    backend: s3', '    bucket: pipes',
 			'  vault:', '    url: https://vault.example.com',
 			'  locker:', '    url: https://locker.example.com', ''),
@@ -223,6 +226,41 @@ subtest "an environment block refusal carries no backtrace" => sub {
 		'with no location left standing behind the bullet';
 	unlike $flat, qr/Genesis::Config::validate/,
 		'and no frame behind that';
+};
+
+# Last, because the configuration it commits is one every later load refuses.
+subtest 'a committed fly target is refused at load, with what replaces it (T369)' => sub {
+	# Three explicit rows and one for each run's restoration assertion.
+	plan tests => 5;
+
+	# A target is one operator's ~/.flyrc entry, so a committed one means
+	# nothing on a teammate's machine (D86, noted 2026-10-15).
+	commit_on_control($h, files => {
+		'.genesis/config' => join("\n",
+			'---', 'deployment_type: bosh', 'version: "3"',
+			'creator_version: 3.2.0', 'minimum_version: 3.2.0',
+			'pipeline:', '  enabled: true',
+			'  source_control:',
+			'    repository: genesis/bosh-deployments',
+			'    auth:', '      type: ssh', '      vault: secret/ci/git',
+			'    identity:', '      name: Genesis CI',
+			'      email: ci@genesis.example.com',
+			'  provider:', '    type: concourse', '    target: ci',
+			'    url: https://ci.example.com', '    team: main',
+			'  shuttle:', '    backend: s3', '    bucket: pipes',
+			'  vault:', '    url: https://vault.example.com',
+			'  locker:', '    url: https://locker.example.com', ''),
+	});
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
+	(my $flat = $err) =~ s/\s+/ /g;
+	is $exit, Genesis::Exit::CONFIG, 'pipeline-status refuses at CONFIG';
+	like $flat, qr/pipeline\.provider\.target.*genesis\.fly-target/,
+		'naming the key and the clone pin that replaces it';
+
+	($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '--help');
+	unlike "$out$err", qr/Defaults to the pipeline name/,
+		"and pipeline-apply's help promises no default nothing implements";
 };
 
 done_testing;
