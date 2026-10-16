@@ -326,8 +326,12 @@ sub assert_pre_deploy {
 		# Unasked where the remote may not be, as in a dry run without one.
 		if ($opts{control_only} && ($opts{network} // 1)) {
 			require Genesis::CI::Preflight;
-			Genesis::CI::Preflight::require_control($top, $git,
-				action => 'apply', outcome => 'Nothing was written.');
+			Genesis::CI::Preflight::refuse_once(
+				problems => [
+					Genesis::CI::Preflight::root_committed_problems($git),
+					Genesis::CI::Preflight::control_problems($top, $git)],
+				action  => 'apply',
+				outcome => 'Nothing was written.');
 		}
 
 		# Where control requires a pull request, a command that commits

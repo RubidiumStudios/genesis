@@ -103,6 +103,21 @@ sub repository_problems {
 }
 
 # }}}
+# root_committed_problems - the deployment root's own uncommitted changes {{{
+sub root_committed_problems {
+	my ($git) = @_;
+	my ($prefix) = $git->prefixed('');
+	my $status   = $git->status(length($prefix // '') ? $prefix : ());
+	my @dirty    = sort grep {$status->{$_} !~ /^\?\?/} keys %$status;
+	return () unless @dirty;
+	return problem(DATAERR, sprintf(
+		"The deployment root has uncommitted changes, and this command reads ".
+		"what is committed and pushed, not the tree in front of it.\n\n".
+		"Commit and push them first:\n%s",
+		join('', map {"  - $_\n"} @dirty)));
+}
+
+# }}}
 # applied_record_problems - the applied record, and why the run cannot read it {{{
 #
 # With no applied record the pipeline has never been applied here, or the

@@ -350,6 +350,39 @@ B<Examples:>
     my ($branch_of, @problems) = prefix_problems($top, topology => $topo);
     # returns ({qa => 'pr/qa/bosh'}) where nothing collides
 
+=head2 root_committed_problems($git)
+
+    my @problems = Genesis::CI::Preflight::root_committed_problems($git);
+
+The deployment root's own uncommitted changes, for a command that reads
+commits and acts on their sync without switching branches, which is
+C<pipeline-apply> (D112 and D113, noted 2026-10-16).  Only the root's paths
+are asked about, so another root of the same repository never stands in the
+way; untracked files are not changes.  A command that switches branches asks
+L</repository_problems($git)> instead, because a switch needs the whole tree
+clean.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+The C<Service::Git> handle on the clone, whose prefix is the root.
+
+=back
+
+B<Returns:> One problem at C<DATAERR> listing the changed paths, or the empty
+list.
+
+B<Errors:> None of its own.
+
+B<Examples:>
+
+    Genesis::CI::Preflight::root_committed_problems($git);
+    # The deployment root has uncommitted changes, ... Commit and push them first:
+    #   - bosh/prod.yml
+
 =head2 repository_problems($git)
 
     my @problems = Genesis::CI::Preflight::repository_problems($git);

@@ -367,9 +367,13 @@ alone (D113), runs on control and nowhere else. Every other branch is
 refused, a feature branch and a detached HEAD included, naming what the
 clone stands on and the checkout of control that fixes it. On control it
 must also be in step with the remote, through
-L<Genesis::CI::Preflight/require_control>, which refuses C<ahead> as
+L<Genesis::CI::Preflight/control_problems($top, $git, %opts)>, which words C<ahead> as
 unpushed and C<behind> as stale in D30's words, because the commit the
-apply records must be one every clone can fetch. A clone with no control
+apply records must be one every clone can fetch, and its deployment root
+must be committed, through
+L<Genesis::CI::Preflight/root_committed_problems($git)>, so that what it
+applies is the tree in front of the operator (D113, noted 2026-10-16).  Every
+one of these is a problem in one refusal (D115). A clone with no control
 branch at all is let through, so the apply's own C<CONFIG> refusal names
 the missing branch. Where C<network> is false the in-step check is not asked,
 because it needs the remote; the gate passes that for a dry run in a clone
@@ -433,9 +437,11 @@ C<Genesis::Exit::DATAERR>.
 
 =item Refuses control out of step with the remote, for the same command.
 
-Raised through L<Genesis::CI::Preflight/require_control>: I<The control
+Raised through L<Genesis::CI::Preflight/refuse_once(%opts)>: I<The control
 branch control is ahead of origin/control by 1 commit, which is
-unpublished.>, or behind it and stale, at C<Genesis::Exit::DATAERR>.
+unpublished.>, or behind it and stale, and I<The deployment root has
+uncommitted changes>, listing them, each in the one refusal, at
+C<Genesis::Exit::DATAERR>.
 
 =item Refuses control where a pull request is required, for a command that
 commits there.
