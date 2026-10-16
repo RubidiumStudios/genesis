@@ -248,27 +248,6 @@ EOF
 
 # }}}
 # provider_options_schema - schema for pipeline.provider: when type=concourse {{{
-#
-# Keys map directly to the pipeline.provider: sub-keys in .genesis/config.
-# This fragment is the only place these keys are declared, and it is the
-# whole of what the block admits beside the type, so a key that is not
-# here is refused by name as the configuration loads.  That is why target,
-# url, team and insecure live here rather than beside the type, where they
-# sat unread under every other provider.
-#
-# There is no output_layout here.  Concourse emits one pipeline definition
-# and declares multi_file_output false, and a provider offers that key by
-# declaring it, so the provider that cannot use it declares nothing and an
-# operator who writes it is refused like anybody writing a key nobody
-# declared.
-#
-# pipeline_name is gone, because pipeline.name is the one label the
-# compiler and the status commands read, and expose is public with no
-# alias behind it.
-#
-# NOTE: notification styles, BOSH upgrade locks, and task library are
-# configuration-level features rather than provider-level options, and
-# they are documented in the compiler class's cli_opts_help and POD.
 sub provider_options_schema {
 	return {
 		# Declared to be refused by name, with what replaces it (D86).
@@ -276,36 +255,13 @@ sub provider_options_schema {
 		url      => {type => 'string',  required => \&_pipeline_enabled, description => 'Concourse API URL, used by fly login'},
 		team     => {type => 'string',  required => \&_pipeline_enabled, description => 'Concourse team name'},
 		insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS certificate verification'},
-
-		# The floor check_prereqs enforces, declared so that a
-		# repository can set it.  It was readable on the object and
-		# settable only from Perl, so an operator who wrote the key was
-		# refused by name and the version check had nothing to enforce.
-		# There is no default, because a repository that names no floor
-		# wants any fly that is present, which is what the check does
-		# when the key is absent.
-		#
-		# Declared as a version rather than as a string, so a value the
-		# check cannot compare against is refused as the configuration
-		# loads rather than silently enforcing nothing later.  A leading
-		# v is admitted here and stripped before the comparison, because
-		# that is how a Concourse release names itself.
 		min_fly_version => {type => 'semver', description => 'Lowest fly version this pipeline may be set with'},
-
-		# The fly this repository runs, so two repositories on two Concourse
-		# installations each keep the one that matches theirs.  A session
-		# overrides it through GENESIS_FLY_BIN, and a repository that names
-		# none takes whatever fly the path finds; fly_command is the one
-		# reader of all three.
 		fly_bin_path    => {type => 'string', description => 'Path or name of the fly CLI this pipeline is set with; GENESIS_FLY_BIN overrides it'},
 
 		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
 		tagged   => {type => 'boolean', default => Genesis::Config::FALSE, description => "Pin each environment's containers to workers tagged with its name"},
 
-		# The block defaults to an empty hash for the same reason the
-		# provider block itself does: validation only walks into a hash
-		# that is present, so without it the two defaults below are never
-		# reached and never resolve.
+		# An empty hash by default, or validation never reaches its keys.
 		task     => {
 			type        => 'hash',
 			default     => {},
@@ -313,13 +269,6 @@ sub provider_options_schema {
 			schema => {
 				image   => {type => 'string', default => 'genesiscommunity/concourse', description => 'Task image repository'},
 				version => {type => 'string', default => 'latest', description => 'Task image tag'},
-
-				# ASTBuilder and PipelineDescriptor both read
-				# task.privileged as the list of environments whose deploy
-				# task runs privileged, so the key has to be declared here
-				# or an operator who writes it has the load refuse it by
-				# name.  No default, because an absent list and an empty
-				# one mean the same thing to the readers.
 				privileged => {
 					type        => 'array',
 					subtype     => 'string',
@@ -353,10 +302,6 @@ sub capabilities {
 
 # }}}
 # validate_config - a url that is one {{{
-#
-# The rules a declaration cannot state, on top of the generic pass the
-# base gives every block.  SUPER first, because the declaration is the
-# floor rather than a subset of what is wanted checked.
 sub validate_config {
 	my ($class, $config, $path, $discriminator) = @_;
 	my @errors = $class->SUPER::validate_config($config, $path, $discriminator);

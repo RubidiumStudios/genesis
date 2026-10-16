@@ -164,6 +164,20 @@ the description C<genesis config> renders as help.
 The keys are C<target>, C<url>, C<team>, C<insecure>, C<min_fly_version>, C<fly_bin_path>,
 C<public>, C<tagged>, C<task>, C<pause_after_set>, and C<group_commits>.
 
+This fragment is the only place these keys are declared, and it is the
+whole of what the block admits beside the type, so a key that is not here
+is refused by name as the configuration loads. That is why the Concourse
+keys live here rather than beside the type, where they once sat unread
+under every other provider. There is no C<output_layout>: Concourse emits
+one pipeline definition and declares C<multi_file_output> false, and a
+provider offers that key by declaring it, so an operator who writes it is
+refused like anybody writing a key nobody declared. There is no
+C<pipeline_name> either, because C<pipeline.name> is the one label the
+compiler and the status commands read, and C<expose> is C<public> with no
+alias behind it. Notification styles, BOSH upgrade locks and the task
+library are configuration-level features, not provider options, and are
+documented with the compiler.
+
 B<The block names the Concourse, not an operator's fly target> (D86, noted
 2026-10-15). C<url> and C<team> are required while C<pipeline.enabled> is
 true, through L</_pipeline_enabled($siblings, $config)>, and not before,
@@ -196,6 +210,11 @@ The C<task> block declares C<image>, C<version>, and C<privileged>, and
 it defaults to an empty hash for the same reason the provider block
 itself does: validation only walks into a hash that is present, so
 without that default the sub-keys are never reached and never resolve.
+C<task.privileged> is the list of environments whose deploy task runs
+privileged, read by the AST builder and the pipeline descriptor, so it has
+to be declared here or the load refuses it by name; it has no default,
+because an absent list and an empty one mean the same thing to its
+readers.
 
 B<Returns:> a hash reference of key name to its declaration.
 
