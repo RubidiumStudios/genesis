@@ -152,8 +152,9 @@ sub _parse_genesis_config {
 	$parsed{provider}        = $data->{provider} || {};
 	$parsed{provider_config} = {};
 
+	# Every declared block the compiler uses reaches it (T382).
 	my %integ;
-	$integ{vault}          = $data->{vault} if $data->{vault};
+	$integ{$_} = $data->{$_} for grep {$data->{$_}} qw/vault locker notifications/;
 	$integ{source_control} = $self->_source_control_model($data->{source_control})
 		if $data->{source_control};
 	$parsed{integrations} = \%integ;

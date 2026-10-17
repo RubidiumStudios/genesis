@@ -474,6 +474,7 @@ integration-tests/genesis_commands_pipelines-diff.t           # pipeline-diff pr
 integration-tests/genesis_commands_pipelines-no_pipeline.t    # a preview with no pipeline section says so before it compiles
 integration-tests/genesis_ci_compiler-credential_refs.t       # the compile emits each credential component as its resolved reference
 integration-tests/genesis_ci_compiler-schema_contract.t       # the compiler reads nothing the schema does not declare
+integration-tests/genesis_ci_compiler-declared_blocks.t       # every declared block the compiler uses reaches it
 integration-tests/branch_class-pre_deploy_refusal.t           # a pre-deploy command refuses off a deployment, pull request, or artifacts branch
 integration-tests/branch_class-deployed_state.t               # a deployed-state command reads the environment's own branch
 integration-tests/genesis_new-no_session.t                    # genesis new opens no session, takes no switch lock, and restores no branch
