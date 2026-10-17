@@ -60,6 +60,7 @@ sub apply {
 	_refuse_disabled_pipeline();
 
 	my $top = _get_top($opts);
+	$top->read_shape_from_worktree if $opts->{'dry-run'}; # a preview (D112)
 
 	# --platform is gone, so the provider is the one the repository is
 	# configured for and nothing else, and an absent type is the manual

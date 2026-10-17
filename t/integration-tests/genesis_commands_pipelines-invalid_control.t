@@ -41,14 +41,15 @@ my $MOJIBAKE = qr/\xC3\xA2\xC2\x80\xC2\xA2/;
 
 subtest 'the previews read the fix and name what control fails' => sub {
 	# Five rows per preview, and one restoration assertion for each run.
-	plan tests => 12;
+	plan tests => 18;
 
-	for my $argv (['pipeline-describe'], ['pipeline-graph']) {
+	for my $argv (['pipeline-describe'], ['pipeline-graph'], ['pipeline-apply', '--dry-run']) {
 		my ($out, $err, $exit) = run_genesis($h, @$argv);
 		my $said = unfolded($err);
 
 		is($exit, 0, "`genesis @$argv` succeeds over an invalid control") or diag($err);
-		like($out, qr/\bqa\b/, "and shows the working tree's pipeline");
+		# The apply reports its branches on standard error.
+		like(unfolded($out, $err), qr/\bqa\b/, "and shows the working tree's pipeline");
 		like($said, qr/Control at \Q$short\E fails the configuration checks, so this preview does not read it/,
 			'naming control and its commit in the banner');
 		like($said, qr/\bci: unknown configuration key/, 'and the failure');
