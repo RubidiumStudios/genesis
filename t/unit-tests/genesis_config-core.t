@@ -1041,6 +1041,27 @@ EOF
 		"the sibling is still in what would be persisted");
 };
 
+subtest 'clear() reaches a parent already read' => sub {
+	# A load's validation reads the whole pipeline block before genesis config
+	# clears a key beneath it, so the parent's cached answer must go too, as
+	# set() already sees to; otherwise --unset of a nested key is ignored.
+	my $path = "$tmp/clear-cached-parent.yml";
+	put_file($path, <<'EOF');
+---
+pipeline:
+  vault:
+    url: https://vault.example.com
+    auth: secret/ci/pipeline:approle
+EOF
+
+	my $c = Genesis::Config->new($path);
+	ok(exists $c->get('pipeline.vault')->{auth}, 'the parent is read with the key in it');
+	ok(exists $c->get('pipeline')->{vault}{auth}, 'and so is the grandparent');
+	$c->clear('pipeline.vault.auth');
+	ok(!exists $c->get('pipeline.vault')->{auth}, 'the parent no longer answers the cleared key');
+	ok(!exists $c->get('pipeline')->{vault}{auth}, 'nor does the grandparent');
+};
+
 subtest 'clear() retracts a default alongside the value' => sub {
 	my $path = "$tmp/clear-default.yml";
 	put_file($path, <<'EOF');

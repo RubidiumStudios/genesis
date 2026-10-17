@@ -230,8 +230,10 @@ sub clear {
 	$self->_prune_empty_parents($_, $key)
 		for ($self->{loaded_values}, $self->{set_values}, $self->{default_values});
 
-	# Invalidate caches
-	delete($self->{cache}{$_}) for (grep {$_ =~ /^$key($|[\.\[])/} keys(%{$self->{cache}}));
+	# The key, its descendants, and every cached parent holding it, as set() does.
+	delete($self->{cache}{$_}) for (grep {
+		$_ =~ /^\Q$key\E($|[\.\[])/ || $key =~ /^\Q$_\E[\.\[]/
+	} keys(%{$self->{cache}}));
 	delete $self->{_contents};
 	delete $self->{_explicit_contents};
 

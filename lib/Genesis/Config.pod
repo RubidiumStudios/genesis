@@ -436,7 +436,10 @@ B<A removal is a removal in every store that could answer for the key>,
 which is why the I<default> layer is cleared alongside the other two. A
 default left behind would keep answering C<has()> and C<get()> for a key
 the caller has just removed, which reads as the removal having silently
-failed.
+failed.  For the same reason the cached answer of every parent already read
+is dropped with the key's own, as C<set()> drops them: a load's validation
+reads the whole block before C<genesis config --unset> clears a key beneath
+it, and a parent still cached would keep answering the removed key.
 
 Removing a key whose ancestor holds a scalar in the I<default> store does
 nothing in that store, rather than failing. A schema may declare a scalar
