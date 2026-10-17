@@ -1449,7 +1449,7 @@ sub diff {
 	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
 	_preview_shape($top);
-	my $result = _compile_pipeline($top, 'concourse');
+	my $result = _concourse_compile($top, 'pipeline-diff');
 	my $ast    = $result->{ast};
 	my $output = $result->{output};
 
@@ -1500,7 +1500,7 @@ sub status {
 
 	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
-	my $result = _compile_pipeline($top, 'concourse');
+	my $result = _concourse_compile($top, 'pipeline-jobs');
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
@@ -1560,7 +1560,7 @@ sub pause {
 
 	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
-	my $result = _compile_pipeline($top, 'concourse');
+	my $result = _concourse_compile($top, 'pipeline-pause');
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
@@ -1587,7 +1587,7 @@ sub resume {
 
 	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
-	my $result = _compile_pipeline($top, 'concourse');
+	my $result = _concourse_compile($top, 'pipeline-resume');
 	my $ast    = $result->{ast};
 	my $name   = $ast->metadata->{name}
 		or bail("Pipeline AST has no name defined");
@@ -2417,6 +2417,24 @@ sub _preview_shape {
 	output("The pipeline is disabled %s: #C{pipeline.enabled} is not true in ".
 		"its #C{.genesis/config}.", $where);
 	exit 0;
+}
+
+# }}}
+# _concourse_compile - the compile a command that works a live Concourse pipeline makes {{{
+sub _concourse_compile {
+	my ($top, $command) = @_;
+	bail({exitcode => CONFIG},
+		"Refusing to run #C{genesis %s}: the pipeline is not enabled, so there is no ".
+		"live pipeline to work.  Set #C{pipeline.enabled true}, then run ".
+		"#C{genesis pipeline-apply}.", $command)
+		unless $top->pipeline_enabled;
+	my $type = $top->pipeline_provider_type // 'manual';
+	bail({exitcode => CONFIG},
+		"Refusing to run #C{genesis %s}: it works a Concourse pipeline, and this ".
+		"pipeline's provider is %s.", $command, $type)
+		unless $type eq 'concourse';
+	$top->pipeline_topology; # the prior_env graph is refused here, by name
+	return _compile_pipeline($top, 'concourse');
 }
 
 # }}}

@@ -262,27 +262,23 @@ subtest 'no second check_prereqs stands on any class the command can be handed' 
 };
 
 subtest 'the provider the caller asked for is the provider it gets' => sub {
-	# Two rows, and one more for the run's own restoration assertion.
-	plan tests => 3;
+	plan tests => 2;
 
-	# pipeline-diff names Concourse itself, whatever the block says, so a
-	# repository whose block declares github-actions tells the two apart.
-	# github-actions has no compiling class, and a compile that read the type
-	# off the block would be refused by the registry and exit CONFIG before
-	# any fly was reached.
-	my $h = make_harness(envs => ['qa'], provider => 'concourse');
-	load_with($h, automated_config('github-actions'));
+	# The compile is asked for Concourse over a block that declares
+	# github-actions, which has no compiling class, so a compile that read
+	# the type off the block would be refused by the registry.  The row
+	# calls the compiler itself: since T386 no command hands it a provider
+	# the block does not declare, pipeline-diff refusing that block first.
+	my $h = make_harness(envs => ['qa'], provider => 'concourse', vault => 0);
+	my $top = load_with($h, automated_config('github-actions'));
 	compilable_pipeline($h);
+	require Genesis::CI::Compiler;
+	my $result = eval {Genesis::CI::Compiler->new(top => $top)->compile(provider => 'concourse')};
 
-	# --target, because a github-actions block names no Concourse for a
-	# ~/.flyrc entry to match (D86), and this row is about the type.
-	my ($out, $err, $exit) = run_genesis($h, 'pipeline-diff', '--target', 'harness');
-	my $said = flatten("$out\n$err");
-
-	unlike($said, qr/has no compiler for it yet/,
-		'the block\'s own type is not the one the compile resolved');
-	like($said, qr/does not exist on target/,
-		'and the run reached the fly the Concourse half calls');
+	is(eval {$result->{provider}->type}, 'concourse',
+		'the provider the compile hands back is the one asked for') or diag($@);
+	isa_ok($result->{compiler}, 'Genesis::CI::ProviderCompiler::Concourse',
+		'and its compiler');
 };
 
 done_testing;

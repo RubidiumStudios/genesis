@@ -1173,9 +1173,11 @@ Compile without vault access.
 
 B<Returns:> Nothing. It prints the diff, or says there is none, and exits 0.
 
-B<Errors:> Bails where the compiled AST carries no name, where the
-Concourse provider produced no F<pipeline.yml>, and where either side cannot
-be read as data.
+B<Errors:> Refuses at C<CONFIG> before it compiles where the provider is not
+Concourse or C<prior_env> forms a cycle, through
+L</_concourse_compile($top, $command)> (T386).  Bails where the compiled AST
+carries no name, where the Concourse provider produced no F<pipeline.yml>,
+and where either side cannot be read as data.
 
 B<Examples:>
 
@@ -1213,8 +1215,11 @@ L</diff()> takes them.
 
 B<Returns:> Nothing. It prints the table and exits 0.
 
-B<Errors:> Bails where the compiled AST carries no name, where C<fly> could
-not list the jobs, and where its answer is not JSON this command can read.
+B<Errors:> Refuses at C<CONFIG> before it compiles where the pipeline is not
+enabled, its provider is not Concourse, or C<prior_env> forms a cycle,
+through L</_concourse_compile($top, $command)> (T386).  Bails where the
+compiled AST carries no name, where C<fly> could not list the jobs, and where
+its answer is not JSON this command can read.
 
 B<Examples:>
 
@@ -1243,8 +1248,9 @@ L</diff()> takes them.
 
 B<Returns:> Nothing. It says what it paused and exits 0.
 
-B<Errors:> Bails where the compiled AST carries no name and where C<fly>
-refuses the pause.
+B<Errors:> Refuses at C<CONFIG> before it compiles as L</status([$env])>
+does.  Bails where the compiled AST carries no name and where C<fly> refuses
+the pause.
 
 B<Examples:>
 
@@ -1275,8 +1281,9 @@ L</diff()> takes them.
 
 B<Returns:> Nothing. It says what it resumed and exits 0.
 
-B<Errors:> Bails where the compiled AST carries no name and where C<fly>
-refuses the resume.
+B<Errors:> Refuses at C<CONFIG> before it compiles as L</status([$env])>
+does.  Bails where the compiled AST carries no name and where C<fly> refuses
+the resume.
 
 B<Examples:>
 
@@ -2280,6 +2287,45 @@ B<Examples:>
 
   _preview_shape($top);
   # Reading the pipeline's shape from HEAD at 4cf1438, not from control.
+
+=head2 _concourse_compile($top, $command)
+
+    my $result = _concourse_compile($top, 'pipeline-jobs');
+
+The compile a command that works a live Concourse pipeline makes:
+C<pipeline-diff>, C<pipeline-jobs>, C<pipeline-pause> and C<pipeline-resume>.
+Before it hands the root to L</_compile_pipeline>, it refuses a pipeline that
+is not enabled, a provider other than Concourse, and a C<prior_env> graph
+L<Genesis::Top/pipeline_topology> refuses, so none of those reaches the
+parser (T386).  C<pipeline-diff> has already left through
+L</_preview_shape($top)> where its preview reads a disabled pipeline.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment root.
+
+=item C<$command>
+
+The command's name, which each refusal names.
+
+=back
+
+B<Returns:> What L</_compile_pipeline> returns for C<concourse>.
+
+B<Errors:> Bails at C<CONFIG> where the pipeline is not enabled, naming
+C<pipeline.enabled> and C<genesis pipeline-apply>; where the provider is not
+Concourse, naming it; and where C<prior_env> forms a cycle or names an
+unknown environment, as L<Genesis::Top/pipeline_topology> says.
+
+B<Examples:>
+
+  _concourse_compile($top, 'pipeline-pause');
+  # Refusing to run genesis pipeline-pause: it works a Concourse pipeline,
+  # and this pipeline's provider is manual.
 
 =head2 _refuse_no_pipeline($top)
 
