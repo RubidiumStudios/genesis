@@ -182,4 +182,20 @@ subtest 'the removed keys are refused by name' => sub {
 	}
 };
 
+# T388: an empty name loaded and reached the compiler, which refused it under
+# a key v3 does not have, 'pipeline.metadata.name'.
+subtest 'an empty pipeline name is refused at load' => sub {
+	plan tests => 3;
+
+	write_nested_env('qa');
+
+	throws_ok {load_with($h, automated_pipeline_block() . "\n  name: ''")}
+		qr/pipeline\.name.*must not be empty.*deployment_type/s,
+		'an empty name is refused by name, with the default it would leave out';
+	lives_ok {load_with($h, automated_pipeline_block() . "\n  name: my-bosh")}
+		'a name passes';
+	lives_ok {load_with($h, automated_pipeline_block())}
+		'and no name at all takes the deployment_type';
+};
+
 done_testing;

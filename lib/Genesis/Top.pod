@@ -4542,6 +4542,26 @@ B<Examples:>
     Genesis::Top::_pr_prefix_rule('pr/');           # undef
     Genesis::Top::_pr_prefix_rule('');              # "must not be empty.  ..."
 
+=head2 _pipeline_name_rule
+
+    name => {type => 'string', check => \&_pipeline_name_rule}
+
+The schema's own rule for C<pipeline.name>: it must not be empty, because the
+provider's pipeline needs a name, and leaving the key out already names it
+after the C<deployment_type> (T388). An empty name used to load and be refused
+by the compiler under a key v3 does not have.
+
+B<Parameters:> The written value.
+
+B<Returns:> A message without the key, or C<undef>.
+
+B<Errors:> None; the schema reports the message as C<#R{key}: message>.
+
+B<Examples:>
+
+    Genesis::Top::_pipeline_name_rule('my-bosh');   # undef
+    Genesis::Top::_pipeline_name_rule('');          # "must not be empty.  ..."
+
 =head2 _pr_branch_collisions
 
     my ($branch, @collisions) = $top->_pr_branch_collisions('lab');

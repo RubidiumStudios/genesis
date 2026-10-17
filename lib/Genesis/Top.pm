@@ -2826,6 +2826,7 @@ sub _pipeline_config_schema {
 			# not checked as a git ref component.
 			name => {
 				type        => 'string',
+				check       => \&_pipeline_name_rule,
 				description => "The pipeline's name in its provider (defaults to deployment_type)"
 			},
 
@@ -3259,6 +3260,15 @@ sub _pr_prefix_rule {
 	return undef if length $prefix;
 	return "must not be empty.  An empty prefix gives the pull request branch ".
 		"the deployment branch's own name, so the two could not be told apart.";
+}
+
+# }}}
+# _pipeline_name_rule - the provider's pipeline needs a name {{{
+sub _pipeline_name_rule {
+	my ($name) = @_;
+	return undef if length $name;
+	return "must not be empty.  Leave it out to name the pipeline after the ".
+		"#C{deployment_type}.";
 }
 
 # }}}
