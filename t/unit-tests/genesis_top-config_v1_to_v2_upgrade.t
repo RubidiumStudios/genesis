@@ -27,6 +27,7 @@ use Test::Deep;
 use Test::Output;
 use Test::Exit;
 use File::Path qw/make_path/;
+use Genesis::Exit qw/CONFIG/;
 
 use_ok 'Genesis::Top';
 use_ok 'Genesis::Config';
@@ -191,6 +192,28 @@ EOF
 	ok(defined $code && $code != 0, 'the upgrade is refused');
 	like($err, qr/Cannot upgrade.*Manual intervention required/s,
 		'with the refusal written for it');
+	is(slurp_config($repo), $v1, 'and the v1 file is left as it was');
+};
+
+subtest 'v1 with no way to upgrade is refused at CONFIG, naming the way' => sub {
+	plan tests => 3;
+
+	# T390: a configuration problem exits at the configuration code, and the
+	# refusal names the setting that lets the upgrade run unattended.
+	my $v1 = "deployment_type: bosh\n";
+	my $repo = make_v1_repo('v1-no-upgrade', $v1);
+	local $ENV{GENESIS_IGNORE_EVAL} = 1;
+	$Genesis::RC->set('automatic_config_upgrade', 'no');
+	no warnings 'redefine';
+	local *Genesis::Top::in_controlling_terminal = sub {0};
+
+	my $code;
+	my $err = stderr_from { $code = exit_code { Genesis::Top->new($repo)->type } };
+	$Genesis::RC->set('automatic_config_upgrade', 'silent');
+
+	is($code, CONFIG, 'the refusal exits at CONFIG');
+	like($err =~ s/\s+/ /gr, qr/terminal.*automatic_config_upgrade/,
+		'naming how to let the upgrade run');
 	is(slurp_config($repo), $v1, 'and the v1 file is left as it was');
 };
 

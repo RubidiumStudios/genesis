@@ -3723,9 +3723,11 @@ B<Errors:>
 
 =item *
 
-C<"Genesis deployment repo v1 configuration is not supported, and cannot update automatically.  Manual intervention required.">
-- raised when a v1 config is detected, no controlling terminal is available,
-and automatic upgrade is disabled.
+C<"Genesis deployment repo v1 configuration is not supported, and cannot update automatically.  ...">
+- raised at C<Genesis::Exit::CONFIG> when a v1 config is detected, no
+controlling terminal is available, and automatic upgrade is disabled. It names
+the two ways the upgrade runs: from a terminal, or with
+C<automatic_config_upgrade: yes> in F<~/.genesis/config> (T390).
 
 =item *
 

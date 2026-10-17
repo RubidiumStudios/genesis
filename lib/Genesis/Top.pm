@@ -2487,9 +2487,11 @@ sub _validate_config {
 	if (($is_integer && $config_version == 1) || $is_semver) {
 
 		my $upgrade_automatically = $Genesis::RC->get(automatic_config_upgrade => 'no');
-		bail(
+		bail({exitcode => CONFIG},
 			"Genesis deployment repo v1 configuration is not supported, and cannot ".
-			"update automatically.  Manual intervention required."
+			"update automatically.  Run any Genesis command from a terminal to ".
+			"upgrade it to version 2, or set #C{automatic_config_upgrade: yes} in ".
+			"#C{~/.genesis/config} to upgrade it unattended."
 		) unless in_controlling_terminal || $upgrade_automatically ne 'no';
 
 		$self->_upgrade_config_to_v2($config_version, $upgrade_automatically);
