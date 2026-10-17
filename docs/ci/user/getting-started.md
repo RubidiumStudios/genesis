@@ -36,14 +36,16 @@ pipeline:
     control_branch: control
     auth:
       type: ssh
-      vault: secret/ci/pipeline:git_private_key
+      path: secret/ci/pipeline/git        # holds private_key
     identity:
       name:  Concourse Bot
       email: concourse@pipeline
 
   vault:
     url: https://vault.example.com
-    auth: secret/ci/pipeline:approle
+    auth:
+      type: approle
+      path: secret/ci/pipeline/approle    # holds role_id and secret_id
 
   locker:
     url: https://locker.example.com

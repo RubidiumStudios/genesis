@@ -866,7 +866,7 @@ ${url}    team: main
     repository: genesis/test-kit-deployments
     auth:
       type: ssh
-      vault: secret/ci/git
+      path: secret/ci/git
     identity:
       name: Genesis CI
       email: ci\@genesis.example.com

@@ -1965,6 +1965,44 @@ B<Examples:>
     $top->control_config_problems;
     # ('#R{ci}: unknown configuration key: expected one of ...')
 
+=head2 credential_components
+
+    my $refs = Genesis::Top::credential_components(vault => $auth);
+
+A credential block's components, as the references the compiler emits (D27,
+noted 2026-10-16).  A function rather than a method, because the compiler
+holds the block and not the Top.  For a type the schema declares, each
+component the type needs is given as C<< {secret_ref =E<gt> 'path:key'} >>:
+its own C<path:key> where the block gives one, else the block's C<path> under
+the component's name.  Any other shape, the first pass's and the legacy
+parser's, is handed back as it stands without its C<type>, so their compiles
+read what they always did.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$block>
+
+C<vault> or C<source_control>.
+
+=item C<$auth>
+
+The block's C<auth> hash, or anything else, which answers an empty hash.
+
+=back
+
+B<Returns:> A hashref of component name to reference.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    Genesis::Top::credential_components(vault =>
+        {type => 'approle', path => 'secret/ci/a', secret_id => 'secret/x:sid'});
+    # {role_id => {secret_ref => 'secret/ci/a:role_id'},
+    #  secret_id => {secret_ref => 'secret/x:sid'}}
+
 =head2 pipeline_section
 
     my $section = $top->pipeline_section();
@@ -4177,6 +4215,91 @@ Two of those carry a shape the declaration cannot state, and
 L</_validate_env_pipeline_block> checks both beside it.
 
 B<Returns:> A hash reference.
+
+=head2 _credential_schema
+
+    auth => _credential_schema(vault => 'The task credential, ...'),
+
+The schema entry for a credential block (D27, noted 2026-10-16): a hash with a
+required C<type> naming one of the block's credential types, an optional
+C<path>, and one optional C<path:key> string per component any of its types
+takes, judged as a whole by L</_credential_rule>.  The source-control block
+also declares its retired C<vault> key, so the load can refuse it by name
+through L</_retired_credential_vault>.  The types and their components live in
+one table, which L</credential_components> reads too.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$block>
+
+C<vault> or C<source_control>.
+
+=item C<$description>
+
+The entry's description.
+
+=back
+
+B<Returns:> The schema hashref.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _credential_schema(source_control => 'The clone credential');
+
+=head2 _credential_rule
+
+    my $problem = _credential_rule($block, $auth);
+
+The block's C<check>: a component the type does not take is named with the
+type and what it does take, and a component neither C<path> nor its own
+reference gives is named as missing, with the two ways to give it.  A block
+with no type, or a type the enum refuses, is left to those rules.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$block>
+
+C<vault> or C<source_control>.
+
+=item C<$auth>
+
+The block's value.
+
+=back
+
+B<Returns:> A message, or C<undef> where the block is whole.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _credential_rule(vault => {type => 'approle', role_id => 'secret/a:r'});
+    # 'the approle credential needs secret_id: name the secret ...'
+
+=head2 _retired_credential_vault
+
+    my $problem = _retired_credential_vault($value);
+
+The C<check> of C<source_control.auth.vault>, the one reference the block took
+before its components: it is always a problem, naming C<path> and the
+per-component form that replace it.
+
+B<Parameters:> The value, which is not read.
+
+B<Returns:> The message.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _retired_credential_vault('secret/ci/git');
+    # 'retired; name the vault secret holding the credential with path, ...'
 
 =head2 _automated_provider_configured
 

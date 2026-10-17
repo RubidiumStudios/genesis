@@ -2869,14 +2869,8 @@ sub _pipeline_config_schema {
 					# CI only, and required wherever a pipeline task has to
 					# clone and commit on its own.
 					auth => {
-						type        => 'hash',
-						required    => \&_automated_provider_configured,
-						description => 'Vault references for the clone credential',
-						schema => {
-							type     => {type => 'enum', values => [qw/ssh https/], default => 'ssh', description => 'How the task authenticates'},
-							vault    => {type => 'string', description => 'Vault path holding the credential'},
-							username => {type => 'string', description => 'Username for the https form'},
-						}
+						%{_credential_schema(source_control => 'The clone credential, as a type and its vault paths')},
+						required => \&_automated_provider_configured,
 					},
 					identity => {
 						type        => 'hash',
@@ -2921,7 +2915,7 @@ sub _pipeline_config_schema {
 				schema => {
 					url       => {type => 'string', required => 1, description => 'Vault URL'},
 					namespace => {type => 'string', description => 'Vault namespace'},
-					auth      => {type => 'string', description => 'Vault reference for the task credential'},
+					auth      => _credential_schema(vault => 'The task credential, as a type and its vault paths'),
 					options   => {type => 'any',    description => 'Provider-specific vault options'},
 				}
 			},
@@ -3087,6 +3081,70 @@ sub _pipeline_env_keys_schema {
 			},
 		}
 	};
+}
+
+# }}}
+# The components each credential type needs, each read from `path` under its own name by default.
+my %CREDENTIAL_COMPONENTS = (
+	vault          => {approle => [qw/role_id secret_id/], token => [qw/token/]},
+	source_control => {ssh => [qw/private_key/], https => [qw/username password/]},
+);
+
+# _credential_schema - a credential block: a type, a path, and its components {{{
+sub _credential_schema {
+	my ($block, $description) = @_;
+	my $types = $CREDENTIAL_COMPONENTS{$block};
+	my %components = map {($_ => 1)} map {@$_} values %$types;
+	return {
+		type        => 'hash',
+		description => $description,
+		check       => sub {_credential_rule($block, @_)},
+		schema      => {
+			type => {type => 'enum', values => [sort keys %$types], required => 1, description => 'The kind of credential'},
+			path => {type => 'string', description => 'The vault secret holding every component under its own name'},
+			(map {($_ => {type => 'string', description => "The <path>:<key> holding $_, in place of path's"})}
+				sort keys %components),
+			($block eq 'source_control' ? (vault => {type => 'string', check => \&_retired_credential_vault,
+				description => 'Retired: the vault secret is named by path'}) : ()),
+		},
+	};
+}
+
+# }}}
+# _credential_rule - every component the type needs is reachable, and no other {{{
+sub _credential_rule {
+	my ($block, $auth) = @_;
+	return undef unless ref($auth) eq 'HASH';
+	my $needs = $CREDENTIAL_COMPONENTS{$block}{$auth->{type} // ''} or return undef;
+	my %takes = map {($_ => 1)} @$needs, qw/type path vault/;
+	if (my @stray = grep {!$takes{$_}} sort keys %$auth) {
+		return sprintf("%s is not a component of the %s credential, which takes %s",
+			join(', ', @stray), $auth->{type}, join(', ', @$needs));
+	}
+	my @missing = grep {!defined $auth->{path} && !defined $auth->{$_}} @$needs;
+	return sprintf("the %s credential needs %s: name the secret holding %s with ".
+		"#C{path}, or give each as <path>:<key>", $auth->{type}, join(', ', @missing),
+		@missing > 1 ? 'them' : 'it') if @missing;
+	return undef;
+}
+
+# }}}
+# _retired_credential_vault - the one-reference key the credential had before its components {{{
+sub _retired_credential_vault {
+	return "retired; name the vault secret holding the credential with #C{path}, ".
+		"or give each component as <path>:<key>";
+}
+
+# }}}
+# credential_components - a credential block's components, as the references the compiler emits {{{
+sub credential_components {
+	my ($block, $auth) = @_;
+	return {} unless ref($auth) eq 'HASH';
+	my $needs = $CREDENTIAL_COMPONENTS{$block}{$auth->{type} // ''}
+		or return {map {($_ => $auth->{$_})} grep {$_ ne 'type'} keys %$auth};
+	return {map {
+		($_ => {secret_ref => $auth->{$_} // "$auth->{path}:$_"})
+	} @$needs};
 }
 
 # }}}

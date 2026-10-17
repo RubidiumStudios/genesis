@@ -142,7 +142,8 @@ subtest 'enabled with concourse is an automated pipeline' => sub {
 		'pipeline.vault.url'                 => 'https://vault.example.com',
 		'pipeline.locker.url'                => 'https://locker.example.com',
 		'pipeline.source_control.repository'     => 'genesis/bosh-deployments',
-		'pipeline.source_control.auth.vault'     => 'secret/ci/git',
+		'pipeline.source_control.auth.type'      => 'ssh',
+		'pipeline.source_control.auth.path'      => 'secret/ci/git',
 		'pipeline.source_control.identity.name'  => 'Genesis Bot',
 		'pipeline.source_control.identity.email' => 'bot@genesis.example.com',
 	});

@@ -215,8 +215,11 @@ sub env_vars_for_target {
 	# Vault
 	$env{VAULT_ADDR} = $vault->{url} if $vault->{url};
 	if ($vault->{auth}) {
-		$env{VAULT_ROLE_ID}   = _resolve_ref($vault->{auth}{role_id});
-		$env{VAULT_SECRET_ID} = _resolve_ref($vault->{auth}{secret_id});
+		require Genesis::Top;
+		my $vauth = Genesis::Top::credential_components(vault => $vault->{auth});
+		$env{VAULT_ROLE_ID}   = _resolve_ref($vauth->{role_id});
+		$env{VAULT_SECRET_ID} = _resolve_ref($vauth->{secret_id});
+		$env{VAULT_TOKEN}     = _resolve_ref($vauth->{token}) if defined $vauth->{token};
 	}
 	$env{VAULT_SKIP_VERIFY} = 'true'
 		if $vault->{options} && !$vault->{options}{tls_verify};
@@ -234,11 +237,13 @@ sub env_vars_for_target {
 	# Git
 	my $git = $self->{_source}{integrations}{source_control} || {};
 	if ($git->{auth}) {
-		if ($git->{auth}{type} eq 'ssh-key') {
-			$env{GIT_PRIVATE_KEY} = _resolve_ref($git->{auth}{private_key});
-		} elsif ($git->{auth}{type} eq 'username-password') {
-			$env{GIT_USERNAME} = _resolve_ref($git->{auth}{username});
-			$env{GIT_PASSWORD} = _resolve_ref($git->{auth}{password});
+		require Genesis::Top;
+		my $gauth = Genesis::Top::credential_components(source_control => $git->{auth});
+		if (defined $gauth->{private_key}) {
+			$env{GIT_PRIVATE_KEY} = _resolve_ref($gauth->{private_key});
+		} elsif (defined $gauth->{username}) {
+			$env{GIT_USERNAME} = _resolve_ref($gauth->{username});
+			$env{GIT_PASSWORD} = _resolve_ref($gauth->{password});
 		}
 	}
 	if ($git->{commit_author}) {

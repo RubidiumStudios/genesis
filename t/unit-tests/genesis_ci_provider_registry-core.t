@@ -175,7 +175,7 @@ subtest 'the two spellings cannot drift' => sub {
 	lives_ok {
 		load_with($h, join("\n",
 			enabled_pipeline('  provider:', '    type: github-actions'),
-			'    auth:', '      vault: secret/ci/git',
+			'    auth:', '      type: ssh', '      path: secret/ci/git',
 			'    identity:', '      name: Genesis', '      email: ci@example.com',
 			automation_block_lines()))
 	} 'github-actions validates, because the registry spells it that way';

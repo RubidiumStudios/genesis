@@ -1033,7 +1033,7 @@ sub _seed_pipeline_section {
 		$config->set('pipeline.provider.url'  => 'https://ci.harness.example');
 		$config->set('pipeline.provider.team' => 'main');
 		$config->set('pipeline.source_control.auth.type' => 'ssh');
-		$config->set('pipeline.source_control.auth.vault' => 'secret/ci/git');
+		$config->set('pipeline.source_control.auth.path' => 'secret/ci/git');
 		$config->set('pipeline.source_control.identity.name' => 'Genesis CI');
 		$config->set('pipeline.source_control.identity.email'
 			=> 'ci@genesis.example.com');
@@ -5007,7 +5007,7 @@ sub _automation_preamble {
 		'    repository: genesis/bosh-deployments',
 		'    auth:',
 		'      type: ssh',
-		'      vault: secret/ci/git',
+		'      path: secret/ci/git',
 		'    identity:',
 		'      name: Genesis CI',
 		'      email: ci@genesis.example.com',
@@ -5625,8 +5625,8 @@ sub automated {
 		$opts{provider} // 'concourse', commit => 0);
 	$h->set_repo_config('pipeline.source_control.auth.type',
 		$opts{auth_type} // 'ssh', commit => 0);
-	$h->set_repo_config('pipeline.source_control.auth.vault',
-		$opts{auth_vault} // 'secret/ci/git', commit => 0);
+	$h->set_repo_config('pipeline.source_control.auth.path',
+		$opts{auth_path} // 'secret/ci/git', commit => 0);
 	$h->set_repo_config('pipeline.source_control.identity.name',
 		$opts{identity_name} // 'Genesis CI', commit => 0);
 	$h->set_repo_config('pipeline.source_control.identity.email',

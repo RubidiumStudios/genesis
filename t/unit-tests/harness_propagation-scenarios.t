@@ -382,7 +382,7 @@ subtest 'the shuttle shape writes the backend block a row hands it' => sub {
 	my @preamble = ('pipeline:', '  enabled: true',
 		'  source_control:',
 		'    repository: genesis/bosh-deployments',
-		'    auth:', '      type: ssh', '      vault: secret/ci/git',
+		'    auth:', '      type: ssh', '      path: secret/ci/git',
 		'    identity:', '      name: Genesis CI',
 		'      email: ci@genesis.example.com',
 		'  provider:', '    type: concourse',
@@ -419,7 +419,7 @@ subtest 'the automated shape carries what an automation requires' => sub {
 	my ($config) = load_yaml_file($h->a . '/.genesis/config');
 	is($config->{pipeline}{provider}{type}, 'concourse',
 		'the provider is an automated one');
-	is($config->{pipeline}{source_control}{auth}{vault}, 'secret/ci/git',
+	is($config->{pipeline}{source_control}{auth}{path}, 'secret/ci/git',
 		'the clone credential is seeded beside it');
 	is($config->{pipeline}{source_control}{identity}{email},
 		'ci@genesis.example.com', 'and so is the committer identity');

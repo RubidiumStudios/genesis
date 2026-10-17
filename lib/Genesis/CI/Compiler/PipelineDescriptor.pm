@@ -444,16 +444,7 @@ sub _git_resource {
 	my $uri    = Genesis::CI::ProviderCompiler->git_uri($sc);
 	my $branch = $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main';
 
-	my $source = { uri => $uri, branch => $branch };
-
-	if ($sc->{auth}) {
-		if (($sc->{auth}{type} || '') eq 'ssh-key') {
-			$source->{private_key} = _unwrap_ref($sc->{auth}{private_key});
-		} else {
-			$source->{username} = _unwrap_ref($sc->{auth}{username});
-			$source->{password} = _unwrap_ref($sc->{auth}{password});
-		}
-	}
+	my $source = { uri => $uri, branch => $branch, _git_credential($sc) };
 	$source->{version_depth} = $sc->{version_depth} if $sc->{version_depth};
 
 	return { name => 'git', type => 'git', icon => 'github', source => $source };
@@ -573,15 +564,7 @@ sub _env_resources {
 	my $pr   = ($root eq '.') ? '' : "$root/";
 
 	# Shared git source
-	my %gs = (uri => $uri, branch => $br);
-	if ($sc->{auth}) {
-		if (($sc->{auth}{type} || '') eq 'ssh-key') {
-			$gs{private_key} = _unwrap_ref($sc->{auth}{private_key});
-		} else {
-			$gs{username} = _unwrap_ref($sc->{auth}{username});
-			$gs{password} = _unwrap_ref($sc->{auth}{password});
-		}
-	}
+	my %gs = (uri => $uri, branch => $br, _git_credential($sc));
 
 	# Env branch resource.  Under branch propagation the branch itself is
 	# the change signal, so there is nothing to path-filter: anything that
@@ -1234,15 +1217,7 @@ sub _auto_update_resources {
 	my $target_branch = $auto_update->{target_branch} || '';
 	if ($target_branch && $target_branch ne $control_branch) {
 		my $uri = Genesis::CI::ProviderCompiler->git_uri($sc);
-		my %source = (uri => $uri, branch => $target_branch);
-		if ($sc->{auth}) {
-			if (($sc->{auth}{type} || '') eq 'ssh-key') {
-				$source{private_key} = _unwrap_ref($sc->{auth}{private_key});
-			} else {
-				$source{username} = _unwrap_ref($sc->{auth}{username});
-				$source{password} = _unwrap_ref($sc->{auth}{password});
-			}
-		}
+		my %source = (uri => $uri, branch => $target_branch, _git_credential($sc));
 		push @resources, {
 			name   => 'git-autoupdate',
 			type   => 'git',
@@ -1520,8 +1495,10 @@ sub _task_config {
 	}
 
 	if ($vault->{auth}) {
-		$params{VAULT_ROLE_ID}   = _unwrap_ref($vault->{auth}{role_id});
-		$params{VAULT_SECRET_ID} = _unwrap_ref($vault->{auth}{secret_id});
+		my $auth = Genesis::Top::credential_components(vault => $vault->{auth});
+		$params{VAULT_ROLE_ID}   = _unwrap_ref($auth->{role_id});
+		$params{VAULT_SECRET_ID} = _unwrap_ref($auth->{secret_id});
+		$params{VAULT_TOKEN}     = _unwrap_ref($auth->{token}) if defined $auth->{token};
 	}
 	if ($vault->{options}) {
 		$params{VAULT_SKIP_VERIFY}  = $vault->{options}{tls_verify} ? 'false' : 'true';
@@ -1530,11 +1507,12 @@ sub _task_config {
 	$params{VAULT_NAMESPACE} = $vault->{namespace} if $vault->{namespace};
 
 	if ($sc->{auth}) {
-		if (($sc->{auth}{type} || '') eq 'ssh-key') {
-			$params{GIT_PRIVATE_KEY} = _unwrap_ref($sc->{auth}{private_key});
+		my $auth = Genesis::Top::credential_components(source_control => $sc->{auth});
+		if (defined $auth->{private_key}) {
+			$params{GIT_PRIVATE_KEY} = _unwrap_ref($auth->{private_key});
 		} else {
-			$params{GIT_USERNAME} = _unwrap_ref($sc->{auth}{username});
-			$params{GIT_PASSWORD} = _unwrap_ref($sc->{auth}{password});
+			$params{GIT_USERNAME} = _unwrap_ref($auth->{username});
+			$params{GIT_PASSWORD} = _unwrap_ref($auth->{password});
 		}
 	}
 	$params{GIT_GENESIS_ROOT} = $root if !$cli && $root ne '.';
@@ -1603,8 +1581,10 @@ sub _errand_config {
 		VAULT_ADDR        => $vault->{url} || '',
 	);
 	if ($vault->{auth}) {
-		$params{VAULT_ROLE_ID}   = _unwrap_ref($vault->{auth}{role_id});
-		$params{VAULT_SECRET_ID} = _unwrap_ref($vault->{auth}{secret_id});
+		my $auth = Genesis::Top::credential_components(vault => $vault->{auth});
+		$params{VAULT_ROLE_ID}   = _unwrap_ref($auth->{role_id});
+		$params{VAULT_SECRET_ID} = _unwrap_ref($auth->{secret_id});
+		$params{VAULT_TOKEN}     = _unwrap_ref($auth->{token}) if defined $auth->{token};
 	}
 	if ($vault->{options}) {
 		$params{VAULT_SKIP_VERIFY}  = $vault->{options}{tls_verify} ? 'false' : 'true';
@@ -1869,6 +1849,15 @@ sub _bosh_config_types {
 		? $track->{$env}
 		: ($ast->configuration || {})->{track_bosh_configs};
 	return _normalize_bosh_config_types($val);
+}
+
+# }}}
+# _git_credential - a git resource's credential keys, from the source-control block {{{
+sub _git_credential {
+	my ($sc) = @_;
+	my $auth = Genesis::Top::credential_components(source_control => $sc->{auth});
+	return map {($_ => _unwrap_ref($auth->{$_}))}
+		grep {defined $auth->{$_}} qw/private_key username password/;
 }
 
 # }}}

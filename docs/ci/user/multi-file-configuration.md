@@ -71,7 +71,7 @@ source_control:
   control_requires_pr: false
   auth:
     type: ssh
-    vault: secret/ci/pipeline:git_private_key
+    path: secret/ci/pipeline/git
   identity:
     name:  Concourse Bot
     email: concourse@pipeline
@@ -79,7 +79,7 @@ source_control:
 
 `remote` and `uri` are derived from the control branch's upstream, and `repository` is the GitHub owner and repository the API targets. Each is a choice with a good default rather than a fact of the checkout, which is why each takes a key. The deployment root takes none, being a fact of the checkout, and neither does the branch a command happens to be run from, that being runtime state.
 
-`auth` and `identity` are for CI alone, and they are required wherever a pipeline task has to clone and commit on its own. `auth.type` is `ssh` or `https`, and `auth.vault` is the path holding the credential.
+`auth` and `identity` are for CI alone, and they are required wherever a pipeline task has to clone and commit on its own. `auth.type` is `ssh` or `https`, and `auth.path` names the vault secret holding the type's components under their own names: `private_key` for `ssh`, `username` and `password` for `https`. A component kept elsewhere is given on its own as `<path>:<key>`, which replaces the default for that component alone, so `{type: https, path: secret/ci/git, password: secret/shared/token:value}` reads the username from `secret/ci/git` and the password from the shared secret. The load refuses a block missing a component, and a component the type does not take. The old `auth.vault` key is refused, naming `path`.
 
 ## The vault, locker, and shuttle Blocks
 
@@ -87,7 +87,9 @@ source_control:
 vault:
   url: https://vault.example.com
   namespace: null
-  auth: secret/ci/pipeline:approle
+  auth:
+    type: approle                       # or token
+    path: secret/ci/pipeline/approle    # holds role_id and secret_id
 
 locker:
   url: https://locker.example.com

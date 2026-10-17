@@ -41,7 +41,7 @@ sub automated_pipeline_block {
 	push @lines, @{$opts{provider_extra}} if $opts{provider_extra};
 	push @lines, '  source_control:',
 		'    repository: team/bosh',
-		'    auth:', '      vault: secret/ci/git',
+		'    auth:', '      type: ssh', '      path: secret/ci/git',
 		'    identity:', '      name: Genesis', '      email: ci@example.com';
 	push @lines, automation_block_lines(
 		without => [grep {$opts{$_}} qw/shuttle vault locker/]);

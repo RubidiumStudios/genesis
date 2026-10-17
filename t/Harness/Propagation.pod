@@ -2199,7 +2199,7 @@ It writes five blocks beside the provider type, because the configuration
 schema requires all five of an automated provider and a repository missing any
 of them is refused when a C<Genesis::Top> loads it.  They are the clone
 credential under C<source_control.auth>, which takes C<auth_type> and
-C<auth_vault>, the committer identity under C<source_control.identity>, which
+C<auth_path> (D27, noted 2026-10-16), the committer identity under C<source_control.identity>, which
 takes C<identity_name> and C<identity_email>, and the shuttle, the vault, and
 the locker, which come from C<automation_blocks>.
 
