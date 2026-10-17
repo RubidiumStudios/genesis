@@ -157,8 +157,9 @@ subtest 'the option and the declaration reach no other command' => sub {
 	my @declaring = grep {
 		defined command_properties($_)->{refresh}
 	} Genesis::Commands::commands();
-	is_deeply([sort @declaring], ['pipeline-describe', 'pipeline-status'],
-		'and the two reading commands are the only ones declaring a refresh');
+	# pipeline-diff joined them as a preview of the working tree (T376).
+	is_deeply([sort @declaring], ['pipeline-describe', 'pipeline-diff', 'pipeline-status'],
+		'and the three reading commands are the only ones declaring a refresh');
 };
 
 subtest 'a remedy that rests on the tracking refs is not offered stale' => sub {

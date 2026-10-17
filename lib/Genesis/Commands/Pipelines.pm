@@ -1445,6 +1445,7 @@ sub pipeline_describe {
 sub diff {
 	my $opts   = get_options;
 	my $top    = _get_top($opts, skip_vault => 1);
+	_preview_shape($top);
 	my $result = _compile_pipeline($top, 'concourse');
 	my $ast    = $result->{ast};
 	my $output = $result->{output};
@@ -1470,12 +1471,17 @@ sub diff {
 	}
 	mkfile_or_fail("$dir/live.yml", $live);
 
-	my ($diff_out, $diff_rc) = run(
-		'diff -u --label live --label compiled $1 $2',
-		"$dir/live.yml", "$dir/compiled.yml"
-	);
+	# Compared as data, since fly returns the pipeline in its own key order and
+	# spells null its own way; JSON spells both sides alike.
+	for my $side (qw/live compiled/) {
+		my ($json, $rc, $err) = run({stderr => 0}, 'spruce json "$1"', "$dir/$side.yml");
+		bail("Could not read the %s pipeline as data: %s", $side, $err // $json) if $rc;
+		mkfile_or_fail("$dir/$side.json", $json);
+	}
+	my ($diff_out, $diff_rc) = run('spruce diff "$1" "$2"',
+		"$dir/live.json", "$dir/compiled.json");
 
-	if ($diff_rc == 0) {
+	if ($diff_rc == 0 && ($diff_out // '') !~ /\S/) {
 		info("#G{No differences}.  The compiled pipeline matches the live ".
 			"pipeline.");
 	} else {
@@ -2627,10 +2633,10 @@ drifted away from what git says can be seen.  Where it configures none,
 the legacy configuration is compiled first and the progression is read
 off the compiled result, so the command prints in either case.
 
-=item B<pipeline-diff> [--target TARGET]
+=item B<pipeline-diff> [--from REF] [--target TARGET]
 
-Compare compiled pipeline YAML against the live pipeline via
-C<fly get-pipeline>.
+Compare the pipeline compiled from the working tree, or REF, against the live
+pipeline via C<fly get-pipeline>, as data through C<spruce diff>.
 
 =item B<pipeline-status> [<env>] [--target TARGET]
 

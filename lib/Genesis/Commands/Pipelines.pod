@@ -1129,20 +1129,29 @@ B<Examples:>
 
 =head2 diff()
 
-    genesis pipeline-diff
+    genesis pipeline-diff [--from <ref>]
 
-Compiles the pipeline and prints a unified diff between the pipeline
-Concourse is running and the one this repository would set.
+Compiles the pipeline and prints, path by path, how the pipeline Concourse
+is running differs from the one this repository would set.  It is a preview
+(D112, noted 2026-10-16): it compiles the deployment root's working tree under
+L</_preview_shape($top)>'s banner, or the ref C<--from> names.
 
 The live pipeline is read with C<fly get-pipeline>, so a target that does not
 carry the pipeline is reported as nothing to diff against rather than as a
-failure, with the command that would set it named beside the report.
+failure, with the command that would set it named beside the report.  Both
+sides are read as data through C<spruce json> and compared with C<spruce
+diff>, so key order and the spelling of a null are never reported as a
+difference (T376).
 
 B<Parameters:> None.  The environment is not an argument to this command.
 
 B<Options (via C<get_options>):>
 
 =over 4
+
+=item C<--from>
+
+The ref to compile the shape at, in place of the working tree.
 
 =item C<--target>
 
@@ -1157,13 +1166,18 @@ Compile without vault access.
 
 B<Returns:> Nothing. It prints the diff, or says there is none, and exits 0.
 
-B<Errors:> Bails where the compiled AST carries no name and where the
-Concourse provider produced no F<pipeline.yml>.
+B<Errors:> Bails where the compiled AST carries no name, where the
+Concourse provider produced no F<pipeline.yml>, and where either side cannot
+be read as data.
 
 B<Examples:>
 
   genesis pipeline-diff
   # No differences.  The compiled pipeline matches the live pipeline.
+
+  genesis pipeline-diff
+  # groups.bosh.jobs
+  # + one list entry added: ...
 
 =head2 status([$env])
 

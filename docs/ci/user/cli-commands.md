@@ -170,7 +170,7 @@ Compiles the pipeline and compares it against the live pipeline fetched through 
 genesis pipeline-diff [options]
 ```
 
-It shows a unified diff, or reports that the two pipelines are identical. `--target` or `-t` names the fly target for the run, found otherwise as `pipeline-apply` finds it, and `--skip-vault` skips vault connectivity when compiling.
+It shows each path that differs, through `spruce diff`, or reports that the two pipelines are identical; key order and how a null is spelled are never differences. Like `pipeline-describe` it is a preview: it compiles the working tree, and `--from <ref>` compiles a commit instead. `--target` or `-t` names the fly target for the run, found otherwise as `pipeline-apply` finds it, and `--skip-vault` skips vault connectivity when compiling.
 
 ## The Provider Job Controls
 

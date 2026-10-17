@@ -2337,15 +2337,25 @@ define_command("pipeline-release", {
 # genesis pipeline-diff - show compiled vs live pipeline delta {{{
 define_command("pipeline-diff", {
 	summary => "Show the diff between compiled and live pipeline.",
-	usage   => "pipeline-diff",
+	usage   => "pipeline-diff [--from <ref>]",
 	description =>
-		"Compiles the pipeline and compares it against the live pipeline ".
-		"fetched via `fly get-pipeline`.  Shows a unified diff, or reports ".
-		"that the pipelines are identical.",
+		"Compiles the pipeline from the working tree, or the ref --from names, ".
+		"and compares it against the live pipeline fetched via `fly ".
+		"get-pipeline`, through `spruce diff`.  Shows each path that differs, ".
+		"or reports that the pipelines are identical.",
 	function_group => Genesis::Commands::PIPELINE,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
+	# It reads the working tree and the live pipeline, never a ref a refresh
+	# could make current, as pipeline-describe does.
+	refresh        => 'never',
+	preview        => 1,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
 	options => [
+		'from=s' =>
+			"Compile the pipeline's shape as <ref> holds it rather than the ".
+			"working tree.  A banner names the ref and its commit.",
+
 		'target|t=s' =>
 			"The fly target for this run.  Without it, this clone's ".
 			"genesis.fly-target pin, else the one ~/.flyrc target whose URL ".

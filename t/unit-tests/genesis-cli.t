@@ -96,10 +96,16 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			absent       => [qw/platform|provider|p=s no-fetch/],
 			control_only => 1,
 		},
-		# The two describing commands take --from, the one way to read the
-		# pipeline's shape anywhere but control, and only they take it, so a
-		# shape read off a branch never reaches a command that acts (D112).
+		# The previews take --from, the one way to read the pipeline's shape
+		# at a commit rather than the working tree, and only they take it, so
+		# a shape read off a branch never reaches a command that acts (D112,
+		# noted 2026-10-16).
 		'pipeline-describe' => {
+			class   => Genesis::Commands::PRE_DEPLOY,
+			options => [qw/from=s/],
+			absent  => [qw/no-fetch no-refresh/],
+		},
+		'pipeline-diff' => {
 			class   => Genesis::Commands::PRE_DEPLOY,
 			options => [qw/from=s/],
 			absent  => [qw/no-fetch no-refresh/],
