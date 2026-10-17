@@ -2851,6 +2851,7 @@ sub _pipeline_config_schema {
 
 			source_control => {
 				type        => 'hash',
+				required    => \&_automated_provider_configured, # its auth and identity are (T385)
 				description => 'What the pipeline needs to know about the repository',
 				schema => {
 					# Derived from git, with an explicit override, because each

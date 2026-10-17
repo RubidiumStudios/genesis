@@ -60,8 +60,11 @@ EOF
 			print $fh "    url: https://ci.example.com\n";
 			print $fh "    team: main\n";
 			# An automated provider does the work unattended, so the
-			# skeleton carries the three blocks the schema requires of it.
-			print $fh "$_\n" for automation_block_lines();
+			# skeleton carries the four blocks the schema requires of it (T385).
+			print $fh "$_\n" for automation_block_lines(),
+				'  source_control:', '    repository: acme/test-kit-deployments',
+				'    auth:', '      type: ssh', '      path: secret/ci/git',
+				'    identity:', '      name: Genesis CI', '      email: ci@example.com';
 		}
 		close $fh;
 	}

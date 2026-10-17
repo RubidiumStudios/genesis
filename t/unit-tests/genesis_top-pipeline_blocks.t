@@ -42,7 +42,8 @@ sub automated_pipeline_block {
 	push @lines, '  source_control:',
 		'    repository: team/bosh',
 		'    auth:', '      type: ssh', '      path: secret/ci/git',
-		'    identity:', '      name: Genesis', '      email: ci@example.com';
+		'    identity:', '      name: Genesis', '      email: ci@example.com'
+		unless $opts{source_control};
 	push @lines, automation_block_lines(
 		without => [grep {$opts{$_}} qw/shuttle vault locker/]);
 	return join("\n", @lines);
@@ -73,13 +74,15 @@ sub write_nested_env {
 	});
 }
 
-subtest 'three blocks are required under an automation' => sub {
-	plan tests => 4;
+# source_control joined the three under T385: its auth and identity were
+# required only once the block was there, so a pipeline without it loaded.
+subtest 'four blocks are required under an automation' => sub {
+	plan tests => 5;
 
 	write_nested_env('qa');
 
 	lives_ok {load_with($h, automated_pipeline_block())} 'the complete section validates';
-	for my $block (qw/shuttle vault locker/) {
+	for my $block (qw/shuttle vault locker source_control/) {
 		throws_ok {load_with($h, automated_pipeline_block($block => 1))}
 			qr/pipeline: missing required key $block/,
 			"$block is required under an automated provider";
@@ -87,7 +90,7 @@ subtest 'three blocks are required under an automation' => sub {
 };
 
 subtest 'and every one of them is optional under manual' => sub {
-	plan tests => 1;
+	plan tests => 2;
 
 	write_nested_env('qa');
 
@@ -95,6 +98,9 @@ subtest 'and every one of them is optional under manual' => sub {
 		'  provider:', '    type: manual',
 		'  source_control:', '    repository: team/bosh'))}
 		'a manual pipeline needs none of the three';
+	lives_ok {load_with($h, join("\n", 'pipeline:', '  enabled: true',
+		'  provider:', '    type: manual'))}
+		'nor a source_control block, its keys derived from the clone';
 };
 
 subtest 'the shuttle backend refuses a directory' => sub {

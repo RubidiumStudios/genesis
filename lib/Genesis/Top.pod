@@ -4005,7 +4005,10 @@ to know about the repository, in three tiers. C<remote>, C<uri>, and
 C<repository> are derived from git with an explicit override; C<control_branch>,
 C<pr_prefix>, and C<control_requires_pr> are defaulted; and C<auth> and
 C<identity> are required wherever an automation has to clone and commit
-unattended, which is what L</_automated_provider_configured> decides. Two
+unattended, which is what L</_automated_provider_configured> decides.  The
+block itself is required there too, since a predicate on a key inside an
+absent block is never asked (T385); under the manual provider it may be left
+out, every key it would hold being derived or defaulted. Two
 things take no key at all. The deployment root is a fact of the checkout,
 read from the git prefix, and the branch a command runs from is runtime
 state, so it is checked rather than configured. L</_source_control> resolves

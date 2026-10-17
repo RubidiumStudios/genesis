@@ -38,6 +38,16 @@ sub make_repo {
 # Initialize $Genesis::RC for tests that consult global config
 provide_rc();
 
+# The source_control block an automated provider requires (T385), beside the
+# shuttle, vault and locker blocks automation_blocks gives.
+sub source_control_block {
+	return source_control => {
+		repository => 'acme/bosh-deployments',
+		auth       => {type => 'ssh', path => 'secret/ci/git'},
+		identity   => {name => 'Genesis CI', email => 'ci@example.com'},
+	};
+}
+
 sub make_v3_repo {
 	my ($dir, %opts) = @_;
 
@@ -49,20 +59,17 @@ sub make_v3_repo {
 
 	my $version = $opts{version} // 3;
 	my $content = "---\ncreator_version: 3.2.0\ndeployment_type: test-kit\nversion: $version\n";
-	if ($opts{pipeline}) {
-		$content .= "pipeline:\n";
-		for my $key (sort keys %{$opts{pipeline}}) {
-			my $val = $opts{pipeline}{$key};
-			if (ref($val) eq 'HASH') {
-				$content .= "  $key:\n";
-				for my $subkey (sort keys %$val) {
-					$content .= "    $subkey: $val->{$subkey}\n";
-				}
-			} else {
-				$content .= "  $key: $val\n";
-			}
-		}
-	}
+	# Rendered to any depth, since a credential block sits three levels down.
+	my $render;
+	$render = sub {
+		my ($hash, $indent) = @_;
+		join('', map {
+			ref($hash->{$_}) eq 'HASH'
+				? "$indent$_:\n" . $render->($hash->{$_}, "$indent  ")
+				: "$indent$_: $hash->{$_}\n"
+		} sort keys %$hash);
+	};
+	$content .= "pipeline:\n" . $render->($opts{pipeline}, '  ') if $opts{pipeline};
 	mkfile_or_fail("$genesis_dir/config", $content);
 
 	# An enabled pipeline derives its remote and its repository from git, so
@@ -112,7 +119,7 @@ subtest 'v3 config validates with CI enabled and provider' => sub {
 		enabled  => 'true',
 		provider => { type => 'concourse', url => 'https://pipes.example.com', team => 'acme' },
 		name => 'bosh',
-		automation_blocks(),
+		automation_blocks(), source_control_block(),
 	});
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
@@ -139,7 +146,7 @@ subtest 'v3 config with ci.yml and CI configured warns' => sub {
 	my $dir = make_v3_repo(workdir("v3-conflict"), pipeline => {
 		enabled  => 'true',
 		provider => { type => 'concourse', url => 'https://ci.example.com', team => 'test' },
-		automation_blocks(),
+		automation_blocks(), source_control_block(),
 	});
 	mkfile_or_fail("$dir/ci.yml", "---\npipeline:\n  layouts:\n    - sandbox\n");
 
