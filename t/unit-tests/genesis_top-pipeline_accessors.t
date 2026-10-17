@@ -224,6 +224,10 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 		# and the accessor answers control's type under D112, which on a
 		# branch or a clone behind R is not the file being checked.
 		'lib/Genesis/Top.pm _validate_capability_gates',
+
+		# The override check (T389) judges the files of the configuration in
+		# front of it, for the same reason, and the load reads nothing of control.
+		'lib/Genesis/Top.pm _validate_override_files',
 	);
 
 	my @readers = readers_of(qr{pipeline\.provider\.type});

@@ -3438,6 +3438,10 @@ sub _validate_pipeline_config {
 	# read for their shape.
 	$self->_validate_one_exodus_mount;
 
+	# The override files merged over the emitted pipeline, so a bad one is
+	# refused before the pipeline is built rather than after.
+	$self->_validate_override_files;
+
 	# Every environment's genesis.pipeline block, read merged.  A file
 	# whose genesis key is not a hash at all carries no block to check,
 	# and is left to whatever reads the environment itself.
@@ -3500,6 +3504,39 @@ sub _validate_shape_values {
 				$key, $env_name, $held, ($from // "$env_name.yml") =~ s{^\./}{}r
 			);
 		}
+	}
+
+	bail({exitcode => CONFIG},
+		"Configuration validation failed for #C{%s}:%s",
+		$self->path('.genesis/config'),
+		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
+	) if @errors;
+
+	return 1;
+}
+
+# }}}
+# _validate_override_files - every override the provider would merge is a YAML map {{{
+sub _validate_override_files {
+	my ($self) = @_;
+
+	# The file being judged, not control's shape: the load reads nothing of control.
+	my $type = $self->config->get('pipeline.provider.type', 'manual') // 'manual';
+	my $dir  = $self->path('.genesis');
+	opendir(my $dh, $dir) or return 1;
+	my @files = sort grep {/^pipeline-overrides-\Q$type\E(-.+)?\.yml$/ && -f "$dir/$_"} readdir($dh);
+	closedir $dh;
+
+	my @errors;
+	for my $file (@files) {
+		my ($data, $rc, $err) = load_yaml_file("$dir/$file");
+		# spruce prefixes a parse error with the not-a-map words; only the type
+		# assertion means the document parsed and is something else.
+		($err) = (($err // '') =~ /not a hash\/map:\s*(.*)/) or ($err) = split /\n/, $err // '';
+		push @errors, ($rc && $err !~ /type assertion/)
+			? sprintf("#C{.genesis/%s} is not valid YAML: %s", $file, $err)
+			: sprintf("#C{.genesis/%s} must be a map, merged over the emitted pipeline", $file)
+			if $rc || ref($data) ne 'HASH';
 	}
 
 	bail({exitcode => CONFIG},

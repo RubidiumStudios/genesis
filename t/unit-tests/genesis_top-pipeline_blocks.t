@@ -198,4 +198,38 @@ subtest 'an empty pipeline name is refused at load' => sub {
 		'and no name at all takes the deployment_type';
 };
 
+# T389: the override file was read only by the compile's spruce merge, so a
+# file that is no YAML map was found after the pipeline was built.
+subtest 'an override file that is no YAML map is refused at load' => sub {
+	plan tests => 5;
+
+	write_nested_env('qa');
+	my $file = $h->a . '/.genesis/pipeline-overrides-concourse.yml';
+
+	helper::put_file($file, "---\njobs: [unclosed\n");
+	throws_ok {load_with($h, automated_pipeline_block())}
+		qr/pipeline-overrides-concourse\.yml.*not valid YAML/s,
+		'a file that does not parse is refused, naming it';
+
+	helper::put_file($file, "---\n- a\n- b\n");
+	throws_ok {load_with($h, automated_pipeline_block())}
+		qr/pipeline-overrides-concourse\.yml.*must be a map/s,
+		'a file that is not a map is refused, naming it';
+
+	helper::put_file($h->a . '/.genesis/pipeline-overrides-concourse-pipeline.yml', "--- 42\n");
+	helper::put_file($file, "---\njobs: []\n");
+	throws_ok {load_with($h, automated_pipeline_block())}
+		qr/pipeline-overrides-concourse-pipeline\.yml.*must be a map/s,
+		'and so is a per-file override under the multi-file form';
+	unlink $h->a . '/.genesis/pipeline-overrides-concourse-pipeline.yml';
+
+	lives_ok {load_with($h, automated_pipeline_block())}
+		'a map passes';
+
+	helper::put_file($h->a . '/.genesis/pipeline-overrides-github-actions.yml', "- x\n");
+	lives_ok {load_with($h, automated_pipeline_block())}
+		'and another provider\'s override is not this pipeline\'s to judge';
+	unlink $file, $h->a . '/.genesis/pipeline-overrides-github-actions.yml';
+};
+
 done_testing;

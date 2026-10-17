@@ -4813,16 +4813,47 @@ every other error. Then come the capability gates of
 L</_validate_capability_gates>, then the manifest store and the kit floors
 of L</_validate_manifest_store>, and then the one exodus mount of
 L</_validate_one_exodus_mount>, which comes after the store because the
-mount is where that store keeps the pipeline's applied record. Last, every
+mount is where that store keeps the pipeline's applied record. Then the
+provider's override files are checked by L</_validate_override_files>
+(T389). Last, every
 environment the deployment root holds has its C<genesis.pipeline> block
 checked, read merged through L</_merged_env_params>. The refusals
 themselves belong to L</_validate_slug_components>, to
 L</_validate_shape_values>,
 to L</_validate_capability_gates>, to
-L</_validate_manifest_store>, to L</_validate_one_exodus_mount>, and to
-L</_validate_env_pipeline_block>.
+L</_validate_manifest_store>, to L</_validate_one_exodus_mount>, to
+L</_validate_override_files>, and to L</_validate_env_pipeline_block>.
 
 B<Returns:> 1.
+
+=head2 _validate_override_files
+
+    $top->_validate_override_files();
+
+Checks every override file the configured provider would merge over its
+emitted pipeline: each F<.genesis/pipeline-overrides-E<lt>typeE<gt>.yml>, and
+under the multi-file form each
+F<.genesis/pipeline-overrides-E<lt>typeE<gt>-E<lt>fileE<gt>.yml>, as the
+compiler's C<override_file_names> names them (D27, D67). Each must parse as
+YAML and be a map, which is what the compile's C<spruce merge> needs, so a bad
+one is refused at load rather than after the pipeline is built (T389). A file
+named for another provider is not this pipeline's and is not read. The files
+are read from the deployment root, where the compiler reads them.
+
+B<Parameters:> None.
+
+B<Returns:> 1.
+
+B<Errors:> Bails at C<CONFIG>, one bullet per file, naming a file that does
+not parse with the parser's first line, and a file that parses to something
+other than a map.
+
+B<Examples:>
+
+    $top->_validate_override_files;
+    # Configuration validation failed for .genesis/config:
+    #  - .genesis/pipeline-overrides-concourse.yml must be a map, merged over
+    #    the emitted pipeline
 
 =head2 _validate_shape_values
 
