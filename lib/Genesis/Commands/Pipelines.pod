@@ -711,7 +711,10 @@ aimed at it.
 The run may be started from any branch.  It switches to control inside its own
 session, walks from there, and puts the operator back on the branch they were
 standing on, so nobody has to move before running it.  See
-L</open_control_session>.
+L</open_control_session>.  A dry run switches nothing: it reads control's
+commits and its environments from their trees, through
+L<Genesis::Top/control_env>, so it needs only its deployment root committed
+(D112, noted 2026-10-16).
 
 An environment whose own C<genesis.pipeline.require_pr> is true takes its
 delivery on the pull request branch instead, as one aggregate commit above
@@ -1026,9 +1029,9 @@ I9 asks for.
 
 The clean-tree refusal that used to stand beside the branch refusal has moved
 rather than gone.  It now lives in the session's own C<begin>, which names the
-files it found, and it applies to a dry run as it does to a writing one,
-because a dry run switches to control like any other run and the clean
-assertion sits on the switch.
+files it found.  A dry run opens no session through here, since it switches
+nothing, and asks only that its deployment root is committed (D112, noted
+2026-10-16).
 
 B<Returns:> The open session, standing on control.
 
@@ -1835,9 +1838,11 @@ it creates no branch and keeps the lock until its report (D115, noted
 so it reads the shape from the local control it stands on rather than from
 the snapshot, and its topology, its control commits and its environment
 files come from one control (D30, noted 2026-10-10). A preview stands on
-control and creates nothing, so where the
-clone has no local control it is refused at C<DATAERR> with the rest (D44,
-noted 2026-10-09).
+nothing, so where the clone has no local control it reads control on T and
+says so (D44, noted 2026-10-16), and in place of the whole-tree question it
+asks only that its deployment root is committed, through
+L<Genesis::CI::Preflight/root_committed_problems($git)>, worded for a preview
+that needs a commit and not a push.
 
 B<Parameters:>
 

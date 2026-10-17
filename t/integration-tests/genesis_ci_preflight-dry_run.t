@@ -2,8 +2,10 @@
 # Proves the preview's reads and its assumed moves (D115 and D44, both noted
 # 2026-10-09), and T116's no-write half for them.  A dry run reads R once,
 # brings T up to that read, and creates, resets and fast-forwards nothing.
-# It warns for each move it assumes, in the conditional, and refuses a clone
-# with no local control, since it creates nothing and stands on control.
+# It warns for each move it assumes, in the conditional.  It also proves T374
+# (D112, D30 and D44, noted 2026-10-16): the preview reads control's commits
+# and switches nothing, reads control on T where the clone has no control,
+# and asks of the tree only that its own root is committed.
 use strict;
 use warnings;
 use utf8;
@@ -146,13 +148,37 @@ subtest 'a preview with control ahead reads the shape it stands on' => sub {
 	unlike($err, qr/^\s*qa: held/m, 'not held behind lab, as R\'s shape has it');
 };
 
-subtest 'a preview refuses a clone with no local control' => sub {
-	# Four rows, and the run's own restoration assertion.
-	plan tests => 5;
+# T374: the preview reads control's commits and switches nothing (D112, D30
+# and D44, all noted 2026-10-16).  HEAD's reflog is the witness: a switch to
+# control and back writes two entries into it even where it ends where it
+# began.
+sub reflog_of {
+	my ($h) = @_;
+	my ($out) = run({dir => $h->a}, 'git', 'reflog', '--format=%H %gs', 'HEAD');
+	return $out;
+}
+
+subtest '(a) a preview on a feature branch switches nothing' => sub {
+	# Three rows, and the run's own restoration assertion.
+	plan tests => 4;
+
+	my $h = two_stage();
+	run({dir => $h->a}, 'git', 'checkout', '-q', '-b', 'feature/watch', $h->control);
+	my $reflog = reflog_of($h);
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '--dry-run');
+	is($exit, 0, 'the preview succeeds') or diag($err);
+	like(unfolded($out, $err), qr/qa/, 'and reports the environments');
+	is(reflog_of($h), $reflog, 'and HEAD never moved');
+};
+
+subtest '(b) a clone with no local control previews control on T' => sub {
+	# Three rows, and the run's own restoration assertion.
+	plan tests => 4;
 
 	# The operator stands on a feature branch cut from control, and control
 	# itself is gone from the clone.  A real run creates it from T before it
-	# switches; a preview creates nothing, so it has no control to stand on.
+	# switches; a preview reads T, since it stands on nothing.
 	my $h       = two_stage();
 	my $control = $h->control;
 	run({dir => $h->a}, 'git', 'checkout', '-q', '-b', 'feature/watch', $control);
@@ -160,12 +186,39 @@ subtest 'a preview refuses a clone with no local control' => sub {
 	my $heads = heads_of($h);
 
 	my (undef, $err, $exit) = run_genesis($h, 'propagate', '--dry-run');
-	my $said = unfolded($err);
-
-	is($exit, Genesis::Exit::DATAERR, 'the preview refuses as data');
-	like($said, qr/preview creates nothing/, 'saying a preview creates nothing');
-	like($said, qr/git checkout \Q$control\E/, 'and naming the command that would create it');
+	is($exit, 0, 'the preview succeeds') or diag($err);
+	like(unfolded($err), qr{no local \Q$control\E, so this preview reads origin/\Q$control\E},
+		'saying it read control on T');
 	is(heads_of($h), $heads, 'and no local branch was created');
+};
+
+subtest '(c) an uncommitted change in the root is refused for the preview' => sub {
+	# Two rows, and the run's own restoration assertion.
+	plan tests => 3;
+
+	my $h = two_stage();
+	mkfile_or_fail($h->a . '/ops/shared.yml', "---\nshared: 2\n");
+
+	my (undef, $err, $exit) = run_genesis($h, 'propagate', '--dry-run');
+	is($exit, Genesis::Exit::DATAERR, 'the preview refuses as data');
+	like(unfolded($err), qr/needs the change committed and not pushed/,
+		'saying a preview of propagation needs a commit, not a push');
+};
+
+subtest "(d) another root's uncommitted change is not the preview's" => sub {
+	# One row, and the run's own restoration assertion.
+	plan tests => 2;
+
+	my $h = ready_harness(envs => ['lab', 'qa'], kit => 'omega-v2.7.0',
+		chained => 1, tracked => ['ops/shared.yml'], root => 'bosh');
+	commit_on_control($h, files => {
+		'bosh/ops/shared.yml' => "---\nshared: 1\n",
+		'vault/notes.yml'     => "--- {}\n",
+	}, message => 'Bump shared ops, beside a second root', push => 1);
+	mkfile_or_fail($h->a . '/vault/notes.yml', "--- {changed: true}\n");
+
+	my (undef, $err, $exit) = run_genesis($h, {dir => 'bosh'}, 'propagate', '--dry-run');
+	is($exit, 0, 'the preview in bosh/ succeeds') or diag($err);
 };
 
 done_testing;

@@ -588,21 +588,19 @@ sub propagate {
 	my $control_state = Genesis::CI::Preflight::require_control($top, $git,
 		refreshed    => $refreshed,
 		command      => 'propagate',
+		preview      => $dry_run ? 1 : 0,
 		permit_ahead => $dry_run ? 1 : 0);
 
-	# The run stands itself on control rather than asking the operator to.
-	# Everything below reads the environment files off the working tree, so
-	# the switch is what makes a run from a feature branch read the same
-	# topology as a run from control, and finish puts the operator back on the
-	# branch they started from.
-	#
-	# The clean-tree refusal that stood beside the branch refusal has moved
-	# rather than gone.  It now lives in the session's own begin, which names
-	# the files it found, and it is the same guard stated in one place.  It
-	# applies to a dry run as it does to a writing one, because a dry run
-	# switches to control like any other run and the clean assertion sits on
-	# the switch.
-	my $session = open_control_session($top, $git);
+	# The run stands itself on control rather than asking the operator to,
+	# and the session's begin asserts the tree clean.  A preview reads
+	# control's commits and environments from their trees, so it opens no
+	# session and switches nothing (D112, noted 2026-10-16).
+	my $session = $dry_run
+		? $git->session(control => $top->control_branch)
+		: open_control_session($top, $git);
+	my $load_env = $dry_run
+		? sub {$top->control_env($_[0])}
+		: sub {$top->load_env($_[0])};
 
 	# A refusal from here on owes the operator their branch back before it
 	# tells them why the run stopped.  The session's exit net would restore
@@ -793,7 +791,7 @@ sub propagate {
 			# request that has since merged is its to clear.
 			next unless @{$env_record->{pending}}
 				|| $topo->{nodes}{$env_record->{env}}{require_pr};
-			$env_of{$env_record->{env}} = $top->load_env($env_record->{env});
+			$env_of{$env_record->{env}} = $load_env->($env_record->{env});
 		}
 
 		for my $env_record (@{$record->{environments}}) {
@@ -837,7 +835,7 @@ sub propagate {
 				# The arm is asked even where nothing is due, because a
 				# proposed record left over from a pull request that has
 				# since merged is its to clear (D111).
-				my $env = $env_of{$env_name} ||= $top->load_env($env_name);
+				my $env = $env_of{$env_name} ||= $load_env->($env_name);
 				Genesis::CI::Walk::walk_one(
 					session => $session,
 					record  => $env_record,
@@ -1663,7 +1661,11 @@ sub _propagate_check_first {
 	my (@problems, $not_checked, $github);
 	my ($topology, $pr_branch_of) = ({nodes => {}, order => []}, {});
 
-	push @problems, Genesis::CI::Preflight::repository_problems($git);
+	# A preview switches nothing, so only its own root's commits matter (D112).
+	push @problems, $dry_run
+		? ($git->preflight_problems,
+		   Genesis::CI::Preflight::root_committed_problems($git, preview => 1))
+		: Genesis::CI::Preflight::repository_problems($git);
 
 	my $read = $git->snapshot_remote(remote => $remote, namespace => $ns,
 		branches => [$control], globs => ['*/' . $top->type]);
@@ -1713,6 +1715,9 @@ sub _propagate_check_first {
 			$git->resolve_branch($control, tracking => $ns) // {})->{state} // ''
 		) eq 'ahead';
 		$top->read_shape_from($ahead ? "refs/heads/$control" : "$ns/$control");
+		info("There is no local #C{%s}, so this preview reads #C{%s/%s}.",
+			$control, $remote, $control)
+			if $dry_run && !$git->branch_exists("refs/heads/$control");
 
 		# Whether the pipeline is enabled is the shape's to say, and one that is
 		# not ends the questions about it, the applied record's absence among

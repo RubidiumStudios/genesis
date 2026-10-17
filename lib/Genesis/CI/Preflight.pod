@@ -353,12 +353,14 @@ B<Examples:>
 =head2 root_committed_problems($git)
 
     my @problems = Genesis::CI::Preflight::root_committed_problems($git);
+    my @problems = Genesis::CI::Preflight::root_committed_problems($git, preview => 1);
 
 The deployment root's own uncommitted changes, for a command that reads
-commits and acts on their sync without switching branches, which is
-C<pipeline-apply> (D112 and D113, noted 2026-10-16).  Only the root's paths
-are asked about, so another root of the same repository never stands in the
-way; untracked files are not changes.  A command that switches branches asks
+commits without switching branches: C<pipeline-apply>, which acts on their
+sync, and C<genesis propagate --dry-run>, which walks control's commits (D112,
+D113 and D30, noted 2026-10-16).  Only the root's paths are asked about, so
+another root of the same repository never stands in the way; untracked files
+are not changes.  A command that switches branches asks
 L</repository_problems($git)> instead, because a switch needs the whole tree
 clean.
 
@@ -369,6 +371,11 @@ B<Parameters:>
 =item C<$git>
 
 The C<Service::Git> handle on the clone, whose prefix is the root.
+
+=item C<preview>
+
+Optional.  True for the propagate preview, which needs the change committed
+and not pushed, and says so in place of asking for a push.
 
 =back
 
@@ -649,10 +656,9 @@ is still answered, because no run writes the branch the tree stands on.
 
 =item C<preview>
 
-Optional. True for a preview, which stands on control as a run does and
-creates nothing, so a control the clone lacks is answered as a C<DATAERR>
-problem naming C<git checkout E<lt>controlE<gt>> or a real run, either of
-which creates it (D44, noted 2026-10-09).
+Optional. True for a preview, which reads control's commits and stands on
+nothing, so a control the clone lacks is no problem for it: it reads control
+on T (D44, noted 2026-10-16, withdrawing the refusal noted 2026-10-09).
 
 =item C<permit_ahead>, C<unverifiable>
 

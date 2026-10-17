@@ -105,15 +105,19 @@ sub repository_problems {
 # }}}
 # root_committed_problems - the deployment root's own uncommitted changes {{{
 sub root_committed_problems {
-	my ($git) = @_;
+	my ($git, %opts) = @_;
 	my ($prefix) = $git->prefixed('');
 	my $status   = $git->status(length($prefix // '') ? $prefix : ());
 	my @dirty    = sort grep {$status->{$_} !~ /^\?\?/} keys %$status;
 	return () unless @dirty;
 	return problem(DATAERR, sprintf(
-		"The deployment root has uncommitted changes, and this command reads ".
-		"what is committed and pushed, not the tree in front of it.\n\n".
-		"Commit and push them first:\n%s",
+		"The deployment root has uncommitted changes, and %s\n\n%s:\n%s",
+		$opts{preview}
+			? "a preview of propagation walks control's commits, so it needs the ".
+			  "change committed and not pushed."
+			: "this command reads what is committed and pushed, not the tree in ".
+			  "front of it.",
+		$opts{preview} ? 'Commit them first' : 'Commit and push them first',
 		join('', map {"  - $_\n"} @dirty)));
 }
 
@@ -382,15 +386,9 @@ sub _control_standing {
 		return ($div) if $opts{creates_local}
 			&& ($git->checked_out_branch // '') ne $control;
 
-		# A preview stands on control as a run does and creates nothing, so a
-		# clone without control has nothing for it to stand on (D44, noted
-		# 2026-10-09).
-		return ($div, problem(DATAERR, sprintf(
-			"The control branch #C{%s} is on #C{%s/%s} and not in this clone, ".
-			"and a preview creates nothing, so it has no control to stand on.  ".
-			"Create it with #C{git checkout %s}, or run #C{genesis propagate} ".
-			"without #C{--dry-run}, which creates it, then preview again.",
-			$control, $remote, $control, $control))) if $opts{preview};
+		# A preview reads control's commits and stands on nothing, so it reads
+		# control on T (D44, noted 2026-10-16).
+		return ($div) if $opts{preview};
 		return ($div, problem(DATAERR, sprintf(
 			"The control branch #C{%s} is on #C{%s/%s} and not in ".
 			"this clone.  The refresh writes the local ref for a branch the remote ".

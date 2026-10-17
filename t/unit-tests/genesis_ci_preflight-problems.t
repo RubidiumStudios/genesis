@@ -269,21 +269,19 @@ subtest "control's standing is read against the snapshot" => sub {
 	is($nowhere->[0]{code}, CONFIG, 'a control nowhere at all is CONFIG');
 };
 
-subtest 'a preview has no control to stand on where the clone has none' => sub {
-	plan tests => 2;
+subtest 'a preview reads control on T where the clone has none' => sub {
+	plan tests => 1;
 
-	# A preview stands on control as a run does and creates nothing, so the
-	# control a run would create from T is a problem for it (D44, noted
-	# 2026-10-09).
+	# A preview reads control's commits and stands on nothing, so a control
+	# the clone lacks is no problem for it; it reads control on T (D44, noted
+	# 2026-10-16, which withdrew the refusal noted 2026-10-09; T374).
 	my $w = moved_world();
 	$w->{run}->($w->{l}, 'checkout', '-q', '--detach');
 	$w->{run}->($w->{l}, 'branch', '-q', '-D', 'control');
-	my ($found) = Genesis::CI::Preflight::control_problems(Stub::Top->new,
+	my @found = Genesis::CI::Preflight::control_problems(Stub::Top->new,
 		$w->{git}, tracking => $SNAP, preview => 1);
 
-	is($found && $found->{code}, DATAERR, 'at DATAERR');
-	like($found && $found->{text}, qr/a preview creates nothing.*git checkout control/s,
-		'saying a preview creates nothing, and how to create it');
+	is(scalar(@found), 0, 'no problem is found');
 };
 
 subtest 'every pull request environment\'s collision is named' => sub {
