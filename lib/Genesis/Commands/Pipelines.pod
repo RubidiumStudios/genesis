@@ -2254,8 +2254,8 @@ names every gap between that tree and control on T.
 A shape switched off at the ref, or in a working tree whose
 F<.genesis/config> has a C<pipeline> section, is reported as disabled there on
 standard output, and the command exits 0 having done nothing more.  A working
-tree with no C<pipeline> section at all is left to the command, which falls
-back to the compiler as it always has.
+tree with no C<pipeline> section at all is refused by
+L</_refuse_no_pipeline($top)> before anything compiles (T381).
 
 B<Parameters:>
 
@@ -2276,6 +2276,37 @@ B<Examples:>
 
   _preview_shape($top);
   # Reading the pipeline's shape from HEAD at 4cf1438, not from control.
+
+=head2 _refuse_no_pipeline($top)
+
+    _refuse_no_pipeline($top);
+
+Refuses a preview of a repository whose F<.genesis/config> has no C<pipeline>
+section, saying no pipeline is configured and naming the section, before any
+compile is reached (T381, runbook finding 27).  A version 2 configuration
+takes no pipeline at all, so its refusal also names the move to version 3,
+C<genesis config --set version 3>; a version 3 one names the first key to set.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment root being previewed.
+
+=back
+
+B<Returns:> Never.
+
+B<Errors:> Always bails at C<CONFIG>.
+
+B<Examples:>
+
+  _refuse_no_pipeline($top);
+  # No pipeline is configured: .genesis/config has no pipeline section, so
+  # there is nothing to preview.  This repository's configuration is version
+  # 2, which takes no pipeline; move it to version 3 with ...
 
 =head2 _worktree_banner($top)
 

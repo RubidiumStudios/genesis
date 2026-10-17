@@ -471,6 +471,7 @@ integration-tests/genesis_commands_pipelines-preview_worktree.t # previews read 
 integration-tests/genesis_commands_pipelines-invalid_control.t # control's tree is judged: previews name its failures, actions refuse
 integration-tests/genesis_commands_pipelines-apply_root_committed.t # the apply needs its own deployment root committed, and no other
 integration-tests/genesis_commands_pipelines-diff.t           # pipeline-diff previews the tree, compares as data, and takes --from
+integration-tests/genesis_commands_pipelines-no_pipeline.t    # a preview with no pipeline section says so before it compiles
 integration-tests/genesis_ci_compiler-credential_refs.t       # the compile emits each credential component as its resolved reference
 integration-tests/genesis_ci_compiler-schema_contract.t       # the compiler reads nothing the schema does not declare
 integration-tests/branch_class-pre_deploy_refusal.t           # a pre-deploy command refuses off a deployment, pull request, or artifacts branch

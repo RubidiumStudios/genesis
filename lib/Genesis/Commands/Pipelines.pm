@@ -2405,14 +2405,31 @@ sub _preview_shape {
 		$where = "at #C{$ref} (#C{$short})";
 	} else {
 		$top->read_shape_from_worktree;
+		_refuse_no_pipeline($top) unless $top->config->is_set('pipeline');
 		_worktree_banner($top);
-		return if $top->pipeline_enabled || !$top->config->is_set('pipeline');
+		return if $top->pipeline_enabled;
 		$where = 'in the working tree';
 	}
 
 	output("The pipeline is disabled %s: #C{pipeline.enabled} is not true in ".
 		"its #C{.genesis/config}.", $where);
 	exit 0;
+}
+
+# }}}
+# _refuse_no_pipeline - a preview of a repository that configures no pipeline {{{
+sub _refuse_no_pipeline {
+	my ($top) = @_;
+	my $v2 = ($top->config->get('version') // '') eq '2';
+	bail({exitcode => CONFIG},
+		"No pipeline is configured: #C{.genesis/config} has no #C{pipeline} section, ".
+		"so there is nothing to preview.%s",
+		$v2
+			? "  This repository's configuration is version 2, which takes no ".
+			  "pipeline; move it to version 3 with #C{genesis config --set version 3}, ".
+			  "then configure the pipeline with #C{genesis config --set pipeline.<key> <value>}."
+			: "  Configure one with #C{genesis config --set pipeline.<key> <value>}, ".
+			  "starting with #C{pipeline.enabled true}.");
 }
 
 # }}}
