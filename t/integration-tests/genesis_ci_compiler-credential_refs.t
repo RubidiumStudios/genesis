@@ -39,7 +39,7 @@ sub compiled {
 }
 
 subtest 'approle from a path, with one component given on its own' => sub {
-	plan tests => 4;
+	plan tests => 5;
 	my $yml = compiled(
 		'pipeline.vault.auth.type'          => 'approle',
 		'pipeline.vault.auth.path'          => 'secret/ci/a',
@@ -50,6 +50,9 @@ subtest 'approle from a path, with one component given on its own' => sub {
 	like($yml, qr{VAULT_ROLE_ID: "?\(\(secret/ci/a:role_id\)\)}, 'role_id from the path, under its own name');
 	like($yml, qr{VAULT_SECRET_ID: "?\(\(secret/shared/x:sid\)\)}, 'secret_id from its own reference');
 	like($yml, qr{private_key: "?\(\(secret/ci/git:private_key\)\)}, 'the ssh key from its path');
+	# The committer is the configured source_control.identity, which the
+	# compiler once ignored for a default of its own (T380).
+	like($yml, qr{GIT_AUTHOR_NAME: "?Genesis CI}, 'and tasks commit as the configured identity');
 };
 
 subtest 'https from a path' => sub {

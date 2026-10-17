@@ -143,19 +143,19 @@ sub _parse_genesis_config {
 
 	my %parsed;
 
-	$parsed{pipeline}        = $data->{pipeline}        || {};
-	$parsed{targets}         = $data->{targets}         || {};
-	$parsed{scripts}         = $data->{scripts}         || {};
-	$parsed{provider}        = $data->{provider}        || {};
-	$parsed{provider_config} = $data->{provider_config} || {};
+	# Only keys the schema declares are read (D27, noted 2026-10-16; T380).
+	# The topology comes from the environment files, so the superseded
+	# layout's pipeline, targets, scripts and integrations blocks are not.
+	$parsed{pipeline}        = {};
+	$parsed{targets}         = {};
+	$parsed{scripts}         = {};
+	$parsed{provider}        = $data->{provider} || {};
+	$parsed{provider_config} = {};
 
-	# Accept both the nested form (pipeline.integrations.*) and the flat one
-	# (pipeline.vault:, pipeline.source_control:).  A flat key wins only where
-	# the nested one is absent, so an explicit pipeline.integrations: always
-	# takes precedence.
-	my %integ = %{ $data->{integrations} || {} };
-	$integ{vault}          //= $data->{vault}          if $data->{vault}          && !$integ{vault};
-	$integ{source_control} //= $data->{source_control} if $data->{source_control} && !$integ{source_control};
+	my %integ;
+	$integ{vault}          = $data->{vault} if $data->{vault};
+	$integ{source_control} = $self->_source_control_model($data->{source_control})
+		if $data->{source_control};
 	$parsed{integrations} = \%integ;
 
 	# When no pipeline section is provided, workflow topology is derived from
@@ -194,6 +194,23 @@ sub _parse_genesis_config {
 		: '.genesis/config';
 
 	return \%parsed;
+}
+
+# }}}
+# _source_control_model - the compiler's source-control model, from the declared keys {{{
+sub _source_control_model {
+	my ($self, $sc) = @_;
+	my $git      = $self->{top} ? eval {$self->{top}->git} : undef; # no clone: the root is '.'
+	my ($prefix) = $git ? $git->prefixed('') : ('');
+	$prefix = ($prefix // '') =~ s{/+$}{}r;
+	return {
+		repository     => $sc->{repository},
+		uri            => $sc->{uri},
+		default_branch => $sc->{control_branch},
+		root           => length($prefix) ? $prefix : '.',
+		(defined $sc->{auth}     ? (auth          => $sc->{auth})     : ()),
+		(defined $sc->{identity} ? (commit_author => $sc->{identity}) : ()),
+	};
 }
 
 # }}}

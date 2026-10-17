@@ -2326,19 +2326,14 @@ subtest 'Parser - genesis-config: produces correct normalized structure' => sub 
 	is $parsed->{_source_format}, 'genesis-config', "_source_format is 'genesis-config'";
 	like $parsed->{_source_path}, qr{\.genesis/config$}, "_source_path ends with .genesis/config";
 
-	ok ref($parsed->{targets}) eq 'HASH', "targets is a hash";
-	ok exists $parsed->{targets}{sandbox},  "sandbox target present";
-	ok exists $parsed->{targets}{prod},     "prod target present";
-
+	# Only keys the schema declares are read (D27, noted 2026-10-16; T380), so
+	# the superseded layout's targets, workflows and nested integrations the
+	# fixture carries are not, and the topology comes from the env files.
+	is_deeply $parsed->{targets}, {}, "targets are not read from the section";
 	ok ref($parsed->{integrations}) eq 'HASH', "integrations is a hash";
-	ok $parsed->{integrations}{vault}{url}, "vault url present";
-
-	ok ref($parsed->{pipeline}) eq 'HASH',    "pipeline is a hash";
-	ok $parsed->{pipeline}{workflows},         "workflows present (from ci.pipeline)";
-
-	# env_dir must NOT be set when a pipeline section is provided
-	ok(!$parsed->{env_dir},
-		"env_dir not set when pipeline section is provided");
+	ok !$parsed->{integrations}{vault}, "a nested integrations block is not read";
+	ok !$parsed->{pipeline}{workflows}, "nor a pipeline block's workflows";
+	ok $parsed->{env_dir}, "the topology is read from the environment files";
 
 	# ci.provider: must be propagated into $parsed->{provider} so that
 	# Compiler->compile() can populate provider_opts from stored config.
@@ -2752,8 +2747,10 @@ subtest 'Parser - genesis-config: flat vault/source_control lifted into integrat
 			auth => { role_id => { secret_ref => 'secret/ci:role_id' } },
 		},
 		source_control => {
-			provider   => 'github',
-			repository => 'org/repo',
+			provider       => 'github',
+			repository     => 'org/repo',
+			control_branch => 'control',
+			identity       => {name => 'Bot', email => 'bot@example.com'},
 		},
 		pipeline => {},
 	};
@@ -2768,18 +2765,20 @@ subtest 'Parser - genesis-config: flat vault/source_control lifted into integrat
 		"ci.vault lifted into integrations.vault";
 	is $parsed->{integrations}{vault}{url}, 'https://vault.example.com',
 		"vault url preserved";
-	ok $parsed->{integrations}{source_control},
-		"ci.source_control lifted into integrations.source_control";
-	is $parsed->{integrations}{source_control}{provider}, 'github',
-		"source_control provider preserved";
+	my $sc = $parsed->{integrations}{source_control};
+	is $sc->{repository}, 'org/repo', "source_control repository preserved";
+	is $sc->{default_branch}, 'control', "the control branch is the one the git resources track";
+	is_deeply $sc->{commit_author}, {name => 'Bot', email => 'bot@example.com'},
+		"and the identity is the one tasks commit under";
+	ok !exists $sc->{provider}, "an undeclared provider key is not read (T380)";
 };
 
-subtest 'Parser - genesis-config: nested integrations.* takes precedence over flat' => sub {
+subtest 'Parser - genesis-config: a nested integrations block is not read' => sub {
 	my $mixed_ci = {
 		targets       => { sandbox => { type => 'bosh-director', connection => { url => 'u' } } },
-		vault         => { url => 'https://flat-vault.example.com' },   # flat, so it should be ignored
+		vault         => { url => 'https://flat-vault.example.com' },   # declared, so it is read
 		integrations  => {
-			vault          => { url => 'https://nested-vault.example.com' },  # nested wins
+			vault          => { url => 'https://nested-vault.example.com' },  # undeclared, so it is not
 			source_control => { provider => 'github', repository => 'org/repo' },
 		},
 		pipeline => {},
@@ -2789,8 +2788,9 @@ subtest 'Parser - genesis-config: nested integrations.* takes precedence over fl
 	my $parser = Genesis::CI::Compiler::Parser->new(top => $top);
 	my $parsed = eval { $parser->parse() };
 	ok !$@, "mixed flat+nested parses without error" or diag $@;
-	is $parsed->{integrations}{vault}{url}, 'https://nested-vault.example.com',
-		"nested integrations.vault takes precedence over flat ci.vault";
+	# Only keys the schema declares are read (D27, noted 2026-10-16; T380).
+	is $parsed->{integrations}{vault}{url}, 'https://flat-vault.example.com',
+		"the declared vault block is read, and the nested one is not";
 };
 
 ### ============================================================ ###
