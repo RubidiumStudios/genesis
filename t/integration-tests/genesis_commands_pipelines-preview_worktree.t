@@ -33,18 +33,11 @@ sub harness {
 	return $h;
 }
 
-# pipeline-graph still writes pipeline.md (T375 moves it to stdout), so the
-# drawing is read and taken away, and only then is the tree asserted restored.
+# Every preview prints what it shows (T375), so the run's own restoration
+# assertion is the proof it wrote nothing in the tree.
 sub preview {
 	my ($h, @argv) = @_;
-	my $w = $h->snapshot_w;
-	my ($out, $err, $exit) = run_genesis($h, {dir => 'bosh', restore => 0}, @argv);
-	my $file = $h->a . '/bosh/pipeline.md';
-	if (-f $file) {
-		$out = slurp($file);
-		unlink $file;
-	}
-	assert_w_restored($w, "working state is restored after `genesis @argv`");
+	my ($out, $err, $exit) = run_genesis($h, {dir => 'bosh'}, @argv);
 	return ($out, unfolded($err), $exit);
 }
 

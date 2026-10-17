@@ -135,10 +135,11 @@ Where the repository has no enabled `pipeline:` block there is nothing for the c
 
 ## Visualizing the Pipeline
 
-Genesis writes a Mermaid flowchart of your pipeline to `pipeline.md`:
+Genesis prints a Mermaid flowchart of your pipeline, or writes it to a file with `--output`:
 
 ```bash
 genesis pipeline-graph
+genesis pipeline-graph --output pipeline.md
 ```
 
 Or describes it in words:

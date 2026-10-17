@@ -1361,7 +1361,7 @@ sub _push_failure {
 
 # }}}
 # }}}
-# pipeline_graph - write pipeline.md with Mermaid flowchart {{{
+# pipeline_graph - print, or write, the Mermaid flowchart {{{
 sub pipeline_graph {
 	my ($layout) = @_;
 
@@ -1371,9 +1371,7 @@ sub pipeline_graph {
 	# For env-file topology, build the DAG directly.
 	if ($top->pipeline_enabled) {
 		my $topo = $top->pipeline_topology;
-		my $md = _topology_to_mermaid_md($top, $topo->{nodes}, $topo->{edges});
-		mkfile_or_fail('pipeline.md', $md);
-		info("Wrote #C{pipeline.md}");
+		_emit_graph(_topology_to_mermaid_md($top, $topo->{nodes}, $topo->{edges}));
 		exit 0;
 	}
 
@@ -1389,11 +1387,18 @@ sub pipeline_graph {
 	# A compile hands back a compiler and every compiler that emits a
 	# Concourse pipeline defines graph_md, so there is nothing here to
 	# ask about first.
-	my $md = $compiler->graph_md();
-
-	mkfile_or_fail('pipeline.md', $md);
-	info("Wrote #C{pipeline.md}");
+	_emit_graph($compiler->graph_md());
 	exit 0;
+}
+
+# }}}
+# _emit_graph - the drawing to standard output, or to the file --output names {{{
+sub _emit_graph {
+	my ($md) = @_;
+	my $file = get_options->{output};
+	return output({raw => 1}, $md) unless defined $file;
+	mkfile_or_fail($file, $md);
+	info("Wrote #C{%s}", $file);
 }
 
 # }}}
@@ -2608,7 +2613,8 @@ its directory empty.
 
 =item B<pipeline-graph>
 
-Compile pipeline and write C<pipeline.md> containing a Mermaid flowchart.
+Compile pipeline and print a Mermaid flowchart, or write it to the file
+C<--output> names.
 Where the repository configures a pipeline, the flowchart is drawn from
 the environment files and no provider is compiled for at all.
 

@@ -40,11 +40,7 @@ subtest 'the previews read the fix and name what control fails' => sub {
 	plan tests => 10;
 
 	for my $argv (['pipeline-describe'], ['pipeline-graph']) {
-		my $w = $h->snapshot_w;
-		my ($out, $err, $exit) = run_genesis($h, {restore => 0}, @$argv);
-		my $file = $h->a . '/pipeline.md';
-		if (-f $file) {$out = slurp($file); unlink $file}
-		assert_w_restored($w, "working state is restored after `genesis @$argv`");
+		my ($out, $err, $exit) = run_genesis($h, @$argv);
 		my $said = unfolded($err);
 
 		is($exit, 0, "`genesis @$argv` succeeds over an invalid control") or diag($err);

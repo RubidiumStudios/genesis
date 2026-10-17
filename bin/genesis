@@ -2144,13 +2144,13 @@ define_command("pipeline-apply", {
 	],
 }, 'Genesis::Commands::Pipelines::apply');
 # }}}
-# genesis pipeline-graph - write Mermaid pipeline.md {{{
+# genesis pipeline-graph - print or write the Mermaid flowchart {{{
 define_command("pipeline-graph", {
-	summary => "Write a Mermaid pipeline graph to pipeline.md.",
-	usage   => "pipeline-graph [--from <ref>]",
+	summary => "Print a Mermaid pipeline graph.",
+	usage   => "pipeline-graph [--from <ref>] [--output <file>]",
 	description =>
-		"Compiles the pipeline and writes a Mermaid flowchart to pipeline.md ".
-		"in the current directory.  Replaces `genesis graph`.",
+		"Compiles the pipeline and prints a Mermaid flowchart, or writes it to ".
+		"the file --output names.  Replaces `genesis graph`.",
 	function_group => Genesis::Commands::PIPELINE,
 	preview        => 1,
 	scope          => 'repo',
@@ -2161,6 +2161,11 @@ define_command("pipeline-graph", {
 			"does, to see a change to it before it is merged.  A banner names ".
 			"the ref and its commit.  Only pipeline-graph and pipeline-describe ".
 			"take it; every command that acts reads control.",
+
+		'output|o=s' =>
+			"Write the drawing to <file> rather than printing it.  A file inside ".
+			"the deployment root is a change to it, which pipeline-apply refuses ".
+			"until it is committed.",
 	],
 }, 'Genesis::Commands::Pipelines::pipeline_graph');
 # }}}

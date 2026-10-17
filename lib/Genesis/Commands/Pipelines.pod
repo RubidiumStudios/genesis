@@ -1041,10 +1041,12 @@ B<Examples:>
 
 =head2 pipeline_graph([$layout])
 
-    genesis pipeline-graph
+    genesis pipeline-graph [--output <file>]
 
-Writes F<pipeline.md>, a Markdown page holding a Mermaid flowchart of the
-pipeline's environments and the edges between them.
+Prints a Markdown page holding a Mermaid flowchart of the pipeline's
+environments and the edges between them, or writes it to the file
+C<--output> names, through L</_emit_graph($md)>.  A preview writes nothing
+by default, so it never dirties the tree it reads (T375).
 
 A repository whose pipeline is configured in F<.genesis/config> is drawn
 straight from C<< $top->pipeline_topology >>, because that topology is the one
@@ -1068,7 +1070,8 @@ The pipeline layout, accepted for the legacy call shape and not read.
 
 =back
 
-B<Returns:> Nothing. It writes the file, says where it wrote it, and exits 0.
+B<Returns:> Nothing. It prints the drawing, or writes the file and says where,
+and exits 0.
 
 B<Errors:> Bails where the repository has no pipeline section for the parser
 to read, and where C<--from> names no commit or a shape that is invalid at
@@ -1077,11 +1080,11 @@ it.
 B<Examples:>
 
   genesis pipeline-graph
-  # Wrote pipeline.md
+  # ```mermaid ...
 
-  genesis pipeline-graph --from HEAD
+  genesis pipeline-graph --from HEAD --output graph.md
   # Reading the pipeline's shape from HEAD at 4cf1438, not from control.
-  # Wrote pipeline.md
+  # Wrote graph.md
 
 =head2 pipeline_describe([$layout])
 
@@ -2190,6 +2193,31 @@ B<Examples:>
 
   _describe_topology($top, {}, []);
   # No environments with pipeline metadata found.
+
+=head2 _emit_graph($md)
+
+    _emit_graph($md);
+
+Prints the drawing on standard output, or writes it to the file C<--output>
+names and says so on standard error.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$md>
+
+The Markdown page holding the flowchart.
+
+=back
+
+B<Returns:> Nothing of use.
+
+B<Errors:> Bails where the named file cannot be written.
+
+B<Examples:>
+
+  _emit_graph($md);    # prints it, or "Wrote graph.md"
 
 =head2 _preview_shape($top)
 

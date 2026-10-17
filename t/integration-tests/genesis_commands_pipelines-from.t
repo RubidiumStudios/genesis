@@ -39,18 +39,11 @@ sub commit_here {
 	return $h->git('a')->sha('HEAD');
 }
 
-# pipeline-graph writes pipeline.md by design, so a row reads the drawing,
-# takes it away, and then asserts the run left nothing else behind.
+# pipeline-graph prints the drawing (T375), so the run's own restoration
+# assertion is the proof it left nothing behind.
 sub graph {
 	my ($h, @args) = @_;
-	my $w = $h->snapshot_w;
-	my (undef, $err, $exit) = run_genesis($h, {restore => 0},
-		'pipeline-graph', @args);
-	my $file = $h->a . '/pipeline.md';
-	my $md   = -f $file ? slurp($file) : '';
-	unlink $file;
-	assert_w_restored($w, "working state is restored after `genesis pipeline-graph @args`");
-	return ($md, $err, $exit);
+	return run_genesis($h, 'pipeline-graph', @args);
 }
 
 subtest '(a) the branch re-parents prod, and the previews show it' => sub {

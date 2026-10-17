@@ -141,7 +141,7 @@ Releasing is a human act. No deploy clears a hold, and no flag does either. The 
 
 ## genesis pipeline-graph
 
-Compiles the pipeline and writes a Mermaid flowchart to `pipeline.md` in the current directory.
+Compiles the pipeline and prints a Mermaid flowchart, or writes it to the file `--output` names. A file written inside the deployment root is an uncommitted change, which `pipeline-apply` refuses until it is committed.
 
 ```
 genesis pipeline-graph
