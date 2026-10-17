@@ -392,10 +392,12 @@ B<Parameters:>
 
 =item C<%opts>
 
-C<target> is the C<fly> target and is required, C<team> the Concourse
-team, C<pipeline_name> the name to set it under, C<pause_after_set>,
-C<expose>, and C<insecure> the switches of the same names, C<dry-run> to
-print rather than set, and C<yes> to skip the confirmation.
+C<yaml> is the compiled pipeline to set, which C<pipeline-apply> hands over
+from its compile; without it the C<parse()> path's own C<generate()> is
+used.  C<target> is the C<fly> target, C<team> the Concourse team,
+C<pipeline_name> the name to set it under, C<pause_after_set>, C<expose>,
+and C<insecure> the switches of the same names, C<dry-run> to print rather
+than set, and C<yes> to skip the confirmation.
 
 An option the caller leaves out is resolved through C<provider_option>,
 so the team falls back to the operator's block and then to the provider's
@@ -409,9 +411,9 @@ runs, so it needs no target.
 
 B<Returns:> 1.
 
-B<Errors:> raises "Must call parse() before deploy()" when nothing has
-been read, the provider's refusal at C<CONFIG> when no target is to be
-found, "Cannot determine pipeline name" when nothing
+B<Errors:> raises what C<generate()> raises when neither C<yaml> nor a
+C<parse()> gives a pipeline to set, the provider's refusal at C<CONFIG>
+when no target is to be found, "Cannot determine pipeline name" when nothing
 names the pipeline, and a message naming the C<fly> subcommand that
 failed when one does.
 

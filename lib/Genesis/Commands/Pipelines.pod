@@ -288,7 +288,11 @@ own has the branch, protection, and record stages behind it rather than
 skipped, and a dry run has reported all three and written none of them,
 whether or not a directory flag was given with it.  Exits 0 under the
 C<manual> provider, once those stages have run and the skipped stage has
-been named.  Exits 86 when the provider's prerequisites are not met.
+been named.  Exits 86 when the provider's prerequisites are not met, which
+is asked with the compile, after the pre-flight and before any branch is
+cut or record written, so a compile or a missing C<fly> leaves nothing
+behind (T384).  The pipeline is set from that compile, at C<--target> where
+it is given and at the target the provider resolves otherwise (D86).
 
 B<Errors:>
 

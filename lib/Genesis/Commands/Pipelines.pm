@@ -155,6 +155,11 @@ sub apply {
 		) if $found->{refusal};
 	}
 
+	# Compiled, and fly checked where it will be run, before anything is written (T384).
+	my $deploys = $platform eq 'concourse' && !$dry_run && !$opts->{'output-dir'};
+	my $result  = $platform eq 'manual' ? undef : _compile_pipeline($top, $platform);
+	$result->{provider}->check_prereqs() or exit 86 if $deploys;
+
 	_apply_init_branches($top, $git, dry_run => $dry_run);
 
 	# The repository is asked to enforce the append-only rule Genesis observes
@@ -243,8 +248,6 @@ sub apply {
 		exit 0;
 	}
 
-	my $result = _compile_pipeline($top, $platform);
-
 	_dump_debug_artifacts($opts->{'debug-dir'}, $result, $platform)
 		if $opts->{'debug-dir'};
 
@@ -279,14 +282,14 @@ sub apply {
 			exit 0;
 		}
 
-		$provider->check_prereqs() or exit 86;
-
 		my %deploy_opts = %{ $compiler->normalize_provider_opts(
 			$result->{provider_cli_opts} || {}
 		) };
-		$deploy_opts{target}          //= $opts->{target} // $layout // $name;
+		# A target only where the operator names one; fly resolves it otherwise (D86).
+		$deploy_opts{target}          //= $opts->{target} if defined $opts->{target};
 		$deploy_opts{pause_after_set} //= $opts->{paused};
-		$compiler->deploy(%deploy_opts, yes => $opts->{yes});
+		$compiler->deploy(%deploy_opts, yaml => $output->{'pipeline.yml'},
+			pipeline_name => $name, yes => $opts->{yes});
 
 	} elsif ($platform eq 'github-actions') {
 		# No run reaches this arm today, because the provider registry

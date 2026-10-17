@@ -331,8 +331,7 @@ sub generate {
 #   4. Built-in defaults (team: main, etc.)
 sub deploy {
 	my ($self, %opts) = @_;
-
-	bail("Must call parse() before deploy()") unless $self->{config};
+	my $config = $self->{config} || {}; # set only on the parse() path
 
 	# All keys use config-file names (target, team, pipeline_name, pause_after_set, expose).
 	# Callers are responsible for normalizing cli-prefixed keys before calling deploy().
@@ -350,7 +349,7 @@ sub deploy {
 	# Pipeline name: call-site override > provider_opts > config name > deployment_type
 	my $pipeline_name = $opts{pipeline_name}
 		// $self->provider_option('pipeline_name')
-		// $self->{config}{pipeline}{name}
+		// ($config->{pipeline} || {})->{name}
 		// ($self->{top} ? $self->{top}->type : undef);
 	bail("Cannot determine pipeline name.  Set pipeline.name, or ensure ".
 		"deployment_type is set")
@@ -364,12 +363,13 @@ sub deploy {
 		// DEFAULT_PAUSE_AFTER_SET;
 	my $expose   = $opts{expose}
 		// $self->provider_option('expose')
-		// _yaml_bool(($self->{config}{pipeline} || {})->{public}, DEFAULT_EXPOSE);
+		// _yaml_bool(($config->{pipeline} || {})->{public}, DEFAULT_EXPOSE);
 	my $insecure = $opts{insecure}
 		// $self->provider_option('insecure')
 		// DEFAULT_INSECURE;
 
-	my $yaml = $self->generate();
+	# The compiled pipeline the apply hands over, or the parse() path's own.
+	my $yaml = $opts{yaml} // $self->generate();
 
 	if ($dry_run) {
 		output({raw => 1}, $yaml);
