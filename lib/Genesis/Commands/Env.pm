@@ -1134,6 +1134,25 @@ sub _deploy_branch_action {
 }
 
 # }}}
+# _warn_control_position - say where the local control stands against T {{{
+sub _warn_control_position {
+	my ($top, $div, $branch) = @_;
+	return unless $div && ($div->{ahead} || $div->{behind});
+	my $control = $top->control_branch;
+	my $theirs  = sprintf('%s/%s', $top->source_control_remote, $control);
+
+	my @said;
+	push @said, sprintf("The local #C{%s} has %s not on #C{%s}, which reach ".
+		"#C{%s} only once they are pushed and propagated.", $control,
+		count_nouns($div->{ahead}, 'commit'), $theirs, $branch) if $div->{ahead};
+	push @said, sprintf("The local #C{%s} lacks %s that #C{%s} has; pull it to ".
+		"see the pipeline in effect.", $control,
+		count_nouns($div->{behind}, 'commit'), $theirs) if $div->{behind};
+	warning("%s  This deploy delivers from #C{%s}, which neither changes.",
+		join('  ', @said), $branch);
+}
+
+# }}}
 # _deploy_preflight - the deploy's pre-flight, in order {{{
 #
 # The order is the design's, and it is one sub because the order is what the
@@ -1205,6 +1224,7 @@ sub _deploy_preflight {
 		outcome       => 'Nothing was deployed.',
 		on_divergence => 'report');
 	info("  #Gi{%s}", $_) for @{$control_state->{events}};
+	_warn_control_position($top, $control_state->{divergence}, $branch);
 
 	# 3.  The session the gate opened asserts the tree clean in begin, and for
 	# a deploy that switches that is the whole of the check.  Three arms of
