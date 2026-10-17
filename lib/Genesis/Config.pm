@@ -342,7 +342,7 @@ sub problems {
 
 	for my $key (sort keys %{$self->_contents}) {
 		if (! exists($schema->{$key})) {
-			push @errors, "#R{$key}: unknown configuration key: expected one of ".join(', ', keys %$schema);
+			push @errors, "#R{$key}: unknown configuration key: expected one of ".join(', ', sort keys %$schema);
 			next;
 		}
 		my $value = $self->get($key);
@@ -752,7 +752,7 @@ sub _validate_key {
 			$value = $self->get($key);
 			for my $subkey (sort keys %$value) {
 				if (! exists($schema->{schema}{$subkey})) {
-					push @errors, "#R{$key.$subkey}: unknown configuration key: expected one of ".join(', ', keys %{$schema->{schema}});
+					push @errors, "#R{$key.$subkey}: unknown configuration key: expected one of ".join(', ', sort keys %{$schema->{schema}});
 					next;
 				}
 				my @subkey_errors = $self->_validate_key("$key.$subkey", $schema->{schema}{$subkey});

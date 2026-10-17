@@ -1041,6 +1041,23 @@ EOF
 		"the sibling is still in what would be persisted");
 };
 
+subtest 'an unknown key lists the expected keys sorted (T383)' => sub {
+	my $path = "$tmp/unknown-sorted.yml";
+	put_file($path, "---\nzeta: 1\nblock:\n  bogus: 1\n");
+	my $schema = {
+		mango  => {type => 'string'}, apple => {type => 'string'},
+		kiwi   => {type => 'string'},
+		block  => {type => 'hash', schema => {
+			yew => {type => 'string'}, ash => {type => 'string'}, oak => {type => 'string'},
+		}},
+	};
+	my @errors = Genesis::Config->new($path)->problems($schema);
+	my ($top)    = grep {/zeta/}  @errors;
+	my ($nested) = grep {/bogus/} @errors;
+	like($top, qr/expected one of apple, block, kiwi, mango$/, 'the top-level keys, sorted');
+	like($nested, qr/expected one of ash, oak, yew$/, 'and a block\'s keys, sorted');
+};
+
 subtest 'clear() reaches a parent already read' => sub {
 	# A load's validation reads the whole pipeline block before genesis config
 	# clears a key beneath it, so the parent's cached answer must go too, as
