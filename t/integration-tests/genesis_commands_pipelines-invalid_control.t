@@ -35,9 +35,13 @@ my $sha   = commit_on_control($h, files => {'.genesis/config' => to_yaml($data)}
 my $short = substr($sha, 0, 7);
 mkfile_or_fail($path, $good);
 
+# A bullet written as a literal in a file without `use utf8` reaches the
+# terminal encoded twice, so its bytes read as "â" and two control characters.
+my $MOJIBAKE = qr/\xC3\xA2\xC2\x80\xC2\xA2/;
+
 subtest 'the previews read the fix and name what control fails' => sub {
-	# Four rows per preview, and one restoration assertion for each run.
-	plan tests => 10;
+	# Five rows per preview, and one restoration assertion for each run.
+	plan tests => 12;
 
 	for my $argv (['pipeline-describe'], ['pipeline-graph']) {
 		my ($out, $err, $exit) = run_genesis($h, @$argv);
@@ -48,12 +52,13 @@ subtest 'the previews read the fix and name what control fails' => sub {
 		like($said, qr/Control at \Q$short\E fails the configuration checks, so this preview does not read it/,
 			'naming control and its commit in the banner');
 		like($said, qr/\bci: unknown configuration key/, 'and the failure');
+		unlike($err, $MOJIBAKE, 'in a list whose bullets are not encoded twice');
 	}
 };
 
 subtest 'the commands that act refuse, naming control' => sub {
-	# Three rows per command, and one restoration assertion for each run.
-	plan tests => 12;
+	# Four rows per command, and one restoration assertion for each run.
+	plan tests => 15;
 
 	for my $argv (['pipeline-apply'], ['propagate'], ['qa', 'deploy']) {
 		my (undef, $err, $exit) = run_genesis($h, @$argv);
@@ -62,6 +67,7 @@ subtest 'the commands that act refuse, naming control' => sub {
 		like($said, qr/control at \Q$short\E fails the configuration checks/i,
 			'naming control and its commit');
 		like($said, qr/\bci: unknown configuration key/, 'and the failure');
+		unlike($err, $MOJIBAKE, 'in a list whose bullets are not encoded twice');
 	}
 };
 

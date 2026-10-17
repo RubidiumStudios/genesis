@@ -1176,7 +1176,8 @@ sub _refuse_invalid_shape {
 		"#C{genesis pipeline-describe}, reads the fix from the working tree ".
 		"before it is committed.",
 		defined($self->{__shape_ref}) ? "#C{$self->{__shape_ref}}" : 'Control',
-		$at, join('', map {"\n  • $_"} @{$shape->{__config_problems}}),
+		$at, join('', map {"\n[[".bullet('', inline => 1, indent => 2).">>$_"}
+			@{$shape->{__config_problems}}),
 		$self->control_branch);
 }
 

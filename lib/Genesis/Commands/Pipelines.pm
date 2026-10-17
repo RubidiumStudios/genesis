@@ -5,6 +5,7 @@ use warnings;
 
 use Genesis;
 use Genesis::State;
+use Genesis::Term qw/bullet/;
 use Genesis::Commands;
 use Genesis::Exit qw/CONFIG ABORTED TEMPFAIL/;
 use Genesis::Config;
@@ -2433,7 +2434,7 @@ sub _worktree_banner {
 	if (my @failed = $top->control_config_problems) {
 		push @lines, sprintf("#Y{Control at }#C{%s}#Y{ fails the configuration checks, so this ".
 			"preview does not read it:}%s", substr($gaps->{tracking}{commit} // '', 0, 7),
-			join('', map {"\n  • $_"} @failed));
+			join('', map {"\n[[".bullet('', inline => 1, indent => 2).">>$_"} @failed));
 	}
 	return unless @lines;
 
