@@ -388,8 +388,8 @@ subtest 'Error: bosh_parent with no locker integration causes bail' => sub {
 	eval { $d->describe(); 1 } or do { $err = $@ };
 
 	ok $err, 'describe() died when bosh_parent set but no locker';
-	like $err, qr/locker/i,        'error mentions locker';
-	like $err, qr/bosh_upgrade/i, 'error mentions bosh_upgrade opt-out';
+	like $err, qr/pipeline\.locker/, 'error names the pipeline.locker block';
+	unlike $err, qr/bosh_upgrade|opt out/i, 'and offers no lock opt-out (D22, T387)';
 	like $err, qr/cf-lab/i,        'error names the offending env';
 	like $err, qr/bosh-lab/i,      'error names the parent director';
 };
@@ -485,9 +485,11 @@ YAML
 };
 
 # =========================================================================
-# 13. ASTBuilder: bosh_upgrade_lock: false opt-out is respected
+# 13. ASTBuilder: the retired locks.bosh_upgrade opt-out is not read (T387)
 # =========================================================================
-subtest 'ASTBuilder: bosh_upgrade_lock: false disables lock for that env' => sub {
+# The load refuses genesis.pipeline.locks (D22); ci-compiler.t holds the
+# live row, and this one fails with 12 for want of a Top.
+subtest 'ASTBuilder: a locks.bosh_upgrade key does not disable the lock' => sub {
 	my $tmp = tempdir(CLEANUP => 1);
 
 	_write("$tmp/bosh-lab.yml", <<'YAML');
@@ -523,8 +525,8 @@ YAML
 
 	is $nodes->{'cf-lab'}{bosh_parent},       'bosh-lab',
 		'cf-lab: bosh_parent still set';
-	is $nodes->{'cf-lab'}{bosh_upgrade_lock}, 0,
-		'cf-lab: bosh_upgrade_lock=0 (opt-out)';
+	is $nodes->{'cf-lab'}{bosh_upgrade_lock}, 1,
+		'cf-lab: bosh_upgrade_lock stays 1, the lock being mandatory';
 };
 
 # =========================================================================

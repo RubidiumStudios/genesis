@@ -3,6 +3,7 @@ use strict;
 use warnings;
 
 use Genesis;
+use Genesis::Exit qw/CONFIG/;
 use Genesis::Top ();
 use Genesis::CI::ProviderCompiler;
 use JSON::PP;
@@ -64,13 +65,11 @@ sub describe {
 		for my $env (@{$wf_data->{environments}}) {
 			my $parent = $wf_data->{bosh_parent}{$env} || '';
 			next unless $parent && ($wf_data->{bosh_upgrade_lock}{$env} // 1);
-			bail(
-				"Environment '%s' has a pipeline-managed BOSH director ('%s') but no\n".
-				"locker integration is configured.\n".
-				"Add a 'locker:' block to your integrations configuration, or set\n".
-				"  genesis:\n    pipeline:\n      locks:\n        bosh_upgrade: false\n".
-				"in %s.yml to opt out.",
-				$env, $parent, $env
+			bail({exitcode => CONFIG},
+				"Environment '%s' has a pipeline-managed BOSH director ('%s') but no ".
+				"locker is configured.  Its deploy takes the director's lock, so add a ".
+				"#C{pipeline.locker} block with its #C{url} to .genesis/config.",
+				$env, $parent
 			) unless $locker->{url};
 		}
 

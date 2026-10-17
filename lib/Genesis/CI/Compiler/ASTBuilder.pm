@@ -193,12 +193,8 @@ sub _build_legacy_workflows {
 				$nodes{$env}{signal_prefix}       = $ef->{signal_prefix};
 				# bosh_parent only valid if the director is also in this pipeline
 				my $bp    = $ef->{bosh_parent} // '';
-				my $locks = $ef->{locks} || {};
 				$nodes{$env}{bosh_parent}       = (exists $nodes{$bp}) ? $bp : '';
-				$nodes{$env}{bosh_upgrade_lock} =
-					exists $locks->{bosh_upgrade}
-						? _truthy($locks->{bosh_upgrade})
-						: 1;
+				$nodes{$env}{bosh_upgrade_lock} = 1;
 			}
 		}
 
@@ -490,12 +486,8 @@ sub build_from_env_files {
 		my $data   = $pipeline_data{$env} || {};
 		my $be     = $data->{_bosh_env}  || '';
 		next unless $be && exists $nodes{$be};
-		my $locks = $data->{locks} || {};
 		$nodes{$env}{bosh_parent}       = $be;
-		$nodes{$env}{bosh_upgrade_lock} =
-			exists $locks->{bosh_upgrade}
-				? _truthy($locks->{bosh_upgrade})
-				: 1;
+		$nodes{$env}{bosh_upgrade_lock} = 1;
 	}
 
 	my @edges;

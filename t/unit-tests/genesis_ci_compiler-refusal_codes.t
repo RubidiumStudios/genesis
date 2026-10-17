@@ -124,6 +124,42 @@ subtest 'a configuration the validator rejects is refused' => sub {
 	}), CONFIG, 'a configuration the validator finds errors in';
 };
 
+subtest 'a director the pipeline manages needs the locker, with no opt-out' => sub {
+	plan tests => 3;
+
+	# T387: the deploy locks are mandatory (D22), so the remedy is the
+	# pipeline.locker block and never the locks key the load refuses.
+	require Genesis::CI::Compiler::AST;
+	require Genesis::CI::Compiler::PipelineDescriptor;
+	my %node = (type => 'deployment', auto => 0, bosh_upgrade_lock => 1);
+	my $ast = Genesis::CI::Compiler::AST->new(
+		metadata     => {name => 'test-pipeline', deployment_type => 'deployment'},
+		branches     => {control => 'main'},
+		integrations => {vault => {url => 'https://vault.example.com'}},
+		targets      => {map {$_ => {type => 'bosh-create-env'}} qw/bosh-lab cf-lab/},
+		workflows    => {default => {name => 'default', type => 'deployment', graph => {
+			nodes => {
+				'bosh-lab' => {%node, stage_name => 'bosh-lab', alias => 'bosh-lab', genesis_env => 'bosh-lab', bosh_parent => ''},
+				'cf-lab'   => {%node, stage_name => 'cf-lab',   alias => 'cf-lab',   genesis_env => 'cf-lab',   bosh_parent => 'bosh-lab'},
+			},
+			edges => [],
+		}}},
+		configuration => {task => {image => 'genesiscommunity/concourse', version => 'latest'}, registry => {}},
+	);
+
+	my ($code, $said);
+	{
+		local $ENV{GENESIS_IGNORE_EVAL} = 1;
+		$said = join(' ', output_from {
+			$code = exit_code {Genesis::CI::Compiler::PipelineDescriptor->new(ast => $ast)->describe}
+		});
+	}
+	$said =~ s/\s+/ /g;
+	is $code, CONFIG, 'a child of a pipeline-managed director with no locker';
+	like $said, qr/pipeline\.locker/, 'naming the locker block to add';
+	unlike $said, qr/bosh_upgrade|opt out/i, 'and offering no lock opt-out';
+};
+
 done_testing;
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

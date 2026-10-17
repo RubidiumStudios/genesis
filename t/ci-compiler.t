@@ -566,6 +566,20 @@ subtest 'ASTBuilder - build_from_env_files: entrypoint with no pipeline block is
 	is $nodes->{lab}{manual},     0, "lab manual defaults to 0";
 };
 
+subtest 'ASTBuilder - build_from_env_files: no locks key turns the director lock off' => sub {
+	# T387: both deploy locks are mandatory (D22) and the load refuses
+	# genesis.pipeline.locks, so a compile never sees one.  The row writes
+	# one without committing it, past the load, to pin that it is not read.
+	my $h = make_harness(envs => [qw/bosh-lab cf-lab/], pipeline => 0, vault => 0);
+	$h->write_env_file('cf-lab', genesis => {bosh_env => 'bosh-lab'},
+		pipeline => {prior_env => 'bosh-lab', locks => {bosh_upgrade => 'false'}});
+
+	my ($nodes) = builder_for($h)->build_from_env_files($h->a);
+
+	is $nodes->{'cf-lab'}{bosh_parent}, 'bosh-lab', "cf-lab follows its director";
+	is $nodes->{'cf-lab'}{bosh_upgrade_lock}, 1, "and still takes the director's lock";
+};
+
 subtest 'ASTBuilder - build_from_env_files: non-existent dir returns empty' => sub {
 	# No repository here.  The directory is opened before the top is
 	# ever consulted, so this row is about that guard and a harness

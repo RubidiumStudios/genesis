@@ -27,37 +27,17 @@ genesis:
 
 `bosh_env` is read at pipeline-gen time. Genesis resolves the relationship only when the named director env is also included in the current pipeline — if the director lives in a separate, manually managed pipeline, the key is ignored and the child behaves as a standalone env.
 
-### Locker integration (required)
+### Locker (required)
 
-BOSH upgrade locks require a locker integration. Add it to your `ci.yml`:
+The locks are mandatory, and an automated provider requires the `pipeline.locker` block in `.genesis/config` at load:
 
 ```yaml
-integrations:
+pipeline:
   locker:
-    url:      https://locker.example.com
-    username: ((locker-username))
-    password: ((locker-password))
+    url: https://locker.example.com
 ```
 
-If a child env has a pipeline-managed BOSH director but no locker is configured, `genesis ci describe` will error early with instructions to either add the locker block or opt out with `bosh_upgrade_lock: false`.
-
-### Opting out per environment
-
-To disable the shared lock for a specific child — for example, a non-production env that does not need coordinated upgrades:
-
-```yaml
-# cf-lab.yml
-genesis:
-  env: cf-lab
-  bosh_env: bosh-lab
-  pipeline:
-    locks:
-      bosh_upgrade: false
-```
-
-An opted-out child falls back to standalone behaviour: its deploy job acquires a per-env `bosh-lock` resource scoped to its BOSH director URL, without coordinating with the director's own lock.
-
-The `locks:` block is extensible — future lock types will be added as sibling keys under it.
+There is no per-environment opt-out: `genesis.pipeline.locks` in an environment file is refused at load as an unknown key.
 
 ## Lock topology
 

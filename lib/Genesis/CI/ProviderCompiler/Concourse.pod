@@ -86,7 +86,7 @@ Override C<channel> and/or C<mentions_on_failure> for a specific environment:
         mentions_on_failure:
           - '@prod-sre'
 
-=head2 BOSH upgrade locks (C<genesis.pipeline.locks.bosh_upgrade>)
+=head2 BOSH upgrade locks
 
 When a child deployment's YAML declares C<genesis.bosh_env: E<lt>directorE<gt>> and
 the named director is also in the pipeline, Genesis wires a shared upgrade lock:
@@ -105,12 +105,10 @@ for envs whose director is not in the same pipeline).
 
 =back
 
-Requires a C<locker:> integration.  Opt out per-env:
-
-  genesis:
-    pipeline:
-      locks:
-        bosh_upgrade: false
+The locks are mandatory (D22) and backed by the C<pipeline.locker> block,
+which an automated provider requires at load.  There is no per-environment
+opt-out: the load refuses C<genesis.pipeline.locks>, and the compiler reads
+no such key (T387).
 
 =head2 Redeploy lane (C<genesis.pipeline.redeploy>)
 

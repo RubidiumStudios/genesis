@@ -135,14 +135,10 @@ sub cli_opts_help {
         minimal,  no notify jobs; Slack alerts on failure only
         none,     no Slack resource or notifications at all
 
-    BOSH upgrade locks (genesis.pipeline.locks.bosh_upgrade):
+    BOSH upgrade locks:
         Automatically wired when a pipeline manages a BOSH director alongside
         child deployments.  Prevents a director upgrade from racing a child
-        deploy.  Requires a locker integration.  Opt out per-env with:
-            genesis:
-              pipeline:
-                locks:
-                  bosh_upgrade: false
+        deploy.  Mandatory, and backed by the pipeline.locker block.
 
     Task library (configuration.task_library):
         Declares an external git repository of custom task files.  The repo
