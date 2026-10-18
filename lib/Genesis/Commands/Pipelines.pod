@@ -2614,7 +2614,9 @@ B<Examples:>
 The deployment root for a pipeline command, with or without a vault on it.
 
 A command that only compiles asks for one with C<skip_vault>, because nothing
-it does reads a secret.  Every other command gets a root carrying the vault
+it does reads a secret, and so does C<--skip-vault>.  That root is opened
+with no vault at all, so a C<secrets_provider> out of reach is never dialled
+(T402).  Every other command gets a root carrying the vault
 the operator named or the repository configured, and a repository with
 neither is refused here rather than at the first read.
 

@@ -53,4 +53,21 @@ subtest 'a broken configuration is reported as itself' => sub {
 	}
 };
 
+subtest 'a skipped vault is never dialled' => sub {
+	# T402: _get_top took --skip-vault, and the four commands that always
+	# skip it, as a reason not to check the vault, and opened the root with
+	# it dialled all the same (runbook finding 7).
+	# One row per command, and one restoration assertion for each run.
+	plan tests => 8;
+
+	my $h = make_harness(envs => ['qa'], provider => 'concourse', vault => 0);
+	compilable_pipeline($h);
+	$h->set_repo_config('secrets_provider.url', $UNREACHABLE);
+	for my $argv (['pipeline-apply', '--dry-run', '--skip-vault'],
+	              ['pipeline-jobs'], ['pipeline-pause'], ['pipeline-diff']) {
+		my ($out, $err, $exit) = run_genesis($h, @$argv);
+		unlike(unfolded($out, $err), qr/127\.0\.0\.1:9/, "`genesis @$argv` never dials the vault");
+	}
+};
+
 done_testing;

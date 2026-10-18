@@ -1807,7 +1807,7 @@ sub _get_top {
 
 	my $skip = $opts->{'skip-vault'} || $defaults{skip_vault};
 	if ($skip) {
-		return Genesis::Top->new('.');
+		return Genesis::Top->new('.', no_vault => 1);
 	}
 
 	my $top = Genesis::Top->new('.', vault => $opts->{vault});
