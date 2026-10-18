@@ -1181,6 +1181,11 @@ every gap between it and control on T, and with C<--from E<lt>refE<gt>> it is
 the shape that ref holds, as L</_preview_shape($top)> describes, so a change
 to it can be checked before it is committed or merged.
 
+The root is opened with no vault, because the drawing reads files only, so a
+secrets provider out of reach does not stop it (T401). It declares the
+pre-deploy branch class and never refreshes, as L</pipeline_describe([$layout])>
+does (T392).
+
 B<Parameters:>
 
 =over 4
@@ -1221,6 +1226,11 @@ only on that path, because a repository with no pipeline configured has
 nothing for those derivations to read.  Any other repository is compiled and
 the compiler tells it, with Concourse standing in for the same reason
 L</pipeline_graph([$layout])> gives.
+
+Like L</pipeline_graph([$layout])>, it opens its root with no vault: a preview
+reads the repository's files and nothing in the vault, so a secrets provider
+out of reach neither stops it nor stands in front of a broken configuration's
+own refusal (T401).
 
 The shape described is the deployment root's working tree, under a banner
 naming every gap between it and control on T, and with C<--from E<lt>refE<gt>>

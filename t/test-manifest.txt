@@ -474,6 +474,7 @@ integration-tests/genesis_commands_pipelines-apply_concourse.t # a real apply se
 integration-tests/genesis_commands_pipelines-concourse_gate.t # diff, jobs, pause and resume refuse what is not a live Concourse pipeline before they compile
 integration-tests/genesis_commands_pipelines-diff.t           # pipeline-diff previews the tree, compares as data, and takes --from
 integration-tests/genesis_commands_pipelines-no_pipeline.t    # a preview with no pipeline section says so before it compiles
+integration-tests/genesis_commands_pipelines-preview_no_vault.t # describe and graph read no vault, so one out of reach stops neither
 integration-tests/genesis_ci_compiler-credential_refs.t       # the compile emits each credential component as its resolved reference
 integration-tests/genesis_ci_compiler-schema_contract.t       # the compiler reads nothing the schema does not declare
 integration-tests/genesis_ci_compiler-declared_blocks.t       # every declared block the compiler uses reaches it

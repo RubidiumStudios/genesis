@@ -937,7 +937,7 @@ sub _push_failure {
 sub pipeline_graph {
 	my ($layout) = @_;
 
-	my $top = Genesis::Top->new('.');
+	my $top = Genesis::Top->new('.', no_vault => 1); # a preview reads files only
 	_preview_shape($top);
 
 	# For env-file topology, build the DAG directly.
@@ -969,7 +969,7 @@ sub _emit_graph {
 sub pipeline_describe {
 	my ($layout) = @_;
 
-	my $top = Genesis::Top->new('.');
+	my $top = Genesis::Top->new('.', no_vault => 1); # a preview reads files only
 	_preview_shape($top);
 
 	# Source control is told only here: with no pipeline there is nothing to derive.
