@@ -279,6 +279,13 @@ named by C<--unset> are the same, or one contains the other.  Keys that
 merely share a prefix -- C<pipeline.enabled> and C<pipeline.provider> --
 do not overlap and are allowed together.
 
+=item C<"--set takes the key and the value as two arguments: --set %s %s">
+
+Raised as a usage error, before any other check, when a key given to
+C<--set> holds C<=>: the C<key=value> form is not accepted, and it would
+otherwise take the next argument as its value (T391).  The sentence spells
+the two-argument form of the first such key.  A value may hold C<=>.
+
 =item C<"Reading and writing cannot be combined in one run">
 
 Raised as a usage error when a key is given alongside C<--set> or

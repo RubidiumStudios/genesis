@@ -21,6 +21,13 @@ sub config {
 		@{get_options()}{qw/set set-from-file unset/};
 	my $writing = ($pairs || $from_files || $removals) ? 1 : 0;
 
+	# Keys only: a value may hold '=', and pairs arrive flat, key first.
+	my @eq = grep {$_ % 2 == 0 && $pairs->[$_] =~ /=/} 0..$#{$pairs || []};
+	command_usage(1, sprintf(
+		"#C{--set} takes the key and the value as two arguments: #C{--set %s %s}",
+		split(/=/, $pairs->[$eq[0]], 2)
+	)) if @eq;
+
 	command_usage(1, "Reading and writing cannot be combined in one run")
 		if $writing && @keys;
 	command_usage(1, "Only one key can be read at a time")

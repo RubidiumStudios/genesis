@@ -302,6 +302,28 @@ subtest 'config will not read more than one key' => sub {
 	popd;
 };
 
+subtest 'config --set key=value is refused, naming the two-argument form' => sub {
+	plan tests => 6;
+
+	# T391: --set takes the key and the value as two arguments, so key=value
+	# took the next argument as its value, and was refused as a read and a
+	# write in one run, or died on a key holding '='.
+	my $dir = config_repo('config-set-equals');
+	my $before = slurp("$dir/.genesis/config");
+	for my $argv (['--set', 'version=3', '--set', 'pipeline.enabled=true'],
+	              ['--set', 'version=3', 'pipeline.enabled']) {
+		pushd $dir;
+		prepare_command('config', @$argv);
+		build_command_environment;
+		# command_usage prints its sentence only outside a test run.
+		my ($code, $err) = do {delete local $ENV{GENESIS_TESTING}; run_config()};
+		popd;
+		isnt($code, 0, "`config @$argv` is refused");
+		like($err =~ s/\s+/ /gr, qr/--set version 3/, 'naming the form it takes');
+		is(slurp("$dir/.genesis/config"), $before, 'and writes nothing');
+	}
+};
+
 subtest 'config --unset accepts a key that is already unset' => sub {
 	plan tests => 2;
 
