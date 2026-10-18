@@ -667,7 +667,8 @@ sub secrets_provider {
 
 	my $ui_nl = $options{interactive} ? "" : "\n";
 
-	my $top = Genesis::Top->new('.', no_vault => 1);
+	# Read in repair mode, as genesis config is; a change is judged at its save.
+	my $top = Genesis::Top->new('.', no_vault => 1, repair_config => 1);
 	my $err;
 	if (scalar(keys %options)) {
 		$err = $top->set_vault(%options);

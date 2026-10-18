@@ -176,6 +176,12 @@ displays the new state.
 Exactly one of C<$target>, C<--interactive>, or C<--clear> may be specified
 at a time.
 
+The configuration is read in repair mode, as C<genesis config> reads it, so
+the provider is shown even for a file the load refuses, such as one still
+carrying the rc builds' C<ci> block. A change is judged on its result before
+it is saved, as every writer's is, so it is refused, naming what the load
+would refuse and writing nothing, until that is repaired (T407).
+
 B<Parameters:>
 
 =over 4
