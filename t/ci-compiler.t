@@ -2468,33 +2468,17 @@ subtest 'Top - register_config_section stores handler' => sub {
 ### Phase E Provider Options System Tests
 ### ============================================================ ###
 
-subtest 'ProviderCompiler - base class cli_opts returns empty list' => sub {
-	# We cannot call cli_opts on the abstract base directly (bug guard),
-	# so we test via the Concourse subclass and verify the pattern instead.
-	my @opts = Genesis::CI::ProviderCompiler::Concourse->cli_opts();
-	ok scalar(@opts) > 0, "Concourse declares at least one CLI opt";
-	ok grep { $_ eq 'ci-target=s' } @opts, "ci-target=s declared";
-	ok grep { $_ eq 'ci-team=s'   } @opts, "ci-team=s declared";
-	ok grep { $_ eq 'ci-pause'    } @opts, "ci-pause declared (boolean flag)";
-	ok grep { $_ eq 'ci-expose'   } @opts, "ci-expose declared (boolean flag)";
-};
-
-subtest 'Concourse - cli_opts_help contains required option documentation' => sub {
-	my $help = Genesis::CI::ProviderCompiler::Concourse->cli_opts_help(valid_types => ['concourse']);
-	ok length($help) > 0,                          "help text is non-empty";
-	like $help, qr/--ci-target/,                   "documents --ci-target";
-	like $help, qr/--ci-team/,                     "documents --ci-team";
-	like $help, qr/--ci-pipeline-name/,            "documents --ci-pipeline-name";
-	like $help, qr/--ci-pause/,                    "documents --ci-pause";
-	like $help, qr/--ci-expose/,                   "documents --ci-expose";
-	like $help, qr/required/i,                     "marks required options";
-	like $help, qr/optional.*default|default.*optional/i, "marks optional options with defaults";
-	like $help, qr/main/,                          "shows default team 'main'";
-};
-
-subtest 'Concourse - cli_opts_help hidden when type not in valid_types' => sub {
-	my $help = Genesis::CI::ProviderCompiler::Concourse->cli_opts_help(valid_types => ['github-actions']);
-	is $help, '', "help empty when concourse not in valid_types";
+subtest 'the --ci-* flags and their help are gone (T406)' => sub {
+	# They were registered on no command, so the help was shown nowhere and
+	# the compile's read of them always found nothing (runbook finding 38).
+	for my $class (qw/Genesis::CI::ProviderCompiler Genesis::CI::ProviderCompiler::Concourse/) {
+		for my $sub (qw/cli_opts cli_opts_help parse_cli_opts cli_opt_keys all_cli_opts_help/) {
+			no strict 'refs';
+			ok !defined(&{"${class}::$sub"}), "$class defines no $sub";
+		}
+	}
+	unlike slurp('lib/Genesis/Commands/Pipelines.pm'), qr/cli_opt_keys|parse_cli_opts|provider_cli_opts/,
+		'and no command reads them';
 };
 
 subtest 'Concourse - provider_options_schema has correct structure' => sub {
@@ -2610,28 +2594,6 @@ subtest 'Concourse - describe_provider returns structured hash' => sub {
 	is $info{Team},   'genesis',        "Team value correct";
 };
 
-subtest 'ProviderCompiler - all_cli_opts_help covers all providers' => sub {
-	my $help = Genesis::CI::ProviderCompiler->all_cli_opts_help();
-	like $help, qr/CI PROVIDER OPTIONS/,   "contains header";
-	like $help, qr/--ci-provider/,         "documents --ci-provider";
-	like $help, qr/concourse/,             "mentions concourse";
-	like $help, qr/--ci-target/,           "includes Concourse-specific flag";
-};
-
-subtest 'ProviderCompiler - parse_cli_opts two-pass extraction' => sub {
-	# Simulate argv that includes a provider-specific flag
-	my @argv = ('--ci-target', 'my-fly-target', '--ci-team', 'ops', '--other-flag');
-	my %opts;
-
-	Genesis::CI::ProviderCompiler->parse_cli_opts(
-		\@argv, \%opts, 'concourse'
-	);
-
-	is $opts{'ci-target'}, 'my-fly-target', "ci-target extracted";
-	is $opts{'ci-team'},   'ops',           "ci-team extracted";
-	ok grep { $_ eq '--other-flag' } @argv, "unknown flag left in argv";
-};
-
 ### ============================================================ ###
 ### Concourse insecure option
 ### ============================================================ ###
@@ -2648,11 +2610,6 @@ subtest 'Concourse - insecure in provider_options_defaults' => sub {
 	my $defaults = concourse_compiler()->provider_options_defaults();
 	ok exists $defaults->{insecure},  "insecure present in defaults";
 	is $defaults->{insecure}, 0,      "insecure default is 0 (false)";
-};
-
-subtest 'Concourse - ci-insecure declared in cli_opts' => sub {
-	my @opts = Genesis::CI::ProviderCompiler::Concourse->cli_opts();
-	ok grep { $_ eq 'ci-insecure' } @opts, "ci-insecure declared (boolean flag)";
 };
 
 subtest 'Concourse - insecure omitted from provider_config when default (false)' => sub {

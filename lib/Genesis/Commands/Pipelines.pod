@@ -1769,9 +1769,9 @@ Compiles the pipeline from the C<pipeline> section of C<.genesis/config>,
 which is the one configuration source.  Neither the C<.genesis/ci/>
 directory nor a legacy C<ci.yml> is read, and a repository still carrying
 either one is compiled as though it did not.  The provider type is the one
-the caller read off C<pipeline.provider.type>, and the provider's own
-command-line options are collected from C<get_options> and handed to the
-compiler beside it.
+the caller read off C<pipeline.provider.type>.  No command-line option
+reaches the compile: the C<--ci-*> flags it once collected were registered
+on no command, and are gone (T406).
 
 Where C<--debug-dir> is given, the compiler's intermediates are written
 there before the result is returned.
@@ -1791,8 +1791,7 @@ C<github-actions>.
 
 =back
 
-B<Returns:> The compiler's result hash, with the collected provider
-options added to it under C<provider_cli_opts>.
+B<Returns:> The compiler's result hash.
 
 B<Errors:>
 

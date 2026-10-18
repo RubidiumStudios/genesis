@@ -211,44 +211,6 @@ whatever the compile handed back. The question goes to
 L<Genesis::CI::Provider::Concourse/check_prereqs> now, which also enforces
 the floor a repository declares as C<pipeline.provider.min_fly_version>.
 
-=head2 cli_opts()
-
-The Getopt::Long specifications for Concourse's deploy-time flags, each
-prefixed C<ci-> so that none of them collides with a top-level Genesis
-option.
-
-B<Returns:> the specifications, as a list.
-
-B<Examples:>
-
-    Genesis::CI::ProviderCompiler::Concourse->cli_opts;
-    # ('ci-target=s', 'ci-team=s', 'ci-pipeline-name=s',
-    #  'ci-pause', 'ci-expose', 'ci-insecure')
-
-=head2 cli_opts_help(%config)
-
-The help text for those flags, followed by the Concourse-specific
-sections of C<pipeline.provider> a person setting one up needs to know
-about.
-
-B<Parameters:>
-
-=over 4
-
-=item C<%config>
-
-C<valid_types> narrows the help. Text is returned only where C<concourse>
-is among the types asked for.
-
-=back
-
-B<Returns:> the help text, as a string.
-
-B<Examples:>
-
-    print Genesis::CI::ProviderCompiler::Concourse->cli_opts_help(
-        valid_types => ['concourse']);
-
 =head2 provider_options_defaults()
 
 The default each Concourse option takes, read off the declared schema

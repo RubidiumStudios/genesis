@@ -5,7 +5,6 @@ use warnings;
 use Genesis;
 use Genesis::CI::ProviderRegistry;
 use JSON::PP;
-use Getopt::Long qw/GetOptionsFromArray/;
 
 ### Constructor {{{
 
@@ -91,42 +90,6 @@ sub output_files {
 # Genesis::Kit::Provider.  Subclasses override them to expose their
 # platform-specific flags, help text, and config-section schemas.
 
-# cli_opts - Getopt::Long option specs for deploy-time command-line flags {{{
-#
-# Returns a list of Getopt::Long spec strings, e.g.:
-#   qw( ci-target=s  ci-team=s  ci-pause  ci-expose )
-#
-# All CI-provider opts are prefixed with 'ci-' to avoid collisions with
-# top-level genesis option names (--target, --dry-run, etc.).
-#
-# Subclasses override to declare their provider-specific options.
-# Base implementation returns empty list (no provider-specific opts).
-sub cli_opts {
-	return qw//;
-}
-
-# }}}
-# cli_opts_help - formatted help text for cli_opts() {{{
-#
-# Returns a multi-line string (heredoc) documenting each option.
-# Format mirrors Genesis::Kit::Provider::Github::opts_help():
-#
-#   --ci-target <value>  (required)
-#       The fly target to deploy to.
-#
-#   --ci-team <value>  (optional, default: "main")
-#       The Concourse team name.
-#
-# %config may include:
-#   valid_types  - arrayref of provider type strings to show help for
-#
-# Subclasses override to document their specific options.
-sub cli_opts_help {
-	my ($class, %config) = @_;
-	return '';
-}
-
-# }}}
 # where provider_options_schema and capabilities went {{{
 #
 # Both were forwarders on this class, and each resolved the CLI class
@@ -221,58 +184,6 @@ sub describe_provider {
 # }}}
 ### Class Methods for Provider Options Parsing {{{
 
-# parse_cli_opts - two-pass CLI option parsing (mirrors Kit::Provider::parse_opts) {{{
-#
-# Usage:
-#   Genesis::CI::ProviderCompiler->parse_cli_opts(
-#       \@ARGV,           # args array (modified in place)
-#       \%opts,           # options hash (populated in place)
-#       $provider_type,   # optional: already-known provider type
-#   );
-#
-# Pass 1: parse --ci-provider <type> (if not already known)
-# Pass 2: load provider class, get cli_opts(), parse provider-specific flags
-#
-# Returns 1. Remaining unparsed args are put back into $args.
-sub parse_cli_opts {
-	my ($class, $args, $opts, $provider_type) = @_;
-
-	Getopt::Long::Configure(
-		qw(pass_through permute no_auto_abbrev no_ignore_case bundling)
-	);
-
-	# Collect args up to '--'
-	my $opt_args = [];
-	while (scalar(@$args) && $args->[0] ne '--') {
-		push @$opt_args, shift @$args;
-	}
-
-	# Pass 1: extract --ci-provider if not already known
-	unless ($provider_type) {
-		GetOptionsFromArray($opt_args, $opts, 'ci-provider=s');
-		$provider_type = $opts->{'ci-provider'} // $opts->{platform};
-	}
-
-	# Pass 2: load provider and parse provider-specific flags.  A type with
-	# no compiler class, which manual is, contributes no flags.
-	my $info = $provider_type
-		? Genesis::CI::ProviderRegistry->provider_info($provider_type)
-		: undef;
-	if ($info && $info->{file}) {
-		eval { require $info->{file} }  ## no critic
-			or bail("Failed to load CI provider '%s': %s", $provider_type, $@);
-
-		my @extra_opts = $info->{class}->cli_opts();
-		GetOptionsFromArray($opt_args, $opts, @extra_opts) if @extra_opts;
-	}
-
-	# Return unparsed args to caller
-	while (scalar(@$opt_args)) { unshift @$args, pop @$opt_args }
-
-	return 1;
-}
-
-# }}}
 # cli_key_to_config_key - convert a ci-* CLI key to its config/schema key {{{
 #
 # The convention is: strip the 'ci-' prefix, convert hyphens to underscores.
@@ -300,53 +211,6 @@ sub normalize_provider_opts {
 		$out{ $class->cli_key_to_config_key($k) } = $opts->{$k};
 	}
 	return \%out;
-}
-
-# }}}
-# cli_opt_keys - return parsed option key names for a given provider type {{{
-#
-# Strips Getopt::Long type suffixes (=s, !, +, etc.) leaving bare key names.
-# Used by the commands layer to copy matching options from get_options without
-# hardcoding provider-specific names.
-sub cli_opt_keys {
-	my ($class, $provider_type) = @_;
-	my $info = Genesis::CI::ProviderRegistry->provider_info($provider_type)
-		or return ();
-	# A type with no compiler class, which manual is, has no flags to name.
-	return () unless $info->{file};
-	eval { require $info->{file} }  ## no critic
-		or bail("Failed to load CI provider '%s': %s", $provider_type, $@);
-	return map { (split /[=!+:]/, $_)[0] } $info->{class}->cli_opts();
-}
-
-# }}}
-# all_cli_opts_help - assembled help text for all known providers {{{
-#
-# Prints shared CI flags, then delegates to each provider's cli_opts_help().
-# Mirrors Genesis::Kit::Provider::opts_help() in structure.
-sub all_cli_opts_help {
-	my ($class, %config) = @_;
-
-	# Every type is named where the types are enumerated, and only the ones
-	# with a compiler class are asked for help text, because manual has none.
-	$config{valid_types} ||= [Genesis::CI::ProviderRegistry->known_providers];
-
-	my $provider_help = join('',
-		map  { $_->{class}->cli_opts_help(%config) }
-		grep { $_->{file} && eval { require $_->{file}; 1 } }  ## no critic
-		map  { Genesis::CI::ProviderRegistry->provider_info($_) }
-		Genesis::CI::ProviderRegistry->known_providers
-	);
-
-	return <<EOF;
-CI PROVIDER OPTIONS
-
-  --ci-provider <type>  (optional, defaults to "manual")
-      The CI provider to use for pipeline generation and deployment.
-      Available types: ${\ join(', ', Genesis::CI::ProviderRegistry->known_providers) }
-
-$provider_help
-EOF
 }
 
 # }}}

@@ -196,12 +196,9 @@ sub apply {
 			exit 0;
 		}
 
-		my %deploy_opts = %{ $compiler->normalize_provider_opts(
-			$result->{provider_cli_opts} || {}
-		) };
 		# A target only where the operator names one; fly resolves it otherwise (D86).
-		$deploy_opts{target}          //= $opts->{target} if defined $opts->{target};
-		$deploy_opts{pause_after_set} //= $opts->{paused};
+		my %deploy_opts = (pause_after_set => $opts->{paused});
+		$deploy_opts{target} = $opts->{target} if defined $opts->{target};
 		$compiler->deploy(%deploy_opts, yaml => $output->{'pipeline.yml'},
 			pipeline_name => $name, yes => $opts->{yes});
 
@@ -1393,31 +1390,13 @@ sub describe {
 sub _compile_pipeline {
 	my ($top, $platform) = @_;
 
-	# Parse provider-specific CLI flags
-	my %provider_cli_opts;
-	{
-		require Genesis::CI::ProviderCompiler;
-		my @argv = ();
-		Genesis::CI::ProviderCompiler->parse_cli_opts(
-			\@argv, \%provider_cli_opts, $platform
-		);
-		for my $key (Genesis::CI::ProviderCompiler->cli_opt_keys($platform)) {
-			$provider_cli_opts{$key} = get_options->{$key}
-				if defined get_options->{$key};
-		}
-	}
-
 	my $compiler = Genesis::CI::Compiler->new(top => $top);
-	my $result   = $compiler->compile(
-		provider      => $platform,
-		provider_opts => \%provider_cli_opts,
-	);
+	my $result   = $compiler->compile(provider => $platform);
 
 	if (my $debug_dir = get_options->{'debug-dir'}) {
 		_dump_debug_artifacts($debug_dir, $result, $platform);
 	}
 
-	$result->{provider_cli_opts} = \%provider_cli_opts;
 	return $result;
 }
 

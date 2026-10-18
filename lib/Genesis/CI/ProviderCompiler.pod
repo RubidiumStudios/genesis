@@ -177,41 +177,10 @@ B<Examples:>
 
 =head1 METHODS - PROVIDER OPTIONS
 
-=head2 cli_opts()
-
-The Getopt::Long specifications for this provider's deploy-time flags.
-Every one of them is prefixed C<ci-> so that a provider's flag cannot
-collide with a top-level Genesis option. The base declares none.
-
-B<Returns:> the specifications, as a list.
-
-B<Examples:>
-
-    Genesis::CI::ProviderCompiler::Concourse->cli_opts;
-    # ('ci-target=s', 'ci-team=s', 'ci-pause', 'ci-expose')
-
-=head2 cli_opts_help(%config)
-
-The help text for this provider's flags, one block per option, in the
-shape the kit providers use. The base has no flags and so returns an
-empty string.
-
-B<Parameters:>
-
-=over 4
-
-=item C<%config>
-
-C<valid_types> narrows the help to the provider types named in it.
-
-=back
-
-B<Returns:> the help text, as a string.
-
-B<Examples:>
-
-    print Genesis::CI::ProviderCompiler::Concourse->cli_opts_help(
-        valid_types => ['concourse']);
+The C<--ci-*> flags, their help, and their parsing (C<cli_opts>,
+C<cli_opts_help>, C<parse_cli_opts>, C<cli_opt_keys>, C<all_cli_opts_help>)
+are gone: no command registered them, so the help was shown nowhere and a
+compile's read of them always found nothing (T406, ruled 2026-10-18).
 
 =head2 provider_options_defaults()
 
@@ -295,46 +264,6 @@ B<Examples:>
 
 =head1 CLASS METHODS - COMMAND LINE
 
-=head2 parse_cli_opts($args, $opts, $provider_type)
-
-Reads this provider's flags off a command line, in two passes. The first
-finds C<--ci-provider> unless the caller already knows the type, and the
-second loads that provider's compiling class and parses the flags it
-declares. Arguments that are neither are put back.
-
-A type with no compiling class, which C<manual> is, contributes no flags
-and is not an error.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$args>
-
-The argument list, as an array reference. It is read up to the first
-C<--> and what is left unparsed is put back into it.
-
-=item C<$opts>
-
-The options hash to populate, as a hash reference.
-
-=item C<$provider_type>
-
-The provider type, when the caller already knows it. Optional.
-
-=back
-
-B<Returns:> 1.
-
-B<Errors:> raises "Failed to load CI provider '...'" when the registry
-names a file that will not compile.
-
-B<Examples:>
-
-    my %opts;
-    Genesis::CI::ProviderCompiler->parse_cli_opts(\@ARGV, \%opts);
-    $opts{'ci-target'};
-
 =head2 cli_key_to_config_key($key)
 
 The configuration spelling of a command-line key, which is the key with
@@ -381,60 +310,6 @@ B<Examples:>
     Genesis::CI::ProviderCompiler->normalize_provider_opts(
         {'ci-team' => 'ops'});
     # {team => 'ops'}
-
-=head2 cli_opt_keys($provider_type)
-
-The bare key names a provider's flags parse into, with the Getopt::Long
-type suffixes stripped. The commands layer reads this to copy the flags
-that matter without writing any provider's names down.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$provider_type>
-
-The provider type to ask. A type the registry does not hold, or one with
-no compiling class, contributes no keys.
-
-=back
-
-B<Returns:> the key names, as a list.
-
-B<Errors:> raises "Failed to load CI provider '...'" when the registry
-names a file that will not compile.
-
-B<Examples:>
-
-    Genesis::CI::ProviderCompiler->cli_opt_keys('concourse');
-    # ('ci-target', 'ci-team', 'ci-pause', 'ci-expose')
-
-    Genesis::CI::ProviderCompiler->cli_opt_keys('manual');
-    # ()
-
-=head2 all_cli_opts_help(%config)
-
-The whole CI section of a usage message, which is the shared
-C<--ci-provider> flag and then each provider's own help text beneath it.
-The types come from the registry, so this cannot name a provider the
-schema does not hold.
-
-B<Parameters:>
-
-=over 4
-
-=item C<%config>
-
-Passed through to each provider's C</cli_opts_help>. C<valid_types>
-defaults to every registered type.
-
-=back
-
-B<Returns:> the help text, as a string.
-
-B<Examples:>
-
-    print Genesis::CI::ProviderCompiler->all_cli_opts_help;
 
 =head1 METHODS - SHARED HELPERS
 

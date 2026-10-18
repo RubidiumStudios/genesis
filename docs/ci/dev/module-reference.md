@@ -562,8 +562,8 @@ There is no resolver here. `compile()` builds a `Genesis::CI::Provider` and asks
 - `provider_config()`
   the stored options, excluding anything still at its default.
 
-- `cli_opts()`, `cli_opts_help()`, `parse_cli_opts(...)`, `cli_opt_keys($type)`, `normalize_provider_opts($opts)`, and `cli_key_to_config_key($key)`
-  the deploy-time flag plumbing.
+- `normalize_provider_opts($opts)` and `cli_key_to_config_key($key)`
+  turn caller-supplied `ci-*` keys into the block's own spelling. The `--ci-*` flags themselves, and their help and parsing, are gone: no command registered them.
 
 - `describe_provider()`
   a structured self-description for display.
@@ -711,7 +711,7 @@ Four of the five methods above guard on the `config` key, and `generate_descript
 **Internal:**
 
 - `_compile_pipeline($top, $platform)`
-  the shared compile. It parses the provider-specific CLI flags, builds a `Genesis::CI::Compiler`, calls `compile()`, honours `--debug-dir`, and returns the result with the parsed flags added under `provider_cli_opts`.
+  the shared compile. It builds a `Genesis::CI::Compiler`, calls `compile()`, honours `--debug-dir`, and returns the result.
 
 - `_dump_debug_artifacts($debug_dir, $result, $platform)`
   writes numbered intermediate files for debugging.
