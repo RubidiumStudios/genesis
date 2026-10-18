@@ -2436,6 +2436,7 @@ sub download_kit {
 # Private Methods
 
 # _validate_config - validate the configuration of the repo {{{
+my %stale_ci_yml_warned; # once a run, however many roots it opens
 sub _validate_config {
 	my ($self) = @_;
 	return 1 if $self->{__materialised_tree};
@@ -2493,7 +2494,7 @@ sub _validate_config {
 					"Legacy #C{%s} present alongside a v3 CI configuration; ".
 					"the v3 config wins.  Remove #C{%s} to clear this warning.",
 					$ci_yml, $ci_yml
-				) unless $self->{__warned_stale_ci_yml}++;
+				) unless $stale_ci_yml_warned{$ci_yml}++;
 			} else {
 				$self->{__has_legacy_ci_yml} = 1;
 			}

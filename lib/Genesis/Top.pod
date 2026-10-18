@@ -3711,7 +3711,8 @@ commands run. An environment file named F<ci.yml>, which starts with
 C<kit:> or C<genesis:>, does not trip it. And where a F<ci.yml> sits
 beside a version 3 configuration that already enables a pipeline, it warns
 that the file is a stale leftover and lets the command through, once per
-Top, since a writer's judgement runs the same check again. That check
+run for each F<ci.yml>, however many Tops the run opens or judgements it
+makes (T397). That check
 reads C<pipeline.enabled> off L</config> directly rather than through
 L</pipeline_enabled>'s shape, because the question is about the F<ci.yml>
 sitting beside this file, not about what control declares.

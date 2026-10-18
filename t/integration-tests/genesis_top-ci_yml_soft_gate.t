@@ -142,6 +142,20 @@ subtest 'v3 config + legacy ci.yml + ci already configured -> flag is 0, warning
 		'warning emitted about the stale ci.yml');
 };
 
+subtest 'the stale ci.yml warning is given once a run' => sub {
+	# T397: each Top a run opened warned of its own, so one command said it
+	# twice.
+	my $tmp = make_repo(name => 'v3-ci-warned-once', version => 3,
+		v3_ci_configured => 1,
+		ci_yml => $legacy_pipeline_yml);
+	$Genesis::Log::Logger = undef;
+	my (undef, $stderr) = output_from {
+		Genesis::Top->new($tmp, no_vault => 1)->has_legacy_ci_yml for 1..2;
+	};
+	my @said = $stderr =~ /Legacy.*?present\s+alongside/sg;
+	is(scalar(@said), 1, 'two roots opened on one repository warn once');
+};
+
 subtest 'no ci.yml at all -> flag is 0' => sub {
 	my $tmp = make_repo(name => 'no-ci-yml', version => 2);
 	my $top = Genesis::Top->new($tmp, no_vault => 1);
