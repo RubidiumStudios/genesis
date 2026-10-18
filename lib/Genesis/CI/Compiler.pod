@@ -105,12 +105,15 @@ the options that C<provider_option> reads. C<ast> is the
 platform-agnostic tree, C<output> maps each emitted file name to its
 contents, and C<parsed> is the configuration as the parser read it.
 
-Three of that compiler's methods a caller cannot reach from here yet,
-and they are C<deploy>, C<graph_md>, and C<generate_description>, which
-is an alias for C<describe>. Each of them wants the configuration that
+Two of that compiler's methods a caller cannot reach from here yet,
+C<graph_md> and C<generate_description>, which is an alias for
+C<describe>. Each wants the configuration that
 C<Genesis::CI::ProviderCompiler::Concourse> sets in C<parse>, and a
 compiler this method built has none, so each refuses with "Must call
-parse() before ..." before it does anything at all.
+parse() before ..." before it does anything at all. C<deploy> is
+reachable: it takes the emitted F<pipeline.yml> as C<yaml> and the
+pipeline's name as C<pipeline_name>, so it sets what this compile
+emitted (T384).
 
 A provider the registry knows but has no compiler for is refused here
 rather than answered with nothing, because a run that reached this stage
@@ -152,7 +155,8 @@ B<Examples:>
     $result->{provider}->check_prereqs or exit 86;
 
     # Everything emitted is the compiler's half.
-    $result->{compiler}->deploy(target => 'ci', yes => 1);
+    $result->{compiler}->deploy(target => 'ci', yes => 1,
+        yaml => $result->{output}{'pipeline.yml'}, pipeline_name => 'my-bosh');
 
     # A command-line override, in its CLI spelling, wins over the block.
     $compiler->compile(
