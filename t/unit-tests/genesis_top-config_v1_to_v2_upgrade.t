@@ -195,6 +195,20 @@ EOF
 	is(slurp_config($repo), $v1, 'and the v1 file is left as it was');
 };
 
+subtest 'the upgrade shows what it changes' => sub {
+	plan tests => 2;
+
+	# T398: the upgrade said "No differences found" while changing the
+	# version and adding creator_version and updater_version.
+	my $repo = make_v1_repo('v1-shows-diff', "deployment_type: bosh\n");
+	$Genesis::RC->set('automatic_config_upgrade', 'yes');
+	my (undef, $err) = output_from { Genesis::Top->new($repo)->type };
+	$Genesis::RC->set('automatic_config_upgrade', 'silent');
+
+	unlike($err, qr/No differences found/, 'it does not say nothing changed');
+	like($err, qr/version/, 'and names the version it changes');
+};
+
 subtest 'v1 with no way to upgrade is refused at CONFIG, naming the way' => sub {
 	plan tests => 3;
 

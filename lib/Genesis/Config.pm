@@ -1017,7 +1017,7 @@ sub show_diff {
 	$other ||= Genesis::Config->new($self->{path});
 
 	# Use Genesis::spruce_diff to compare configurations
-	my $diff = spruce_diff(
+	my ($diff) = spruce_diff( # a list: the diff, then its code and errors
 		{object => $other->_contents, label => 'saved'},
 		{object => $self->_contents, label => 'current'}
 	);
