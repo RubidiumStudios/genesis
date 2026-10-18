@@ -166,8 +166,8 @@ subtest 'a mapping written where a list belongs is refused' => sub {
 			'genesis:', '  env: qa', '  pipeline:',
 			'    track_dependencies:', '      cf: prod', '')});
 		Genesis::Top->new($h->a, no_vault => 1)->config;
-	} qr/genesis\.pipeline\.track_dependencies: expected a list of strings/,
-		'the mapping is refused by name rather than stringified';
+	} qr/genesis\.pipeline\.track_dependencies in qa: expected a list of strings/,
+		'the mapping is refused by name rather than stringified, in its environment (T411)';
 	commit_on_control($h, files => {'qa.yml' => $env_file});
 };
 
@@ -272,6 +272,28 @@ subtest "a shape key resolves from the environment's own files, or is refused (T
 	unlike($tainted, qr/REDACTED/, 'and no vault was asked for it');
 };
 
+subtest 'every problem the load finds is refused at once (T411)' => sub {
+	plan tests => 5;
+
+	# Three classes the load checks one after another: the schema's, the
+	# provider's capability gate, and an environment block's own checks.
+	# Each used to stop the load, so an operator met them in three runs.
+	my $g = make_harness(envs => [], pipeline => 1, vault => 0);
+	commit_on_control($g, message => 'three problems', files => {
+		'qa.yml' => "---\ngenesis:\n  env: qa\n  pipeline:\n    manual: true\n    track_dependencies: [a/b/c]\n",
+	});
+	my $refusal = '';
+	eval {load_with($g, "pipeline:\n  enabled: true\n  provider:\n    type: manual\nbogus: 1"); 1}
+		or $refusal = Genesis::Term::decolorize("$@") =~ s/\s+/ /gr;
+
+	like($refusal, qr/\bbogus: unknown configuration key/, "the schema's problem");
+	like($refusal, qr/genesis\.pipeline\.manual in qa/, "the capability gate's");
+	like($refusal, qr/genesis\.pipeline\.track_dependencies/, "an environment block's");
+	my @refusals = $refusal =~ /\[FATAL\]/g; # the stack trace repeats the format
+	is(scalar(@refusals), 1, 'in one refusal');
+	unlike($refusal, qr/environment qa:/, 'under one heading, not one per check');
+};
+
 subtest 'an inherited bad key is refused naming the file that sets it (T405)' => sub {
 	plan tests => 3;
 
@@ -286,7 +308,7 @@ subtest 'an inherited bad key is refused naming the file that sets it (T405)' =>
 	eval {my $t = Genesis::Top->new($g->a, no_vault => 1); $t->config; 1} or $refusal = $@;
 	$refusal = Genesis::Term::decolorize($refusal) =~ s/\s+/ /gr;
 
-	like($refusal, qr/environment us-east-qa/, 'the refusal names the environment that inherits it');
+	like($refusal, qr/track_dependencies in us-east-qa\b/, 'the refusal names the environment that inherits it');
 	like($refusal, qr/genesis\.pipeline\.track_dependencies.*\bset in us\.yml\b/, 'and the file that sets the key');
 	unlike($refusal, qr/set in us-east-qa\.yml/, 'not the environment\'s own file, which never wrote it');
 };

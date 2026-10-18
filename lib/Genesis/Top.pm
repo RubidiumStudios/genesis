@@ -2487,13 +2487,21 @@ sub _validate_config {
 
 	} elsif ($is_integer && $config_version == 3){
 		$self->{__config_version} = 3;
-		$self->_refuse_retired_remote unless $self->{__config_repair};
+		# A repair refuses nothing, and is judged at its save.
+		local $self->{__problems} = $self->{__config_repair} ? undef : [];
 		$self->_check_config($self->_repo_config_schema());
-
-		# What follows refuses or warns; a repair is judged at its save.
 		return 1 if $self->{__config_repair};
 
-		$self->_validate_pipeline_config;
+		# A check may die over a shape the schema already refused; that refusal stands.
+		if (@{$self->{__problems}}) {
+			eval {$self->_validate_pipeline_config};
+		} else {
+			$self->_validate_pipeline_config; # its own bails keep CONFIG
+		}
+		if (my @problems = @{$self->{__problems}}) {
+			local $self->{__problems};
+			$self->_refuse_config(@problems);
+		}
 
 		my $ci_yml = $self->path('ci.yml');
 		if (-f $ci_yml && _is_legacy_ci_file($ci_yml)) {
@@ -2529,6 +2537,7 @@ sub _validate_config {
 sub _check_config {
 	my ($self, $schema) = @_;
 	return $self->config->problems($schema) if $self->{__config_repair};
+	return $self->_refuse_config($self->config->problems($schema)) if $self->{__problems};
 	return $self->config->validate($schema, $self->{__config_to_save});
 }
 
@@ -2560,6 +2569,7 @@ sub _validate_config_to_save {
 # _refuse_config - a load check's problems, refused against what is being judged {{{
 sub _refuse_config {
 	my ($self, @problems) = @_;
+	return push @{$self->{__problems}}, @problems if $self->{__problems}; # one refusal (T411)
 	bail({exitcode => CONFIG}, "Configuration validation failed for %s:%s",
 		$self->{__config_to_save} // sprintf('#C{%s}', $self->path('.genesis/config')),
 		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @problems));
@@ -2569,6 +2579,7 @@ sub _refuse_config {
 # _refuse_config_text - a load check's refusal in its own words, saying a save wrote nothing {{{
 sub _refuse_config_text {
 	my ($self, $fmt, @args) = @_;
+	return push @{$self->{__problems}}, sprintf($fmt, @args) if $self->{__problems};
 	bail({exitcode => CONFIG}, $fmt.($self->{__config_to_save}
 		? "\n\nNothing was written: #C{%s} is left as it was." : ''),
 		@args, ($self->{__config_to_save} ? $self->path('.genesis/config') : ()));
@@ -2833,6 +2844,7 @@ sub _pipeline_config_schema {
 					# Derived from git, with an explicit override.
 					uri        => {type => 'string', description => "The URL CI clones from, where it cannot be composed from the repository"},
 					repository => {type => 'string', check => \&_repository_rule, description => "The repository the pipeline lives in, as owner/repo or its URL"},
+					remote     => {type => 'any', retired => 1, check => \&_retired_remote_rule, description => 'Retired: a remote is found by the repository it points at'},
 
 					# Defaulted, and read through one accessor apiece.
 					control_branch      => {type => 'string',  default => DEFAULT_CONTROL_BRANCH, check => \&_control_branch_rule, description => "The control branch's name"},
@@ -2938,24 +2950,16 @@ sub _refuse_v2_pipeline {
 }
 
 # }}}
-# _refuse_retired_remote - a committed remote name is refused, with what replaces it {{{
-#
-# A remote's name is each clone's own, so the pipeline finds its remote by
-# the repository it points at (D118), and the key that named it is refused
-# rather than read as an alias (D28).  Asked before the schema, so the
-# operator hears what replaces the key and not that it was never known.
-sub _refuse_retired_remote {
-	my ($self) = @_;
-	my $named = $self->config->get('pipeline.source_control.remote');
-	return 1 unless defined $named;
-	$self->_refuse_config_text(
-		"#C{pipeline.source_control.remote} is set to #C{%s} in ".
-		"#C{.genesis/config}, and is no longer read.  A remote's name is each ".
+# _retired_remote_rule - a committed remote name is refused, with what replaces it {{{
+sub _retired_remote_rule {
+	my ($named) = @_;
+	return sprintf(
+		"is set to #C{%s}, and is no longer read.  A remote's name is each ".
 		"clone's own, so the pipeline finds its remote by the repository it ".
-		"points at.\n\nRemove the key, and set ".
+		"points at.  Remove the key, and set ".
 		"#C{pipeline.source_control.repository} to the repository the pipeline ".
 		"lives in wherever the clone's remotes do not settle it.  To keep using ".
-		"#C{%s} in this clone, pin it there:\n\n  git config genesis.remote %s\n",
+		"#C{%s} in this clone, pin it there: #C{git config genesis.remote %s}",
 		$named, $named, $named
 	);
 }
@@ -3758,6 +3762,7 @@ sub _merged_env_params {
 	my ($merged, $err);
 	eval {$merged = $env->manifest_provider->vaultless_environment->data; 1}
 		or $err = $@;
+	local $self->{__problems} unless ref($merged) eq 'HASH'; # every reader needs the file
 	$self->_refuse_config_text(
 		"An environment file could not be read as YAML.\n%s\n%s\n".
 		"Every environment file has to parse before anything can be ".
@@ -3883,17 +3888,16 @@ sub _validate_env_pipeline_block {
 			unless !ref($v) || ref($v) eq 'ARRAY';
 	}
 
-	# An inherited key is edited where it is set, so its file is named too.
+	# Worded as the capability gate words its own, so one refusal reads as one
+	# list; an inherited key is edited where it is set, so its file is named.
 	for (@errors) {
-		my ($key) = /^#R\{(genesis\.pipeline\.\w+)/ or next;
+		my ($head, $key, $rest) = /^(#R\{(genesis\.pipeline\.\w+)[^}]*\})(.*)\z/s
+			or do {$_ .= " (in #C{$env_name})"; next};
 		my $from = $self->_file_setting($env_name, $key);
-		$_ .= " (set in #C{$from})" if defined $from && $from ne "$env_name.yml";
+		my $set  = defined $from && $from ne "$env_name.yml" ? " (set in #C{$from})" : '';
+		$_ = "$head in #C{$env_name}$set$rest";
 	}
-	$self->_refuse_config_text(
-		"Configuration validation failed for environment #C{%s}:%s",
-		$env_name,
-		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
-	) if @errors;
+	$self->_refuse_config(@errors) if @errors;
 
 	return 1;
 }

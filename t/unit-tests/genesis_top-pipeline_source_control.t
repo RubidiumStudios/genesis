@@ -79,14 +79,15 @@ subtest 'the two branch-naming keys are declared' => sub {
 };
 
 subtest 'the block declares three tiers and refuses runtime state' => sub {
-	plan tests => 5;
+	plan tests => 6;
 
 	my $top = load_control("pipeline:\n  enabled: true");
 	my $sc  = $top->_repo_config_schema->{pipeline}{schema}{source_control}{schema};
-	is_deeply [sort grep {!$sc->{$_}{required}} keys %$sc],
+	is_deeply [sort grep {!$sc->{$_}{required} && !$sc->{$_}{retired}} keys %$sc],
 		[qw/control_branch control_requires_pr pr_prefix repository uri/],
 		'the overridable and defaulted fields are the five the design names, '.
 		'with no remote among them (D118)';
+	ok $sc->{remote}{retired}, 'remote is declared only to be refused as retired (T411)';
 	is_deeply [sort grep {$sc->{$_}{required}} keys %$sc],
 		[qw/auth identity/],
 		'auth and identity are the required pair';

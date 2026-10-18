@@ -3683,15 +3683,20 @@ with C<==> would warn, which is why the shape is checked first. The
 upgraded configuration is then judged as the version 2 configuration it
 now is.
 
-A version 3 configuration is first asked about the retired
-C<pipeline.source_control.remote>, so the operator hears what replaces it
-rather than that it was never declared, and then validated against
-L</_repo_config_schema>, which carries the C<pipeline> section, so
-C<genesis E<lt>envE<gt> deploy> and C<genesis propagate> meet the same
-refusal in the same words. The checks a declarative schema cannot state
-follow in L</_validate_pipeline_config>, which later work extends without
-touching this call, and then each registered section handler's
-C<validate_config_section>. A refusal exits C<Genesis::Exit::CONFIG>.
+A version 3 configuration is validated against L</_repo_config_schema>,
+which carries the C<pipeline> section and declares each retired key so it is
+refused naming what replaced it, so C<genesis E<lt>envE<gt> deploy> and
+C<genesis propagate> meet the same refusal in the same words. The checks a
+declarative schema cannot state follow in L</_validate_pipeline_config>, and
+then each registered section handler's C<validate_config_section>.
+
+B<Every problem is refused at once> (T411). The schema's problems and every
+check's are gathered, through L</_refuse_config> and L</_refuse_config_text>,
+and refused together at C<Genesis::Exit::CONFIG> under one heading, so an
+operator does not meet one class of problem per run. Where the schema has
+already failed, a check that dies over the shape it refused is set aside, the
+schema's refusal standing for it. An environment file that does not parse is
+still refused on the spot, because every check after it reads that file.
 
 A version 2 configuration is first refused if it carries a C<pipeline>
 section of its own, through L</_refuse_v2_pipeline>. That comes B<before
@@ -3876,6 +3881,10 @@ validation failed for" what is being judged: the file on disk at load, and
 during L</_validate_config_to_save> the configuration the run would write,
 which says the file is left as it was (T403). A check that names the file on
 disk when a save is refused reads as a file the operator has to repair.
+
+During a judgement by L</_validate_config>, it and L</_refuse_config_text>
+add their problems to the judgement's list rather than refusing, and the list
+is refused once at the end (T411).
 
 B<Parameters:> The problems, each a sentence.
 
@@ -4201,37 +4210,29 @@ B<Examples:>
     $top->_refuse_v2_pipeline;
     # returns 1 on a version 3 repository, whatever its pipeline says
 
-=head2 _refuse_retired_remote
+=head2 _retired_remote_rule
 
-    $top->_refuse_retired_remote();
+    remote => {type => 'any', retired => 1, check => \&_retired_remote_rule}
 
-Refuses, at C<Genesis::Exit::CONFIG>, a C<.genesis/config> that still carries
-C<pipeline.source_control.remote>. A remote's name is each clone's own, so
-the pipeline finds its remote by the repository it points at (D118), and the
-key is refused rather than read as an alias (D28). L</_validate_config> asks
-it before the schema, so the operator hears what replaces the key rather
-than that the key was never known.
+The schema's rule for C<pipeline.source_control.remote>, declared only to be
+refused. A remote's name is each clone's own, so the pipeline finds its remote
+by the repository it points at (D118), and the key is refused rather than read
+as an alias (D28). Declared retired, it is refused in the load's one refusal
+with every other problem, naming what replaces it, and never as a key never
+heard of (T411); it was a pass of its own before the schema.
 
-B<Returns:> 1 where the key is absent.
+B<Parameters:> The value the key carries, a remote's name.
 
-B<Errors:>
+B<Returns:> The message: the key "is set to" the name "and is no longer read",
+naming C<pipeline.source_control.repository> as what replaces it and the
+clone's own pin, C<git config genesis.remote> with that name.
 
-=over 4
-
-=item *
-
-C<"pipeline.source_control.remote is set to ... and is no longer read."> -
-naming C<pipeline.source_control.repository> as what replaces it, and the
-clone's own pin, C<git config genesis.remote> with the name the key carried,
-for keeping that remote in this clone.
-
-=back
+B<Errors:> None; the schema reports the message.
 
 B<Examples:>
 
-    $top->_refuse_retired_remote;
-    # with "remote: origin" in the source-control block, exits 78 ending
-    # "git config genesis.remote origin"
+    Genesis::Top::_retired_remote_rule('origin');
+    # "is set to origin, and is no longer read.  ... git config genesis.remote origin"
 
 =head2 _provider_module_map
 
@@ -5406,9 +5407,10 @@ B<Errors:>
 
 =item *
 
-C<"Configuration validation failed for environment ..."> - raised at
-C<Genesis::Exit::CONFIG> with one bullet per fault, which are the schema's
-own refusals with their keys named as the environment file spells them, the
+Each fault is a problem of the load's one refusal, through L</_refuse_config>,
+worded C<< genesis.pipeline.<key> in <env>: ... >> as the capability gate
+words its own (T411), and refused at C<Genesis::Exit::CONFIG>. The faults are
+the schema's own refusals with their keys named as the environment file spells them, the
 shape refusals above, and C<"genesis.pipeline.<key>: expected a list of
 strings"> where a mapping was written in a list's place.
 
