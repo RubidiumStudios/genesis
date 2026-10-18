@@ -2152,6 +2152,9 @@ define_command("pipeline-graph", {
 		"Compiles the pipeline and prints a Mermaid flowchart, or writes it to ".
 		"the file --output names.  Replaces `genesis graph`.",
 	function_group => Genesis::Commands::PIPELINE,
+	# describe's other reading, so the same branches and no refresh (T392)
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
+	refresh        => 'never',
 	preview        => 1,
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,

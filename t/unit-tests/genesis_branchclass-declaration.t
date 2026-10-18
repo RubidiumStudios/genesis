@@ -34,7 +34,10 @@ my %expected = (
 	'pipeline-apply'     => Genesis::Commands::PRE_DEPLOY,
 	'pipeline-status'    => Genesis::Commands::PRE_DEPLOY,
 	'pipeline-describe'  => Genesis::Commands::PRE_DEPLOY,
-	'check-secrets'      => Genesis::Commands::PRE_DEPLOY,
+	# T392: the graph is describe's other reading, so it stands on the same branches.
+	'pipeline-graph'     => Genesis::Commands::PRE_DEPLOY,
+	'pipeline-diff'      => Genesis::Commands::PRE_DEPLOY,
+	'check-secrets'     => Genesis::Commands::PRE_DEPLOY,
 	'secrets'            => Genesis::Commands::PRE_DEPLOY,
 	'add-secrets'        => Genesis::Commands::PRE_DEPLOY,
 	'rotate-secrets'     => Genesis::Commands::PRE_DEPLOY,
