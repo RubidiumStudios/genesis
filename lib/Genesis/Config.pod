@@ -1161,6 +1161,12 @@ valid string, and guessing at a boolean would discard what was typed.
 
 =item *
 
+A digit literal the value spells, such as the version's C<"3">, becomes the
+number, which is how Genesis writes it, so C<--set version 3> is not the one
+quoted scalar in the file (T396).
+
+=item *
+
 C<boolean> accepts C<false>, C<no>, C<off>, C<0> and the empty string as
 false, case-insensitively; anything else is true.
 

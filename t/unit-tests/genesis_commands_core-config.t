@@ -175,6 +175,21 @@ subtest 'config --set persists a value' => sub {
 		"writes the new value to .genesis/config");
 };
 
+subtest 'config --set version writes the number, as Genesis does' => sub {
+	plan tests => 1;
+
+	# T396: the schema types the version as the literal "3", so the text the
+	# command line gave was written quoted, the one quoted scalar in the file.
+	my $dir = config_repo('config-set-version');
+	pushd $dir;
+	prepare_command('config', '--set', 'version', '3');
+	build_command_environment;
+	output_from { Genesis::Commands::Core::config() };
+	popd;
+
+	like(slurp("$dir/.genesis/config"), qr/^version: 3$/m, 'version: 3, bare');
+};
+
 subtest 'config --set refuses a value the schema rejects' => sub {
 	plan tests => 2;
 

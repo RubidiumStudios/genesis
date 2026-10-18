@@ -565,6 +565,9 @@ sub _coerce_to_schema_type {
 	# guessing at a boolean would discard what the operator actually typed.
 	return $value if $types{string};
 
+	# A digit literal, such as the version's "3", is the number Genesis writes.
+	return 0 + $value if $value =~ /^\d+$/ && $types{qq("$value")};
+
 	if ($types{boolean}) {
 		# Every non-empty string is true in Perl, so the spellings a person
 		# would actually type for false have to be recognised explicitly.
