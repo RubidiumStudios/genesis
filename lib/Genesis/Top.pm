@@ -2449,6 +2449,13 @@ sub _validate_config {
 
 	if (($is_integer && $config_version == 1) || $is_semver) {
 
+		# The upgrade rewrites the file, and a preview writes nothing (T408).
+		$self->_refuse_config_text(
+			"This repository's configuration is version 1, and a preview writes ".
+			"nothing, so it is not upgraded here.  Upgrade it with any command ".
+			"that is not a preview, such as #C{genesis config}, then preview again."
+		) if $Genesis::Commands::COMMAND && Genesis::Commands::previewing();
+
 		my $upgrade_automatically = $Genesis::RC->get(automatic_config_upgrade => 'no');
 		bail({exitcode => CONFIG},
 			"Genesis deployment repo v1 configuration is not supported, and cannot ".

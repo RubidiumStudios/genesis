@@ -3734,6 +3734,15 @@ B<Errors:>
 
 =item *
 
+C<"This repository's configuration is version 1, and a preview writes nothing, so it is not upgraded here.  ...">
+- raised at C<Genesis::Exit::CONFIG> when a v1 config is loaded by a preview
+(a command whose registration declares C<preview>, or C<--dry-run> where it
+names that option), because the upgrade rewrites the file. It names
+C<genesis config> as a command that upgrades it, and leaves the file as it was
+(T408).
+
+=item *
+
 C<"Genesis deployment repo v1 configuration is not supported, and cannot update automatically.  ...">
 - raised at C<Genesis::Exit::CONFIG> when a v1 config is detected, no
 controlling terminal is available, and automatic upgrade is disabled. It names
