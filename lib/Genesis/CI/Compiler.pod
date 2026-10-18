@@ -116,6 +116,12 @@ A provider the registry knows but has no compiler for is refused here
 rather than answered with nothing, because a run that reached this stage
 has an artefact to emit.
 
+Scripts are discovered under the repository's own root, not the process's
+working directory. Every command that compiles opens its deployment root on
+the directory it was run in, so the two agree wherever a command reaches here,
+but a caller holding a root of its own would otherwise have its scripts looked
+for wherever the process stood.
+
 B<Parameters:>
 
 =over 4

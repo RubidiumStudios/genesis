@@ -384,6 +384,11 @@ provider's C<fly_command> names, and then pauses,
 unpauses, exposes, or hides it according to what was asked for. A dry run
 prints what would be set and stops.
 
+Each option resolves from the caller's C<%opts>, given in the configuration
+file's spelling (the caller normalises any CLI spelling first), then the
+C<pipeline.provider> options held on the compiler, then the legacy layout, then
+the built-in default, such as C<team: main>.
+
 B<Parameters:>
 
 =over 4

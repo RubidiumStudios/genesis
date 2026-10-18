@@ -1447,6 +1447,22 @@ Control's divergence and the problem it makes, which
 L</require_control($top, $git, %opts)> frames and refuses with and
 L</control_problems($top, $git, %opts)> hands back.
 
+Where the remote has control and this clone does not, a run that creates the
+local branch from what it read of R (C<creates_local>, as D115's does) has
+nothing to say, unless the tree stands on control unborn, which no run writes.
+A preview reads control on T and stands on nothing, so it has nothing to say
+either (D44, noted 2026-10-16). Otherwise the refresh is what writes the local
+ref, so something stopped it, usually a working tree standing on an unborn
+control, and the problem says the creation did not happen rather than reading
+staleness out of two counts that are both zero.
+
+Under C<permit_ahead> a control branch ahead of its remote is no problem: it is
+the one divergence a preview can still answer, because everything it reads is on
+control and the push settles only whether another machine could resolve the
+markers a real run would write. Behind and diverged are problems for a preview
+as for a run that writes. The commit count governs the verb in every wording,
+because "by 1 commit, which are unpublished" is read past rather than read.
+
 B<Parameters:> As for L</control_problems($top, $git, %opts)>.
 
 B<Returns:> The divergence from L<Service::Git/resolve_branch>, or C<undef>

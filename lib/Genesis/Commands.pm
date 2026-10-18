@@ -253,12 +253,6 @@ sub define_command { # {{{
 	) if defined($PROPS{$name}{branch_target})
 		&& !defined($PROPS{$name}{branch_class});
 
-	# A misspelt target reads as the tip, because that is what the resolver
-	# makes of every word that is not #y{deployed}, so the command would take
-	# the commit its author declared it did not mean and nothing downstream
-	# could tell the typo from a deliberate #y{tip}.  The registration is the
-	# only place that can catch it, which is the same reason the class above
-	# is checked here.
 	bug(
 		"Command #C{$name} declares the default target #y{%s}; ".
 		"the only targets are #y{%s} and #y{%s}.",
@@ -266,10 +260,6 @@ sub define_command { # {{{
 	) if ($PROPS{$name}{default_target} // 'tip') ne 'tip'
 		&& $PROPS{$name}{default_target} ne 'deployed';
 
-	# A commit declared outside the pre-deploy class is read by nobody.
-	# Only the pre-deploy assertion asks the question, so the attribute on
-	# any other registration reads as though the command had been exempted
-	# from the control_requires_pr refusal when it was never subject to it.
 	bug(
 		"Command #C{$name} declares that it commits on control without ".
 		"the #y{%s} branch class.",
@@ -277,12 +267,6 @@ sub define_command { # {{{
 	) if $PROPS{$name}{commits}
 		&& ($PROPS{$name}{branch_class} // '') ne PRE_DEPLOY;
 
-	# The fast-forward is the gate's one write, and it is declared rather
-	# than assumed, so that a command which only reads the deployment branch
-	# cannot acquire a ref move by sharing a gate with one that deploys.
-	# Declared outside the class the gate switches for, it would be read by
-	# nobody and would read as though the command moved a ref it never
-	# touches.
 	bug(
 		"Command #C{$name} declares that it fast-forwards its deployment ".
 		"branch without the #y{%s} branch class.",
@@ -290,10 +274,6 @@ sub define_command { # {{{
 	) if $PROPS{$name}{branch_fast_forward}
 		&& ($PROPS{$name}{branch_class} // '') ne DEPLOYED_STATE;
 
-	# A target the gate never compares against would silently gate the
-	# command it was meant to exempt, which is the same failure the class
-	# check above rules out.  Control is the only target the gate reads
-	# today; a step that teaches it a second one adds that name here.
 	bug(
 		"Command #C{$name} declares the branch target #y{%s}; ".
 		"the only target is #y{%s}.",
@@ -301,9 +281,6 @@ sub define_command { # {{{
 	) if defined($PROPS{$name}{branch_target})
 		&& !grep {$_ eq $PROPS{$name}{branch_target}} BRANCH_TARGETS;
 
-	# A refresh mode the gate never compares against would leave the command
-	# refreshed as though it had declared nothing, which is the same silent
-	# failure the class check above rules out.
 	bug(
 		"Command #C{$name} declares the refresh mode #y{%s}; ".
 		"the only modes are #y{%s}.",
@@ -311,9 +288,6 @@ sub define_command { # {{{
 	) if defined($PROPS{$name}{refresh})
 		&& !grep {$_ eq $PROPS{$name}{refresh}} REFRESH_MODES;
 
-	# A refresh declared outside the pre-deploy class is read by nobody, so
-	# the attribute on any other registration reads as though the command had
-	# been exempted from a fetch it was never subject to.
 	bug(
 		"Command #C{$name} declares a refresh mode without the #y{%s} ".
 		"branch class.",
@@ -327,9 +301,6 @@ sub define_command { # {{{
 		$PROPS{$name}{option_passthrough} = 1;
 	}
 
-	# The retired and deprecated flags are mutually exclusive.  A retired
-	# command's refuse-to-run always trumps a deprecated one's warn-and-run,
-	# so declaring both is a bug.
 	bug(
 		"Command #C{$name} declares both #y{retired} and #y{deprecated}; ".
 		"use #y{retired} alone once the command no longer runs."
@@ -701,64 +672,25 @@ sub deployed_target {
 } # }}}
 
 # _gate_branch_class - run a command under its declared class {{{
-#
-# The class sits at the registration so that one declaration drives both the
-# refusal and the help marker, which means the enforcement belongs here,
-# beside the legacy ci.yml gate, and not inside each command.
-#
-# The command's own function comes in as $fn and every path here runs it.  A
-# pre-deploy command is refused before it runs or runs where it stands, and a
-# deployed-state command runs inside a branch session, which is why the gate
-# runs the function rather than returning to a caller that would.
 sub _gate_branch_class {
 	my ($fn) = @_;
 
 	my $class = command_properties()->{branch_class};
 	return $fn->() unless $class;
 
-	# propagate switches to control inside the session it already has, so
-	# the gate leaves it where it stands.  The exemption is read before
-	# anything is loaded, because loading a Top names the root and the vault
-	# target in the environment and a command the gate never gates should
-	# not be handed those as a side effect.
+	# propagate switches to control inside its own session; read before any
+	# Top is loaded, so an ungated command is not handed a root and a target.
 	return $fn->() if (command_properties()->{branch_target} // '') eq 'control';
 
 	# Only meaningful when the command has a repository to read a Top from.
 	return $fn->() unless has_scope('repo', 'env');
 
-	# One root and one handle, built once and read by both arms.  The
-	# pre-deploy assertion classifies the branch through the handle and the
-	# deployed-state switch opens its session on it, and two handles onto
-	# one working tree would key two sessions, which is what I9 forbids.
+	# One root and one handle for both arms: two handles key two sessions (I9).
 	my ($top, $git) = _gate_context();
 	return $fn->() unless $top && $git;
 
-	# The two deployed-commit flags refuse where no session opens, so the
-	# resolver is asked above the return that leaves every other command
-	# alone with the pipeline off.  It answers the commit the run targets,
-	# or undef where the run targets the tip, which is every run that named
-	# neither flag under a registration declaring no deployed default.
-	#
-	# The name derivation lives here rather than in _gate_deployed_state,
-	# for the reason the comment there gave, which is that two derivations
-	# of one name are two chances to disagree, and now two callers want it.
-	# An operator may name the environment by a path, so the leading
-	# directories and the suffix both come off, which is what the deploy does
-	# to the same argument in Genesis::Commands::Env::deploy.  set_top_path
-	# has already turned a path resolving to a file into its basename by the
-	# time this runs, so the directory half earns its place by keeping the
-	# two derivations identical rather than by the work it does here.
-	#
-	# The record the target came out of comes back with it, in list context,
-	# so that a commit the repository cannot reach is refused by the name of
-	# the record an operator has to go and correct.  The resolver reads that
-	# record already, and this is the only caller that knows which one this
-	# run was answered from.
-	#
-	# Genesis writes an environment file as <name>.yml, which is the only
-	# spelling Genesis::Top::_env_file_names globs for, and the command line
-	# tolerates the longer one because an operator may well type it.  The
-	# same expression strips it wherever an argument is read as a name.
+	# Asked above the pipeline return, so the two deployed-commit flags refuse
+	# where no session opens.  The name is derived once, as the deploy does.
 	my $name = $COMMAND_ARGS[0];
 	my ($target, $record);
 	if (defined($name) && length($name)) {
@@ -767,39 +699,18 @@ sub _gate_branch_class {
 		($target, $record) = deployed_target($name, $top);
 	}
 
-	# Outside a pipeline every command behaves as it always has, on any
-	# branch.  A preview reads the working tree, so a control that fails the
-	# configuration checks gates nothing for it; the preview's banner names it.
+	# Outside a pipeline nothing is gated; nor is a preview over a control that
+	# fails the configuration checks, which its banner names.
 	return $fn->() if previewing() && $top->control_config_problems;
 	return $fn->() unless $top->pipeline_enabled;
 
-	# The secrets family is pre-deploy by class, and --as-deployed opts it
-	# into the deployed commit, so a run that resolved a target is sent
-	# down the deployed-state arm whatever class its registration declares.
-	# It is read before the class, because the flag is the operator saying
-	# which of the two questions they are asking and the class is only the
-	# default answer.
+	# A resolved target (--as-deployed on the secrets family) outranks the class.
 	return _gate_deployed_state($top, $git, $fn, $name,
 			target => $target, record => $record)
 		if defined($target) || $class eq DEPLOYED_STATE;
 
 	if ($class eq PRE_DEPLOY) {
-		# Two pre-deploy commands make no network call of their own, and
-		# the gate makes none for them either.  Each says so at its own
-		# registration rather than by name here, because a list of command
-		# names inside the gate is the second declaration the class rule
-		# exists to prevent.  Such a list drifts from the help text, from
-		# the command's own reading, and from whatever the next such
-		# command declares.
-		#
-		# pipeline-status declares an optional refresh, which is one the
-		# operator skips with --no-refresh, and which the command makes
-		# itself, once, so the gate makes none for it (D115, noted
-		# 2026-10-11); the gate may still ask R a question where the
-		# operator did not skip it.  pipeline-describe declares that it
-		# never refreshes, because it answers out of the repository's own
-		# files and a fetch would refuse offline what it can always read
-		# from disk, so the gate makes no network call for it at all.
+		# The registration's refresh mode, never a list of names here (D115).
 		my $mode    = command_properties()->{refresh} // '';
 		my $network = $mode eq 'never' ? 0
 		            : $mode eq 'optional' && get_options()->{'no-refresh'} ? 0
@@ -815,19 +726,7 @@ sub _gate_branch_class {
 			($network, $refresh) = (0, 0);
 		}
 
-		# Whether the command commits goes down too.  The refusal is
-		# about a commit that cannot reach control through a pull
-		# request, and most pre-deploy commands make none:
-		# pipeline-apply writes to the provider, pipeline-status and
-		# pipeline-describe only read, and the secrets commands write to
-		# the vault.  Only create declares it today, and it is read off
-		# the registration for the same reason the refresh mode above it
-		# is.
-		#
-		# genesis new is about to add an environment whose name may be the
-		# branch it stands on, and that collision is one the gate cannot
-		# see from the branch alone, so the name the command was given
-		# goes down with it.
+		# genesis new's name goes down: it may collide with the branch it stands on.
 		my $adding;
 		$adding = $COMMAND_ARGS[0] if is_equivalent_command(create => $COMMAND)
 			&& defined($COMMAND_ARGS[0]);

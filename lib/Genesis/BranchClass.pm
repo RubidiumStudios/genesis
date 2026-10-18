@@ -261,50 +261,18 @@ sub permitted_feature_branch {
 
 # }}}
 # assert_pre_deploy - refuse a pre-deploy command off a permitted branch {{{
-#
-# A pre-deploy command runs on control or on a permitted feature branch,
-# refuses elsewhere naming the condition it failed, and switches nothing,
-# because the operator chose the branch and the fix is theirs.
 sub assert_pre_deploy {
 	my ($top, $git, %opts) = @_;
 
-	# The refresh runs above the classification, because the descent
-	# condition the class check grows reads the remote-tracking ref, and a
-	# stale one answers for a control tip nobody has any more.  It runs on a
-	# branch the gate is about to refuse as well as on one it permits, so
-	# where a command ends says nothing about whether it refreshed.
-	#
-	# The caller passes refresh => 0 for a command whose registration
-	# declares that it makes its own refresh, or that it never makes one,
-	# which is pipeline-status and pipeline-describe.  network => 0 says the
-	# gate may not ask R anything either, which is pipeline-status under
-	# --no-refresh and pipeline-describe; where it is not given it follows
-	# refresh.  The gate reads that declaration; nothing here knows either
-	# command's name.
+	# Above the classification: the descent check reads the remote-tracking ref.
 	refresh_control($top, $git)
 		unless defined($opts{refresh}) && !$opts{refresh};
 
-	# A detached HEAD is neither control nor derived, so it is allowed
-	# through here.  The repository that has lost control is the pre-flight's
-	# to repair, since it re-creates the branch from the remote, and the
-	# clone that never had it is the apply's to refuse at CONFIG.  A refusal
-	# raised here would speak before either of them and say less.
 	my $branch = $git->current_branch;
-
-	# A HEAD that names no branch is the pre-flight's to refuse, and it
-	# refuses it by saying the repository has no commits and naming the
-	# commit that fixes that, so the gate stands aside and lets the command
-	# reach it.  There is no branch here to measure against control's tip,
-	# and a gate that measured anyway would tell an operator with nothing
-	# committed to rebase.
-	return 1 unless defined $branch;
+	return 1 unless defined $branch; # no commits yet: the pre-flight's to refuse
 
 	my $class = classify_branch($top, $branch);
 
-	# A command that runs only on control (D113) refuses every other branch,
-	# a detached HEAD included, naming what it found.  A clone with no control
-	# branch at all is let through, because the command's own refusal of that
-	# says more than "check it out" can.
 	if ($opts{control_only} && $class ne 'control'
 	    && $git->branch_exists($top->control_branch)) {
 		bail({exitcode => DATAERR},
@@ -321,9 +289,7 @@ sub assert_pre_deploy {
 	}
 
 	if ($class eq 'control') {
-		# Control must also be in step with the remote, because the commit the
-		# command records must be one every clone can fetch (D113, D30).
-		# Unasked where the remote may not be, as in a dry run without one.
+		# In step with the remote, so the recorded commit is fetchable (D113, D30).
 		if ($opts{control_only} && ($opts{network} // 1)) {
 			require Genesis::CI::Preflight;
 			Genesis::CI::Preflight::refuse_once(
@@ -334,19 +300,6 @@ sub assert_pre_deploy {
 				outcome => 'Nothing was written.');
 		}
 
-		# Where control requires a pull request, a command that commits
-		# on control expects a feature branch instead, because a commit
-		# made here has no way to reach control through a pull request.
-		# The expectation follows the key that already decides the
-		# protection, so there is no second key to set.
-		#
-		# It is asked of the command and not of the class.  The refusal
-		# is about a commit, and most pre-deploy commands make none on
-		# control.  The command pipeline-apply applies the very
-		# protection this key derives, and refusing it here would leave
-		# an operator no way to turn the protection on.  The caller
-		# passes commits from the registration, and create is the only
-		# command that declares it today.
 		bail({exitcode => DATAERR},
 			"#C{%s} requires a pull request, so this command expects to run ".
 			"on a feature branch.\n\n".
@@ -363,9 +316,6 @@ sub assert_pre_deploy {
 	my %derived = (
 		deployment => "a deployment branch, which holds what was delivered",
 		pr         => "a pull request branch, which a propagate run rewrites",
-		# Nothing on the tree writes an artifacts branch.  The name is
-		# composed so that a command standing on one can be refused, and
-		# the refusal says that rather than naming a writer.
 		artifacts  => "an artifacts branch, which nothing writes yet and ".
 		              "which Genesis knows by name so that it can refuse ".
 		              "a command standing on one",
@@ -379,12 +329,7 @@ sub assert_pre_deploy {
 		$branch, $derived{$class}, $top->control_branch
 	) if exists $derived{$class};
 
-	# The detached HEAD the comment above let through is let through here
-	# too.  It is no branch, so neither remedy the predicate offers can be
-	# carried out on it, and the two landed behaviours that own the state
-	# still speak for it.  A HEAD that names no branch at all never reaches
-	# this far, because the early return above owns that case.
-	return 1 if $branch eq 'HEAD';
+	return 1 if $branch eq 'HEAD'; # detached: no remedy applies to it
 
 	my ($ok, $reason, $remedy) = permitted_feature_branch(
 		$top, $git, $branch,

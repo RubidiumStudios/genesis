@@ -29,18 +29,8 @@ sub new {
 sub parse {
 	my ($self) = @_;
 
-	# Determine parsing mode, in priority order:
-	#   1. A named configuration directory (multi-file)
-	#   2. .genesis/config pipeline: section (inline genesis-config)
-	#   3. Legacy ci.yml file                (single-file legacy)
-	#
-	# The inline section is named pipeline, with no alias left behind for
-	# its old spelling, and that is the name
-	# Genesis::CI::Compiler::can_compile_from_genesis_config reads.  The
-	# two reads have to be about the same section.  A gate that answers
-	# yes and a parser that then goes looking for a file would send a
-	# correctly configured repository to the bail below, which would
-	# complain about a ci.yml nobody is meant to have any more.
+	# A named directory, then the pipeline section (the one section
+	# can_compile_from_genesis_config reads), then a legacy ci.yml.
 	if ($self->{ci_dir} && -d $self->{ci_dir}) {
 		return $self->_parse_multi_file($self->{ci_dir});
 	} elsif ($self->{top} && $self->{top}->pipeline_section) {
@@ -125,27 +115,14 @@ sub _parse_multi_file {
 ### Genesis Config Parser {{{
 
 # _parse_genesis_config - parse the pipeline: section from .genesis/config {{{
-#
-# Maps the section's sub-keys directly to the same normalized structure
-# produced by _parse_multi_file(), so all downstream stages (Validator,
-# ASTBuilder, etc.) are format-agnostic.
-#
-# Expected structure (all optional except targets + integrations):
-#
-#   pipeline:
-#     targets:         { name: { type, connection, ... } }  # required
-#     integrations:    { vault: {...}, source_control: {...} }  # required
-#     pipeline:        { workflows: {...}, ... }             # optional
-#     scripts:         { script_id: { path, ... } }         # optional
-#     provider_config: { concourse: {...} }                  # optional
+# Into _parse_multi_file's structure, so the stages after it are format-agnostic.
 sub _parse_genesis_config {
 	my ($self, $data) = @_;
 
 	my %parsed;
 
-	# Only keys the schema declares are read (D27, noted 2026-10-16; T380).
-	# The topology comes from the environment files, so the superseded
-	# layout's pipeline, targets, scripts and integrations blocks are not.
+	# Only declared keys are read (D27, T380); the superseded layout's
+	# pipeline, targets, scripts and integrations blocks are not.
 	$parsed{pipeline}        = {};
 	$parsed{targets}         = {};
 	$parsed{scripts}         = {};
@@ -159,32 +136,18 @@ sub _parse_genesis_config {
 		if $data->{source_control};
 	$parsed{integrations} = \%integ;
 
-	# When no pipeline section is provided, workflow topology is derived from
-	# genesis.pipeline.* keys in environment YAML files (same as multi-file
-	# with no pipeline.yml).  Point ASTBuilder at the repo root.
+	# The topology comes from the environment files at the repo root.
 	unless (%{$parsed{pipeline}}) {
 		$parsed{env_dir} = $self->{top} ? $self->{top}->path() : '.';
 	}
 
-	# The pipeline's own name, which the v3 schema declares as pipeline.name
-	# and describes as falling back to the deployment type.  Nothing carried
-	# it this far, so the AST every command reads the name off carried none
-	# and a repository configured entirely from .genesis/config was refused
-	# before any provider was asked for anything.  The fallback is the one
-	# the Concourse deploy already resolves the name by, so the name a
-	# pipeline is set under and the name the AST holds are the same name.
-	#
-	# The block is copied rather than written into, because it comes off the
-	# configuration the caller still holds and a parse should not change what
-	# it read.
+	# pipeline.name, falling back to the deployment type as the deploy does;
+	# copied, so the parse never changes the configuration it read.
 	$parsed{pipeline} = {%{$parsed{pipeline}}};
 	$parsed{pipeline}{metadata} = {
 		%{$parsed{pipeline}{metadata} || {}},
 	};
-	# Set only where there is something to set.  Assigning the fallback
-	# unconditionally left a name key holding undef whenever neither the
-	# section nor the top had a name to give, and a key that is there and
-	# empty reads differently from a key that was never written.
+	# Set only where defined: a present-but-undef key reads unlike an absent one.
 	my $name = $parsed{pipeline}{metadata}{name} // $data->{name}
 		// ($self->{top} ? $self->{top}->type : undef);
 	$parsed{pipeline}{metadata}{name} = $name if defined $name;

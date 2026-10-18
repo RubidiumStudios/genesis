@@ -375,20 +375,10 @@ sub _control_standing {
 		"again.",
 		$control, $remote, $remote, $control))) if $div->{state} eq 'no-remote';
 
-	# The remote has control and this clone does not.  A run that creates the
-	# local branch from what it read of R, as D115's does, has nothing to say
-	# about that, unless the tree stands on control unborn, which no run
-	# writes.  Otherwise the refresh was the one that writes the local ref,
-	# so something stopped it, and a working tree standing on an unborn control
-	# is what usually does; the refusal says the creation did not happen,
-	# rather than reading a staleness out of two counts that are both zero.
 	if ($div->{state} eq 'no-local') {
 		return ($div) if $opts{creates_local}
 			&& ($git->checked_out_branch // '') ne $control;
-
-		# A preview reads control's commits and stands on nothing, so it reads
-		# control on T (D44, noted 2026-10-16).
-		return ($div) if $opts{preview};
+		return ($div) if $opts{preview}; # reads control on T (D44)
 		return ($div, problem(DATAERR, sprintf(
 			"The control branch #C{%s} is on #C{%s/%s} and not in ".
 			"this clone.  The refresh writes the local ref for a branch the remote ".
@@ -399,18 +389,8 @@ sub _control_standing {
 			$control, $remote, $control, $control, $control, $remote, $control)));
 	}
 
-	# The preview refuses nothing it can warn about instead, so a caller
-	# that is only going to report says so here.  A control branch that is
-	# ahead of its remote is the one divergence a preview can still answer,
-	# because everything the preview reads is on control itself and all the
-	# push settles is whether another machine could resolve the markers a
-	# real run would write.  Staleness is not like that, so behind and
-	# diverged are refused here as they are for a run that writes.
 	return ($div) if $opts{permit_ahead} && $div->{state} eq 'ahead';
 
-	# The number governs the verb in every one of these, because a refusal
-	# that reads "by 1 commit, which are unpublished" is read past rather
-	# than read.
 	my $counts = $div->{state} eq 'diverged'
 		? sprintf("is ahead of #C{%s/%s} by %s and behind it by %s, so it is ".
 		          "both unpublished and stale",

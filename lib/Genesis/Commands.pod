@@ -545,9 +545,12 @@ C<control_requires_pr> refusal when it was never subject to it.
 =item C<"Command %s declares that it fast-forwards its deployment branch without the deployed-state branch class.">
 
 Raised via C<bug> when C<branch_fast_forward> is true and C<branch_class> is
-anything but C<DEPLOYED_STATE>.  Only the deployed-state gate asks whether a
-command may move the branch, so the attribute anywhere else is read by nobody
-and reads as though the command moved a ref it never touches.
+anything but C<DEPLOYED_STATE>.  The fast-forward is the gate's one write, and
+it is declared rather than assumed so that a command which only reads the
+deployment branch cannot acquire a ref move by sharing a gate with one that
+deploys.  Only the deployed-state gate asks whether a command may move the
+branch, so the attribute anywhere else is read by nobody and reads as though
+the command moved a ref it never touches.
 
 =item C<"Command %s declares the default target %s; the only targets are tip and deployed.">
 
@@ -555,7 +558,7 @@ Raised via C<bug> when C<default_target> is set to anything but C<'tip'> or
 C<'deployed'>.  The resolver reads every other word as the tip, so a
 misspelling would take the command to the commit its registration says it
 does not mean, and nothing after the registration can tell that typo from a
-deliberate C<'tip'>.
+deliberate C<'tip'>, so the registration is the one place that can catch it.
 
 =item C<"Command %s declares the refresh mode %s; the only modes are optional and never.">
 
@@ -582,7 +585,9 @@ it means nothing on its own.
 Raised via C<bug> when C<branch_target> is set to anything but
 C<'control'>.  A target the gate never compares against would exempt the
 command from nothing while reading as though it had, which is the same
-failure the class check rules out.
+failure the class check rules out.  Control is the only target the gate reads
+today; a change that teaches it a second one adds that name to
+C<BRANCH_TARGETS>.
 
 =back
 
@@ -2262,19 +2267,18 @@ in list context because it is the one caller that knows which record answered
 this run.  An environment built here merely to work the path out again would
 announce a vault target on behalf of a command the gate never gates.
 
-The refresh is passed along as C<< refresh => 0 >> for the two commands that
-make no network call of their own.  C<pipeline-status> says so with
-C<--no-refresh>, which it alone declares.  C<pipeline-describe> resolves the
-repository's own configuration out of files, so it holds no ref a refresh
-could make current, and a fetch would refuse offline what the command can
-always answer from disk.  Both are read here, where the options and the
-command name are, rather than in the assertion, which has no business knowing
-which command declared what.
-
-The two names sit in the gate for now.  It would be better for a
-registration to declare that it needs no refresh, the way it declares its
-class, and the attribute that gives a registration such a declaration takes
-these names onto it, C<pipeline-status> included.
+The refresh is read off the registration's C<refresh> mode, never off a list
+of command names in the gate, because such a list is the second declaration
+the class rule exists to prevent and would drift from the help text, from the
+command's own reading, and from whatever the next such command declares.
+C<pipeline-status> declares an C<optional> refresh, one the operator skips
+with C<--no-refresh> and the command makes itself, once, so the gate makes
+none for it (D115, noted 2026-10-11); the gate may still ask R a question
+where the operator did not skip it.  C<pipeline-describe> declares that it
+C<never> refreshes, because it answers out of the repository's own files and
+a fetch would refuse offline what it can always read from disk, so the gate
+makes no network call for it at all.  The assertion is handed the result and
+has no business knowing which command declared what.
 
 A C<--dry-run> in a clone that cannot give the pipeline's remote is also
 passed along with C<< refresh => 0, network => 0 >> (D118, noted
@@ -2284,9 +2288,12 @@ refusing, because a dry run writes nothing the remote has to agree with.
 Every other run meets the clone's refusal where it first uses the remote.
 
 Whether the command commits on control goes down as C<< commits => ... >>,
-read straight off the registration. The C<control_requires_pr> refusal is
-asked of that rather than of the class, and that attribute pattern absorbs
-the declaration later the way it absorbs the two refresh exemptions above.
+read straight off the registration for the same reason the refresh mode is.
+The C<control_requires_pr> refusal is asked of that rather than of the class,
+because it is about a commit that cannot reach control through a pull request
+and most pre-deploy commands make none: C<pipeline-apply> writes to the
+provider, C<pipeline-status> and C<pipeline-describe> only read, and the
+secrets commands write to the vault.  Only C<create> declares it today.
 
 The name a command is about to add goes down with it as C<< adding => ... >>.
 C<genesis new> takes that name as its first argument, and a feature branch
@@ -2306,8 +2313,13 @@ it, because C<deployed_target> has already bailed at
 C<Genesis::Exit::CONFIG>.
 
 The environment name is derived here, once, from the first command argument,
-with any leading directories and any C<.yml> or C<.yaml> suffix removed.  Two
-callers want it.  C<deployed_target> is asked for the target before the
+with any leading directories and any C<.yml> or C<.yaml> suffix removed, as
+C<Genesis::Commands::Env::deploy> does to the same argument.  C<set_top_path>
+has already turned a path resolving to a file into its basename by then, so
+the directory half keeps the two derivations identical rather than doing work
+here.  Genesis writes an environment file as F<E<lt>nameE<gt>.yml>, the only
+spelling C<Genesis::Top::_env_file_names> globs for, and the longer suffix is
+tolerated because an operator may type it.  Two callers want the name.  C<deployed_target> is asked for the target before the
 pipeline question, so that a flagged run meets its refusal where no session
 would open, and C<_gate_deployed_state> is handed the name rather than
 deriving a second one, because two derivations of one name are two chances
@@ -2319,7 +2331,14 @@ command this gate never gates should not be handed those on its way past.
 
 The C<Top> and the git handle both come from C<_gate_context>, which the
 legacy F<ci.yml> gate reads too, so the four commands that meet both gates
-are loaded once.
+are loaded once.  The two arms share that one handle: the pre-deploy
+assertion classifies the branch through it and the deployed-state switch
+opens its session on it, and two handles onto one working tree would key two
+sessions, which I9 forbids.
+
+A preview (L</previewing>) whose control fails the configuration checks
+(L<Genesis::Top/control_config_problems>) runs ungated, since it reads the
+working tree and its banner names the failures (D112, noted 2026-10-16).
 
 B<Parameters:>
 

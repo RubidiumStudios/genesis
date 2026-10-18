@@ -74,11 +74,6 @@ sub compile {
 
 	# Stage 3: Discover scripts
 	info("Discovering scripts...");
-	# The repository's own root, and not the process's working directory.
-	# Every command that compiles opens its deployment root on the directory
-	# it was run in, so the two are the same wherever a command reaches
-	# here, but a caller holding a root of its own would otherwise have its
-	# scripts looked for wherever the process happened to be standing.
 	my $script_discovery = Genesis::CI::Compiler::ScriptDiscovery->new(
 		repo_path => $self->{top}->path,
 	);
@@ -101,20 +96,9 @@ sub compile {
 	$ast->set_pipeline($descriptor->describe());
 
 	# Stage 6: build the provider and ask it for its compiler
-	#
-	# One class answers for a provider, and the compiler that emits its
-	# artefact is a component that class owns.  The compile used to
-	# resolve a compiler class out of the registry and build it directly,
-	# so nothing in a run ever held a Genesis::CI::Provider and the
-	# command that asked for check_prereqs was handed the compiler-side
-	# copy instead.
 	info("Generating %s pipeline...", $provider_type);
 
-	# Provider options come from the parsed pipeline.provider: block and
-	# from any caller-supplied opts, normalised from their CLI form
-	# (ci-* prefixed, hyphenated) to config form (unprefixed,
-	# underscored) so that provider_option() and provider_config() see
-	# consistent keys.
+	# The block, with the caller's CLI-spelled options normalised over it.
 	my $provider_opts = {
 		%{ $parsed->{provider} || {} },
 		%{ $self->_normalized_provider_opts(
@@ -122,18 +106,14 @@ sub compile {
 		) },
 	};
 
-	# The type the caller asked to compile for wins over the type the
-	# block declares, because the caller is the one that named it and a
-	# block that disagrees would otherwise pick the class silently.
+	# The caller's type wins over the block's.
 	require Genesis::CI::Provider;
 	my $provider = Genesis::CI::Provider->new(
 		%$provider_opts, type => $provider_type,
 		($self->{top} ? (clone => $self->{top}->git) : ()),
 	);
 
-	# required, because a run that reached this stage has an artefact to
-	# emit, so a provider with no compiler is the registry's refusal
-	# rather than an undef to trip over one line later.
+	# required: a provider with no compiler is the registry's refusal, not an undef.
 	my $compiler = $provider->compiler(
 		ast           => $ast,
 		top           => $self->{top},
@@ -157,9 +137,6 @@ sub compile {
 	# Stage 7: Apply provider-specific overrides (optional)
 	$output = $self->_apply_provider_overrides($output, $provider_type);
 
-	# Both halves go back, so a caller that wants an emitted artefact
-	# reads compiler and a caller that wants to know whether the
-	# toolchain is there reads provider.
 	return {
 		ast      => $ast,
 		output   => $output,

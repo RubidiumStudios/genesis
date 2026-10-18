@@ -208,20 +208,11 @@ sub clear {
 	# Trigger lazy loading
 	$self->_contents;
 
-	# Removed from every source that could answer for the key, defaults
-	# included.  A default outlives nothing: it was filled from a schema,
-	# and a schema built from the configuration's own values changes when
-	# the value it was built from is cleared.  Leaving the defaults behind
-	# leaves keys the operator never wrote, which the next validation
-	# reports as unknown and refuses a removal nobody asked it to refuse.
+	# Removed from every source that could answer for the key, defaults included.
 	struct_set_value($self->{loaded_values},  $key, undef, 1);
 	struct_set_value($self->{set_values},     $key, undef, 1);
 
-	# A schema may declare a scalar default at a key an operator then names
-	# a path beneath.  Nothing is stored under a scalar, so there is nothing
-	# there to remove, and walking down to it would report the scalar it
-	# meets as a type mismatch and turn a removal that does nothing into a
-	# fatal.
+	# Nothing is stored beneath a scalar default, so there is nothing to remove.
 	struct_set_value($self->{default_values}, $key, undef, 1)
 		unless _blocked_by_scalar($self->{default_values}, $key);
 
@@ -736,9 +727,8 @@ sub _validate_key {
 					# Environment variables take precedence over configuration values.
 					$self->_update_source('env', "$key.$subkey", $ENV{$subschema->{envvar}});
 				} elsif (exists($subschema->{default}) and ! exists($value->{$subkey})) {
-					# When the parent key was explicitly {} in loaded_values, apply
-					# defaults at loaded priority so they aren't blocked by
-					# the empty hash placeholder in priority_merge
+					# Under an explicit {} parent, defaults go in at loaded priority,
+					# so priority_merge's empty-hash placeholder does not block them.
 					my $source = $loaded_is_empty_hash ? 'loaded' : 'default';
 					$self->_update_source($source, "$key.$subkey", $subschema->{default});
 				} elsif ($subschema->{required} and ! exists($value->{$subkey})) {
@@ -916,11 +906,7 @@ sub _validate_key {
 			push @errors, "#R{$key}: expected null, not #ri{".($value ? $value : "<null>")."}";
 		}
 	} elsif ($type eq 'custom_struct') {
-		# A block whose shape is a function of one of its own values
-		# declares that here rather than having a builder read the value
-		# raw and assemble a schema out of it.  This is a dispatcher and
-		# nothing more.  It checks the discriminator against the map and
-		# hands the block to the module that owns the shape.
+		# A dispatcher only: the discriminator picks the module that owns the shape.
 		push @errors, $self->_validate_custom_struct($key, $schema);
 	} elsif ($type eq 'opaque') {
 		# A passthrough accepts any value and validates no sub-keys here.

@@ -25,14 +25,8 @@ sub new {
 ### Public Methods {{{
 
 # describe - build fully-resolved generic pipeline from AST {{{
-#
-# Takes the domain-specific AST (with Genesis concepts like targets,
-# integrations, workflows, configuration) and produces a fully-resolved
-# generic pipeline description with resource_types, resources, jobs,
-# and groups. This is the boundary between Genesis domain logic and
-# generic CI generation.
-#
-# Returns: hashref { resource_types, resources, jobs, groups }
+# The boundary from Genesis concepts to generic CI: returns
+# { resource_types, resources, jobs, groups }.
 sub describe {
 	my ($self) = @_;
 
@@ -213,12 +207,8 @@ sub describe {
 		}
 	}
 
-	# The control-branch resource used to back every deploy task, which ran
-	# the CLI out of its checkout.  A CLI deploy reads the env branch
-	# instead, so it is now only wanted by the jobs that genuinely act on
-	# the control branch -- redeploy, notify, auto-update, and propagation
-	# once that lands.  Decided by reference rather than by feature flags so
-	# it stays correct as those jobs are reworked.
+	# The control-branch resource only where a job uses it, decided by
+	# reference so it stays right as those jobs change.
 	my $referenced = _referenced_resources(\@jobs);
 	@resources = grep { $_->{name} ne 'git' || $referenced->{git} } @resources;
 
@@ -565,14 +555,8 @@ sub _env_resources {
 	# Shared git source
 	my %gs = (uri => $uri, branch => $br, _git_credential($sc));
 
-	# Env branch resource.  Under branch propagation the branch itself is
-	# the change signal, so there is nothing to path-filter: anything that
-	# reaches this branch is by definition intended for this env.  Replaces
-	# both the path-filtered changes resource and the cache resource that
-	# carried an upstream env's files inside the control branch.
-	# ignore_paths, not gated on manifest_store: a deploy that commits
-	# manifests to the branch it triggers on would retrigger itself, and
-	# the stores that still write them are the ones needing the guard.
+	# The env branch is the change signal, so no path filter; ignore_paths
+	# stops a deploy that commits manifests from retriggering itself.
 	push @resources, {
 		name => "$alias-branch", type => 'git', icon => 'github',
 		source => {
@@ -1460,18 +1444,10 @@ sub _task_config {
 	}
 
 	my %params = (
-		# One live consumer, and the pipeline needs it: Service::BOSH
-		# preserves HTTPS_PROXY only when it is set, and a proxied network
-		# cannot reach its director otherwise.  The deploy used to read it
-		# as well, to tell a CI run from an operator at a terminal, and that
-		# read is gone; the variable below is how a job says so now.
+		# Service::BOSH keeps HTTPS_PROXY only when this is set.
 		GENESIS_HONOR_ENV => 1,
-		# This command is the pipeline running, not an operator at a
-		# terminal.  Every pre-flight gate a job has to pass reads it: the
-		# provider gate lets the job deploy what it refuses at a terminal,
-		# and the disowned-pipeline refusal tells a job from an operator
-		# mid-teardown.  Nothing else in the product sets it, so a compiled
-		# job whose task environment lacks it meets its own pipeline's gate.
+		# The pipeline running, not an operator: every pre-flight gate reads
+		# it, and nothing else sets it.
 		GENESIS_PIPELINE_TASK => 1,
 		CI_NO_REDACT     => $config->{unredacted} || 0,
 		CURRENT_ENV      => $env,

@@ -1141,21 +1141,6 @@ sub pipeline_enabled {
 
 # }}}
 # _shape - the Top the pipeline's shape is read from {{{
-#
-# The shape is control's fact under D112: the environment files' pipeline
-# blocks and every pipeline key that says what the pipeline is, read from
-# control as R holds it when the command starts, whatever branch the clone
-# stands on and whatever its own control carries unpublished.  The keys that
-# say where control is, its name and its remote, are read from the tree in
-# front of the command, since they are needed before control can be read.
-#
-# Control is the remote-tracking ref where the clone has one, and the local
-# control branch where it has no remote.  The ref is resolved every time, and
-# the tree is written out of git once per commit it resolves to and kept on
-# this Top, so every read at one commit is one read.  A tree this command
-# cannot read control out of at all, which is a directory that is no git
-# checkout or a clone with no control branch anywhere, reads its own files,
-# and the refusals that concern control are asked where they always were.
 sub _shape {
 	my ($self) = @_;
 	return $self if $self->{__materialised_tree};
@@ -2043,24 +2028,6 @@ sub pipeline_staleness {
 
 # }}}
 # _topology_at - the pipeline's environments as one ref holds them {{{
-#
-# The configuration and the environment files of the deployment root are
-# written out of the ref into a scratch tree, and a Genesis::Top is opened
-# over that tree as a reading surface, so the topology comes back exactly as
-# pipeline_topology would answer it for a clone standing on the ref.  The
-# files are the bytes git holds, read by Service::Git::read_blobs, which is
-# what Genesis::Env::_propagation_file_kinds_at reads for the same reason.
-#
-# Nothing but the configuration and the environment files is written out.  No
-# kit hook runs against this tree, so the kit source and everything else under
-# the root would be extraction paid for and never read.
-#
-# The scratch directory is held on the Top it belongs to, because the caller
-# reads environments out of that Top and a directory taken down when this sub
-# returns would leave every one of those reads looking at nothing.
-#
-# Returns the topology and the Top, or nothing at all where the ref carries no
-# deployment root to read.
 sub _topology_at {
 	my ($self, $git, $ref) = @_;
 
@@ -2070,18 +2037,14 @@ sub _topology_at {
 	my $config = $prefix.'.genesis/config';
 	return () unless $tree{$config};
 
-	# The dev kit's declaration comes too, where the ref carries one, because
-	# an environment file naming the dev kit and no version is valid only in
-	# a root that has a dev kit, and without it the tree would drop from the
-	# pipeline an environment the ref itself holds in it.
+	# The dev kit's declaration too: an environment naming the dev kit with no
+	# version is valid only beside one.
 	my $dev_kit = $prefix.'dev/kit.yml';
 	my @want = grep {
 		$_ eq $config || $_ eq $dev_kit || m{^\Q$prefix\E[^/]+\.ya?ml$}
 	} sort keys %tree;
 
-	# Read out of the object database in one git process and written straight
-	# into the scratch tree, each path with the deployment root's own prefix
-	# taken off (D117).
+	# One git process, each path with the deployment root's prefix taken off (D117).
 	require File::Temp;
 	my $scratch = File::Temp->newdir();
 	my $root    = "$scratch";
@@ -2091,9 +2054,7 @@ sub _topology_at {
 		mkfile_or_fail("$root/$relative", $blobs->{$path}{content});
 	}
 
-	# Opening a Top sets GENESIS_ROOT, and the caller localises the
-	# environment around this call and around every read it makes through the
-	# Top that comes back.
+	# Sets GENESIS_ROOT; the caller localises the environment around it.
 	my $at = Genesis::Top->new($root, materialised_tree => 1);
 	$at->{__scratch_tree} = $scratch;
 	if (my @problems = $at->_config_problems) {
@@ -2780,17 +2741,6 @@ sub _repo_config_schema {
 
 # }}}
 # _pipeline_config_schema - the pipeline section of the v3 schema {{{
-#
-# The section is named pipeline while the Genesis::CI code namespace
-# stays where it is, and the schema is the contract.  Every key the
-# compiler reads is declared here, so Genesis::Config's own recursion
-# refuses an undeclared key by name at configuration load, for every
-# command and not only for the pipeline ones.  There are no compatibility
-# aliases, because the v3 schema is unreleased.
-#
-# The provider block is not required beside an enabled gate, because an
-# absent provider type is a manual pipeline rather than no pipeline at
-# all.
 sub _pipeline_config_schema {
 	my ($self) = @_;
 
@@ -2803,16 +2753,7 @@ sub _pipeline_config_schema {
 				default     => Genesis::Config::FALSE,
 				description => 'Whether this repository has a pipeline'
 			},
-			# The schema for this block is a function of the block's own
-			# type, so the block says so rather than having something read
-			# the type ahead of validation and assemble a schema from what
-			# it found.  The default stays here, on the declaration, so an
-			# enabled section with no provider block is still a manual
-			# pipeline.
-			#
-			# The empty hash is what lets that default be reached, because
-			# validation walks into a block that is present and nowhere
-			# else.
+			# Shaped by its own type; the empty default lets the type's default apply.
 			provider => {
 				type                  => 'custom_struct',
 				discriminator         => 'type',
@@ -2823,28 +2764,22 @@ sub _pipeline_config_schema {
 				description           => 'The automation that owns the pipeline',
 				modules               => $self->_provider_module_map(),
 			},
-			# The label is released from the branch, so it names the
-			# provider's pipeline and nothing else, and it is deliberately
-			# not checked as a git ref component.
+			# The provider's label only; deliberately not checked as a ref component.
 			name => {
 				type        => 'string',
 				check       => \&_pipeline_name_rule,
 				description => "The pipeline's name in its provider (defaults to deployment_type)"
 			},
 
-			# The one mount every pipeline record lives under, the
-			# applied record included, so it is the pipeline's own key
-			# rather than recovered from an environment (D116).
+			# Every pipeline record lives under it, the applied record included (D116).
 			exodus_mount => {
 				type        => 'string',
 				default     => DEFAULT_PIPELINE_EXODUS_MOUNT,
 				description => "The vault mount the pipeline's records live under"
 			},
 
-			# A BOSH flag rather than a provider feature, so no
-			# capability gates it.  Repository-wide, because a key that
-			# changes how a deployment progresses must be uniform or the
-			# earlier environments stop rehearsing the later ones.
+			# A BOSH flag, so no capability gates it; repository-wide, so the
+			# earlier environments rehearse the later ones.
 			recreate_on_deploy => {
 				type        => 'enum',
 				values      => [qw/never redeploy-only always/],
@@ -2857,11 +2792,7 @@ sub _pipeline_config_schema {
 				required    => \&_automated_provider_configured, # its auth and identity are (T385)
 				description => 'What the pipeline needs to know about the repository',
 				schema => {
-					# Derived from git, with an explicit override, because each
-					# is a choice with a good default rather than a fact of the
-					# checkout.  The deployment root takes no key, being a fact
-					# of the checkout, and neither does the branch a command
-					# runs from, that being runtime state.
+					# Derived from git, with an explicit override.
 					uri        => {type => 'string', description => "The URL CI clones from, where it cannot be composed from the repository"},
 					repository => {type => 'string', check => \&_repository_rule, description => "The repository the pipeline lives in, as owner/repo or its URL"},
 
@@ -2888,16 +2819,7 @@ sub _pipeline_config_schema {
 				}
 			},
 
-			# The backend is fixed and a directory is refused, and the
-			# block says that its backend decides its shape, so a GCS
-			# configuration can no longer carry a region that nothing will
-			# ever read.
-			#
-			# There is no discriminator_default, because the block has never
-			# had one: the backend is required today and there is no sensible
-			# default between two object stores.  A block written with no
-			# backend at all is refused as an unknown value naming the two an
-			# operator may write, rather than as a missing required key.
+			# Shaped by its backend, with no default between two object stores.
 			shuttle => {
 				type          => 'custom_struct',
 				discriminator => 'backend',
@@ -2924,8 +2846,7 @@ sub _pipeline_config_schema {
 				}
 			},
 
-			# The locker behind the two mandatory deploy locks, read by the
-			# compiler for the emitted resources and by the CLI.
+			# The locker behind the two mandatory deploy locks.
 			locker => {
 				type        => 'hash',
 				required    => \&_automated_provider_configured,
@@ -3405,48 +3326,20 @@ sub _validate_one_exodus_mount {
 
 # }}}
 # _validate_pipeline_config - the checks a declarative schema cannot state {{{
-#
-# Runs from _validate_config after Genesis::Config::validate, for every
-# command.  What it checks, in what order, and what each check refuses is
-# in this module's POD under _validate_pipeline_config, so the account
-# lives in one place as the sub grows.  Later work extends the sub and
-# leaves the one call site in _validate_config alone.
+# The order, and why, is in the POD.
 sub _validate_pipeline_config {
 	my ($self) = @_;
 
 	return 1 unless $self->config->get('pipeline.enabled');
 
-	# First, because both halves of the deployment slug name the branches
-	# everything below this is about, and a name that cannot compose a ref
-	# is worth saying before anything is said about what it configures.
 	$self->_validate_slug_components;
-
-	# Before anything reads the shape, because a shape key still holding ((
-	# would be read as its own text.
-	$self->_validate_shape_values;
-
-	# Before the environment blocks are read for their shape, because a key
-	# with no ability behind it is a fact about the provider rather than
-	# about how the operator wrote the block.
+	$self->_validate_shape_values;      # before anything reads the shape
 	$self->_validate_capability_gates;
-
-	# After the provider is settled, because a store that cannot be used is
-	# a fact about the pipeline as a whole rather than about any one
-	# provider, and before the environment blocks are read for their shape.
 	$self->_validate_manifest_store;
-
-	# After the store, because the mount is where that store keeps the
-	# pipeline's own applied record, and before the environment blocks are
-	# read for their shape.
-	$self->_validate_one_exodus_mount;
-
-	# The override files merged over the emitted pipeline, so a bad one is
-	# refused before the pipeline is built rather than after.
+	$self->_validate_one_exodus_mount;  # after the store it lives in
 	$self->_validate_override_files;
 
-	# Every environment's genesis.pipeline block, read merged.  A file
-	# whose genesis key is not a hash at all carries no block to check,
-	# and is left to whatever reads the environment itself.
+	# Every environment's genesis.pipeline block, read merged.
 	for my $env_name ($self->_env_file_names) {
 		my $params  = $self->_merged_env_params($env_name);
 		my $genesis = $params->{genesis};

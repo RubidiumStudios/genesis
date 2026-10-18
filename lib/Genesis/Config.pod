@@ -436,7 +436,10 @@ B<A removal is a removal in every store that could answer for the key>,
 which is why the I<default> layer is cleared alongside the other two. A
 default left behind would keep answering C<has()> and C<get()> for a key
 the caller has just removed, which reads as the removal having silently
-failed.  For the same reason the cached answer of every parent already read
+failed, and a schema built from the configuration's own values changes when
+the value it was built from is cleared, so a stale default is a key the
+operator never wrote, which the next validation would refuse as unknown.
+For the same reason the cached answer of every parent already read
 is dropped with the key's own, as C<set()> drops them: a load's validation
 reads the whole block before C<genesis config --unset> clears a key beneath
 it, and a parent still cached would keep answering the removed key.
@@ -445,7 +448,9 @@ Removing a key whose ancestor holds a scalar in the I<default> store does
 nothing in that store, rather than failing. A schema may declare a scalar
 default at a top-level key, and nothing is stored beneath a scalar, so a
 path under one names no value in the I<default> store and there is
-nothing there to remove. The loaded and set stores keep their older
+nothing there to remove; walking down to it would report the scalar as a
+type mismatch and turn a removal that does nothing into a fatal. The loaded
+and set stores keep their older
 behaviour and still fail on such a path.
 
 The I<env> layer is not modified, so a key an environment variable
@@ -1427,7 +1432,11 @@ Handles all supported types: C<string>, C<number>, C<integer>, C<boolean>,
 C<enum>, C<array>, C<hash>, C<hasharray>, C<semver>, C<null>, C<opaque>,
 C<custom_struct>, C<any>, literal string types, and C<||>-joined union
 types. A C<custom_struct> entry is passed to
-L</_validate_custom_struct>, which owns the dispatch.
+L</_validate_custom_struct>, which owns the dispatch: a block whose shape is a
+function of one of its own values declares that in the schema, rather than a
+builder reading the value raw and assembling a schema out of it, and this
+method only checks the discriminator against the map and hands the block to
+the module that owns the shape.
 
 For C<array> and C<boolean> types, normalizes the value in-place via
 C<_update_source()>: booleans are coerced to JSON::PP boolean objects; array

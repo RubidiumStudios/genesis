@@ -1338,14 +1338,6 @@ sub _remote_for {
 
 # }}}
 # _config - the clone's remotes, upstreams and rewrites, read once {{{
-#
-# Every question about which remotes a clone has, where they point, what a
-# branch tracks, and how git rewrites a URL is answered from one read of the
-# configuration, because each was a git process of its own and a command asks
-# them many times.  The read is kept until a configuration file changes, which
-# a stat says without git: the time to the nanosecond, the size, and the
-# inode, since git rewrites a file through a new one, so even a change of the
-# same size in the same second is seen.
 sub _config {
 	my ($self) = @_;
 	my $stamp = $self->_config_stamp;

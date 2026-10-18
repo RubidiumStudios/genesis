@@ -388,19 +388,8 @@ sub _build_workflow_graph {
 ### Env-File Topology Builder {{{
 
 # build_from_env_files - build workflow graph nodes+edges from genesis.pipeline.* {{{
-#
-# Scans *.yml files in $dir.  Every environment Top::has_env accepts is a
-# graph node, keyed by the file stem, with its genesis.pipeline keys read
-# from its merged hierarchy through Top::_merged_env_params, and where its
-# prior_env names another environment also present, a directed edge is
-# added: prior_env -> this_env.
-#
-# Returns: (\%nodes, \@edges)
-#
-# This is called from outside this class, because Genesis::Top asks it
-# for the topology an environment directory describes.  The name and
-# the arguments are a documented seam rather than this file's own
-# business, and a change to either of them reaches that caller.
+# Returns (\%nodes, \@edges), an edge per prior_env -> env.  Genesis::Top
+# calls it for the topology, so its name and arguments are a seam.
 sub build_from_env_files {
 	my ($self, $dir) = @_;
 
@@ -408,11 +397,8 @@ sub build_from_env_files {
 	my @files = sort grep { /\.ya?ml$/i && -f "$dir/$_" } readdir($dh);
 	closedir $dh;
 
-	# Pass 1: enumerate valid environments (Top::has_env filters out
-	# shared parent config files like acme.yml that lack `genesis.env`
-	# and kit info) and collect their genesis.pipeline data, read through
-	# the environment's merged hierarchy (D117), so a key a site file
-	# carries reaches every environment beneath it.
+	# Pass 1: environments only (has_env skips shared parent files), each
+	# read merged (D117) so a site file's key reaches those beneath it.
 	my $top = $self->{top};
 	my (%pipeline_data, %file_exists);
 	for my $file (@files) {
@@ -426,19 +412,15 @@ sub build_from_env_files {
 		$pipeline_data{$env} = \%data if %data;
 	}
 
-	# Identify every environment that another environment names as its
-	# prior_env, since such an environment may carry no genesis.pipeline
-	# block of its own (Phase C design).
+	# A named prior_env may carry no genesis.pipeline block of its own.
 	my %referenced_upstream;
 	for my $env (keys %pipeline_data) {
 		my $upstream = $pipeline_data{$env}{prior_env} or next;
 		$referenced_upstream{$upstream} = 1;
 	}
 
-	# Pass 2: every valid env becomes a node (so envs without any
-	# genesis.pipeline block still appear in the DAG, which is what
-	# pipeline-status wants), plus any upstream reference that resolves to a
-	# file on disk.
+	# Pass 2: every environment is a node, block or not (pipeline-status
+	# reads the whole graph), plus each upstream that resolves to a file.
 	my %nodes;
 	my %prior_env_map;
 	my %envs_to_include = (
@@ -479,9 +461,7 @@ sub build_from_env_files {
 		$prior_env_map{$env} = $data->{prior_env} if $data->{prior_env};
 	}
 
-	# Second pass, which resolves bosh_parent from genesis.bosh_env, and
-	# only where the named director is also a pipeline-managed env in this
-	# same node set.
+	# bosh_parent from genesis.bosh_env, only where that director is a node.
 	for my $env (sort keys %envs_to_include) {
 		my $data   = $pipeline_data{$env} || {};
 		my $be     = $data->{_bosh_env}  || '';

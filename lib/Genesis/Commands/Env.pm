@@ -1154,70 +1154,27 @@ sub _warn_control_position {
 
 # }}}
 # _deploy_preflight - the deploy's pre-flight, in order {{{
-#
-# The order is the design's, and it is one sub because the order is what the
-# rows assert.  Every gate runs before every warning, so an operator sees a
-# refusal before a warning about a deploy that will not happen, and the
-# divergence refusal of the branch classification prints where the prior-env
-# refusal would otherwise also apply.
-#
-# The handle comes from Service::Git->new('.'), which memoises one handle per
-# repository root, so this is the same handle the branch-class gate used and
-# not a second one.  The session is the gate's, read through
-# Genesis::Commands::branch_session, and it is undef where the gate switched
-# nothing.
 sub _deploy_preflight {
-	# The options come down whole rather than by the keys read here, because
-	# the steps that follow this one ask about --yes for the prompt they put
-	# beside their warnings, and a sub whose caller has to know which keys it
-	# reads is a sub whose caller goes stale.
 	my ($top, $env_name, $options) = @_;
 
 	require Service::Git;
 	my $git = Service::Git->new('.');
 
-	# An operator may name the environment by a path or by its file, and the
-	# gate takes the same two things off the same argument before it derives
-	# the branch.  Two derivations of one name are two chances to disagree,
-	# so this one is written to match the gate's and the branch is derived
-	# once, here, for everything below.
+	# Derived as the gate derives it, once, for everything below.
 	(my $name = $env_name) =~ s{^.*/}{};
 	$name =~ s/\.ya?ml$//;
 	my $branch = $top->branch_for($name);
 
-	# Which commit this run is about, resolved once for the two steps that
-	# ask.  --redeploy selects the commit the last successful deployment
-	# recorded, and the gate has already stood the working tree on it,
-	# detached, inside the session.  Step 5 asks whether this deploy is
-	# reading the branch at all, and the notice in step 8 tells the operator
-	# which of the two commits the run is about.
-	#
-	# The resolver reads one record and answers the same value it answered
-	# the gate, so asking it again here costs one vault read and cannot
-	# disagree with the commit the tree is standing on.  It is asked in
-	# scalar context, because the record path beside it is the gate's to
-	# name in its own refusal and nothing here has a use for it.
-	#
-	# This is the second call of the run, and unlike the gate's it reads the
-	# root the deploy itself opened, which is the tree the gate switched onto.
-	# The resolver refuses a named flag where that root's pipeline is off, and
-	# that refusal cannot fire here: the caller asks this whole pre-flight
-	# only of a root whose pipeline_enabled answered true, so the condition is
-	# already known false before the resolver is asked.
+	# The commit this run is about, for step 5 and step 8's notice.
 	my $target = Genesis::Commands::deployed_target($name, $top);
 
-	# 1.  The one refresh, control included, which --no-fetch no longer
-	# withholds on this command.  The deploy's own reads are worthless against
-	# a stale tracking ref.
+	# 1.  The one refresh, control included.
 	my $refreshed = $top->fetch_pipeline_envs($git,
 		command => "$env_name deploy",
 		action  => 'deploy',
 		outcome => 'Nothing was deployed.');
 
-	# 2.  The deploy asks the same first question the run asks, and refuses
-	# on the one answer that leaves it nothing to read.  It reports every
-	# other state rather than refusing on it, because a deploy resolves
-	# nothing about control.
+	# 2.  Control, refused only where it leaves nothing to read.
 	my $control_state = Genesis::CI::Preflight::require_control($top, $git,
 		refreshed     => $refreshed,
 		action        => 'deploy',
@@ -1226,31 +1183,12 @@ sub _deploy_preflight {
 	info("  #Gi{%s}", $_) for @{$control_state->{events}};
 	_warn_control_position($top, $control_state->{divergence}, $branch);
 
-	# 3.  The session the gate opened asserts the tree clean in begin, and for
-	# a deploy that switches that is the whole of the check.  Three arms of
-	# the gate open no session at all, though, and two of them have nothing to
-	# do with cleanliness: an environment with no deployment branch, and a
-	# branch pipeline-apply cut that carries no repository.  A deploy from a
-	# dirty tree there deploys uncommitted content and records a commit that
-	# does not hold it, which is the audit trail describing something other
-	# than what shipped, so the clean-tree precondition is asserted here for
-	# those two.  It is asserted before the classification refuses either of
-	# them, because a dirty tree is the operator's to settle whatever the
-	# branch turns out to be.
-	#
-	# The third arm is exempt on purpose.  A command already standing on the
-	# branch it would switch to is leaving nothing behind, and an operator may
-	# deploy an edit in place, which is how a change is tested before it is
-	# committed.  That is the same branch the retired switch asked about, and
-	# it is asked the same way.
+	# 3.  A clean tree where the gate opened no session; standing on the
+	# branch is exempt, so an edit can be deployed in place.
 	my $session = Genesis::Commands::branch_session();
 	if (!$session && ($git->current_branch // '') ne $branch) {
 		unless ($git->is_clean) {
-			# The list comes from the session's own reader, so an operator
-			# refused here and an operator refused by the session are shown
-			# one list rather than two that have to be kept in step by hand.
-			# The module is required here because the arm with no deployment
-			# branch returns before the gate has loaded it.
+			# Required here: the arm with no deployment branch skips the gate's load.
 			require Service::Git::Session;
 			my $modified = Service::Git::Session::modified_paths_of($git);
 			bail(
@@ -1261,10 +1199,8 @@ sub _deploy_preflight {
 		}
 	}
 
-	# 4.  What the branch is, and the one move its class allows.  The pull is
-	# made where the deploy stands, which the gate has stood on the branch,
-	# and it is a fast-forward rather than the unconditional pull the deploy
-	# used to make of every branch alike.
+	# 4.  What the branch is, and the one move its class allows, made only
+	# where the deploy stands on it.
 	my $on_branch = ($git->current_branch // '') eq $branch;
 	my $action    = _deploy_branch_action($top, $name, $git);
 	if ($action->{action} eq 'fast-forward' && $on_branch) {
@@ -1275,37 +1211,12 @@ sub _deploy_preflight {
 		$git->pull_ff_only($branch);
 	}
 
-	# 5.  What the branch carries, asked after the move, because a branch
-	# behind a delivery holds the commit before it until the fast-forward
-	# lands and the answer taken first would be an answer about the wrong
-	# commit.
-	#
-	# Standing on the branch is asked as well, and the two are one question
-	# rather than two.  The pull above merges into the branch the working tree
-	# holds, so it is made only where the deploy stands on the branch, and a
-	# deploy that is not standing there is one the branch-class gate declined
-	# to switch: the root it read is control's, whatever the branch carries
-	# now, so the commit it would record is not the commit it would deploy.
-	#
-	# A run that resolved a target is the exception, and it is an exception
-	# to the premise rather than to the rule.  Such a run is standing on the
-	# branch's own history, at the commit it was told to deploy, because the
-	# gate checked that commit out detached inside the session, so the root
-	# it read is the branch's and the commit it records is the commit it
-	# deploys.  What it is not standing on is the branch name, and asking for
-	# the name alone would refuse every redeploy as a branch carrying no
-	# repository.
+	# 5.  What the branch carries, asked after the move; a resolved target
+	# stands on the branch's history, detached, rather than on its name.
 	unless (($on_branch || defined($target))
 			&& Genesis::Commands::branch_carries_repository($top, $git, $branch)) {
 		my $remote = $top->source_control_remote;
 
-		# Two states reach here and they need different remedies.  A branch
-		# behind its counterpart has a delivery waiting on the remote that
-		# this clone has not pulled, and telling such an operator to propagate
-		# sends them to a command that cannot help them: nothing is due, and
-		# the deploy would refuse the same way on the next run.  The gate
-		# cannot pull it for them, because every other command in the class
-		# reads and a read moves no ref.
 		bail({exitcode => DATAERR},
 			"Refusing to deploy.  The branch #C{%s} carries no repository as ".
 			"this clone holds it, and it stands %s behind #C{%s/%s}, so a ".
@@ -1331,55 +1242,20 @@ sub _deploy_preflight {
 		);
 	}
 
-	# 6.  Every genesis.pipeline.* key the pre-flight reads comes from the
-	# merged environment hierarchy and never from the leaf file alone, so a
-	# predecessor named on a site file is seen by the check that refuses on
-	# it.  bare runs the name and file-existence checks and nothing else, so
-	# lookup resolves through the hierarchy with no kit loaded and nothing
-	# connected, and the read is made here rather than after the environment
-	# is loaded, where a repository the deploy cannot reach a director for
-	# would answer with the director's complaint instead of this refusal.
-	#
-	# The record is read once and handed to the check.  Two readers want it,
-	# the check for the fact that the predecessor deployed at all and the
-	# due computation for the commit it certified, and one read serves both.
-	#
-	# The predecessor is control's (D112): the branch the deploy stands on
-	# mirrors this environment's hierarchy as it stood when it was delivered,
-	# so its prior_env is the predecessor at delivery and not now, and a
-	# re-parented environment is checked against the one it follows today.
+	# 6.  The predecessor, control's (D112), its record read once for the
+	# check and the walk.
 	my $bare         = Genesis::Env->bare($name, $top);
 	my $prior        = $top->pipeline_topology->{parent_of}{$name} // '';
 	my $prior_record = _prior_env_record($bare, $prior);
 	_assert_prior_env_deployed($bare, $prior, $prior_record) if $prior;
 
-	# 7.  The deploy's words for a gate the propagate run also meets, and the
-	# typed acknowledgement is what makes the operator read what they are
-	# doing.  -y means stop asking questions and must never mean accept an
-	# unlocked deploy, so nothing here reads it.
-	#
-	# It sits after the predecessor's record and before the warnings, which
-	# makes it the last refusal we raise on our own judgment rather than the
-	# first.  Every refusal above it is one no acknowledgement can settle: an
-	# operator who types the phrase past a branch that carries no repository
-	# still has nothing to deploy.  This gate is the one question --force is
-	# an answer to, so it is asked once everything that is not negotiable has
-	# passed, and what follows it is a warning rather than a refusal of ours.
-	# The operator can still stop the deploy below, by declining the prompt
-	# beside the due-commits warning, which exits ABORTED.
+	# 7.  The provider gate, the last refusal of ours; -y never answers it.
 	Genesis::CI::Preflight::assert_provider_gate($top, $options,
 		owns        => 'deploys of this environment',
 		outcome     => 'Nothing was deployed.',
 		acknowledge => 'I accept the risk');
 
-	# 8.  What this run is about, said before anything is said about the
-	# branch, because every warning below it describes the tip and an operator
-	# has to know first that the tip is not what is being deployed.
-	# --redeploy selects the deployed commit, and an operator standing on a
-	# branch whose tip holds something else needs to be told which of the two
-	# this run is about before it starts.  A run that resolved no target is
-	# deploying the tip, as every deploy did before the flag existed, and says
-	# nothing here.
+	# 8.  Which commit this run is about, before the warnings about the tip.
 	if (defined $target) {
 		info(
 			"\nRedeploying #C{%s} at its deployed commit #C{%s}, which is what ".
@@ -1388,39 +1264,8 @@ sub _deploy_preflight {
 		);
 	}
 
-	# 9, 10, 11, and 12.  The pre-flight's four warnings, through the one
-	# caller that decides which of them this run skips.  They run in a fixed
-	# order, the stale pipeline first, because what is stale decides which
-	# environments and which branches the warnings after it are talking about;
-	# the standing hold second, because it is what an operator acts on before
-	# anything else the pre-flight has to say; what control carries that has
-	# not reached this branch third; and the branch's own drift from its
-	# marker's snapshot last, because a drifted branch is a smaller thing to
-	# know than a pipeline that no longer matches control.  A run that
-	# resolved a target skips the two that describe the tip and keeps the two
-	# that do not, and that is decided inside _warn_about_the_tip rather than
-	# at each of the four call sites.
-	#
-	# The walk the due-commits warning reads is made here rather than inside
-	# that caller, because it is the deploy's own read of durable state and
-	# the warning is handed what it found.  The deploy computes none of it:
-	# the walk is the propagate run's own computation, run read-only and
-	# narrowed to this environment through the option it already has, so the
-	# two commands cannot disagree about what is due.  The deploy calls no
-	# read-only sub of its own here, because a second such sub would be a
-	# second thing to keep in step with the first.
-	#
-	# The branch record is composed here rather than taken from
-	# Genesis::CI::Preflight::initial_state, which resets and fast-forwards
-	# the branches it classifies and so is no read for a deploy to make.  The
-	# walk reads the ref off this record and nothing else off it, so the one
-	# field it reads is the one field given, and the classification four
-	# steps above is where the branch was already resolved.
-	#
-	# Every one of the four reads the applied record, and a deploy does not
-	# stop over warnings.  So where the vault answers an error for the record,
-	# the deploy says so once, names the warnings it could not give, and goes
-	# on.  An absent record is not that: it reads as absent below.
+	# 9 to 12.  The four warnings, through _warn_about_the_tip, fed by the
+	# propagate run's own walk read-only; an unreadable record skips them.
 	my $tip;
 	if (defined(my $unread = _unread_applied_record($top))) {
 		warning(
@@ -1442,11 +1287,7 @@ sub _deploy_preflight {
 				$prior => Genesis::CI::Walk::certified_from_record($prior_record)
 			} : {},
 		);
-		# The walk was asked about one environment, so it answers about one,
-		# and a list with nothing in it is the walk disagreeing with its own
-		# scope.  The read below would hand undef on and every warning would
-		# then read as nothing due, which is the one wrong answer this step
-		# can give.
+		# Asked about one environment, so an empty answer is a bug, not "nothing due".
 		my ($due_record) = @{$walk->{environments} || []};
 		bug("The walk answered no environment for #C{%s}.", $name)
 			unless $due_record;

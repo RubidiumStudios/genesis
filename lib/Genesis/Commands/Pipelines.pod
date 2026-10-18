@@ -131,7 +131,17 @@ points at, or the clone's own pin, and not whichever remote git happens to
 list first, so a clone with two of them still writes where the repository's
 branches live.
 
-With the branches in place the run asks the repository to protect them.
+With the branches in place the run asks the repository to protect them, so
+the repository enforces the append-only rule Genesis observes on its own
+side: Genesis cannot prevent a rewrite it does not perform, and a rewrite
+that drops a commit leaves every marker naming it unfetchable. The stage
+follows the branch stage because a rule on a branch that does not exist
+protects nothing. The owner and repository are split off the resolved
+C<source_control_repository> pair, not read off whichever remote git lists
+first, so the override is honoured; a repository with no pair was refused at
+load. Each deployment branch's mode is read from the topology's normalised
+C<require_pr>, the same reader the compiled pipeline runs by, so a file that
+spells the key C<false> or C<no> is protected in the mode it is run in.
 Control and every deployment branch are told to block force pushes and to
 require linear history. A deployment branch is told to require a pull request
 where its own C<genesis.pipeline.require_pr> is true, and control is told to
@@ -148,7 +158,8 @@ gets one ruleset named for it, so a re-run replaces rather than
 accumulates. A user whose token cannot grant a setting is told which branch
 and which settings, and the run carries on. A run that carries no
 C<GITHUB_AUTH_TOKEN> skips the stage, names the variable, and carries on as
-well.
+well: the branches are in place either way, and protection is the one stage
+an operator can apply later.
 
 A run that carries a token, and is not a dry run, asks the host about the
 repository first, before the branch stage cuts anything, through
@@ -168,7 +179,9 @@ with none to be found is refused at C<CONFIG> with the C<fly login> that
 makes one, before any branch is cut, protection applied or record written.
 
 With the branches protected the run records what it applied, which is the
-control commit it read, the provider it applied, and the time. That record
+control commit it read, the provider it applied, and the time. The record
+follows the branches because a record written ahead of them would claim a
+shape the repository does not have yet. That record
 goes to the pipeline's own address in exodus under every provider, because it
 is what a later reader asks to tell an applied pipeline from one nobody has
 applied. An C<--output-dir> run writes the compiled artifacts rather than
@@ -196,7 +209,9 @@ C<.genesis/config>, which is the one configuration source, and the
 compiled result is then set on the provider.
 Concourse has its pipeline uploaded through the C<fly> CLI.  GitHub Actions
 has its workflows written under C<.github/workflows/> for the operator to
-commit.
+commit.  No run reaches the GitHub Actions arm today, because the provider
+registry refuses the type before the dispatch is asked about it; the arm is
+kept as the seam its provider class lands in.
 
 Before a Concourse pipeline is set, the run asks whether the toolchain it
 needs is installed, and it asks the provider rather than the compiler beside
@@ -245,7 +260,9 @@ Concourse pipeline YAML or each GitHub Actions workflow file under its own
 name.  C<--output-dir> and C<--debug-dir> are the one exception, and a run
 given either of them fills that directory as it always would, since the
 directory is one the operator named for the purpose rather than a store the
-apply owns.
+apply owns.  The dry-run banner names whichever of the two the run carries,
+and neither where neither was given; under the C<manual> provider it names
+neither, since nothing would fill them.
 
 =item C<--output-dir>
 
@@ -791,6 +808,103 @@ remote refused contributes none, and a run that had work due and published
 none of it ends on the per-environment outcomes rather than on a count.  A
 preview publishes nothing, so what it counts is the environments its own
 report marked as ones that would propagate.
+
+B<How the run proceeds:>
+
+The first stage asks every question first, against a snapshot of R, changing
+nothing the operator has, and answers with one refusal naming every problem
+(D115), through L</_propagate_check_first>. A run that proceeds has the
+snapshot promoted into T and the local branches it needs created, so what
+follows reads T as the questions read R. A dry run asks the same questions
+and has the snapshot promoted too, but creates, resets and fast-forwards
+nothing. A repository the first stage did not ask, which has no pipeline,
+still has R brought into T for every branch in scope before the first read,
+with no flag, because a report resting on a stale tracking ref is what the
+refresh removes. The stage's events are printed once, where the deployment
+branches are settled. Control's standing is then settled again against T,
+ahead of the branch check, since a branch that exists nowhere is not one the
+operator can be asked to stand on.
+
+From the point the session opens, every refusal goes through one closure that
+closes the session and then speaks, so the operator has their branch back
+before they read why, and no second error from the session's exit net is
+printed over the refusal.
+
+The initial state is classified over the whole pipeline rather than one
+environment's scope, because it is a property of the repository and not of the
+run, and it stands ahead of the guard that would otherwise create a deployment
+branch the remote never had. The run then reads durable state once (I11),
+through L<Genesis::CI::Walk/read_durable_state>, and the banner names
+control's commit from that read, so the sha the operator reads and the sha
+the walk routes from are one fact. Each environment receives commit by
+commit, from the marker its own branch carries, rather than one diff against
+control's tip, which made an urgent change to one environment wait behind an
+unrelated earlier change to a shared file.
+
+The records the GitHub client is decided from carry each environment's pull
+request branch, composed from the names the first stage composed, which are
+the names the walk seeds its own record from, so the two cannot disagree
+about which environments deliver into a pull request. The review state is
+read in the first stage and reused; it is read outside the run's eval because
+a refusal from inside it comes back as a bare 1 where this one earns
+C<UNAVAILABLE>.
+
+One eval holds the walk, the whole delivery and the push, because a failure no
+guard caught is the run failing, and L<Genesis::CI::Walk/abort_run> answers
+it: the partial write is named and discarded, every branch the session
+committed to goes back to where the remote has it, and the operator is put
+back where they started. The walk is inside that eval rather than in its own,
+since two evals reading one error two ways is how they come to disagree about
+a status. The run tracks the environment it has reached, and an early end
+splits the outcome words on it: that environment and every one before it
+record that nothing of theirs was published, every one after records not
+attempted, and a failure after the last environment names the last.
+
+The walk reads durable state and writes nothing; everything it decides stands
+in the record. It is handed the GitHub client and the review state, because a
+branch whose merge dropped the marker takes it back from the pull request
+that merged. Every environment the run delivers to is loaded before the first
+switch, because an environment is read off the working tree and the tree
+stands on control only until the first delivery moves it. An environment that
+delivers into a pull request is loaded whether or not anything is due, since
+a proposed record left over from a merged pull request is its arm's to clear
+(D111).
+
+An environment the walk confined an error to takes C<failed> as its outcome,
+with the error beneath it, rather than a warning beside the report, because
+I8 asks for an outcome per environment. That is read ahead of the
+branchless check, so an environment with no branch that also fails to load
+reports the load failure rather than sending the operator to
+C<genesis pipeline-apply>, which reads the same file and fails on it again.
+An environment with no deployment branch is left as awaiting the apply,
+written by the report so the run and the preview cannot disagree about the
+word. An environment with nothing pending is left as the walk wrote it, and
+the report settles held or idempotent from what stands.
+
+The second stage delivers each environment within its own guard: a delivery
+that dies halfway resets that branch to T, records C<failed>, and the walk
+carries on; a run-fatal or unsurvivable failure reaches the run's eval. A
+pull request arm's push carries a lease on the tip the arm read before it
+rewrote anything, and an undefined tip, a branch the remote has never had,
+leases the empty object name. A preview leaves each outcome null, and the
+preview's renderer writes its own verb, so no record carries a fact about a
+run that did not happen.
+
+The third stage, the publish, is held to the end of the walk, so a run that
+failed halfway has put nothing on the remote. Its push set is the deployment
+and pull request branches; control is the run's input and never its output,
+and is named to the publish only to be read once more and refused where it
+moved. The publish runs inside the session, because a remote that has gone
+away is answered by the abort. The pull request is opened or updated, and
+the proposed record written, only once its branch is on the remote.
+
+A commit carrying a hold trailer sets the hold as it is delivered rather than
+as it is deployed, so the write follows the publish, which settles whether
+the delivery landed, and precedes the report; a preview writes none. The
+report gives I8's three axes, an outcome per environment, per routed control
+commit, and per overwritten hand edit, from one record through the renderer
+C<pipeline-status> shares. A preview's caveats are read off what the first
+two stages settled rather than asked of git again.
 
 B<Options (via C<get_options>):>
 

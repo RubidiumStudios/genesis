@@ -387,6 +387,16 @@ which re-creates it from the remote, and a clone that never had one is
 refused by the apply at C<Genesis::Exit::CONFIG>. A refusal raised here
 would speak before either of them and say less.
 
+A HEAD that names no branch at all, in a repository with no commits, is let
+through before the classification. The pre-flight refuses it, saying the
+repository has no commits and naming the commit that fixes that; there is no
+branch to measure against control's tip, and a gate that measured anyway would
+tell an operator with nothing committed to rebase.
+
+Nothing writes an artifacts branch. Its name is composed so that a command
+standing on one can be refused, and the refusal says so rather than naming a
+writer.
+
 B<Parameters:>
 
 =over 4

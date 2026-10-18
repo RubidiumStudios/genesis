@@ -2827,6 +2827,13 @@ materialised tree, already opened over one commit, is its own shape: reading
 control out of a tree that already is one commit of control is what would
 let a read of control read control again.
 
+Control is the remote-tracking ref where the clone has one, and the local
+control branch where it has no remote. The tree is written out of git once
+per commit the ref resolves to and kept on this C<Genesis::Top>. A tree the
+command cannot read control out of at all -- a directory that is no git
+checkout, or a clone with no control branch anywhere -- reads its own files,
+and the refusals that concern control are asked where they always were.
+
 Control moving on the remote after this resolves is not seen by the command
 that already resolved it. The next command opens a new C<Genesis::Top> and
 reads control anew.
@@ -3973,6 +3980,8 @@ Returns the C<pipeline> block of the version 3 schema, in the shape
 C<< $self->config->validate() >> consumes. Every key the pipeline reads is
 declared here, so C<Genesis::Config> refuses an undeclared key by name as the
 configuration loads, for every command rather than only for the pipeline ones.
+The schema is the contract, and there are no compatibility aliases, because
+the v3 schema is unreleased.
 
 The block declares C<enabled>, which is the gate and defaults to false, the
 C<provider> block, which is optional even once the gate is on and whose keys
@@ -3989,9 +3998,15 @@ hands the block to that provider's class. The discriminator's default is
 C<manual>, declared under C<discriminator_default> beside the map.
 
 The C<provider> block itself defaults to an empty hash so that the type's own
-default still applies when the operator writes no provider block at all. A
+default still applies when the operator writes no provider block at all,
+since validation walks into a block that is present and nowhere else. A
 section that is enabled with no provider block is therefore a manual pipeline
-rather than no pipeline.
+rather than no pipeline, which is why the provider block is not required
+beside an enabled gate.
+
+C<exodus_mount> is the one vault mount every pipeline record lives under, the
+applied record included, so it is the pipeline's own key rather than one
+recovered from an environment (D116).
 
 C<pipeline.provider.output_layout> is C<single> or C<multiple>, and a
 provider offers it by declaring it, which one that cannot emit several
@@ -4812,14 +4827,19 @@ provider's own rules are not among the checks here: the provider block
 declares the type that decides it, so C<Genesis::Config::validate> has
 already dispatched the block to that provider and gathered what it said with
 every other error. Then come the capability gates of
-L</_validate_capability_gates>, then the manifest store and the kit floors
-of L</_validate_manifest_store>, and then the one exodus mount of
+L</_validate_capability_gates>, before the environment blocks are read for
+their shape, because a key with no ability behind it is a fact about the
+provider rather than about how the operator wrote the block; then the
+manifest store and the kit floors of L</_validate_manifest_store>, a fact
+about the pipeline as a whole; and then the one exodus mount of
 L</_validate_one_exodus_mount>, which comes after the store because the
 mount is where that store keeps the pipeline's applied record. Then the
 provider's override files are checked by L</_validate_override_files>
-(T389). Last, every
+(T389), so a bad one is refused before the pipeline is built. Last, every
 environment the deployment root holds has its C<genesis.pipeline> block
-checked, read merged through L</_merged_env_params>. The refusals
+checked, read merged through L</_merged_env_params>; a file whose C<genesis>
+key is not a hash carries no block to check, and is left to whatever reads
+the environment itself. The refusals
 themselves belong to L</_validate_slug_components>, to
 L</_validate_shape_values>,
 to L</_validate_capability_gates>, to

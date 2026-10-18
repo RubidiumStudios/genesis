@@ -180,11 +180,7 @@ sub normalize_provider_opts {
 
 # }}}
 # describe_provider - structured self-description for display {{{
-#
-# Mirrors Genesis::Kit::Provider::Github::status() and returns a hash with
-# type, label, an ordered 'extras' list, and a per-key status structure.
-# Also surfaces the active notification style and task library when an AST
-# is already resolved (i.e., after parse() has been called).
+# Shaped as Genesis::Kit::Provider::Github::status() is.
 sub describe_provider {
 	my ($self) = @_;
 
@@ -319,12 +315,6 @@ sub generate {
 
 # }}}
 # deploy - deploy pipeline to Concourse via fly CLI {{{
-#
-# Option resolution priority (highest to lowest):
-#   1. Caller-supplied %opts (from command-line flags via parse_cli_opts)
-#   2. provider_opts stored in $self (loaded from pipeline.provider: in .genesis/config)
-#   3. Legacy $self->{layout} (backward compat)
-#   4. Built-in defaults (team: main, etc.)
 sub deploy {
 	my ($self, %opts) = @_;
 	my $config = $self->{config} || {}; # set only on the parse() path
