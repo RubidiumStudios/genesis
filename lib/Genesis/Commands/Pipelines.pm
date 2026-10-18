@@ -938,19 +938,10 @@ sub pipeline_graph {
 	my ($layout) = @_;
 
 	my $top = Genesis::Top->new('.', no_vault => 1); # a preview reads files only
-	_preview_shape($top);
+	_preview_shape($top); # returns only on an enabled pipeline
 
-	# For env-file topology, build the DAG directly.
-	if ($top->pipeline_enabled) {
-		my $topo = $top->pipeline_topology;
-		_emit_graph(_topology_to_mermaid_md($top, $topo->{nodes}, $topo->{edges}));
-		exit 0;
-	}
-
-	# Nothing here chooses a provider, so Concourse stands in for the drawing.
-	my $result   = _compile_pipeline($top, 'concourse');
-	my $compiler = $result->{compiler};
-	_emit_graph($compiler->graph_md());
+	my $topo = $top->pipeline_topology;
+	_emit_graph(_topology_to_mermaid_md($top, $topo->{nodes}, $topo->{edges}));
 	exit 0;
 }
 
@@ -970,21 +961,11 @@ sub pipeline_describe {
 	my ($layout) = @_;
 
 	my $top = Genesis::Top->new('.', no_vault => 1); # a preview reads files only
-	_preview_shape($top);
+	_preview_shape($top); # returns only on an enabled pipeline
 
-	# Source control is told only here: with no pipeline there is nothing to derive.
-	if ($top->pipeline_enabled) {
-		_describe_source_control($top);
-		my $topo = $top->pipeline_topology;
-		_describe_topology($top, $topo->{nodes}, $topo->{edges});
-		exit 0;
-	}
-
-	# Nothing here chooses a provider, so Concourse stands in for the telling.
-	my $result   = _compile_pipeline($top, 'concourse');
-	my $ast      = $result->{ast};
-	my $compiler = $result->{compiler};
-	$compiler->generate_description($ast);
+	_describe_source_control($top);
+	my $topo = $top->pipeline_topology;
+	_describe_topology($top, $topo->{nodes}, $topo->{edges});
 	exit 0;
 }
 

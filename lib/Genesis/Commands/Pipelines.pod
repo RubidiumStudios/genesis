@@ -1169,12 +1169,11 @@ environments and the edges between them, or writes it to the file
 C<--output> names, through L</_emit_graph($md)>.  A preview writes nothing
 by default, so it never dirties the tree it reads (T375).
 
-A repository whose pipeline is configured in F<.genesis/config> is drawn
-straight from C<< $top->pipeline_topology >>, because that topology is the one
-source of the DAG and no provider is involved in drawing it.  Any other
-repository is compiled first and the drawing comes off the compiler, with
-Concourse standing in as the platform, since nothing here chooses a provider
-and every compiler that emits a Concourse pipeline draws the same graph.
+The pipeline is drawn straight from C<< $top->pipeline_topology >>, because
+that topology is the one source of the DAG and no provider is involved in
+drawing it.  Nothing is compiled: L</_preview_shape($top)> returns only on an
+enabled pipeline, and has already answered a disabled one and refused a
+repository with none.
 
 The shape drawn is the deployment root's working tree, under a banner naming
 every gap between it and control on T, and with C<--from E<lt>refE<gt>> it is
@@ -1220,12 +1219,10 @@ Prints the pipeline's progression in the operator's own words, which is the
 source control the pipeline reads and writes, and then each environment with
 the environments it follows.
 
-A repository whose pipeline is configured in F<.genesis/config> is described
-from C<< $top->pipeline_topology >>, and the source control values are printed
-only on that path, because a repository with no pipeline configured has
-nothing for those derivations to read.  Any other repository is compiled and
-the compiler tells it, with Concourse standing in for the same reason
-L</pipeline_graph([$layout])> gives.
+The pipeline is described from C<< $top->pipeline_topology >>, after the
+source control values it derives.  Nothing is compiled: as for
+L</pipeline_graph([$layout])>, L</_preview_shape($top)> returns only on an
+enabled pipeline.
 
 Like L</pipeline_graph([$layout])>, it opens its root with no vault: a preview
 reads the repository's files and nothing in the vault, so a secrets provider
