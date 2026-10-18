@@ -151,7 +151,9 @@ subtest 'a block that is not a hash is refused before the map is read' => sub {
 	$cfg->set('block', 'a string');
 
 	my @errors = $cfg->_validate_key('block', $schema->{block});
-	is_deeply [map {csprintf('%s', $_)} @errors], ['block: expected a hash'],
+	# T400: and the refusal names the key that decides the hash's shape.
+	is_deeply [map {csprintf('%s', $_)} @errors],
+		['block: expected a hash, naming its kind: one of boom, broken, loud, mumble, quiet'],
 		'the shape is checked before the discriminator is looked for';
 };
 

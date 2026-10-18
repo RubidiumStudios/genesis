@@ -816,9 +816,12 @@ declared where a reader can see it rather than performed by a raw read
 inside whatever builds the schema.
 
 A block that is written as anything but a hash is refused before its
-discriminator is read at all, with C<< <path>: expected a hash >>, because
+discriminator is read at all, with
+C<< <path>: expected a hash, naming its <field>: one of <keys> >>, because
 there is no field to match against the map until there is a block holding
-one.
+one. A C<hash> written as anything else is refused the same way with the
+keys its schema declares, C<< <path>: expected a hash, with keys <keys> >>,
+so the operator reads the shape from the refusal (T400).
 
 A value no entry in the map owns is refused in the words C<enum> uses,
 C<< <path>: unknown value: <value>; expected one of <keys> >>, with the

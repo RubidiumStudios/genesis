@@ -715,7 +715,8 @@ sub _validate_key {
 		}
 	} elsif ($type eq 'hash') {
 		if (ref($value) ne 'HASH') {
-			push @errors, "#R{$key}: expected a hash";
+			my @keys = sort keys %{$schema->{schema} || {}};
+			push @errors, "#R{$key}: expected a hash".(@keys ? ", with keys ".join(', ', @keys) : '');
 		} else {
 			# Check if loaded_values has an explicit empty hash for this key
 			my $loaded_is_empty_hash = 0;
@@ -935,7 +936,8 @@ sub _validate_custom_struct {
 	my $map = $schema->{modules}
 		or bug "Schema for $key has no module map";
 
-	return ("#R{$key}: expected a hash") unless ref($self->get($key)) eq 'HASH';
+	return sprintf("#R{%s}: expected a hash, naming its %s: one of %s",
+		$key, $field, join(', ', sort keys %$map)) unless ref($self->get($key)) eq 'HASH';
 
 	# Filled before the match, because the provider type has a default and
 	# a map has nowhere else to put one.  It is spelled

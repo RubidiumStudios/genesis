@@ -1058,6 +1058,17 @@ subtest 'an unknown key lists the expected keys sorted (T383)' => sub {
 	like($nested, qr/expected one of ash, oak, yew$/, 'and a block\'s keys, sorted');
 };
 
+subtest 'a scalar where a hash belongs names the keys the hash takes (T400)' => sub {
+	my $path = "$tmp/expected-hash.yml";
+	put_file($path, "---\nblock: a-string\n");
+	my $schema = {block => {type => 'hash', schema => {
+		yew => {type => 'string'}, ash => {type => 'string'},
+	}}};
+	my ($error) = Genesis::Config->new($path)->problems($schema);
+	like(Genesis::Term::csprintf('%s', $error), qr/^block: expected a hash, with keys ash, yew$/,
+		'the hash and its keys, sorted');
+};
+
 subtest 'clear() reaches a parent already read' => sub {
 	# A load's validation reads the whole pipeline block before genesis config
 	# clears a key beneath it, so the parent's cached answer must go too, as
