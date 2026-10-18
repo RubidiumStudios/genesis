@@ -203,7 +203,7 @@ subtest 'an environment file that will not parse is refused' => sub {
 };
 
 subtest 'the read is merged and never leaf-only' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	# Two tokens, so the environment has a site file above it, and the key
 	# is written only there.  A leaf-only read finds it absent and answers
@@ -222,6 +222,8 @@ subtest 'the read is merged and never leaf-only' => sub {
 		'the leaf reads a key only its site file declares';
 	unlike $refusal, qr/genesis\.pipeline\.manual in us:/,
 		'and the refusal never names the site file as an environment';
+	like $refusal, qr/genesis\.pipeline\.manual in us-east\s+\(set\s+in\s+us\.yml\)/,
+		'but names it as the file that sets the key (T405)';
 };
 
 subtest "a shape key resolves from the environment's own files, or is refused (T352)" => sub {
@@ -268,6 +270,25 @@ subtest "a shape key resolves from the environment's own files, or is refused (T
 	like($tainted, qr/genesis\.pipeline\.prior_env.*c-\(\(\s+vault\s+"secret\/value:test"\s+\)\)-lab/s,
 		'a vault value is refused through a concat that takes it in');
 	unlike($tainted, qr/REDACTED/, 'and no vault was asked for it');
+};
+
+subtest 'an inherited bad key is refused naming the file that sets it (T405)' => sub {
+	plan tests => 3;
+
+	# The block is refused on the environment that inherits it, and the
+	# operator has to edit the file that sets it, so the refusal names both.
+	my $g = make_harness(envs => [], pipeline => 1, vault => 0);
+	commit_on_control($g, message => 'a site key', files => {
+		'us.yml'          => "---\ngenesis:\n  pipeline:\n    track_dependencies: [a/b/c]\n",
+		'us-east-qa.yml'  => "---\ngenesis:\n  env: us-east-qa\n",
+	});
+	my $refusal = '';
+	eval {my $t = Genesis::Top->new($g->a, no_vault => 1); $t->config; 1} or $refusal = $@;
+	$refusal = Genesis::Term::decolorize($refusal) =~ s/\s+/ /gr;
+
+	like($refusal, qr/environment us-east-qa/, 'the refusal names the environment that inherits it');
+	like($refusal, qr/genesis\.pipeline\.track_dependencies.*\bset in us\.yml\b/, 'and the file that sets the key');
+	unlike($refusal, qr/set in us-east-qa\.yml/, 'not the environment\'s own file, which never wrote it');
 };
 
 subtest 'the prior_env graph is refused where the shape is read, if not well formed (T350)' => sub {

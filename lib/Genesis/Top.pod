@@ -4998,6 +4998,28 @@ B<Examples:>
     # exits CONFIG (78) where prior_env is (( concat "c-" meta.value "-lab" ))
     # and meta.value is a (( vault )), naming c-(( vault "..." ))-lab
 
+=head2 _file_setting
+
+    my $file = $top->_file_setting('us-east-qa', 'genesis.pipeline.manual');
+
+The nearest file in an environment's hierarchy that sets a key, read one file
+at a time from the leaf up, as the path relative to the deployment root, or
+C<undef> when no file sets it. A refusal of an inherited key names the
+environment that inherits it, and the operator edits the file this answers,
+so L</_validate_shape_values>, L</_validate_capability_gates> and
+L</_validate_env_pipeline_block> name both (T405).
+
+B<Parameters:> The environment name and the dotted key.
+
+B<Returns:> The file, or C<undef>.
+
+B<Errors:> None of its own; a file that does not parse is read as setting
+nothing.
+
+B<Examples:>
+
+    $top->_file_setting('us-east-qa', 'genesis.pipeline.manual');   # 'us.yml'
+
 =head2 _validate_prior_env_graph
 
     $top->_validate_prior_env_graph();
@@ -5336,6 +5358,10 @@ Two shapes the declaration cannot state are checked beside it. A
 C<track_dependencies> entry is a deployment type at this environment or an
 C<< <env>/<type> >> pair elsewhere, and C<track_bosh_configs> is a boolean or
 a list of config type names.
+
+Each refused key that the environment inherits rather than writes itself is
+followed by C<(set in E<lt>fileE<gt>)>, the file L</_file_setting> answers, as
+is each key L</_validate_capability_gates> refuses (T405).
 
 Those checks read the block as the operator wrote it, taken before the
 validator runs. Each list key declares C<envsplit>, and C<Genesis::Config>

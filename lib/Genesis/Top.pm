@@ -3424,10 +3424,7 @@ sub _validate_shape_values {
 		for my $key (@SHAPE_KEYS) {
 			my ($held) = $unresolved->(scalar struct_lookup($params, $key)) or next;
 
-			my $env = Genesis::Env->bare($env_name, $self);
-			my ($from) = grep {
-				defined scalar struct_lookup(scalar(load_yaml_file($env->path($_))) // {}, $key)
-			} reverse grep {-f $env->path($_)} $env->actual_environment_files;
+			my $from = $self->_file_setting($env_name, $key);
 
 			push @errors, sprintf(
 				"#R{%s} in #C{%s} is #C{%s}, set in #C{%s}: a key that shapes the ".
@@ -3435,7 +3432,7 @@ sub _validate_shape_values {
 				"one still holds a credhub variable, a vault value, or a reference ".
 				"those files do not resolve (a value only Genesis or the kit supplies ".
 				"is not among them)",
-				$key, $env_name, $held, ($from // "$env_name.yml") =~ s{^\./}{}r
+				$key, $env_name, $held, $from // "$env_name.yml"
 			);
 		}
 	}
@@ -3472,6 +3469,17 @@ sub _validate_override_files {
 	$self->_refuse_config(@errors) if @errors;
 
 	return 1;
+}
+
+# }}}
+# _file_setting - the nearest file in an environment's hierarchy that sets a key {{{
+sub _file_setting {
+	my ($self, $env_name, $key) = @_;
+	my $env = Genesis::Env->bare($env_name, $self);
+	my ($from) = grep {
+		defined scalar struct_lookup(scalar(load_yaml_file($env->path($_))) // {}, $key)
+	} reverse grep {-f $env->path($_)} $env->actual_environment_files;
+	return defined $from ? $from =~ s{^\./}{}r : undef;
 }
 
 # }}}
@@ -3593,10 +3601,13 @@ sub _validate_capability_gates {
 			next unless ref($block) eq 'HASH';
 			for my $key (sort keys %env_gates) {
 				next unless exists $block->{$key};
+				my $from = $self->_file_setting($env_name, "genesis.pipeline.$key");
 				push @errors, sprintf(
-					"#R{genesis.pipeline.%s} in #C{%s}: the #C{%s} provider ".
+					"#R{genesis.pipeline.%s} in #C{%s}%s: the #C{%s} provider ".
 					"does not declare the #C{%s} capability",
-					$key, $env_name, $type, $env_gates{$key}
+					$key, $env_name,
+					(defined $from && $from ne "$env_name.yml" ? " (set in #C{$from})" : ''),
+					$type, $env_gates{$key}
 				);
 			}
 		}
@@ -3865,6 +3876,12 @@ sub _validate_env_pipeline_block {
 			unless !ref($v) || ref($v) eq 'ARRAY';
 	}
 
+	# An inherited key is edited where it is set, so its file is named too.
+	for (@errors) {
+		my ($key) = /^#R\{(genesis\.pipeline\.\w+)/ or next;
+		my $from = $self->_file_setting($env_name, $key);
+		$_ .= " (set in #C{$from})" if defined $from && $from ne "$env_name.yml";
+	}
 	$self->_refuse_config_text(
 		"Configuration validation failed for environment #C{%s}:%s",
 		$env_name,

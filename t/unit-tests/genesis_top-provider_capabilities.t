@@ -247,8 +247,8 @@ subtest 'the gated key is read out of the merged hierarchy' => sub {
 	write_env_file($h, 'ocfp-qa', site => 'ocfp', pipeline => {manual => 1});
 
 	throws_ok {load_with($h, automated_config($no_triggers))}
-		qr/genesis\.pipeline\.manual\s+in\s+ocfp-qa:\s+the\s+\Q$no_triggers\E\s+provider/s,
-		'the leaf inherits the key, and the refusal names the leaf';
+		qr/genesis\.pipeline\.manual\s+in\s+ocfp-qa\s+\(set\s+in\s+ocfp\.yml\):\s+the\s+\Q$no_triggers\E\s+provider/s,
+		'the leaf inherits the key, and the refusal names the leaf and the file that sets it (T405)';
 };
 
 subtest 'a capability that is true admits the key it gates' => sub {
