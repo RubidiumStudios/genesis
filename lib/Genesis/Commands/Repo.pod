@@ -463,8 +463,8 @@ created directory is removed -- and in subdirectory mode, anything staged into
 the enclosing repository's index is unstaged first, with the reset scoped by
 pathspec to just what was staged. Without that, a failed init would leave the
 parent repository's index dirty with files that no longer exist. Validation
-having established the parent had no other pending changes is what makes the
-reset safe.
+having established the parent had no other pending changes, or the operator
+having passed C<--force>, is what makes the reset safe.
 
 B<Parameters:>
 

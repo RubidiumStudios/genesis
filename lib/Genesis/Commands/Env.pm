@@ -23,9 +23,7 @@ our @EXPORT_OK = qw/redeploy_wanted/;
 
 sub create {
 
-	# WARNING: Do not default create-env option to 0, because its absence is used
-	# to determine whether the user has explicitly specified it or not, so
-	# appropriate warnings can be issued, or actions taken.
+	# WARNING: never default --create-env; its absence means the operator chose nothing.
 	command_usage(1) if @_ != 1;
 	warning(
 		"The --no-secrets flag is deprecated, and no longer honored."
@@ -80,26 +78,13 @@ sub create {
 	# check version prereqs
 	$kit->check_prereqs() or exit 86;
 
-	# Under a pipeline the branch class gate has already refreshed control
-	# into T and refused a derived branch, so create has nothing left to check
-	# about the branch it stands on.
+	# The branch class gate has already refreshed control and refused a derived branch.
 	my $pipeline_enabled = $top->pipeline_enabled;
 	my $git;
 	if ($pipeline_enabled) {
 		require Service::Git;
 		$git = Service::Git->new('.');
-
-		# genesis new opens no session, because it writes on the branch the
-		# operator chose and there is nothing to leave.  What it does share
-		# with begin is the pre-flight, so H20 closes for it too.
-		$git->preflight;
-
-		# The command commits the environment file, and a commit takes
-		# everything the index already holds, so an operator with staged work
-		# of their own would otherwise find it swept into the environment's
-		# own commit and have to undo a commit to get it back.  Under
-		# --no-commit there is no commit for anything to be swept into, so the
-		# check is skipped.
+		$git->preflight; # no session, but begin's pre-flight (H20)
 		_assert_clean_index($git) unless get_options->{'no-commit'};
 	}
 
@@ -108,9 +93,7 @@ sub create {
 	my $env = $top->create_env($name, $kit, %{get_options()});
 	bail "Failed to create environment $name" unless $env;
 
-	# Phase C: write pipeline metadata when the repository declares a pipeline.
-	# Runs interactively when in a controlling terminal; honours --prior-env,
-	# --require-pr, and --manual flags for non-interactive (scripted) use.
+	# Pipeline metadata, from the flags or asked at a terminal.
 	if ($pipeline_enabled) {
 		my $provider = $top->pipeline_provider_type // 'unknown';
 		info(
@@ -228,13 +211,6 @@ sub create {
 
 			my $sha = $git->sha('HEAD', short => 1);
 			info "#G{Committed} #C{%s} -- %s", $sha // '<unknown>', $message;
-
-			# Branch creation belongs to genesis pipeline-apply and to nothing
-			# else, so this command writes the environment file on the branch
-			# the operator is standing on and touches no deployment branch.
-			# The environment reaches its branch when a propagate run delivers
-			# this commit onto it, and the shape of the pipeline that carries
-			# it is the apply's to write.
 			info(
 				"#C{%s} reaches its deployment branch when the next ".
 				"#C{genesis propagate} run delivers this commit.  The branch ".
@@ -244,12 +220,7 @@ sub create {
 		}
 	}
 
-	# Generate secrets.  This is non-fatal, because the env file, pipeline
-	# metadata, and git branch are already in place, and secrets can be
-	# retried later with `genesis add-secrets` or generated at deploy time.
-	#
-	# quiet_if_empty: this runs immediately after create_env, so the
-	# source vault is expected to be empty for a brand-new env.
+	# Non-fatal: the file is in place, and secrets can be retried or made at deploy.
 	my $secrets_ok = eval {
 		$env->add_secrets(verbose => 1, import => 1, quiet_if_empty => 1)
 	};

@@ -939,19 +939,8 @@ sub _validate_custom_struct {
 	return sprintf("#R{%s}: expected a hash, naming its %s: one of %s",
 		$key, $field, join(', ', sort keys %$map)) unless ref($self->get($key)) eq 'HASH';
 
-	# Filled before the match, because the provider type has a default and
-	# a map has nowhere else to put one.  It is spelled
-	# discriminator_default rather than default because a schema entry's
-	# default belongs to the key that entry declares, and the parent fills
-	# it before this arm is ever reached, so the two cannot share a name.
+	# Filled before the match; an explicit empty hash takes it at loaded priority.
 	if (exists $schema->{discriminator_default} && ! $self->has("$key.$field")) {
-		# One block shape needs the fill filed higher than the others.  When
-		# the file carried the block as an explicit empty hash, that hash
-		# claims the key in the merge and skips every default underneath it,
-		# so a fill at default priority would be masked and the operator
-		# would meet a refusal naming a null value for a block that has a
-		# default.  It goes in at loaded priority in that one case, which is
-		# the remedy the hash arm of _validate_key uses for the same reason.
 		my $block  = $self->get($key);
 		my $loaded = struct_has($self->{loaded_values}, $key)
 			? struct_lookup($self->{loaded_values}, $key)
@@ -962,23 +951,14 @@ sub _validate_custom_struct {
 			$schema->{discriminator_default});
 	}
 
-	# Resolved through the one resolver the subschema reader also calls, so
-	# the two cannot come to disagree about which module owns a block.  The
-	# fill above has already happened, so the resolver's own fallback finds
-	# nothing left to do here.
-	my $entry = $self->_discriminator_entry($key, $schema);
+	my $entry = $self->_discriminator_entry($key, $schema); # the subschema reader's resolver too
 	my $value = $self->get("$key.$field");
 	return ("#R{$key.$field}: unknown value: #ri{".($value // '<null>')."}; ".
 		"expected one of ".join(', ', sort keys %$map))
 		unless $entry;
 
 	unless (eval {require $entry->{module}; 1}) {  ## no critic
-		# Copied first, because bail's own readers run evals that clear it,
-		# and cut, because the operator reads the refusal and not the line
-		# the require failed on.  The cut is Genesis::without_backtrace,
-		# which moved out of Genesis::Top because the load it trims now
-		# happens here.
-		my $err = $@;
+		my $err = $@; # copied first: bail's readers run evals that clear it
 		bail({exitcode => CONFIG},
 			"Failed to load %s '%s': %s", $schema->{noun} // 'module',
 			$value, without_backtrace($err));
@@ -986,27 +966,12 @@ sub _validate_custom_struct {
 
 	my $method = $entry->{method} || $schema->{method} || 'validate_config';
 
-	# The module is somebody else's code, so a rule that dies is answered
-	# with an error the operator can act on rather than with a Carp trace
-	# out of the middle of a configuration load.  It is gathered as an
-	# error like every other, because the module's rules are the block's
-	# rules and not a phase of their own with a heading of their own.
 	my @errors = eval {$entry->{class}->$method($self, $key, $field)};
-	# Copied first, because the readers below run evals that clear it.
-	my $caught = $@;
+	my $caught = $@; # copied first: the readers below run evals that clear it
 	if ($caught) {
-		# Genesis raises its own fatals already framed, and one of those
-		# says the module is broken rather than that the operator wrote
-		# the block wrongly.  It goes back up as it came, so a defect
-		# keeps the exit code and the stack a defect carries instead of
-		# being answered as a configuration the operator could fix.
-		die $caught if decolorize($caught) =~ m{^\s*\[FATAL\]};
+		die $caught if decolorize($caught) =~ m{^\s*\[FATAL\]}; # a defect, not the operator's
 		return ("#R{$key}: ".without_backtrace(decolorize($caught)));
 	}
-
-	# A rule that answers with a bare undef or an empty string has said
-	# nothing, and printing one gives the operator a bullet with nothing
-	# after it to read, so nothing empty survives the hand back.
 	return grep {defined($_) && length($_)} @errors;
 }
 

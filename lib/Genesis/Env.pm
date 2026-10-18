@@ -362,10 +362,7 @@ sub create {
 	if (-f $env_path) {
 		die "Environment file $env->{file} already exists.\n"
 			unless $opts{force};
-		# Move the existing file out of the way so the new hook
-		# starts fresh and $self->exists returns false.  The .old
-		# file is kept for reference (manual diff / re-create).
-		my $old_path = "${env_path}.old";
+		my $old_path = "${env_path}.old"; # the hook starts fresh; .old is kept
 		rename($env_path, $old_path)
 			or bail("Could not move existing %s to %s: %s", $env->{file}, "$env->{file}.old", $!);
 		$set_aside = $old_path;
@@ -417,12 +414,7 @@ sub create {
 			$env->{__params}{genesis}{use_create_env} = 0;
 			$env->{__params}{genesis}{bosh_env} = $bosh_env//$opts{name};
 		} else {
-			# Kit allows but does not require create-env.  When neither
-			# --create-env nor --bosh-env is given, default based on
-			# whether the kit is a BOSH director: director kits default
-			# to create-env (they create the director itself), everything
-			# else defaults to bosh deployment.  This matches the
-			# pre-2.8.0 heuristic and the use_create_env accessor logic.
+			# Either method: with neither flag, a director kit defaults to create-env.
 			bail(
 				"Cannot specify a bosh environment for environments that use create-env deployment method."
 			) if $create_env && $bosh_env;

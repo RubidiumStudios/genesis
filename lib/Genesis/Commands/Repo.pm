@@ -558,12 +558,6 @@ sub _repo_init_execute {
 }
 
 # -- Phase 3: Report ----------------------------------------------------------
-#
-# Handles both success and failure.  On failure, cleans up any partial
-# initialization (removing the new directory and, in subdir mode,
-# unstaging from the enclosing repo's index) before bailing with an
-# appropriate message.  On success, prints the summary.
-#
 sub _repo_init_report {
 	my ($result) = @_;
 
@@ -572,13 +566,7 @@ sub _repo_init_report {
 			"removing incomplete Genesis repository at #C{%s} due to failed creation",
 			$result->{root}
 		);
-		# In subdir mode, unstage anything we added to the enclosing
-		# repo's index before deleting the directory so the parent
-		# repo's working state is left clean.  This is safe because
-		# validation ensured the parent repo had no other tracked
-		# changes (or the user passed --force); the pathspec scopes
-		# the reset strictly to what we just staged.
-		if ($result->{use_subdir}) {
+		if ($result->{use_subdir}) { # unstage only what this run staged
 			eval {
 				run({ dir => $result->{parent_dir} },
 					'git', 'reset', 'HEAD', '--', $result->{target_path});

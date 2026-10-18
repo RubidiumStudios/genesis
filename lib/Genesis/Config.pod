@@ -1519,7 +1519,15 @@ sees the value every other reader will. The fill is filed at default
 priority, except where the file carried the block as an explicit empty
 hash. Such a hash claims the key in the merge and masks anything filed
 beneath it, so there the fill is filed at loaded priority instead and the
-block still reaches the module its default names.
+block still reaches the module its default names, the remedy the hash arm of
+L</_validate_key> uses for the same reason. The key is spelled
+C<discriminator_default> rather than C<default> because a schema entry's
+C<default> belongs to the key that entry declares, which the parent fills
+before this arm is reached, so the two cannot share a name.
+
+The owning entry is found through L</_discriminator_entry>, the one resolver
+the subschema reader also calls, so the two cannot disagree about which module
+owns a block.
 
 A value the map does not hold is refused in the words C<enum> uses, with
 the map's keys sorted. Otherwise the entry's module is loaded and its
@@ -1536,7 +1544,10 @@ path rather than with a C<Carp> trace out of the middle of a
 configuration load. What it said is cut of its backtrace by
 L<Genesis/without_backtrace> and gathered with every other error the walk
 found, under the one sentence a configuration refusal carries, because
-the module's rules are the block's rules and not a phase of their own.
+the module's rules are the block's rules and not a phase of their own. A
+Genesis fatal, which arrives already framed, says the module is broken rather
+than that the operator wrote the block wrongly, so it is raised again as it
+came, keeping the exit code and stack a defect carries.
 
 B<Parameters:>
 
