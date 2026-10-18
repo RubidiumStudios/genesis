@@ -123,7 +123,7 @@ sub execute {
 
 	$env{$_} = $opts->{env}{$_} for (keys %{$opts->{env}||{}});
 	$opts->{env} = \%env;
-	unless ($ENV{GENESIS_HONOR_ENV}) {
+	unless ($ENV{GENESIS_HONOR_ENV} || $ENV{GENESIS_PIPELINE_TASK}) { # a pipeline keeps its proxy
 		$opts->{env}{HTTPS_PROXY} = undef; # bosh dislikes this env var
 		$opts->{env}{https_proxy} = undef; # bosh dislikes this env var
 	}

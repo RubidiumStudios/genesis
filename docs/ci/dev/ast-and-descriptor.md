@@ -126,7 +126,7 @@ Notification steps (`on_failure` and `on_success`) wrap the `do` block.
 
 ### Environment Variable Assembly
 
-`_task_config()` builds the complete environment variable map for deployment tasks. This includes `GENESIS_HONOR_ENV`, `CI_NO_REDACT`, `CURRENT_ENV`, `PREVIOUS_ENV`, `CACHE_DIR`, `OUT_DIR`, `WORKING_DIR`, `GIT_BRANCH`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `BOSH_NON_INTERACTIVE`, `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`, `VAULT_SKIP_VERIFY`, `VAULT_NAMESPACE`, `VAULT_NO_STRONGBOX`, git authentication variables, `GIT_GENESIS_ROOT`, and `DEBUG`.
+`_task_config()` builds the complete environment variable map for deployment tasks. This includes `GENESIS_PIPELINE_TASK`, `CI_NO_REDACT`, `CURRENT_ENV`, `PREVIOUS_ENV`, `CACHE_DIR`, `OUT_DIR`, `WORKING_DIR`, `GIT_BRANCH`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `BOSH_NON_INTERACTIVE`, `VAULT_ADDR`, `VAULT_ROLE_ID`, `VAULT_SECRET_ID`, `VAULT_SKIP_VERIFY`, `VAULT_NAMESPACE`, `VAULT_NO_STRONGBOX`, git authentication variables, `GIT_GENESIS_ROOT`, and `DEBUG`.
 
 The `_unwrap_ref()` helper handles secret references. Values that were stored as `{ secret_ref => 'some/path' }` by the ASTBuilder are unwrapped back to `((some/path))` Concourse interpolation syntax. Plain scalar values pass through unchanged.
 

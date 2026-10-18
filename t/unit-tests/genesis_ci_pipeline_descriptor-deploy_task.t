@@ -174,20 +174,28 @@ subtest 'params the plain CLI still consumes are kept' => sub {
 	is $params->{GIT_BRANCH}, 'control',        'GIT_BRANCH survives';
 };
 
-subtest 'GENESIS_HONOR_ENV survives the shim retirement' => sub {
+subtest 'GENESIS_HONOR_ENV is not emitted, GENESIS_PIPELINE_TASK replacing it (T410)' => sub {
 	plan tests => 1;
 
-	# It reads as a shim-era var but is not one.  Service::BOSH strips
-	# HTTPS_PROXY/https_proxy from the environment unless it is set, which
-	# would cut a proxied network's pipeline off from its director.  It had
-	# a second consumer, the deploy telling a CI run from an operator at a
-	# terminal, and that read is gone: the job says what it is through
-	# GENESIS_PIPELINE_TASK, which the subtest below reads.
+	# D27 replaced it with GENESIS_PIPELINE_TASK, and its last consumer,
+	# Service::BOSH keeping HTTPS_PROXY, now reads that too, so a proxied
+	# network's pipeline still reaches its director (service_bosh-base.t).
 	my $params = _deploy_step(_describe(_ast()), "$ENV_NAME-bosh")
 		->{config}{params};
 
-	ok $params->{GENESIS_HONOR_ENV},
-		'GENESIS_HONOR_ENV is still passed to the deploy task';
+	ok !exists $params->{GENESIS_HONOR_ENV},
+		'GENESIS_HONOR_ENV is no longer passed to the deploy task';
+};
+
+subtest 'an errand task says it is the pipeline too (T410)' => sub {
+	plan tests => 2;
+
+	# D27: the emitter sets GENESIS_PIPELINE_TASK in every task.
+	my $ast = _ast();
+	my $params = Genesis::CI::Compiler::PipelineDescriptor->new(ast => $ast)
+		->_errand_config($ast, $ENV_NAME, 'smoke-tests', 'git', 'git')->{params};
+	is $params->{GENESIS_PIPELINE_TASK}, 1, 'GENESIS_PIPELINE_TASK is set';
+	ok !exists $params->{GENESIS_HONOR_ENV}, 'and GENESIS_HONOR_ENV is not';
 };
 
 subtest 'the task says it is the pipeline running, not an operator' => sub {

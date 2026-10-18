@@ -1444,10 +1444,8 @@ sub _task_config {
 	}
 
 	my %params = (
-		# Service::BOSH keeps HTTPS_PROXY only when this is set.
-		GENESIS_HONOR_ENV => 1,
 		# The pipeline running, not an operator: every pre-flight gate reads
-		# it, and nothing else sets it.
+		# it, and Service::BOSH keeps HTTPS_PROXY under it.
 		GENESIS_PIPELINE_TASK => 1,
 		CI_NO_REDACT     => $config->{unredacted} || 0,
 		CURRENT_ENV      => $env,
@@ -1549,7 +1547,7 @@ sub _errand_config {
 	}
 
 	my %params = (
-		GENESIS_HONOR_ENV => 1,
+		GENESIS_PIPELINE_TASK => 1,
 		CI_NO_REDACT      => $config->{unredacted} || 0,
 		CURRENT_ENV       => $env,
 		ERRAND_NAME       => $errand_name,

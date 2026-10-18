@@ -270,7 +270,8 @@ and C<script -q -c> on Linux) so that interactive terminal output is
 available in C<$results[0]> after the command completes.
 
 C<HTTPS_PROXY> and C<https_proxy> are cleared from the subprocess
-environment unless C<GENESIS_HONOR_ENV> is set. C<BOSH_NON_INTERACTIVE>
+environment unless C<GENESIS_HONOR_ENV> is set, which an operator may set, or
+C<GENESIS_PIPELINE_TASK>, which every pipeline task carries (T410). C<BOSH_NON_INTERACTIVE>
 is always cleared from the subprocess environment; the C<-n> flag is
 prepended to the command instead when C<BOSH_NON_INTERACTIVE> is set in the
 calling process.

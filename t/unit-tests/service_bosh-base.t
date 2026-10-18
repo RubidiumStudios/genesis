@@ -601,6 +601,7 @@ EOF
 	local $ENV{HTTPS_PROXY} = 'http://proxy.example.com:3128';
 	local $ENV{https_proxy} = 'http://proxy.example.com:3128';
 	delete $ENV{GENESIS_HONOR_ENV};
+	delete local $ENV{GENESIS_PIPELINE_TASK};
 	Service::BOSH->set_command($ENV{GENESIS_BOSH_COMMAND});
 	my $obj = bless { deployment => undef }, 'Service::BOSH';
 
@@ -630,6 +631,32 @@ EOF
 
 	my $ok = $obj->execute({ passfail => 1 }, 'foo');
 	ok $ok, 'proxy vars are preserved when GENESIS_HONOR_ENV is set';
+};
+
+subtest 'execute() preserves proxy vars in a pipeline task (T410)' => sub {
+	plan tests => 1;
+
+	# The pipeline says what it is through GENESIS_PIPELINE_TASK, which
+	# replaced GENESIS_HONOR_ENV in every emitted task (D27); an operator's
+	# own GENESIS_HONOR_ENV still counts outside a pipeline.
+	my $tmp = workdir('proxy-pipeline-bosh');
+	put_file("$tmp/bosh", 0755, <<'EOF');
+#!/bin/bash
+if [[ -z "$HTTPS_PROXY" ]]; then
+	echo "PROXY NOT FOUND" >&2
+	exit 3
+fi
+exit 0
+EOF
+
+	local $ENV{GENESIS_BOSH_COMMAND} = "$tmp/bosh";
+	local $ENV{HTTPS_PROXY} = 'http://proxy.example.com:3128';
+	delete local $ENV{GENESIS_HONOR_ENV};
+	local $ENV{GENESIS_PIPELINE_TASK} = '1';
+	Service::BOSH->set_command($ENV{GENESIS_BOSH_COMMAND});
+	my $obj = bless { deployment => undef }, 'Service::BOSH';
+
+	ok $obj->execute({ passfail => 1 }, 'foo'), 'proxy vars are preserved when GENESIS_PIPELINE_TASK is set';
 };
 
 subtest 'execute() clears BOSH_NON_INTERACTIVE from subprocess environment' => sub {
