@@ -212,6 +212,36 @@ subtest 'config --set refuses a value the schema rejects' => sub {
 		"names the offending key");
 };
 
+subtest 'a save refused by a load check says nothing was written' => sub {
+	plan tests => 6;
+
+	# T403: the load's own checks named the file on disk as the bad one, and
+	# never said the save wrote nothing, so a refused run read as a file the
+	# operator had to repair by hand.
+	# The gate's case needs an environment the manual provider refuses; the
+	# store's must not have one, or the gate would refuse it first.
+	my $gated = config_repo('config-save-refused-gate');
+	mkfile_or_fail("$gated/qa.yml",
+		"---\nkit: {name: dev, version: latest}\ngenesis:\n  env: qa\n  pipeline:\n    manual: true\n");
+	for my $case (
+		[$gated, ['--set', 'deployment_type', 'other-kit'], qr/genesis\.pipeline\.manual/, 'a refusal of the result'],
+		[config_repo('config-save-refused-store'), ['--set', 'manifest_store', 'repository'],
+			qr/manifest_store: repository/, 'a refusal in words of its own'],
+	) {
+		my ($dir, $argv, $names, $label) = @$case;
+		my $before = slurp("$dir/.genesis/config");
+		pushd $dir;
+		prepare_command('config', @$argv);
+		build_command_environment;
+		my ($code, $err) = run_config();
+		popd;
+		$err =~ s/\s+/ /g;
+		like($err, $names, "$label names what it refuses");
+		like($err, qr/this run would write|Nothing was written/, 'and says the save wrote nothing');
+		is(slurp("$dir/.genesis/config"), $before, 'which it did not');
+	}
+};
+
 subtest 'config --unset removes a key' => sub {
 	plan tests => 2;
 

@@ -3839,7 +3839,9 @@ It drops what the load worked out from the configuration it loaded:
 L</_source_control> keeps its answer, and an answer about the loaded
 configuration is not an answer about the one being saved. Nothing has
 been written yet, so the schema's refusal names "the configuration this
-run would write" and says the file is left as it was.
+run would write" and says the file is left as it was. Every other check the
+load makes refuses through L</_refuse_config> or L</_refuse_config_text>,
+so its refusal says the same during a save (T403).
 
 B<Parameters:> None.
 
@@ -3855,6 +3857,47 @@ B<Examples:>
     $top->config->set('pipeline.enabled', 1);
     $top->_validate_config_to_save;   # refuses if the next load would
     $top->config->save;
+
+=head2 _refuse_config
+
+    $self->_refuse_config(@problems) if @problems;
+
+Refuses a load check's problems, one bullet each, as "Configuration
+validation failed for" what is being judged: the file on disk at load, and
+during L</_validate_config_to_save> the configuration the run would write,
+which says the file is left as it was (T403). A check that names the file on
+disk when a save is refused reads as a file the operator has to repair.
+
+B<Parameters:> The problems, each a sentence.
+
+B<Returns:> Never.
+
+B<Errors:> Always bails at C<Genesis::Exit::CONFIG>.
+
+B<Examples:>
+
+    $self->_refuse_config("#R{genesis.pipeline.manual} in #C{qa}: ...");
+    # Configuration validation failed for the configuration this run would
+    # write (.genesis/config is left as it was):
+    #  - genesis.pipeline.manual in qa: ...
+
+=head2 _refuse_config_text
+
+    $self->_refuse_config_text($format, @args);
+
+Refuses with a load check's own sentence, formatted as C<bail> formats it, and
+during L</_validate_config_to_save> adds "Nothing was written:
+F<.genesis/config> is left as it was." (T403).
+
+B<Parameters:> A format and its arguments.
+
+B<Returns:> Never.
+
+B<Errors:> Always bails at C<Genesis::Exit::CONFIG>.
+
+B<Examples:>
+
+    $self->_refuse_config_text("#R{manifest_store: %s} cannot be used under a pipeline.", $store);
 
 =head2 _upgrade_config_to_v2
 

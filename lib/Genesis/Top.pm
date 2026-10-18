@@ -2509,7 +2509,7 @@ sub _validate_config {
 				if $handler->can('validate_config_section');
 		}
 	} else {
-		bail({exitcode => CONFIG},
+		$self->_refuse_config_text(
 			"Genesis deployment repo configuration version %s is not supported",
 			$config_version
 		);
@@ -2547,6 +2547,24 @@ sub _validate_config_to_save {
 		$self->path('.genesis/config')
 	);
 	return $self->_validate_config;
+}
+
+# }}}
+# _refuse_config - a load check's problems, refused against what is being judged {{{
+sub _refuse_config {
+	my ($self, @problems) = @_;
+	bail({exitcode => CONFIG}, "Configuration validation failed for %s:%s",
+		$self->{__config_to_save} // sprintf('#C{%s}', $self->path('.genesis/config')),
+		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @problems));
+}
+
+# }}}
+# _refuse_config_text - a load check's refusal in its own words, saying a save wrote nothing {{{
+sub _refuse_config_text {
+	my ($self, $fmt, @args) = @_;
+	bail({exitcode => CONFIG}, $fmt.($self->{__config_to_save}
+		? "\n\nNothing was written: #C{%s} is left as it was." : ''),
+		@args, ($self->{__config_to_save} ? $self->path('.genesis/config') : ()));
 }
 
 # }}}
@@ -2892,7 +2910,7 @@ sub _current_config_schema {
 sub _refuse_v2_pipeline {
 	my ($self) = @_;
 	return 1 unless ($self->{__config_version} // 0) == 2;
-	bail({exitcode => CONFIG},
+	$self->_refuse_config_text(
 		"A pipeline section belongs to a version 3 repository configuration, ".
 		"and this repository is still version 2.  Migrate ".
 		"#C{.genesis/config} to version 3 with #C{genesis config --set version 3}; ".
@@ -2912,7 +2930,7 @@ sub _refuse_retired_remote {
 	my ($self) = @_;
 	my $named = $self->config->get('pipeline.source_control.remote');
 	return 1 unless defined $named;
-	bail({exitcode => CONFIG},
+	$self->_refuse_config_text(
 		"#C{pipeline.source_control.remote} is set to #C{%s} in ".
 		"#C{.genesis/config}, and is no longer read.  A remote's name is each ".
 		"clone's own, so the pipeline finds its remote by the repository it ".
@@ -3265,7 +3283,7 @@ sub _validate_slug_components {
 
 	my $type = $self->config->get('deployment_type');
 	if (my $why = _ref_component_errors($type)) {
-		bail({exitcode => CONFIG},
+		$self->_refuse_config_text(
 			"The deployment type #R{%s} in #C{.genesis/config} is not a git ".
 			"ref component: %s.\nIt names the branch #C{<env>/%s} for every ".
 			"environment of this repository.",
@@ -3315,7 +3333,7 @@ sub _validate_one_exodus_mount {
 	}
 	return 1 unless %off;
 
-	bail({exitcode => CONFIG},
+	$self->_refuse_config_text(
 		"Every environment of a pipeline must resolve #C{genesis.exodus_mount} ".
 		"to the pipeline's own mount, because its records live beside the ".
 		"pipeline's.\n%s, but #C{pipeline.exodus_mount} is #C{%s}.\n".
@@ -3403,11 +3421,7 @@ sub _validate_shape_values {
 		}
 	}
 
-	bail({exitcode => CONFIG},
-		"Configuration validation failed for #C{%s}:%s",
-		$self->path('.genesis/config'),
-		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
-	) if @errors;
+	$self->_refuse_config(@errors) if @errors;
 
 	return 1;
 }
@@ -3436,11 +3450,7 @@ sub _validate_override_files {
 			if $rc || ref($data) ne 'HASH';
 	}
 
-	bail({exitcode => CONFIG},
-		"Configuration validation failed for #C{%s}:%s",
-		$self->path('.genesis/config'),
-		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
-	) if @errors;
+	$self->_refuse_config(@errors) if @errors;
 
 	return 1;
 }
@@ -3498,11 +3508,7 @@ sub _validate_prior_env_graph {
 		);
 	}
 
-	bail({exitcode => CONFIG},
-		"Configuration validation failed for #C{%s}:%s",
-		$self->path('.genesis/config'),
-		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
-	) if @errors;
+	$self->_refuse_config(@errors) if @errors;
 
 	return 1;
 }
@@ -3577,11 +3583,7 @@ sub _validate_capability_gates {
 		}
 	}
 
-	bail({exitcode => CONFIG},
-		"Configuration validation failed for #C{%s}:%s",
-		$self->path('.genesis/config'),
-		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
-	) if @errors;
+	$self->_refuse_config(@errors) if @errors;
 
 	return 1;
 }
@@ -3617,7 +3619,7 @@ sub _validate_manifest_store {
 	# not met the version 2 schema yet, which is a version 1 file on its way
 	# through _upgrade_config_to_v2, is the case where nothing supplies it.
 	my $store = $self->config->get('manifest_store');
-	bail({exitcode => CONFIG},
+	$self->_refuse_config_text(
 		"#R{manifest_store: %s} cannot be used under a pipeline.\n".
 		"The certified commit and the applied, hold and proposed records ".
 		"live in exodus, so the store must be #C{exodus}.",
@@ -3654,7 +3656,7 @@ sub _validate_manifest_store {
 		}
 		next if new_enough($floor, '3.1.0');
 
-		bail({exitcode => CONFIG},
+		$self->_refuse_config_text(
 			"The environment #C{%s} declares no minimum Genesis version, and ".
 			"neither does the repository, so its floor is #C{0.0.0}, which ".
 			"forces the repository store whatever #C{manifest_store} says.\n".
@@ -3663,7 +3665,7 @@ sub _validate_manifest_store {
 			$env_name
 		) unless length $env_min || length $repo_min;
 
-		bail({exitcode => CONFIG},
+		$self->_refuse_config_text(
 			"The environment #C{%s} has a Genesis floor below #C{3.1.0}, ".
 			"which forces the repository store whatever #C{manifest_store} ".
 			"says.\nRaise the kit's floor to #C{3.1.0} or later, or raise ".
@@ -3719,7 +3721,7 @@ sub _merged_env_params {
 	my ($merged, $err);
 	eval {$merged = $env->manifest_provider->vaultless_environment->data; 1}
 		or $err = $@;
-	bail({exitcode => CONFIG},
+	$self->_refuse_config_text(
 		"An environment file could not be read as YAML.\n%s\n%s\n".
 		"Every environment file has to parse before anything can be ".
 		"said about what the pipeline reads from it.",
@@ -3844,7 +3846,7 @@ sub _validate_env_pipeline_block {
 			unless !ref($v) || ref($v) eq 'ARRAY';
 	}
 
-	bail({exitcode => CONFIG},
+	$self->_refuse_config_text(
 		"Configuration validation failed for environment #C{%s}:%s",
 		$env_name,
 		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @errors)
