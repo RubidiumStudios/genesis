@@ -350,7 +350,10 @@ B<Examples:>
 
 Returns true when C<$path> looks like a valid Genesis deployment repository:
 it must have a C<.genesis/> directory, a C<.genesis/config> file, and that
-file must contain the string C<deployment_type:>.
+file must contain the string C<deployment_type:>, or carry C<type:> at the
+start of a line, the oldest version 1 key for it, which the version 1
+upgrade reads as its fallback (T399). A C<type:> nested under another key
+does not count.
 
 B<Parameters:>
 

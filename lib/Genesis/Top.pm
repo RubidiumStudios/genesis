@@ -709,7 +709,8 @@ sub search_for_repo_path {
 # is_repo - returns true if the specified path is a Genesis deployment repository {{{
 sub is_repo {
 	my ($class, $path) = @_;
-	return -d "$path/.genesis" && -f "$path/.genesis/config" && slurp("$path/.genesis/config") =~ /deployment_type:/;
+	# type: is the oldest v1 key for it, which the v1 upgrade reads too
+	return -d "$path/.genesis" && -f "$path/.genesis/config" && slurp("$path/.genesis/config") =~ /deployment_type:|^type:/m;
 }
 # }}}
 

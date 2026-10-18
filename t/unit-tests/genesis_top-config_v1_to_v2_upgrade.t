@@ -195,6 +195,20 @@ EOF
 	is(slurp_config($repo), $v1, 'and the v1 file is left as it was');
 };
 
+subtest 'a v1 configuration naming its type by type: is a repository' => sub {
+	plan tests => 3;
+
+	# T399: is_repo looked only for deployment_type:, so the oldest v1 key
+	# made every command say the directory is no Genesis repository, though
+	# the upgrade reads type: as its fallback.
+	my $repo = make_v1_repo('v1-type-key', "type: bosh\n");
+	ok(Genesis::Top->is_repo($repo), 'is_repo answers true');
+	is(Genesis::Top->new($repo)->type, 'bosh', 'and the upgrade reads its type');
+
+	my $nested = make_v1_repo('v1-nested-type', "kit_provider:\n  type: genesis-community\n");
+	ok(!Genesis::Top->is_repo($nested), 'a type: nested under another key is not one');
+};
+
 subtest 'the upgrade shows what it changes' => sub {
 	plan tests => 2;
 
