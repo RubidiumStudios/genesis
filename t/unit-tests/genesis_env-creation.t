@@ -221,6 +221,36 @@ subtest 'Genesis::Env->create() - smoke test for name validation' => sub {
 	}
 };
 
+subtest 'Genesis::Env->create() - a failed new hook leaves no environment file' => sub {
+	plan tests => 4;
+
+	# T395: the new hook writes the file, so a hook that fails part way, such
+	# as one that prompts with no terminal, left it behind and a retry met
+	# "already exists".  The vault and the purge are stood in for, because
+	# the row is about the file the hook leaves.
+	no warnings 'redefine';
+	local *Genesis::Env::vault                     = sub {1};
+	local *Genesis::Env::remove_secrets            = sub {({})};
+	local *Genesis::Env::download_required_configs = sub {1};
+	local *Genesis::Env::has_hook                  = sub {1};
+	local *Genesis::Env::run_hook = sub {
+		my ($env) = @_;
+		put_file($env->path($env->file), "---\ngenesis:\n  env: half\n");
+		die "the new hook cannot prompt without a terminal\n";
+	};
+
+	throws_ok {Genesis::Env->create(name => 'half', top => $top, kit => $kit)}
+		qr/cannot prompt without a terminal/, 'the hook\'s failure is the refusal';
+	ok(!-e $top->path('half.yml'), 'and the file it began is removed');
+
+	put_file($top->path('kept.yml'), "---\ngenesis:\n  env: kept\n");
+	throws_ok {Genesis::Env->create(name => 'kept', top => $top, kit => $kit, force => 1)}
+		qr/cannot prompt without a terminal/, 'under --force too';
+	is(slurp($top->path('kept.yml')), "---\ngenesis:\n  env: kept\n",
+		'where the file it set aside is put back');
+	unlink $top->path('kept.yml');
+};
+
 # NOTE: Successful environment creation testing is not included in this unit test
 # because Genesis::Env->create() requires vault operations (remove_secrets() at
 # line 406) which cannot be mocked with no_vault => 1. Full create() workflow

@@ -358,6 +358,7 @@ sub create {
 
 	# environment must not already exist (unless --force)
 	my $env_path = $env->path($env->{file});
+	my $set_aside;
 	if (-f $env_path) {
 		die "Environment file $env->{file} already exists.\n"
 			unless $opts{force};
@@ -367,6 +368,7 @@ sub create {
 		my $old_path = "${env_path}.old";
 		rename($env_path, $old_path)
 			or bail("Could not move existing %s to %s: %s", $env->{file}, "$env->{file}.old", $!);
+		$set_aside = $old_path;
 		notice("\nMoved existing #C{%s} to #C{%s.old}", $env->{file}, $env->{file});
 	}
 
@@ -482,7 +484,12 @@ sub create {
 		"a newer version of this kit.",
 		$env->kit->id, $Genesis::VERSION
 	) unless $env->has_hook('new');
-	$env->run_hook('new');
+	unless (eval {$env->run_hook('new'); 1}) {
+		my $err = $@; # a retry must not meet the half-written file
+		unlink $env_path;
+		rename($set_aside, $env_path) if $set_aside;
+		die $err;
+	}
 
 	# Load the environment from the file to pick up hierarchy, and generate secrets
 	$env = $class->load(name =>$env->name, top => $env->top);
