@@ -566,6 +566,23 @@ subtest 'execute() scalar context returns raw exit code (BOSH-2)' => sub {
 # Section 16 - execute() - environment variable merging and proxy cleanup
 # ---------------------------------------------------------------------------
 
+subtest 'execute() with passfail answers whether bosh succeeded (T409)' => sub {
+	plan tests => 2;
+
+	# run() answers passfail itself, with one true or false value, and
+	# execute read that as a list, so it answered true whatever bosh did.
+	my $tmp = workdir('passfail-bosh');
+	put_file("$tmp/bosh", 0755, "#!/bin/bash\nexit \${FAKE_BOSH_RC:-0}\n");
+	local $ENV{GENESIS_BOSH_COMMAND} = "$tmp/bosh";
+	Service::BOSH->set_command($ENV{GENESIS_BOSH_COMMAND});
+	my $obj = bless { deployment => undef }, 'Service::BOSH';
+
+	local $ENV{FAKE_BOSH_RC} = 3;
+	ok !$obj->execute({ passfail => 1 }, 'foo'), 'a bosh that fails is answered false';
+	local $ENV{FAKE_BOSH_RC} = 0;
+	ok $obj->execute({ passfail => 1 }, 'foo'), 'and one that succeeds true';
+};
+
 subtest 'execute() clears HTTPS_PROXY and https_proxy unless GENESIS_HONOR_ENV is set' => sub {
 	plan tests => 1;
 

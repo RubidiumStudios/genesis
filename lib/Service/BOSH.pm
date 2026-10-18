@@ -168,6 +168,7 @@ sub execute {
 
 	dump_var("bosh command" => \@cmd);
 	my @results = run($opts, @cmd);
+	return $results[0] if $opts->{passfail}; # run answers passfail itself
 
 	if ($opts->{interactive} && $file) {
 		$results[0] = slurp($file);
@@ -178,7 +179,6 @@ sub execute {
 		$results[0] =~ s/^\^D[\x08]*//;       # remove macOS script ^D prefix + backspaces
 		logger->dump_var("bosh results" => \@results);
 	}
-	return !$results[1] if $opts->{passfail};
 	return wantarray ? @results : $results[1];
 }
 

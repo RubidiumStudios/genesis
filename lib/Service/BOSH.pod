@@ -288,6 +288,8 @@ Optional hash reference of execution options. Recognised keys:
 =item passfail
 
 If true, returns a boolean: C<1> on success (exit code 0), C<''> on failure.
+It is passed on to C<run>, which answers it with that boolean, and
+C<execute> returns it as C<run> gave it (T409).
 
 =item interactive
 
