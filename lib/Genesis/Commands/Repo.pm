@@ -592,6 +592,16 @@ sub _repo_init_report {
 	}
 
 	success "\nGenesis repository #C{%s} created successfully.\n", $result->{name};
+
+	return unless $result->{ci_provider};
+	my ($remotes) = run({dir => $result->{root}}, 'git', 'remote');
+	return if ($remotes // '') =~ /\S/;
+	info(
+		"A pipeline lives in a repository other clones can reach, and #C{genesis new} ".
+		"refuses one with no remote.  Add it and push control next:\n".
+		"  #C{git remote add origin <url>}\n  #C{git push -u origin %s}\n",
+		Genesis::Top::DEFAULT_CONTROL_BRANCH()
+	);
 }
 
 # -- Helpers -------------------------------------------------------------------

@@ -476,6 +476,11 @@ The hashref from C<_repo_init_execute>.
 
 =back
 
+On success under C<--with-ci>, a clone with no remote is told that a remote
+comes next, with the C<git remote add> and the push of the control branch,
+because C<genesis new> refuses an enabled pipeline with no remote (T393). A
+clone that has one, or a repository without a pipeline, is told nothing more.
+
 B<Returns:> Nothing on success; bails on a recorded error.
 
 B<Errors:>

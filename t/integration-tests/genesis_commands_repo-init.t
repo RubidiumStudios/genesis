@@ -567,4 +567,34 @@ subtest 'execute phase' => sub {
 	popd;
 };
 
+subtest 'a pipeline clone with no remote is told a remote comes next' => sub {
+	plan tests => 3;
+
+	# T393: genesis new refuses an enabled pipeline with no remote, and the
+	# closing message of init --with-ci said nothing of it.
+	require Genesis::Commands::Repo;
+	scrub_git_env();
+	my $root = workdir('report-remote');
+	run({dir => $root}, 'git', 'init', '-q');
+	my %ok = (error => undef, root => $root, human_root => $root, name => 'bosh');
+
+	my $said = join(' ', output_from {
+		Genesis::Commands::Repo::_repo_init_report({%ok, ci_provider => 'manual'})
+	}) =~ s/\s+/ /gr;
+	my $control = Genesis::Top::DEFAULT_CONTROL_BRANCH();
+	like($said, qr/git remote add origin.*git push -u origin \Q$control\E/,
+		'a --with-ci clone with no remote is told to add one and push control');
+
+	$said = join(' ', output_from {
+		Genesis::Commands::Repo::_repo_init_report({%ok, ci_provider => undef})
+	});
+	unlike($said, qr/git remote add/, 'a clone without a pipeline is not');
+
+	run({dir => $root}, 'git', 'remote', 'add', 'origin', 'https://github.com/acme/bosh.git');
+	$said = join(' ', output_from {
+		Genesis::Commands::Repo::_repo_init_report({%ok, ci_provider => 'manual'})
+	});
+	unlike($said, qr/git remote add/, 'and nor is one that has a remote');
+};
+
 done_testing;
