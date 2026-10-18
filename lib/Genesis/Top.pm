@@ -2984,13 +2984,6 @@ sub _provider_module_map {
 
 # }}}
 # _pipeline_env_keys_schema - the genesis.pipeline block of an env file {{{
-#
-# Declared as its own schema rather than folded into the repository's,
-# because it is validated once per environment against that environment's
-# merged parameters.  The read is merged and never leaf-only.  A
-# leaf-only read finds an inherited key absent, silently, and answers
-# wrongly with no error, and most of these keys live high in the
-# hierarchy, typically in the site file.
 sub _pipeline_env_keys_schema {
 	my ($self) = @_;
 	return {
@@ -3009,11 +3002,7 @@ sub _pipeline_env_keys_schema {
 			(map {$_ => _retired_key("the redeploy is #C{genesis.pipeline.redeploy_cron}, one crontab expression or a list of them, in UTC")}
 				qw/redeploy redeploy_cron_start redeploy_cron_stop/),
 
-			# One crontab expression, or a list of them, in UTC, replaced the
-			# shipped redeploy key, the two flat cron keys, and the
-			# boolean-or-block form.  A bare string is normalised to a
-			# one-element list before validation, so the declaration stays a
-			# list of strings and the operator may still write one.
+			# A bare string is normalised to a one-element list before validation.
 			redeploy_cron => {
 				type        => 'array',
 				subtype     => 'string',
@@ -3021,10 +3010,7 @@ sub _pipeline_env_keys_schema {
 				description => 'Crontab expressions, in UTC, that trigger the redeploy job'
 			},
 
-			# Two sources, no opt-out.  An entry is a deployment type at this
-			# environment, or <env>/<type> elsewhere, and the shape is
-			# checked beside the declaration because the validator has no
-			# pattern of its own.
+			# An entry's shape is checked beside the declaration.
 			track_dependencies => {
 				type        => 'array',
 				subtype     => 'string',
@@ -3041,10 +3027,7 @@ sub _pipeline_env_keys_schema {
 				description => 'Extra deployment-root-relative paths for the propagation set'
 			},
 
-			# Per environment only; the global fallback went with the
-			# multi-file layout.  A boolean turns every config type on, and a
-			# list names them, so the declaration is permissive here and the
-			# shape is checked beside it.
+			# A boolean or a list of config types, checked beside the declaration.
 			track_bosh_configs => {
 				type        => 'any',
 				description => 'BOSH config types whose change triggers a redeploy'
@@ -3299,15 +3282,6 @@ sub _ref_component_errors {
 
 # }}}
 # _validate_slug_components - both halves of the deployment slug {{{
-#
-# The deployment branch is <env>/<type>, so both halves become git ref
-# components and neither is trusted over the other; the environment half
-# is held by the environment naming rules, and the type is checked here.
-# Both already reach vault through the exodus slug and BOSH through the
-# deployment name, so the check is narrow in practice and catches a value
-# that was never safe in those places either.  The message names the
-# branch the value would have composed, because that is what makes it
-# obvious why a name that was fine before this release is not fine now.
 sub _validate_slug_components {
 	my ($self) = @_;
 
@@ -3321,20 +3295,11 @@ sub _validate_slug_components {
 		);
 	}
 
-	# The environment half needs no check here: a name the environment's own
-	# rules accept is always a ref component, and a name they refuse is no
-	# environment at all, left out of every list of them.
-	return 1;
+	return 1; # the environment half is held by the environment naming rules
 }
 
 # }}}
 # _validate_one_exodus_mount - every environment resolves the pipeline's mount {{{
-#
-# Every pipeline record lives under pipeline.exodus_mount (D116), and an
-# environment's own exodus record, with its pipeline subpath, lives under the
-# mount the environment resolves, so the two must be one mount or the
-# environment's records live apart from the pipeline's.  The load refuses
-# each environment off the key by name, beside the key's own value.
 sub _validate_one_exodus_mount {
 	my ($self) = @_;
 
@@ -3344,14 +3309,8 @@ sub _validate_one_exodus_mount {
 		my $genesis = $self->_merged_env_params($env_name)->{genesis};
 		next unless ref($genesis) eq 'HASH' && exists $genesis->{pipeline};
 
-		# The default is the one Genesis::Env::default_exodus_mount answers,
-		# which is the secrets mount with exodus/ under it, and the secrets
-		# mount is normalised before anything is appended to it so that a
-		# value written without its slashes lands where the run time would
-		# put it rather than one segment short.
-		# An empty value is taken as written rather than as unset, because
-		# Genesis::Env::exodus_mount takes it as written too, and two mounts
-		# the run time tells apart have to be two mounts here as well.
+		# Resolved as the run time does: the secrets mount, normalised, with
+		# exodus/ under it; an empty value is a mount, taken as written.
 		my $mount = $genesis->{exodus_mount};
 		unless (defined $mount) {
 			(my $secrets = $genesis->{secrets_mount} // '/secret/')
@@ -3495,13 +3454,6 @@ sub _file_setting {
 
 # }}}
 # _validate_prior_env_graph - every predecessor is an environment, and no chain loops {{{
-#
-# The topology orders the environments from the ones that follow nothing, so
-# an environment in a prior_env cycle is never reached and one whose
-# predecessor is no environment becomes a root that nothing holds; both
-# would be dropped or ungated without a word.  It runs where the shape is
-# built, on the shape's own tree, which is the only tree that holds every
-# environment; D77's dependency-cycle exception, another key, is untouched.
 sub _validate_prior_env_graph {
 	my ($self) = @_;
 
@@ -3523,9 +3475,7 @@ sub _validate_prior_env_graph {
 		) unless $is_env{$prior{$name}};
 	}
 
-	# Each chain is followed from every environment; one that comes back to
-	# an environment already on it has closed a cycle, which is named once,
-	# from its alphabetically first member.
+	# A chain back on itself is a cycle, named once from its first member.
 	my %reported;
 	for my $start (sort keys %prior) {
 		my (@chain, %on_chain);
@@ -3553,19 +3503,10 @@ sub _validate_prior_env_graph {
 
 # }}}
 # _validate_capability_gates - refuse a key whose capability is false {{{
-#
-# A key is the operator's choice inside an ability the provider has.
-# Where the ability is absent the key cannot mean anything, so it is
-# refused at load naming both the key and the capability, rather than
-# being accepted and quietly ignored when the pipeline is emitted.
 sub _validate_capability_gates {
 	my ($self) = @_;
 
-	# Every provider declares its abilities, so there is a declaration to
-	# gate against for each of them and nothing here asks whether a
-	# provider has a class.  The type is the one in the file being
-	# validated, not the one control holds, because validation checks the
-	# configuration in front of it, and its default is the accessor's.
+	# The type in the file being validated, not control's.
 	require Genesis::CI::Provider;
 	require Genesis::CI::ProviderRegistry;
 	my $type  = $self->config->get('pipeline.provider.type', 'manual') // 'manual';
@@ -3573,9 +3514,7 @@ sub _validate_capability_gates {
 	my $caps  = Genesis::CI::Provider->declared_capabilities($class);
 	my $gates = Genesis::CI::Provider->capability_gates;
 
-	# The gates that are going to fire are separated by where their key
-	# lives before anything is read, so the environment files are walked
-	# once rather than once for every capability.
+	# Sorted by where the key lives, so the environment files are walked once.
 	my (%env_gates, %repo_gates);
 	for my $capability (sort keys %$gates) {
 		next if $caps->{$capability};
@@ -3588,13 +3527,7 @@ sub _validate_capability_gates {
 	}
 	return 1 unless %env_gates || %repo_gates;
 
-	# The repository-wide key is read for what the operator wrote and not
-	# for what the schema filled, because a gate is about the choice inside
-	# an ability and a default is the provider's own answer rather than
-	# anybody's choice.  is_set reads the loaded and set layers alone, and
-	# has would look through the merged contents and cannot tell a filled
-	# default from a written key.  The per-environment half needs no such
-	# care, reading the files themselves, where no default is ever applied.
+	# What the operator wrote, not a filled default: is_set, not has.
 	my @errors;
 	for my $key (sort keys %repo_gates) {
 		next unless $self->config->is_set($key);
@@ -3631,35 +3564,10 @@ sub _validate_capability_gates {
 
 # }}}
 # _validate_manifest_store - the store a pipeline repository may use {{{
-#
-# A pipeline requires the exodus store, and the refusal is permanent and
-# lives here, where every command sees it, rather than in the compiler's
-# validator, where a deploy never met it.  The certified commit and the
-# applied, hold and proposed records all live in exodus, so an
-# environment whose manifests live only in git still needs every one of
-# them and the routing cannot run without them.
-#
-# The floor case is the same refusal reached another way.  An environment
-# whose kit declares a Genesis floor below 3.1.0 is forced onto the
-# repository store at runtime whatever the configuration says, because
-# earlier versions cannot update the exodus deployment audit data, so the
-# deploy would commit manifests onto the deployment branch that the
-# propagation writer also advances.  That is the two-writer case, and the
-# remedy is the kit's floor rather than the store's value.
-#
-# An environment that declares no floor at all is the same case, because
-# an absent declaration resolves to 0.0.0 rather than to no opinion, and
-# it gets its own refusal because the remedy is to write a floor down
-# rather than to raise one.
 sub _validate_manifest_store {
 	my ($self) = @_;
 
-	# The key is read with no fallback of its own, because the schema
-	# declares the default and a second one here would read an explicit null
-	# as exodus instead of refusing it by name.  A configuration that has
-	# not met the version 2 schema yet, which is a version 1 file on its way
-	# through _upgrade_config_to_v2, is the case where nothing supplies it.
-	my $store = $self->config->get('manifest_store');
+	my $store = $self->config->get('manifest_store'); # no fallback: an explicit null is refused
 	$self->_refuse_config_text(
 		"#R{manifest_store: %s} cannot be used under a pipeline.\n".
 		"The certified commit and the applied, hold and proposed records ".
@@ -3667,12 +3575,7 @@ sub _validate_manifest_store {
 		$store // '<unset>'
 	) unless defined $store && $store eq 'exodus';
 
-	# The floor a deploy actually honours is the effective one, which is
-	# the higher of the repository's own minimum and the environment's, the
-	# same pair Genesis::Env::effective_minimum_version takes the maximum
-	# of.  Reading the environment's line alone would refuse a repository
-	# whose own floor already lifts it, over a number the run time would
-	# never honour.
+	# The effective floor: the higher of the repository's and the environment's.
 	my $repo_min = $self->config->get('minimum_version', '') =~ s/^v//r;
 	for my $env_name ($self->_env_file_names) {
 		my $params = $self->_merged_env_params($env_name);
@@ -3683,13 +3586,8 @@ sub _validate_manifest_store {
 			// '';
 		$env_min =~ s/^v//;
 
-		# An environment where neither line is written declares nothing,
-		# and Genesis::Env::effective_minimum_version resolves that to
-		# 0.0.0 rather than to no opinion, so the run time serves it out
-		# of the repository store exactly as it serves a declared 3.0.0.
-		# Skipping it here would pass the repository the gate exists to
-		# refuse, and a newly written environment file omits the minimum
-		# version whenever Genesis is a development build.
+		# Neither line written resolves to 0.0.0, which the run time serves
+		# from the repository store, so it is refused, not skipped.
 		my @declared = grep {length $_} ($env_min, $repo_min);
 		my $floor = shift(@declared) // '0.0.0';
 		for my $version (@declared) {
@@ -3720,28 +3618,10 @@ sub _validate_manifest_store {
 
 # }}}
 # _merged_env_params - an environment's merged parameters, without a kit {{{
-#
-# Genesis resolves an environment by merging its ancestral hierarchy, with
-# the nearer file winning, and every genesis.pipeline.* read follows that
-# rule.  This is the load-time form of that read, and it is the environment's
-# own: a bare Genesis::Env's vaultless_environment manifest, spruce's adaptive
-# merge with vault unreachable, so the merge operators apply exactly as they do
-# at deploy time, what the files resolve is resolved, a vault value comes back
-# as its own text, and no kit is needed (D117).
 sub _merged_env_params {
 	my ($self, $env_name) = @_;
 
-	# Five call sites walk every environment, and every pass used to spawn
-	# one spruce run per file, so an ancestor was parsed once per descendant
-	# per pass.  The answer is kept on the instance instead, which leaves
-	# every one of those callers as it was written.
-	#
-	# There is no invalidator and none is wanted yet.  All five run from
-	# _validate_pipeline_config, config runs that once behind its own memo,
-	# and nothing writes an environment file between the first read and the
-	# last.  _validate_env_pipeline_block is the only caller that writes
-	# into what it was handed, and it copies the top level before it does.
-	# A caller added after a file is written would need one.
+	# Kept on the instance; there is no invalidator (see the POD).
 	return $self->{__merged_env_params}{$env_name}
 		if $self->{__merged_env_params}{$env_name};
 
@@ -3753,12 +3633,7 @@ sub _merged_env_params {
 	# is refused in its own words rather than as a file that will not parse.
 	$env->_refuse_operator_call_form;
 
-	# A file that will not merge is refused rather than skipped.  A key can
-	# live anywhere in the hierarchy, so a file nobody could read is a key
-	# nobody can see, which is the silent wrong answer this read exists to
-	# prevent.  The refusal names the files by name alone, because listing
-	# the hierarchy in full parses every file for what it inherits and would
-	# fall over the same file again.
+	# A file that will not merge is refused, not skipped; it names files only.
 	my ($merged, $err);
 	eval {$merged = $env->manifest_provider->vaultless_environment->data; 1}
 		or $err = $@;
@@ -3804,43 +3679,19 @@ sub _env_file_names {
 
 # }}}
 # _validate_env_pipeline_block - check one environment's block {{{
-#
-# The same declarative rules Genesis::Config applies to the repository's
-# own section, applied to a block that lives in an environment file.  The
-# block is validated through a throw-away in-memory Genesis::Config, so
-# the types, the defaults, the required flags, and the unknown-key refusal
-# are the ones the repository configuration already gets, and there is no
-# second validator to keep in step with the first.  We catch its bail so
-# the message can name the environment and carry the CONFIG code.
 sub _validate_env_pipeline_block {
 	my ($self, $env_name, $block) = @_;
 
-	# A block that is not a hash at all goes to the validator as it stands,
-	# so the answer is the declaration's own refusal rather than a Perl
-	# error out of the checks below.
-	my %block = ref($block) eq 'HASH' ? %$block : ();
+	my %block = ref($block) eq 'HASH' ? %$block : (); # a non-hash goes to the validator as is
 
-	# An operator may write one crontab expression where a list is
-	# declared, and the other list keys are owed the same courtesy, so a
-	# bare string becomes a one-element list first.  Nothing is split on
-	# the way, because a crontab expression carries commas of its own.
+	# A bare string becomes a one-element list, split on nothing.
 	my @list_keys = qw/redeploy_cron track_dependencies track_additional_files/;
 	for my $key (@list_keys) {
 		$block{$key} = [$block{$key}]
 			if defined $block{$key} && !ref $block{$key};
 	}
 
-	# The shape checks below read the block as the operator wrote it.  Each
-	# list key declares envsplit, and Genesis::Config answers a value that
-	# is not a list by splitting it as though it came from the environment,
-	# which turns a mapping into the address of a reference and hides the
-	# fault from anything that reads the block afterwards.
-	#
-	# The copy is shallow, and that is enough while all three of these keys
-	# are lists of strings: what the checks below read is the reference the
-	# operator's own value came in as, and nothing between here and them
-	# writes through it.  A key that grows a nested subtype would need a
-	# deep copy instead.
+	# As written, before envsplit turns a mapping into a reference's address.
 	my %raw = map {$_ => $block{$_}} @list_keys;
 
 	my @errors;
@@ -3848,12 +3699,7 @@ sub _validate_env_pipeline_block {
 		{pipeline => ref($block) eq 'HASH' ? \%block : $block});
 	eval {$probe->validate({pipeline => $self->_pipeline_env_keys_schema}); 1}
 		or do {
-			# The caught text is taken before anything else is called,
-			# because the readers below run evals of their own and would
-			# clear it.  A refusal we cannot pick apart is still a refusal,
-			# so that text stands in wherever there are no bullets in it to
-			# read; without the fallback an eval that failed would leave
-			# nothing behind and the block would pass.
+			# Taken first, since the readers below clear it; no bullets, first line.
 			my $caught = $@;
 			my @found  = _first_errors($caught);
 			my ($first) = grep {length}
@@ -3870,9 +3716,7 @@ sub _validate_env_pipeline_block {
 			"#R{genesis.pipeline.%s}: expected a list of strings", $key);
 	}
 
-	# Two shapes the declaration cannot state.  A dependency entry is a
-	# deployment type here or <env>/<type> elsewhere, and the BOSH-config
-	# key is a boolean or a list of config type names.
+	# Two shapes the declaration cannot state.
 	for my $entry (@{ref($raw{track_dependencies}) eq 'ARRAY'
 			? $raw{track_dependencies} : []}) {
 		push @errors, sprintf(

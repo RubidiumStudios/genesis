@@ -1381,12 +1381,6 @@ sub describe {
 ### Internal Compiler Helpers {{{
 
 # _compile_pipeline - compile from the repository configuration {{{
-#
-# There is one configuration source, which is the pipeline section of
-# .genesis/config, so there is no precedence to work through here and no
-# legacy file to fall back to.  A leftover .genesis/ci/ directory is not read
-# and is not named either, because a directory nothing consults is not worth a
-# line of the operator's attention.
 sub _compile_pipeline {
 	my ($top, $platform) = @_;
 

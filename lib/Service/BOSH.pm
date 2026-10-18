@@ -157,10 +157,7 @@ sub execute {
 			if ($OS eq 'darwin') {
 				unshift(@cmd, "script", "-q", "$file");
 			} elsif ($OS eq 'linux') {
-				# `script -c` re-parses its argument with a shell, so the
-				# argument list must be flattened with shell_quote: naive
-				# joining lets values containing shell metacharacters split
-				# into separate arguments or execute as injected commands.
+				# `script -c` re-parses with a shell; shell_quote keeps args whole
 				@cmd = ('script', '-q', $file, '-c', shell_quote(@cmd));
 			}
 		}

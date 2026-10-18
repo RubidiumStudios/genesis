@@ -1768,7 +1768,8 @@ B<Examples:>
 Compiles the pipeline from the C<pipeline> section of C<.genesis/config>,
 which is the one configuration source.  Neither the C<.genesis/ci/>
 directory nor a legacy C<ci.yml> is read, and a repository still carrying
-either one is compiled as though it did not.  The provider type is the one
+either one is compiled as though it did not.  A leftover directory is not
+named either, since nothing consults it.  The provider type is the one
 the caller read off C<pipeline.provider.type>.  No command-line option
 reaches the compile: the C<--ci-*> flags it once collected were registered
 on no command, and are gone (T406).

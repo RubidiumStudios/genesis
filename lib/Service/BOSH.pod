@@ -267,7 +267,10 @@ any C<-n> flag are unshifted onto the argument list.
 When C<$opts-E<gt>{interactive}> is true and the command is not C<int>,
 output is captured via the C<script> command (using C<script -q> on macOS
 and C<script -q -c> on Linux) so that interactive terminal output is
-available in C<$results[0]> after the command completes.
+available in C<$results[0]> after the command completes. On Linux C<script -c>
+re-parses its argument with a shell, so the argument list is flattened with
+C<shell_quote>: naive joining would let a value carrying shell metacharacters
+split into separate arguments or run as an injected command.
 
 C<HTTPS_PROXY> and C<https_proxy> are cleared from the subprocess
 environment unless C<GENESIS_HONOR_ENV> is set, which an operator may set, or
