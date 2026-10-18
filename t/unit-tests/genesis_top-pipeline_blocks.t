@@ -164,22 +164,51 @@ subtest 'the provider-specific keys are validated per provider type' => sub {
 		'the task image has the default the fragment gave it';
 };
 
-subtest 'the removed keys are refused by name' => sub {
-	plan tests => 3;
+subtest 'the removed keys are refused by name, with what replaced them' => sub {
+	# T404: each was refused as an unknown key, which said nothing of what to
+	# write instead; a retired key is now refused as no longer read, naming
+	# its replacement.
+	my @retired = (
+		[['    locks:', '      bosh_upgrade: x'], 'locks', qr/mandatory.*pipeline\.locker/],
+		[['    status_signal: x'],       'status_signal',       qr/pipeline\.shuttle/],
+		[['    signal_prefix: x'],       'signal_prefix',       qr/pipeline\.shuttle/],
+		[['    redeploy: x'],            'redeploy',            qr/redeploy_cron/],
+		[['    redeploy_cron_start: x'], 'redeploy_cron_start', qr/redeploy_cron/],
+		[['    redeploy_cron_stop: x'],  'redeploy_cron_stop',  qr/redeploy_cron/],
+		[['    required_files: [x]'],    'required_files',      qr/genesis\.pipeline\.track_additional_files/],
+	);
+	plan tests => 2 * @retired + 1;
 
-	write_nested_env('qa');
+	# And a key nobody declared is not offered a retired one in its list.
+	write_nested_env('qa', '    bogus: x');
+	my $listed = '';
+	eval {load_with($h, automated_pipeline_block()); 1}
+		or $listed = Genesis::Term::decolorize("$@") =~ s/\s+/ /gr;
+	unlike($listed, qr/expected one of[^.]*\b(?:locks|required_files|status_signal)\b/,
+		'an unknown key is offered no retired key among those expected');
 
-	write_nested_env('qa', '    locks:', '      bosh_upgrade: x');
-	throws_ok {load_with($h, automated_pipeline_block())}
-		qr/genesis\.pipeline\.locks: unknown configuration key/,
-		'the configurable lock is gone, the two locks being mandatory';
-
-	for my $gone (qw/status_signal signal_prefix/) {
-		write_nested_env('qa', "    $gone: x");
-		throws_ok {load_with($h, automated_pipeline_block())}
-			qr/genesis\.pipeline\.$gone: unknown configuration key/,
-			"$gone went with the multi-file layout";
+	for my $case (@retired) {
+		my ($lines, $key, $replacement) = @$case;
+		write_nested_env('qa', @$lines);
+		my $said = '';
+		eval {load_with($h, automated_pipeline_block()); 1}
+			or $said = Genesis::Term::decolorize("$@") =~ s/\s+/ /gr;
+		like($said, qr/genesis\.pipeline\.$key: is no longer read/, "$key is refused as retired");
+		like($said, $replacement, 'naming what replaced it');
 	}
+	write_nested_env('qa');
+};
+
+subtest "the rc builds' ci block is refused, naming pipeline" => sub {
+	plan tests => 2;
+
+	# T404: the block an rc build wrote was refused as an unknown key.
+	write_nested_env('qa');
+	my $said = '';
+	eval {load_with($h, automated_pipeline_block() . "\nci:\n  enabled: true"); 1}
+		or $said = Genesis::Term::decolorize("$@") =~ s/\s+/ /gr;
+	like($said, qr/\bci: is no longer read/, 'ci is refused as retired');
+	like($said, qr/\bpipeline\b.*genesis config --unset ci/, 'naming pipeline, and the command that removes it');
 };
 
 # T388: an empty name loaded and reached the compiler, which refused it under

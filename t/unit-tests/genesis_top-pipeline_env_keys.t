@@ -65,8 +65,8 @@ subtest 'the redeploy keys are declared in their settled form' => sub {
 
 	for my $gone (qw/redeploy redeploy_cron_start redeploy_cron_stop/) {
 		throws_ok {load_env_with({$gone => '0 3 * * *'})}
-			qr/genesis\.pipeline\.$gone: unknown configuration key/,
-			"$gone is refused by name";
+			qr/genesis\.pipeline\.$gone: is no longer read.*redeploy_cron/s,
+			"$gone is refused by name, as retired (T404)";
 	}
 };
 
@@ -74,8 +74,8 @@ subtest 'the tracked-files key is renamed and behaves as before' => sub {
 	plan tests => 5;
 
 	throws_ok {load_env_with({required_files => ['ops/<env>.yml']})}
-		qr/genesis\.pipeline\.required_files: unknown configuration key/,
-		'the old name is refused by name';
+		qr/genesis\.pipeline\.required_files: is no longer read.*track_additional_files/s,
+		'the old name is refused by name, naming the new one (T404)';
 	lives_ok {load_env_with({track_additional_files => ['ops/<env>.yml']})}
 		'the new name is declared in its place';
 

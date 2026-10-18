@@ -4349,6 +4349,32 @@ B<Examples:>
     _credential_rule(vault => {type => 'approle', role_id => 'secret/a:r'});
     # 'the approle credential needs secret_id: name the secret ...'
 
+=head2 _retired_key
+
+    ci => _retired_key("the pipeline is configured under pipeline in this file; ..."),
+
+A schema entry for a key a decision retired: it accepts any value, is flagged
+C<retired> so no "expected one of" list offers it, and its C<check> always
+refuses it as "is no longer read", followed by what replaced it (T404). The
+retired keys are the rc builds' C<ci> block, and in an environment's
+C<genesis.pipeline>: C<locks> (D22), C<status_signal> and C<signal_prefix>
+(D23), C<required_files> (now C<track_additional_files>, D24), and C<redeploy>,
+C<redeploy_cron_start> and C<redeploy_cron_stop> (now C<redeploy_cron>, D21).
+A key no decision names is still refused as unknown.
+
+B<Parameters:> The sentence naming what replaced the key.
+
+B<Returns:> The schema entry.
+
+B<Errors:> None; the schema reports the check's message at load and before
+every save.
+
+B<Examples:>
+
+    required_files => _retired_key("it is genesis.pipeline.track_additional_files, with the same paths"),
+    # genesis.pipeline.required_files: is no longer read: it is
+    # genesis.pipeline.track_additional_files, with the same paths.
+
 =head2 _retired_credential_vault
 
     my $problem = _retired_credential_vault($value);

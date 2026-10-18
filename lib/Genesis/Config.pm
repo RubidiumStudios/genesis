@@ -333,7 +333,7 @@ sub problems {
 
 	for my $key (sort keys %{$self->_contents}) {
 		if (! exists($schema->{$key})) {
-			push @errors, "#R{$key}: unknown configuration key: expected one of ".join(', ', sort keys %$schema);
+			push @errors, "#R{$key}: unknown configuration key: expected one of ".join(', ', _offered($schema));
 			next;
 		}
 		my $value = $self->get($key);
@@ -547,6 +547,13 @@ sub _prune_empty_parents {
 }
 
 # }}}
+# _offered - the keys an unknown key is told to choose from, sorted, retired ones left out {{{
+sub _offered {
+	my ($schema) = @_;
+	return sort grep {!(ref($schema->{$_}) eq 'HASH' && $schema->{$_}{retired})} keys %$schema;
+}
+
+# }}}
 # _coerce_to_schema_type - convert a string value to the type its schema declares {{{
 sub _coerce_to_schema_type {
 	my ($self, $key, $value) = @_;
@@ -746,7 +753,7 @@ sub _validate_key {
 			$value = $self->get($key);
 			for my $subkey (sort keys %$value) {
 				if (! exists($schema->{schema}{$subkey})) {
-					push @errors, "#R{$key.$subkey}: unknown configuration key: expected one of ".join(', ', sort keys %{$schema->{schema}});
+					push @errors, "#R{$key.$subkey}: unknown configuration key: expected one of ".join(', ', _offered($schema->{schema}));
 					next;
 				}
 				my @subkey_errors = $self->_validate_key("$key.$subkey", $schema->{schema}{$subkey});

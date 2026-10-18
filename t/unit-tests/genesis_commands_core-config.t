@@ -888,8 +888,8 @@ subtest 'a run whose result the load would refuse writes nothing' => sub {
 
 	is($code, Genesis::Exit::CONFIG,
 		"the run is refused at the configuration exit code");
-	like($err, qr/ci: unknown configuration key/,
-		"naming the key the result still carries");
+	like($err, qr/ci: is no longer read/,
+		"naming the key the result still carries, as retired (T404)");
 	like($err, qr/configuration this run would write/,
 		"as a problem with what the run would write, which has not been written");
 	is(slurp("$dir/.genesis/config"), $before, "and the file is as it was");

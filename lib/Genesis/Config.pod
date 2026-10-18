@@ -655,6 +655,12 @@ element after splitting.
 
 For C<type => 'semver'>: when true, C<undef> is accepted without error.
 
+=item C<retired>
+
+When true, the key is declared only so a C<check> can refuse it, naming what
+replaced it, and it is left out of the keys an unknown key is told to choose
+from, by L</_offered> (T404).
+
 =item C<check>
 
 A code reference for a rule the type cannot state, such as that a string
@@ -1135,6 +1141,25 @@ B<Examples:>
     # after clearing pipeline.enabled from a config also holding pipeline.provider
     $cfg->_prune_empty_parents($cfg->{set_values}, 'pipeline.enabled');
     # pipeline is left in place, still carrying provider
+
+=head2 _offered
+
+    my @keys = _offered($schema);
+
+The keys an unknown key's refusal lists as "expected one of": the schema's
+keys, sorted, less every key declared C<retired>, so a typo is never told
+it could have meant a key no longer read (T404).
+
+B<Parameters:> A schema hash, its keys the declared keys.
+
+B<Returns:> The sorted list.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _offered({name => {type => 'string'}, ci => {retired => 1}});
+    # ('name')
 
 =head2 _coerce_to_schema_type
 

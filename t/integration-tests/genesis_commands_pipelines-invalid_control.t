@@ -52,7 +52,7 @@ subtest 'the previews read the fix and name what control fails' => sub {
 		like(unfolded($out, $err), qr/\bqa\b/, "and shows the working tree's pipeline");
 		like($said, qr/Control at \Q$short\E fails the configuration checks, so this preview does not read it/,
 			'naming control and its commit in the banner');
-		like($said, qr/\bci: unknown configuration key/, 'and the failure');
+		like($said, qr/\bci: is no longer read/, 'and the failure, ci retired (T404)');
 		unlike($err, $MOJIBAKE, 'in a list whose bullets are not encoded twice');
 	}
 };
@@ -67,7 +67,7 @@ subtest 'the commands that act refuse, naming control' => sub {
 		is($exit, Genesis::Exit::CONFIG, "`genesis @$argv` refuses at CONFIG");
 		like($said, qr/control at \Q$short\E fails the configuration checks/i,
 			'naming control and its commit');
-		like($said, qr/\bci: unknown configuration key/, 'and the failure');
+		like($said, qr/\bci: is no longer read/, 'and the failure, ci retired (T404)');
 		unlike($err, $MOJIBAKE, 'in a list whose bullets are not encoded twice');
 	}
 };

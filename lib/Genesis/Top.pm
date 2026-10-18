@@ -2756,7 +2756,18 @@ sub _repo_config_schema {
 			description    => 'Configuration schema version'
 		},
 		pipeline => $self->_pipeline_config_schema(),
+		# What an rc build wrote, refused naming what replaced it (T404).
+		ci => _retired_key("the pipeline is configured under #C{pipeline} in this file; ".
+			"set its keys there, then remove this block with #C{genesis config --unset ci}"),
 	};
+}
+
+# }}}
+# _retired_key - a declared key refused as no longer read, naming what replaced it {{{
+sub _retired_key {
+	my ($replaced_by) = @_;
+	return {type => 'any', retired => 1, description => 'Retired',
+		check => sub {"is no longer read: $replaced_by."}};
 }
 
 # }}}
@@ -2978,6 +2989,14 @@ sub _pipeline_env_keys_schema {
 			prior_env  => {type => 'string',  description => 'The topology edge, the environment this one follows'},
 			require_pr => {type => 'boolean', description => 'Propagate through a pull request rather than directly'},
 			manual     => {type => 'boolean', description => "The deploy job waits for a human trigger"},
+
+			# Retired keys, refused naming what replaced them (T404).
+			locks          => _retired_key("both deploy locks are mandatory, backed by #C{pipeline.locker} in #C{.genesis/config}; remove it"),
+			status_signal  => _retired_key("signalling is the #C{pipeline.shuttle} in #C{.genesis/config}; remove it"),
+			signal_prefix  => _retired_key("signalling is the #C{pipeline.shuttle} in #C{.genesis/config}; remove it"),
+			required_files => _retired_key("it is #C{genesis.pipeline.track_additional_files}, with the same paths"),
+			(map {$_ => _retired_key("the redeploy is #C{genesis.pipeline.redeploy_cron}, one crontab expression or a list of them, in UTC")}
+				qw/redeploy redeploy_cron_start redeploy_cron_stop/),
 
 			# One crontab expression, or a list of them, in UTC, replaced the
 			# shipped redeploy key, the two flat cron keys, and the

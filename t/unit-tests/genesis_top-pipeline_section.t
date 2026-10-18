@@ -50,8 +50,8 @@ subtest 'the pipeline section loads and the ci section does not' => sub {
 		'the gate reads back through the new name';
 
 	throws_ok {load_with($h, "ci:\n  enabled: true")}
-		qr/\bci\b.*unknown configuration key/s,
-		'the ci section is refused by name';
+		qr/\bci: is no longer read.*\bpipeline\b/s,
+		'the ci section is refused by name, naming pipeline (T404)';
 };
 
 subtest 'the code namespace is unchanged' => sub {
@@ -85,20 +85,22 @@ subtest 'there are no compatibility aliases' => sub {
 	# reads the key the refusal names as well, because a refusal over some
 	# other key would otherwise satisfy every one of them.
 	#
-	# The name a refusal carries is the outermost key the schema does not
-	# know, so all three ci. spellings are refused as ci, and the one under
-	# an enabled pipeline is refused as pipeline.repo.
+	# The name a refusal carries is the outermost key refused, so all three
+	# ci. spellings are refused as ci, retired since T404, and the one under
+	# an enabled pipeline as pipeline.repo, which the schema does not know.
+	my $retired = qr/is\s+no\s+longer\s+read/;
+	my $unknown = qr/unknown\s+configuration\s+key/;
 	my %old = (
-		'ci.enabled'         => ["ci:\n  enabled: true", 'ci'],
+		'ci.enabled'         => ["ci:\n  enabled: true", 'ci', $retired],
 		'pipeline.repo.root' => ["pipeline:\n  enabled: true\n  repo:\n    root: .",
-		                         'pipeline.repo'],
-		'ci.control_branch'  => ["ci:\n  control_branch: control", 'ci'],
-		'ci.name'            => ["ci:\n  name: bosh", 'ci'],
+		                         'pipeline.repo', $unknown],
+		'ci.control_branch'  => ["ci:\n  control_branch: control", 'ci', $retired],
+		'ci.name'            => ["ci:\n  name: bosh", 'ci', $retired],
 	);
 	for my $key (sort keys %old) {
-		my ($body, $refused) = @{$old{$key}};
+		my ($body, $refused, $why) = @{$old{$key}};
 		throws_ok {load_with($h, $body)}
-			qr/\Q$refused\E:\s+unknown\s+configuration\s+key/,
+			qr/\Q$refused\E:\s+$why/,
 			"$key is refused as $refused rather than translated";
 	}
 };
