@@ -267,13 +267,20 @@ sub create {
 	}
 
 	# let the user know
-	if ($pipeline_enabled && !$cli_opts_git{'no-commit'}) {
+	if ($pipeline_enabled && !$cli_opts_git{'no-commit'} && !$top->manual_pipeline) {
 		info(
 			"\nNew environment #C{%s} provisioned!\n\n".
-			"To deploy, switch to the environment branch and run:\n\n".
+			"The pipeline deploys #C{%s} once #C{genesis propagate} has delivered it.\n",
+			$env->{name}, $env->{name}
+		);
+	} elsif ($pipeline_enabled && !$cli_opts_git{'no-commit'}) {
+		info(
+			"\nNew environment #C{%s} provisioned!\n\n".
+			"To deploy, once #C{genesis propagate} has delivered it, switch to its ".
+			"deployment branch and run:\n\n".
 			"  #C{git checkout '%s'}\n".
 			"  #C{genesis deploy '%s'}\n",
-			$env->{name}, $name, $env->{name}
+			$env->{name}, $top->deployment_slug_for($env->{name}), $env->{name}
 		);
 	} else {
 		info(
