@@ -68,4 +68,25 @@ subtest 'a11: a create-env environment takes no director lock' => sub {
 	is_deeply([lock_steps(\@do, 'lock')], ["$DN-lock:i-need-to-deploy-myself"], 'and only its own lock');
 };
 
+subtest "g2, g8: a director's pool is its own deploy's and its children's director lock" => sub {
+	my $h = contract_harness(type => 'bosh', envs => ['mgmt', 'lab'], env_genesis => {
+		mgmt => {use_create_env => 'true'},
+		lab  => {bosh_env => 'mgmt'},
+	});
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'the dry apply prints a pipeline') or return diag($why);
+
+	is_deeply([sort map {$_->{name}} grep {($_->{type} // '') eq 'locker'} @{$p->{resources} || []}],
+		['lab-bosh-lock', 'mgmt-bosh-lock'], 'one resource per pool, mgmt-bosh shared');
+	my $locks = sub {
+		my ($env) = @_;
+		lock_steps([plan_steps((pipeline_job($p, "deploy-$env") || {})->{plan}[0]{do} || [])], 'lock');
+	};
+	is_deeply([$locks->('mgmt')], ['mgmt-bosh-lock:i-need-to-deploy-myself'],
+		"the director's deploy holds its own pool, being create-env");
+	is_deeply([$locks->('lab')],
+		['mgmt-bosh-lock:dont-upgrade-bosh-on-me', 'lab-bosh-lock:i-need-to-deploy-myself'],
+		"and lab holds that pool as its director's, then its own");
+};
+
 done_testing;

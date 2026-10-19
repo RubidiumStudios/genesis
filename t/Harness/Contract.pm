@@ -23,11 +23,12 @@ sub contract_harness {
 	my (%opts) = @_;
 	my $h = make_harness(envs => $opts{envs} || [$ENV_NAME], chained => $opts{chained},
 		provider => 'concourse', vault => 0,
-		type => $TYPE, root => $ROOT, embed => !$opts{no_binary});
+		type => $opts{type} || $TYPE, root => $ROOT, embed => !$opts{no_binary});
 	compilable_pipeline($h);
 	$h->set_repo_config($_, $opts{config}{$_}) for sort keys %{$opts{config} || {}};
 	write_env_file($h, $ENV_NAME, pipeline => $opts{pipeline} || {}, genesis => $opts{genesis} || {})
 		if $opts{pipeline} || $opts{genesis};
+	write_env_file($h, $_, genesis => $opts{env_genesis}{$_}) for sort keys %{$opts{env_genesis} || {}};
 	return $h;
 }
 

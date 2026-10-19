@@ -35,7 +35,9 @@ Builds the repository. C<config> is a hash of C<.genesis/config> keys to set,
 C<pipeline> and C<genesis> hashes of C<qa>'s C<genesis.pipeline> and
 C<genesis> keys, and C<no_binary> leaves C<.genesis/bin/genesis> out.
 C<envs> names the environments in place of C<qa> alone, and C<chained>
-makes each the C<prior_env> of the next.
+makes each the C<prior_env> of the next. C<env_genesis> maps an environment
+to the C<genesis> keys its file is written with, and C<type> replaces the
+deployment type C<doomsday>.
 
 B<Returns:> the L<Harness::Propagation> harness.
 
