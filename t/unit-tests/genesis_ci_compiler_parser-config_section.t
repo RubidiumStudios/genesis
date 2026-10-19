@@ -43,6 +43,7 @@ use_ok 'Genesis::CI::Compiler::Parser';
 	sub config { $_[0]->{config} }
 	# The section as control holds it, which for this stand-in is its own.
 	sub pipeline_section { $_[0]->{config}->get('pipeline') }
+	sub pipeline_unredacted { (($_[0]->pipeline_section || {})->{unredacted}) ? 1 : 0 }
 	sub type   { $_[0]->{type} }
 	sub path {
 		my ($self, $rel) = @_;

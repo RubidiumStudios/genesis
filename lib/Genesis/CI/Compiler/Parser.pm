@@ -152,6 +152,11 @@ sub _parse_genesis_config {
 		// ($self->{top} ? $self->{top}->type : undef);
 	$parsed{pipeline}{metadata}{name} = $name if defined $name;
 
+	# The repository-wide keys an emitted task reads, through their accessors.
+	$parsed{pipeline}{configuration} = $self->{top} ? {
+		unredacted => $self->{top}->pipeline_unredacted,
+	} : {};
+
 	$parsed{_source_format} = 'genesis-config';
 	$parsed{_source_path}   = $self->{top}
 		? $self->{top}->path('.genesis/config')

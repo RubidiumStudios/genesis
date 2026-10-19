@@ -1696,6 +1696,29 @@ B<Examples:>
     my $setting = $top->recreate_on_deploy();
     # returns 'never' in a repository that has not set the key
 
+=head2 pipeline_unredacted
+
+    my $bool = $top->pipeline_unredacted();
+
+Whether the pipeline's deploys print their manifest diffs unredacted. The
+compiler emits it into every task as C<CI_NO_REDACT>, which
+L<Genesis::Commands::Env/deploy_redacts()> reads (plumbing contract f9).
+
+Reads C<pipeline.unredacted> off L</_shape>, so the pipeline compiles the
+setting control holds.
+
+B<Parameters:> None.
+
+B<Returns:> 1 where C<pipeline.unredacted> is true, 0 otherwise, the key
+defaulting to false.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    my $bool = $top->pipeline_unredacted();
+    # returns 0 in a repository that has not set the key
+
 =head2 control_branch
 
     my $branch = $top->control_branch();

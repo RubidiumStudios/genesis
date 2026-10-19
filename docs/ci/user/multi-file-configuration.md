@@ -13,6 +13,7 @@ pipeline:
   name:                # The pipeline's name in its provider
   exodus_mount:        # The vault mount the pipeline's records live under
   recreate_on_deploy:  # Which runs pass --recreate to the BOSH deploy
+  unredacted:          # Whether the pipeline's deploys print diffs unredacted
   source_control:      # What the pipeline needs to know about the repository
   vault:               # The vault a pipeline task writes exodus through
   locker:              # The locker behind the two mandatory deploy locks

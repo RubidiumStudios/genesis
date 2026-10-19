@@ -2248,6 +2248,7 @@ subtest 'Validator - multi-file without pipeline.yml passes validation' => sub {
 	sub config { $_[0]->{config} }
 	# The section as control holds it, which for this stand-in is its own.
 	sub pipeline_section { $_[0]->{config}->get('pipeline') }
+	sub pipeline_unredacted { (($_[0]->pipeline_section || {})->{unredacted}) ? 1 : 0 }
 	# The parse reads pipeline.name with the deployment type as its
 	# fallback, so a top that stands in for Genesis::Top answers for one.
 	sub type   { $_[0]->{type} }
@@ -2388,9 +2389,11 @@ subtest 'Parser - genesis-config: sets env_dir when no pipeline section' => sub 
 	ok $parsed->{env_dir}, "env_dir is set when no pipeline section";
 	is $parsed->{env_dir}, '/myrepo', "env_dir is top->path()";
 	# The parse settles pipeline.name here, falling back to the
-	# deployment type, so the block carries that and nothing else.
-	is_deeply $parsed->{pipeline}, {metadata => {name => 'cf'}},
-		"pipeline holds only the name it settled (env-file topology mode)";
+	# deployment type, and the repository-wide keys a task reads, so the
+	# block carries those and nothing else.
+	is_deeply $parsed->{pipeline},
+		{metadata => {name => 'cf'}, configuration => {unredacted => 0}},
+		"pipeline holds only what it settled (env-file topology mode)";
 };
 
 subtest 'Parser - genesis-config: fallback order (ci_dir missing, file missing)' => sub {

@@ -1630,6 +1630,13 @@ sub recreate_on_deploy {
 }
 
 # }}}
+# pipeline_unredacted - whether a pipeline's deploys skip redaction {{{
+sub pipeline_unredacted {
+	my ($self) = @_;
+	return $self->_shape->config->get('pipeline.unredacted') ? 1 : 0;
+}
+
+# }}}
 # control_branch - the name of the branch that is control {{{
 #
 # The one reader of pipeline.source_control.control_branch.  The
@@ -2834,6 +2841,13 @@ sub _pipeline_config_schema {
 				values      => [qw/never redeploy-only always/],
 				default     => 'never',
 				description => 'Which runs pass --recreate to the BOSH deploy'
+			},
+
+			# Reaches the deploy as CI_NO_REDACT (contract f9).
+			unredacted => {
+				type        => 'boolean',
+				default     => Genesis::Config::FALSE,
+				description => "Whether a pipeline's deploys print their manifest diffs unredacted"
 			},
 
 			source_control => {
