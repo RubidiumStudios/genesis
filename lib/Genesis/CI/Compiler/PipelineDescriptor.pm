@@ -1453,11 +1453,11 @@ sub _task_config {
 		$params{BOSH_NON_INTERACTIVE} = 'true';
 	}
 
+	# Each component under the variable Service::Vault::Remote reads it from.
 	if ($vault->{auth}) {
 		my $auth = Genesis::Top::credential_components(vault => $vault->{auth});
-		$params{VAULT_ROLE_ID}   = _unwrap_ref($auth->{role_id});
-		$params{VAULT_SECRET_ID} = _unwrap_ref($auth->{secret_id});
-		$params{VAULT_TOKEN}     = _unwrap_ref($auth->{token}) if defined $auth->{token};
+		my %var  = (role_id => 'VAULT_ROLE_ID', secret_id => 'VAULT_SECRET_ID', token => 'VAULT_AUTH_TOKEN');
+		$params{$var{$_}} = _unwrap_ref($auth->{$_}) for grep {$var{$_}} sort keys %$auth;
 	}
 	if ($vault->{options}) {
 		$params{VAULT_SKIP_VERIFY}  = $vault->{options}{tls_verify} ? 'false' : 'true';
@@ -1540,11 +1540,11 @@ sub _errand_config {
 		ERRAND_NAME       => $errand_name,
 		VAULT_ADDR        => $vault->{url} || '',
 	);
+	# Each component under the variable Service::Vault::Remote reads it from.
 	if ($vault->{auth}) {
 		my $auth = Genesis::Top::credential_components(vault => $vault->{auth});
-		$params{VAULT_ROLE_ID}   = _unwrap_ref($auth->{role_id});
-		$params{VAULT_SECRET_ID} = _unwrap_ref($auth->{secret_id});
-		$params{VAULT_TOKEN}     = _unwrap_ref($auth->{token}) if defined $auth->{token};
+		my %var  = (role_id => 'VAULT_ROLE_ID', secret_id => 'VAULT_SECRET_ID', token => 'VAULT_AUTH_TOKEN');
+		$params{$var{$_}} = _unwrap_ref($auth->{$_}) for grep {$var{$_}} sort keys %$auth;
 	}
 	if ($vault->{options}) {
 		$params{VAULT_SKIP_VERIFY}  = $vault->{options}{tls_verify} ? 'false' : 'true';
