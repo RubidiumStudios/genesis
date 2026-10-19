@@ -1417,6 +1417,7 @@ subtest 'Concourse - locker resources generated when locker configured' => sub {
 						sandbox => {
 							stage_name => 'sandbox', alias => 'sandbox',
 							genesis_env => 'sandbox', auto => 1,
+							deployment_name => 'sandbox-cf', director_pool => 'sandbox-bosh',
 						},
 					},
 					edges => [],
@@ -1434,9 +1435,9 @@ subtest 'Concourse - locker resources generated when locker configured' => sub {
 
 	_debug_write('concourse-locker.yml', $output // '');
 
-	# Locker resources
-	like $output, qr/sandbox-bosh-lock/, "bosh-lock resource present";
-	like $output, qr/sandbox-deployment-lock/, "deployment-lock resource present";
+	# Locker resources, one per pool the node names
+	like $output, qr/sandbox-bosh-lock/, "director pool's lock resource present";
+	like $output, qr/sandbox-cf-lock/, "own pool's lock resource present";
 	like $output, qr/shield-lock-outline/, "locker icon present";
 
 	# Locker lock/unlock steps in deploy job
@@ -1472,6 +1473,7 @@ subtest 'Concourse - locker skips bosh-lock for create-env' => sub {
 					nodes => { 'proto-bosh' => {
 						stage_name => 'proto-bosh', alias => 'proto',
 						genesis_env => 'proto-bosh', auto => 1,
+						deployment_name => 'proto-bosh-bosh', director_pool => '',
 					}},
 					edges => [],
 				},
@@ -1488,9 +1490,10 @@ subtest 'Concourse - locker skips bosh-lock for create-env' => sub {
 
 	_debug_write('concourse-create-env-locker.yml', $output // '');
 
-	# Deployment lock should exist, bosh-lock should NOT
-	like $output, qr/proto-deployment-lock/, "deployment-lock present for create-env";
-	unlike $output, qr/proto-bosh-lock/, "bosh-lock absent for create-env";
+	# Its own pool's lock, and no director's: a create-env node names none
+	like $output, qr/proto-bosh-bosh-lock/, "own pool's lock present for create-env";
+	my @lockers = $output =~ /type: locker/g;
+	is scalar(@lockers), 1, "and no director lock";
 };
 
 ### ============================================================ ###
@@ -1610,10 +1613,12 @@ subtest 'Concourse - the emitted pipeline parses back to what it was built from'
 						sandbox => {
 							stage_name => 'sandbox', alias => 'sandbox',
 							genesis_env => 'sandbox', auto => 1,
+							deployment_name => 'sandbox-cf', director_pool => 'sandbox-bosh',
 						},
 						prod => {
 							stage_name => 'prod', alias => 'prod',
 							genesis_env => 'prod', auto => 0,
+							deployment_name => 'prod-cf', director_pool => 'prod-bosh',
 						},
 					},
 					edges => [{ from => 'sandbox', to => 'prod' }],
@@ -2034,19 +2039,26 @@ subtest 'PipelineDescriptor - _locker_resources' => sub {
 		configuration => { tagged => 0 },
 	);
 
+	# The pools the builder names: each environment's own, and its director's
+	# unless it is create-env (contract a10, a11).
+	my $wf_data = {
+		deployment_name => {sandbox => 'sandbox-cf',   proto => 'proto-bosh'},
+		director_pool   => {sandbox => 'sandbox-bosh', proto => ''},
+	};
 	my $descriptor = Genesis::CI::Compiler::PipelineDescriptor->new(ast => $ast);
-	my $resources = $descriptor->_locker_resources($ast, 'sandbox', 'sandbox', 'cf', 0);
+	my $resources = $descriptor->_locker_resources($ast, 'sandbox', 'sandbox', 'cf', 0, $wf_data);
 
-	is scalar(@$resources), 2, "non-create-env gets 2 locker resources (bosh + deployment)";
-	is $resources->[0]{name}, 'sandbox-bosh-lock', "first resource is bosh-lock";
-	is $resources->[1]{name}, 'sandbox-deployment-lock', "second resource is deployment-lock";
-	is $resources->[0]{source}{bosh_lock}, 'https://bosh:25555', "bosh_lock has correct URL";
-	is $resources->[1]{source}{lock_name}, 'sandbox-cf', "lock_name has correct format";
+	is scalar(@$resources), 2, "non-create-env gets 2 locker resources (director + own)";
+	is $resources->[0]{name}, 'sandbox-bosh-lock', "first is the director pool's";
+	is $resources->[1]{name}, 'sandbox-cf-lock', "second is its own pool's";
+	is $resources->[0]{source}{lock_name}, 'sandbox-bosh', "the director's lock_name is its pool";
+	ok !exists $resources->[0]{source}{bosh_lock}, "never bosh_lock";
+	is $resources->[1]{source}{lock_name}, 'sandbox-cf', "its own lock_name is <dn>";
 
-	# create-env should skip bosh-lock
-	my $ce_resources = $descriptor->_locker_resources($ast, 'proto', 'proto', 'bosh', 1);
-	is scalar(@$ce_resources), 1, "create-env gets only 1 locker resource (deployment only)";
-	is $ce_resources->[0]{name}, 'proto-deployment-lock', "only deployment-lock for create-env";
+	# create-env names no director pool
+	my $ce_resources = $descriptor->_locker_resources($ast, 'proto', 'proto', 'bosh', 1, $wf_data);
+	is scalar(@$ce_resources), 1, "create-env gets only its own pool's resource";
+	is $ce_resources->[0]{name}, 'proto-bosh-lock', "its own pool, proto-bosh";
 };
 
 ### ============================================================ ###

@@ -387,6 +387,18 @@ sub _build_workflow_graph {
 # }}}
 ### Env-File Topology Builder {{{
 
+# _director_pool - the lock pool of the director that deploys an environment {{{
+#
+# Read from the file, with no kit: a create-env environment has none, and
+# genesis.bosh_env (<name>[/<type>]...) defaults to the environment's name.
+sub _director_pool {
+	my ($env, $data) = @_;
+	return '' if _truthy($data->{_use_create_env});
+	my ($name, $type) = ($data->{_bosh_env} // $env) =~ m/^([^\/\@]+)(?:\/([^\@]+))?/;
+	return sprintf('%s-%s', $name, $type || 'bosh');
+}
+
+# }}}
 # build_from_env_files - build workflow graph nodes+edges from genesis.pipeline.* {{{
 # Returns (\%nodes, \@edges), an edge per prior_env -> env.  Genesis::Top
 # calls it for the topology, so its name and arguments are a seam.
@@ -409,6 +421,7 @@ sub build_from_env_files {
 		$genesis = {} unless ref($genesis) eq 'HASH';
 		my %data = ref($genesis->{pipeline}) eq 'HASH' ? %{$genesis->{pipeline}} : ();
 		$data{_bosh_env} = $genesis->{bosh_env} if defined $genesis->{bosh_env};
+		$data{_use_create_env} = $genesis->{use_create_env} if defined $genesis->{use_create_env};
 		$pipeline_data{$env} = \%data if %data;
 	}
 
@@ -446,6 +459,8 @@ sub build_from_env_files {
 			alias               => $env,
 			genesis_env         => $env,
 			branch              => $top->branch_for($env),
+			deployment_name     => sprintf('%s-%s', $env, $top->type),
+			director_pool       => _director_pool($env, $data),
 			auto                => _truthy($data->{manual}) ? 0 : 1,
 			type                => 'deployment',
 			require_pr          => _truthy($data->{require_pr}),

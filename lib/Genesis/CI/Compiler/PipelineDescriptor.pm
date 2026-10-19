@@ -80,9 +80,10 @@ sub describe {
 				$ast, $env, $alias, $trigger_from, $is_create_env, $wf_data
 			)};
 
-			# Locker resources
+			# Locker resources, one per pool however many jobs hold it
 			if ($locker->{url}) {
-				push @resources, @{$self->_locker_resources(
+				my %have = map {($_->{name} => 1)} @resources;
+				push @resources, grep {!$have{$_->{name}}} @{$self->_locker_resources(
 					$ast, $env, $alias, $deploy_type, $is_create_env, $wf_data
 				)};
 			}
@@ -631,77 +632,39 @@ sub _env_resources {
 }
 
 # }}}
-# _locker_resources - build locker resources for an environment {{{
+# _lock_pools - an environment's lock pools, director first, own last {{{
+sub _lock_pools {
+	my ($self, $env, $wf_data) = @_;
+	my $director = $wf_data->{director_pool}{$env} // '';
+	return (($director ? ([$director, 'dont-upgrade-bosh-on-me']) : ()),
+		[$wf_data->{deployment_name}{$env}, 'i-need-to-deploy-myself']);
+}
+
+# }}}
+# _locker_resources - one locker resource per pool an environment holds {{{
 #
-# Three cases:
-#   Director  (is_bosh_director=1):  emits <alias>-bosh-lock as a shared named
-#                                    lock; all children will acquire this resource.
-#   Child     (bosh_parent set, bosh_upgrade_lock=1):  emits only the
-#                                    deployment-lock, bosh-lock being the
-#                                    director's.
-#   Standalone (no pipeline parent): emits per-env bosh-lock pointing to the
-#                                    BOSH director URL (legacy behaviour).
-#
-# All cases emit <alias>-deployment-lock for intra-env deploy serialization.
+# Named <pool>-lock with lock_name <pool> (contract a10, a11, g8), so every
+# job holding a pool shares one resource; describe drops the repeats.
 sub _locker_resources {
 	my ($self, $ast, $env, $alias, $deploy_type, $is_create_env, $wf_data) = @_;
 
-	my @resources;
 	my $locker = $ast->integrations->{locker} || {};
-	return \@resources unless $locker->{url};
-
-	my $tagged = ($ast->configuration || {})->{tagged};
-	my %to = $tagged ? (tags => [$env]) : ();
+	return [] unless $locker->{url};
 
 	my %locker_source = (
 		locker_uri          => _unwrap_ref($locker->{url}),
 		username            => _unwrap_ref($locker->{username}),
 		password            => _unwrap_ref($locker->{password}),
-		skip_ssl_validation => $locker->{skip_ssl_validation} // JSON::PP::true,
+		skip_ssl_validation => $locker->{skip_ssl_validation} ? JSON::PP::true : JSON::PP::false,
 		ca_cert             => $locker->{ca_cert},
 	);
 
-	my $bosh_parent    = $wf_data->{bosh_parent}{$env}       || '';
-	my $bu_lock        = $wf_data->{bosh_upgrade_lock}{$env} // 1;
-	my $is_director    = $wf_data->{is_bosh_director}{$env}  || 0;
-
-	if ($is_director) {
-		# Shared bosh-upgrade lock, which children acquire during their deploys.
-		# Use lock_name (named lock) so no BOSH URL is required at pipeline-gen time.
-		push @resources, {
-			name   => "$alias-bosh-lock",
-			type   => 'locker',
-			icon   => 'shield-lock-outline',
-			%to,
-			source => { %locker_source, lock_name => "$alias-bosh-upgrade" },
-		};
-	} elsif (!$bosh_parent || !$bu_lock) {
-		# Standalone or opted-out child: per-env bosh-lock using the BOSH URL.
-		unless ($is_create_env) {
-			my $target = $ast->targets->{$env} || {};
-			my $conn   = $target->{connection} || {};
-			push @resources, {
-				name   => "$alias-bosh-lock",
-				type   => 'locker',
-				icon   => 'shield-lock-outline',
-				%to,
-				source => { %locker_source, bosh_lock => $conn->{url} },
-			};
-		}
-	}
-	# A child with bosh_parent and bosh_upgrade_lock emits no bosh-lock
-	# resource of its own, and acquires the director's
-	# <director-alias>-bosh-lock instead.
-
-	push @resources, {
-		name   => "$alias-deployment-lock",
+	return [map {+{
+		name   => "$_->[0]-lock",
 		type   => 'locker',
 		icon   => 'shield-lock-outline',
-		%to,
-		source => { %locker_source, lock_name => "$env-$deploy_type" },
-	};
-
-	return \@resources;
+		source => { %locker_source, lock_name => $_->[0] },
+	}} $self->_lock_pools($env, $wf_data)];
 }
 
 # }}}
@@ -801,55 +764,19 @@ sub _deploy_job {
 	my @priv = @{$config->{task}{privileged} || []};
 	$deploy_task->{privileged} = JSON::PP::true if grep { $_ eq $alias } @priv;
 
-	# Locker steps
+	# Locker steps: each pool in order, released in reverse (contract g4, g5)
 	my @lock_steps;
 	my @unlock_steps;
 	my $locker = $ast->integrations->{locker} || {};
+	my $dn     = $wf_data->{deployment_name}{$env};
 	if ($locker->{url}) {
-		my $bosh_parent = $wf_data->{bosh_parent}{$env}       || '';
-		my $bu_lock     = $wf_data->{bosh_upgrade_lock}{$env} // 1;
-		my $is_director = $wf_data->{is_bosh_director}{$env}  || 0;
-
-		my $bosh_lock_alias;
-		if ($bosh_parent && $bu_lock) {
-			# Child: acquire director's shared bosh-lock
-			$bosh_lock_alias = $wf_data->{aliases}{$bosh_parent} || $bosh_parent;
-		} elsif ($is_director || !$is_create_env) {
-			# Director or standalone non-create-env: acquire own bosh-lock
-			$bosh_lock_alias = $alias;
+		for my $pool ($self->_lock_pools($env, $wf_data)) {
+			my ($name, $key) = @$pool;
+			push @lock_steps, { put => "$name-lock", %to,
+				params => { lock_op => 'lock', key => $key, locked_by => $dn } };
+			unshift @unlock_steps, { put => "$name-lock", %to,
+				params => { lock_op => 'unlock', key => $key, locked_by => $dn } };
 		}
-
-		if ($bosh_lock_alias) {
-			push @lock_steps, {
-				put => "$bosh_lock_alias-bosh-lock", %to,
-				params => {
-					lock_op => 'lock', key => 'dont-upgrade-bosh-on-me',
-					locked_by => "$env-$deploy_type",
-				},
-			};
-			push @unlock_steps, {
-				put => "$bosh_lock_alias-bosh-lock", %to,
-				params => {
-					lock_op => 'unlock', key => 'dont-upgrade-bosh-on-me',
-					locked_by => "$env-$deploy_type",
-				},
-			};
-		}
-
-		push @lock_steps, {
-			put => "$alias-deployment-lock", %to,
-			params => {
-				lock_op => 'lock', key => 'i-need-to-deploy-myself',
-				locked_by => "$env-$deploy_type",
-			},
-		};
-		push @unlock_steps, {
-			put => "$alias-deployment-lock", %to,
-			params => {
-				lock_op => 'unlock', key => 'i-need-to-deploy-myself',
-				locked_by => "$env-$deploy_type",
-			},
-		};
 	}
 
 	# Build do block
@@ -882,6 +809,7 @@ sub _deploy_job {
 		name   => "deploy-$alias",
 		public => JSON::PP::true,
 		serial => JSON::PP::true,
+		($dn ? (serial_groups => [$dn]) : ()),
 		plan   => [$plan_step],
 	};
 }
@@ -1725,6 +1653,7 @@ sub _extract_workflow_data {
 	my $edges = $graph->{edges} || [];
 
 	my (%will_trigger, %triggers, %auto, %aliases, %genesis_envs, %branches,
+	    %deployment_name, %director_pool,
 	    %redeploy, %redeploy_cron_start, %redeploy_cron_stop,
 	    %status_signal, %signal_prefix,
 	    %bosh_parent, %bosh_upgrade_lock, %is_bosh_director,
@@ -1740,6 +1669,8 @@ sub _extract_workflow_data {
 		$aliases{$n}             = $nd->{alias}               || $n;
 		$genesis_envs{$n}        = $nd->{genesis_env}         || $n;
 		$branches{$n}            = $nd->{branch};
+		$deployment_name{$n}     = $nd->{deployment_name};
+		$director_pool{$n}       = $nd->{director_pool} // '';
 		$redeploy{$n}          = $nd->{redeploy}            || '';
 		$redeploy_cron_start{$n} = $nd->{redeploy_cron_start} || '';
 		$redeploy_cron_stop{$n}  = $nd->{redeploy_cron_stop}  || '';
@@ -1774,6 +1705,8 @@ sub _extract_workflow_data {
 		aliases             => \%aliases,
 		genesis_envs        => \%genesis_envs,
 		branches            => \%branches,
+		deployment_name     => \%deployment_name,
+		director_pool       => \%director_pool,
 		will_trigger        => \%will_trigger,
 		triggers            => \%triggers,
 		redeploy            => \%redeploy,
@@ -1991,6 +1924,15 @@ redeploy job C<redeploy-E<lt>aliasE<gt>>, the alias defaulting to the
 environment's name (plumbing contract rows b1 and b3).  One C<propagate>
 job per pipeline runs C<genesis propagate> on the C<control-branch>
 resource, which triggers it (b2, c4).
+
+Each deploy holds two locker pools, its director's then its own, as the
+first steps of its plan, and releases them in reverse in its C<ensure>
+(D22).  Its own pool is its deployment name, C<E<lt>envE<gt>-E<lt>typeE<gt>>, held
+with C<i-need-to-deploy-myself>, and its director's is
+C<E<lt>bosh_envE<gt>-bosh>, held with C<dont-upgrade-bosh-on-me>, and absent for
+a create-env environment.  ASTBuilder names both from the environment file,
+with no kit.  Every pool is one C<E<lt>poolE<gt>-lock> resource, however many
+jobs hold it, and the deploy is in C<serial_groups: [E<lt>dnE<gt>]>.
 
 =head1 SYNOPSIS
 
