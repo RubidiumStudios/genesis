@@ -91,9 +91,11 @@ sub describe {
 				)};
 			}
 
+			# Propagate wakes on a deployment others follow; a tail's success
+			# makes nothing due (contract c5).
 			if (my $ran = $self->_ran_resource($ast, $wf_data->{deployment_name}{$env})) {
 				push @resources, $ran;
-				push @ran_names, $ran->{name};
+				push @ran_names, $ran->{name} if @{$wf_data->{will_trigger}{$env} || []};
 			}
 
 			# Signal resource
@@ -1980,7 +1982,9 @@ jobs hold it, and the deploy is in C<serial_groups: [E<lt>dnE<gt>]>.
 Where C<pipeline.shuttle> is set, each deployment has a C<E<lt>dnE<gt>_ran>
 event, a C<shuttle> resource on the path C<E<lt>dnE<gt>/ran> with
 C<seed_version>.  The deploy puts it on success alone, with no params, and
-the propagate job triggers on every one (D23, D75).  C<auth> names the vault
+the propagate job triggers on that of each deployment another environment
+names as its C<prior_env>, a tail's success making nothing due (D23, D25,
+D75).  C<auth> names the vault
 path holding the S3 C<access_key_id> and C<secret_access_key>.
 
 =head1 SYNOPSIS

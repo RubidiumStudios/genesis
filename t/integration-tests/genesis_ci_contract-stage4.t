@@ -23,8 +23,12 @@ my $DN       = "$ENV_NAME-$Harness::Contract::TYPE";
 my $RAN      = "${DN}_ran";
 
 sub ran_puts {
-	my ($node) = @_;
-	return grep {($_->{put} // '') eq $RAN} plan_steps($node || {});
+	my ($node, $ran) = @_;
+	return grep {($_->{put} // '') eq ($ran // $RAN)} plan_steps($node || {});
+}
+sub ran_puts_of {
+	my ($p, $env, $ran) = @_;
+	return ran_puts(((pipeline_job($p, "deploy-$env") || {})->{plan}[0] || {})->{on_success}, $ran);
 }
 
 subtest 'Stage 4 rows over the default shuttle' => sub {
@@ -44,8 +48,8 @@ subtest 'Stage 4 rows over the default shuttle' => sub {
 	is_deeply($type && $type->{source}, {repository => 'klaue/shuttle-resource', tag => 'latest'},
 		'a18: the shuttle type on the default image');
 
-	my ($get) = grep {($_->{get} // '') eq $RAN} plan_steps(pipeline_job($p, 'propagate'));
-	is($get && $get->{trigger}, 1, 'c5: propagate triggers on each _ran');
+	ok(!grep({($_->{get} // '') =~ /_ran$/} plan_steps(pipeline_job($p, 'propagate'))),
+		"c5: propagate gets no _ran, qa being a tail");
 
 	my $plan = (pipeline_job($p, "deploy-$ENV_NAME") || {})->{plan}[0] || {};
 	my @put = ran_puts($plan->{on_success});
@@ -55,6 +59,19 @@ subtest 'Stage 4 rows over the default shuttle' => sub {
 	ok($gp->{skip} && keys(%$gp) == 1, 'd2: and get_params skip');
 	is(scalar(map {ran_puts($plan->{$_})} qw/on_failure on_abort on_error ensure do/), 0,
 		'd6: and on no other outcome');
+};
+
+subtest 'c5: propagate triggers on the _ran of a deployment with a successor' => sub {
+	my $h = contract_harness(envs => [$ENV_NAME, 'prod'], chained => 1);
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'the dry apply prints a pipeline') or return diag($why);
+
+	my $tail = "prod-$Harness::Contract::TYPE\_ran";
+	my %get = map {($_->{get} => $_)} grep {$_->{get}} plan_steps(pipeline_job($p, 'propagate'));
+	is($get{$RAN} && $get{$RAN}{trigger}, 1, "qa's, which prod follows");
+	ok(!$get{$tail}, "and not prod's, the tail");
+	ok(pipeline_resource($p, $tail), "whose _ran is still emitted (a8)");
+	is(scalar(ran_puts_of($p, 'prod', $tail)), 1, 'and put on its success (d2)');
 };
 
 subtest 'a9: the configured shuttle source' => sub {

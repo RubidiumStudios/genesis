@@ -32,8 +32,10 @@ C<$Harness::Contract::ENV_NAME>, C<$TYPE> and C<$ROOT>.
 =head2 contract_harness(%opts)
 
 Builds the repository. C<config> is a hash of C<.genesis/config> keys to set,
-C<pipeline> a hash of the environment's C<genesis.pipeline> keys, and
-C<no_binary> leaves C<.genesis/bin/genesis> out.
+C<pipeline> and C<genesis> hashes of C<qa>'s C<genesis.pipeline> and
+C<genesis> keys, and C<no_binary> leaves C<.genesis/bin/genesis> out.
+C<envs> names the environments in place of C<qa> alone, and C<chained>
+makes each the C<prior_env> of the next.
 
 B<Returns:> the L<Harness::Propagation> harness.
 

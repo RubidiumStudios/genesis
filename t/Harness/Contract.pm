@@ -21,7 +21,8 @@ our $ROOT     = 'doomsday';
 
 sub contract_harness {
 	my (%opts) = @_;
-	my $h = make_harness(envs => [$ENV_NAME], provider => 'concourse', vault => 0,
+	my $h = make_harness(envs => $opts{envs} || [$ENV_NAME], chained => $opts{chained},
+		provider => 'concourse', vault => 0,
 		type => $TYPE, root => $ROOT, embed => !$opts{no_binary});
 	compilable_pipeline($h);
 	$h->set_repo_config($_, $opts{config}{$_}) for sort keys %{$opts{config} || {}};
