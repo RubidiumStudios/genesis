@@ -19,7 +19,7 @@ use Encode qw(decode_utf8);
 # that bin/genesis calls by its full name, so nothing is exported by default
 # and a caller outside this file asks for the one question it may need.
 use Exporter qw/import/;
-our @EXPORT_OK = qw/redeploy_wanted/;
+our @EXPORT_OK = qw/redeploy_wanted deploy_redacts/;
 
 sub create {
 
@@ -1440,9 +1440,15 @@ sub _spawn_propagate_child {
 }
 
 # }}}
+# deploy_redacts - the deploy's default for --redact {{{
+sub deploy_redacts {
+	return (! -t STDOUT) && !(($ENV{CI_NO_REDACT} // '') =~ /^(1|true)$/i);
+}
+
+# }}}
 sub deploy {
 	option_defaults(
-		redact   => ! -t STDOUT,
+		redact   => deploy_redacts(),
 		reactions => 1,
 	);
 	command_usage(1) if @_ < 1 || @_ > 2;

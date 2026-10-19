@@ -261,6 +261,7 @@ unit-tests/genesis_commands_env-deploy_due_prompt.t  # the prompt beside the due
 unit-tests/genesis_commands_env-dryrun_cloud_config_warning.t  # dry-run warnings about the director's cloud config
 unit-tests/genesis_commands_env-new_clean_tree.t  # `genesis new` refuses a dirty tree before it writes
 unit-tests/genesis_commands_env-redeploy_wanted.t  # the three arms of the one reader of "is this run a redeploy"
+unit-tests/genesis_commands_env-deploy_redacts.t   # off a terminal the deploy redacts, unless CI_NO_REDACT says not
 unit-tests/genesis_commands_env-child_stdin.t  # what the /dev/null redirect does to the publish confirmation
 unit-tests/genesis_commands_repo-init.t        # repo-init CLI (registration + option parsing; validate + execute in integration-tests/)
 unit-tests/genesis_commands_check-embedded-genesis_version.t  # embedded version read from packed $VERSION line; legacy form still accepted
