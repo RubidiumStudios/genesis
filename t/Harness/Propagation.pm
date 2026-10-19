@@ -3165,7 +3165,8 @@ EOS
 	_guard_env(GENESIS_BOSH_COMMAND => $command);
 	$self->{bosh}{command} = $command;
 
-	$self->fixture_director($_, %opts, url => "https://127.0.0.1:$port")
+	# A director is a bosh deployment, whatever type the root under test is.
+	$self->fixture_director($_, %opts, type => 'bosh', url => "https://127.0.0.1:$port")
 		for @envs;
 
 	# The operator's own clone is left holding the branch as the apply cut
