@@ -266,22 +266,16 @@ subtest 'each env watches its own branch, not filtered control paths' => sub {
 		'no path filtering -- the branch itself is the trigger';
 };
 
-subtest 'the env branch ignores manifest writes made by its own deploy' => sub {
+subtest 'the env branch filters no paths' => sub {
 	plan tests => 2;
 
-	# A deploy job that commits manifests to the branch it triggers on is a
-	# feedback loop.  Emitted unconditionally rather than gated on
-	# manifest_store: it costs nothing under exodus, and gating would drop
-	# the defence from hybrid and repository, which are the two that need
-	# it.  _env_resources never reads manifest_store, so this holds for
-	# every value of it.
+	# No emitted deploy writes the branch it triggers on (contract a4, d7),
+	# so there is no feedback loop for a filter to break.
 	my $res = _resource(_describe(_ast()), "$ENV_NAME-branch");
-	is_deeply $res->{source}{ignore_paths}, ['.genesis/manifests/*'],
-		'the env branch ignores its own manifest writes';
+	ok !exists $res->{source}{ignore_paths}, 'the env branch ignores no paths';
 
 	my $rooted = _resource(_describe(_ast(root => 'bosh')), "$ENV_NAME-branch");
-	is_deeply $rooted->{source}{ignore_paths}, ['bosh/.genesis/manifests/*'],
-		'and carries the source_control root prefix when one is set';
+	ok !exists $rooted->{source}{ignore_paths}, 'nor under a source_control root';
 };
 
 subtest 'the old path-filtered changes resource is gone' => sub {

@@ -549,21 +549,14 @@ sub _env_resources {
 	my $sc   = $ast->integrations->{source_control} || {};
 	my $uri  = Genesis::CI::ProviderCompiler->git_uri($sc);
 	my $br   = $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main';
-	my $root = $sc->{root} || '.';
-	my $pr   = ($root eq '.') ? '' : "$root/";
 
 	# Shared git source
 	my %gs = (uri => $uri, branch => $br, _git_credential($sc));
 
-	# The env branch is the change signal, so no path filter; ignore_paths
-	# stops a deploy that commits manifests from retriggering itself.
+	# The env branch is the change signal, and no deploy writes it: no filter.
 	push @resources, {
 		name => "$alias-branch", type => 'git', icon => 'github',
-		source => {
-			%gs,
-			branch       => $wf_data->{branches}{$env},
-			ignore_paths => ["${pr}.genesis/manifests/*"],
-		},
+		source => {%gs, branch => $wf_data->{branches}{$env}},
 	};
 
 	# BOSH config resources, emitted only when track_bosh_configs is set
