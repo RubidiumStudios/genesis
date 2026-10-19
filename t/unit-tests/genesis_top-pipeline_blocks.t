@@ -112,8 +112,9 @@ subtest 'the shuttle backend refuses a directory' => sub {
 	throws_ok {load_with($h, automated_pipeline_block() =~ s/backend: s3/backend: file/r)}
 		qr/pipeline\.shuttle\.backend: unknown value/,
 		'file is refused, because a directory cannot trigger across pipelines';
-	lives_ok {load_with($h, automated_pipeline_block() =~ s/backend: s3/backend: gcs/r)}
-		'gcs validates';
+	throws_ok {load_with($h, automated_pipeline_block() =~ s/backend: s3/backend: gcs/r)}
+		qr/pipeline\.shuttle\.backend: unknown value: gcs/,
+		'gcs is refused, s3 being the one backend';
 };
 
 subtest 'notifications are optional and overridable per environment' => sub {

@@ -42,6 +42,6 @@ B<Returns:> a hash reference of key name to schema entry.
 
 =head1 SEE ALSO
 
-L<Genesis::CI::Shuttle>, L<Genesis::CI::Shuttle::GCS>
+L<Genesis::CI::Shuttle>
 
 =cut

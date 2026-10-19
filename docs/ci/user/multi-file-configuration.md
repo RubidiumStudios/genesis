@@ -107,7 +107,7 @@ shuttle:
   auth: secret/ci/pipeline:s3
 ```
 
-`vault` is the vault a pipeline task writes exodus through, and `url` is the one key it cannot do without. `locker` is the locker behind the two mandatory deploy locks. `shuttle` is the object store behind every deployment's request queue and `_ran` event, and its `backend` chooses its shape, which is `s3` or `gcs`, and the backend is required, so a shuttle block written with no backend is refused as an unknown value naming the two you may write.
+`vault` is the vault a pipeline task writes exodus through, and `url` is the one key it cannot do without. `locker` is the locker behind the two mandatory deploy locks. `shuttle` is the object store behind every deployment's request queue and `_ran` event, and its `backend` chooses its shape, which is `s3`, the one store the shuttle resource has. The backend is required, so a shuttle block written with no backend, or with another, is refused as an unknown value naming `s3`.
 
 ## The notifications Block
 

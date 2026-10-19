@@ -2883,7 +2883,7 @@ sub _pipeline_config_schema {
 				}
 			},
 
-			# Shaped by its backend, with no default between two object stores.
+			# Shaped by its backend; s3 is the one the shuttle resource has (D23).
 			shuttle => {
 				type          => 'custom_struct',
 				discriminator => 'backend',
@@ -2893,7 +2893,6 @@ sub _pipeline_config_schema {
 				description   => "The object store behind every deployment's queue and event",
 				modules => {
 					s3  => {class => 'Genesis::CI::Shuttle::S3',  module => 'Genesis/CI/Shuttle/S3.pm'},
-					gcs => {class => 'Genesis::CI::Shuttle::GCS', module => 'Genesis/CI/Shuttle/GCS.pm'},
 				},
 			},
 

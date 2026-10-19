@@ -1,9 +1,8 @@
 #!perl
-# Proves that the shuttle block is declared on its backend.  Each backend
-# admits the keys it declares and refuses the rest, so a GCS configuration
-# cannot carry a region.  The credentials the compiler reads out of the
-# block are left exactly where they are, because how one vault reference
-# becomes two S3 keys or one GCS key is the emitter rewrite's question.
+# Proves that the shuttle block is declared on its backend, which admits the
+# keys it declares and refuses the rest.  S3 is the only backend: the shuttle
+# resource the pipeline runs is S3 only, and gcs came from an image that never
+# existed (D23, noted 2026-10-18).
 use strict;
 use warnings;
 use utf8;
@@ -21,17 +20,12 @@ use_ok 'Genesis::Top';
 
 my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
 
-subtest 'a GCS shuttle carries no region and no endpoint' => sub {
-	plan tests => 3;
+subtest 'a GCS shuttle is refused by name' => sub {
+	plan tests => 1;
 
-	throws_ok {load_with($h, shuttle('gcs', 'bucket: sig', 'region: us-east-1'))}
-		qr/pipeline\.shuttle\.region: unknown configuration key/,
-		'the region is refused, because GCS has nothing to do with one';
-	throws_ok {load_with($h, shuttle('gcs', 'bucket: sig', 'endpoint: https://x'))}
-		qr/pipeline\.shuttle\.endpoint: unknown configuration key/,
-		'and so is an endpoint';
-	lives_ok {load_with($h, shuttle('gcs', 'bucket: sig'))}
-		'while the keys GCS does read are accepted';
+	throws_ok {load_with($h, shuttle('gcs', 'bucket: sig'))}
+		qr/pipeline\.shuttle\.backend: unknown value: gcs; expected one of s3/,
+		's3 being the one backend the shuttle resource has';
 };
 
 subtest 'an S3 shuttle carries both' => sub {
@@ -49,7 +43,7 @@ subtest 'a backend nobody owns is refused by name' => sub {
 	plan tests => 1;
 
 	throws_ok {load_with($h, shuttle('file', 'path: /tmp/signals'))}
-		qr/pipeline\.shuttle\.backend: unknown value: file; expected one of gcs, s3/,
+		qr/pipeline\.shuttle\.backend: unknown value: file; expected one of s3/,
 		'a directory backend is refused, and the map is what says so';
 };
 

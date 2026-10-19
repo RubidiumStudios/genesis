@@ -6,7 +6,7 @@ Genesis::CI::Shuttle - the object store behind the pipeline's queue and event
 
     # Reached through the configuration schema rather than called directly:
     # pipeline.shuttle declares backend as its discriminator, and the map
-    # sends s3 to Genesis::CI::Shuttle::S3 and gcs to ::GCS.
+    # sends s3, its one value, to Genesis::CI::Shuttle::S3.
 
     my $declared = Genesis::CI::Shuttle::S3->options_schema;
 
@@ -17,23 +17,24 @@ Genesis::CI::Shuttle - the object store behind the pipeline's queue and event
 
 Every environment's request queue and its C<_ran> event live in one
 object store, and never in a directory, because a directory on one worker
-cannot trigger a run in another pipeline. Two backends carry that store,
-S3 and GCS, and they do not read the same keys: S3 takes a region and may
-take a non-default endpoint, and the GCS resource takes neither.
+cannot trigger a run in another pipeline. One backend carries that store,
+S3, because the shuttle resource the pipeline runs is S3 only (D23, noted
+2026-10-18); a GCS backend was declared once for an image that never
+existed, and is gone.
 
-So the block is declared on its backend rather than flat, as a
+The block is still declared on its backend rather than flat, as a
 C<custom_struct>, which is the schema type that names the field a block's
 shape depends on and maps each of that field's values to the module
-owning that shape. Each backend is a class of its own, it declares the
-keys it reads through C<options_schema>, and this base validates a block
-against whichever declaration the written backend selected. A GCS
-configuration then has nowhere to put a region, and the refusal names the
-key rather than accepting it and dropping it later.
+owning that shape. A backend is a class of its own, it declares the keys
+it reads through C<options_schema>, and this base validates a block
+against whichever declaration the written backend selected. A backend a
+later resource brings then declares its own keys, and the refusal names a
+key the written backend does not read.
 
 A backend with a rule a declaration cannot state overrides
 C<validate_config> and calls C<SUPER> first, because the declaration is
-the floor rather than a subset of what is wanted checked. Neither backend
-needs one today.
+the floor rather than a subset of what is wanted checked. S3 needs none
+today.
 
 The method is called C<options_schema> rather than
 C<provider_options_schema>, which is the name the same declaration carries
@@ -42,7 +43,7 @@ provider has, which are C<pipeline-describe>'s resolved values, the
 per-key defaults, the help text, and the wizard, and a shuttle backend has
 none of them.
 
-Concrete subclasses: L<Genesis::CI::Shuttle::S3>, L<Genesis::CI::Shuttle::GCS>.
+Concrete subclass: L<Genesis::CI::Shuttle::S3>.
 
 =head1 CLASS METHODS
 
@@ -62,13 +63,13 @@ options_schema()", when a subclass has not declared one.
 
 B<Examples:>
 
-    # The S3 fragment carries a region; the GCS fragment does not.
+    # The S3 fragment carries a region, and no prefix.
     exists Genesis::CI::Shuttle::S3->options_schema->{region};   # true
-    exists Genesis::CI::Shuttle::GCS->options_schema->{region};  # false
+    exists Genesis::CI::Shuttle::S3->options_schema->{prefix};   # false
 
 =head2 validate_config($config, $path, $discriminator)
 
-    my @errors = Genesis::CI::Shuttle::GCS->validate_config(
+    my @errors = Genesis::CI::Shuttle::S3->validate_config(
         $config, 'pipeline.shuttle', 'backend');
 
 Validates the block an operator wrote against this backend's own
@@ -99,10 +100,10 @@ B<Returns:> the list of error strings, empty when the block is good.
 
 B<Examples:>
 
-    # A region under gcs comes back as one error naming the key.
-    my @errors = Genesis::CI::Shuttle::GCS->validate_config(
+    # A prefix under s3 comes back as one error naming the key.
+    my @errors = Genesis::CI::Shuttle::S3->validate_config(
         $config, 'pipeline.shuttle', 'backend');
-    # ('pipeline.shuttle.region: unknown configuration key: ...')
+    # ('pipeline.shuttle.prefix: unknown configuration key: ...')
 
 =head1 SEE ALSO
 
