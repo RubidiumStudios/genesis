@@ -561,7 +561,7 @@ sub _env_resources {
 		name => "$alias-branch", type => 'git', icon => 'github',
 		source => {
 			%gs,
-			branch       => $env,
+			branch       => $wf_data->{branches}{$env},
 			ignore_paths => ["${pr}.genesis/manifests/*"],
 		},
 	};
@@ -1706,7 +1706,7 @@ sub _extract_workflow_data {
 	my $nodes = $graph->{nodes} || {};
 	my $edges = $graph->{edges} || [];
 
-	my (%will_trigger, %triggers, %auto, %aliases, %genesis_envs,
+	my (%will_trigger, %triggers, %auto, %aliases, %genesis_envs, %branches,
 	    %redeploy, %redeploy_cron_start, %redeploy_cron_stop,
 	    %status_signal, %signal_prefix,
 	    %bosh_parent, %bosh_upgrade_lock, %is_bosh_director,
@@ -1721,7 +1721,8 @@ sub _extract_workflow_data {
 		$auto{$n}                = 1 if $nd->{auto};
 		$aliases{$n}             = $nd->{alias}               || $n;
 		$genesis_envs{$n}        = $nd->{genesis_env}         || $n;
-		$redeploy{$n}            = $nd->{redeploy}            || '';
+		$branches{$n}            = $nd->{branch};
+		$redeploy{$n}          = $nd->{redeploy}            || '';
 		$redeploy_cron_start{$n} = $nd->{redeploy_cron_start} || '';
 		$redeploy_cron_stop{$n}  = $nd->{redeploy_cron_stop}  || '';
 		$status_signal{$n}       = $nd->{status_signal}       // '';
@@ -1754,6 +1755,7 @@ sub _extract_workflow_data {
 		auto                => \%auto,
 		aliases             => \%aliases,
 		genesis_envs        => \%genesis_envs,
+		branches            => \%branches,
 		will_trigger        => \%will_trigger,
 		triggers            => \%triggers,
 		redeploy            => \%redeploy,

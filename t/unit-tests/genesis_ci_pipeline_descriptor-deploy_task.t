@@ -32,6 +32,7 @@ sub _node {
 		alias               => $o{env},
 		stage_name          => $o{env},
 		genesis_env         => $o{env},
+		branch              => "$o{env}/bosh",
 		auto                => $o{auto} // 1,
 		type                => 'bosh',
 		require_pr          => 0,
@@ -260,7 +261,7 @@ subtest 'each env watches its own branch, not filtered control paths' => sub {
 
 	ok $res, "$ENV_NAME-branch resource is emitted";
 	is $res->{type}, 'git', 'it is a git resource';
-	is $res->{source}{branch}, $ENV_NAME, 'it watches the env branch';
+	is $res->{source}{branch}, "$ENV_NAME/bosh", "it watches the branch the node's builder named";
 	ok !exists $res->{source}{paths},
 		'no path filtering -- the branch itself is the trigger';
 };

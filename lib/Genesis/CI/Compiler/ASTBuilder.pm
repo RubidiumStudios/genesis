@@ -445,6 +445,7 @@ sub build_from_env_files {
 			target_name         => $env,
 			alias               => $env,
 			genesis_env         => $env,
+			branch              => $top->branch_for($env),
 			auto                => 0,
 			type                => 'deployment',
 			require_pr          => _truthy($data->{require_pr}),
