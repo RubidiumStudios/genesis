@@ -1825,6 +1825,7 @@ sub source_control_resolved {
 
 	my $sc = $self->_source_control_found;
 	my %derived = map {($_ => 1)} qw/uri repository/;
+	require Genesis::CI::ProviderCompiler;
 
 	my %how = (matched => 'matched', pinned => 'pinned', only => 'derived');
 	my @rows = ({
@@ -1838,11 +1839,18 @@ sub source_control_resolved {
 	});
 	for my $key (qw/uri repository control_branch pr_prefix/) {
 		my $value = $sc->{$key};
+		# The uri the compiled pipeline clones from, where git derives none (a2).
+		my $composed = $key eq 'uri' && !defined $value && defined $sc->{repository}
+			? Genesis::CI::ProviderCompiler->git_uri({
+				repository => $sc->{repository},
+				auth       => $self->config->get('pipeline.source_control.auth'),
+			}) : undef;
 		push @rows, {
 			key    => $key,
-			value  => $value // '(none)',
+			value  => $value // $composed // '(none)',
 			source => $self->config->is_set("pipeline.source_control.$key")
 				? 'explicit'
+				: defined $composed ? 'composed'
 				: $derived{$key}
 					? (defined $value ? 'derived' : 'unset')
 					: 'default',

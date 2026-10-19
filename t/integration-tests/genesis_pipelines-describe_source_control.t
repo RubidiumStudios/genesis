@@ -144,6 +144,24 @@ subtest 'pipeline-describe shows whether the remote was matched or pinned' => su
 		"and says the pin is this clone's own");
 };
 
+# Proves T417's first half: where no uri is configured and git derives none,
+# the describe shows the one the compiled pipeline clones from (contract a2),
+# composed from the repository, rather than unset.
+subtest 'the uri the pipeline clones from shows as composed' => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'],
+		source_control => {repository => 'team/mirror'});
+	# The harness's own bare repository is the remote, which points at no
+	# team/mirror, so git derives no uri.
+	set_remotes($h, remotes => {origin => $h->r}, upstream => 'origin');
+
+	my ($out, undef, $exit) = run_genesis($h, 'pipeline-describe');
+	is($exit, 0, 'the command succeeds');
+	like($out, qr{uri\s+composed\s+git\@github\.com:team/mirror\.git},
+		'the uri composed from the repository, as the compiler composes it');
+};
+
 subtest 'a long url cannot carry its tier off the line' => sub {
 	# The five are the restoration the run asserts for itself and the four
 	# rows below it.

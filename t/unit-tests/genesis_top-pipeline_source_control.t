@@ -192,9 +192,12 @@ subtest 'the uri row says whether git was asked' => sub {
 	my $named = load_control("pipeline:\n  enabled: true");
 	my ($unasked) = grep {$_->{key} eq 'uri'}
 		@{$named->source_control_resolved};
-	is $unasked->{source}, 'unset',
-		'a url nobody asked git for is not reported as derived';
-	is $unasked->{value}, '(none)', 'and the row says it has no value';
+	# T417: the row carries the uri the pipeline clones from, composed from
+	# the repository, under its own tier, so derived still means git answered.
+	is $unasked->{source}, 'composed',
+		'a url nobody asked git for is not reported as derived, but as composed';
+	is $unasked->{value}, 'git@github.com:team/bosh.git',
+		'and the row carries the uri composed from the repository';
 
 	my $derived = load_control("pipeline:\n  enabled: true",
 		derive_repository => 1);

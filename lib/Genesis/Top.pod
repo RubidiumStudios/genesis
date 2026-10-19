@@ -2197,9 +2197,9 @@ names one.
 The url is asked of git only where C<pipeline.source_control.repository> is
 unset, because the repository is the one value derived from it and asking
 costs a fork on every command. So an explicit repository is the only way undef
-comes back here, and the only way L</source_control_resolved> shows C<(none)>
-in the uri row, which it labels C<unset> rather than C<derived> because git
-was never asked. Without that override a url git cannot answer for is refused
+comes back here. L</source_control_resolved> then shows, in the uri row, the
+uri the compiled pipeline clones from, composed from the repository, under the
+tier C<composed> rather than C<derived>, because git was never asked. Without that override a url git cannot answer for is refused
 rather than returned, because the repository then has nothing to parse.
 
 It answers wherever the repository is known, written or derived, whether or
@@ -2283,8 +2283,10 @@ drifted away from what git says is visible rather than silent.
 
 Each row is a hash reference carrying C<key>, C<value>, and C<source>. The
 source is C<explicit> where the operator wrote the key, C<derived> where git
-answered for it, C<unset> where the key takes a derivation that was never
-run, and C<default> where the key takes no derivation at all.
+answered for it, C<composed> for a uri git was not asked for but the
+compiled pipeline composes from the repository (T417; contract a2), C<unset>
+where the key takes a derivation that was never run and nothing composes,
+and C<default> where the key takes no derivation at all.
 
 The remote is never written in the configuration (D118), so its row says
 how L</_resolve_remote> found it: C<matched> by the repository it points at,
@@ -2296,10 +2298,8 @@ refused> (D118, noted 2026-10-15): its row carries the tier C<missing> and
 the value C<(none): no remote points at E<lt>repositoryE<gt>>, so a pipeline
 can be described before its remote exists. A row with no
 value carries C<(none)> rather than a blank column the reader has to
-interpret, which is what the uri row shows wherever
-C<pipeline.source_control.repository> was named, since L</source_control_uri>
-is then never asked of git. A derived key with no value is C<unset>, not
-C<derived>, because git was never asked. The explicit tier is read with
+interpret. A derived key with no value is C<unset>, not C<derived>, because
+git was never asked. The explicit tier is read with
 C<Genesis::Config::is_set> rather than with C<get>, the way
 L</_validate_capability_gates> reads it, because the schema fills
 C<control_branch> and C<pr_prefix> in for every repository and a filled
