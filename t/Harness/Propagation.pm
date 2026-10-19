@@ -787,7 +787,9 @@ sub make_harness {
 		pipeline  => defined $opts{pipeline} ? $opts{pipeline} : 1,
 		source_control => $opts{source_control},
 		kit       => $opts{kit},
-		embed     => $opts{embed},
+		# An automated pipeline's tasks run the root's own genesis, and its
+		# compile refuses a root without one (contract e7).
+		embed     => $opts{embed} // (($opts{provider} // 'manual') ne 'manual'),
 		# A chained harness names each environment's predecessor as its
 		# prior_env, so the topology has the edges an ancestor hold is
 		# computed from.  It is off by default, because a pipeline whose

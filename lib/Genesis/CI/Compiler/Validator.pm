@@ -447,6 +447,20 @@ sub _validate_multi_file {
 
 	# Cross-reference validation
 	$self->_validate_cross_references($parsed);
+
+	$self->_validate_embedded_genesis;
+}
+
+# }}}
+# _validate_embedded_genesis - every task runs the root's own genesis {{{
+sub _validate_embedded_genesis {
+	my ($self) = @_;
+	my $top = $self->{top} or return;
+	return if -x $top->path('.genesis/bin/genesis');
+	$self->_error(
+		"The deployment root has no .genesis/bin/genesis, which every pipeline ".
+		"task runs; run genesis embed in the root and commit it"
+	);
 }
 
 # }}}
@@ -699,6 +713,13 @@ Warnings are collected alongside errors and printed by
 C<Genesis::CI::Compiler::compile> immediately after C<validate> returns,
 each prefixed C<warning:>. Unlike errors they do not stop compilation, so
 a pipeline carrying warnings still compiles and can still be applied.
+
+=head2 The embedded genesis
+
+Every emitted task runs the deployment root's own C<.genesis/bin/genesis>
+(plumbing contract e7), so where the validator holds a C<Genesis::Top>, a
+.genesis/config pipeline whose root has no executable there is an error,
+naming C<genesis embed>.  The legacy format is not checked.
 
 =head1 SYNOPSIS
 
