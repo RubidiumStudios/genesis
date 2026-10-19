@@ -1433,8 +1433,6 @@ sub _task_config {
 		# it, and Service::BOSH keeps HTTPS_PROXY under it.
 		GENESIS_PIPELINE_TASK => 1,
 		CI_NO_REDACT     => $config->{unredacted} || 0,
-		CURRENT_ENV      => $env,
-		GIT_BRANCH       => $sc->{default_branch} || $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main',
 		GIT_AUTHOR_NAME  => ($sc->{commit_author} ? $sc->{commit_author}{name}  : undef)
 			|| 'Concourse Bot',
 		GIT_AUTHOR_EMAIL => ($sc->{commit_author} ? $sc->{commit_author}{email} : undef)
@@ -1445,6 +1443,9 @@ sub _task_config {
 	# Directory and mode vars addressed the retired ci-* commands' notion of
 	# an input/output/cache workspace.  The plain CLI has none of that.
 	unless ($cli) {
+		$params{CURRENT_ENV}          = $env;
+		$params{GIT_BRANCH}           = $sc->{default_branch}
+			|| $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main';
 		$params{PREVIOUS_ENV}         = $passed || '~';
 		$params{CACHE_DIR}            = "$alias-cache";
 		$params{OUT_DIR}              = 'out/git';

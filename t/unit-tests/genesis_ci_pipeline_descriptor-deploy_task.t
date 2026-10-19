@@ -148,10 +148,12 @@ subtest 'shim-era task params are gone' => sub {
 	# consumers outside the retired shim.  See the subtest below.
 	# BOSH_NON_INTERACTIVE is dropped because Genesis::Env sets it itself,
 	# and PREVIOUS_ENV because its only readers resolve .genesis/cached
-	# paths, which the branch model removes.
+	# paths, which the branch model removes.  CURRENT_ENV and GIT_BRANCH
+	# have no reader in the plain CLI (contract f7).
 	my @retired = qw(
 		WORKING_DIR OUT_DIR CACHE_DIR PREVIOUS_ENV
 		GIT_GENESIS_ROOT BOSH_NON_INTERACTIVE
+		CURRENT_ENV GIT_BRANCH
 	);
 	plan tests => scalar @retired;
 
@@ -163,16 +165,14 @@ subtest 'shim-era task params are gone' => sub {
 };
 
 subtest 'params the plain CLI still consumes are kept' => sub {
-	plan tests => 4;
+	plan tests => 2;
 
 	my $params = _deploy_step(_describe(_ast()), "deploy-$ENV_NAME")
 		->{config}{params};
 
-	is $params->{CURRENT_ENV}, $ENV_NAME,      'CURRENT_ENV survives';
 	is $params->{VAULT_ADDR}, 'https://vault.example.com',
 		'VAULT_ADDR survives for attach auto-provision';
 	ok exists $params->{CI_NO_REDACT},          'CI_NO_REDACT survives';
-	is $params->{GIT_BRANCH}, 'control',        'GIT_BRANCH survives';
 };
 
 subtest 'GENESIS_HONOR_ENV is not emitted, GENESIS_PIPELINE_TASK replacing it (T410)' => sub {
