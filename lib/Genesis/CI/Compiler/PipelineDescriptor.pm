@@ -149,7 +149,7 @@ sub describe {
 				my @group_jobs;
 				for my $member (@{$custom_groups->{$group_name}}) {
 					my $member_alias = $wf_data->{aliases}{$member} || $member;
-					push @group_jobs, "$member_alias-$deploy_type";
+					push @group_jobs, "deploy-$member_alias";
 					if (!$wf_data->{auto}{$member}) {
 						my $notify_name = "notify-$member_alias-$deploy_type-changes";
 						if ($group_notifications) {
@@ -354,7 +354,7 @@ sub description {
 			}
 			my $annot_str = @annot ? '  [' . join(', ', @annot) . ']' : '';
 
-			push @lines, sprintf("  %-20s %s-$deploy_type  [%s]%s%s",
+			push @lines, sprintf("  %-20s deploy-%s  [%s]%s%s",
 				$alias, $alias, $mode, $source, $annot_str);
 		}
 		push @lines, "";
@@ -691,7 +691,7 @@ sub _notify_job {
 	my $tagged = $config->{tagged};
 	my %to     = $tagged ? (tags => [$env]) : ();
 	my $passed = $trigger_from ? $wf_data->{aliases}{$trigger_from} : '';
-	my $passed_job = $passed ? "$passed-$deploy_type" : '';
+	my $passed_job = $passed ? "deploy-$passed" : '';
 
 	my @gets = ({ get => "$alias-changes", trigger => JSON::PP::true });
 	push @gets, { get => "$alias-cache", trigger => JSON::PP::true }
@@ -742,7 +742,7 @@ sub _deploy_job {
 	my $name       = $ast->metadata->{name} || 'genesis-pipeline';
 	my $trigger    = $is_auto ? JSON::PP::true : JSON::PP::false;
 	my $passed     = $trigger_from ? $wf_data->{aliases}{$trigger_from} : '';
-	my $passed_job = $passed ? "$passed-$deploy_type" : '';
+	my $passed_job = $passed ? "deploy-$passed" : '';
 	my $pass_cache  = $config->{'require-passed-caches'};
 	my $inline      = $self->notification_style($ast) eq 'per-env';
 
@@ -864,7 +864,7 @@ sub _deploy_job {
 	$plan_step->{do} = \@do;
 
 	return {
-		name   => "$alias-$deploy_type",
+		name   => "deploy-$alias",
 		public => JSON::PP::true,
 		serial => JSON::PP::true,
 		plan   => [$plan_step],
@@ -1965,6 +1965,10 @@ workflow graph is walked in, and the spelling of a secret reference are
 settled. This file asks that class for each of them rather than keeping
 its own answer, so a provider that spells one of them differently
 overrides it in one place and is obeyed here.
+
+Each environment's deploy job is named C<deploy-E<lt>aliasE<gt>>, and its
+redeploy job C<redeploy-E<lt>aliasE<gt>>, the alias defaulting to the
+environment's name (plumbing contract rows b1 and b3).
 
 =head1 SYNOPSIS
 

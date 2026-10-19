@@ -119,7 +119,7 @@ sub _deploy_step {
 subtest 'deploy task runs `genesis <env> deploy -SFy` from PATH' => sub {
 	plan tests => 3;
 
-	my $step = _deploy_step(_describe(_ast()), "$ENV_NAME-bosh");
+	my $step = _deploy_step(_describe(_ast()), "deploy-$ENV_NAME");
 	ok $step, 'deploy job has a bosh-deploy task';
 
 	is $step->{config}{run}{path}, 'genesis',
@@ -133,7 +133,7 @@ subtest 'deploy task run shape is independent of source_control root' => sub {
 
 	# Under the shim the binary path was derived from the repo root; with a
 	# PATH-resolved genesis the root must not leak into the run command.
-	my $step = _deploy_step(_describe(_ast(root => 'bosh')), "$ENV_NAME-bosh");
+	my $step = _deploy_step(_describe(_ast(root => 'bosh')), "deploy-$ENV_NAME");
 	is $step->{config}{run}{path}, 'genesis',
 		'a non-default repo root does not change the run path';
 };
@@ -154,7 +154,7 @@ subtest 'shim-era task params are gone' => sub {
 	);
 	plan tests => scalar @retired;
 
-	my $params = _deploy_step(_describe(_ast(root => 'bosh')), "$ENV_NAME-bosh")
+	my $params = _deploy_step(_describe(_ast(root => 'bosh')), "deploy-$ENV_NAME")
 		->{config}{params};
 
 	ok !exists $params->{$_}, "$_ is no longer passed to the deploy task"
@@ -164,7 +164,7 @@ subtest 'shim-era task params are gone' => sub {
 subtest 'params the plain CLI still consumes are kept' => sub {
 	plan tests => 4;
 
-	my $params = _deploy_step(_describe(_ast()), "$ENV_NAME-bosh")
+	my $params = _deploy_step(_describe(_ast()), "deploy-$ENV_NAME")
 		->{config}{params};
 
 	is $params->{CURRENT_ENV}, $ENV_NAME,      'CURRENT_ENV survives';
@@ -180,7 +180,7 @@ subtest 'GENESIS_HONOR_ENV is not emitted, GENESIS_PIPELINE_TASK replacing it (T
 	# D27 replaced it with GENESIS_PIPELINE_TASK, and its last consumer,
 	# Service::BOSH keeping HTTPS_PROXY, now reads that too, so a proxied
 	# network's pipeline still reaches its director (service_bosh-base.t).
-	my $params = _deploy_step(_describe(_ast()), "$ENV_NAME-bosh")
+	my $params = _deploy_step(_describe(_ast()), "deploy-$ENV_NAME")
 		->{config}{params};
 
 	ok !exists $params->{GENESIS_HONOR_ENV},
@@ -211,7 +211,7 @@ subtest 'the task says it is the pipeline running, not an operator' => sub {
 	# It is set in the task configuration every genesis task shares, so the
 	# notification job's show-changes task carries it as well.  This AST
 	# emits no such job, which is why only the deploy task is read.
-	my $params = _deploy_step(_describe(_ast()), "$ENV_NAME-bosh")
+	my $params = _deploy_step(_describe(_ast()), "deploy-$ENV_NAME")
 		->{config}{params};
 
 	ok $params->{GENESIS_PIPELINE_TASK},
@@ -225,7 +225,7 @@ subtest 'the task says it is the pipeline running, not an operator' => sub {
 subtest 'deploy task does not commit the repo back' => sub {
 	plan tests => 1;
 
-	my $step = _deploy_step(_describe(_ast()), "$ENV_NAME-bosh");
+	my $step = _deploy_step(_describe(_ast()), "deploy-$ENV_NAME");
 	ok !exists $step->{ensure},
 		'no ensure/put git -- exodus carries deploy state now';
 };
@@ -234,7 +234,7 @@ subtest 'no cache task is emitted' => sub {
 	plan tests => 1;
 
 	my @cache = grep { ref $_ eq 'HASH' && ($_->{task} || '') eq 'generate-cache' }
-		_plan_steps(_describe(_ast()), "$ENV_NAME-bosh");
+		_plan_steps(_describe(_ast()), "deploy-$ENV_NAME");
 	is scalar(@cache), 0, 'generate-cache task is gone';
 };
 
@@ -306,7 +306,7 @@ subtest 'the control branch is not a stage 1 deploy input' => sub {
 		'control-branch is deferred to stage 2, not carried unused';
 
 	my ($parallel) = grep { ref $_ eq 'HASH' && $_->{in_parallel} }
-		_plan_steps($pipeline, "$ENV_NAME-bosh");
+		_plan_steps($pipeline, "deploy-$ENV_NAME");
 	my @gets = map { $_->{get} // () } @{ $parallel->{in_parallel} || [] };
 	is_deeply [sort @gets], ["$ENV_NAME-branch"],
 		'the deploy job gets exactly one resource: its own branch';

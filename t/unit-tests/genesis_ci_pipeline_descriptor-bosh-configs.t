@@ -328,7 +328,7 @@ subtest 'Per-env superset overrides global subset' => sub {
 # =========================================================================
 subtest 'Auto env deploy job: bosh-config gets trigger when configured' => sub {
 	my $pl = _describe(_ast_for(auto => 1, track_bosh_configs => 1));
-	my @names = _get_names($pl, 'sandbox-deployment');
+	my @names = _get_names($pl, 'deploy-sandbox');
 
 	ok(grep({ $_ eq 'sandbox-cloud-config'   } @names), 'cloud-config get in auto deploy');
 	ok(grep({ $_ eq 'sandbox-runtime-config' } @names), 'runtime-config get in auto deploy');
@@ -336,7 +336,7 @@ subtest 'Auto env deploy job: bosh-config gets trigger when configured' => sub {
 
 subtest 'Auto env deploy job: no bosh-config gets when not configured' => sub {
 	my $pl = _describe(_ast_for(auto => 1));
-	my @names = _get_names($pl, 'sandbox-deployment');
+	my @names = _get_names($pl, 'deploy-sandbox');
 
 	ok(!grep({ $_ eq 'sandbox-cloud-config'   } @names), 'no cloud-config get');
 	ok(!grep({ $_ eq 'sandbox-runtime-config' } @names), 'no runtime-config get');
@@ -344,7 +344,7 @@ subtest 'Auto env deploy job: no bosh-config gets when not configured' => sub {
 
 subtest 'Auto env deploy job: subset [cloud] adds only cloud get' => sub {
 	my $pl = _describe(_ast_for(auto => 1, track_bosh_configs => ['cloud']));
-	my @names = _get_names($pl, 'sandbox-deployment');
+	my @names = _get_names($pl, 'deploy-sandbox');
 
 	ok(grep({ $_ eq 'sandbox-cloud-config' } @names),    'cloud-config get present');
 	ok(!grep({ $_ eq 'sandbox-runtime-config' } @names), 'runtime-config get absent');

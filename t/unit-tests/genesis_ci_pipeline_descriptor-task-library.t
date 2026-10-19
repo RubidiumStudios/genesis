@@ -139,11 +139,11 @@ subtest 'No task_library config: no tasks resource, no library input' => sub {
 	ok(!_find_resource($pl, 'tasks'),
 		'No tasks resource without task_library config');
 
-	my @gets = _deploy_gets($pl, 'sandbox-deployment');
+	my @gets = _deploy_gets($pl, 'deploy-sandbox');
 	ok(!grep({ ref $_ eq 'HASH' && ($_->{get} || '') eq 'tasks' } @gets),
 		'No tasks get step in deploy job without task_library config');
 
-	my @inputs = _task_inputs($pl, 'sandbox-deployment');
+	my @inputs = _task_inputs($pl, 'deploy-sandbox');
 	ok(!grep({ ref $_ eq 'HASH' && ($_->{name} || '') eq 'tasks' } @inputs),
 		'No tasks input in task config without task_library config');
 };
@@ -171,7 +171,7 @@ subtest 'task_library: deploy job fetches tasks resource' => sub {
 		uri => 'https://github.com/org/pipeline-tasks.git',
 	});
 	my $pl   = _describe($ast);
-	my @gets = _deploy_gets($pl, 'sandbox-deployment');
+	my @gets = _deploy_gets($pl, 'deploy-sandbox');
 
 	my ($tl_get) = grep { ref $_ eq 'HASH' && ($_->{get} || '') eq 'tasks' } @gets;
 	ok($tl_get,                       'tasks get step present in deploy job');
@@ -183,7 +183,7 @@ subtest 'task_library: task config receives tasks input' => sub {
 		uri => 'https://github.com/org/pipeline-tasks.git',
 	});
 	my $pl     = _describe($ast);
-	my @inputs = _task_inputs($pl, 'sandbox-deployment');
+	my @inputs = _task_inputs($pl, 'deploy-sandbox');
 
 	my ($tl_in) = grep { ref $_ eq 'HASH' && ($_->{name} || '') eq 'tasks' } @inputs;
 	ok($tl_in, 'tasks input present in task config');
@@ -202,11 +202,11 @@ subtest 'task_library: custom resource_name used throughout' => sub {
 	ok(_find_resource($pl, 'pipeline-tasks'), 'resource uses custom name');
 	ok(!_find_resource($pl, 'tasks'),         'default name not created');
 
-	my @gets = _deploy_gets($pl, 'sandbox-deployment');
+	my @gets = _deploy_gets($pl, 'deploy-sandbox');
 	my ($tl_get) = grep { ref $_ eq 'HASH' && ($_->{get} || '') eq 'pipeline-tasks' } @gets;
 	ok($tl_get, 'deploy job fetches pipeline-tasks');
 
-	my @inputs = _task_inputs($pl, 'sandbox-deployment');
+	my @inputs = _task_inputs($pl, 'deploy-sandbox');
 	my ($tl_in) = grep { ref $_ eq 'HASH' && ($_->{name} || '') eq 'pipeline-tasks' } @inputs;
 	ok($tl_in, 'task config input uses pipeline-tasks');
 };
@@ -219,7 +219,7 @@ subtest 'task_library without path: GENESIS_TASK_LIBRARY_PATH = resource_name' =
 		uri => 'https://github.com/org/tasks.git',
 	});
 	my $pl = _describe($ast);
-	my %p  = _task_params($pl, 'sandbox-deployment');
+	my %p  = _task_params($pl, 'deploy-sandbox');
 	is($p{GENESIS_TASK_LIBRARY_PATH}, 'tasks',
 		'GENESIS_TASK_LIBRARY_PATH is resource_name when no path set');
 };
@@ -230,7 +230,7 @@ subtest 'task_library with path: GENESIS_TASK_LIBRARY_PATH = resource_name/path'
 		path => 'tasks',
 	});
 	my $pl = _describe($ast);
-	my %p  = _task_params($pl, 'sandbox-deployment');
+	my %p  = _task_params($pl, 'deploy-sandbox');
 	is($p{GENESIS_TASK_LIBRARY_PATH}, 'tasks/tasks',
 		'GENESIS_TASK_LIBRARY_PATH includes subdirectory');
 };
@@ -242,7 +242,7 @@ subtest 'task_library with custom resource_name and path' => sub {
 		path          => 'ci/tasks',
 	});
 	my $pl = _describe($ast);
-	my %p  = _task_params($pl, 'sandbox-deployment');
+	my %p  = _task_params($pl, 'deploy-sandbox');
 	is($p{GENESIS_TASK_LIBRARY_PATH}, 'lib/ci/tasks',
 		'GENESIS_TASK_LIBRARY_PATH = resource_name/path');
 };
@@ -305,7 +305,7 @@ subtest 'task_library: token auth with explicit username' => sub {
 subtest 'No task_library: errand uses inline config' => sub {
 	my $ast = _ast_for(errands => ['smoke-tests']);
 	my $pl  = _describe($ast);
-	my ($step) = _errand_steps($pl, 'sandbox-deployment');
+	my ($step) = _errand_steps($pl, 'deploy-sandbox');
 
 	ok($step,                           'errand step present');
 	ok(exists $step->{config},          'inline config used without task_library');
@@ -318,7 +318,7 @@ subtest 'task_library: errand uses file reference resolved from library' => sub 
 		task_library => { uri => 'https://github.com/org/tasks.git' },
 	);
 	my $pl   = _describe($ast);
-	my ($step) = _errand_steps($pl, 'sandbox-deployment');
+	my ($step) = _errand_steps($pl, 'deploy-sandbox');
 
 	ok($step,                           'errand step present');
 	is($step->{file}, 'tasks/smoke-tests.yml',
@@ -332,7 +332,7 @@ subtest 'task_library with path: errand file includes subdirectory' => sub {
 		task_library => { uri => 'https://github.com/org/tasks.git', path => 'tasks' },
 	);
 	my $pl   = _describe($ast);
-	my ($step) = _errand_steps($pl, 'sandbox-deployment');
+	my ($step) = _errand_steps($pl, 'deploy-sandbox');
 
 	is($step->{file}, 'tasks/tasks/acceptance-tests.yml',
 		'file path is resource_name/path/errand-name.yml');
@@ -348,7 +348,7 @@ subtest 'task_library with custom resource_name: errand file uses resource_name'
 		},
 	);
 	my $pl   = _describe($ast);
-	my ($step) = _errand_steps($pl, 'sandbox-deployment');
+	my ($step) = _errand_steps($pl, 'deploy-sandbox');
 
 	is($step->{file}, 'pipeline-tasks/errands/validate.yml',
 		'file path uses custom resource_name and path');
@@ -360,7 +360,7 @@ subtest 'task_library: multiple errands each get their own file reference' => su
 		task_library => { uri => 'https://github.com/org/tasks.git', path => 'tasks' },
 	);
 	my $pl    = _describe($ast);
-	my @steps = _errand_steps($pl, 'sandbox-deployment');
+	my @steps = _errand_steps($pl, 'deploy-sandbox');
 
 	is(scalar @steps, 2, 'two errand steps emitted');
 	my %files = map { $_->{task} => $_->{file} } @steps;

@@ -177,7 +177,7 @@ subtest 'per-env style: notify jobs created and inlined with deploy' => sub {
 	my $nj = _find_job($pipeline, 'notify-sandbox-deployment-changes');
 	ok $nj, 'notify job created for non-auto env';
 
-	my $dj = _find_job($pipeline, 'sandbox-deployment');
+	my $dj = _find_job($pipeline, 'deploy-sandbox');
 	my $gets = $dj->{plan}[0]{do};
 	my ($par) = grep { ref $_ eq 'HASH' && $_->{in_parallel} } @$gets;
 	my ($changes_get) = grep { ($_->{get}||'') eq 'sandbox-branch' }
@@ -218,7 +218,7 @@ subtest 'grouped style: notify jobs in separate group, deploy gets changes direc
 		'notify job is in the notifications group';
 
 	# Deploy job must NOT depend on notify job (gets changes directly)
-	my $dj   = _find_job($pipeline, 'sandbox-deployment');
+	my $dj   = _find_job($pipeline, 'deploy-sandbox');
 	my $do   = $dj->{plan}[0]{do};
 	my ($par) = grep { ref $_ eq 'HASH' && $_->{in_parallel} } @$do;
 	my ($cg)  = grep { ($_->{get}||'') eq 'sandbox-branch' }
@@ -245,7 +245,7 @@ subtest 'minimal style: no notify jobs, only on_failure hook in deploy' => sub {
 	ok !_find_job($pipeline, 'notify-sandbox-deployment-changes'),
 		'no notify job for minimal style';
 
-	my $dj = _find_job($pipeline, 'sandbox-deployment');
+	my $dj = _find_job($pipeline, 'deploy-sandbox');
 	ok !_outcome_hook($dj, 'on_success'), 'no on_success hook for minimal style';
 	ok  _outcome_hook($dj, 'on_failure'), 'on_failure hook present for minimal style';
 
@@ -275,7 +275,7 @@ subtest 'none style: no slack resources, no notify jobs, no hooks' => sub {
 	ok !_find_rtype($pipeline, 'slack-notification'),
 		'no slack-notification resource type for none style';
 
-	my $dj = _find_job($pipeline, 'sandbox-deployment');
+	my $dj = _find_job($pipeline, 'deploy-sandbox');
 	ok !_outcome_hook($dj, 'on_success'), 'no on_success hook';
 	ok !_outcome_hook($dj, 'on_failure'), 'no on_failure hook';
 };
@@ -296,7 +296,7 @@ subtest 'mentions_on_failure prepended to failure notification text' => sub {
 	);
 	my $pipeline = _describe($ast);
 
-	my $dj       = _find_job($pipeline, 'prod-deployment');
+	my $dj       = _find_job($pipeline, 'deploy-prod');
 	my $on_fail  = _outcome_hook($dj, 'on_failure');
 	ok $on_fail, 'on_failure hook present';
 
@@ -354,7 +354,7 @@ subtest 'per_env_overrides: env uses its own channel and mentions' => sub {
 	is $prod_put->{params}{channel}, '#prod-alerts', 'prod uses override channel';
 
 	# Prod failure hook should have mentions
-	my $prod_dj   = _find_job($pipeline, 'prod-deployment');
+	my $prod_dj   = _find_job($pipeline, 'deploy-prod');
 	my $on_fail   = _outcome_hook($prod_dj, 'on_failure');
 	my $fail_put  = ref($on_fail) eq 'HASH' && $on_fail->{in_parallel}
 		? $on_fail->{in_parallel}[0] : $on_fail;
@@ -362,7 +362,7 @@ subtest 'per_env_overrides: env uses its own channel and mentions' => sub {
 	is   $fail_put->{params}{channel}, '#prod-alerts',  'prod failure uses override channel';
 
 	# Sandbox failure hook should NOT have mentions
-	my $sb_dj    = _find_job($pipeline, 'sandbox-deployment');
+	my $sb_dj    = _find_job($pipeline, 'deploy-sandbox');
 	my $sb_fail  = _outcome_hook($sb_dj, 'on_failure');
 	my $sf_put   = ref($sb_fail) eq 'HASH' && $sb_fail->{in_parallel}
 		? $sb_fail->{in_parallel}[0] : $sb_fail;
@@ -411,7 +411,7 @@ subtest 'Legacy notifications: inline maps to per-env (notify job with passed de
 	my $nj = _find_job($pipeline, 'notify-sandbox-deployment-changes');
 	ok $nj, 'notify job created for legacy inline style';
 
-	my $dj   = _find_job($pipeline, 'sandbox-deployment');
+	my $dj   = _find_job($pipeline, 'deploy-sandbox');
 	my $do   = $dj->{plan}[0]{do};
 	my ($par) = grep { ref $_ eq 'HASH' && $_->{in_parallel} } @$do;
 	my ($cg)  = grep { ($_->{get}||'') eq 'sandbox-branch' }
@@ -472,7 +472,7 @@ subtest 'minimal style: deploy job gets changes directly' => sub {
 	);
 	my $pipeline = _describe($ast);
 
-	my $dj   = _find_job($pipeline, 'sandbox-deployment');
+	my $dj   = _find_job($pipeline, 'deploy-sandbox');
 	my $do   = $dj->{plan}[0]{do};
 	my ($par) = grep { ref $_ eq 'HASH' && $_->{in_parallel} } @$do;
 	my ($cg)  = grep { ($_->{get}||'') eq 'sandbox-branch' }
