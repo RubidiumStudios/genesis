@@ -117,26 +117,26 @@ sub _deploy_step {
 # Deploy task invokes the plain Genesis CLI
 # =========================================================================
 
-subtest 'deploy task runs `genesis <env> deploy -SFy` from PATH' => sub {
-	plan tests => 3;
+subtest "deploy task runs the root's own genesis <env> deploy -SFy" => sub {
+	plan tests => 4;
 
 	my $step = _deploy_step(_describe(_ast()), "deploy-$ENV_NAME");
 	ok $step, 'deploy job has a bosh-deploy task';
 
-	is $step->{config}{run}{path}, 'genesis',
-		'task runs genesis from PATH, not a checked-out shim path';
+	is $step->{config}{run}{path}, '.genesis/bin/genesis',
+		'task runs the embedded genesis (contract e7)';
+	is $step->{config}{run}{dir}, "$ENV_NAME-branch",
+		'from the branch input, the root being the clone top (contract e6)';
 	is_deeply $step->{config}{run}{args}, [$ENV_NAME, 'deploy', '-SFy'],
 		'task invokes the env-first deploy form';
 };
 
-subtest 'deploy task run shape is independent of source_control root' => sub {
-	plan tests => 1;
+subtest 'a source_control root moves the working directory, not the path' => sub {
+	plan tests => 2;
 
-	# Under the shim the binary path was derived from the repo root; with a
-	# PATH-resolved genesis the root must not leak into the run command.
 	my $step = _deploy_step(_describe(_ast(root => 'bosh')), "deploy-$ENV_NAME");
-	is $step->{config}{run}{path}, 'genesis',
-		'a non-default repo root does not change the run path';
+	is $step->{config}{run}{dir}, "$ENV_NAME-branch/bosh", 'run.dir is the root in the input';
+	is $step->{config}{run}{path}, '.genesis/bin/genesis', 'run.path stays relative to it';
 };
 
 # =========================================================================

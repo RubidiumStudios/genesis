@@ -1407,7 +1407,7 @@ sub _task_config {
 	my $sc      = $ast->integrations->{source_control} || {};
 	my $vault   = $ast->integrations->{vault} || {};
 	my $root    = $sc->{root} || '.';
-	# Deploy tasks invoke the plain CLI resolved from PATH; the shim shape
+	# Deploy tasks run the root's embedded CLI from the root; the shim shape
 	# below survives only for the pre-deploy show-changes task.
 	my $cli     = $opts->{cli_args};
 	my $cmd     = $opts->{command} || 'ci-pipeline-deploy';
@@ -1499,7 +1499,8 @@ sub _task_config {
 		image_resource => { type => 'registry-image', source => $img_src },
 		params         => \%params,
 		run            => $cli
-			? { path => 'genesis', args => $cli }
+			? { path => '.genesis/bin/genesis', args => $cli,
+			    dir  => "$alias-branch" . ($root eq '.' ? '' : "/$root") }
 			: { path => "$bindir/.genesis/bin/genesis", args => [$cmd] },
 		inputs         => \@inputs,
 		# 'out' existed to stage the commit-back; exodus carries deploy
