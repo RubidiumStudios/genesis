@@ -2062,7 +2062,10 @@ sub _describe_topology {
 		my ($env, $indent) = @_;
 		my $node = $nodes->{$env};
 		my @flags;
-		push @flags, '#Y{manual}'     if $node->{manual};
+		# An automated provider deploys an environment on its branch unless it
+		# is manual (contract c1); under the manual provider nothing does.
+		push @flags, $node->{manual} ? '#Y{manual}' : '#G{automatic}'
+			if $node->{manual} || $provider_type ne 'manual';
 		push @flags, '#M{require_pr}' if $node->{require_pr};
 		my $flag_str = @flags ? '  (' . join(', ', @flags) . ')' : '';
 		output "%s#C{%s}%s", $indent, $env, $flag_str;

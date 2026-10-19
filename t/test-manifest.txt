@@ -466,6 +466,7 @@ integration-tests/genesis_ci_pullrequest-review_state.t       # what a reviewer 
 integration-tests/genesis_ci_pullrequest-seed.t               # the first pull request is the whole aggregate from E, and a branchless environment waits
 integration-tests/genesis_ci_pullrequest-title.t              # the marker in the pull request title, and which one a run acts on
 integration-tests/genesis_pipelines-describe_source_control.t  # the derived source-control values, and the tier each resolved from
+integration-tests/genesis_commands_pipelines-describe_modes.t  # the progression labels each environment automatic or manual under an automated provider
 integration-tests/genesis_ci_source_control-configured_remote.t # propagate and pipeline-status use the configured remote, never the first git remote
 integration-tests/genesis_commands_pipelines-graph.t          # pipeline-graph draws the chain control holds
 integration-tests/genesis_commands_pipelines-from.t           # --from previews a shape at a ref, validated as control's, and only the describing commands take it
