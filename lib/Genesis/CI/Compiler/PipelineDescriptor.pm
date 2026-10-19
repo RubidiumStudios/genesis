@@ -745,17 +745,9 @@ sub _deploy_job {
 	my $bindir = $srcdir;
 	$bindir .= "/$root" if $root ne '.';
 
-	# Resource gets
+	# The env's branch is the only input and the only trigger: it carries the
+	# env's files, and a tracked config change redeploys instead.
 	my @gets;
-	if (!$is_create_env && $is_auto) {
-		my %_bc_suffix = (cloud => 'cloud-config', runtime => 'runtime-config', cpi => 'cpi-config');
-		for my $type (@{$self->_bosh_config_types($ast, $env, $wf_data)}) {
-			push @gets, { get => "$alias-$_bc_suffix{$type}", %to, trigger => JSON::PP::true };
-		}
-	}
-	# The env's branch is the only input: it carries the env's files and its
-	# push is the trigger.  Upstream ordering moves to branch propagation
-	# rather than a passed cache resource.
 	if ($is_auto || !$inline) {
 		push @gets, { get => "$alias-branch", trigger => $trigger };
 	} else {
