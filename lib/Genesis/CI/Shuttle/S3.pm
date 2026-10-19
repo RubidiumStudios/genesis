@@ -19,7 +19,7 @@ sub options_schema {
 		region    => {type => 'string', description => 'The bucket region'},
 		endpoint  => {type => 'string', description => 'A non-default endpoint'},
 		auth      => {type => 'string', description => 'Vault reference for the credentials'},
-		image     => {type => 'string', default => 'cfcommunity/shuttle-resource', description => 'The resource image'},
+		image     => {type => 'string', default => 'klaue/shuttle-resource', description => 'The resource image'},
 		image_tag => {type => 'string', default => 'latest', description => 'The resource image tag'},
 	};
 }

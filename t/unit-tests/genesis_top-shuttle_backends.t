@@ -39,6 +39,16 @@ subtest 'an S3 shuttle carries both' => sub {
 		'and the bucket is still required under it';
 };
 
+subtest 'the S3 shuttle defaults to the resource that exists' => sub {
+	plan tests => 2;
+
+	# cfcommunity/shuttle-resource was never published; the resource is
+	# thomasmitchell/shuttle-resource, published as klaue/shuttle-resource.
+	my $schema = Genesis::CI::Shuttle::S3->options_schema;
+	is($schema->{image}{default}, 'klaue/shuttle-resource', 'the image');
+	is($schema->{image_tag}{default}, 'latest', 'and its tag');
+};
+
 subtest 'a backend nobody owns is refused by name' => sub {
 	plan tests => 1;
 
