@@ -152,10 +152,13 @@ sub _parse_genesis_config {
 		// ($self->{top} ? $self->{top}->type : undef);
 	$parsed{pipeline}{metadata}{name} = $name if defined $name;
 
-	# The repository-wide keys an emitted task reads, through their accessors.
+	# The repository-wide keys an emitted task reads, through their accessors,
+	# and the image it runs in, from the provider block (contract e8).
 	$parsed{pipeline}{configuration} = $self->{top} ? {
 		unredacted => $self->{top}->pipeline_unredacted,
 	} : {};
+	$parsed{pipeline}{configuration}{task} = {%{$parsed{provider}{task}}}
+		if ref($parsed{provider}{task}) eq 'HASH';
 
 	$parsed{_source_format} = 'genesis-config';
 	$parsed{_source_path}   = $self->{top}
