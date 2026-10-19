@@ -482,6 +482,7 @@ integration-tests/genesis_ci_compiler-credential_refs.t       # the compile emit
 integration-tests/genesis_ci_contract-stage1.t                # the dry apply's pipeline holds the plumbing contract's Stage 1 rows
 integration-tests/genesis_ci_contract-stage2.t                # and its control resource and one propagate job, Stage 2's
 integration-tests/genesis_ci_contract-stage3.t                # and each deploy's two lock pools, Stage 3's
+integration-tests/genesis_ci_contract-stage4.t                # and each deployment's _ran event on the shuttle, Stage 4's
 integration-tests/genesis_ci_compiler-schema_contract.t       # the compiler reads nothing the schema does not declare
 integration-tests/genesis_ci_compiler-declared_blocks.t       # every declared block the compiler uses reaches it
 integration-tests/branch_class-pre_deploy_refusal.t           # a pre-deploy command refuses off a deployment, pull request, or artifacts branch

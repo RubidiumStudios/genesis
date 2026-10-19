@@ -49,6 +49,9 @@ sub describe {
 		push @resources, $tlr;
 	}
 
+	# Each deployment's _ran event, which propagate triggers on
+	my @ran_names;
+
 	# Process each workflow
 	for my $wf_name (sort $ast->workflow_names) {
 		my $workflow = $ast->workflows->{$wf_name};
@@ -86,6 +89,11 @@ sub describe {
 				push @resources, grep {!$have{$_->{name}}} @{$self->_locker_resources(
 					$ast, $env, $alias, $deploy_type, $is_create_env, $wf_data
 				)};
+			}
+
+			if (my $ran = $self->_ran_resource($ast, $wf_data->{deployment_name}{$env})) {
+				push @resources, $ran;
+				push @ran_names, $ran->{name};
 			}
 
 			# Signal resource
@@ -210,7 +218,7 @@ sub describe {
 
 	# One propagate job per pipeline, on control (contract b2, c4).
 	push @resources, $self->_control_resource($ast);
-	push @jobs, $self->_propagate_job($ast);
+	push @jobs, $self->_propagate_job($ast, \@ran_names);
 	if (@groups) {
 		$groups[0]{jobs} = [sort @{$groups[0]{jobs}}, 'propagate'];
 	}
@@ -416,8 +424,16 @@ sub _resource_types {
 		}
 	}
 
-	# Shuttle resource type for deployment status signals
-	if (my $signal = $config->{status_signal}) {
+	# The shuttle every _ran event and request queue rides (contract a18)
+	if (my $shuttle = $ast->integrations->{shuttle}) {
+		push @types, {
+			name   => 'shuttle',
+			type   => 'registry-image',
+			source => { %rs,
+				repository => $prefix . ($shuttle->{image} || 'klaue/shuttle-resource'),
+				tag        => $shuttle->{image_tag} || 'latest' },
+		};
+	} elsif (my $signal = $config->{status_signal}) {
 		my $img = (ref $signal eq 'HASH' ? $signal->{image}     : undef)
 			|| 'cfcommunity/shuttle-resource';
 		my $tag = (ref $signal eq 'HASH' ? $signal->{image_tag} : undef)
@@ -455,15 +471,36 @@ sub _control_resource {
 }
 
 # }}}
+# _ran_resource - a deployment's _ran event on the shuttle, or undef without one {{{
+#
+# The resource's own keys only (contract a8, a9); auth names the vault path
+# holding both S3 credentials, under their own names.
+sub _ran_resource {
+	my ($self, $ast, $dn) = @_;
+	my $shuttle = $ast->integrations->{shuttle} or return;
+	return unless $dn;
+	my %source = (
+		bucket       => $shuttle->{bucket},
+		path         => "$dn/ran",
+		seed_version => JSON::PP::true,
+		(map {defined $shuttle->{$_} ? ($_ => $shuttle->{$_}) : ()} qw/region endpoint/),
+		($shuttle->{auth} ? (map {($_ => _unwrap_ref({secret_ref => "$shuttle->{auth}:$_"}))}
+			qw/access_key_id secret_access_key/) : ()),
+	);
+	return { name => "${dn}_ran", type => 'shuttle', icon => 'bullhorn', source => \%source };
+}
+
+# }}}
 # _propagate_job - the one job that runs genesis propagate {{{
 sub _propagate_job {
-	my ($self, $ast) = @_;
+	my ($self, $ast, $ran_names) = @_;
 	return {
 		name   => 'propagate',
 		public => JSON::PP::true,
 		serial => JSON::PP::true,
 		plan   => [
 			{ get => 'control-branch', trigger => JSON::PP::true },
+			(map {+{ get => $_, trigger => JSON::PP::true }} @{$ran_names || []}),
 			{ task => 'propagate', config => $self->_task_config($ast, undef, undef, undef, {},
 				{ cli_args => ['propagate'], input => 'control-branch' }) },
 		],
@@ -1075,6 +1112,12 @@ sub _outcome_hooks {
 			my $notif = $self->_notification_step($ast, $fail_msg,
 				{ env => $env, is_failure => 1 });
 			push @steps, @{$notif->{in_parallel}} if $notif;
+		}
+
+		# The deployment's _ran event, on success alone (contract d2, d6)
+		my $dn = $wf_data->{deployment_name}{$env};
+		if ($outcome eq 'success' && $dn && $ast->integrations->{shuttle}) {
+			push @steps, { put => "${dn}_ran", get_params => { skip => JSON::PP::true } };
 		}
 
 		# Signal: all four outcomes
@@ -1933,6 +1976,12 @@ C<E<lt>bosh_envE<gt>-bosh>, held with C<dont-upgrade-bosh-on-me>, and absent for
 a create-env environment.  ASTBuilder names both from the environment file,
 with no kit.  Every pool is one C<E<lt>poolE<gt>-lock> resource, however many
 jobs hold it, and the deploy is in C<serial_groups: [E<lt>dnE<gt>]>.
+
+Where C<pipeline.shuttle> is set, each deployment has a C<E<lt>dnE<gt>_ran>
+event, a C<shuttle> resource on the path C<E<lt>dnE<gt>/ran> with
+C<seed_version>.  The deploy puts it on success alone, with no params, and
+the propagate job triggers on every one (D23, D75).  C<auth> names the vault
+path holding the S3 C<access_key_id> and C<secret_access_key>.
 
 =head1 SYNOPSIS
 
