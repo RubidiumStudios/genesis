@@ -60,9 +60,7 @@ B<Examples:>
   my ($p, $why) = dry_pipeline($h);
   ok($p, 'the dry apply prints a pipeline') or diag($why);
 
-=head2 pipeline_job($p, $name)
-
-=head2 pipeline_resource($p, $name)
+=head2 pipeline_job($p, $name), pipeline_resource($p, $name)
 
 The job or resource of that name, or C<undef>.
 
