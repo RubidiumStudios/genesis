@@ -3,8 +3,8 @@
 # plumbing contract's Stage 1 rows, the environment's branch resource and its
 # deploy job.  Each row names the contract row it asserts (design/
 # plumbing-contract.md), so a contract row with no assertion here is visible.
-# The repository is a doomsday-type root in a doomsday/ subdirectory of its
-# clone, as a multi-root repository's is, with one environment, qa.
+# The repository is Harness::Contract's: a doomsday-type root in a doomsday/
+# subdirectory of its clone, with one environment, qa.
 use strict;
 use warnings;
 use utf8;
@@ -13,58 +13,20 @@ use lib 'lib';
 use lib 't';
 use helper;
 use Harness::Propagation;
+use Harness::Contract;
 
 use Test::More;
 
-use Genesis qw/load_yaml/;
 use Genesis::Exit;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
-my $ENV_NAME = 'qa';
-my $TYPE     = 'doomsday';
-my $ROOT     = 'doomsday';
-my $DN       = "$ENV_NAME-$TYPE";
+my $ENV_NAME = $Harness::Contract::ENV_NAME;
+my $TYPE     = $Harness::Contract::TYPE;
+my $ROOT     = $Harness::Contract::ROOT;
 
-# A pipeline-enabled Concourse repository with the embedded Genesis D68 runs.
-sub contract_harness {
-	my (%opts) = @_;
-	my $h = make_harness(envs => [$ENV_NAME], provider => 'concourse', vault => 0,
-		type => $TYPE, root => $ROOT, embed => !$opts{no_binary});
-	compilable_pipeline($h);
-	$h->set_repo_config($_, $opts{config}{$_}) for sort keys %{$opts{config} || {}};
-	write_env_file($h, $ENV_NAME, pipeline => $opts{pipeline}) if $opts{pipeline};
-	return $h;
-}
-
-# The dry apply's printed pipeline, read as data.
-sub dry_pipeline {
-	my ($h) = @_;
-	my ($out, $err, $exit) = run_genesis($h, {dir => $ROOT}, 'pipeline-apply', '--dry-run', '--skip-vault');
-	return (undef, "exit $exit: $err") unless $exit == 0;
-	my $p = eval {load_yaml($out)};
-	return ($p, $p ? '' : "not YAML: $@\n$out");
-}
-
-sub job      {my ($p, $name) = @_; (grep {$_->{name} eq $name} @{$p->{jobs} || []})[0]}
-sub resource {my ($p, $name) = @_; (grep {$_->{name} eq $name} @{$p->{resources} || []})[0]}
-
-# Every step of a job's plan, flattened through do, in_parallel and ensure.
-sub steps {
-	my ($node) = @_;
-	return () unless ref $node;
-	return map {steps($_)} @$node if ref $node eq 'ARRAY';
-	my @inner = map {steps($node->{$_})} grep {exists $node->{$_}} qw/plan do in_parallel ensure on_success on_failure/;
-	return ((grep {exists $node->{$_}} qw/get put task/) ? $node : (), @inner);
-}
-
-sub branch_resource {
-	my ($p) = @_;
-	(grep {($_->{type} // '') eq 'git' && ($_->{source}{branch} // '') ne ''
-		&& $_->{source}{branch} ne 'control'} @{$p->{resources} || []})[0];
-}
-sub deploy_task {my ($p) = @_; (grep {$_->{task}} steps(job($p, "deploy-$ENV_NAME")))[0]}
+sub deploy_job {my ($p) = @_; pipeline_job($p, "deploy-$ENV_NAME")}
 
 subtest 'Stage 1 rows over a default doomsday root' => sub {
 	my $h = contract_harness();
@@ -72,8 +34,8 @@ subtest 'Stage 1 rows over a default doomsday root' => sub {
 	ok($p, 'the dry apply prints a pipeline') or return diag($why);
 
 	my $br   = branch_resource($p) || {};
-	my $jb   = job($p, "deploy-$ENV_NAME");
-	my $task = deploy_task($p) || {};
+	my $jb   = deploy_job($p);
+	my $task = task_step($jb) || {};
 	my %env  = %{$task->{config}{params} || {}};
 	my $run  = $task->{config}{run} || {};
 
@@ -87,14 +49,14 @@ subtest 'Stage 1 rows over a default doomsday root' => sub {
 		or diag(join(', ', map {$_->{name}} @{$p->{jobs} || []}));
 	is($jb && $jb->{serial}, 1, 'b1: and is serial');
 
-	my @gets = grep {$_->{get}} steps($jb);
+	my @gets = grep {$_->{get}} plan_steps($jb);
 	my ($bget) = grep {$_->{get} eq ($br->{name} // '')} @gets;
 	is($bget && $bget->{trigger}, 1, 'c1: it triggers on its branch, manual being unset');
 	ok($bget && !exists $bget->{passed}, 'c2: with no passed constraint');
 	is(scalar(grep {$_->{trigger} && $_ != ($bget // {})} @gets), 0, 'c3: and on nothing else');
 
 	my @git = map {$_->{name}} grep {($_->{type} // '') eq 'git'} @{$p->{resources} || []};
-	is(scalar(grep {my $put = $_->{put}; $put && grep {$_ eq $put} @git} steps($jb)), 0,
+	is(scalar(grep {my $put = $_->{put}; $put && grep {$_ eq $put} @git} plan_steps($jb)), 0,
 		'd7: the deploy job puts to no git resource');
 
 	is_deeply($run->{args}, [$ENV_NAME, 'deploy', '-SFy'], 'e1: the task runs <env> deploy -SFy');
@@ -131,10 +93,10 @@ subtest 'Stage 1 rows the configuration changes' => sub {
 	ok($p, 'the dry apply prints a pipeline') or return diag($why);
 
 	my $br   = branch_resource($p) || {};
-	my $jb   = job($p, "deploy-$ENV_NAME");
-	my $task = deploy_task($p) || {};
+	my $jb   = deploy_job($p);
+	my $task = task_step($jb) || {};
 	my %env  = %{$task->{config}{params} || {}};
-	my ($bget) = grep {$_->{get} && $_->{get} eq ($br->{name} // '')} steps($jb);
+	my ($bget) = grep {$_->{get} && $_->{get} eq ($br->{name} // '')} plan_steps($jb);
 
 	is($bget && $bget->{trigger}, 0, 'c1: manual turns the branch trigger off');
 	ok(!grep({$_ eq '--recreate'} @{$task->{config}{run}{args} || []}),

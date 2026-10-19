@@ -1,0 +1,106 @@
+=head1 NAME
+
+Harness::Contract - readers of a dry apply's pipeline, for the plumbing contract
+
+=head1 SYNOPSIS
+
+  use lib 't';
+  use Harness::Propagation;
+  use Harness::Contract;
+
+  my $h = contract_harness(config => {'pipeline.unredacted' => 'true'});
+  my ($p, $why) = dry_pipeline($h);
+  my $job  = pipeline_job($p, 'deploy-qa');
+  my $task = task_step($job);
+
+=head1 DESCRIPTION
+
+The plumbing contract (studio C<design/plumbing-contract.md>) says, row by
+row, what the compiled Concourse pipeline must hold, and each stage's rows
+are asserted in their own C<t/integration-tests/genesis_ci_contract-*.t>.
+They all read the same thing, the pipeline C<genesis pipeline-apply
+--dry-run> prints, over the same repository, so the fixture and the readers
+live here once.
+
+The repository is a C<doomsday>-type root in a C<doomsday/> subdirectory of
+its clone, with one environment, C<qa>, on the Concourse provider, with
+C<pipeline.name> set and the root's embedded genesis in place. The names are
+C<$Harness::Contract::ENV_NAME>, C<$TYPE> and C<$ROOT>.
+
+=head1 FUNCTIONS
+
+=head2 contract_harness(%opts)
+
+Builds the repository. C<config> is a hash of C<.genesis/config> keys to set,
+C<pipeline> a hash of the environment's C<genesis.pipeline> keys, and
+C<no_binary> leaves C<.genesis/bin/genesis> out.
+
+B<Returns:> the L<Harness::Propagation> harness.
+
+B<Errors:> any of the harness's own.
+
+B<Examples:>
+
+  my $h = contract_harness(pipeline => {manual => 'true'});
+
+=head2 dry_pipeline($h)
+
+Runs C<pipeline-apply --dry-run --skip-vault> in the root and reads what it
+prints as YAML.
+
+B<Returns:> the pipeline and an empty string, or C<undef> and why: the exit
+and its standard error, or the YAML error and the output.
+
+B<Errors:> none; a failure is returned.
+
+B<Examples:>
+
+  my ($p, $why) = dry_pipeline($h);
+  ok($p, 'the dry apply prints a pipeline') or diag($why);
+
+=head2 pipeline_job($p, $name)
+
+=head2 pipeline_resource($p, $name)
+
+The job or resource of that name, or C<undef>.
+
+B<Errors:> none.
+
+B<Examples:>
+
+  my $job = pipeline_job($p, 'propagate');
+
+=head2 plan_steps($node)
+
+Every C<get>, C<put> and C<task> step under a job or plan, flattened through
+C<plan>, C<do>, C<in_parallel>, C<ensure>, C<on_success> and C<on_failure>.
+
+B<Returns:> the steps, in plan order.
+
+B<Errors:> none.
+
+B<Examples:>
+
+  my @gets = grep {$_->{get}} plan_steps($job);
+
+=head2 task_step($job)
+
+The job's first task step, or C<undef>.
+
+B<Errors:> none.
+
+B<Examples:>
+
+  my $run = task_step($job)->{config}{run};
+
+=head2 branch_resource($p)
+
+The environment's branch resource, C<qa-branch> (contract a1), or C<undef>.
+
+B<Errors:> none.
+
+B<Examples:>
+
+  is(branch_resource($p)->{source}{branch}, 'qa/doomsday');
+
+=cut
