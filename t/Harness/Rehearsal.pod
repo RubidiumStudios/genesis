@@ -1,0 +1,147 @@
+=head1 NAME
+
+Harness::Rehearsal - a stand-in for Concourse's scheduler, over a compiled pipeline
+
+=head1 SYNOPSIS
+
+  use lib 't';
+  use Harness::Propagation;
+  use Harness::Rehearsal;
+
+  my $r = rehearsal($h, $pipeline);       # what the dry apply printed, as data
+  # ... a control commit, published ...
+  $r->settle;                             # run what triggers, until nothing does
+  is_deeply([$r->jobs_run], ['propagate', 'deploy-qa']);
+
+=head1 DESCRIPTION
+
+The plumbing contract's rows prove a compiled pipeline holds the right
+links. A rehearsal proves a change flows through them, in every C<make test>
+and with no Concourse: it keeps a version for each resource, runs any job
+whose triggering input has a new one, and repeats until nothing triggers.
+
+=over 4
+
+=item Versions
+
+A git resource's version is its branch's tip on the harness's remote R. A
+shuttle resource's version is a counter, which every C<put> to it bumps.
+Locker resources have no versions; their puts take and release pools.
+
+=item Running a job
+
+Its plan is walked in order through C<do> and C<in_parallel>. A git C<get>
+is a fresh clone of its branch into the job's own work directory, under the
+input's name. A task runs its own C<run.path> in its C<run.dir> with its
+C<params>, through L<Harness::Propagation/run_task($h, %task)>, so the
+harness's BOSH and vault answer it. A task that fails stops the plan. The
+outcome hook, C<on_success> or C<on_failure>, is then put, and the
+C<ensure>. The versions the job's trigger gets fetched become what it has
+seen.
+
+=item Locks
+
+Pools are keyed as the locker resource keys them: one key at a time per
+pool, held by any number of holders of that key. A C<lock> put a pool cannot
+admit parks the job: what it took is released, as its C<ensure> would on an
+abort, its run is recorded as C<parked> with no task run, and it is not due
+again until that pool admits it. A rehearsal is serial, so contention comes
+from a hold a row places with C<hold>.
+
+=back
+
+The root must embed the real genesis, C<make_harness(embed =E<gt> 'real')>,
+and a run is capped (C<max>, default 20) so a pipeline that never comes to
+rest fails rather than spins.
+
+=head1 FUNCTIONS
+
+=head2 rehearsal($h, $pipeline, %opts)
+
+A rehearsal over C<$pipeline>, the compiled pipeline as data, with every
+job's triggers marked seen at their current versions, so only what changes
+afterwards triggers. C<max> caps the runs one C<settle> makes.
+
+B<Returns:> the rehearsal.
+
+B<Errors:> dies naming a resource the pipeline gets but does not declare.
+
+B<Examples:>
+
+  my $r = rehearsal($h, load_yaml($dry_apply_output));
+
+=head1 METHODS
+
+=head2 settle()
+
+Runs, one at a time and in pipeline order, each job that is due, until none
+is.
+
+B<Returns:> the rehearsal.
+
+B<Errors:> dies when still triggering after C<max> runs.
+
+B<Examples:>
+
+  $r->settle;
+
+=head2 jobs_run(), runs()
+
+C<jobs_run> is the names of the jobs that ran, in order, parked runs left
+out. C<runs> is every run, each a hash of C<job>, C<outcome> (C<success>,
+C<failure> or C<parked>), C<commands> (each with C<argv>, C<dir>, C<rc>,
+C<out> and C<err>), C<puts>, and C<parked_on> for a parked run.
+
+B<Errors:> none.
+
+B<Examples:>
+
+  my ($first) = $r->runs;
+  is_deeply($first->{commands}[0]{argv}, ['.genesis/bin/genesis', 'propagate']);
+
+=head2 version($resource)
+
+The resource's current version, as a job's C<get> would see it.
+
+B<Errors:> dies for a resource the pipeline does not declare, or a type
+with no versions.
+
+B<Examples:>
+
+  is($r->version('qa-doomsday_ran'), 1, 'one _ran put');
+
+=head2 hold($pool, $key, $by), release($pool, $key, $by), held()
+
+C<hold> takes a pool under a key for a holder, as a job outside the
+rehearsal would, and C<release> gives it back. Each returns the rehearsal.
+C<held> maps every held pool to its key, empty at rest.
+
+B<Errors:> C<hold> dies on a pool held under another key; C<release> dies
+when the holder holds no such key there.
+
+B<Examples:>
+
+  $r->hold('qa-bosh', 'i-need-to-deploy-myself', 'qa-bosh');
+  $r->settle;                       # deploy-qa parks
+  $r->release('qa-bosh', 'i-need-to-deploy-myself', 'qa-bosh')->settle;
+
+=head2 mark_seen()
+
+Marks every job's triggers seen at their current versions.
+
+B<Returns:> the rehearsal.
+
+B<Errors:> as C<version>.
+
+B<Examples:>
+
+  $r->mark_seen;   # what is there now is not new
+
+=head1 LIMITATIONS
+
+Jobs run one at a time, so two jobs never contend with each other; a row
+places the contending hold itself. A task's C<inputs> are not checked
+against its gets, and its outputs are not modelled, no emitted task having
+one. C<serial_groups> is not modelled, being moot when nothing overlaps.
+
+=cut
