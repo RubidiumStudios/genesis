@@ -207,6 +207,13 @@ sub describe {
 		}
 	}
 
+	# One propagate job per pipeline, on control (contract b2, c4).
+	push @resources, $self->_control_resource($ast);
+	push @jobs, $self->_propagate_job($ast);
+	if (@groups) {
+		$groups[0]{jobs} = [sort @{$groups[0]{jobs}}, 'propagate'];
+	}
+
 	# The control-branch resource only where a job uses it, decided by
 	# reference so it stays right as those jobs change.
 	my $referenced = _referenced_resources(\@jobs);
@@ -437,6 +444,29 @@ sub _git_resource {
 	$source->{version_depth} = $sc->{version_depth} if $sc->{version_depth};
 
 	return { name => 'git', type => 'git', icon => 'github', source => $source };
+}
+
+# }}}
+# _control_resource - the control branch propagate reads and triggers on {{{
+sub _control_resource {
+	my ($self, $ast) = @_;
+	return { %{$self->_git_resource($ast)}, name => 'control-branch' };
+}
+
+# }}}
+# _propagate_job - the one job that runs genesis propagate {{{
+sub _propagate_job {
+	my ($self, $ast) = @_;
+	return {
+		name   => 'propagate',
+		public => JSON::PP::true,
+		serial => JSON::PP::true,
+		plan   => [
+			{ get => 'control-branch', trigger => JSON::PP::true },
+			{ task => 'propagate', config => $self->_task_config($ast, undef, undef, undef, {},
+				{ cli_args => ['propagate'], input => 'control-branch' }) },
+		],
+	};
 }
 
 # }}}
@@ -1410,6 +1440,7 @@ sub _task_config {
 	# Deploy tasks run the root's embedded CLI from the root; the shim shape
 	# below survives only for the pre-deploy show-changes task.
 	my $cli     = $opts->{cli_args};
+	my $input   = $opts->{input} || ($cli ? "$alias-branch" : undef);
 	my $cmd     = $opts->{command} || 'ci-pipeline-deploy';
 	my $bindir  = $opts->{genesis_bindir} || 'git';
 	my $srcdir  = $opts->{genesis_srcdir} || 'git';
@@ -1477,9 +1508,9 @@ sub _task_config {
 	$params{GIT_GENESIS_ROOT} = $root if !$cli && $root ne '.';
 	$params{DEBUG}            = $config->{debug} if $config->{debug};
 
-	# A CLI deploy reads the env's own branch and nothing else; the branch
-	# is both the change trigger and the source of record.
-	my @inputs = $cli ? ({ name => "$alias-branch" }) : ({ name => "$alias-changes" });
+	# A CLI task reads one branch, the env's own for a deploy and control
+	# for propagate: its trigger and its source of record.
+	my @inputs = $cli ? ({ name => $input }) : ({ name => "$alias-changes" });
 	unless ($cli) {
 		push @inputs, { name => "$alias-cache" } if $passed;
 		push @inputs, { name => 'git' } unless $config->{'require-passed-caches'};
@@ -1501,7 +1532,7 @@ sub _task_config {
 		params         => \%params,
 		run            => $cli
 			? { path => '.genesis/bin/genesis', args => $cli,
-			    dir  => "$alias-branch" . ($root eq '.' ? '' : "/$root") }
+			    dir  => $input . ($root eq '.' ? '' : "/$root") }
 			: { path => "$bindir/.genesis/bin/genesis", args => [$cmd] },
 		inputs         => \@inputs,
 		# 'out' existed to stage the commit-back; exodus carries deploy
@@ -1957,7 +1988,9 @@ overrides it in one place and is obeyed here.
 
 Each environment's deploy job is named C<deploy-E<lt>aliasE<gt>>, and its
 redeploy job C<redeploy-E<lt>aliasE<gt>>, the alias defaulting to the
-environment's name (plumbing contract rows b1 and b3).
+environment's name (plumbing contract rows b1 and b3).  One C<propagate>
+job per pipeline runs C<genesis propagate> on the C<control-branch>
+resource, which triggers it (b2, c4).
 
 =head1 SYNOPSIS
 

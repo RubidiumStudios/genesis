@@ -286,19 +286,19 @@ subtest 'the old path-filtered changes resource is gone' => sub {
 		'<env>-changes resource is replaced by the env branch resource';
 };
 
-subtest 'the control branch is not a stage 1 deploy input' => sub {
+subtest 'the control branch is propagate input, not a deploy input' => sub {
 	plan tests => 3;
 
-	# The shared control-branch resource existed to supply the checkout the
-	# shim binary ran from.  With genesis resolved from PATH and repo content
-	# coming from the env branch, nothing in a stage 1 deploy job consumes it,
-	# so it is not emitted until stage 2 needs it for propagation.
+	# The shared control-branch resource once supplied the checkout the shim
+	# binary ran from.  A deploy now runs the env branch's own genesis on the
+	# env branch's content, so control is read by propagate alone (contract
+	# a5, e10).
 	my $pipeline = _describe(_ast());
 
 	ok !_resource($pipeline, 'git'),
 		'the bare git resource is gone';
-	ok !_resource($pipeline, 'control-branch'),
-		'control-branch is deferred to stage 2, not carried unused';
+	ok _resource($pipeline, 'control-branch'),
+		'control-branch is emitted, for propagate';
 
 	my ($parallel) = grep { ref $_ eq 'HASH' && $_->{in_parallel} }
 		_plan_steps($pipeline, "deploy-$ENV_NAME");
