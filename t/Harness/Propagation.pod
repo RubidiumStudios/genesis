@@ -1266,6 +1266,25 @@ here too and a leading hashref of its own is still read.  A row reaches for it
 where naming the copy outright reads better than a hashref would, as it does
 where a teammate's clone is the one running the command.
 
+=head2 run_task($h, %task)
+
+  my ($out, $err, $rc) = $h->run_task(
+    dir => "$work/qa-branch/doomsday", path => '.genesis/bin/genesis',
+    args => ['qa', 'deploy', '-SFy'], params => {GENESIS_PIPELINE_TASK => 1});
+
+Runs a compiled pipeline task's own command the way its worker would: the
+task's C<run.path>, relative to its C<run.dir>, with its C<args>, and its
+C<params> laid over the environment C<run_genesis> gives every command (the
+vault, the fixture BOSH, the fault plan). C<VAULT_ADDR> is dropped, the harness
+vault being C<SAFE_TARGET>'s. No W snapshot is taken, the task running in a
+checkout of its own rather than in a copy. For a rehearsal, the root's
+embedded genesis must be the real one, C<make_harness(embed =E<gt> 'real')>,
+which writes C<.genesis/bin/genesis> as an exec of the genesis under test.
+
+B<Returns:> the output, the standard error and the exit code.
+
+B<Errors:> none; a failure is returned.
+
 =head2 stand_on($h, $branch, %opts)
 
 Puts a copy on a branch, and optionally in a subdirectory of it.  Options are

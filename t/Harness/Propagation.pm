@@ -1100,8 +1100,10 @@ sub _embed_genesis {
 	my ($self, $root) = @_;
 
 	helper::mkdir_or_fail("$root/.genesis/bin") unless -d "$root/.genesis/bin";
-	helper::put_file("$root/.genesis/bin/genesis", 0755,
-		"#!/bin/sh\n# stands in for the genesis Top::embed writes\nexit 0\n");
+	# embed => 'real' runs the genesis under test, for a pipeline rehearsal.
+	helper::put_file("$root/.genesis/bin/genesis", 0755, ($self->{embed} // '') eq 'real'
+		? "#!/bin/sh\n# runs the genesis under test, as Top::embed's copy would\nexec \"\$GENESIS_TOPDIR/bin/genesis\" \"\$@\"\n"
+		: "#!/bin/sh\n# stands in for the genesis Top::embed writes\nexit 0\n");
 
 	return $self;
 }
@@ -3853,6 +3855,45 @@ sub run_genesis {
 	$dir .= "/$opts{dir}" if $opts{dir};
 
 	my $w = $self->snapshot_w(copy => $copy);
+	my %env = $self->_run_env(%opts);
+
+	helper::set_stdin(join("\n", @{$opts{answers}}, '')) if $opts{answers};
+	my ($out, $rc, $err) = run({
+			dir      => $dir,
+			env      => \%env,
+			stderr   => 0,
+			passfail => 0,
+		}, "$helper::TOPDIR/bin/genesis", @argv);
+	helper::reset_stdin if $opts{answers};
+
+	assert_w_restored($w, "working state is restored after `genesis @argv`")
+		if ($opts{restore} // 1);
+
+	return ($out, $err, $rc);
+}
+
+# }}}
+# run_task - run a pipeline task's own command, as its worker would {{{
+#
+# The task's run.path in its run.dir, with its params, over the environment
+# every harness run carries.  See Propagation.pod.
+sub run_task {
+	my ($self, %task) = @_;
+	my %env = ($self->_run_env, %{$task{params} || {}});
+	delete $env{VAULT_ADDR};  # the harness vault is SAFE_TARGET's
+	my ($out, $rc, $err) = run({
+			dir      => $task{dir},
+			env      => \%env,
+			stderr   => 0,
+			passfail => 0,
+		}, "$task{dir}/$task{path}", @{$task{args} || []});
+	return ($out, $err, $rc);
+}
+
+# }}}
+# _run_env - the environment a command under the harness runs with {{{
+sub _run_env {
+	my ($self, %opts) = @_;
 
 	# A command reads the vault, so it is started now if nothing has yet,
 	# unless the harness was built with it refused.
@@ -3906,19 +3947,7 @@ sub run_genesis {
 			'-MHarness::Propagation::Git', ($ENV{PERL5OPT} // ()));
 	}
 
-	helper::set_stdin(join("\n", @{$opts{answers}}, '')) if $opts{answers};
-	my ($out, $rc, $err) = run({
-			dir      => $dir,
-			env      => \%env,
-			stderr   => 0,
-			passfail => 0,
-		}, "$helper::TOPDIR/bin/genesis", @argv);
-	helper::reset_stdin if $opts{answers};
-
-	assert_w_restored($w, "working state is restored after `genesis @argv`")
-		if ($opts{restore} // 1);
-
-	return ($out, $err, $rc);
+	return %env;
 }
 
 # }}}
