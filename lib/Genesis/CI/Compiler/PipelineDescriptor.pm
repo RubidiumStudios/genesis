@@ -1975,8 +1975,9 @@ first steps of its plan, and releases them in reverse in its C<ensure>
 (D22).  Its own pool is its deployment name, C<E<lt>envE<gt>-E<lt>typeE<gt>>, held
 with C<i-need-to-deploy-myself>, and its director's is
 C<E<lt>bosh_envE<gt>-bosh>, held with C<dont-upgrade-bosh-on-me>, and absent for
-a create-env environment.  ASTBuilder names both from the environment file,
-with no kit.  Every pool is one C<E<lt>poolE<gt>-lock> resource, however many
+a create-env environment.  ASTBuilder names both from the environment,
+loaded from control with its kit: C<Env::use_create_env> and
+C<Env::bosh_env> (D22, noted 2026-10-19).  Every pool is one C<E<lt>poolE<gt>-lock> resource, however many
 jobs hold it, and the deploy is in C<serial_groups: [E<lt>dnE<gt>]>.
 
 Where C<pipeline.shuttle> is set, each deployment has a C<E<lt>dnE<gt>_ran>

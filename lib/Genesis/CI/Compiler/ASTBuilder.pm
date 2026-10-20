@@ -263,6 +263,7 @@ sub _build_from_multi_file {
 			|| $self->{env_dir}
 			|| ($self->{top} ? $self->{top}->path : '.');
 		my ($nodes, $edges) = $self->build_from_env_files($env_dir);
+		$self->_add_lock_pools($nodes);
 		$workflows = {
 			default => {
 				name     => 'default',
@@ -387,15 +388,19 @@ sub _build_workflow_graph {
 # }}}
 ### Env-File Topology Builder {{{
 
-# _director_pool - the lock pool of the director that deploys an environment {{{
+# _add_lock_pools - each node's own and director pools, the environment's answers {{{
 #
-# Read from the file, with no kit: a create-env environment has none, and
-# genesis.bosh_env (<name>[/<type>]...) defaults to the environment's name.
-sub _director_pool {
-	my ($env, $data) = @_;
-	return '' if _truthy($data->{_use_create_env});
-	my ($name, $type) = ($data->{_bosh_env} // $env) =~ m/^([^\/\@]+)(?:\/([^\@]+))?/;
-	return sprintf('%s-%s', $name, $type || 'bosh');
+# Loaded from control with its kit, as the legacy pipeline loaded it, so
+# create-env and the director are Env's own (D22, noted 2026-10-19).
+sub _add_lock_pools {
+	my ($self, $nodes) = @_;
+	my $top = $self->{top} or return;
+	for my $env (sort keys %$nodes) {
+		my $E = $top->control_env($env);
+		my ($name, $type) = $E->use_create_env ? () : $E->bosh_env;
+		$nodes->{$env}{deployment_name} = $E->deployment_name;
+		$nodes->{$env}{director_pool}   = $name ? sprintf('%s-%s', $name, $type || 'bosh') : '';
+	}
 }
 
 # }}}
@@ -421,7 +426,6 @@ sub build_from_env_files {
 		$genesis = {} unless ref($genesis) eq 'HASH';
 		my %data = ref($genesis->{pipeline}) eq 'HASH' ? %{$genesis->{pipeline}} : ();
 		$data{_bosh_env} = $genesis->{bosh_env} if defined $genesis->{bosh_env};
-		$data{_use_create_env} = $genesis->{use_create_env} if defined $genesis->{use_create_env};
 		$pipeline_data{$env} = \%data if %data;
 	}
 
@@ -459,8 +463,6 @@ sub build_from_env_files {
 			alias               => $env,
 			genesis_env         => $env,
 			branch              => $top->branch_for($env),
-			deployment_name     => sprintf('%s-%s', $env, $top->type),
-			director_pool       => _director_pool($env, $data),
 			auto                => _truthy($data->{manual}) ? 0 : 1,
 			type                => 'deployment',
 			require_pr          => _truthy($data->{require_pr}),

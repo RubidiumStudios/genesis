@@ -68,6 +68,30 @@ subtest 'a11: a create-env environment takes no director lock' => sub {
 	is_deeply([lock_steps(\@do, 'lock')], ["$DN-lock:i-need-to-deploy-myself"], 'and only its own lock');
 };
 
+# D22's note of 2026-10-19: create-env is the kit's answer.  A proto director
+# that never says use_create_env is create-env all the same, so it takes no
+# director lock, and in particular not its own pool under a second key.
+subtest 'a11: a director its kit makes create-env holds its own pool alone' => sub {
+	my $h = contract_harness(type => 'bosh', envs => ['mgmt'], kit => 't/src/kit-uce-allow',
+		env_files => {mgmt => "---\nkit:\n  name: dev\n  version: latest\n  features: [proto]\n"
+			. "genesis:\n  env: mgmt\n"});
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'the dry apply prints a pipeline') or return diag($why);
+
+	is_deeply([sort map {$_->{name}} grep {($_->{type} // '') eq 'locker'} @{$p->{resources} || []}],
+		['mgmt-bosh-lock'], 'its own pool');
+	is_deeply([lock_steps([plan_steps((pipeline_job($p, 'deploy-mgmt') || {})->{plan}[0]{do} || [])], 'lock')],
+		['mgmt-bosh-lock:i-need-to-deploy-myself'], 'held once, as its own, and never as its director');
+};
+
+subtest 'a root whose kit cannot be loaded is refused at compile' => sub {
+	my $h = contract_harness(kit => undef);
+	my ($out, $err, $exit) = run_genesis($h, {dir => $Harness::Contract::ROOT},
+		'pipeline-apply', '--dry-run', '--skip-vault');
+	isnt($exit, 0, 'the dry apply refuses');
+	like(unfolded($err), qr/\bdev\b.*\blatest\b|kit/i, 'naming the kit') or diag($err);
+};
+
 subtest "g2, g8: a director's pool is its own deploy's and its children's director lock" => sub {
 	my $h = contract_harness(type => 'bosh', envs => ['mgmt', 'lab'], env_genesis => {
 		mgmt => {use_create_env => 'true'},

@@ -7,7 +7,7 @@ use strict;
 use warnings;
 
 use Exporter qw/import/;
-use Genesis qw/load_yaml/;
+use Genesis qw/load_yaml run/;
 use Harness::Propagation;
 
 our @EXPORT = qw/
@@ -23,8 +23,15 @@ sub contract_harness {
 	my (%opts) = @_;
 	my $h = make_harness(envs => $opts{envs} || [$ENV_NAME], chained => $opts{chained},
 		provider => 'concourse', vault => 0,
-		type => $opts{type} || $TYPE, root => $ROOT, embed => !$opts{no_binary});
+		type => $opts{type} || $TYPE, root => $ROOT, embed => !$opts{no_binary},
+		kit => exists $opts{kit} ? $opts{kit} : 't/src/ops-blueprint');
 	compilable_pipeline($h);
+	for my $env (sort keys %{$opts{env_files} || {}}) {
+		helper::put_file($h->a."/$ROOT/$env.yml", $opts{env_files}{$env});
+		run({dir => $h->a}, 'git', 'add', '--', "$ROOT/$env.yml");
+		run({dir => $h->a, onfailure => "Failed to commit $env.yml"},
+			'git', 'commit', '-q', '-m', "write $env.yml");
+	}
 	$h->set_repo_config($_, $opts{config}{$_}) for sort keys %{$opts{config} || {}};
 	write_env_file($h, $ENV_NAME, pipeline => $opts{pipeline} || {}, genesis => $opts{genesis} || {})
 		if $opts{pipeline} || $opts{genesis};

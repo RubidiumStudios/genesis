@@ -786,7 +786,11 @@ sub make_harness {
 		# or wants no section at all, says so.
 		pipeline  => defined $opts{pipeline} ? $opts{pipeline} : 1,
 		source_control => $opts{source_control},
-		kit       => $opts{kit},
+		# An automated pipeline's compile loads each environment with its kit
+		# (D22, noted 2026-10-19), so such a repository carries one unless a
+		# row names its own or fixture_bosh brings one.
+		kit       => exists $opts{kit} ? $opts{kit}
+			: (($opts{provider} // 'manual') ne 'manual' && !$opts{bosh}) ? 't/src/ops-blueprint' : undef,
 		# An automated pipeline's tasks run the root's own genesis, and its
 		# compile refuses a root without one (contract e7).
 		embed     => $opts{embed} // (($opts{provider} // 'manual') ne 'manual'),

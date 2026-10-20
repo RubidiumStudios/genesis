@@ -36,8 +36,10 @@ C<pipeline> and C<genesis> hashes of C<qa>'s C<genesis.pipeline> and
 C<genesis> keys, and C<no_binary> leaves C<.genesis/bin/genesis> out.
 C<envs> names the environments in place of C<qa> alone, and C<chained>
 makes each the C<prior_env> of the next. C<env_genesis> maps an environment
-to the C<genesis> keys its file is written with, and C<type> replaces the
-deployment type C<doomsday>.
+to the C<genesis> keys its file is written with, C<env_files> maps one to a
+whole file body, and C<type> replaces the deployment type C<doomsday>. C<kit>
+names the kit the root carries, C<t/src/ops-blueprint> by default, the compile
+loading each environment with it; C<undef> leaves the root with none.
 
 B<Returns:> the L<Harness::Propagation> harness.
 

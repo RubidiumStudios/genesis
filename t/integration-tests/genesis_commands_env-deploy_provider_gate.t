@@ -101,7 +101,9 @@ subtest 'a deploy past the gate writes no shuttle event' => sub {
 	# Two rows, and one more for the run's own restoration assertion.
 	plan tests => 3;
 
-	my $h = gated_harness(provider => 'concourse');
+	# fixture_bosh brings the kit this deploy renders, so the default an
+	# automated harness carries is declined rather than left tracked beneath it.
+	my $h = gated_harness(provider => 'concourse', kit => undef);
 	# The three things a deploy has to reach before it finishes at all.
 	fixture_bosh($h);
 	my $spy = shuttle_spy($h);

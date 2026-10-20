@@ -591,7 +591,8 @@ subtest 'ASTBuilder - build_from_env_files: non-existent dir returns empty' => s
 };
 
 subtest 'ASTBuilder - env-files format: build() produces AST with workflow graph' => sub {
-	my $h = make_harness(envs => [qw/lab prod/], pipeline => 0, vault => 0);
+	# The build loads each environment with its kit for its lock pools.
+	my $h = make_harness(envs => [qw/lab prod/], pipeline => 0, vault => 0, kit => 't/src/ops-blueprint');
 	$h->write_env_file('lab',  pipeline => {require_pr => 'false'});
 	$h->write_env_file('prod', pipeline => {prior_env  => 'lab',
 	                                        require_pr => 'true'});
@@ -660,7 +661,8 @@ subtest 'ASTBuilder - legacy nodes enriched with gate flags from env files' => s
 };
 
 subtest 'ASTBuilder + PipelineDescriptor - end-to-end env-file mermaid gates' => sub {
-	my $h = make_harness(envs => [qw/lab prod/], pipeline => 0, vault => 0);
+	# The build loads each environment with its kit for its lock pools.
+	my $h = make_harness(envs => [qw/lab prod/], pipeline => 0, vault => 0, kit => 't/src/ops-blueprint');
 	$h->write_env_file('lab',  pipeline => {require_pr => 'false'});
 	$h->write_env_file('prod', pipeline => {prior_env  => 'lab',
 	                                        require_pr => 'true',
@@ -685,7 +687,7 @@ subtest 'PipelineDescriptor - env-file topology produces topological job order' 
 	# lab → nonprod → prod would sort the same way alphabetically, so the
 	# names here expose the difference: zoo → alpha → middle.
 	my $h = make_harness(envs => [qw/zoo alpha middle/],
-		pipeline => 0, vault => 0);
+		pipeline => 0, vault => 0, kit => 't/src/ops-blueprint');
 	$h->write_env_file('alpha',  pipeline => {prior_env => 'zoo'});
 	$h->write_env_file('middle', pipeline => {prior_env => 'alpha'});
 
