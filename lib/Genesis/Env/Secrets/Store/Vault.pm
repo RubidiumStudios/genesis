@@ -123,12 +123,14 @@ sub store_data {
 		my $canonical = sub {($_[0] // '') =~ s{/+}{/}gr =~ s{^/|/$}{}gr}; # as safe names a path
 		my $data;
 		while (@paths) {
-			my ($json, $rc, $err) = read_json_from($self->service->query(
+			# Decoded with bignums, so every typed path is seen, and each one is
+			# read again whole with safe get, as the vault readers do.
+			my ($json, $rc, $err) = read_json_from({allow_bignum => 1}, $self->service->query(
 				{stderr => 0, redact_output => 1, exact => 1},
 				'export', @paths
 			));
 			unless ($rc || $err) {
-				$data = Service::Vault::normalize_export($json);
+				$data = Service::Vault::flatten_export($json, $self->service);
 				last;
 			}
 			my ($reason, @absent) = $rc ? Service::Vault::read_failure($rc, $err) : ($err);

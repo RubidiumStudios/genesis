@@ -491,15 +491,13 @@ sub get_path {
 sub get_path_strict {
 	my ($self, $path) = @_;
 	$path =~ s{(^/*|/*$)}{}; # Trim preceeding and trailing / as safe doesn't honour it
-	my ($out,$rc,$err) = $self->query({stderr => 0, redact_output => 1, exact => 1}, 'export', $path);
-	my $data;
-	unless ($rc) {
-		local $@;
-		# Decoded with bignums, as decode_export_text decodes, so an integer
-		# too large for Perl is seen as a number rather than as its digits.
-		eval {$data = load_json($out, {allow_bignum => 1})};
-		$err = $@; # safe exited cleanly, so only an unparseable payload is an error
-	}
+	# Decoded with bignums, as decode_export_text decodes, so an integer too
+	# large for Perl is seen as a number rather than as its digits.  When safe
+	# exited cleanly, only an unparseable payload is an error.
+	my ($data,$rc,$err) = read_json_from(
+		{allow_bignum => 1},
+		$self->query({stderr => 0, redact_output => 1, exact => 1}, 'export', $path)
+	);
 	if ($rc || $err) {
 		my ($reason) = read_failure($rc, $err);
 		return undef unless defined($reason);
@@ -608,7 +606,7 @@ sub read_flattened_secret {
 # _unpack_path_export - nest the paths in a safe export under the path it was made for {{{
 sub _unpack_path_export {
 	my ($self, $path, $data) = @_;
-	$data = normalize_export($data) // {};
+	$data = flatten_export($data, $self) // {};
 	my $results = {};
 	for my $subpath (sort keys %$data) {
 		if ($subpath eq $path) {
@@ -645,6 +643,31 @@ sub decode_export_text {
 	};
 	my ($export, $typed) = _unwrap_export($data);
 	return wantarray ? ($export // {}, $typed) : $export // {};
+}
+
+# }}}
+# flatten_export - reduce a decoded safe export to {path => {key => string}}, reading each typed path again whole {{{
+sub flatten_export {
+	my ($data, $vault) = @_;
+	my ($export, $typed) = _unwrap_export($data);
+
+	# Genesis never turns a typed value into text itself, since the text Perl
+	# makes of a number or a boolean is not always the text safe shows.  safe
+	# get prints every value as safe 1.25.1 and 1.26.1 export it, so a path
+	# holding one is read again whole, and every field comes from that one read
+	# so the secret is never a mix of two moments.
+	for my $path (sort CORE::keys %$typed) {
+		my $secret = $vault->read_flattened_secret($path);
+		bail(
+			"Could not read #C{%s} from vault at #M{%s}: the export showed it holding ".
+			"a value that is not a string, but it held nothing when read again with ".
+			"#C{safe get}, so it changed while Genesis was reading it.  Run the ".
+			"command again.",
+			$path, $vault->{url} // 'the vault'
+		) unless defined($secret);
+		$export->{$path} = $secret;
+	}
+	return $export;
 }
 
 # }}}

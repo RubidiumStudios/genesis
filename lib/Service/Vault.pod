@@ -1024,7 +1024,7 @@ B<Examples:>
 
 Reads all secrets under C<$path> and all subpaths, returning a nested hash
 structure. Uses C<safe export> to retrieve the entire tree in a single JSON
-call, and reads every export version through L</normalize_export>.
+call, and reads every export version through L</flatten_export>.
 Automatically unflattens paths stored with the C<__flattened__> marker.
 
 It is L</get_path_strict> with an empty tree in place of C<undef>, so the two
@@ -1033,11 +1033,22 @@ apart in the same way. It returns the tree it read, and it returns C<{}> when
 C<safe> reports that nothing is stored at the path. Any other way the export
 can end dies naming the path. That covers a nonzero exit, a refusal, an
 unreachable or sealed vault, a C<safe> killed by a signal, and output that
-does not decode. A value under the path that is not a string dies too, as
-L</normalize_export> does, rather than read as an empty tree or as a
-converted string. The export is decoded with C<allow_bignum>, as
+does not decode.
+
+Every value in the tree is a string. A path that holds only strings keeps
+the strings the export gave it. A path holding any value that is not a
+string, such as the boolean C<path_style> in an ocfp blobstore config or a
+numeric C<pid> in a network lock, is read again whole with
+L</read_flattened_secret>, and every field of that path comes from that one
+read, so its values arrive as the text C<safe> 1.25.1 and 1.26.1 give for
+them. A typed secret that holds nothing when it is read again changed while
+Genesis was reading it, and that dies too. L</flatten_export> explains why
+Genesis never turns a typed value into text itself, and why one read is
+used for the whole secret. The export is decoded with C<allow_bignum>, as
 L</decode_export_text> decodes it, so an integer too large for Perl counts
-as a number and dies with the rest, where it used to pass as its digits.
+as a number and its path is read again, where it used to pass as its
+digits. With C<safe> 1.25.x and 1.26.1 the export is already flat, so there
+is nothing to read again and no extra C<safe get>.
 
 It used to return C<{}> for a failed read as well. An outage then looked
 like a path with nothing in it, so a pipeline C<--pull> whose predecessor's
@@ -1066,11 +1077,14 @@ B<Errors:>
 
 Raised by L</get_path_strict> when the export fails for any reason other
 than the path having nothing stored, or when its output cannot be parsed.
+Raised by L</read_flattened_secret>, naming the typed path, when reading a
+typed path again fails, and by L</flatten_export> when that read finds
+nothing stored.
 
 =item C<"Cannot use the safe export ...">
 
-Raised by L</normalize_export> when the export holds a value that is not a
-string, or is in a format it does not read.
+Raised by L</flatten_export> when the export is in a format it does not
+read.
 
 =back
 
@@ -1078,6 +1092,10 @@ B<Examples:>
 
   my $tree = $vault->get_path('secret/myapp');
   # Returns: { password => 'hunter2', db => { host => 'localhost' } }
+
+  my $tree = $vault->get_path('secret/config/ocfp-lab/mgmt');
+  # A blobstore stored with "path_style": true and "port": 9000 comes back
+  # as { bosh => { blobstores => { bosh => { path_style => 'true', port => '9000', ... } } }, ... }
 
   my $none = $vault->get_path('secret/never-written');
   # Returns: {}
@@ -1121,6 +1139,20 @@ C<forbidden> reads as absent when nothing is stored.
 
 The export runs with C<run>'s C<exact> option, so a C<safe> killed by a
 signal is a failed read rather than an exit of 0 with whatever it printed.
+It is decoded through C<read_json_from> with C<allow_bignum>, as
+L</decode_export_text> decodes, so an integer too large for Perl is seen as
+a number.
+
+Every value it returns is a string, as with L</get_path>. A path holding
+only strings keeps what the export gave it, and a path holding any value
+that is not a string is read again whole with L</read_flattened_secret>,
+which supplies every field of that path from its one read. Genesis never
+turns a typed value into text itself, so the text matches what C<safe>
+1.25.1 and 1.26.1 give on every C<safe> version, and the one read can't mix
+fields from two moments of a secret written again during the read. A typed
+secret that holds nothing when it is read again dies, since it changed
+while Genesis was reading it. With C<safe> 1.25.x and 1.26.1 the export is
+already flat, so they cost no extra read.
 
 Use it where a read that failed must not pass for an empty record, and where
 nothing stored must be told from a record with nothing in it.
@@ -1155,10 +1187,15 @@ token without read on the path, a sealed vault, or an unreachable vault) and
 to say to run C<safe export> on the path and C<safe vault status>. The text
 here is the start of it.
 
+The same message names a typed path when L</read_flattened_secret> cannot
+read it again, and when L</flatten_export> finds it holding nothing on that
+second read, in which case the reason says it changed while Genesis was
+reading it.
+
 =item C<"Cannot use the safe export ...">
 
-Raised by L</normalize_export> when the export holds a value that is not a
-string, or is in a format it does not read.
+Raised by L</flatten_export> when the export is in a format it does not
+read.
 
 =back
 
@@ -1432,7 +1469,7 @@ decodes the text first and asks about types afterwards misses that path.
 Genesis never turns a decoded number into text, so the decoder doesn't keep
 C<-0> or the exact digits a number was written with. A reader that needs
 the text of a typed value reads the path again with
-L</read_flattened_secret>.
+L</read_flattened_secret>, as L</flatten_export> does.
 
 B<Parameters:>
 
@@ -1485,6 +1522,103 @@ B<Examples:>
   Service::Vault::decode_export_text('{"secret/a":');
   # Dies: Cannot use the safe export: it is not JSON: ...
 
+=head2 flatten_export
+
+  my $export = Service::Vault::flatten_export($data, $vault);
+
+Reduces a decoded C<safe export> of any export version to the flat shape of
+version 1, a hash of full vault path to the key/value pairs stored there,
+with every value a string. It is how L</get_path>, L</get_path_strict>, and
+the secrets store's C<store_data> read an export. It is a function, not a
+method, so the store can pass it the vault it reads through.
+
+It unwraps the export with L</_unwrap_export>, the same code and checks and
+messages as L</decode_export_text> and L</normalize_export>. A path whose
+current version holds only strings keeps the strings the export gave it. A
+path holding any value that is not a string, which C<safe> 1.26.0 exports
+with its JSON type in export format 3, is read again whole with
+L</read_flattened_secret>, and the pairs that one read returns replace the
+export's copy of the path entirely. A typed path is read only once, however
+many of its keys are typed, and paths holding only strings are never read
+again.
+
+Genesis never turns a typed value into text itself. The text Perl makes of
+a number or a boolean is not always the text C<safe> shows for it, and
+C<safe get> prints every value as C<safe> 1.25.1 and 1.26.1 export it,
+booleans as C<true> or C<false>, C<null> as C<null>, numbers as Go prints a
+float64, and objects and lists as compact JSON with sorted keys and C<E<lt>>,
+C<E<gt>>, and C<&> escaped. Reading through C<safe get> gives the same text
+on every C<safe> version, which is why a typed value comes back as the same
+string whichever C<safe> is installed.
+
+Every field of a typed path comes from the one read, and nothing from the
+export's copy is kept. A secret written again between the export and the
+read therefore comes back wholly as it was at the read, never as a mix of
+fields from two moments. When that read finds nothing stored, the secret
+was deleted while Genesis was reading it, and this dies rather than read it
+as empty or fall back on the export's typed copy.
+
+With C<safe> 1.25.x and 1.26.1 the export is already flat, so no path is
+typed and no extra C<safe get> runs. With C<safe> 1.26.0, each typed path
+costs one C<safe get>.
+
+The data must be decoded with C<allow_bignum>, as C<read_json_from> decodes
+it when given that option, so an integer too large for Perl is seen as a
+number and its path is read again rather than passed on as its digits.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The decoded export, of any export version. It is not modified.
+
+=item C<$vault>
+
+The vault to read typed paths from, which is the one the export came from.
+Only its C<read_flattened_secret> method and its C<url> are used.
+
+=back
+
+B<Returns:> A new hash reference of full vault path to a hash of key to
+string, or C<undef> when C<$data> is C<undef>.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: the export showed it holding a value that is not a string, but it held nothing when read again ...">
+
+Raised (via C<bail()>) when a typed path holds nothing when it is read
+again, because it was deleted, or its newest version deleted or destroyed,
+since the export. The placeholders are the path and the vault URL. The
+message goes on to say to run the command again.
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised by L</read_flattened_secret> when reading a typed path again fails
+for any other reason, such as a refusal or an unreachable vault.
+
+=item Every format error that L</normalize_export> lists, except the typed value
+
+Raised when the export is in a format it does not know, or when a path or
+its value is not the shape an export gives it.
+
+=back
+
+B<Examples:>
+
+  my $export = Service::Vault::flatten_export(
+    load_json($safe_1_26_0_export, {allow_bignum => 1}), $vault
+  );
+  # A lock stored as {"pid": 3834038, "user": "ubuntu"} runs
+  # safe get secret/exodus/lab-mgmt/bosh/network-claim-lock, and comes back as
+  # { 'secret/exodus/lab-mgmt/bosh/network-claim-lock' => { pid => '3834038', user => 'ubuntu' } }
+
+  Service::Vault::flatten_export({'secret/a' => {k => 'v'}}, $vault);
+  # Returns: { 'secret/a' => { k => 'v' } }, and reads nothing more
+
 =head2 normalize_export
 
   my $export = Service::Vault::normalize_export($data);
@@ -1492,10 +1626,11 @@ B<Examples:>
 Reduces a decoded C<safe export> of any export version to the flat shape of
 version 1, a hash of full vault path to the key/value pairs stored there,
 with every value a string. It is the strict wrapper over
-L</decode_export_text>, kept for callers that already hold decoded data. It
-unwraps the export with the same code and the same checks and messages, and
-then refuses the first typed path that the decoder marks. It is a function,
-not a method.
+L</decode_export_text>, kept for callers that already hold decoded data and
+must refuse a typed value rather than read it again. The vault readers use
+L</flatten_export> instead. It unwraps the export with the same code and the
+same checks and messages, and then refuses the first typed path that the
+decoder marks. It is a function, not a method.
 
 C<safe> writes version 1, a bare object of path to key/value pairs, when
 every secret has one version and every value is a string. It writes version
@@ -3185,15 +3320,15 @@ and those are not read back.
 Nests the paths of a C<safe export> under the path the export was made for,
 for L</get_path> and L</get_path_strict>. The export is first reduced to a
 flat hash of full vault paths to the key/value pairs stored at each by
-L</normalize_export>, whatever its export version, and dies as that does on
-a value that is not a string. The pairs stored at
-C<$path> itself become the top level of the result, and the pairs at each
+L</flatten_export>, whatever its export version, so a path holding a value
+that is not a string is read again whole with C<safe get> and every value
+is a string. The pairs stored at C<$path> itself become the top level of the result, and the pairs at each
 subpath are placed under the keys named by the rest of its path. A path
 stored with the C<__flattened__> marker has the marker removed and is
 unflattened with C<Genesis::unflatten>.
 
 C<$data> itself is not modified, since the marker is deleted from the copies
-C<normalize_export> makes.
+C<flatten_export> makes.
 
 B<Parameters:>
 
@@ -3217,8 +3352,13 @@ B<Errors:>
 
 =item C<"Cannot use the safe export ...">
 
-Raised (via C<bail()>) by L</normalize_export> when the export holds a value
-that is not a string, or is in a format it does not read.
+Raised (via C<bail()>) by L</flatten_export> when the export is in a format
+it does not read.
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: ...">
+
+Raised by L</flatten_export> when a path holding a value that is not a
+string cannot be read again, or holds nothing when it is.
 
 =back
 
@@ -3238,7 +3378,9 @@ Unwraps a decoded C<safe export> of version 1, 2, or 3 into a hash of full
 vault path to the key/value pairs of its current version, and names the
 keys in each path that hold a value that is not a string. It is the one
 copy of the format checks, shared by L</decode_export_text>, which returns
-its result, and L</normalize_export>, which refuses any typed path it names.
+its result, L</flatten_export>, which reads each typed path it names again
+with C<safe get>, and L</normalize_export>, which refuses any typed path it
+names.
 It reads the formats as L</normalize_export> describes, keeps every value
 as it was decoded, and dies with the format errors listed there. It refuses
 no typed value itself.
@@ -3280,8 +3422,9 @@ B<Examples:>
 Checks that the value exported for one path is an object of key/value
 pairs, for L</_unwrap_export>, and returns a copy of the pairs with the keys
 whose values are not strings, as C<_export_value_type> judges them. It dies
-only when C<$value> is not a hash. A typed value is named, not refused, and
-L</normalize_export> is the one that refuses it.
+only when C<$value> is not a hash. A typed value is named, not refused.
+L</flatten_export> reads its path again, and L</normalize_export> refuses
+it.
 
 B<Parameters:>
 
@@ -3324,8 +3467,8 @@ B<Examples:>
   my $type = _export_value_type($value);
 
 Names the JSON type of a decoded value that is not a string, for
-L</decode_export_text> to mark its path and for L</normalize_export> to
-refuse it. A hash is an C<object>, an array is a C<list>, a
+L</decode_export_text> to mark its path, for L</flatten_export> to read the
+path again, and for L</normalize_export> to refuse it. A hash is an C<object>, an array is a C<list>, a
 C<JSON::PP::Boolean> is a C<boolean>, and C<undef> is C<null>. A
 C<Math::BigInt> or a C<Math::BigFloat> is a C<number>, because that is how
 C<allow_bignum> decodes an integer too large for Perl and every number with

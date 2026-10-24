@@ -1604,11 +1604,18 @@ B<Examples:>
 
     my $data = read_json_from($out, $rc, $err);
     my ($data, $rc, $err) = read_json_from($out, $rc, $err);
+    my $data = read_json_from(\%opts, $out, $rc, $err);
 
 Parses C<$out> as JSON and returns the decoded structure. Designed to wrap
 C<run()>:
 
     my $data = read_json_from(run('kubectl get pods -o json'));
+
+A hash reference given first holds options passed on to C<load_json>, such
+as C<allow_bignum>. The vault readers pass C<{allow_bignum =E<gt> 1}> when they
+decode a C<safe export>, so an integer too large for Perl is kept as a
+number rather than read as its digits, and its path is read again with
+C<safe get>. Without the hash, the output is decoded as before.
 
 In scalar context, calls C<bail> with the JSON parse error if C<$out> is not valid JSON
 (and C<$rc> is zero). In list context, returns the data (possibly C<undef>),
@@ -1617,6 +1624,11 @@ the original C<$rc>, and any error message encountered during parsing.
 B<Parameters:>
 
 =over 4
+
+=item C<\%opts>
+
+Optional. When the first argument is a hash reference, it is taken as the
+options for C<load_json>, and the rest of the arguments shift along.
 
 =item C<$out>
 
@@ -1648,6 +1660,12 @@ B<Examples:>
     # List context -- caller handles errors
     my ($data, $rc, $err) = read_json_from(run({ stderr => 0 }, 'safe get secret/foo'));
     # Returns: (hashref, 0, '') on success; (undef, $rc, $err) on failure
+
+    # With options for load_json
+    my ($export, $rc, $err) = read_json_from({allow_bignum => 1},
+      run({ stderr => 0 }, 'safe export secret/foo'));
+    # Returns: (hashref, 0, '') on success, with any number too large for
+    # Perl as a Math::BigInt
 
 =head2 curl
 

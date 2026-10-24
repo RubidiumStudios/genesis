@@ -461,6 +461,52 @@ EOF
 		'user_provided_bosh_creds_policy accepts explicit "ignore" from top config');
 };
 
+subtest 'user_provided_bosh_creds_policy reads a config whose blobstore has a boolean path_style' => sub {
+	plan tests => 4;
+
+	my $top = make_top(name => 'thing', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+	put_file($top->path('lab-mgmt.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+  features: [ocfp]
+genesis:
+  env: lab-mgmt
+ocfp:
+  bloc: ocfp-lab-wayneeseguin
+EOF
+	my $env = $top->load_env('lab-mgmt');
+	ok($env->is_ocfp, 'the env is an ocfp env');
+
+	# The config export in the shape safe 1.26.0 writes, with the blobstore's
+	# path_style a JSON boolean and its port a number, and what safe 1.26.0
+	# prints for a safe get of that blobstore.
+	my $base = 'secret/config/ocfp-lab-wayneeseguin/mgmt';
+	my $dir = workdir('ocfp-config');
+	put_file("$dir/export.json", qq([{"export_version":3,"data":{"$base/bosh/blobstores/bosh":{"first":2,"versions":[{"value":{"bucket":"bosh","endpoint":"https://s3.lab:9000","host":"s3.lab","path_style":true,"port":9000,"region":"us-east-1"}}]},"$base/policies":{"versions":[{"value":{"user_provided_bosh_creds":"allow"}}]}},"requires_versioning":{}}]));
+	put_file("$dir/get.yml", qq(--- # $base/bosh/blobstores/bosh\nbucket: bosh\nendpoint: https://s3.lab:9000\nhost: s3.lab\npath_style: "true"\nport: "9000"\nregion: us-east-1\n\n));
+
+	require Service::Vault;
+	my $vault = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
+	no warnings 'redefine';
+	local *Genesis::Env::vault = sub { $vault };
+	use warnings 'redefine';
+	local $ENV{PATH} = fake_safe_path(join("\n",
+		qq{echo "\$*" >> '$dir/calls'},
+		qq{[ "\$1" = export ] && [ "\$2" = '$base' ] && exec cat '$dir/export.json'},
+		qq{[ "\$1" = get ] && [ "\$2" = '$base/bosh/blobstores/bosh' ] && exec cat '$dir/get.yml'},
+		'exit 1',
+	));
+
+	is($env->user_provided_bosh_creds_policy, 'allow', 'the policy beside the blobstore reads as allow');
+	is($env->ocfp_config_lookup('bosh.blobstores.bosh.path_style'), 'true',
+		'and the boolean path_style comes back as the text safe prints for it');
+	is(get_file("$dir/calls"), "export $base\nget $base/bosh/blobstores/bosh\n",
+		'after the config export and one safe get, of the blobstore');
+};
+
 subtest 'minimum_genesis_version' => sub {
 	plan tests => 9;
 
@@ -1201,6 +1247,6 @@ subtest 'a successful terminate stops when the exodus secret cannot be read' => 
 	ok(!grep({/^(?:rm|set)\b/ || /\s--\s/} @calls), 'and nothing was removed or written');
 };
 
-done_testing;  # 22 subtests + 4 use_ok calls = 26 tests total
+done_testing;  # 23 subtests + 4 use_ok calls = 27 tests total
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

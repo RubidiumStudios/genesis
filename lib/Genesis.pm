@@ -835,11 +835,12 @@ sub lines {
 }
 
 sub read_json_from {
+	my $opts = ref($_[0]) eq 'HASH' ? shift : undef; # load_json's options, such as allow_bignum
 	my ($out, $rc, $err) = @_;
 	local $@;
 	my $json;
 	unless ($rc) {
-		eval {$json = load_json($out)};
+		eval {$json = load_json($out, $opts)};
 		$err = $@; # previous error was non-fatal, so override
 	}
 	return ($json,$rc,$err) if (wantarray);

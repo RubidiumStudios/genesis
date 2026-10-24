@@ -1,0 +1,11 @@
+--- # secret/fixture/escaping
+config: "{\"a\":\"x\",\"b\":[1,2],\"tag\":\"\\u003ca\\u0026b\\u003e\"}"
+controls: "{\"bs\":\"g\\bh\",\"line\":\"a\\u2028b\",\"para\":\"c\\u2029d\",\"soh\":\"e\\u0001f\"}"
+count: "12345678901234567000"
+enabled: "false"
+list: "[\"p\",{\"q\":1}]"
+nothing: "null"
+password: old
+ratio: "0.5"
+tag: <a&b>
+

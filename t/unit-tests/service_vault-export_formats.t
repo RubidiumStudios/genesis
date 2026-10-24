@@ -215,17 +215,24 @@ subtest 'decode_export_text refuses a format it does not know, or text that does
 		qr/Cannot\s+use\s+the\s+safe\s+export:\s+it\s+is\s+not\s+JSON/s, 'and so does no text at all';
 };
 
-subtest 'get_path refuses an integer too large for Perl until typed reads land' => sub {
-	plan tests => 2;
+subtest 'get_path reads a path holding an integer too large for Perl again with safe get' => sub {
+	plan tests => 3;
 	my $v = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
 	my $text = versioned(3, '{"secret/myapp/db":{"versions":[{"value":{"host":"localhost","port":'.$HUGE.'}}]}}');
+	my @gets;
 	no warnings 'redefine';
-	local *Service::Vault::query = sub { return ($text, 0, '') };
+	local *Service::Vault::query = sub {
+		my (undef, undef, $cmd, $path) = @_;
+		return ($text, 0, '') if $cmd eq 'export';
+		push @gets, $path;
+		return (qq{--- # $path\nhost: localhost\nport: "1e+42"\n\n}, 0, '');
+	};
 	use warnings 'redefine';
-	throws_ok { $v->get_path('/secret/myapp') } qr{secret/myapp/db.*\bport\b.*typed.*JSON\s+number}s,
-		'get_path decodes the raw export text and sees the number';
-	throws_ok { $v->get_path_strict('/secret/myapp') } qr{secret/myapp/db.*\bport\b.*typed.*JSON\s+number}s,
-		'and so does get_path_strict';
+	is_deeply($v->get_path('/secret/myapp'), {db => {host => 'localhost', port => '1e+42'}},
+		'get_path decodes the raw export text, sees the number, and takes the path from safe get');
+	is_deeply($v->get_path_strict('/secret/myapp'), {db => {host => 'localhost', port => '1e+42'}},
+		'and so does get_path_strict');
+	is_deeply(\@gets, ['secret/myapp/db', 'secret/myapp/db'], 'each reading that one path again');
 };
 
 subtest 'normalize_export already refuses 12345678901234567890 as a number' => sub {
@@ -264,12 +271,14 @@ subtest 'get_path and get_path_strict read every export version' => sub {
 
 	my $typed = versioned(3, '{"secret/myapp/db":{"versions":[{"value":{"port":5432}}]}}');
 	no warnings 'redefine';
-	local *Service::Vault::query = sub { return ($typed, 0, '') };
+	local *Service::Vault::query = sub {
+		return $_[2] eq 'export' ? ($typed, 0, '') : (qq{--- # $_[3]\nport: "5432"\n\n}, 0, '');
+	};
 	use warnings 'redefine';
-	throws_ok { $v->get_path('/secret/myapp') } qr{secret/myapp/db.*\bport\b.*typed}s,
-		'get_path dies on a typed value rather than returning it';
-	throws_ok { $v->get_path_strict('/secret/myapp') } qr{secret/myapp/db.*\bport\b.*typed}s,
-		'and so does get_path_strict';
+	is_deeply($v->get_path('/secret/myapp'), {db => {port => '5432'}},
+		'get_path reads a typed value as the text safe get prints, rather than dying');
+	is_deeply($v->get_path_strict('/secret/myapp'), {db => {port => '5432'}},
+		'and so does get_path_strict');
 };
 
 {
@@ -297,13 +306,15 @@ subtest 'store_data reads every export version' => sub {
 	my $typed = versioned(3, '{"secret/myapp":{"versions":[{"value":{"ca":{"pem":"x"}}}]}}');
 	my $store = Genesis::Env::Secrets::Store::Vault->new(
 		ExportMockEnv->new,
-		service => Mock->new(query => sub { ($typed, 0, '') }),
+		service => Mock->new(
+			query                => sub { ($typed, 0, '') },
+			read_flattened_secret => sub { {ca => '{"pem":"x"}'} },
+		),
 		mount_override => '/secret/',
-			slug_override  => 'myapp',
+		slug_override  => 'myapp',
 	);
-	throws_ok { $store->store_data } qr{secret/myapp.*\bca\b.*typed.*JSON\s+object}s,
-		'store_data dies on a typed value';
-	ok(!exists $store->{__data}, 'and caches nothing');
+	is_deeply($store->store_data, {'secret/myapp' => {ca => '{"pem":"x"}'}},
+		'store_data reads a typed value as the text safe get prints, rather than dying');
 };
 
 subtest 'pipeline callers of get_path surface an export error' => sub {
@@ -352,16 +363,18 @@ sub safe_answers {
 
 # A stand-in for the safe binary itself, so run() and the reader see a real
 # child process exactly as they would with safe, but with no vault behind it.
-# Each one logs its arguments, one per line, to the file named by args_file.
+# Each one logs its last arguments, one per line, to the file args, and every
+# call it was given, one per line, to the file calls.
 my $FAKE_SAFE = 0;
 sub fake_safe {
 	my ($body) = @_;
 	my $dir = workdir('fake-safe-'.++$FAKE_SAFE);
-	put_file("$dir/safe", "#!/bin/bash\nprintf '%s\\n' \"\$@\" > '$dir/args'\n$body\n");
+	put_file("$dir/safe", "#!/bin/bash\nprintf '%s\\n' \"\$@\" > '$dir/args'\necho \"\$*\" >> '$dir/calls'\n$body\n");
 	chmod(0755, "$dir/safe");
 	return $dir;
 }
 sub args_of { my $args = get_file("$_[0]/args"); [split /\n/, $args] }
+sub calls_of { [split /\n/, get_file("$_[0]/calls")] }
 
 subtest 'get_path dies when the export exits nonzero' => sub {
 	plan tests => 2;
@@ -690,6 +703,220 @@ subtest 'get reads a trailing ^N as a version, and the strict read takes it as p
 	is_deeply(args_of($dir), ['get', 'secret/app\\^2'], 'read_flattened_secret escapes the caret, so it names the literal path');
 	$v->read_flattened_secret('secret/app^2', versioned => 1);
 	is_deeply(args_of($dir), ['get', 'secret/app^2'], 'unless it is asked to read versions as get does');
+};
+
+# ---------------------------------------------------------------------------
+# Typed secrets, read again whole with safe get
+# ---------------------------------------------------------------------------
+
+# The same exodus as $EXODUS_KV2 on a kv v1 mount, where no secret has a
+# first field.
+my $EXODUS_KV1 = $EXODUS_KV2 =~ s/"first":\d+,//gr;
+my $EXODUS = 'secret/exodus/lab-mgmt/bosh';
+my %EXODUS_STRINGS = (
+	ca_cert => "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
+	url     => 'https://10.108.16.4:25555',
+);
+
+# What safe 1.26.0 prints for a safe get of each typed secret below, made by
+# safe's own read path and encoder from the v1.26.0 tag, as the files under
+# t/src/safe are.
+my $LOCK_GET = qq{--- # $LOCK\nat: "2026-10-24 12:09:14 +0000"\nenv: lab-mgmt\nhostname: bastion\npid: "3834038"\ntoken: 6f1c2a9e\nuser: ubuntu\n\n};
+my %LOCK_STRINGS = (
+	at => '2026-10-24 12:09:14 +0000', env => 'lab-mgmt', hostname => 'bastion',
+	pid => '3834038', token => '6f1c2a9e', user => 'ubuntu',
+);
+
+# A query that answers safe export with $export and safe get of a path with
+# what %gets holds for it, which is safe's output, or [out, rc, stderr] for
+# a get that fails.  A path it holds nothing for is absent.  Every command it
+# is given is logged to the list it returns.
+sub typed_safe {
+	my ($export, %gets) = @_;
+	my @calls;
+	my $query = sub {
+		my (undef, $opts, @cmd) = @_;
+		push @calls, [@cmd];
+		return safe_answers($export, 0, '')->(undef, $opts) if $cmd[0] eq 'export';
+		my $got = $gets{$cmd[1]};
+		return safe_answers(@$got)->(undef, $opts) if ref($got) eq 'ARRAY';
+		return safe_answers($got, 0, '')->(undef, $opts) if defined($got);
+		return safe_answers('', 1, absent($cmd[1]))->(undef, $opts);
+	};
+	return ($query, \@calls);
+}
+
+subtest 'get_path takes a typed secret whole from safe get' => sub {
+	plan tests => 3;
+	my ($query, $calls) = typed_safe($EXODUS_KV2, $LOCK => $LOCK_GET);
+	no warnings 'redefine';
+	local *Service::Vault::query = $query;
+	use warnings 'redefine';
+	my $tree = test_vault()->get_path("/$EXODUS");
+	is_deeply($tree, {%EXODUS_STRINGS, 'network-claim-lock' => \%LOCK_STRINGS},
+		'the lock comes back with its pid as the string 3834038, beside the exodus strings');
+	is(value_type($tree->{'network-claim-lock'}{pid}), 'string', 'and the pid is a Perl string');
+	is_deeply($calls, [['export', $EXODUS], ['get', $LOCK]],
+		'after exactly one safe get, of the lock, and none of the exodus, which holds only strings');
+};
+
+subtest 'get_path_strict takes a typed secret whole from safe get' => sub {
+	plan tests => 2;
+	my ($query, $calls) = typed_safe($EXODUS_KV1, $LOCK => $LOCK_GET);
+	no warnings 'redefine';
+	local *Service::Vault::query = $query;
+	use warnings 'redefine';
+	is_deeply(test_vault()->get_path_strict("/$EXODUS"), {%EXODUS_STRINGS, 'network-claim-lock' => \%LOCK_STRINGS},
+		'a kv v1 export, with no first fields, reads the lock the same way');
+	is_deeply($calls, [['export', $EXODUS], ['get', $LOCK]], 'with one safe get, of the lock');
+};
+
+subtest 'store_data takes a typed secret whole from safe get' => sub {
+	plan tests => 3;
+	my ($query, $calls) = typed_safe($EXODUS_KV2, $LOCK => $LOCK_GET);
+	no warnings 'redefine';
+	local *Service::Vault::query = $query;
+	use warnings 'redefine';
+	my $store = Genesis::Env::Secrets::Store::Vault->new(
+		ExportMockEnv->new, service => test_vault(), mount_override => '/secret/', slug_override => 'exodus/lab-mgmt/bosh',
+	);
+	is_deeply($store->store_data, {$EXODUS => \%EXODUS_STRINGS, $LOCK => \%LOCK_STRINGS},
+		'the lock is stored with its pid as the string safe get prints');
+	is_deeply($calls, [['export', "/$EXODUS/"], ['get', $LOCK]], 'after one safe get, of the lock');
+	ok(exists $store->{__data}, 'and the store is cached');
+};
+
+subtest 'store_data never writes back a value it only read' => sub {
+	# store_data feeds fill, and a secret fill gives a value counts as present,
+	# so nothing adds, imports, or saves it.  Only store->write persists a
+	# value, and only a secret's save calls it, after a command set the value
+	# itself.  So a typed value read as text is never written back as text.
+	plan tests => 4;
+	local $ENV{GENESIS_SKIP_SECRET_DEFINITION_VALIDATION} = 1;
+	require Genesis::Secret::UserProvided;
+	my ($query, $calls) = typed_safe($EXODUS_KV2, $LOCK => $LOCK_GET);
+	no warnings 'redefine';
+	local *Service::Vault::query = $query;
+	use warnings 'redefine';
+	my $store = Genesis::Env::Secrets::Store::Vault->new(
+		ExportMockEnv->new, service => test_vault(), mount_override => '/secret/', slug_override => 'exodus/lab-mgmt/bosh',
+	);
+	my $pid = Genesis::Secret::UserProvided->new('network-claim-lock:pid', prompt => 'pid');
+	$store->fill($pid);
+	ok($pid->has_value, 'a typed value read whole fills its secret');
+	is($pid->value, '3834038', 'with the text safe get prints');
+	is(($store->check($pid))[0], 'ok', 'and checking it reads nothing more');
+	is_deeply([map {$_->[0]} @$calls], ['export', 'get'], 'so the only commands run were the export and the safe get');
+};
+
+subtest 'a typed object keeps the escaping safe gives it' => sub {
+	plan tests => 4;
+	my $path = 'secret/fixture/escaping';
+	my $captured = 't/src/safe/get-escaping.out';
+	# The secret as safe 1.26.0 exports it: json.Marshal escapes <, &, and >
+	# in every string, and U+2028 and U+2029 as well.
+	my $export = versioned(3, qq({"$path":{"versions":[{"value":{).
+		'"config":{"a":"x","b":[1,2],"tag":"\u003ca\u0026b\u003e"},'.
+		'"controls":{"bs":"g\bh","line":"a\u2028b","para":"c\u2029d","soh":"e\u0001f"},'.
+		'"count":12345678901234567890,"enabled":false,"list":["p",{"q":1}],"nothing":null,'.
+		'"password":"old","ratio":0.5,"tag":"\u003ca\u0026b\u003e"'.
+	'}}]}}');
+	my $dir = workdir('typed-escaping');
+	put_file("$dir/export.json", $export);
+	my $safe = fake_safe(qq{[ "\$1" = export ] && exec cat '$dir/export.json'; exec cat '}.Cwd::abs_path($captured)."'");
+	local $ENV{PATH} = "$safe:$ENV{PATH}";
+
+	my $secret = test_vault()->get_path($path);
+	is($secret->{config}, '{"a":"x","b":[1,2],"tag":"\u003ca\u0026b\u003e"}',
+		'the object is the compact, sorted JSON safe prints, with <, &, and > as six-byte escapes');
+	is($secret->{tag}, '<a&b>', 'a string at the top of the secret keeps its <, &, and > unescaped');
+	is($secret->{controls}, '{"bs":"g\bh","line":"a\u2028b","para":"c\u2029d","soh":"e\u0001f"}',
+		'U+2028, U+2029, and the control characters keep the escapes safe gives them');
+	is_deeply({map {($_ => $secret->{$_})} qw/count enabled list nothing password ratio/}, {
+		count => '12345678901234567000', enabled => 'false', list => '["p",{"q":1}]',
+		nothing => 'null', password => 'old', ratio => '0.5',
+	}, 'and every other value is the text safe prints');
+};
+
+subtest 'a typed secret read again keeps every byte safe printed' => sub {
+	plan tests => 3;
+	my $path = 'secret/fixture/fidelity';
+	my %strings = (
+		a_hex        => '0x10',
+		a_tilde      => '~',
+		leading      => '   three leading spaces',
+		long         => ('abcdefghij ' x 22).'end',
+		two_newlines => "ends with two newlines\n\n",
+		z_cert       => $CERT,
+	);
+	# Three keys hold the typed values that safe get prints as the strings in
+	# the captured output, so the secret is read again through spruce json.
+	my $value = JSON::PP->new->canonical->encode({%strings, a_bool => JSON::PP::true, a_int => 9000, a_null => undef});
+	my $dir = workdir('typed-fidelity');
+	put_file("$dir/export.json", versioned(3, qq({"$path":{"versions":[{"value":$value}]}})));
+	my $safe = fake_safe(qq{[ "\$1" = export ] && exec cat '$dir/export.json'; exec cat '}.Cwd::abs_path($FIDELITY)."'");
+	local $ENV{PATH} = "$safe:$ENV{PATH}";
+
+	my $secret = test_vault()->get_path($path);
+	is_deeply($secret, {%strings, a_bool => 'true', a_int => '9000', a_null => 'null'},
+		'every value comes back byte for byte as the string safe printed');
+	is($secret->{z_cert}, $CERT, 'and the certificate ending the output keeps its one final newline');
+	is_deeply(calls_of($safe), ["export $path", "get $path"], 'after one export and one safe get of the secret');
+};
+
+subtest 'every field of a typed secret comes from one read' => sub {
+	plan tests => 4;
+	my $export = versioned(3, '{"secret/x":{"versions":[{"value":{"username":"alice","ratio":0.5}}]}}');
+	my %cases = (
+		'a secret written again between the export and the read' =>
+			["--- # secret/x\nratio: \"1.5\"\nusername: bob\n\n", {username => 'bob', ratio => '1.5'}],
+		'a secret that went from A to B and back to A' =>
+			["--- # secret/x\nratio: \"0.5\"\nusername: alice\n\n", {username => 'alice', ratio => '0.5'}],
+	);
+	for my $case (sort keys %cases) {
+		my ($get, $want) = @{$cases{$case}};
+		my ($query, $calls) = typed_safe($export, 'secret/x' => $get);
+		no warnings 'redefine';
+		local *Service::Vault::query = $query;
+		use warnings 'redefine';
+		is_deeply(test_vault()->get_path_strict('secret/x'), $want, "$case gives every field as the safe get gave it");
+		is_deeply($calls, [['export', 'secret/x'], ['get', 'secret/x']], 'from one whole-secret safe get, and none per key');
+	}
+};
+
+subtest 'a typed secret that disappears before the second read is an error' => sub {
+	plan tests => 3;
+	my ($query) = typed_safe($EXODUS_KV2);
+	no warnings 'redefine';
+	local *Service::Vault::query = $query;
+	use warnings 'redefine';
+	my $gone = qr{Could not read \Q$LOCK\E from vault.*held\s+nothing\s+when\s+read\s+again.*changed\s+while\s+Genesis\s+was\s+reading\s+it}s;
+	throws_ok { test_vault()->get_path("/$EXODUS") } $gone,
+		'get_path dies naming the secret, rather than reading it as empty or keeping the export\'s copy';
+	throws_ok { test_vault()->get_path_strict("/$EXODUS") } $gone, 'and so does get_path_strict';
+	my $store = Genesis::Env::Secrets::Store::Vault->new(
+		ExportMockEnv->new, service => test_vault(), mount_override => '/secret/', slug_override => 'exodus/lab-mgmt/bosh',
+	);
+	throws_ok { $store->store_data } $gone, 'and so does store_data';
+};
+
+subtest 'the pipeline readers report a failed second read' => sub {
+	plan tests => 2;
+	my $deploy = "$PRIOR_DEPLOYS/2026-10-24-120914";
+	my ($query) = typed_safe(
+		versioned(3, qq({"$deploy":{"versions":[{"value":{"action":"deploy","git.control_commit":"abc123","status":"succeeded","chunks":2}}]}})),
+		$deploy => ['', 1, $REFUSED],
+	);
+	no warnings 'redefine';
+	local *Service::Vault::query = $query;
+	use warnings 'redefine';
+	my $env = pipeline_env(test_vault());
+	throws_ok { Genesis::Commands::Env::_assert_prior_env_deployed($env, 'prior-env') }
+		qr{Could not read \Q$deploy\E from vault.*Code: 403}s,
+		'the prior-env check names the deployment it could not read again, not a missing deploy';
+	throws_ok { Genesis::Commands::Env::_get_source_sha_for_pull($env, 'prior-env', Mock->new(sha => 'control-head')) }
+		qr{Could not read \Q$deploy\E from vault.*Code: 403}s,
+		'and the pull source lookup stops rather than falling back to control HEAD';
 };
 
 done_testing;
