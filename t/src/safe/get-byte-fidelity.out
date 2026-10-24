@@ -1,0 +1,15 @@
+--- # secret/fixture/fidelity
+a_bool: "true"
+a_hex: "0x10"
+a_int: "9000"
+a_null: "null"
+a_tilde: "~"
+leading: "   three leading spaces"
+long: abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij abcdefghij end
+two_newlines: "ends with two newlines\n\n"
+z_cert: |
+  -----BEGIN CERTIFICATE-----
+  MIIBszCCAVmgAwIBAgIUJ8v
+  AQIDBAUGBwgJCgsMDQ4PEA==
+  -----END CERTIFICATE-----
+

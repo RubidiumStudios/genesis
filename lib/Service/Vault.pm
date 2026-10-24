@@ -468,63 +468,30 @@ sub get {
 		);
 		return undef;
 	}
-	my $start = gettimeofday();
-	my ($yaml,$rc,$err) = $self->query({stderr => 0, redact_output => 1}, 'get', $path);
-	my $values;
-	unless ($rc) {
-		# safe exited cleanly, so let the payload decide rather than stderr:
-		# a noverify target draws a TLS warning on every call, and treating
-		# that as failure discards a perfectly good read.  stderr is still
-		# the signal when safe fails without saying so in its exit code --
-		# an unparseable payload keeps the error below.  Same reasoning as
-		# read_json_from, which overrides $err for the JSON paths.
-		trace(
-			"safe wrote to stderr but exited 0; deferring to the payload: %s", $err
-		) if $err;
-		local $@;
-		eval {$values = load_yaml($yaml)};
-		$err = $@;
-	}
-	if ($rc || $err) {
-		debug(
-			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}:%s\nexit code: %s",
-			$path,$self->{url},$err || '',$rc
-		);
-		return {};
-	}
-	bail(
-		"Expected #C{%s} to return a hash of key/value pairs, but got a %s",
-		$path, ref($values)
-	) unless ref($values) eq 'HASH';
-	trace(
-		"Exported %s key/value pairs from #C{%s} in vault at #M{%s} in %.3f seconds",
-		scalar(CORE::keys %$values), $path, $self->{url}, gettimeofday() - $start
-	);
-	return $values;
+	# One whole-secret read serves every caller.  These callers have always
+	# addressed a version with a trailing ^N, and taken a read that safe did
+	# not finish as an empty secret, so both stay theirs; a reader that has
+	# to tell a failure from a missing secret calls read_flattened_secret
+	# itself.
+	return $self->read_flattened_secret($path, versioned => 1, lenient => 1) // {};
 }
 
 # }}}
-# get_path - get all the keys under a given path, including subpaths {{{
+# get_path - get all the keys under a given path, including subpaths; a failed read dies and nothing stored is an empty tree {{{
 sub get_path {
 	my ($self, $path) = @_;
-	$path =~ s{(^/*|/*$)}{}; # Trim preceeding and trailing / as safe doesn't honour it
-	my ($data,$rc,$err) = read_json_from($self->query({stderr => 0, redact_output => 1}, 'export', $path));
-	if ($rc || $err) {
-		debug(
-			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}:%s\nexit code: %s",
-			$path,$self->{url},$err || '',$rc
-		);
-		return {};
-	}
-
-	return $self->_unpack_path_export($path, $data);
+	# An outage read as an empty tree looks like a path with nothing in it,
+	# which once let a pipeline pull control HEAD for a predecessor whose
+	# history it could not read.  Only safe saying nothing is stored there
+	# reads as empty.
+	return $self->get_path_strict($path) // {};
 }
 # }}}
-# get_path_strict - get_path, except a failed read dies and a path with nothing stored comes back undef {{{
+# get_path_strict - get_path, except a path with nothing stored comes back undef {{{
 sub get_path_strict {
 	my ($self, $path) = @_;
 	$path =~ s{(^/*|/*$)}{}; # Trim preceeding and trailing / as safe doesn't honour it
-	my ($out,$rc,$err) = $self->query({stderr => 0, redact_output => 1}, 'export', $path);
+	my ($out,$rc,$err) = $self->query({stderr => 0, redact_output => 1, exact => 1}, 'export', $path);
 	my $data;
 	unless ($rc) {
 		local $@;
@@ -532,26 +499,108 @@ sub get_path_strict {
 		$err = $@; # safe exited cleanly, so only an unparseable payload is an error
 	}
 	if ($rc || $err) {
-		# safe names a path with nothing stored on stderr, and exits the same
-		# way for it as for an unreachable or sealed vault.  A token that can
-		# list a path but not read it gets that same line after a refusal,
-		# so a refusal anywhere in the output means the path was not read.  The
-		# path quoted in the absent-secret line is left out of that scan, since
-		# an environment name can hold 403 or forbidden and is not a refusal.
-		my $reason = ($err // '') =~ s/\s+$//r;
-		my $refusals = $reason =~ s/no secret exists at path\s+`[^`]*`//gr;
-		my $refused = $refusals =~ /\b403\b|permission denied|forbidden/i;
-		return undef if $rc && $reason =~ /no secret exists at path/ && !$refused;
-		bail(
-			"Could not read #C{%s} from vault at #M{%s}: %s\n\n".
-			"Likely causes are that the token has no read access on that path, ".
-			"that the vault is sealed, or that the vault cannot be reached.  ".
-			"Run #C{safe export %s} with the same token to see which, and ".
-			"#C{safe vault status} to check whether the vault is sealed.",
-			$path, $self->{url}, length($reason) ? $reason : "safe exited with code $rc", $path
-		);
+		my ($reason) = read_failure($rc, $err);
+		return undef unless defined($reason);
+		bail_read_failure($self->{url}, $path, $reason, "export $path");
 	}
 	return $self->_unpack_path_export($path, $data);
+}
+# }}}
+# read_failure - why a safe read did not finish, or the paths safe said hold nothing {{{
+sub read_failure {
+	my ($rc, $err) = @_;
+
+	# safe names a path with nothing stored on stderr, and exits the same way
+	# for it as for an unreachable or sealed vault.  A secret whose newest
+	# version was deleted or destroyed has nothing to read either, and safe get
+	# says which version that was.  A token that can list a path but not read
+	# it gets the absent-secret line after a refusal, so a refusal anywhere in
+	# the output means the path was not read.  The paths quoted in the absent
+	# lines are left out of that scan, since an environment name can hold 403
+	# or forbidden and is not a refusal.  safe exits 1 for every error it
+	# reports, absence included (internal/cli/cli.go in safe), so any other
+	# status means safe did not finish: a safe killed by a signal leaves 128
+	# plus the signal, whether run notes the signal or the shell running safe
+	# exits with it, and whatever it said about absent paths settles nothing.
+	my $reason = ($err // '') =~ s/\s+$//r;
+	my @absent;
+	my $others = $reason =~ s{
+		no\s+secret\s+exists\s+at\s+path\s+`([^`]*)`
+		| version\s+\d+\s+of\s+secret\s+`([^`]*)`\s+has\s+been\s+(?:deleted|destroyed)
+	}{push(@absent, $1 // $2); ''}gerx;
+	my $refused = $others =~ /\b403\b|permission denied|forbidden/i;
+	return (undef, @absent) if ($rc // 0) == 1 && @absent && !$refused;
+	return (length($reason) ? $reason : "safe exited with code ".($rc // 0));
+}
+# }}}
+# bail_read_failure - stop on a read that safe did not finish, saying how to see why {{{
+sub bail_read_failure {
+	my ($url, $what, $reason, $command) = @_;
+	bail(
+		"Could not read #C{%s} from vault at #M{%s}: %s\n\n".
+		"Likely causes are that the token has no read access on that path, ".
+		"that the vault is sealed, or that the vault cannot be reached.  ".
+		"Run #C{safe %s} with the same token to see which, and ".
+		"#C{safe vault status} to check whether the vault is sealed.",
+		$what, $url, $reason, $command
+	);
+}
+# }}}
+# read_flattened_secret - read one secret whole with safe get, as the strings safe prints {{{
+sub read_flattened_secret {
+	my ($self, $path, %opts) = @_;
+
+	# safe splits a path at its last unescaped colon and reads a trailing ^N
+	# as a version, so a path holding either is escaped, backslash first,
+	# unless the caller addresses versions that way, as get always has.  An
+	# ordinary path is passed as it is, so every safe version, including
+	# those that predate the escapes, gets the same bytes it always did.
+	my $arg = !$opts{versioned} && $path =~ /[\\:^]/ ? $path =~ s/([\\:^])/\\$1/gr : $path;
+
+	# exact keeps the output as safe printed it, since trimming it drops the
+	# newline of a literal block that ends the output, and it reports a safe
+	# killed by a signal rather than reading what it printed as finished.
+	my $start = gettimeofday();
+	my ($yaml,$rc,$err) = $self->query({stderr => 0, redact_output => 1, exact => 1}, 'get', $arg);
+	my $values;
+	unless ($rc) {
+		if (defined($yaml) && length($yaml)) {
+			my ($json, $yrc, $yerr) = eval {load_yaml($yaml)};
+			if (my $parse_error = $@) {
+				$err = $parse_error =~ s/\s+$//r;
+			} elsif ($yrc) {
+				$err = ($yerr // '') =~ s/\s+$//r || "its output could not be parsed as YAML";
+			} elsif (ref($json) ne 'HASH') {
+				$err = sprintf("it printed a %s rather than a map of keys", ref($json) ? lc(ref($json)) : defined($json) ? 'string' : 'empty document');
+			} else {
+				($values, $err) = ($json, undef);
+			}
+		} else {
+			$err = "safe printed nothing";
+		}
+	}
+	# A lenient caller takes a read that safe did not finish as nothing
+	# stored, and that includes a safe that printed nothing at all, since
+	# safe has exited 0 on failures that it reported only on stderr.  Output
+	# safe did print is still checked, so a list or a string never passes
+	# for an empty secret.
+	if ($opts{lenient} && ($rc || !(defined($yaml) && length($yaml)))) {
+		debug(
+			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}: %s\nexit code: %s",
+			$path, $self->{url}, $err // '', $rc
+		);
+		return undef;
+	}
+	if ($rc || defined($err)) {
+		my ($reason) = $rc ? read_failure($rc, $err) : ($err);
+		return undef unless defined($reason);
+		bail_read_failure($self->{url}, $path, $reason, "get $arg");
+	}
+	trace(
+		"Read %s key/value pairs from #C{%s} in vault at #M{%s} in %.3f seconds",
+		scalar(CORE::keys %$values), $path, $self->{url}, gettimeofday() - $start
+	);
+	return $values;
 }
 # }}}
 # _unpack_path_export - nest the paths in a safe export under the path it was made for {{{
@@ -633,13 +682,6 @@ sub normalize_export {
 		$export->{$path} = _export_pairs($path, $current->{value} // {});
 	}
 	return $export;
-}
-
-# }}}
-# is_export_error - true when an error came from normalize_export {{{
-sub is_export_error {
-	my ($err) = @_;
-	return defined($err) && $err =~ /Cannot\s+use\s+the\s+safe\s+export/;
 }
 
 # }}}

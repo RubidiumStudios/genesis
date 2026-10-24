@@ -1529,9 +1529,9 @@ sub _assert_prior_env_deployed {
 
 	# exodus_mount already ends with '/'; construct the deployments path directly.
 	my $prior_deploys = $env->exodus_mount . $prior_name . '/' . $env->type . '/deployments';
-	my $deploys = eval { $env->vault->get_path($prior_deploys) };
-	# A record Genesis cannot read is not a record that is missing.
-	die $@ if Service::Vault::is_export_error($@);
+	# A record Genesis cannot read is not a record that is missing, so a
+	# failed read dies here; only nothing stored reads as an empty history.
+	my $deploys = $env->vault->get_path($prior_deploys);
 
 	if ($deploys && ref($deploys) eq 'HASH') {
 		for my $entry (values %$deploys) {
@@ -1572,10 +1572,10 @@ sub _get_source_sha_for_pull {
 
 	# Access the prior env's last successful deployment directly via vault.
 	my $prior_deploys = $env->exodus_mount . $prior_name . '/' . $env->type . '/deployments';
-	my $deploys = eval { $env->vault->get_path($prior_deploys) };
 	# Falling back to control HEAD would pull content the prior env never
-	# shipped, so a record Genesis cannot read stops the pull instead.
-	die $@ if Service::Vault::is_export_error($@);
+	# shipped, so a record Genesis cannot read stops the pull instead; only
+	# nothing stored reads as an empty history.
+	my $deploys = $env->vault->get_path($prior_deploys);
 
 	if ($deploys && ref($deploys) eq 'HASH') {
 		for my $ts (sort { $b cmp $a } keys %$deploys) {

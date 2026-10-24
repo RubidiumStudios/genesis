@@ -738,7 +738,9 @@ sub run {
 			open my $pipe, "-|", @cmd
 				or bail("Could not open pipe to run #C{%s}", join(' ',@cmd));
 			$out = do { local $/; <$pipe> };
-			$out =~ s/\s+$//;
+			# exact keeps the output as printed: trimming drops the newline
+			# that ends a YAML literal block when that block ends the output.
+			$out =~ s/\s+$// unless $opts{exact};
 			close $pipe;
 		}
 	};
@@ -760,6 +762,12 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 
 	my $err = slurp($err_file) if ($err_file && -f $err_file);
 	my $rc = $exit_status >> 8;
+	if ($opts{exact} && (my $signal = $exit_status & 127)) {
+		# A process killed by a signal has no exit code, so >> 8 reads it as
+		# 0 and whatever it printed before it died as a finished run.
+		$rc = 128 + $signal;
+		$err = join("\n", grep {defined && length} ($err // '') =~ s/\s+$//r, "killed by signal $signal");
+	}
 	if (defined($out)) {
 		if ($out =~ m/[\x00-\x08\x0b-\x0c\x0e\x1f\x7f-\xff]/) {
 			qtrace "[%sb of binary data omitted from debug]", length($out);

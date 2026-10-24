@@ -1781,9 +1781,6 @@ sub exodus_lookup {
 	$key //= '.';
 	$for ||= $self->exodus_slug;
 	my $path =  $self->exodus_mount().$for;
-	debug "Checking if $path path exists...";
-	return $default unless $self->vault->has($path);
-	debug "Exodus data exists, retrieving it and converting to json";
 
 	my $extended = 0;
 	if ($key =~ m#^(/[^:]*)(?::(.*))?#) {
@@ -1792,17 +1789,20 @@ sub exodus_lookup {
 		$extended = 1;
 	}
 
+	# No safe exists check first: has() reads any failure as false, so a
+	# refused or unreachable vault would come back as the default.  The read
+	# itself tells nothing stored, which is the default, from a read that
+	# failed, which bails.
+	debug "Retrieving exodus data from $path";
 	my $out;
-	if ($extended) {
-		eval {$out = $self->vault->get_path($path);};
-		bail "Could not get $for exodus data from the Vault: $@" if $@;
-		return struct_lookup($out, $key, $default);
-	} else {
-		eval {$out = $self->vault->get($path);};
-		bail "Could not get $for exodus data from the Vault: $@" if $@;
-		my $exodus = unflatten($out);
-		return struct_lookup($exodus, $key, $default);
-	}
+	eval {
+		$out = $extended
+			? $self->vault->get_path_strict($path)
+			: $self->vault->read_flattened_secret($path);
+	};
+	bail "Could not get $for exodus data from the Vault: $@" if $@;
+	return $default unless defined($out);
+	return struct_lookup($extended ? $out : unflatten($out), $key, $default);
 }
 
 # }}}
@@ -1851,13 +1851,15 @@ sub director_exodus_lookup {
 			eval {$out = $self->bosh->vault->get_path("$path$ext_path");}; # changed from $bosh_vault to $self->bosh->vault
 			bail "Could not get director exodus data from the Vault: $@" if $@;
 		} else {
-			eval {$out = $self->bosh->vault->get($path);}; # changed from $bosh_vault to $self->bosh->vault
+			# Nothing stored gives the default below; a read that failed bails.
+			eval {$out = $self->bosh->vault->read_flattened_secret($path);};
 			bail "Could not get director exodus data from the Vault: $@" if $@;
-			$out = unflatten($out);
+			$out = unflatten($out) if defined($out);
 		}
 		$bosh_exodus = $self->{__director_exodus_cache}{$ext_path//''} = $out;
 	}
 	return $bosh_exodus unless defined($key);
+	return (wantarray ? ($default, undef) : $default) unless defined($bosh_exodus);
 	return struct_lookup($bosh_exodus, $key, $default);
 }
 # }}}
@@ -5053,8 +5055,12 @@ sub update_deployment_exodus {
 	my $notify = !delete($deployment_details{quiet});
 	my $started = gettimeofday;
 
+	# The read is strict.  A failed read taken as no exodus data would leave
+	# the old data in place after a successful terminate, where it later
+	# reads as a director that still exists, so nothing is written unless
+	# safe said what is stored there.
 	my @rm_exodus_cmds = ();
-	if (keys $self->vault->get($self->exodus_base)->%*) {
+	if (keys(($self->vault->read_flattened_secret($self->exodus_base) // {})->%*)) {
 		# If the exodus data already exists, we need to remove it first
 		push @rm_exodus_cmds, ('rm', $self->exodus_base, "-f");
 	}

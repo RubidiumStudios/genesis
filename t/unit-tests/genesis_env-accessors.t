@@ -1091,6 +1091,116 @@ EOF
 		'manifest_store() reflects config changes (not memoized)');
 };
 
-done_testing;  # 21 subtests + 4 use_ok calls = 25 tests total
+# ---------------------------------------------------------------------------
+# exodus_lookup against a safe that cannot finish the read
+# ---------------------------------------------------------------------------
+
+# A stand-in for the safe binary, so exodus_lookup runs its real vault calls,
+# has() included, against a child process that answers as safe would.
+my $FAKE_SAFE = 0;
+sub fake_safe_path {
+	my ($body) = @_;
+	my $dir = workdir('fake-safe-'.++$FAKE_SAFE);
+	put_file("$dir/safe", "#!/bin/bash\n$body\n");
+	chmod(0755, "$dir/safe");
+	return "$dir:$ENV{PATH}";
+}
+
+sub exodus_env {
+	my $top = make_top(name => 'bosh', no_vault => 1);
+	$top->link_dev_kit('t/src/simple');
+	put_file($top->path('lab-mgmt.yml'), <<EOF);
+---
+kit:
+  name:    dev
+  version: latest
+  features: []
+
+genesis:
+  env: lab-mgmt
+EOF
+	return $top->load_env('lab-mgmt');
+}
+
+subtest 'exodus_lookup bails when the exodus secret cannot be read' => sub {
+	plan tests => 4;
+	my $env = exodus_env();
+	require Service::Vault;
+	my $vault = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
+	no warnings 'redefine';
+	local *Genesis::Env::vault = sub { $vault };
+	use warnings 'redefine';
+	my $root = ($env->exodus_mount.$env->exodus_slug) =~ s{^/}{}r;
+
+	{
+		local $ENV{PATH} = fake_safe_path(q{printf 'Error making API request.\n\nCode: 403. Errors:\n\n* 1 error occurred:\n\t* permission denied\n' >&2; exit 1});
+		throws_ok { $env->exodus_lookup('dated', 'never') }
+			qr{Could\s+not\s+get\s+\S+\s+exodus\s+data\s+from\s+the\s+Vault:.*Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*Code: 403}s,
+			'a refused read of a plain key bails naming the path, rather than returning the default';
+		throws_ok { $env->exodus_lookup('/deployments:x', 'never') }
+			qr{Could\s+not\s+get\s+\S+\s+exodus\s+data\s+from\s+the\s+Vault:.*Could\s+not\s+read\s+/?\Q$root\E/deployments\s+from\s+vault.*Code: 403}s,
+			'and so does a refused read of an extended key';
+	}
+	{
+		local $ENV{PATH} = fake_safe_path(q{printf '!! dial tcp 10.0.0.1:8200: connect: connection refused\n' >&2; exit 1});
+		throws_ok { $env->exodus_lookup('dated', 'never') }
+			qr{Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*connection\s+refused}s,
+			'an unreachable vault bails for a plain key';
+		throws_ok { $env->exodus_lookup('/deployments:x', 'never') }
+			qr{Could\s+not\s+read\s+/?\Q$root\E/deployments\s+from\s+vault.*connection\s+refused}s,
+			'and for an extended key';
+	}
+};
+
+subtest 'exodus_lookup returns the default when nothing is stored, for a plain and an extended key' => sub {
+	plan tests => 4;
+	my $env = exodus_env();
+	require Service::Vault;
+	my $vault = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
+	no warnings 'redefine';
+	local *Genesis::Env::vault = sub { $vault };
+	use warnings 'redefine';
+
+	# safe exists says nothing and exits 1; get and export name the path.
+	local $ENV{PATH} = fake_safe_path(join("\n",
+		'[ "$1" = exists ] && exit 1',
+		'p="${@: -1}"; p="${p#/}"; p="${p%/}"',
+		'printf "!! no secret exists at path \`%s\`\n" "$p" >&2',
+		'exit 1',
+	));
+	is($env->exodus_lookup('dated', 'never'), 'never', 'a plain key reads as the default');
+	is($env->exodus_lookup('dated'), undef, 'or undef when no default is given');
+	is($env->exodus_lookup('/deployments:x', 'never'), 'never', 'an extended key reads as the default');
+	is_deeply($env->exodus_lookup('.', {}), {}, 'and the whole record reads as the default');
+};
+
+subtest 'a successful terminate stops when the exodus secret cannot be read' => sub {
+	plan tests => 3;
+	my $env = exodus_env();
+	require Service::Vault;
+	my $vault = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
+	no warnings 'redefine';
+	local *Genesis::Env::vault = sub { $vault };
+	local *Service::Vault::authenticated = sub { 1 };
+	local *Service::Vault::authenticate = sub { $_[0] };
+	use warnings 'redefine';
+	my $root = ($env->exodus_mount.$env->exodus_slug) =~ s{^/}{}r;
+
+	# Left in place, the old exodus data reads later as a director that
+	# still exists, so a read that can't say whether it is there must stop.
+	my $calls = workdir('exodus-calls').'/calls';
+	local $ENV{PATH} = fake_safe_path(join("\n",
+		"echo \"\$*\" >> '$calls'",
+		q{printf 'Error making API request.\n\nCode: 403. Errors:\n\n* 1 error occurred:\n\t* permission denied\n' >&2; exit 1},
+	));
+	throws_ok { quietly { $env->update_deployment_exodus('terminate', 'success', quiet => 1) } }
+		qr{Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*Code: 403}s,
+		'the refused read is raised, naming the exodus path';
+	my @calls = -f $calls ? split("\n", get_file($calls)) : ();
+	ok(scalar(@calls), 'after safe was asked for the exodus secret');
+	ok(!grep({/^(?:rm|set)\b/ || /\s--\s/} @calls), 'and nothing was removed or written');
+};
+
+done_testing;  # 22 subtests + 4 use_ok calls = 26 tests total
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

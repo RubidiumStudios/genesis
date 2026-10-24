@@ -944,24 +944,31 @@ When C<$key> is provided (either as a second argument or embedded in
 C<$path> as C<path:key>), returns the value of that specific key as a
 string, or C<undef> if not found.
 
-When no key is given, fetches the entire path and returns a hash reference
-of all key/value pairs at that path. Returns an empty hash reference C<{}>
-on error.
+When no key is given, it reads the whole secret through
+L</read_flattened_secret> with its C<versioned> and C<lenient> options, so
+there is one whole-secret read in Genesis, and returns its keys and values
+as a hash reference. The values are the strings C<safe get> prints, kept
+exactly as printed, so a certificate under the last key keeps its final
+newline.
 
-B<What counts as an error.> A non-zero exit from C<safe> is a failure. A
-zero exit is not automatically a success: C<safe> has not reliably set a
-non-zero exit code on failure, so the payload is the deciding evidence --
-if it parses as a hash the read succeeded, and if it does not the read is
-treated as failed and the C<safe> output is reported.
+The path goes to C<safe> as it is given, as it always has, so a trailing
+C<^N> reads version N of the secret, and a caller that means a literal caret
+escapes it as C<\^>. A read that C<safe> did not finish, meaning a nonzero
+exit, a refusal, a C<safe> killed by a signal, or a C<safe> that printed
+nothing, returns an empty hash reference C<{}> and is logged at debug level,
+and so does a path with nothing stored. Its callers have always read those
+as an empty secret, and they keep that contract. A reader that has to tell a
+missing secret from a failed read, such as the exodus lookups and the exodus
+check in C<update_deployment_exodus>, calls L</read_flattened_secret>
+directly.
 
-Anything C<safe> writes to standard error while exiting zero is
-B<not> treated as failure. Some builds emit a TLS notice on every call
-against a C<noverify> target, and treating that as an error discarded
-otherwise complete reads and reported them as missing permissions. What
-was written is recorded at trace level rather than dropped. The same
-reasoning is applied to the JSON paths by
-C<Genesis::read_json_from>, which overrides its error on a zero exit for
-exactly this reason.
+Output that C<safe> printed on a clean exit is still checked, and anything
+other than a YAML map of keys, such as a list or a string, dies as it always
+has. Taking it as C<{}> would let L</clear>'s read-back take a malformed
+answer for a path with no keys left, and write over keys that are still
+there. Anything C<safe> writes to standard error while exiting zero is
+B<not> treated as failure, because some builds emit a TLS notice on every
+call against a C<noverify> target, and the payload decides instead.
 
 B<Parameters:>
 
@@ -982,9 +989,16 @@ when only a path is given.
 
 B<Errors:>
 
-Dies with C<"Expected #C{%s} to return a hash of key/value pairs, but got a %s">
-when the path returns something other than a hash. The first C<%s> is the
-path, the second is the Perl ref type returned.
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised (via C<bail()>) for a whole-secret read when C<safe> exits zero and
+prints something that is not a YAML map of keys. Every other failure of a
+whole-secret read returns C<{}>, and a single-key read returns C<undef> when
+it fails.
+
+=back
 
 B<Examples:>
 
@@ -1000,6 +1014,10 @@ B<Examples:>
   my $data = $vault->get('secret/myapp');
   # Returns: { password => 'hunter2', user => 'admin' }
 
+  # Fetch all keys of version 2
+  my $old = $vault->get('secret/myapp^2');
+  # Runs: safe get secret/myapp^2
+
 =head2 get_path
 
   my $data = $vault->get_path($path);
@@ -1009,10 +1027,20 @@ structure. Uses C<safe export> to retrieve the entire tree in a single JSON
 call, and reads every export version through L</normalize_export>.
 Automatically unflattens paths stored with the C<__flattened__> marker.
 
-Returns an empty hash reference C<{}> when the export fails or cannot be
-parsed. A value under the path that is not a string is not a failed read; it
-dies, as L</normalize_export> does, rather than read as an empty tree or as
-a converted string.
+It is L</get_path_strict> with an empty tree in place of C<undef>, so the two
+tell a read that worked, a path with nothing stored, and a read that failed
+apart in the same way. It returns the tree it read, and it returns C<{}> when
+C<safe> reports that nothing is stored at the path. Any other way the export
+can end dies naming the path. That covers a nonzero exit, a refusal, an
+unreachable or sealed vault, a C<safe> killed by a signal, and output that
+does not decode. A value under the path that is not a string dies too, as
+L</normalize_export> does, rather than read as an empty tree or as a
+converted string.
+
+It used to return C<{}> for a failed read as well. An outage then looked
+like a path with nothing in it, so a pipeline C<--pull> whose predecessor's
+deployment history could not be read fell back to control HEAD and deployed
+content the predecessor never shipped.
 
 B<Parameters:>
 
@@ -1025,23 +1053,62 @@ The root vault path to export from. Leading and trailing slashes are stripped.
 =back
 
 B<Returns:> A nested hash reference. Keys at each level correspond to path
-segments; leaf values are hash references of key/value pairs.
+segments; leaf values are hash references of key/value pairs. It is C<{}>
+when nothing is stored at the path.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised by L</get_path_strict> when the export fails for any reason other
+than the path having nothing stored, or when its output cannot be parsed.
+
+=item C<"Cannot use the safe export ...">
+
+Raised by L</normalize_export> when the export holds a value that is not a
+string, or is in a format it does not read.
+
+=back
 
 B<Examples:>
 
   my $tree = $vault->get_path('secret/myapp');
   # Returns: { password => 'hunter2', db => { host => 'localhost' } }
 
+  my $none = $vault->get_path('secret/never-written');
+  # Returns: {}
+
+  # With the vault unreachable
+  $vault->get_path('secret/myapp');
+  # Dies: Could not read secret/myapp from vault at https://...: <safe's error>
+
 =head2 get_path_strict
 
   my $data = $vault->get_path_strict($path);
 
-Reads the tree under C<$path> as C<get_path> does, but tells a failed read
-from a path with nothing stored. Returns C<undef> when C<safe> reports that no
-secret exists at the path, and dies with the path, the vault URL, the error,
-the likely causes, and what to check for any other failure, such as an
-unreachable or sealed vault, an expired token, or an export that cannot be
-parsed.
+Reads the tree under C<$path> as C<get_path> does, but returns C<undef>
+rather than C<{}> when nothing is stored there. It and C<get_path> share one
+classification of how a read ended, which L</read_failure> makes. A read that
+worked returns its tree. A read where C<safe> says nothing is stored returns
+C<undef>. Any other failure dies with the path, the vault URL, the error, the
+likely causes, and what to check. That covers an unreachable or sealed
+vault, an expired token, a refusal, a C<safe> killed by a signal, and an
+export that cannot be parsed.
+
+These C<safe> messages count as nothing stored:
+
+=over 4
+
+=item * C<no secret exists at path `PATH`>, which C<safe> has written for a
+missing secret since 2016.
+
+=item * C<version N of secret `PATH` has been deleted> and C<version N of
+secret `PATH` has been destroyed>, which C<safe> writes when the newest
+version of a secret was deleted or destroyed, so nothing is left to read.
+
+=back
 
 A token that can list a path but cannot read it makes C<safe> report that no
 secret exists, after a refusal. When the output holds C<403>, C<permission
@@ -1050,8 +1117,11 @@ since the path was never read.  The path that C<safe> quotes in its "no secret
 exists" line is not searched, so an environment name that holds C<403> or
 C<forbidden> reads as absent when nothing is stored.
 
-Use it where a read that failed must not pass for an empty record, such as
-before a write that clears the record it replaces.
+The export runs with C<run>'s C<exact> option, so a C<safe> killed by a
+signal is a failed read rather than an exit of 0 with whatever it printed.
+
+Use it where a read that failed must not pass for an empty record, and where
+nothing stored must be told from a record with nothing in it.
 
 B<Parameters:>
 
@@ -1059,7 +1129,8 @@ B<Parameters:>
 
 =item $path
 
-The root vault path to export from. A leading slash is stripped.
+The root vault path to export from. Leading and trailing slashes are
+stripped.
 
 =back
 
@@ -1076,10 +1147,11 @@ Raised (via C<bail()>) when C<safe export> fails for any reason other than
 the path having nothing stored, or when its output cannot be parsed as JSON.
 The placeholders are the path, the vault URL, and the reason, which is the
 text C<safe> wrote to stderr, or C<safe exited with code N> when it wrote
-none. The message goes on to name the likely causes (a token without read on
-the path, a sealed vault, or an unreachable vault) and to say to run
-C<safe export> on the path and C<safe vault status>. The text here is the
-start of it.
+none, with C<killed by signal N> added when a signal stopped it. The message
+comes from L</bail_read_failure>, which goes on to name the likely causes (a
+token without read on the path, a sealed vault, or an unreachable vault) and
+to say to run C<safe export> on the path and C<safe vault status>. The text
+here is the start of it.
 
 =item C<"Cannot use the safe export ...">
 
@@ -1099,6 +1171,231 @@ B<Examples:>
   # With the vault sealed or the token expired
   $vault->get_path_strict('secret/myapp');
   # Dies: Could not read secret/myapp from vault at https://...: <safe's error>
+
+=head2 read_failure
+
+  my ($reason, @absent) = Service::Vault::read_failure($rc, $err);
+
+Tells how a C<safe> read that did not finish ended. It is the one
+classification that L</get_path_strict>, L</get_path>,
+L</read_flattened_secret>, and the secrets store's C<store_data> share, so
+each of them reads a missing secret as nothing stored and every other
+failure as a failure. It is a function, not a method.
+
+When the read ended because C<safe> said the paths it read hold nothing, the
+reason is C<undef> and the paths C<safe> named follow it, as C<safe> wrote
+them. The messages that count are C<no secret exists at path `PATH`> and
+C<version N of secret `PATH` has been deleted> or C<destroyed>. Anything
+else is a failure, and the reason is the text C<safe> wrote to stderr with
+trailing whitespace removed, or C<safe exited with code N> when it wrote
+none.
+
+A refusal anywhere in the output, meaning C<403>, C<permission denied>, or
+C<forbidden> outside the quoted paths, makes the read a failure even with an
+absent-secret line beside it. A token that can list a path but not read it
+gets both, and that path was never read. The quoted paths are left out of
+the scan, since an environment name can hold C<403> or C<forbidden>.
+
+Absence is accepted only with exit status 1, which is the status C<safe>
+exits with for every error it reports, a missing secret included. C<safe>
+prints the error and calls C<os.Exit(1)> in C<internal/cli/cli.go> at line
+1829 of C<safe> 1.26.1, and that exit has been C<1> since 2017. Any other
+status means C<safe> did not finish, so what it said about absent paths
+settles nothing and the read is a failure. A C<safe> killed by a signal
+leaves C<128> plus the signal either way it can reach Genesis. C<run> with
+its C<exact> option gives that status, and adds C<killed by signal N> after
+whatever C<safe> wrote, when the shell running C<safe> is itself killed.
+When C<safe> alone is killed, that shell exits with the same status and
+prints C<Killed>, and C<run> has no signal to note.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$rc>
+
+The exit code C<safe> returned. Nothing is read as absent unless it is
+C<1>.
+
+=item C<$err>
+
+What C<safe> wrote to stderr. It may be C<undef>.
+
+=back
+
+B<Returns:> A list of the reason, which is C<undef> when nothing is stored,
+followed by the paths C<safe> named as holding nothing in that case.
+
+B<Examples:>
+
+  my ($reason, @absent) = Service::Vault::read_failure(1, "!! no secret exists at path `secret/x`\n");
+  # Returns: (undef, 'secret/x')
+
+  my ($reason) = Service::Vault::read_failure(1, "Code: 403. Errors:\n* permission denied\n");
+  # Returns: ("Code: 403. Errors:\n* permission denied")
+
+  my ($reason) = Service::Vault::read_failure(137, "!! no secret exists at path `secret/x`\nkilled by signal 9");
+  # Returns: ("!! no secret exists at path `secret/x`\nkilled by signal 9")
+
+  my ($reason) = Service::Vault::read_failure(137, "!! no secret exists at path `secret/x`\nKilled");
+  # Returns: ("!! no secret exists at path `secret/x`\nKilled")
+
+=head2 bail_read_failure
+
+  Service::Vault::bail_read_failure($url, $what, $reason, $command);
+
+Stops Genesis on a vault read that C<safe> did not finish, with the one
+message that L</get_path_strict>, L</read_flattened_secret>, and the
+secrets store's C<store_data> give for it. Each of them decides for itself
+what counts as absent and whether to read again, through L</read_failure>,
+and calls this only once the read has failed. It is a function, not a
+method.
+
+The message names what was read, the vault, and the reason, then the likely
+causes, which are a token without read access on the path, a sealed vault,
+or an unreachable vault. It ends by telling the operator to run the same
+C<safe> command with the same token to see which, and C<safe vault status>
+to check for a sealed vault.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$url>
+
+The vault's URL, or a description such as C<the vault> when it is not known.
+
+=item C<$what>
+
+The path or paths that were read, as the operator should see them.
+
+=item C<$reason>
+
+Why the read failed, usually the reason L</read_failure> gave.
+
+=item C<$command>
+
+The C<safe> command to run again, without the leading C<safe>, such as
+C<get secret/a\:b> or C<export secret/a secret/b>.
+
+=back
+
+B<Returns:> Nothing. It always dies.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Always raised (via C<bail()>). The placeholders are C<$what>, C<$url>, and
+C<$reason>, and the text that follows names the likely causes and the
+C<safe> command to run.
+
+=back
+
+B<Examples:>
+
+  Service::Vault::bail_read_failure($vault->{url}, 'secret/myapp', 'Code: 403', 'get secret/myapp');
+  # Dies: Could not read secret/myapp from vault at https://...: Code: 403
+  #       ...Run safe get secret/myapp with the same token to see which...
+
+=head2 read_flattened_secret
+
+  my $secret = $vault->read_flattened_secret($path);
+  my $secret = $vault->read_flattened_secret($path, versioned => 1, lenient => 1);
+
+Reads one secret whole with C<safe get> on C<$path> and no key, and returns
+its keys and values as the strings C<safe> prints. It is the strict
+whole-secret read. It returns the secret when the read worked, C<undef> when
+C<safe> says nothing is stored there (including a newest version that was
+deleted or destroyed), and dies naming the path on any other failure, in the
+same way L</get_path_strict> does. It is also the read behind a whole-secret
+L</get>, which passes both options below, so Genesis has one implementation
+of a whole-secret read. A successful read is logged at trace level with its
+key count and how long it took.
+
+It is the one read that gives C<safe>'s flattened text for a value on every
+C<safe> version, since C<safe get> prints every value as a string. Three
+details keep that text exact.
+
+=over 4
+
+=item * It escapes C<\>, C<:>, and C<^> in the path, backslash first, because
+C<safe> splits a path at its last unescaped colon to find a key and reads a
+trailing C<^N> as a version. A path without any of them is passed as it is,
+so a C<safe> that predates the escapes (they arrived in 1.20.0) gets the
+same bytes it always did. The C<versioned> option turns the escaping off.
+
+=item * It reads the output untrimmed, through C<run>'s C<exact> option. C<run>
+otherwise strips trailing whitespace, and when the last value is a YAML
+literal block, that removes the newline that belongs to it, so a certificate
+would come back without its final newline.
+
+=item * It treats a C<safe> killed by a signal as a failed read, rather than
+reading whatever it printed before it died as the whole secret, or reading
+an absent-secret line it printed first as nothing stored. The same option
+gives the status of a killed shell, and L</read_failure> takes only C<safe>'s
+own error status as nothing stored.
+
+=back
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The path of the secret, without a key. It is read as a path even when it
+holds a colon or a caret, unless C<versioned> is given.
+
+=item C<versioned =E<gt> 1>
+
+Optional. The path goes to C<safe> as it is given, so a trailing C<^N>
+reads version N, as L</get> has always addressed a secret. The readers of
+paths that came out of an export leave it off, since such a path names one
+secret literally.
+
+=item C<lenient =E<gt> 1>
+
+Optional. A read that C<safe> did not finish returns C<undef> after a debug
+log, as nothing stored does, rather than dying. That covers a nonzero exit,
+a refusal, a signal, and a C<safe> that exited zero having printed nothing,
+which C<safe> has done for failures it reported only on stderr. Output that
+C<safe> did print on a clean exit is still checked, so a list or a string
+dies either way. L</get> uses this to keep its callers' contract.
+
+=back
+
+B<Returns:> A hash reference of key to string, or C<undef> when nothing is
+stored at the path, or, with C<lenient>, when the read did not finish.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised (via C<bail()>) when C<safe get> fails for any reason other than
+nothing being stored, when it is killed by a signal, when it prints nothing,
+or when what it prints is not a YAML map of keys. With C<lenient>, only the
+last of those is raised. The placeholders are the path, the vault URL, and
+the reason. The message comes from L</bail_read_failure>, which goes on to
+name the likely causes and to say to run C<safe get> on the path and C<safe
+vault status>.
+
+=back
+
+B<Examples:>
+
+  my $exodus = $vault->read_flattened_secret('secret/exodus/lab-mgmt/bosh');
+  # Returns: { url => 'https://10.108.16.4:25555', ca_cert => "-----BEGIN ...\n" }
+
+  my $none = $vault->read_flattened_secret('secret/exodus/never-deployed/bosh');
+  # Returns: undef
+
+  $vault->read_flattened_secret('secret/odd:name');
+  # Runs: safe get 'secret/odd\:name'
 
 =head2 normalize_export
 
@@ -1151,8 +1448,7 @@ pairs, or C<undef> when C<$data> is C<undef>.
 
 B<Errors:>
 
-Every message starts with C<Cannot use the safe export>, which is what
-L</is_export_error> looks for.
+Every message starts with C<Cannot use the safe export>.
 
 =over 4
 
@@ -1201,35 +1497,6 @@ B<Examples:>
   Service::Vault::normalize_export({'secret/myapp' => {port => 8443}});
   # Dies: Cannot use the safe export of secret/myapp: its port key holds
   #       a typed value, a JSON number, not a string. ...
-
-=head2 is_export_error
-
-  my $refused = Service::Vault::is_export_error($@);
-
-Tells whether an error came from L</normalize_export>, so that a caller that
-catches the errors of a read in an C<eval> can let this one through. A
-secret Genesis cannot read is a different answer from a read that failed,
-and treating it as one would hide a value that needs fixing. It is a
-function, not a method.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$err>
-
-The error to check, usually C<$@>. It may be C<undef> or empty.
-
-=back
-
-B<Returns:> True when C<$err> is an error raised by C<normalize_export>,
-and false otherwise.
-
-B<Examples:>
-
-  my $deploys = eval { $env->vault->get_path($path) };
-  die $@ if Service::Vault::is_export_error($@);
-  # A failed read still falls through; an unreadable value does not.
 
 =head2 set
 
@@ -1451,6 +1718,15 @@ Optional. If provided, checks for the existence of C<$path:$key>.
 =back
 
 B<Returns:> True if the path (or path:key) exists, false otherwise.
+
+B<Limitations:>
+
+It reads any failure of C<safe exists> as false, through C<run>'s
+C<passfail> option, so a refused read, an expired token, or an unreachable
+vault all look like a path that does not exist. A reader that must tell
+nothing stored from a read that failed must not gate on it, and should read
+with L</get_path_strict> or L</read_flattened_secret> instead, which make
+that distinction themselves.
 
 B<Examples:>
 

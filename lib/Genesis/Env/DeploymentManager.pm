@@ -285,7 +285,9 @@ sub _all {
 	my ($self) = @_;
 	my $env = $self->env;
 	unless ($self->{__all_deployments}) {
-		# Get list of deployments from vault
+		# Get list of deployments from vault.  get_path dies on a read that
+		# failed, so an outage is never mistaken for an env never deployed;
+		# only nothing stored comes back as an empty history.
 		# REFACTOR: Would like to lazy load artifacts, but can't do that with a massive export
 		my $deployments = $env->vault->get_path($env->exodus_base.'/deployments');
 		unless ($deployments && keys %$deployments) {

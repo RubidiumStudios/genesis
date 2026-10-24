@@ -322,8 +322,26 @@ When successful deployments do exist, the first (newest) deployment's action
 determines the result: C<'deployed'> for C<'deploy'>, or C<'terminated'> for
 C<'terminate'>.
 
+A deployment history that cannot be read raises instead of reporting
+C<'undeployed'>, because C<_all> dies on an unreadable history. An outage
+must not look like an environment that was never deployed, since callers act
+on C<'undeployed'> as if nothing were running. A history with nothing stored
+still reads as no deployments.
+
 B<Returns:> One of the strings C<'deployed'>, C<'terminated'>, or
 C<'undeployed'>.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised by C<Service::Vault::get_path>, through C<_all>, when the deployment
+history cannot be read for any reason other than nothing being stored, and by
+C<exodus_lookup> when the legacy exodus data cannot be read.
+
+=back
 
 B<Examples:>
 
@@ -464,11 +482,27 @@ In list context returns a list of C<Genesis::Env::Deployment> objects sorted
 newest-first. In scalar context returns an arrayref to the cached list
 (suitable for efficient read-only access).
 
-If Vault returns no data for the deployments path, caches an empty list and
-returns an empty list or empty arrayref according to calling context.
+The history is read with C<Service::Vault::get_path>. When C<safe> reports
+nothing stored at the deployments path, it caches an empty list and returns an
+empty list or empty arrayref according to calling context. When the read does
+not finish, such as on a refusal, an unreachable or sealed vault, or a C<safe>
+killed by a signal, it dies naming the path and caches nothing. It once read
+a failed read as an empty history, so an outage made an environment look as
+though it had never been deployed.
 
 Modifies the object in-place by populating C<{__all_deployments}> on first
 call.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised by C<Service::Vault::get_path> when the deployment history cannot be
+read for any reason other than nothing being stored there.
+
+=back
 
 B<Examples:>
 

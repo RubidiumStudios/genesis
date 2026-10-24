@@ -1411,6 +1411,27 @@ templates, as the kit hook runners do for addon and reaction arguments.
     # $HOME is expanded and arrives as $1; $$ is left for the shell itself
     run({eval_var_args => 1}, 'echo "Home: $1, process: $$"', '$HOME');
 
+=item C<exact>
+
+If true, returns the output exactly as the command printed it, and reports a
+command killed by a signal as a failure. Off by default, so every other
+caller keeps the trimmed output and the exit code it has always had.
+
+Without it, C<run> strips trailing whitespace from the output. That is
+harmless for most commands, but when the output is YAML that ends in a
+literal block, the newline it removes belongs to the last value, so a
+certificate read through C<safe get> would lose its final newline.
+
+Without it, the exit code is taken as C<<< $? >> 8 >>>, which is C<0> for a
+process killed by a signal, since such a process has no exit code. Whatever
+it printed before it died then reads as a finished, successful run. With
+C<exact>, a signal C<N> gives an exit code of C<128 + N>, the code a shell
+reports for it, and when stderr is captured, C<killed by signal N> is added
+to it.
+
+    # A safe get read whole, keeping the newline of a final literal block
+    my ($yaml, $rc, $err) = run({stderr => 0, exact => 1}, 'safe', 'get', $path);
+
 =back
 
 =item C<$command>
@@ -1438,6 +1459,9 @@ When C<onfailure> is set and the command succeeds: the bare C<$out> scalar
 (not a three-element list).
 
 When C<interactive> is set: C<(undef, $rc)> in list context, C<$rc> in scalar.
+
+When C<exact> is set, C<$out> keeps its trailing whitespace, and C<$rc> is
+C<128 + N> for a command killed by signal C<N>.
 
 Returns C<undef> in void context.
 

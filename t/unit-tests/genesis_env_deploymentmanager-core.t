@@ -1654,5 +1654,26 @@ subtest 'the deprecated-record note is emitted once, not per record' => sub {
 		'timestamps stay out of the note -- they are trace detail');
 };
 
+subtest 'the deployment history stops on a nonzero export exit instead of reading as undeployed' => sub {
+	plan tests => 3;
+	require Service::Vault;
+	my $vault = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
+	my $env = make_mock_env(vault => $vault, exodus_lookup => sub { return {} });
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub {
+		return ('', 2, "Error making API request.\n\nCode: 403. Errors:\n\n* 1 error occurred:\n\t* permission denied\n");
+	};
+	use warnings 'redefine';
+
+	my $mgr = Genesis::Env::DeploymentManager->new($env);
+	throws_ok { $mgr->current_state } qr{Could not read secret/exodus/test-env/deployments from vault.*Code: 403}s,
+		'current_state names the unreadable history rather than reporting undeployed';
+	ok(!defined $mgr->{__all_deployments}, 'and caches no history');
+
+	local *Service::Vault::query = sub { return ('', 1, "!! no secret exists at path `secret/exodus/test-env/deployments`\n") };
+	is($mgr->current_state, 'undeployed', 'a history with nothing stored still reads as undeployed');
+};
+
 done_testing;
 # vim: set ts=2 sw=2 sts=2 noet:
