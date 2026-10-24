@@ -100,6 +100,32 @@ The method is guarded by an C<entombed> flag on the consuming object: if
 C<_entomb_secrets> has already completed successfully for this object it
 returns C<1> immediately without repeating any work.
 
+The values come from one C<safe export> that names every referenced path.
+Any referenced path that the export left out is then read on its own with
+L<Service::Vault/read_flattened_secret>, which runs C<safe get> on that one
+secret with no key. When C<safe> says nothing is stored there, the path has
+no values, and its first referenced key stops entombment with the "has no
+value in the vault" error below, as it always has. Any other failure, such as
+a refused read, a sealed or unreachable vault, or output that does not parse,
+stops entombment with an error that names the path, before anything is
+written to CredHub. Before this read, a failed C<safe get> came back as an
+empty secret, so a path left out of the export because the token could not
+read it looked the same as a path with nothing stored.
+
+The read gives each value as the text C<safe get> prints for it, which on
+every C<safe> version is the text a flat export gives. So a referenced number
+or boolean reaches CredHub as the same text, and under the same credential
+name, whether the export or this read found it.
+
+This read is kept because Genesis still accepts C<safe> as old as 1.6.1, and
+older C<safe> exports dropped one of two paths when one name begins with the
+other, such as C<secret/a> and C<secret/ab>. The C<safe> fix for that is in
+current tags, but nothing tells Genesis which installed binary carries it.
+The read is C<safe get> rather than one C<safe export> per path, because an
+export needs LIST access and walks every path beneath the one named. It is
+not C<kv_read> either, because C<kv_read> returns the raw JSON of a typed
+value, which is not the text the export route gives.
+
 B<Parameters:>
 
 =over 4
@@ -123,7 +149,18 @@ C<"Manifest references vault path #C{%s:%s} which has no value in the vault -- p
 raised via C<bail()> when the manifest names a vault path and key that holds
 nothing. Caught here rather than at deploy time because an empty value would
 entomb as an empty credential, and the deployment would fail somewhere far
-less informative. The substitutions are the path and the key.
+less informative. The substitutions are the path and the key. A path that the
+export left out and that C<safe get> reports as holding no secret ends here
+too.
+
+=item *
+
+C<"Could not read #C{%s} from vault at #M{%s}: %s"> --
+raised via C<bail()> by L<Service::Vault/read_flattened_secret> when the read
+of a path the export left out fails for any reason other than nothing being
+stored there. The substitutions are the path, the vault URL, and the reason
+C<safe> gave. Nothing has been written to CredHub when it is raised, because
+those reads all happen before the first write.
 
 =item *
 

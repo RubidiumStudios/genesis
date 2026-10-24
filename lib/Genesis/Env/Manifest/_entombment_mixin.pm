@@ -59,9 +59,14 @@ sub _entomb_secrets {
 				$src_vault->query({redact_output => 1},"export", keys %secret_keys)
 			))) // {}
 		};
-		# BUG FIX for safe export on similar names
+		# Older safe exports dropped one of two paths when one name begins
+		# with the other, so a path the export left out is read on its own.
+		# The strict reader needs no LIST, gives safe's text for a typed
+		# value as the export does, and dies on a read safe could not
+		# finish rather than reading it as an empty secret.  Nothing stored
+		# stays undef and is reported below as a reference with no value.
 		for (map {substr($_,1)} keys %secret_keys) {
-			$secret_values{$_} = $src_vault->get("/$_")
+			$secret_values{$_} = $src_vault->read_flattened_secret($_)
 				unless (defined($secret_values{$_}));
 		}
 		info ("#g{done!}");

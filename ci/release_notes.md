@@ -355,6 +355,8 @@
 
 * Vault reads that safe can't finish now stop the command. A refused read, an unreachable vault, or a killed `safe` process used to read as empty data, so exodus lookups returned their defaults, the deployment history looked empty, a pipeline `--pull` could fall back to control HEAD and deploy content its predecessor never shipped, and a successful terminate could leave the old exodus data in place, where it still read as a deployed director. A secret that doesn't exist still reads as empty, and commands such as `genesis info` now stop during a vault outage instead of showing empty data.
 
+* Entombment no longer treats a refused or failed read of a referenced secret as an empty secret, and the error names the path.
+
 # Internal Changes/Improvements
 
 ## BOSH Refactor

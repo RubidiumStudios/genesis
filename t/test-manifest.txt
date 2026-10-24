@@ -190,6 +190,7 @@ unit-tests/genesis_env_manifestprovider-core.t            # Env::ManifestProvide
 unit-tests/genesis_env_networkclaims-core.t               # Env::NetworkClaims core
 unit-tests/genesis_env_required_files-core.t              # required-files propagation
 unit-tests/genesis_env_secrets_entombment-core.t          # secrets entombment
+unit-tests/genesis_env_manifest-entombment_export.t       # entombment reads, including paths the export left out
 
 # Genesis::Log per-target tests
 unit-tests/genesis_log-active_log_env.t
