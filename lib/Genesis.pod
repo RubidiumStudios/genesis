@@ -2288,9 +2288,17 @@ B<Examples:>
 =head2 load_json
 
     my $data = load_json($json_string);
+    my $data = load_json($json_string, {allow_bignum => 1});
 
 Decodes a JSON string (including bare scalars) and returns the resulting Perl
 data structure.
+
+With C<allow_bignum>, it decodes with C<JSON::PP>'s option of that name, so
+an integer too large for any native Perl type comes back as a
+C<Math::BigInt> and a number with a fraction or an exponent as a
+C<Math::BigFloat>. Without it, such an integer comes back as a plain string
+of its digits, which can't be told from a JSON string. The safe export
+decoder in C<Service::Vault> asks for it so that it sees every number.
 
 B<Parameters:>
 
@@ -2300,9 +2308,16 @@ B<Parameters:>
 
 A valid JSON string.
 
+=item C<$opts>
+
+Optional. A hash reference whose C<allow_bignum> key, when true, decodes
+large and fractional numbers as C<Math::BigInt> and C<Math::BigFloat>
+objects.
+
 =back
 
 B<Returns:> The decoded Perl value (hash ref, array ref, scalar, etc.).
+It dies with C<JSON::PP>'s error when the text does not decode.
 
 B<Examples:>
 

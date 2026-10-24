@@ -1215,8 +1215,10 @@ sub time_exec {
 # Data handling
 
 sub load_json {
-	my ($json) = @_;
-	return JSON::PP->new->allow_nonref->decode($json);
+	my ($json, $opts) = @_;
+	my $decoder = JSON::PP->new->allow_nonref;
+	$decoder->allow_bignum if ($opts // {})->{allow_bignum};
+	return $decoder->decode($json);
 }
 
 sub load_json_file {

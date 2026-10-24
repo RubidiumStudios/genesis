@@ -495,7 +495,9 @@ sub get_path_strict {
 	my $data;
 	unless ($rc) {
 		local $@;
-		eval {$data = load_json($out)};
+		# Decoded with bignums, as decode_export_text decodes, so an integer
+		# too large for Perl is seen as a number rather than as its digits.
+		eval {$data = load_json($out, {allow_bignum => 1})};
 		$err = $@; # safe exited cleanly, so only an unparseable payload is an error
 	}
 	if ($rc || $err) {
@@ -625,21 +627,65 @@ sub _unpack_path_export {
 	return $results;
 }
 # }}}
+# decode_export_text - decode safe's export text to {path => {key => value}}, keeping each value's type {{{
+sub decode_export_text {
+	my ($text) = @_;
+
+	# Without bignums, JSON::PP keeps an integer too large for Perl as its
+	# digits, which then pass for a string, so the raw text is the one place
+	# every typed value can still be told from a string.
+	my $data = do {
+		local $@;
+		my $decoded = eval {load_json($text, {allow_bignum => 1})};
+		bail(
+			"Cannot use the safe export: it is not JSON: %s",
+			($@ =~ s/\s+$//r) || 'it is empty'
+		) if $@ || !defined($text);
+		$decoded;
+	};
+	my ($export, $typed) = _unwrap_export($data);
+	return wantarray ? ($export // {}, $typed) : $export // {};
+}
+
+# }}}
 # normalize_export - reduce a decoded safe export of any version to {path => {key => string}} {{{
 sub normalize_export {
 	my ($data) = @_;
-	return undef unless defined($data);
+	my ($export, $typed) = _unwrap_export($data);
+
+	# Genesis reads every secret as a string, and the text a typed value would
+	# turn into here is not the text safe shows for it, so it is refused rather
+	# than converted.
+	for my $path (sort CORE::keys %$typed) {
+		my $key = $typed->{$path}[0];
+		bail(
+			"Cannot use the safe export of #C{%s}: its #C{%s} key holds a typed ".
+			"value, a JSON %s, not a string.  Genesis reads every secret as a ".
+			"string and cannot use it; store it as a string, or move it out of ".
+			"the path Genesis reads.",
+			$path, $key, _export_value_type($export->{$path}{$key})
+		);
+	}
+	return $export;
+}
+
+# }}}
+# _unwrap_export - reduce a decoded safe export to {path => {key => value}}, and name its typed keys {{{
+sub _unwrap_export {
+	my ($data) = @_;
+	return (undef, {}) unless defined($data);
 
 	# v1 is the bare object of path to key/value pairs that safe writes when
 	# every secret has one version of strings.
-	my $export;
+	my ($export, %typed);
 	if (ref($data) eq 'HASH') {
 		$export = {};
 		for my $path (sort CORE::keys %$data) {
 			next unless defined($data->{$path}); # a path with no value has nothing to read
-			$export->{$path} = _export_pairs($path, $data->{$path});
+			($export->{$path}, my $keys) = _export_pairs($path, $data->{$path});
+			$typed{$path} = $keys if @$keys;
 		}
-		return $export;
+		return ($export, \%typed);
 	}
 
 	bail(
@@ -679,34 +725,21 @@ sub normalize_export {
 		# version is not read in its place.
 		my $current = $versions->[-1];
 		next unless ref($current) eq 'HASH' && !$current->{deleted} && !$current->{destroyed};
-		$export->{$path} = _export_pairs($path, $current->{value} // {});
+		($export->{$path}, my $keys) = _export_pairs($path, $current->{value} // {});
+		$typed{$path} = $keys if @$keys;
 	}
-	return $export;
+	return ($export, \%typed);
 }
 
 # }}}
-# _export_pairs - check the key/value pairs of one exported path are all strings {{{
+# _export_pairs - copy the key/value pairs of one exported path, and name the keys that are not strings {{{
 sub _export_pairs {
 	my ($path, $pairs) = @_;
 	bail(
 		"Cannot use the safe export of #C{%s}: it is not an object of keys, but a JSON %s.",
 		$path, _export_value_type($pairs) // 'string'
 	) unless ref($pairs) eq 'HASH';
-
-	# Genesis reads every secret as a string, and the text a typed value would
-	# turn into here is not the text safe shows for it, so it is refused rather
-	# than converted.
-	for my $key (sort CORE::keys %$pairs) {
-		my $type = _export_value_type($pairs->{$key}) or next;
-		bail(
-			"Cannot use the safe export of #C{%s}: its #C{%s} key holds a typed ".
-			"value, a JSON %s, not a string.  Genesis reads every secret as a ".
-			"string and cannot use it; store it as a string, or move it out of ".
-			"the path Genesis reads.",
-			$path, $key, $type
-		);
-	}
-	return {%$pairs};
+	return ({%$pairs}, [grep {defined(_export_value_type($pairs->{$_}))} sort CORE::keys %$pairs]);
 }
 
 # }}}
@@ -718,6 +751,9 @@ sub _export_value_type {
 		return 'object'  if $type eq 'HASH';
 		return 'list'    if $type eq 'ARRAY';
 		return 'boolean' if JSON::PP::is_bool($value);
+		# allow_bignum decodes an integer too large for Perl, and every number
+		# with a fraction or an exponent, to one of these.
+		return 'number'  if $type eq 'Math::BigInt' || $type eq 'Math::BigFloat';
 		return lc($type);
 	}
 

@@ -1035,7 +1035,9 @@ can end dies naming the path. That covers a nonzero exit, a refusal, an
 unreachable or sealed vault, a C<safe> killed by a signal, and output that
 does not decode. A value under the path that is not a string dies too, as
 L</normalize_export> does, rather than read as an empty tree or as a
-converted string.
+converted string. The export is decoded with C<allow_bignum>, as
+L</decode_export_text> decodes it, so an integer too large for Perl counts
+as a number and dies with the rest, where it used to pass as its digits.
 
 It used to return C<{}> for a failed read as well. An outage then looked
 like a path with nothing in it, so a pipeline C<--pull> whose predecessor's
@@ -1397,15 +1399,103 @@ B<Examples:>
   $vault->read_flattened_secret('secret/odd:name');
   # Runs: safe get 'secret/odd\:name'
 
+=head2 decode_export_text
+
+  my ($export, $typed) = Service::Vault::decode_export_text($text);
+  my $export           = Service::Vault::decode_export_text($text);
+
+Decodes C<safe export> output, given exactly as C<safe> printed it, and
+reduces it to the flat shape of version 1, a hash of full vault path to the
+key/value pairs stored there. Unlike L</normalize_export>, it keeps the
+JSON type of every value and refuses none of them. It marks every path whose
+current version holds a value that is not a string, so a reader knows which
+paths are typed and can read those another way. It is a function, not a
+method.
+
+It decodes the text with C<JSON::PP>'s C<allow_bignum>, through
+C<load_json>, and then unwraps export version 1, 2, or 3 with the same code
+and the same checks and messages as L</normalize_export>. So the current
+version of each path is the one returned, a path whose current version is
+deleted or destroyed is left out, and a current version with no C<value>
+gives an empty hash. A string stays a Perl string, a JSON boolean stays a
+C<JSON::PP::Boolean>, C<null> stays C<undef>, an object or a list stays a
+hash or an array, and a number stays a number. With C<allow_bignum>, an
+integer too large for any native Perl type comes back as a C<Math::BigInt>,
+and a number with a fraction or an exponent comes back as a
+C<Math::BigFloat>, both of which L</_export_value_type> counts as numbers.
+A JSON C<-0> decodes as the number zero and still marks its path.
+
+The raw text is the only place every typed path can still be seen. Without
+C<allow_bignum>, C<JSON::PP> keeps an integer too large for Perl as a plain
+string of its digits, which then passes for a string, so a reader that
+decodes the text first and asks about types afterwards misses that path.
+Genesis never turns a decoded number into text, so the decoder doesn't keep
+C<-0> or the exact digits a number was written with. A reader that needs
+the text of a typed value reads the path again with
+L</read_flattened_secret>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$text>
+
+The output of C<safe export>, in any export version, as C<safe> printed it.
+
+=back
+
+B<Returns:> In list context, the export and the marks. The export is a new
+hash reference of full vault path to a hash of key/value pairs, each value
+as it was decoded, and it is C<{}> when the export holds no paths. The marks
+are a hash reference of each typed path to an array of its keys that hold a
+value that is not a string, in sorted order, and they are C<{}> when every
+current value is a string. In scalar context, it returns only the export.
+
+B<Errors:>
+
+Every message starts with C<Cannot use the safe export>.
+
+=over 4
+
+=item C<"Cannot use the safe export: it is not JSON: %s">
+
+Raised (via C<bail()>) when the text does not decode as JSON, or is
+undefined. The placeholder is C<JSON::PP>'s error.
+
+=item Every format error that L</normalize_export> lists
+
+Raised when the export is in a format it does not know, such as an
+unknown C<export_version>, or when a path or its value is not the shape an
+export gives it. A typed value is not an error here.
+
+=back
+
+B<Examples:>
+
+  my ($export, $typed) = Service::Vault::decode_export_text(
+    '[{"export_version":3,"data":{'.
+    '"secret/config/blobstore":{"versions":[{"value":{"bucket":"bosh","path_style":true}}]},'.
+    '"secret/config/policies":{"versions":[{"value":{"creds":"allow"}}]}'.
+    '},"requires_versioning":{}}]'
+  );
+  # $export: { 'secret/config/blobstore' => { bucket => 'bosh', path_style => JSON::PP::true },
+  #            'secret/config/policies'  => { creds => 'allow' } }
+  # $typed:  { 'secret/config/blobstore' => ['path_style'] }
+
+  Service::Vault::decode_export_text('{"secret/a":');
+  # Dies: Cannot use the safe export: it is not JSON: ...
+
 =head2 normalize_export
 
   my $export = Service::Vault::normalize_export($data);
 
 Reduces a decoded C<safe export> of any export version to the flat shape of
 version 1, a hash of full vault path to the key/value pairs stored there,
-with every value a string. Every reader of C<safe export> output goes
-through it, so none of them depends on which version C<safe> chose to write.
-It is a function, not a method.
+with every value a string. It is the strict wrapper over
+L</decode_export_text>, kept for callers that already hold decoded data. It
+unwraps the export with the same code and the same checks and messages, and
+then refuses the first typed path that the decoder marks. It is a function,
+not a method.
 
 C<safe> writes version 1, a bare object of path to key/value pairs, when
 every secret has one version and every value is a string. It writes version
@@ -1429,8 +1519,17 @@ Genesis reads every secret as a string, and the text Perl would make of a
 number or a boolean is not always the text C<safe> shows for it, so a
 converted value could differ from the secret without anything saying so. A
 string in version 3 is a JSON string, so a string that spells a number, such
-as C<"42">, is a string and is kept. An integer too large for Perl is
-decoded by C<JSON::PP> as its digits, so it reads as a string.
+as C<"42">, is a string and is kept.
+
+It can judge only the data it is given. C<load_json> and C<read_json_from>
+decode without C<allow_bignum>, and they keep an integer too large for any
+native Perl type, such as 999999999999999999999999999999999999999999, as a
+plain string of its digits, so data decoded by them lets such an integer
+through as a string. An integer that still fits a native unsigned type,
+such as 12345678901234567890, decodes as a number and is refused. Data
+decoded with C<allow_bignum>, as L</decode_export_text> and
+L</get_path_strict> decode it, holds the large integer as a
+C<Math::BigInt>, which is refused as a number.
 
 B<Parameters:>
 
@@ -1439,7 +1538,8 @@ B<Parameters:>
 =item C<$data>
 
 The decoded export, as C<load_json> or C<read_json_from> returns it, of any
-export version. It is not modified.
+export version. It is not modified. A huge integer is judged a number only
+when the data was decoded with C<allow_bignum>.
 
 =back
 
@@ -3130,13 +3230,58 @@ B<Examples:>
   });
   # Returns: { user => 'admin', db => { host => 'localhost' } }
 
+=head2 _unwrap_export
+
+  my ($export, $typed) = _unwrap_export($data);
+
+Unwraps a decoded C<safe export> of version 1, 2, or 3 into a hash of full
+vault path to the key/value pairs of its current version, and names the
+keys in each path that hold a value that is not a string. It is the one
+copy of the format checks, shared by L</decode_export_text>, which returns
+its result, and L</normalize_export>, which refuses any typed path it names.
+It reads the formats as L</normalize_export> describes, keeps every value
+as it was decoded, and dies with the format errors listed there. It refuses
+no typed value itself.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The decoded export, of any export version. It is not modified.
+
+=back
+
+B<Returns:> The export, which is C<undef> when C<$data> is C<undef>, and a
+hash reference of each typed path to an array of its typed keys in sorted
+order, which is C<{}> when every current value is a string.
+
+B<Errors:>
+
+=over 4
+
+=item Every format error that L</normalize_export> lists
+
+Raised (via C<bail()>) when the export is in a format it does not read, or
+a path or its value is not the shape an export gives it.
+
+=back
+
+B<Examples:>
+
+  my ($export, $typed) = _unwrap_export({'secret/a' => {port => 8443, host => 'db'}});
+  # Returns: ({ 'secret/a' => { port => 8443, host => 'db' } }, { 'secret/a' => ['port'] })
+
 =head2 _export_pairs
 
-  my $pairs = _export_pairs($path, $value);
+  my ($pairs, $typed_keys) = _export_pairs($path, $value);
 
-Checks the key/value pairs exported for one path for L</normalize_export>,
-and returns a copy of them. It dies when C<$value> is not a hash, or when any
-of its values is not a string, as C<_export_value_type> judges it.
+Checks that the value exported for one path is an object of key/value
+pairs, for L</_unwrap_export>, and returns a copy of the pairs with the keys
+whose values are not strings, as C<_export_value_type> judges them. It dies
+only when C<$value> is not a hash. A typed value is named, not refused, and
+L</normalize_export> is the one that refuses it.
 
 B<Parameters:>
 
@@ -3152,7 +3297,9 @@ The decoded value exported for the path.
 
 =back
 
-B<Returns:> A new hash reference holding the same key/value pairs.
+B<Returns:> A new hash reference holding the same key/value pairs, and an
+array reference of the keys whose values are not strings, in sorted order,
+which is empty when every value is a string.
 
 B<Errors:>
 
@@ -3162,29 +3309,29 @@ B<Errors:>
 
 Raised (via C<bail()>) when C<$value> is not a hash reference.
 
-=item C<"Cannot use the safe export of #C{%s}: its #C{%s} key holds a typed value, a JSON %s, not a string. ...">
-
-Raised when a value is not a string. The first key in sorted order that
-holds one is named.
-
 =back
 
 B<Examples:>
 
-  my $pairs = _export_pairs('secret/myapp', {password => 'hunter2'});
-  # Returns: { password => 'hunter2' }
+  my ($pairs, $typed) = _export_pairs('secret/myapp', {password => 'hunter2'});
+  # Returns: ({ password => 'hunter2' }, [])
 
-  _export_pairs('secret/myapp', {enabled => JSON::PP::true});
-  # Dies: Cannot use the safe export of secret/myapp: its enabled key holds
-  #       a typed value, a JSON boolean, not a string. ...
+  ($pairs, $typed) = _export_pairs('secret/myapp', {enabled => JSON::PP::true, user => 'admin'});
+  # Returns: ({ enabled => JSON::PP::true, user => 'admin' }, ['enabled'])
 
 =head2 _export_value_type
 
   my $type = _export_value_type($value);
 
 Names the JSON type of a decoded value that is not a string, for
-L</normalize_export> to refuse it. A hash is an C<object>, an array is a
-C<list>, a C<JSON::PP::Boolean> is a C<boolean>, and C<undef> is C<null>.
+L</decode_export_text> to mark its path and for L</normalize_export> to
+refuse it. A hash is an C<object>, an array is a C<list>, a
+C<JSON::PP::Boolean> is a C<boolean>, and C<undef> is C<null>. A
+C<Math::BigInt> or a C<Math::BigFloat> is a C<number>, because that is how
+C<allow_bignum> decodes an integer too large for Perl and every number with
+a fraction or an exponent. Without that rule, a decoder using
+C<allow_bignum> would report such a number by its class name rather than as
+a number.
 A plain scalar is a C<number> when it has a numeric value and no string
 value, which is how C<JSON::PP> decodes a JSON number and how it tells one
 from a string when it encodes. The check is only sound on a value that has
@@ -3209,6 +3356,8 @@ B<Examples:>
   _export_value_type(load_json('{"n":42}')->{n});   # Returns: 'number'
   _export_value_type(load_json('{"n":"42"}')->{n}); # Returns: undef
   _export_value_type([]);                           # Returns: 'list'
+  _export_value_type(load_json('[1e400]', {allow_bignum => 1})->[0]);
+                                                    # Returns: 'number'
 
 =head2 _kv_curl
 

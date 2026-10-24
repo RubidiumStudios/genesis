@@ -796,7 +796,7 @@ sub safe_export {
 				versions => [map { %{$_->[1]} ? {value => $_->[1]} : {} } @{$versions{$_}}],
 			})
 		} keys %versions},
-		requires_versioning => {$many ? ('secret/' => JSON::PP::true) : ()},
+		requires_versioning => {$many ? ('secret' => JSON::PP::true) : ()},
 	}]);
 }
 
@@ -1018,6 +1018,20 @@ sub read_export {
 	return Service::Vault::normalize_export(JSON::PP::decode_json(safe_export($vault, %opts)));
 }
 
+# safe names a mount in requires_versioning as its own golden exports do,
+# "secret" with no trailing slash (internal/cli/export_v3_test.go, v1.26.0).
+subtest 'the export simulator names the mount the way safe does' => sub {
+	plan tests => 4;
+	my $vault = MockLockVault->new(kv_version => 2);
+	seed_exodus($vault);
+	my $bosh = director($vault);
+	is(try_acquire($bosh), 'won', 'the lock is taken');
+	ok($bosh->clear_network_lock, 'and released, so it has two versions');
+	my $all = safe_export($vault, all => 1);
+	like($all, qr/"requires_versioning":\{"secret":true\}/, 'the export of every version names the mount as safe does');
+	unlike($all, qr{"secret/":}, 'with no trailing slash');
+};
+
 for my $kv_version (2, 1) {
 	subtest "kv v$kv_version: the director's exodus data exports readably while this Genesis holds the lock, and after" => sub {
 		my $vault = MockLockVault->new(kv_version => $kv_version);
@@ -1066,7 +1080,7 @@ for my $kv_version (2, 1) {
 		my $all = safe_export($vault, all => 1);
 		like($all, qr/"export_version":3/, 'an export of every version is format 3, for the number pid in the history');
 		like($all, qr/\{\}\]/, 'with no value for the released version');
-		like($all, qr/"requires_versioning":\{"secret\/":true\}/, 'and naming the mount that keeps versions');
+		like($all, qr/"requires_versioning":\{"secret":true\}/, 'and naming the mount that keeps versions');
 		lives_ok { $exported = read_export($vault, all => 1) } 'and Genesis reads it';
 		is_deeply($exported->{$LOCK_PATH}, {}, 'as only the current, released version counts');
 
@@ -1097,7 +1111,7 @@ subtest 'a format 3 export of a released lock with a number pid in its history r
 			'"%s":{"versions":[{"value":{"url":"https://127.0.0.1:25555"}}]},'.
 			'"%s":{"versions":[{"value":{"at":"2026-10-22 12:00:00 +0000","env":"lab",'.
 				'"hostname":"jumpbox","pid":4242,"token":"t","user":"jdoe"}},{}]}'.
-		'},"requires_versioning":{"secret/":true}}]',
+		'},"requires_versioning":{"secret":true}}]',
 		$EXODUS, $LOCK_PATH
 	));
 	my $exported;
