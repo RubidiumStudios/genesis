@@ -157,14 +157,25 @@ subtest 'release clears only a lock this process holds' => sub {
 	my $env = make_env();
 	$held = 1;
 	my $result;
+	my $path = 'secret/exodus/parent/bosh/network-claim-lock';
 	output_from { $result = Genesis::Commands::Env::_deploy_release_network_claims_lock($env) };
-	is($result, 1, 'a held lock is released');
+	is_deeply($result, {cleared => [$path], not_held => [], failed => []}, 'a held lock is reported as cleared');
 	is_deeply(\@calls, ['mine', 'clear'], 'the lock is cleared after confirming it is ours');
 
 	$env = make_env();
 	output_from { $result = Genesis::Commands::Env::_deploy_release_network_claims_lock($env) };
-	is($result, 0, 'nothing is released when the lock is not ours');
+	is_deeply($result, {cleared => [], not_held => [$path], failed => []}, 'a lock that is not ours is reported as not held');
 	is_deeply(\@calls, ['mine'], 'the director is only asked whose lock it is');
+};
+
+subtest 'release reports a lock it could not read or clear' => sub {
+	$status = 'unlocked';
+	my $env = make_env(clear_network_lock => sub { push @calls, 'clear'; die "Could not write the lock: Vault is sealed\n" });
+	$held = 1;
+	my $result;
+	output_from { $result = Genesis::Commands::Env::_deploy_release_network_claims_lock($env) };
+	is_deeply($result, {cleared => [], not_held => [], failed => ['secret/exodus/parent/bosh/network-claim-lock']},
+		'a release that failed is reported as failed, naming the lock');
 };
 
 # ---------------------------------------------------------------------------
@@ -226,6 +237,60 @@ subtest 'a release that fails does not hide the error that stopped the deploy' =
 	like($err // '', qr/^the cloud config upload failed\b/, 'the error that stopped the deploy is the one passed on');
 	like($out.$stderr, qr/could not be released.*Vault is sealed/s, 'and the failed release is logged, with why');
 	like($out.$stderr, qr/network-claim-lock/, 'naming where the lock is stored');
+};
+
+# deploy_after_lock - run the locked step, then the deploy that follows it
+# in the deploy command, the way the command does: the deploy runs only when
+# the locked step returned.
+sub deploy_after_lock {
+	my ($env, $code, %opts) = @_;
+	my ($err, $deployed) = (undef, 0);
+	my ($out, $stderr) = output_from {
+		eval {
+			Genesis::Commands::Env::_deploy_under_network_claims_lock(
+				$env, $code, dryrun => 0, yes => 0, %opts
+			);
+			$deployed = 1; # where the command calls $env->deploy, which entombs
+			1;
+		} or $err = $@;
+	};
+	return ($err, $deployed, $out.$stderr);
+}
+
+subtest 'a release that fails after a successful locked step stops the deploy' => sub {
+	$status = 'unlocked';
+	my $env = make_env(release_network_lock => sub { push @calls, 'release'; return undef });
+	my $ran = 0;
+	my ($err, $deployed) = deploy_after_lock($env, sub { $ran = 1 },
+		completed => 'the cloud config was uploaded');
+	ok($ran, 'the locked step ran');
+	ok(grep({$_ eq 'release'} @calls), 'the release was attempted') or diag explain \@calls;
+	ok(!$deployed, 'the deploy does not go on to deploy and entomb');
+	my $text = ($err // '') =~ s/\s+/ /gr;
+	like($text, qr{secret/exodus/parent/bosh/network-claim-lock}, 'the error names the lock path');
+	like($text, qr/may still be held/, 'and says the lock may still be held');
+	like($text, qr/the cloud config was uploaded/, 'and says what had already completed');
+};
+
+subtest 'a held signal outranks a release failure' => sub {
+	$status = 'unlocked';
+	for my $signal (qw/INT TERM HUP QUIT/) {
+		my $env = make_env(release_network_lock => sub { push @calls, 'release'; kill $signal => $$; return undef });
+		my ($err, $deployed) = deploy_after_lock($env, sub { 1 });
+		like($err // '', qr/^(?:Interrupted by user|Terminated|Hung up|Quit)\b/,
+			"$signal: the held signal is the error raised");
+		unlike($err // '', qr/may still be held/, "$signal: not the release failure");
+		ok(!$deployed, "$signal: and the deploy does not go on");
+	}
+};
+
+subtest 'a release that finds the lock already gone lets the deploy continue' => sub {
+	$status = 'unlocked';
+	my $env = make_env(release_network_lock => sub { push @calls, 'release'; return 0 });
+	my ($err, $deployed) = deploy_after_lock($env, sub { 1 });
+	ok(!defined($err), 'nothing is raised') or diag $err;
+	ok($deployed, 'and the deploy goes on');
+	ok(grep({$_ eq 'release'} @calls), 'after the release was attempted');
 };
 
 # A signal that arrives once the work under the lock has ended, and before

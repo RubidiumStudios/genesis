@@ -200,6 +200,14 @@ step.  One that arrives after that, whether before the release starts or
 while it runs, is held until the release has finished and is then raised, so
 that it cannot skip the release or cut it short.
 
+=item 7.
+
+Fails the step when the release could not read or clear the lock, unless an
+error from the step or a held signal is raised first.  The deploy itself
+worked, but a lock that may still be held makes the next deploy on this
+director wait until it goes stale, so the operator has to know to look at
+it, and a pipeline has to see a nonzero exit.
+
 =back
 
 A deploy can't deadlock against its own post-deploy step, because a normal
@@ -212,7 +220,8 @@ C<0> when the lock could not be taken (so the kit's post-deploy step runner
 records only this step as failed), and nothing when the environment cannot
 build cloud configs.  A C<0> never releases anything, because the step holds
 no network claims lock when it fails to take one; it only reports the failure
-to the runner, and the other steps still run.
+to the runner, and the other steps still run.  The step never returns after a
+release that failed, which raises instead.
 
 B<Errors:>
 
@@ -220,13 +229,22 @@ B<Errors:>
 
 =item C<"The network claims lock on the %s BOSH director could not be released: %s ...">
 
-Printed with C<error()> by C<Service::BOSH::Director::release_network_lock>,
-not raised, when the release itself fails.  The message says other deploys
-on the director will wait until the lock goes stale, that the vault
-probably became unreachable or the token expired, and gives the C<safe get>
-command that shows the lock.  When the lock could not be read at all, the
-message says instead that it is not known whether this process holds the
-lock.
+Printed with C<error()> by C<Service::BOSH::Director::release_network_lock>
+when the release itself fails, before the step raises the error that
+follows.  The message says other deploys on the director will wait until
+the lock goes stale, that the vault probably became unreachable or the
+token expired, and gives the C<safe get> command that shows the lock.  When
+the lock could not be read at all, the message says instead that it is not
+known whether this process holds the lock.
+
+=item C<"The %s BOSH director deployed and is working, ... but the network claims lock at %s could not be released, so it may still be held. ...">
+
+Raised with C<bail()> when the release could not read or clear the lock and
+nothing else stopped the step.  The message says the director deployed,
+says whether its own cloud config and network record were updated, names
+the lock path, and gives the C<safe get> command that shows who holds it.
+An error from the step itself, or a held signal, is raised instead when
+there is one, so a failed release never hides why the step stopped.
 
 =item C<"The %s BOSH director deployed and is working, but its own cloud config %s and its network record in exodus were not updated. The step failed while %s: ...">
 

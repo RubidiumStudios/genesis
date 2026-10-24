@@ -110,8 +110,9 @@ sub update_director_network_config {
 	# Released whenever this process holds it, which covers a signal that
 	# lands between taking the lock and recording that it was taken.  The
 	# release logs a failure rather than dying, so it never replaces the error
-	# that stopped the step.
-	$bosh->release_network_lock;
+	# that stopped the step; a failed release is reported below, once that
+	# error and any held signal have had their turn.
+	my $released = $bosh->release_network_lock;
 
 	unless ($ok) {
 		# A signal passes through as it came, and the lock waiter has already
@@ -145,6 +146,21 @@ sub update_director_network_config {
 		);
 	}
 	die $held_signal if defined($held_signal);
+
+	# The deploy itself worked, but a lock that may still be held leaves the
+	# next deploy on this director waiting on it, so the step fails and says
+	# so, rather than letting the deploy look clean.
+	bail(
+		"The #M{%s} BOSH director deployed and is working%s, but the network claims ".
+		"lock at #C{%s} could not be released, so it may still be held.\n\n".
+		"The error above says why the release failed and how to clear the lock.  ".
+		"Other deploys on this director will wait for it until it goes stale, and ".
+		"#C{safe get %s} shows who holds it.",
+		$bosh->alias,
+		$acquired ? ", and its own cloud config #C{$config_name} and its network record in exodus were updated" : '',
+		$bosh->network_lock_path, $bosh->network_lock_path
+	) unless defined($released);
+
 	# 0 means the lock was never taken; it tells the step runner that this
 	# step failed and the rest can go on
 	return $acquired ? 1 : 0;

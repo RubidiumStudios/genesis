@@ -306,6 +306,7 @@ sub bosh_configs_upload {
 	local $SIG{QUIT} = sub { $on_signal->("Quit\n") };
 
 	my $err;
+	my @uploaded = (); # what reached a director, for a release failure to report
 	eval {
 		eval {
 			# Each director goes on the list before its lock is taken, so that an
@@ -327,6 +328,8 @@ sub bosh_configs_upload {
 					$env->name, _bosh_configs_filter_description(%options)
 				);
 				_bosh_configs_notes($notes);
+				# This return leaves only the eval, not the sub, so the locks
+				# taken above are still released below.
 				return 1;
 			}
 
@@ -384,8 +387,10 @@ sub bosh_configs_upload {
 
 				if ($config->{type} eq 'cloud') {
 					_bosh_configs_upload_cloud($env, $config);
+					push @uploaded, $label;
 				} elsif ($config->{type} eq 'cpi') {
 					_bosh_configs_upload_cpi($env, $config);
+					push @uploaded, $label;
 				} else {
 					# Runtime configs are uploaded by the kit's runtime-config hook,
 					# which also stores any secrets the build generated.
@@ -400,6 +405,8 @@ sub bosh_configs_upload {
 					args => {%$requests, map {($_ => JSON::PP::false)} @runtime_skipped},
 					interactive => 0,
 				);
+				push @uploaded, sprintf("the runtime configs for build%s #C{%s}",
+					@runtime_builds == 1 ? '' : 's', join(', ', @runtime_builds));
 			}
 
 			_bosh_configs_notes($notes);
@@ -421,9 +428,30 @@ sub bosh_configs_upload {
 	} or $err = $@;
 	# Each release logs its own failure rather than dying, so one that fails
 	# neither replaces the error above nor leaves the other director locked.
-	$_->release_network_lock for reverse @locked;
+	my @failed = ();
+	for my $director (reverse @locked) {
+		push @failed, $director unless defined($director->release_network_lock);
+	}
 	die $err if $err;
 	die $held_signal if defined($held_signal);
+
+	# A pipeline acts on the exit status, so a lock that may still be held
+	# fails the command, after every release it owes has been attempted.
+	bail(
+		"The network claims lock could not be released on %s, so it may still be ".
+		"held at %s.  %s before the release failed.\n\n".
+		"The error above says why the release failed.  Other deploys and ".
+		"#C{bosh-configs upload} runs on %s will wait for the lock until it goes ".
+		"stale.  Check it with #C{safe get %s}, and run this command again once the ".
+		"cause is fixed.",
+		join(' and ', map {"the #M{".$_->alias."} BOSH director"} @failed),
+		join(' and ', map {"#C{".$_->network_lock_path."}"} @failed),
+		@uploaded
+			? "The upload had already finished, and ".join(" and ", @uploaded)." had been uploaded"
+			: "The upload had already finished, and nothing was uploaded",
+		@failed == 1 ? 'that director' : 'those directors',
+		$failed[0]->network_lock_path
+	) if @failed;
 	return 1;
 }
 

@@ -1397,7 +1397,9 @@ sub deploy {
 							_deploy_submit_network_claims($env, $network_map);
 						}
 					}
-				}, dryrun => $dryrun, yes => $options{yes});
+				}, dryrun => $dryrun, yes => $options{yes}, completed =>
+					'the cloud config was checked and uploaded where it had changed, '.
+					'and any network claims it records were written');
 			} else {
 				warning(
 					"Kit #C{%s} does not provide a cloud-config hook, so cloud configs ".
@@ -1953,12 +1955,20 @@ sub _deploy_confirm {
 }
 
 # }}}
-# _deploy_release_network_claims_lock - release the network claims lock if this process still holds it {{{
+# _deploy_release_network_claims_lock - release every network claims lock the deploy owes, and report how each went {{{
 sub _deploy_release_network_claims_lock {
 	my ($env) = @_;
-	# Logs a failed release rather than dying, so it never replaces the error
-	# that stopped the deploy.
-	return $env->bosh->release_network_lock;
+	my %report = (cleared => [], not_held => [], failed => []);
+	# The deploy owes one release, on the director that deploys it.  Each
+	# release logs its own failure rather than dying, so it never replaces
+	# the error that stopped the deploy; the report lets the caller fail the
+	# deploy on it once that error has had its turn.
+	for my $bosh ($env->bosh) {
+		my $released = $bosh->release_network_lock;
+		my $outcome = !defined($released) ? 'failed' : $released ? 'cleared' : 'not_held';
+		push @{$report{$outcome}}, $bosh->network_lock_path;
+	}
+	return \%report;
 }
 
 # }}}
@@ -2008,10 +2018,28 @@ sub _deploy_under_network_claims_lock {
 
 	# Released whenever this process holds it, which covers an acquire that
 	# wrote the lock and then failed.  A successful deploy already released
-	# it when the network claims were submitted.
-	_deploy_release_network_claims_lock($env) if $takes_lock;
+	# it when the network claims were submitted, so this is then a recheck.
+	my $release = $takes_lock ? _deploy_release_network_claims_lock($env) : undef;
 	die $err unless $ok;
 	die $held_signal if defined($held_signal);
+
+	# The deploy that follows entombs secrets and then deploys, and a pipeline
+	# acts on the exit status, so a lock that may still be held stops the
+	# deploy here rather than letting it go on, or exit zero, with the next
+	# deploy on this director left waiting on it.
+	my @failed = $release ? @{$release->{failed}} : ();
+	bail(
+		"The network claims lock could not be released, so it may still be held ".
+		"at %s.  %s before the release failed.  The deploy stopped there, ".
+		"before deploying, so nothing was entombed or deployed while ".
+		"the lock may be held.\n\n".
+		"The error above says why the release failed.  Other deploys on this ".
+		"director will wait for the lock until it goes stale.  Check it with ".
+		"#C{safe get %s}, and run the deploy again once the cause is fixed.",
+		join(' and ', map {"#C{$_}"} @failed),
+		ucfirst($opts{completed} // q{the work under the lock had finished}),
+		$failed[0]
+	) if @failed;
 	return 1;
 }
 

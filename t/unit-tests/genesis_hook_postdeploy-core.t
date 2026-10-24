@@ -1019,7 +1019,7 @@ subtest 'update_director_network_config - releases the lock on a signal' => sub 
 };
 
 subtest 'update_director_network_config - releases through the director\'s release, which logs rather than dies' => sub {
-	plan tests => 5;
+	plan tests => 4;
 	@netcalls = ();
 	my $bosh = net_bosh();
 	my $hook = make_hook(env => net_env(self_bosh => $bosh));
@@ -1030,11 +1030,25 @@ subtest 'update_director_network_config - releases through the director\'s relea
 	@netcalls = ();
 	my $failing = net_bosh(fail_clear => "Could not write the lock: Vault is sealed\n");
 	$hook = make_hook(env => net_env(self_bosh => $failing));
-	my ($ret, $out, $err);
-	($out, $err) = output_from { $ret = eval { $hook->update_director_network_config } };
-	is($ret, 1, 'a release that fails does not fail the step');
-	like(($out.$err) =~ s/\s+/ /gr, qr/could not be released.*Vault is sealed/, 'and is logged with why');
+	my ($out, $err);
+	($out, $err) = output_from { eval { $hook->update_director_network_config } };
+	like(($out.$err) =~ s/\s+/ /gr, qr/could not be released.*Vault is sealed/, 'a release that fails is logged with why');
 	like($out.$err, qr/network-claim-lock/, 'naming where the lock is stored');
+};
+
+subtest 'the post-deploy network update fails when its lock release fails' => sub {
+	@netcalls = ();
+	my $failing = net_bosh(fail_clear => "Could not write the lock: Vault is sealed\n");
+	my $hook = make_hook(env => net_env(self_bosh => $failing));
+	my ($ret, $err);
+	output_from { $ret = eval { $hook->update_director_network_config }; $err = $@ };
+	ok(!defined($ret), 'the step does not report success');
+	ok($err, 'it fails');
+	my $text = ($err // '') =~ s/\s+/ /gr;
+	like($text, qr/lab-ocf BOSH director deployed/, 'saying the director deployed');
+	like($text, qr{secret/exodus/lab-ocf/bosh/network-claim-lock}, 'naming the lock');
+	like($text, qr/may still be held/, 'and saying it may still be held');
+	ok(defined(netcall('set_path', 'secret/exodus/lab-ocf/bosh/network')), 'after the network record was written');
 };
 
 subtest 'update_director_network_config - a signal during the release waits for the release to finish' => sub {

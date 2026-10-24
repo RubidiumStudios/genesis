@@ -570,13 +570,38 @@ or more hooks failed to produce a config.
 Raised (via C<bail()>) after the other configs have been handled, when
 spruce could not compare one or more configs with the director's copies.
 
+=item C<"The network claims lock could not be released on %s, so it may still be held at %s. ...">
+
+Raised (via C<bail()>) when the work finished but at least one release could
+not read or clear its lock.  Every release the run owes is attempted first,
+so a failure on one director does not stop the other director's lock
+from being released.  The message
+names each director and lock path that may still be held, says what had
+already been uploaded, or that nothing was, and gives the C<safe get>
+command that shows the lock.  Each failed release has already logged its
+own reason.
+
 =back
 
 Errors from the helpers it calls (lock contention, a failed upload, a lost
 lock, a failed exodus write, a failed hook, a refused prompt) propagate
 after every network claims lock this run took is released.
 
-B<Returns:> C<1>.
+Failures are raised in a fixed order, and only the first that applies is
+raised.  An error from the work itself comes first, so a failed upload is
+what the operator sees even when a release failed too.  A held signal comes
+next, and a failed release last.  A release failure fails the command
+because a pipeline acts on the exit status, and a run that exited zero with
+its lock still held would let the next stage start against a locked
+director, or leave the operator with no sign that the lock needs looking at.
+
+When no configs are provided, the command says there is nothing to upload
+and still releases every lock it took, because the C<return> on that path
+leaves only the inner C<eval>, not the subroutine.  A failed release there
+fails the command like any other.
+
+B<Returns:> C<1> when the work finished and every release either cleared
+its lock or found the lock was not this run's to clear.
 
 B<Examples:>
 

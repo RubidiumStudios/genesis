@@ -998,6 +998,76 @@ subtest 'bosh_configs_upload - a release that fails keeps the original error and
 	ok(!$parent->network_locked_by_me, 'so no lock of ours is left on the parent');
 };
 
+subtest 'bosh-configs releases its locks when there are no configs to upload' => sub {
+	no warnings 'redefine';
+	# Nothing provided, though the run wants a cloud config and so took the lock
+	local *Genesis::Commands::Bosh::_bosh_configs_provided = sub { return ([], []) };
+	my $director = make_director('parent', {});
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: []\n", network_map => {subnets => {}});
+	@director_calls = ();
+	my ($ret, $err);
+	my ($out, $stderr) = output_from {
+		$ret = eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1) };
+		$err = $@;
+	};
+	is($err, '', 'nothing is raised') or diag $err;
+	is($ret, 1, 'the command reports success');
+	like($out.$stderr, qr/nothing to upload/, 'it says there is nothing to upload');
+	ok(defined(call_index('acquire_network_lock', 'parent')), 'the lock was taken')
+		or diag explain \@director_calls;
+	ok(defined(call_index('clear_network_lock', 'parent')), 'and released before the command returned');
+	ok(!$director->network_locked_by_me, 'so no lock of ours is left on the director');
+};
+
+subtest 'bosh-configs attempts every release before failing on one' => sub {
+	@director_calls = ();
+	# Released in reverse order of taking, so the director's own lock is the
+	# first release, and that is the one that fails
+	my $self_bosh = make_director('lab-ocf', {},
+		clear_network_lock => sub { push @director_calls, ['clear_network_lock', 'lab-ocf']; die "Could not write the lock: Vault is sealed\n" },
+	);
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	my $err;
+	my ($out, $stderr) = output_from {
+		eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud'); 1 } or $err = $@;
+	};
+	my $first  = call_index('clear_network_lock', 'lab-ocf');
+	my $second = call_index('clear_network_lock', 'lab-mgmt');
+	ok(defined $first && defined $second && $first < $second, 'both releases were attempted, the failing one first')
+		or diag explain \@director_calls;
+	ok(!$parent->network_locked_by_me, 'so the parent is left unlocked');
+	ok(defined($err), 'the command fails');
+	my $text = ($err // '') =~ s/\s+/ /gr;
+	like($text, qr{secret/exodus/lab-ocf/bosh/network-claim-lock}, 'naming the lock that may still be held');
+	unlike($text, qr{secret/exodus/lab-mgmt/bosh/network-claim-lock}, 'and not the lock that was released');
+	like($text, qr/may still be held/, 'saying it may still be held');
+	like($text, qr/lab-ocf\.bosh\.director/, 'and what had already been uploaded');
+};
+
+subtest 'bosh-configs reports an upload error before a release failure' => sub {
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	my $director = make_director('parent', {},
+		upload_config => sub {
+			my ($self, @args) = @_;
+			push @director_calls, ['upload_config', 'parent', @args[1,2]];
+			die "director refused the cloud config\n";
+		},
+		clear_network_lock => sub { push @director_calls, ['clear_network_lock', 'parent']; die "Could not write the lock: Vault is sealed\n" },
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: []\n", network_map => {subnets => {}});
+	@director_calls = ();
+	my $err;
+	my ($out, $stderr) = output_from {
+		eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1); 1 } or $err = $@;
+	};
+	like($err // '', qr/director refused the cloud config/, 'the upload error is the one raised');
+	unlike($err // '', qr/may still be held/, 'not the release failure');
+	ok(defined(call_index('clear_network_lock', 'parent')), 'the release was still attempted');
+	like($out.$stderr, qr/could not be released.*Vault is sealed/s, 'and its failure was logged');
+};
+
 subtest '_bosh_configs_upload_cloud - an upload that lost its lock while it waited is stopped' => sub {
 	my $director = make_director('parent', {},
 		network_locked_by_me => sub { 0 },

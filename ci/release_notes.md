@@ -351,6 +351,8 @@
 
 * The network claims lock now stores its pid as a string.  An earlier build stored it as a JSON number, and while such a lock was held or left behind, a deploy that exported the director's exodus data with safe 1.26.0 could stop with "Cannot use the safe export".  A lock released since, whose history alone holds the number, does not stop the export.
 
+* Commands that hold the network claims lock now fail when they can't release it. `genesis deploy`, `genesis bosh-configs` uploads, and the post-deploy network update attempt every release they owe, and then exit nonzero naming each lock that may still be held and what had already completed.
+
 # Internal Changes/Improvements
 
 ## BOSH Refactor
