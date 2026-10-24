@@ -357,6 +357,8 @@
 
 * Entombment no longer treats a refused or failed read of a referenced secret as an empty secret, and the error names the path.
 
+* A typed value that a manifest doesn't reference, such as the numeric `pid` an older Genesis writes into its network lock, no longer stops entombment. Every referenced value now resolves before anything is written to CredHub, so a missing value no longer leaves earlier values written.
+
 # Internal Changes/Improvements
 
 ## BOSH Refactor

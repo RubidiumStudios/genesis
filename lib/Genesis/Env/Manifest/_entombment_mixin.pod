@@ -89,42 +89,92 @@ notice and should not be called directly.
     $obj->_entomb_secrets($data);
 
 Orchestrates the full entombment workflow for the consuming manifest object.
-Determines every Vault path referenced by the rendered manifest, retrieves
-the corresponding secret values from the environment's Vault, writes each
-value into Credhub as a value-type credential under the prefix
-C<genesis-entombed/>, and stores the resulting Credhub variable reference
-back into the local in-memory Vault. Progress is printed to STDERR as each
-secret is processed.
+Determines every Vault path referenced by the rendered manifest, resolves
+every referenced value from the environment's Vault, and only then writes
+each value into Credhub as a value-type credential under the prefix
+C<genesis-entombed/>, storing the resulting Credhub variable reference back
+into the local in-memory Vault. Progress is printed to STDERR as each secret
+is processed.
 
 The method is guarded by an C<entombed> flag on the consuming object: if
 C<_entomb_secrets> has already completed successfully for this object it
 returns C<1> immediately without repeating any work.
 
-The values come from one C<safe export> that names every referenced path.
-Any referenced path that the export left out is then read on its own with
-L<Service::Vault/read_flattened_secret>, which runs C<safe get> on that one
-secret with no key. When C<safe> says nothing is stored there, the path has
-no values, and its first referenced key stops entombment with the "has no
-value in the vault" error below, as it always has. Any other failure, such as
-a refused read, a sealed or unreachable vault, or output that does not parse,
-stops entombment with an error that names the path, before anything is
-written to CredHub. Before this read, a failed C<safe get> came back as an
-empty secret, so a path left out of the export because the token could not
-read it looked the same as a path with nothing stored.
+It works in this order.
 
-The read gives each value as the text C<safe get> prints for it, which on
-every C<safe> version is the text a flat export gives. So a referenced number
-or boolean reaches CredHub as the same text, and under the same credential
-name, whether the export or this read found it.
+=over 4
 
-This read is kept because Genesis still accepts C<safe> as old as 1.6.1, and
-older C<safe> exports dropped one of two paths when one name begins with the
-other, such as C<secret/a> and C<secret/ab>. The C<safe> fix for that is in
-current tags, but nothing tells Genesis which installed binary carries it.
-The read is C<safe get> rather than one C<safe export> per path, because an
-export needs LIST access and walks every path beneath the one named. It is
-not C<kv_read> either, because C<kv_read> returns the raw JSON of a typed
-value, which is not the text the export route gives.
+=item 1. Collect the references
+
+Each reference is split at its first colon into a path and a key, so a key
+such as C<tls.key:v2> keeps its dots and colons. For a vaultified manifest,
+the consuming class's C<get_vault_paths> returns the references Genesis
+generated from CredHub variables beside the manifest's own, so they go
+through the same steps.
+
+=item 2. Export the referenced paths
+
+One C<safe export> names every referenced path, and its raw text is decoded
+with L<Service::Vault/decode_export_text>, which keeps each value's JSON type
+and marks every path holding a value that is not a string.
+
+=item 3. Read what the export can't give as text
+
+A referenced path is read whole with L<Service::Vault/read_flattened_secret>,
+which runs C<safe get> on that one secret with no key, when the export holds
+a typed value there, when the export left the path out, or when the export
+itself failed. Every field of that path then comes from that one read, which
+gives each value as the text a flat export gives on every C<safe> version. So
+a referenced number or boolean reaches CredHub as the same text, and under
+the same credential name, whichever route found it. A typed path that no
+reference uses is never read, so a value nobody needs, such as the numeric
+C<pid> an older Genesis writes into its network lock beside the director's
+exodus, can't stop entombment.
+
+=item 4. Resolve every reference
+
+Each reference is looked up by the path C<safe> reads for it. C<safe> trims
+one trailing and one leading slash and then collapses repeated slashes, and
+the lookup copies that rule exactly, so C</secret/a>, C<secret/a>, and
+C<secret//a> all read C<secret/a>, and two spellings referenced together read
+it once. Each reference keeps its own spelling for the local Vault entry and
+the CredHub name, so every name stays what Genesis made before for the same
+spelling, and two spellings of one secret, such as C</secret/a> and
+C<secret//a>, still give different names, as they always have. A spelling
+with repeated slashes at either end, such as C<//secret/a>, is left with a
+slash at that end by the rule, so it never matches a path in the export, and
+it is read with C<safe get>, which applies the rule again and reaches the
+same secret.
+
+=item 5. Write
+
+Only when every reference has resolved to a non-empty string does it start
+the local Vault, prime the CredHub cache, and write each value.
+
+=back
+
+The order exists because entombment used to start the local Vault and write
+values one reference at a time, so a missing value after the first one left
+earlier values written. Before typed values were read again, the export's
+strict policy refused any typed value under a referenced path, including a
+lock that nothing references, and a failed export with nothing on stderr read
+as a run of misleading "no value" errors.
+
+The fallback to C<safe get> is kept because Genesis still accepts C<safe> as
+old as 1.6.1, and older C<safe> exports dropped one of two paths when one name
+begins with the other, such as C<secret/a> and C<secret/ab>. The C<safe> fix
+for that is in current tags, but nothing tells Genesis which installed binary
+carries it. The read is C<safe get> rather than one C<safe export> per path,
+because an export needs LIST access and walks every path beneath the one
+named. It is not C<kv_read> either, because C<kv_read> returns the raw JSON of
+a typed value, which is not the text the export route gives.
+
+B<Limitations:> Entombment still isn't transactional. Resolving every value
+first means a missing or unreadable value stops it before anything is
+written, but writes then happen one at a time, and a reference is recorded in
+the local Vault even after its write fails. So a CredHub failure, an
+interruption, or a local Vault failure after the first write leaves the
+earlier values written, and that includes a dry run.
 
 B<Parameters:>
 
@@ -149,18 +199,29 @@ C<"Manifest references vault path #C{%s:%s} which has no value in the vault -- p
 raised via C<bail()> when the manifest names a vault path and key that holds
 nothing. Caught here rather than at deploy time because an empty value would
 entomb as an empty credential, and the deployment would fail somewhere far
-less informative. The substitutions are the path and the key. A path that the
-export left out and that C<safe get> reports as holding no secret ends here
-too.
+less informative. The substitutions are the reference's path, as the manifest
+spells it, and the key. A path that C<safe get> reports as holding no secret
+ends here too. It is raised before the local Vault starts or anything is
+written to CredHub.
 
 =item *
 
 C<"Could not read #C{%s} from vault at #M{%s}: %s"> --
-raised via C<bail()> by L<Service::Vault/read_flattened_secret> when the read
-of a path the export left out fails for any reason other than nothing being
-stored there. The substitutions are the path, the vault URL, and the reason
+raised via C<bail()> by L<Service::Vault/read_flattened_secret> when a path
+it reads fails for any reason other than nothing being stored there, such as
+a refused read, a sealed or unreachable vault, or output that does not parse.
+The substitutions are the path C<safe> reads, the vault URL, and the reason
 C<safe> gave. Nothing has been written to CredHub when it is raised, because
 those reads all happen before the first write.
+
+=item *
+
+C<"Cannot use the safe export..."> --
+raised via C<bail()> by L<Service::Vault/decode_export_text> when the export
+exits cleanly but its output is not JSON, or is in a shape or version Genesis
+does not read. The rest of the message names the path, when there is one,
+and says what is wrong. Nothing has been written
+when it is raised.
 
 =item *
 

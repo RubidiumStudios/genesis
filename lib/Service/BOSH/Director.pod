@@ -1785,11 +1785,16 @@ record holds the time, hostname, user, PID, environment name, and a token
 that marks it as this process's own (see L</_network_lock_token>).  The time is written in UTC with a C<+0000>
 offset, so that a reader on any host works out the same age for it.
 Every value, the PID included, is written as a string.  The record
-sits under the director's exodus path, so a C<safe export> of that path takes it
-along, and Genesis refuses an export whose current version of a secret holds
-anything but strings (see L<Service::Vault/normalize_export>), as safe 1.26.0
-exports a JSON number there.  A stale lock is taken over, with a note saying
-whose it was.
+sits under the director's exodus path, so a C<safe export> of that path takes
+it along, and an older Genesis on safe 1.26.0 refuses an export holding a
+value that is not a string, such as a numeric PID.  Writing strings keeps
+those clients working.  This Genesis can still read a lock that an older
+client wrote with a numeric PID.  L<Service::Vault/decode_export_text> marks
+the lock as holding a typed value, the ordinary readers read it again whole with
+L<Service::Vault/read_flattened_secret> and take the PID as the text safe
+prints for it, and entombment never reads a lock that no manifest
+references, so such a lock no longer stops a deploy.  A stale lock is taken
+over, with a note saying whose it was.
 
 How the write is made depends on the kv mount the lock is on:
 
