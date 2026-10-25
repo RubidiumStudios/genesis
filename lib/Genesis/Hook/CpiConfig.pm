@@ -120,6 +120,16 @@ sub _entomb_if_needed {
 	return "(($credhub_path))";
 }
 
+# The operator's value for a bosh-configs.cpi leaf, entombed into the
+# CredHub of the director the config goes to: the director being deployed
+# for a self-upload, otherwise the parent that deploys it.
+sub _lookup_operator_value {
+	my ($self, $name) = @_;
+	return $self->{self_upload}
+		? $self->env->lookup_entombed_self("bosh-configs.cpi.$name")
+		: $self->env->lookup_entombed("bosh-configs.cpi.$name");
+}
+
 sub _resolve {
 	my ($self, $spec, $routed) = @_;
 
@@ -130,9 +140,9 @@ sub _resolve {
 	# All operator names before any platform name: consulting both per
 	# name lets an OCFP primary beat an operator alt.
 	for my $name (@names) {
-		# Entombed-self, so an env-file (( vault )) arrives already entombed.
+		# Entombed, so an env-file (( vault )) arrives already entombed.
 		# Presence, not definedness: a null clears the OCFP value.
-		my ($value, $found) = $self->env->lookup_entombed_self("bosh-configs.cpi.$name");
+		my ($value, $found) = $self->_lookup_operator_value($name);
 		return ($value, 1) if $found;
 	}
 
@@ -226,7 +236,7 @@ sub gather_properties {
 	}
 
 	for my $leaf (CORE::keys %extra) {
-		my ($value) = $self->env->lookup_entombed_self("bosh-configs.cpi.$leaf");
+		my ($value) = $self->_lookup_operator_value($leaf);
 		$config{$leaf} = $value if defined $value;
 	}
 

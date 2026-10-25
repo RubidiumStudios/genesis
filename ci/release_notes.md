@@ -365,6 +365,8 @@
 
 * A director's self-uploaded CPI config now names its entombed secrets with absolute names in the director's own CredHub, such as `((/genesis-entombed/...))`, or names under its `credhub_base` when its exodus data sets one. Development builds sent the relative names the entombment writes, and BOSH refuses a relative name in a CPI config, so that config could never resolve. Names inside a longer value, such as `https://((genesis-entombed/...)):8006`, are qualified too, and BOSH variables and literal values are sent unchanged.
 
+* A CPI config that Genesis uploads to a parent director now names its entombed secrets with absolute names in the parent's CredHub, and a director's self-uploaded CPI config names them in its own CredHub. Development builds entombed the parent's CPI values into the child director's CredHub and sent relative names, which BOSH can't resolve in a CPI config, and released builds sent vault-derived CPI values to the parent as plaintext. The next deploy, or `genesis <env> bosh-configs upload --type cpi`, replaces such a value with a reference, and shows that change before it uploads. Because a CPI config can be read back by anyone with access to the director, we recommend rotating any vault-derived CPI value, such as a CPI password or token, that a released build sent as plaintext. Run the `credhub find -n //genesis-entombed` check described above against each child director's CredHub too.
+
 # Internal Changes/Improvements
 
 ## BOSH Refactor

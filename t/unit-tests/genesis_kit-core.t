@@ -443,6 +443,43 @@ subtest 'required_configs' => sub {
 };
 
 # ---------------------------------------------------------------------------
+# Subtest: run_hook tells the cpi-config module where its config goes
+# ---------------------------------------------------------------------------
+subtest 'run_hook passes self_upload to the cpi-config module' => sub {
+	my $path = workdir().'/cpi-options-kit';
+	put_file("$path/kit.yml", "---\nname: cpi-options\nversion: 0.0.1\n");
+	put_file("$path/hooks/cpi-config.pm", <<'PERL');
+package Genesis::Hook::CpiConfig::CpiOptions;
+use strict;
+use warnings;
+use parent qw(Genesis::Hook::CpiConfig);
+
+our %OPTIONS;
+
+sub perform {
+	my ($self) = @_;
+	%OPTIONS = %$self;
+	return $self->done(undef);
+}
+
+1;
+PERL
+	my $kit = Genesis::Kit::Dev->new($path);
+	for my $self_upload (undef, 1) {
+		%Genesis::Hook::CpiConfig::CpiOptions::OPTIONS = ();
+		quietly {
+			$kit->run_hook('cpi-config', env => mockenv->new(),
+				credhub_prefix => '/cpi/', self_upload => $self_upload);
+		};
+		my %got = %Genesis::Hook::CpiConfig::CpiOptions::OPTIONS;
+		my $label = $self_upload ? 'set' : 'unset';
+		is $got{self_upload}, $self_upload, "the module sees self_upload $label";
+		is $got{credhub_prefix}, '/cpi/', 'beside the credhub prefix';
+		ok !exists $got{bootstrap}, 'and is told nothing about a bootstrap';
+	}
+};
+
+# ---------------------------------------------------------------------------
 # Subtest 15: required_connectivity returns empty list when not declared
 # ---------------------------------------------------------------------------
 subtest 'required_connectivity' => sub {

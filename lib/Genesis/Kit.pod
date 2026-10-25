@@ -464,6 +464,15 @@ Used with the C<cloud-config> hook. The cloud-config subtype to generate
 Used with the C<cpi-config> hook. The CredHub prefix for CPI config
 generation.
 
+=item C<self_upload>
+
+Used with the C<cpi-config> hook. True when the config goes to the director
+being deployed rather than to the parent director that deploys it, as in
+the post-deploy CPI self-upload. The hook then reads the operator's CPI
+values from the build entombed into the director's own CredHub instead of
+the parent's, so every reference names the CredHub of the director that
+receives the config. Left unset, the config is the parent's.
+
 =item C<manifest>
 
 Used with the C<pre-deploy> hook. Path to the generated manifest file.

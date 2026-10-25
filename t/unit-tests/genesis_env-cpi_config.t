@@ -1365,7 +1365,7 @@ sub parent_director {
 # the end of the config downloads that follow its CPI step.  The parent
 # director answers get_config with the given config, records uploads and
 # config downloads, and is never asked anything else.  The entombed
-# manifest is built for real, and counts its builds.
+# manifests are built for real, and count their builds by kind.
 #
 # With cloud_config set, deploy also runs its cloud-config step, which the
 # kit's hook answers with an empty config, and the parent's copy of that
@@ -1383,9 +1383,9 @@ sub deploy_past_downloads {
 	my (%s) = @_;
 	my $top = fixture_env(required_configs => $s{required_configs}, env_yaml => $s{env_yaml});
 	my (@uploads, @cloud_uploads, @bosh_calls, @events);
-	my $builds = 0;
+	my %builds = (entombed => 0, entombed_self => 0);
 	my ($has_hook, $run_hook, $reset) = (\&Genesis::Env::has_hook, \&Genesis::Env::run_hook, \&Genesis::Env::ManifestProvider::reset);
-	my $entombed_self = \&Genesis::Env::ManifestProvider::entombed_self;
+	my ($entombed, $entombed_self) = (\&Genesis::Env::ManifestProvider::entombed, \&Genesis::Env::ManifestProvider::entombed_self);
 	local $Genesis::Hook::Blueprint::CpiContext::RUNS = 0;
 	local @DOWNLOADS;
 	local $ENV{GENESIS_CLOUD_CONFIG}; # a download registers the config here too
@@ -1435,7 +1435,8 @@ sub deploy_past_downloads {
 		die "unexpected bosh call: @cmd\n";
 	};
 	local *Genesis::Env::is_bosh_director = sub { 1 };
-	local *Genesis::Env::ManifestProvider::entombed_self = sub { $builds++; goto &$entombed_self };
+	local *Genesis::Env::ManifestProvider::entombed = sub { $builds{entombed}++; goto &$entombed };
+	local *Genesis::Env::ManifestProvider::entombed_self = sub { $builds{entombed_self}++; goto &$entombed_self };
 
 	local $Genesis::Commands::COMMAND_OPTIONS = {yes => 1};
 	my $cwd = getcwd();
@@ -1446,7 +1447,7 @@ sub deploy_past_downloads {
 	return {
 		error => $error, output => $output, uploads => \@uploads,
 		cloud_uploads => \@cloud_uploads, events => \@events,
-		bosh_calls => \@bosh_calls, builds => $builds,
+		bosh_calls => \@bosh_calls, builds => \%builds,
 		blueprints => $Genesis::Hook::Blueprint::CpiContext::RUNS, downloads => [@DOWNLOADS],
 	};
 }
@@ -1457,7 +1458,8 @@ subtest 'a director builds its CPI values once the configs its blueprint reads a
 		my $label = defined($parent_config) ? 'with' : 'without';
 		like $r->{error}, qr/\A\Q${\($SENTINEL =~ s{\n}{}r)}\E/, "the command ran past its config downloads ($label a parent CPI config)";
 		unlike $r->{output}, qr/as it is written/, 'and no value was read as written';
-		ok $r->{builds}, 'the values came from the entombed build';
+		ok $r->{builds}{entombed}, 'the values came from the build entombed into the parent\'s CredHub';
+		is $r->{builds}{entombed_self}, 0, 'and never from the director\'s own';
 		is $r->{blueprints}, 1, 'whose blueprint, which needs the cloud config, ran once';
 		is_deeply $r->{downloads}, ['cloud'], 'and the cloud config was downloaded once, for the build and the deploy alike';
 		is scalar(@{$r->{uploads}}), 1, 'and the config was uploaded once';
@@ -1641,6 +1643,150 @@ subtest 'a director builds its CPI values outside deploy once the configs its bl
 	is_deeply [map {[@{$_->{properties}}{qw/host custom/}]} @{load_yaml($config // '')->{cpis} // []}], [['10.0.0.1', 'kept']],
 		'from the values the build holds';
 	is_deeply \@DOWNLOADS, ['cloud'], 'and reuses the cloud config it already has';
+};
+
+
+# ======================================================================
+# Where the cpi-config hook's values are entombed
+# ======================================================================
+
+# A parent's CPI config holds names in the parent's CredHub, and the
+# director's own holds names in its CredHub.  These run the fixture's real
+# hook against faked entombed builds, which each entomb the host through
+# the real entombment helper into the CredHub their class names: the
+# parent's build into the env's CredHub, the director's own into the one
+# named by its exodus, which here sets no credhub_base.
+
+my $PARENT_CREDHUB = 'https://10.0.0.4:8844';
+my $CHILD_CREDHUB  = 'https://10.0.0.5:8844';
+
+{
+	package Test::Fake::CpiBuild;
+	sub env {$_[0]{env}}
+	sub data {
+		my ($self) = @_;
+		my ($host) = Genesis::Env::Manifest::Entombed::_entomb_secret(
+			undef, $self->credhub_target, '_/child/pve', 'host', '10.0.0.9');
+		return {'bosh-configs' => {cpi => {enabled => 1, host => $host, custom => "https://$host:8006"}}};
+	}
+
+	package Test::Fake::CpiBuild::Parent;
+	our @ISA = ('Test::Fake::CpiBuild');
+	sub credhub_target {Genesis::Env::Manifest::Entombed::credhub_target(@_)}
+
+	package Test::Fake::CpiBuild::Self;
+	our @ISA = ('Test::Fake::CpiBuild');
+	sub credhub_target {Genesis::Env::Manifest::EntombedSelf::credhub_target(@_)}
+}
+require Genesis::Env::Manifest::Entombed;
+require Genesis::Env::Manifest::EntombedSelf;
+
+# cpi_destination - runs $code with the fixture director and reports what
+# it raised, the CPI configs the hook rendered, how many times each build
+# was made, how many times the director's own BOSH or CredHub was looked
+# up, and every CredHub call as "<server> <command> <name>".
+sub cpi_destination {
+	my ($code) = @_;
+	my $top = fixture_env();
+	my $env = $top->load_env('child');
+	my $parent = parent_director();
+	my $child = Service::BOSH::Director->new('child-bosh',
+		url => 'https://10.0.0.5:25555', ca_cert => 'ca', client => 'admin',
+		secret => 'password', exodus_path => 'secret/exodus/child/bosh');
+	my (@configs, @calls, %store);
+	my %count = (entombed => 0, entombed_self => 0, self_target => 0, from_bosh => 0);
+	my $done = \&Genesis::Hook::CpiConfig::done;
+	local @DOWNLOADS;
+	local $ENV{GENESIS_CLOUD_CONFIG}; # a download registers the config here too
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::is_bosh_director = sub { 1 };
+	local *Genesis::Env::vault = sub { $HOOK_VAULT };
+	local *Genesis::Env::with_bosh = sub { $_[0] };
+	local *Genesis::Env::is_ocfp = sub { 1 };
+	local *Genesis::Env::bosh = sub { $parent };
+	local *Genesis::Env::credhub = sub {
+		Service::Credhub->new('parent', '/parent/child-bosh/', $PARENT_CREDHUB, 'admin', 'secret', 'ca');
+	};
+	local *Genesis::Env::get_target_bosh = sub {
+		my ($self, $opts) = @_;
+		die "only the director's own BOSH is expected here\n" unless $opts->{self};
+		$count{self_target}++;
+		return $child;
+	};
+	local *Service::Credhub::from_bosh = sub {
+		$count{from_bosh}++;
+		Service::Credhub->new('child-bosh', '/', $CHILD_CREDHUB, 'admin', 'secret', 'ca');
+	};
+	local *Service::Credhub::run = sub {
+		my ($opts, $cmd, $action, @args) = @_;
+		my ($name) = map {$args[$_ + 1]} grep {$args[$_] eq '-n'} 0..$#args;
+		my ($value) = map {$args[$_ + 1]{redact}} grep {$args[$_] eq '-v'} 0..$#args;
+		push @calls, join(' ', $opts->{env}{CREDHUB_SERVER}, $action, $name // '');
+		$store{$name} = $value if $action eq 'set';
+		return ('', 1, 'not found') unless defined($name) && defined($store{$name});
+		return (JSON::PP::encode_json({value => $store{$name}}), 0, '');
+	};
+	local *Genesis::Env::ManifestProvider::entombed = sub {
+		$count{entombed}++;
+		bless {env => $env}, 'Test::Fake::CpiBuild::Parent';
+	};
+	local *Genesis::Env::ManifestProvider::entombed_self = sub {
+		$count{entombed_self}++;
+		bless {env => $env}, 'Test::Fake::CpiBuild::Self';
+	};
+	local *Genesis::Hook::CpiConfig::done = sub { push @configs, $_[1]; goto &$done };
+	local *Service::BOSH::Director::has_config_of_type = sub { 0 };
+	local *Service::BOSH::Director::download_configs = \&download_config;
+	local *Service::BOSH::Director::configs = sub { wantarray ? () : {} };
+	local *Service::BOSH::Director::get_config = sub { "cpis: []\n" };
+	local *Service::BOSH::Director::upload_config = sub { ('', 0, '') };
+	local *Service::BOSH::Director::execute = sub { shift; die "BOSH was asked something: @_\n" };
+
+	my $error;
+	combined_from { eval { $code->($env, $parent) }; $error = untraced($@) };
+	return {
+		error => $error, configs => \@configs, calls => \@calls, %count,
+		properties => [map {[@{$_->{cpis}[0]{properties}}{qw/host custom/}]} @configs],
+	};
+}
+
+# The name the fixture's host is entombed under, relative to a CredHub base.
+my $HOST = 'genesis-entombed/_/child/pve--host--'.substr(Digest::SHA::sha1_hex('_/child/pve--host--10.0.0.9'), 0, 8);
+
+# Every CPI path that synthesizes a config for the parent: deploy's check
+# and fix, bosh-configs summary, and its upload.
+my %PARENT_PATHS = (
+	'_check_cpi_config' => sub { Genesis::Env::_check_cpi_config($_[0]) },
+	'_fix_cpi_config'   => sub { $_[0]->_fix_cpi_config('missing', undef, noprompt => 1) },
+	'bosh-configs summary --type cpi' => sub {
+		Genesis::Commands::Bosh::bosh_configs_summary($_[0], $_[1], type => 'cpi');
+	},
+);
+
+subtest 'the parent CPI check reads the parent\'s build and never the child\'s CredHub' => sub {
+	for my $path (sort keys %PARENT_PATHS) {
+		my $r = cpi_destination($PARENT_PATHS{$path});
+		is $r->{error}, '', "$path raises nothing";
+		is_deeply $r->{properties}, [["((/parent/child-bosh/$HOST))", "https://((/parent/child-bosh/$HOST)):8006"]],
+			'its host names the parent\'s CredHub, as a whole value and inside a longer one';
+		ok $r->{entombed}, 'from the build entombed into the parent\'s CredHub';
+		is $r->{entombed_self}, 0, 'and never from the director\'s own';
+		is $r->{self_target} + $r->{from_bosh}, 0, 'whose BOSH and CredHub are never looked up';
+		is_deeply [grep {!m{^\Q$PARENT_CREDHUB\E }} @{$r->{calls}}], [], 'so only the parent\'s CredHub is called';
+		is_deeply [grep {m{//}} map {s{^\S+ }{}r} @{$r->{calls}}], [], 'and never with a doubled slash';
+	}
+};
+
+subtest 'the self-upload hook reads the director\'s own build' => sub {
+	my $r = cpi_destination(sub { $_[0]->_resolve_director_cpi_config });
+	is $r->{error}, '', 'the self-upload payload resolves without an error';
+	is_deeply $r->{properties}, [["((/$HOST))", "https://((/$HOST)):8006"]],
+		'its host names the director\'s own CredHub, under its root base';
+	ok $r->{entombed_self}, 'from the build entombed into the director\'s own CredHub';
+	is $r->{entombed}, 0, 'and never from the parent\'s';
+	is_deeply [grep {!m{^\Q$CHILD_CREDHUB\E }} @{$r->{calls}}], [], 'so only the director\'s own CredHub is called';
+	is_deeply [grep {m{//}} map {s{^\S+ }{}r} @{$r->{calls}}], [], 'and never with a doubled slash';
 };
 
 

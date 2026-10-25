@@ -158,6 +158,16 @@ in the OCFP configuration and falls back to what the kit declares -- so a
 null on the name the operator wrote is not rescued by an alt they did not.
 A C<defined>-based test would quietly remove that mechanism.
 
+B<The operator's values are entombed for the director that receives the
+config.> They come from an entombed build, so a C<(( vault ))> reference
+arrives as a CredHub reference rather than the secret. A config the parent
+director stores, which is what deploy's CPI check and fix and
+C<genesis bosh-configs> work with, reads the build entombed into the
+parent's CredHub. The post-deploy self-upload sets C<self_upload>, and its
+values come from the build entombed into the director's own CredHub. Either
+way, every reference names the CredHub of the director that will resolve
+it. L</_lookup_operator_value> makes that choice.
+
 =head2 What a kit says by omission
 
 A property found in no source falls to the descriptor, and the descriptor
@@ -326,6 +336,12 @@ with the value itself collected into C<credhub_secrets> and committed to
 the director's CredHub under C<bosh-configs.cpi.credhub_base>, or under
 C<< <credhub base>genesis-entombed/ >> when that is not set.
 
+An operator value that came from the vault is already a reference when the
+hook sees it. It names the entombed secret by its absolute name in the
+CredHub of the director that receives the config, which is the parent's
+unless C<self_upload> is set, because BOSH resolves only absolute names in
+a CPI config.
+
 The entombed secret's name is Genesis's own bookkeeping and belongs to
 neither vocabulary. It is currently derived from the CPI-side path, which
 couples Genesis's records to a name the CPI owns; see
@@ -410,6 +426,45 @@ B<Examples:>
     # { key => 'host', alts => ['addr'], lookups => ['host','addr'],
     #   default => 'def', optional => 0, secret => 1, path => 'a.b.c' }
 
+=head2 _lookup_operator_value
+
+    my ($value, $found) = $hook->_lookup_operator_value($leaf);
+
+Looks up C<< bosh-configs.cpi.<leaf> >> in the entombed build for the
+director that receives this config.  With C<self_upload> set, the config
+goes to the director being deployed, so it reads
+L<Genesis::Env/lookup_entombed_self>.  Otherwise the config goes to the
+parent that deploys it, so it reads L<Genesis::Env/lookup_entombed>, whose
+build is entombed into the parent's CredHub.  A reference into any other
+CredHub could never resolve on the director that stores the config.
+
+Both of the hook's operator lookups, the declared properties in
+L</_resolve> and the extra leaves in L</gather_properties>, go through
+here, so they always read from the same destination.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$leaf>
+
+The leaf under C<bosh-configs.cpi>, such as C<host> or C<pve.host>.
+
+=back
+
+B<Returns:> what the lookup returns, which is the value, with its entombed
+names absolute, and in list context also the key that was found, or
+C<undef> when the leaf is absent.
+
+B<Errors:> whatever the lookup raises, such as an entombment failure or a
+vault value that can't be read.
+
+B<Examples:>
+
+    my ($host, $found) = $hook->_lookup_operator_value('host');
+    # ((/parent-bosh/child-bosh/genesis-entombed/_/child/pve--host--0a1b2c3d))
+    # for the parent's config, from the vault-derived host
+
 =head2 _resolve
 
     my ($value, $found) = $hook->_resolve($spec, $routed_leaf);
@@ -423,11 +478,12 @@ an C<@alt>, so an operator still using an older spelling is silently
 overridden by the platform default. Preventing that is what an C<@alt> is
 for.
 
-The operator side reads through C<lookup_entombed_self>, so a
-C<(( vault ))> reference in the environment file arrives already entombed.
-For a director, every name it tries is looked up in the entombed build, a
-literal or absent one included, so the director's own CredHub is needed
-whenever its manifest reads the vault anywhere.  The lookup first downloads
+The operator side reads through L</_lookup_operator_value>, so a
+C<(( vault ))> reference in the environment file arrives already entombed,
+for the parent's CredHub or, with C<self_upload>, for the director's own.
+Every name it tries is looked up in that entombed build, a literal or
+absent one included, so that CredHub is needed whenever the manifest reads
+the vault anywhere.  The lookup first downloads
 any config the kit's blueprint reads, so the build works before deploy's
 own config download, and outside deploy too.  A lookup that fails is
 raised, never read as written.  The platform side reads
@@ -459,10 +515,9 @@ value" must test C<defined($value)>, not C<$found>.
 
 B<Errors:>
 
-An unresolvable property is reported as not found.  Whatever
-C<lookup_entombed_self> raises reaches the caller unchanged, such as an
-entombment failure, which for a director can come from any name.  See
-L<Genesis::Env/lookup_entombed_self>.
+An unresolvable property is reported as not found.  Whatever the entombed
+lookup raises reaches the caller unchanged, such as an entombment failure,
+which can come from any name.  See L<Genesis::Env/lookup_entombed>.
 
 B<Examples:>
 
@@ -547,6 +602,12 @@ Constructs and returns a new C<Genesis::Hook::CpiConfig> object. Delegates
 to the parent class for base initialization, then initializes two internal
 stores: C<cpi_config> (empty hashref) and C<credhub_secrets> (empty
 hashref).
+
+L<Genesis::Kit/run_hook> passes two options of its own. C<credhub_prefix>
+is where secrets the hook entombs itself are stored. C<self_upload> is true
+when the config goes to the director being deployed rather than to its
+parent, and it decides which entombed build the operator's values come
+from; see L</_lookup_operator_value>.
 
 B<Parameters:>
 
@@ -787,12 +848,14 @@ and a spruce operator could reach the director as a literal, where it is
 parsed as a BOSH variable reference and fails every deployment against that
 director.
 
-Operator values are read through C<lookup_entombed_self>, so a C<(( vault
-))> reference in the environment file -- explicit or implicit, at any depth
--- arrives already entombed. This is what retired the hand-rolled vault
+Operator values are read through L</_lookup_operator_value>, so a
+C<(( vault ))> reference in the environment file -- explicit or implicit,
+at any depth -- arrives already entombed, for the CredHub of the director
+that receives the config. This is what retired the hand-rolled vault
 regex that scanned only scalars, and with it the limitation that a vault
 reference nested inside a hash or array reached the CPI config
-un-entombed.
+un-entombed. A declared property and an extra leaf read the same build, so
+they never name different CredHubs.
 
 The resulting flat hash is passed through C<unflatten> to produce a nested
 structure when dot-notation config paths are used. Leaf-level flattening
@@ -863,9 +926,9 @@ config had already been built.
 
 =item *
 
-Whatever C<lookup_entombed_self> raises for a declared or an extra
-property reaches the caller unchanged, such as an entombment failure or a
-vault value that can't be read.  See L<Genesis::Env/lookup_entombed_self>.
+Whatever the entombed lookup raises for a declared or an extra property
+reaches the caller unchanged, such as an entombment failure or a vault
+value that can't be read.  See L<Genesis::Env/lookup_entombed>.
 
 =back
 

@@ -43,9 +43,9 @@ require_ok 'Genesis::Hook::CpiConfig';
 # Shared kit and bosh mocks
 # ---------------------------------------------------------------------------
 
-# lookup and lookup_entombed_self read different manifests in production;
-# for a plain value the two agree, so one body answers both -- two copies
-# is how a double starts disagreeing with itself.
+# lookup, lookup_entombed, and lookup_entombed_self read different manifests
+# in production; for a plain value they agree, so one body answers all
+# three -- separate copies are how a double starts disagreeing with itself.
 sub fixed_lookups {
 	my (%values) = @_;
 	my $read = sub {
@@ -54,7 +54,7 @@ sub fixed_lookups {
 			if exists $values{$key};
 		return wantarray ? ($default, undef) : $default;
 	};
-	return (lookup => $read, lookup_entombed_self => $read);
+	return (lookup => $read, lookup_entombed => $read, lookup_entombed_self => $read);
 }
 
 my $kit = mock "Genesis::Kit::CpiConfig" => {
@@ -115,6 +115,10 @@ sub mock_env {
 		lookup_unevaled => sub {
 			my ($self, $key) = @_;
 			return {};
+		},
+		lookup_entombed => sub {
+			my ($self, $key, $default) = @_;
+			return wantarray ? ($default, undef) : $default;
 		},
 		lookup_entombed_self => sub {
 			my ($self, $key, $default) = @_;

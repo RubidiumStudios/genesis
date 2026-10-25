@@ -1723,15 +1723,15 @@ sub lookup {
 }
 
 # }}}
-# lookup_entombed_self - lookup against the env's own-credhub-entombed manifest; an env that isn't a director reads lookup_unevaled {{{
-sub lookup_entombed_self {
-	my ($self, $key, $default) = @_;
+# lookup_entombed - lookup against the manifest entombed into the parent's credhub, or with self => 1 the env's own; an env that isn't a director reads lookup_unevaled for self {{{
+sub lookup_entombed {
+	my ($self, $key, $default, %opts) = @_;
 	$key //= '.';
 
 	# Only a director has a CredHub of its own to entomb into, so any other
-	# env reads its values as they are written.
+	# env asked for its own build reads its values as they are written.
 	return $self->lookup_unevaled($key, $default)
-		unless $self->is_bosh_director;
+		if $opts{self} && !$self->is_bosh_director;
 
 	# Every other value, and whether the key is there at all, comes from the
 	# entombed build, since only evaluating the whole merge shows what its
@@ -1739,7 +1739,7 @@ sub lookup_entombed_self {
 	# runs before the build downloads the configs it reads, and the CPI step
 	# comes before deploy downloads them, so they are fetched here first.
 	$self->download_required_configs('blueprint') if $self->missing_required_configs('blueprint');
-	my $manifest = $self->manifest_provider->entombed_self;
+	my $manifest = $opts{self} ? $self->manifest_provider->entombed_self : $self->manifest_provider->entombed;
 	my ($value, @found) = struct_lookup($manifest->data, $key, $default);
 
 	# BOSH accepts only absolute names in a CPI config, so each entombed name
@@ -1748,6 +1748,13 @@ sub lookup_entombed_self {
 	my $credhub;
 	$value = $self->_qualify_entombed_refs(sub {$credhub //= $manifest->credhub_target}, $value);
 	return wantarray ? ($value, @found) : $value;
+}
+
+# }}}
+# lookup_entombed_self - lookup_entombed against the env's own credhub, for configs a director uploads to itself {{{
+sub lookup_entombed_self {
+	my ($self, $key, $default) = @_;
+	return $self->lookup_entombed($key, $default, self => 1);
 }
 
 # }}}
@@ -2356,7 +2363,7 @@ sub _resolve_director_cpi_config {
 
 	if ($self->has_hook('cpi-config')) {
 		my ($config, $secrets, $errors) = $self->run_hook(
-			'cpi-config', credhub_prefix => $credhub_prefix
+			'cpi-config', credhub_prefix => $credhub_prefix, self_upload => 1
 		);
 		return (undef, undef, 'cpi-config hook', undef, $errors) if $errors;
 		return (
