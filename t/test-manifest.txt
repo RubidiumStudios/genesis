@@ -229,6 +229,7 @@ unit-tests/service_vault_remote-reauth.t                   # Remote vault re-aut
 unit-tests/service_vault_remote-token_renewer.t            # Background token renewer
 unit-tests/service_vault_local-port_selection.t            # Local vault free-port scan
 unit-tests/service_vault_local-process_matching.t          # Local vault safe/vault process matching
+unit-tests/service_vault_local-recreate.t                  # Local vault started again after a shutdown
 
 # Other unit tests not yet in any thematic block
 unit-tests/genesis-init_forked_child.t       # forked-child defensive init
