@@ -359,6 +359,8 @@
 
 * A typed value that a manifest doesn't reference, such as the numeric `pid` an older Genesis writes into its network lock, no longer stops entombment. Every referenced value now resolves before anything is written to CredHub, so a missing value no longer leaves earlier values written.
 
+* CredHub names under a root base now join with one slash. When a director's exodus data names no `credhub_base`, Genesis used to read and write names such as `//genesis-entombed/...` in that director's CredHub, and BOSH refuses a placeholder name with a doubled slash, so no config could resolve one. Genesis now uses `/genesis-entombed/...`. If a development build ran against such a director, check its CredHub with `credhub find -n //genesis-entombed` and delete anything it finds, since nothing can have used those names.
+
 # Internal Changes/Improvements
 
 ## BOSH Refactor

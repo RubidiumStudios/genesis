@@ -344,7 +344,8 @@ sub _full_path {
 	my ($self,$path) = @_;
 	return $self->{base} unless $path;
 	return $path if ($path =~ /^\//);
-	return ($self->{base}).'/'.$path;
+	# base() ends in exactly one slash, so a root base gives /name, not //name.
+	return $self->base . $path;
 }
 
 sub execute {
