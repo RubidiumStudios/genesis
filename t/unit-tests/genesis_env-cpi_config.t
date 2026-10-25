@@ -366,8 +366,15 @@ sub director_env {
 YAML
 }
 
-# The entombed manifest a test builds: its data, or the error building it dies with.
+# The entombed manifest a test builds: its data, or the error building it
+# dies with, and the CredHub it entombed into, when the test names one.
 sub Test::Fake::EntombedSelf::data { ref($_[0]{data}) ? $_[0]{data} : die $_[0]{data} }
+sub Test::Fake::EntombedSelf::credhub_target { $_[0]{credhub} // die "the CredHub was asked for\n" }
+
+# credhub_at - a CredHub whose base is the given one.
+sub credhub_at {
+	return Service::Credhub->new('child-bosh', $_[0], 'https://10.0.0.5:8844', 'admin', 'secret', 'ca');
+}
 
 # self_lookup - runs lookup_entombed_self for a director (or not) whose
 # entombment is given, and reports what came back, what was printed, how
@@ -375,8 +382,9 @@ sub Test::Fake::EntombedSelf::data { ref($_[0]{data}) ? $_[0]{data} : die $_[0]{
 # was built, how many times the kit's blueprint ran to merge a manifest,
 # and which configs were downloaded from the parent.
 #
-#   director - is_bosh_director (default 1)
-#   entombed - entombed data, or the message its build dies with
+#   director     - is_bosh_director (default 1)
+#   entombed     - entombed data, or the message its build dies with
+#   credhub_base - the base of the CredHub the build entombed into
 sub self_lookup {
 	my (%s) = @_;
 	my $env = $s{env} // director_env();
@@ -403,7 +411,10 @@ sub self_lookup {
 	local *Service::BOSH::Director::execute = sub { $bosh++; die "BOSH asked\n" };
 	local *Genesis::Env::ManifestProvider::entombed_self = sub {
 		$builds++;
-		return bless {data => $s{entombed} // $CREDHUB_DOWN}, 'Test::Fake::EntombedSelf';
+		return bless {
+			data => $s{entombed} // $CREDHUB_DOWN,
+			defined($s{credhub_base}) ? (credhub => credhub_at($s{credhub_base})) : (),
+		}, 'Test::Fake::EntombedSelf';
 	};
 	my $kit_files = \&Genesis::Env::ManifestProvider::kit_files;
 	local *Genesis::Env::ManifestProvider::kit_files = sub { $blueprints++; goto &$kit_files };
@@ -491,6 +502,51 @@ subtest 'lookup_entombed_self reports a vault outage instead of falling back' =>
 	is $r->{value}, undef, 'and nothing comes back';
 };
 
+# BOSH resolves only absolute names in a CPI config, so every entombed name
+# the self lookup returns is qualified with the director's own CredHub.
+subtest 'the self lookup returns absolute names in the director\'s CredHub' => sub {
+	for my $base ('/', '/d/e', '/d/e/') {
+		my ($name) = $ENTOMBED =~ /^\(\((.*)\)\)$/;
+		my $r = self_lookup(credhub_base => $base,
+			entombed => {'bosh-configs' => {cpi => {password => $ENTOMBED}}});
+		is $r->{error}, '', "nothing is raised (base $base)";
+		is $r->{value}, '(('.($base =~ s{/?\z}{/}r).$name.'))', 'the name comes back absolute, with one slash after the base';
+		is $r->{found}, 'bosh-configs.cpi.password', 'and is reported found';
+	}
+};
+
+subtest 'names are qualified inside a list of CPIs and inside a longer string' => sub {
+	my $r = self_lookup(credhub_base => '/', key => 'bosh-configs.director-cpi.cpis',
+		entombed => {'bosh-configs' => {'director-cpi' => {cpis => [
+			{name => 'pve', type => 'proxmox', properties => {
+				host     => 'https://((genesis-entombed/_/child/pve--host--11111111)):8006',
+				password => $ENTOMBED,
+				nodes    => [{token => '((genesis-entombed/_/child/pve--token--22222222))'}],
+			}},
+		]}}});
+	is $r->{error}, '', 'nothing is raised';
+	is_deeply $r->{value}, [
+		{name => 'pve', type => 'proxmox', properties => {
+			host     => 'https://((/genesis-entombed/_/child/pve--host--11111111)):8006',
+			password => '((/genesis-entombed/_/child/pve--password--0a1b2c3d))',
+			nodes    => [{token => '((/genesis-entombed/_/child/pve--token--22222222))'}],
+		}},
+	], 'every entombed name comes back absolute, however deep, and inside a string';
+};
+
+subtest 'other values are left alone' => sub {
+	my %values = (
+		literal  => 'plain-text',
+		absolute => '((/elsewhere/genesis-entombed/x))',
+		variable => '((nats_password))',
+		number   => 8006,
+		null     => undef,
+	);
+	my $r = self_lookup(key => 'bosh-configs.cpi', entombed => {'bosh-configs' => {cpi => {%values}}});
+	is $r->{error}, '', 'nothing is raised, and the CredHub is never asked for';
+	is_deeply $r->{value}, \%values, 'a literal, an absolute name, and a BOSH variable come back unchanged';
+};
+
 sub self_upload_env {
 	my ($password, $rest) = @_;
 	return make_cpi_env('child-bosh', <<"YAML".($rest // ''));
@@ -507,18 +563,22 @@ YAML
 }
 
 # self_upload - runs the director CPI self-upload for the env, whose
-# entombed build dies on the director's missing CredHub, and reports what
-# came back, what was raised, how many times the entombed manifest was
+# entombed build dies on the director's missing CredHub unless the test
+# gives its data and the base of the CredHub it entombed into, and reports
+# what came back, what was raised, how many times the entombed manifest was
 # built, and how many times BOSH was asked anything.
 sub self_upload {
-	my ($env) = @_;
+	my ($env, $entombed, $credhub_base) = @_;
 	my ($builds, $bosh) = (0, 0);
 	no warnings qw(redefine once);
 	local *Genesis::Env::is_bosh_director = sub { 1 };
 	local *Service::BOSH::Director::execute = sub { $bosh++; die "BOSH asked\n" };
 	local *Genesis::Env::ManifestProvider::entombed_self = sub {
 		$builds++;
-		bless {data => $CREDHUB_DOWN}, 'Test::Fake::EntombedSelf';
+		bless {
+			data => $entombed // $CREDHUB_DOWN,
+			defined($credhub_base) ? (credhub => credhub_at($credhub_base)) : (),
+		}, 'Test::Fake::EntombedSelf';
 	};
 	my (@result, $error);
 	stderr_from { @result = eval { $env->_resolve_director_cpi_config }; $error = untraced($@) };
@@ -579,6 +639,20 @@ for my $case (
 		is $r->{bosh}, 0, 'and BOSH is never asked';
 	};
 }
+
+# The regression test for the uploaded configs that could never resolve:
+# BOSH refuses a relative name in a CPI config, and a doubled slash in any.
+subtest 'the self-upload payload passes BOSH\'s absolute-name rule' => sub {
+	for my $base ('/', '/d/e') {
+		my $r = self_upload(self_upload_env($UNEVALED), {'bosh-configs' => {'director-cpi' => {cpis => [
+			{name => 'pve', type => 'proxmox', properties => {host => '10.0.0.1', password => $ENTOMBED}},
+		]}}}, $base);
+		is $r->{error}, '', "nothing is raised (base $base)";
+		my @names = map {/\(\(([^()]*)\)\)/g} values %{$r->{result}[0]{cpis}[0]{properties}};
+		ok @names, 'the payload carries entombed names';
+		is_deeply [grep {!m{^/} || m{//}} @names], [], 'and each is absolute, with no doubled slash';
+	}
+};
 
 subtest 'resolver - no source returns empty' => sub {
 	plan tests => 1;

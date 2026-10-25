@@ -363,6 +363,8 @@
 
 * `lookup_entombed_self` reports failures instead of quietly returning unevaluated `(( vault ))` values. An environment that isn't a director reads its values as they are written. For a director, every lookup reads its entombed manifest, so a literal value, such as an inline `bosh-configs.director-cpi.cpis` list, and a key the manifest doesn't set both need the director's own CredHub whenever any part of the manifest reads the vault, and a build that fails stops the command. Before that build, Genesis downloads any config the kit's blueprint reads, so a blueprint that reads the cloud config works during deploy's CPI step and outside deploy, and deploy reuses that download.
 
+* A director's self-uploaded CPI config now names its entombed secrets with absolute names in the director's own CredHub, such as `((/genesis-entombed/...))`, or names under its `credhub_base` when its exodus data sets one. Development builds sent the relative names the entombment writes, and BOSH refuses a relative name in a CPI config, so that config could never resolve. Names inside a longer value, such as `https://((genesis-entombed/...)):8006`, are qualified too, and BOSH variables and literal values are sent unchanged.
+
 # Internal Changes/Improvements
 
 ## BOSH Refactor

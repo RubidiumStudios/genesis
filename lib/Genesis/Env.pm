@@ -1739,7 +1739,27 @@ sub lookup_entombed_self {
 	# runs before the build downloads the configs it reads, and the CPI step
 	# comes before deploy downloads them, so they are fetched here first.
 	$self->download_required_configs('blueprint') if $self->missing_required_configs('blueprint');
-	return struct_lookup($self->manifest_provider->entombed_self->data, $key, $default);
+	my $manifest = $self->manifest_provider->entombed_self;
+	my ($value, @found) = struct_lookup($manifest->data, $key, $default);
+
+	# BOSH accepts only absolute names in a CPI config, so each entombed name
+	# is qualified with the CredHub it was written to.  That CredHub is only
+	# looked up for a value that holds such a name.
+	my $credhub;
+	$value = $self->_qualify_entombed_refs(sub {$credhub //= $manifest->credhub_target}, $value);
+	return wantarray ? ($value, @found) : $value;
+}
+
+# }}}
+# _qualify_entombed_refs - a copy of a looked-up value with each ((genesis-entombed/...)) name made absolute in the CredHub it was entombed into {{{
+sub _qualify_entombed_refs {
+	my ($self, $credhub, $value) = @_;
+	return [map {$self->_qualify_entombed_refs($credhub, $_)} @$value]
+		if ref($value) eq 'ARRAY';
+	return {map {($_ => $self->_qualify_entombed_refs($credhub, $value->{$_}))} keys %$value}
+		if ref($value) eq 'HASH';
+	return $value if ref($value) || !defined($value);
+	return $value =~ s/\(\((genesis-entombed\/[^()\s]+)\)\)/'(('.$credhub->()->_full_path($1).'))'/ger;
 }
 
 # }}}
