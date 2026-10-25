@@ -146,6 +146,9 @@ sub reset {
 	my ($self) = @_;
 	delete($self->{manifests}{$_})->reset for (keys %{$self->{manifests}});
 	delete($self->{$_}) for (grep {$_ =~ /^__/} keys %$self);
+	# The env caches the files its blueprint chose, and a blueprint can
+	# choose them from the configs that changed, so it runs again too.
+	delete($self->env->{__kit_files});
 	$self->{deployment}=undef;
 	unlink($_) for (glob $self->env->workpath()."/manifest-".$self->env->name."-*");
 	return $self;

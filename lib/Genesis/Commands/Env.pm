@@ -1318,6 +1318,7 @@ sub deploy {
 					my $diff_dir = $env->workpath('cloud-config-diffs');
 					my $new_path = "$cloud_config_dir/${cloud_config_name}.yml";
 					my $new_path_diff = "$diff_dir/${cloud_config_name}.yml";
+					my $uploaded;
 					info "[[  - >>cloud config synthesized.";
 
 					# Wrap this in an eval block to ensure the lock is cleared on error
@@ -1361,6 +1362,7 @@ sub deploy {
 									fix_wrap($@),
 									slurp($new_path)
 								);
+								$uploaded = 1;
 								info "[[  - >>cloud config for #C{%s} deployment has been updated.\n", $env->name;
 							}
 						} else {
@@ -1385,7 +1387,29 @@ sub deploy {
 							fix_wrap($@),
 							slurp($new_path)
 						);
+						$uploaded = 1;
 						info "[[  - >>cloud config for #C{%s} deployment has been created.\n", $env->name;
+					}
+
+					# The CPI step may already have downloaded the cloud configs, all
+					# of them or a named one the kit requires, and built the manifest
+					# against them.  The download below skips a config that is already
+					# registered, so read each again and drop any manifest built from
+					# the old ones.  A named config registered by the download of them
+					# all shares its file and is read again with it, and a name with
+					# no file, like the cloud-config hook's SUBTYPE, isn't a config.
+					if ($uploaded) {
+						my $all = $env->config_file('cloud');
+						my @cloud = grep {
+							my (undef, $name) = split('@', $_, 2);
+							!(defined($name) && $name eq 'SUBTYPE')
+							&& $env->has_config('cloud', $name)
+								&& !($name && $env->config_file('cloud', $name) eq $all);
+						} grep {/^cloud(\@|$)/} $env->configs;
+						if (@cloud) {
+							$env->download_configs(@cloud, {refresh => 1});
+							$env->manifest_provider->reset;
+						}
 					}
 
 					if (ref($network_map) eq 'HASH') {

@@ -306,6 +306,12 @@ All memoized provider-level values (keys beginning with C<__>) are cleared,
 the deployment type is set back to undef, and all C<manifest-E<lt>nameE<gt>-*>
 work files in the environment work directory are deleted.
 
+It also clears the environment's cached C<kit_files>, so the next build runs
+the kit's blueprint again.  A blueprint can choose its manifest fragments
+from the BOSH configs, and a reset usually follows a change to those
+configs, so a rebuild that reused the old list would merge the fragments
+the old configs chose.
+
 B<Returns:> The provider object itself, for method chaining.
 
 B<Examples:>

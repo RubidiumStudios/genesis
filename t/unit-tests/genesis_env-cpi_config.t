@@ -1182,31 +1182,44 @@ my $SENTINEL = "stopped after the config downloads\n";
 my $HOOK_VAULT = bless {}, 'Test::Fake::Vault';
 
 # download_config - stands in for the parent's config download, handing out
-# an empty config of the type asked for and recording the type in
-# @DOWNLOADS.  Each test that uses it also says the parent holds no CPI
-# configs, so the opportunistic CPI config download is skipped.
+# a config of the type asked for and recording the type in @DOWNLOADS, with
+# the name of a single config, and marked when the download refreshed the
+# director's listing.  A cloud config holds $CLOUD_CONFIG, when it is set,
+# and every other config is empty.  It reports the config it was asked for,
+# or the default one when it was asked for them all.
+# Each test that uses it also says the parent holds no CPI configs, so the
+# opportunistic CPI config download is skipped.
 our @DOWNLOADS;
+our $CLOUD_CONFIG;
 sub download_config {
-	my (undef, $path, $type) = @_;
-	push @DOWNLOADS, $type;
-	mkfile_or_fail($path, "--- {}\n");
-	return {type => $type, name => 'default', label => "default $type config"};
+	my (undef, $path, $type, $name, %opts) = @_;
+	my $single = defined($name) && $name ne '*';
+	push @DOWNLOADS, $type.($single ? "\@$name" : '').($opts{refresh} ? ' (refresh)' : '');
+	mkfile_or_fail($path, $type eq 'cloud' && defined($CLOUD_CONFIG) ? $CLOUD_CONFIG : "--- {}\n");
+	return {type => $type, name => ($single ? $name : 'default'), label => "default $type config"};
 }
 
 # A dev kit whose cpi-config hook resolves one declared property through
 # _resolve and passes one extra bosh-configs.cpi leaf through
 # gather_properties.  Its blueprint reads the cloud config, and it counts
-# its runs in $Genesis::Hook::Blueprint::CpiContext::RUNS.
+# its runs in $Genesis::Hook::Blueprint::CpiContext::RUNS.  It adds zone.yml
+# to the manifest when the cloud config names the zone z-new.
+#
+# With required_configs given, the kit requires those configs instead of
+# the aggregate cloud config, and its blueprint reads the named cloud config
+# deploy uploads for the env.  With env_yaml given, the env file ends with it.
 sub fixture_env {
+	my (%opts) = @_;
 	my $top = make_top(name => 'bosh', no_vault => 1);
 	my $kit = workdir().'/cpi-context-kit-'.int(rand(1_000_000));
-	put_file("$kit/kit.yml", <<'YAML');
+	put_file("$kit/kit.yml", <<'YAML'.($opts{required_configs} ? "required_configs: [".join(', ', @{$opts{required_configs}})."]\n" : ''));
 ---
 name: cpi-context
 version: 0.0.1
 genesis_version_min: 3.1.0
 YAML
 	put_file("$kit/manifest.yml", "---\nname: child-bosh\n");
+	put_file("$kit/zone.yml", "---\nzone: z-new\n");
 	put_file("$kit/hooks/blueprint.pm", <<'PERL');
 package Genesis::Hook::Blueprint::CpiContext;
 use strict;
@@ -1219,9 +1232,12 @@ our $RUNS = 0;
 sub perform {
 	my ($self) = @_;
 	$RUNS++;
+	my $env = $self->env;
+	my $cloud = $env->config_file('cloud') || $env->config_file('cloud', $env->name.'.'.$env->type);
 	bail("The blueprint needs the cloud config, which isn't downloaded yet.")
-		unless $self->env->config_file('cloud');
+		unless $cloud;
 	$self->add_files('manifest.yml');
+	$self->add_files('zone.yml') if slurp($cloud) =~ /z-new/;
 	return $self->done();
 }
 
@@ -1260,6 +1276,8 @@ bosh-configs:
     host:         10.0.0.1
     custom:       kept
 YAML
+	put_file($top->path('child.yml'), slurp($top->path('child.yml')).$opts{env_yaml})
+		if $opts{env_yaml};
 	return $top;
 }
 
@@ -1274,11 +1292,25 @@ sub parent_director {
 # director answers get_config with the given config, records uploads and
 # config downloads, and is never asked anything else.  The entombed
 # manifest is built for real, and counts its builds.
+#
+# With cloud_config set, deploy also runs its cloud-config step, which the
+# kit's hook answers with an empty config, and the parent's copy of that
+# config is 'missing', 'changed', or 'same'.  The step's uploads are
+# recorded in cloud_uploads, and each reset of the manifest provider in
+# events, in order with the config downloads.  The hook answers with
+# new_cloud_config instead, when it is given, and the parent serves its
+# old_cloud_config until an upload replaces it.  Like the kit's own, the
+# hook leaves GENESIS_CLOUD_CONFIG_SUBTYPE set in the environment.
+#
+# required_configs is handed to the fixture kit, env_yaml is added to the
+# env file, and rebuilt is called with the env where deploy goes on to check
+# it, before the command stops.
 sub deploy_past_downloads {
 	my (%s) = @_;
-	my $top = fixture_env();
-	my (@uploads, @bosh_calls);
+	my $top = fixture_env(required_configs => $s{required_configs}, env_yaml => $s{env_yaml});
+	my (@uploads, @cloud_uploads, @bosh_calls, @events);
 	my $builds = 0;
+	my ($has_hook, $run_hook, $reset) = (\&Genesis::Env::has_hook, \&Genesis::Env::run_hook, \&Genesis::Env::ManifestProvider::reset);
 	my $entombed_self = \&Genesis::Env::ManifestProvider::entombed_self;
 	local $Genesis::Hook::Blueprint::CpiContext::RUNS = 0;
 	local @DOWNLOADS;
@@ -1296,10 +1328,30 @@ sub deploy_past_downloads {
 	local *Genesis::Env::deployment_change_reason_required_size_policy = sub { 0 };
 	local *Genesis::Env::bosh = sub { $parent };
 	local *Genesis::Env::credhub = sub { $credhub };
-	local *Genesis::Env::can_build_cloud_configs = sub { 0 };
-	local *Genesis::Env::_check_environment_viability = sub { die $SENTINEL };
+	local *Genesis::Env::can_build_cloud_configs = sub { !!$s{cloud_config} };
+	local *Genesis::Env::has_hook = sub { $_[1] eq 'cloud-config' ? 1 : goto &$has_hook };
+	local $CLOUD_CONFIG = $s{old_cloud_config};
+	local $ENV{GENESIS_CLOUD_CONFIG_SUBTYPE} = $s{inherited_subtype};
+	local $ENV{'GENESIS_CLOUD_CONFIG_child.bosh'};
+	local $ENV{GENESIS_CLOUD_CONFIG_default};
+	local *Genesis::Env::run_hook = sub {
+		goto &$run_hook unless $_[1] eq 'cloud-config';
+		$ENV{GENESIS_CLOUD_CONFIG_SUBTYPE} = $s{inherited_subtype};
+		return ($s{new_cloud_config} // "--- {}\n", undef);
+	};
+	local *Genesis::Commands::Env::_deploy_under_network_claims_lock = sub { $_[1]->() };
+	local *Genesis::Commands::Env::_deploy_cloud_config_diff = sub { $s{cloud_config} eq 'changed' ? "azs: changed\n" : '' };
+	local *Service::BOSH::Director::has_config = sub { $s{cloud_config} ne 'missing' };
+	local *Service::BOSH::Director::ensure_network_lock_held = sub { 1 };
+	local *Service::BOSH::Director::upload_config_from_file = sub {
+		push @cloud_uploads, $_[2]; push @events, 'upload';
+		$CLOUD_CONFIG = slurp($_[1]);
+		1;
+	};
+	local *Genesis::Env::ManifestProvider::reset = sub { push @events, 'reset'; goto &$reset };
+	local *Genesis::Env::_check_environment_viability = sub { $s{rebuilt}->($_[0]) if $s{rebuilt}; die $SENTINEL };
 	local *Service::BOSH::Director::has_config_of_type = sub { 0 };
-	local *Service::BOSH::Director::download_configs = \&download_config;
+	local *Service::BOSH::Director::download_configs = sub { push @events, 'download'; goto &download_config };
 	local *Service::BOSH::Director::get_config = sub { $s{parent_config} };
 	local *Service::BOSH::Director::upload_config = sub { push @uploads, $_[2]; ('', 0, '') };
 	local *Service::BOSH::Director::execute = sub {
@@ -1319,6 +1371,7 @@ sub deploy_past_downloads {
 	chdir($cwd);
 	return {
 		error => $error, output => $output, uploads => \@uploads,
+		cloud_uploads => \@cloud_uploads, events => \@events,
 		bosh_calls => \@bosh_calls, builds => $builds,
 		blueprints => $Genesis::Hook::Blueprint::CpiContext::RUNS, downloads => [@DOWNLOADS],
 	};
@@ -1336,6 +1389,135 @@ subtest 'a director builds its CPI values once the configs its blueprint reads a
 		is scalar(@{$r->{uploads}}), 1, 'and the config was uploaded once';
 		is_deeply $r->{bosh_calls}, [], 'and the parent was never asked about the director';
 	}
+};
+
+# The CPI step has already downloaded the cloud config and may have built
+# the manifest against it, so an upload has to replace both.
+subtest 'deploy re-reads the cloud config after it uploads a changed one' => sub {
+	for my $state (qw/changed missing/) {
+		my $r = deploy_past_downloads(cloud_config => $state, parent_config => "cpis: []\n");
+		like $r->{error}, qr/\A\Q${\($SENTINEL =~ s{\n}{}r)}\E/, "the command ran past its config downloads (a $state cloud config)";
+		is_deeply $r->{cloud_uploads}, ['cloud'], 'the cloud config was uploaded';
+		is_deeply [grep {!/@/} @{$r->{downloads}}], ['cloud', 'cloud (refresh)'],
+			'and then downloaded again, past the director\'s cached listing';
+		is_deeply [@{$r->{events}}[-3..-1]], ['upload', 'download', 'reset'],
+			'after which the manifest built against the old one was discarded';
+	}
+};
+
+# The SUBTYPE label is hook metadata that configs lists, so a subtype the
+# deploy inherits must not send the refresh to BOSH for a config by that name.
+subtest 'deploy does not read the cloud-config hook\'s SUBTYPE as a config after an upload' => sub {
+	my $r = deploy_past_downloads(
+		cloud_config => 'changed', parent_config => "cpis: []\n", inherited_subtype => 'director',
+	);
+	like $r->{error}, qr/\A\Q${\($SENTINEL =~ s{\n}{}r)}\E/, 'the command ran past its config downloads';
+	is_deeply $r->{cloud_uploads}, ['cloud'], 'the cloud config was uploaded';
+	is_deeply [grep {/SUBTYPE/} @{$r->{downloads}}], [], 'and no config named SUBTYPE was downloaded';
+	is_deeply [grep {/refresh/} @{$r->{downloads}}], ['cloud (refresh)'], 'while the cloud configs were read again';
+};
+
+subtest 'deploy reuses the downloaded cloud config when nothing changed' => sub {
+	my $r = deploy_past_downloads(cloud_config => 'same', parent_config => "cpis: []\n");
+	like $r->{error}, qr/\A\Q${\($SENTINEL =~ s{\n}{}r)}\E/, 'the command ran past its config downloads';
+	is_deeply $r->{cloud_uploads}, [], 'nothing was uploaded';
+	is_deeply [grep {!/@/} @{$r->{downloads}}], ['cloud'], 'and the cloud configs were downloaded once, besides the copy compared';
+	is_deeply [grep {$_ eq 'reset'} @{$r->{events}}], [], 'and the manifest the CPI step built was kept';
+};
+
+# The blueprint picks the manifest's fragments from the cloud config, and
+# the CPI step has already run it against the old one, so the rebuild has
+# to run it again.
+subtest 'the manifest deploy rebuilds after an upload merges what the new cloud config selects' => sub {
+	for my $state (qw/changed missing/) {
+		my $manifest;
+		my $r = deploy_past_downloads(
+			cloud_config => $state, parent_config => "cpis: []\n",
+			old_cloud_config => "---\nazs: [{name: z-old}]\n",
+			new_cloud_config => "---\nazs: [{name: z-new}]\n",
+			rebuilt => sub { $manifest = $_[0]->manifest_provider->unredacted->data },
+		);
+		like $r->{error}, qr/\A\Q${\($SENTINEL =~ s{\n}{}r)}\E/, "the command ran past its config downloads (a $state cloud config)";
+		is_deeply [grep {/refresh/} @{$r->{downloads}}], ['cloud (refresh)'],
+			'the cloud configs were read again, and the named ones only with them';
+		is $r->{blueprints}, 2, 'the blueprint ran again against the new cloud config';
+		is $manifest->{zone}, 'z-new', 'and the rebuilt manifest merged the fragment it selected';
+	}
+};
+
+# Each entombed build holds the CredHub names in a local vault that it shuts
+# down once it has merged, so the rebuild after an upload needs a running
+# local vault of its own.  The local vaults are real, and the env's vault and
+# the parent's CredHub are fakes that hold one secret.
+subtest 'the entombed manifest deploy rebuilds after an upload resolves its vault values' => sub {
+	put_file("$ENV{HOME}/.vault_token", '');
+	local $ENV{SAFE_TARGET};
+	my %credhub;
+	no warnings qw(redefine once);
+	local *Test::Fake::Vault::query = sub { ('', 1, 'no export from the fake vault') };
+	local *Test::Fake::Vault::read_flattened_secret = sub { $_[1] eq 'secret/child/pve' ? {password => 'sekrit'} : undef };
+	local *Test::Fake::Credhub::is_preloaded = sub { 1 };
+	local *Test::Fake::Credhub::get = sub { $credhub{$_[1]} };
+	local *Test::Fake::Credhub::set = sub { $credhub{$_[1]} = $_[2] };
+	my $merges;
+	my $merge = \&Genesis::Env::Manifest::Entombed::_merge;
+	local *Genesis::Env::Manifest::Entombed::_merge = sub { $merges++; goto &$merge };
+
+	my $name = Genesis::Env::Secrets::Entombment::credhub_var_name('_/secret/child/pve', 'password', 'sekrit');
+	for my $state (qw/changed missing/) {
+		%credhub = ();
+		$merges = 0;
+		my ($manifest, $rebuild_error);
+		my $r = deploy_past_downloads(
+			cloud_config => $state, parent_config => "cpis: []\n",
+			env_yaml => qq{vcenter_password: (( vault "secret/child/pve:password" ))\n},
+			rebuilt => sub {
+				$manifest = eval { $_[0]->manifest_provider->entombed->data };
+				$rebuild_error = $@;
+			},
+		);
+		like $r->{error}, qr/\A\Q${\($SENTINEL =~ s{\n}{}r)}\E/, "the command ran past its config downloads (a $state cloud config)";
+		is_deeply [@{$r->{events}}[-3..-1]], ['upload', 'download', 'reset'],
+			'the manifest the CPI step entombed was discarded after the upload';
+		is $merges, 2, 'and entombed again';
+		is $rebuild_error, '', 'which built';
+		is $manifest->{vcenter_password}, "(($name))",
+			'and carries the CredHub name of the vault value';
+		is $credhub{$name}, 'sekrit', 'whose value was entombed into the parent\'s CredHub';
+		my $targets = JSON::PP::decode_json(qx(SAFE_TARGET= safe targets --json) || '[]');
+		is_deeply [grep {/^local_vault_/} map {$_->{name}} @$targets], [],
+			'and neither build left a local vault target behind';
+	}
+};
+
+# A kit can require only the named cloud config its env deploys against,
+# which the CPI step downloads and registers on its own.
+subtest 'deploy re-reads a named cloud config the kit requires after it uploads it' => sub {
+	for my $state (qw/changed missing/) {
+		my $manifest;
+		my $r = deploy_past_downloads(
+			cloud_config => $state, parent_config => "cpis: []\n",
+			required_configs => ['cloud@child.bosh'],
+			old_cloud_config => "---\nazs: [{name: z-old}]\n",
+			new_cloud_config => "---\nazs: [{name: z-new}]\n",
+			rebuilt => sub { $manifest = $_[0]->manifest_provider->unredacted->data },
+		);
+		like $r->{error}, qr/\A\Q${\($SENTINEL =~ s{\n}{}r)}\E/, "the command ran past its config downloads (a $state cloud config)";
+		is_deeply $r->{cloud_uploads}, ['cloud'], 'the cloud config was uploaded';
+		is_deeply [grep {/refresh/} @{$r->{downloads}}], ['cloud@child.bosh (refresh)'],
+			'and the named cloud config was downloaded again, past the director\'s cached listing';
+		is_deeply [grep {!/\@child\.bosh/} @{$r->{downloads}}], [],
+			'and no other cloud config was downloaded';
+		is_deeply [@{$r->{events}}[-3..-1]], ['upload', 'download', 'reset'],
+			'after which the manifest built against the old one was discarded';
+		is $r->{blueprints}, 2, 'the blueprint ran again against the new cloud config';
+		is $manifest->{zone}, 'z-new', 'and the rebuilt manifest merged the fragment it selected';
+	}
+	my $r = deploy_past_downloads(cloud_config => 'same', parent_config => "cpis: []\n",
+		required_configs => ['cloud@child.bosh']);
+	like $r->{error}, qr/\A\Q${\($SENTINEL =~ s{\n}{}r)}\E/, 'the command ran past its config downloads (the same cloud config)';
+	is_deeply [grep {/refresh/} @{$r->{downloads}}], [], 'and an unchanged named cloud config was not read again';
+	is_deeply [grep {$_ eq 'reset'} @{$r->{events}}], [], 'and the manifest the CPI step built was kept';
 };
 
 subtest 'a director builds its CPI values outside deploy once the configs its blueprint reads are downloaded' => sub {
