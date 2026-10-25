@@ -1723,14 +1723,23 @@ sub lookup {
 }
 
 # }}}
-# lookup_entombed_self - lookup against the env's own-credhub-entombed manifest, falling back to lookup_unevaled when it cannot be built {{{
+# lookup_entombed_self - lookup against the env's own-credhub-entombed manifest; an env that isn't a director reads lookup_unevaled {{{
 sub lookup_entombed_self {
 	my ($self, $key, $default) = @_;
 	$key //= '.';
-	my $data = eval { $self->manifest_provider->entombed_self->data };
-	return struct_lookup($data, $key, $default)
-		if !$@ && ref($data) eq 'HASH';
-	return $self->lookup_unevaled($key, $default);
+
+	# Only a director has a CredHub of its own to entomb into, so any other
+	# env reads its values as they are written.
+	return $self->lookup_unevaled($key, $default)
+		unless $self->is_bosh_director;
+
+	# Every other value, and whether the key is there at all, comes from the
+	# entombed build, since only evaluating the whole merge shows what its
+	# operators make of a value.  A build that fails is raised.  Its blueprint
+	# runs before the build downloads the configs it reads, and the CPI step
+	# comes before deploy downloads them, so they are fetched here first.
+	$self->download_required_configs('blueprint') if $self->missing_required_configs('blueprint');
+	return struct_lookup($self->manifest_provider->entombed_self->data, $key, $default);
 }
 
 # }}}
@@ -2293,6 +2302,10 @@ sub _resolve_director_cpi_config {
 	# the uploaded cpis carry ((credhub-var)) references that the new
 	# director can resolve — not plaintext, and not parent-credhub refs
 	# (which the new director can't resolve).
+	# The lookup is strict, so a value that can't be entombed is raised
+	# rather than sent to the director as unevaluated text, and a literal or
+	# absent list needs the director's CredHub too whenever the manifest
+	# reads the vault.
 	if (defined(my $inline = $self->lookup_entombed_self('bosh-configs.director-cpi.cpis', undef))) {
 		bail(
 			"#C{bosh-configs.director-cpi.cpis} must be a non-empty array of ".

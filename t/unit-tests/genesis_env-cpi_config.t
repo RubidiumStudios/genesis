@@ -11,6 +11,7 @@ use Test::More;
 use Test::Deep;
 use Test::Exception;
 use Test::Output;
+use Cwd qw(getcwd abs_path);
 
 use Genesis;
 use_ok 'Genesis::Config';
@@ -19,6 +20,9 @@ provide_rc();
 
 use_ok 'Genesis::Top';
 use_ok 'Genesis::Env';
+use_ok 'Genesis::Commands';
+use_ok 'Genesis::Commands::Env';
+use_ok 'Genesis::Commands::Bosh';
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
@@ -337,6 +341,7 @@ YAML
 	no warnings qw(redefine once);
 	local *Genesis::Env::manifest_provider = sub { $fake_provider };
 	{ no strict 'refs'; *{"Test::Mock::Provider::entombed_self"} = sub { $fake_manifest }; }
+	local *Genesis::Env::is_bosh_director = sub { 1 };
 
 	is_deeply scalar $env->lookup_entombed_self('bosh-configs.director-cpi.cpis'),
 		[{ name => 'ent', type => 'vsphere', properties => {} }],
@@ -344,6 +349,236 @@ YAML
 	is scalar $env->lookup_entombed_self('absent.key', 'fallback'), 'fallback',
 		'lookup_entombed_self returns default for missing keys';
 };
+
+# ======================================================================
+# lookup_entombed_self - strict for a director
+# ======================================================================
+
+my $UNEVALED = '(( vault "secret/child/pve:password" ))';
+my $ENTOMBED = '((genesis-entombed/_/child/pve--password--0a1b2c3d))';
+my $CREDHUB_DOWN = "Could not reach the CredHub of child-bosh-cf at https://10.0.0.5:8844\n";
+
+sub director_env {
+	return make_cpi_env('child-bosh', <<'YAML');
+  cpi:
+    enabled: true
+    password: (( vault "secret/child/pve:password" ))
+YAML
+}
+
+# The entombed manifest a test builds: its data, or the error building it dies with.
+sub Test::Fake::EntombedSelf::data { ref($_[0]{data}) ? $_[0]{data} : die $_[0]{data} }
+
+# self_lookup - runs lookup_entombed_self for a director (or not) whose
+# entombment is given, and reports what came back, what was printed, how
+# many times BOSH was asked anything, how many times the entombed manifest
+# was built, how many times the kit's blueprint ran to merge a manifest,
+# and which configs were downloaded from the parent.
+#
+#   director - is_bosh_director (default 1)
+#   entombed - entombed data, or the message its build dies with
+sub self_lookup {
+	my (%s) = @_;
+	my $env = $s{env} // director_env();
+	my $key = $s{key} // 'bosh-configs.cpi.password';
+	my (@downloads, $builds, $blueprints, $bosh);
+
+	my $parent = Service::BOSH::Director->new('parent-bosh',
+		url => 'https://10.0.0.4:25555', ca_cert => 'ca', client => 'admin',
+		secret => 'password', exodus_path => 'secret/exodus');
+
+	no warnings qw(redefine once);
+	local *Genesis::Env::is_bosh_director = sub { $s{director} // 1 };
+	local *Genesis::Env::use_create_env = sub { 0 };
+	local *Genesis::Env::bosh = sub { $parent };
+	local *Genesis::Env::with_bosh = sub { $_[0] };
+	local $ENV{GENESIS_CLOUD_CONFIG}; # a download registers the config here too
+	local *Service::BOSH::Director::has_config_of_type = sub { 0 };
+	local *Service::BOSH::Director::download_configs = sub {
+		my (undef, $path, $type) = @_;
+		push @downloads, $type;
+		mkfile_or_fail($path, "--- {}\n");
+		return {type => $type, name => 'default', label => "default $type config"};
+	};
+	local *Service::BOSH::Director::execute = sub { $bosh++; die "BOSH asked\n" };
+	local *Genesis::Env::ManifestProvider::entombed_self = sub {
+		$builds++;
+		return bless {data => $s{entombed} // $CREDHUB_DOWN}, 'Test::Fake::EntombedSelf';
+	};
+	my $kit_files = \&Genesis::Env::ManifestProvider::kit_files;
+	local *Genesis::Env::ManifestProvider::kit_files = sub { $blueprints++; goto &$kit_files };
+
+	my (@result, $error);
+	my $stderr = stderr_from {
+		@result = eval { $env->lookup_entombed_self($key, $s{default}) };
+		$error = untraced($@);
+	};
+	return {
+		value => $result[0], found => $result[1], error => $error,
+		stderr => $stderr, bosh => $bosh // 0, builds => $builds // 0,
+		blueprints => $blueprints // 0, downloads => \@downloads,
+	};
+}
+
+# Carp::Always appends a stack trace to every error; keep only the message.
+sub untraced {
+	my ($error) = @_;
+	$error =~ s/(?<=\n) at \S+ line \d+\.\n.*\z//s;
+	return $error;
+}
+
+subtest 'lookup_entombed_self reads the unevaluated manifest for an env that is not a director' => sub {
+	my $r = self_lookup(director => 0);
+	is $r->{error}, '', 'nothing is raised';
+	is $r->{value}, $UNEVALED, 'the unevaluated value comes back';
+	is $r->{found}, 'bosh-configs.cpi.password', 'and is reported found';
+	is $r->{builds}, 0, 'the entombed manifest is never built';
+	is $r->{bosh}, 0, 'and BOSH is never asked';
+	unlike $r->{stderr}, qr/WARNING/, 'and nothing is warned about';
+};
+
+# A director answers every key from the entombed build, which here answers
+# with values of its own, so each test can tell where a value came from.
+
+subtest 'a deployed director answers an absent key from the entombed build' => sub {
+	my $r = self_lookup(key => 'bosh-configs.director-cpi.cpis', default => 'none',
+		entombed => {'bosh-configs' => {cpi => {password => $ENTOMBED}}});
+	is $r->{error}, '', 'nothing is raised';
+	is $r->{value}, 'none', 'the default comes back';
+	is $r->{found}, undef, 'and is reported not found';
+	is $r->{builds}, 1, 'once the entombed build shows the key is absent';
+	is_deeply $r->{downloads}, ['cloud'], 'whose blueprint has the cloud config downloaded first';
+	is $r->{bosh}, 0, 'and the parent is never asked anything else';
+
+	$r = self_lookup(key => 'bosh-configs.director-cpi.cpis', default => 'none');
+	is $r->{error}, $CREDHUB_DOWN, 'a build that fails is raised';
+	is $r->{value}, undef, 'and no default comes back';
+};
+
+subtest 'a deployed director answers a literal key from the entombed build' => sub {
+	my $r = self_lookup(
+		env => make_cpi_env('child-bosh', "  cpi:\n    enabled: true\n    password: plain-text\n"),
+		entombed => {'bosh-configs' => {cpi => {password => 'built'}}});
+	is $r->{error}, '', 'nothing is raised';
+	is $r->{value}, 'built', 'the value comes from the entombed build';
+	is $r->{found}, 'bosh-configs.cpi.password', 'and is reported found';
+	is $r->{builds}, 1, 'which is built once';
+	is_deeply $r->{downloads}, ['cloud'], 'once the cloud config its blueprint reads is downloaded';
+	is $r->{bosh}, 0, 'and the parent is never asked anything else';
+	unlike $r->{stderr}, qr/WARNING/, 'and nothing is warned about';
+};
+
+subtest 'lookup_entombed_self never falls back' => sub {
+	my $r = self_lookup();
+	is $r->{error}, $CREDHUB_DOWN, 'the entombment error is raised';
+	is $r->{value}, undef, 'and neither the unevaluated value nor anything else comes back';
+	is $r->{builds}, 1, 'after the entombed manifest was built';
+	is $r->{bosh}, 0, 'and BOSH is never asked about the director';
+	unlike $r->{stderr}, qr/WARNING/, 'and nothing is warned about';
+};
+
+subtest 'lookup_entombed_self reports an entombment failure instead of falling back' => sub {
+	my $failure = "Failed to entomb one or more secrets into Credhub.\n";
+	my $r = self_lookup(entombed => $failure);
+	is $r->{error}, $failure, 'the entombment failure is raised';
+	is $r->{value}, undef, 'and nothing comes back';
+};
+
+subtest 'lookup_entombed_self reports a vault outage instead of falling back' => sub {
+	my $outage = "Could not read secret/child/pve from vault at https://vault.test: connection refused\n";
+	my $r = self_lookup(entombed => $outage);
+	is $r->{error}, $outage, 'the vault outage is raised';
+	is $r->{value}, undef, 'and nothing comes back';
+};
+
+sub self_upload_env {
+	my ($password, $rest) = @_;
+	return make_cpi_env('child-bosh', <<"YAML".($rest // ''));
+  cpi:
+    enabled: true
+  director-cpi:
+    cpis:
+    - name: pve
+      type: proxmox
+      properties:
+        host: 10.0.0.1
+        password: $password
+YAML
+}
+
+# self_upload - runs the director CPI self-upload for the env, whose
+# entombed build dies on the director's missing CredHub, and reports what
+# came back, what was raised, how many times the entombed manifest was
+# built, and how many times BOSH was asked anything.
+sub self_upload {
+	my ($env) = @_;
+	my ($builds, $bosh) = (0, 0);
+	no warnings qw(redefine once);
+	local *Genesis::Env::is_bosh_director = sub { 1 };
+	local *Service::BOSH::Director::execute = sub { $bosh++; die "BOSH asked\n" };
+	local *Genesis::Env::ManifestProvider::entombed_self = sub {
+		$builds++;
+		bless {data => $CREDHUB_DOWN}, 'Test::Fake::EntombedSelf';
+	};
+	my (@result, $error);
+	stderr_from { @result = eval { $env->_resolve_director_cpi_config }; $error = untraced($@) };
+	return {result => \@result, error => $error, builds => $builds, bosh => $bosh};
+}
+
+my $INJECTED = <<'YAML';
+  cpi:
+    enabled: true
+  director-cpi:
+    <<<: (( inject meta.cpi_defaults ))
+    cpis:
+    - name: pve
+      type: proxmox
+      properties:
+        host: 10.0.0.1
+meta:
+  cpi_defaults:
+    cpis:
+    - name: pve
+      properties:
+        password: (( vault "secret/child/pve:password" ))
+YAML
+my $GRABBED = <<'YAML';
+  cpi:
+    enabled: true
+  director-cpi: (( grab meta.director_cpi ))
+meta:
+  director_cpi:
+    cpis:
+    - name: pve
+      type: proxmox
+      properties:
+        host: 10.0.0.1
+YAML
+
+# The self-upload always reads the entombed build, however the list is
+# written.  Each of these lists either reads the vault or looks literal
+# only until it is evaluated.  A vault reference anywhere in the manifest,
+# even one the list never uses, needs the director's own CredHub, and
+# without it the upload stops.
+for my $case (
+	['an inline literal list beside an unrelated vault reference',
+		sub { self_upload_env('plain-text', qq{params:\n  admin_password: (( vault "secret/child/bosh:admin_password" ))\n}) }],
+	['a vault reference in the list', sub { self_upload_env($UNEVALED) }],
+	['base64 of a vault value',
+		sub { self_upload_env('(( base64 meta.cpi_password ))', qq{meta:\n  cpi_password: $UNEVALED\n}) }],
+	['an expression that reads the environment', sub { self_upload_env('(( grab $REDACT || "live" ))') }],
+	['an inline list beside an inject', sub { make_cpi_env('child-bosh', $INJECTED) }],
+	['a list whose map an operator stands in for', sub { make_cpi_env('child-bosh', $GRABBED) }],
+) {
+	my ($label, $make) = @$case;
+	subtest "the director CPI self-upload entombs $label" => sub {
+		my $r = self_upload($make->());
+		is $r->{error}, $CREDHUB_DOWN, 'the entombment error is raised';
+		is_deeply $r->{result}, [], 'and no config comes back';
+		is $r->{builds}, 1, 'after the entombed manifest was built';
+		is $r->{bosh}, 0, 'and BOSH is never asked';
+	};
+}
 
 subtest 'resolver - no source returns empty' => sub {
 	plan tests => 1;
@@ -914,6 +1149,244 @@ subtest '_check_cpi_config - a difference is still a change' => sub {
 	is $result->{state}, 'changed', 'the state is changed';
 	ok !$result->{fatal}, 'a change is not fatal';
 };
+
+# ======================================================================
+# The cpi-config hook's values for a director
+# ======================================================================
+
+# These run the real chain from a command to the hook's two lookups, the
+# declared property through _resolve and the extra one through
+# gather_properties, with a fixture kit whose blueprint, like a director
+# kit's, reads the cloud config.  The deploy test stops the command after
+# the config downloads that follow its CPI step.
+
+$ENV{GENESIS_CALLBACK_BIN} ||= abs_path('bin/genesis');
+$ENV{GENESIS_LIB} ||= abs_path('lib');
+
+my $SENTINEL = "stopped after the config downloads\n";
+
+# The hook reads the vault target and the parent's CredHub details, and the
+# entombed build names the vault and finds nothing in it to entomb, so a
+# fake that names a target and holds nothing else is all they need.
+{
+	package Test::Fake::Vault;
+	sub ref {'test-vault'}
+	sub name {'test-vault'}
+	sub connect_and_validate {$_[0]}
+	sub verify {1}
+	sub get {{}}
+	sub get_path {{}}
+	sub read_flattened_secret {undef}
+	sub env {{}}
+}
+my $HOOK_VAULT = bless {}, 'Test::Fake::Vault';
+
+# download_config - stands in for the parent's config download, handing out
+# an empty config of the type asked for and recording the type in
+# @DOWNLOADS.  Each test that uses it also says the parent holds no CPI
+# configs, so the opportunistic CPI config download is skipped.
+our @DOWNLOADS;
+sub download_config {
+	my (undef, $path, $type) = @_;
+	push @DOWNLOADS, $type;
+	mkfile_or_fail($path, "--- {}\n");
+	return {type => $type, name => 'default', label => "default $type config"};
+}
+
+# A dev kit whose cpi-config hook resolves one declared property through
+# _resolve and passes one extra bosh-configs.cpi leaf through
+# gather_properties.  Its blueprint reads the cloud config, and it counts
+# its runs in $Genesis::Hook::Blueprint::CpiContext::RUNS.
+sub fixture_env {
+	my $top = make_top(name => 'bosh', no_vault => 1);
+	my $kit = workdir().'/cpi-context-kit-'.int(rand(1_000_000));
+	put_file("$kit/kit.yml", <<'YAML');
+---
+name: cpi-context
+version: 0.0.1
+genesis_version_min: 3.1.0
+YAML
+	put_file("$kit/manifest.yml", "---\nname: child-bosh\n");
+	put_file("$kit/hooks/blueprint.pm", <<'PERL');
+package Genesis::Hook::Blueprint::CpiContext;
+use strict;
+use warnings;
+use parent qw(Genesis::Hook::Blueprint);
+use Genesis;
+
+our $RUNS = 0;
+
+sub perform {
+	my ($self) = @_;
+	$RUNS++;
+	bail("The blueprint needs the cloud config, which isn't downloaded yet.")
+		unless $self->env->config_file('cloud');
+	$self->add_files('manifest.yml');
+	return $self->done();
+}
+
+1;
+PERL
+	put_file("$kit/hooks/cpi-config.pm", <<'PERL');
+package Genesis::Hook::CpiConfig::CpiContext;
+use strict;
+use warnings;
+use parent qw(Genesis::Hook::CpiConfig);
+
+sub perform {
+	my ($self) = @_;
+	my $properties = $self->gather_properties('host');
+	return $self->done({cpis => [{name => 'child', type => 'test', properties => $properties}]});
+}
+
+1;
+PERL
+	$top->link_dev_kit($kit);
+	put_file($top->path('child.yml'), <<'YAML');
+---
+kit:
+  name:    dev
+  version: latest
+  features: []
+  iaas:    test
+genesis:
+  env:             child
+  bosh_env:        parent
+  minimum_version: 3.1.0
+bosh-configs:
+  cpi:
+    enabled:      true
+    credhub_base: /cpi-config/properties/
+    host:         10.0.0.1
+    custom:       kept
+YAML
+	return $top;
+}
+
+sub parent_director {
+	return Service::BOSH::Director->new('parent',
+		url => 'https://10.0.0.4:25555', ca_cert => 'ca', client => 'admin',
+		secret => 'password', exodus_path => 'secret/exodus');
+}
+
+# deploy_past_downloads - runs genesis deploy for the fixture director up to
+# the end of the config downloads that follow its CPI step.  The parent
+# director answers get_config with the given config, records uploads and
+# config downloads, and is never asked anything else.  The entombed
+# manifest is built for real, and counts its builds.
+sub deploy_past_downloads {
+	my (%s) = @_;
+	my $top = fixture_env();
+	my (@uploads, @bosh_calls);
+	my $builds = 0;
+	my $entombed_self = \&Genesis::Env::ManifestProvider::entombed_self;
+	local $Genesis::Hook::Blueprint::CpiContext::RUNS = 0;
+	local @DOWNLOADS;
+	local $ENV{GENESIS_CLOUD_CONFIG}; # a download registers the config here too
+	my $parent = parent_director();
+	my $credhub = bless {}, 'Test::Fake::Credhub';
+
+	no warnings qw(redefine once);
+	local *Test::Fake::Credhub::paths = sub { () };
+	local *Test::Fake::Credhub::base = sub { '/parent/child-bosh/' };
+	local *Genesis::Env::with_vault = sub { $_[0] };
+	local *Genesis::Env::vault = sub { $HOOK_VAULT };
+	local *Genesis::Env::with_bosh = sub { $_[0] };
+	local *Genesis::Env::is_ocfp = sub { 1 };
+	local *Genesis::Env::deployment_change_reason_required_size_policy = sub { 0 };
+	local *Genesis::Env::bosh = sub { $parent };
+	local *Genesis::Env::credhub = sub { $credhub };
+	local *Genesis::Env::can_build_cloud_configs = sub { 0 };
+	local *Genesis::Env::_check_environment_viability = sub { die $SENTINEL };
+	local *Service::BOSH::Director::has_config_of_type = sub { 0 };
+	local *Service::BOSH::Director::download_configs = \&download_config;
+	local *Service::BOSH::Director::get_config = sub { $s{parent_config} };
+	local *Service::BOSH::Director::upload_config = sub { push @uploads, $_[2]; ('', 0, '') };
+	local *Service::BOSH::Director::execute = sub {
+		my ($self, @cmd) = @_;
+		shift(@cmd) if ref($cmd[0]) eq 'HASH';
+		push @bosh_calls, "@cmd";
+		die "unexpected bosh call: @cmd\n";
+	};
+	local *Genesis::Env::is_bosh_director = sub { 1 };
+	local *Genesis::Env::ManifestProvider::entombed_self = sub { $builds++; goto &$entombed_self };
+
+	local $Genesis::Commands::COMMAND_OPTIONS = {yes => 1};
+	my $cwd = getcwd();
+	chdir($top->path) or die "cannot enter ".$top->path.": $!";
+	my $error;
+	my $output = combined_from { eval { Genesis::Commands::Env::deploy('child') }; $error = $@ };
+	chdir($cwd);
+	return {
+		error => $error, output => $output, uploads => \@uploads,
+		bosh_calls => \@bosh_calls, builds => $builds,
+		blueprints => $Genesis::Hook::Blueprint::CpiContext::RUNS, downloads => [@DOWNLOADS],
+	};
+}
+
+subtest 'a director builds its CPI values once the configs its blueprint reads are downloaded' => sub {
+	for my $parent_config ("cpis: []\n", undef) {
+		my $r = deploy_past_downloads(parent_config => $parent_config);
+		my $label = defined($parent_config) ? 'with' : 'without';
+		like $r->{error}, qr/\A\Q${\($SENTINEL =~ s{\n}{}r)}\E/, "the command ran past its config downloads ($label a parent CPI config)";
+		unlike $r->{output}, qr/as it is written/, 'and no value was read as written';
+		ok $r->{builds}, 'the values came from the entombed build';
+		is $r->{blueprints}, 1, 'whose blueprint, which needs the cloud config, ran once';
+		is_deeply $r->{downloads}, ['cloud'], 'and the cloud config was downloaded once, for the build and the deploy alike';
+		is scalar(@{$r->{uploads}}), 1, 'and the config was uploaded once';
+		is_deeply $r->{bosh_calls}, [], 'and the parent was never asked about the director';
+	}
+};
+
+subtest 'a director builds its CPI values outside deploy once the configs its blueprint reads are downloaded' => sub {
+	my $top = fixture_env();
+	my $env = $top->load_env('child');
+	my $parent = parent_director();
+	my $credhub = bless {}, 'Test::Fake::Credhub';
+	my @uploads;
+	local $Genesis::Hook::Blueprint::CpiContext::RUNS = 0;
+	local @DOWNLOADS;
+	local $ENV{GENESIS_CLOUD_CONFIG}; # a download registers the config here too
+
+	no warnings qw(redefine once);
+	local *Test::Fake::Credhub::paths = sub { () };
+	local *Test::Fake::Credhub::base = sub { '/parent/child-bosh/' };
+	local *Genesis::Env::is_bosh_director = sub { 1 };
+	local *Genesis::Env::vault = sub { $HOOK_VAULT };
+	local *Genesis::Env::with_bosh = sub { $_[0] };
+	local *Genesis::Env::is_ocfp = sub { 1 };
+	local *Genesis::Env::bosh = sub { $parent };
+	local *Genesis::Env::credhub = sub { $credhub };
+	local *Service::BOSH::Director::has_config_of_type = sub { 0 };
+	local *Service::BOSH::Director::download_configs = \&download_config;
+	local *Service::BOSH::Director::upload_config = sub { push @uploads, $_[1]; ('', 0, '') };
+	local *Service::BOSH::Director::execute = sub { die "the parent was asked about the director\n" };
+
+	my $error;
+	combined_from {
+		eval {
+			Genesis::Commands::Bosh::_bosh_configs_upload_cpi($env, {
+				status => 'missing', name => 'child.test.bosh', bosh => $parent,
+			});
+		};
+		$error = $@;
+	};
+	is $error, '', 'bosh-configs uploads the CPI config without an error';
+	is scalar(@uploads), 1, 'and uploads it once';
+	is $Genesis::Hook::Blueprint::CpiContext::RUNS, 1, 'after the blueprint, which needs the cloud config, ran once';
+	is_deeply \@DOWNLOADS, ['cloud'], 'and the cloud config was downloaded once';
+
+	my $config;
+	combined_from {
+		eval { ($config) = $env->run_hook('cpi-config', credhub_prefix => $env->cpi_credhub_base) };
+		$error = $@;
+	};
+	is $error, '', 'a bare run_hook renders it without an error too';
+	is_deeply [map {[@{$_->{properties}}{qw/host custom/}]} @{load_yaml($config // '')->{cpis} // []}], [['10.0.0.1', 'kept']],
+		'from the values the build holds';
+	is_deeply \@DOWNLOADS, ['cloud'], 'and reuses the cloud config it already has';
+};
+
 
 done_testing;
 

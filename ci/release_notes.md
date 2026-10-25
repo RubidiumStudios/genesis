@@ -361,6 +361,8 @@
 
 * CredHub names under a root base now join with one slash. When a director's exodus data names no `credhub_base`, Genesis used to read and write names such as `//genesis-entombed/...` in that director's CredHub, and BOSH refuses a placeholder name with a doubled slash, so no config could resolve one. Genesis now uses `/genesis-entombed/...`. If a development build ran against such a director, check its CredHub with `credhub find -n //genesis-entombed` and delete anything it finds, since nothing can have used those names.
 
+* `lookup_entombed_self` reports failures instead of quietly returning unevaluated `(( vault ))` values. An environment that isn't a director reads its values as they are written. For a director, every lookup reads its entombed manifest, so a literal value, such as an inline `bosh-configs.director-cpi.cpis` list, and a key the manifest doesn't set both need the director's own CredHub whenever any part of the manifest reads the vault, and a build that fails stops the command. Before that build, Genesis downloads any config the kit's blueprint reads, so a blueprint that reads the cloud config works during deploy's CPI step and outside deploy, and deploy reuses that download.
+
 # Internal Changes/Improvements
 
 ## BOSH Refactor

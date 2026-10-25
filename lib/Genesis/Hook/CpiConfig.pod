@@ -425,8 +425,14 @@ for.
 
 The operator side reads through C<lookup_entombed_self>, so a
 C<(( vault ))> reference in the environment file arrives already entombed.
-The platform side reads C<ocfp_config_lookup> and JSON-decodes when it
-can, falling back to the raw string.
+For a director, every name it tries is looked up in the entombed build, a
+literal or absent one included, so the director's own CredHub is needed
+whenever its manifest reads the vault anywhere.  The lookup first downloads
+any config the kit's blueprint reads, so the build works before deploy's
+own config download, and outside deploy too.  A lookup that fails is
+raised, never read as written.  The platform side reads
+C<ocfp_config_lookup> and JSON-decodes when it can, falling back to the
+raw string.
 
 B<Parameters:>
 
@@ -453,7 +459,10 @@ value" must test C<defined($value)>, not C<$found>.
 
 B<Errors:>
 
-None. An unresolvable property is reported as not found.
+An unresolvable property is reported as not found.  Whatever
+C<lookup_entombed_self> raises reaches the caller unchanged, such as an
+entombment failure, which for a director can come from any name.  See
+L<Genesis::Env/lookup_entombed_self>.
 
 B<Examples:>
 
@@ -851,6 +860,12 @@ default explicitly, as C<< !key: >>. Before it existed, an unresolvable
 secret was entombed empty and surfaced much later as C<"N missing secret
 values"> -- naming a CredHub path rather than the property, after the
 config had already been built.
+
+=item *
+
+Whatever C<lookup_entombed_self> raises for a declared or an extra
+property reaches the caller unchanged, such as an entombment failure or a
+vault value that can't be read.  See L<Genesis::Env/lookup_entombed_self>.
 
 =back
 
