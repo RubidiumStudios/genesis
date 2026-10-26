@@ -883,10 +883,12 @@ sub _validate_key {
 		if (! in_array($value, TRUE, FALSE, 1, 0, '', undef, 'true', 'false', 'yes', 'no')) {
 			push @errors, "#R{$key}: expected a boolean, not #ri{".($value ? $value : '<null>')."}";
 		}
-		# Normalize boolean in place - update the source structure, not set()
+		# Normalize boolean in place - update the source structure, not set().
+		# A false spelled as text is false, as _coerce_to_schema_type reads it.
 		my $source = $self->get_source($key);
 		bug("Cannot normalize key '$key' - no source found") unless $source;
-		$self->_update_source($source, $key, $value ? TRUE : FALSE);
+		my $false = !ref($value) && defined($value) && $value =~ /^(?:false|no|off|0|)$/i;
+		$self->_update_source($source, $key, ($value && !$false) ? TRUE : FALSE);
 	} elsif ($type eq 'enum') {
 		if (! in_array($value, @{$schema->{values}})) {
 			push @errors, "#R{$key}: unknown value: #ri{".($value ? $value : "<null>")."}; expected one of ".join(', ', @{$schema->{values}});

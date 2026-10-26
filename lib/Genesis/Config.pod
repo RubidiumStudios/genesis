@@ -683,8 +683,9 @@ clone, the network, the rest of the configuration -- does not belong here.
 =back
 
 C<boolean> and C<array> values are normalized in-place during validation
-(booleans are coerced to JSON::PP boolean objects; arrays parsed from
-environment strings are split and converted).
+(booleans are coerced to JSON::PP boolean objects, a false spelled as text,
+C<false>, C<no>, C<off>, C<0> or empty, becoming false as it does on C<set>;
+arrays parsed from environment strings are split and converted).
 
 B<Parameters:>
 
