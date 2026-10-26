@@ -170,6 +170,17 @@ subtest 'T420: an automatic environment gets the deploy messages alone' => sub {
 	ok(!branch_get(pipeline_job($p, $DEPLOY))->{passed}, 'c2: no passed');
 };
 
+subtest 'T420: an app webhook needs no channel, name or icon' => sub {
+	my $h = contract_harness(config => {'pipeline.notifications.slack.webhook' => 'slack:webhook'},
+		pipeline => {manual => 'true'});
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'a webhook alone loads and compiles') or return diag($why);
+	my @puts = map {slack_puts($_)} @{$p->{jobs} || []};
+	ok(scalar(@puts), 'and the jobs put to slack');
+	is_deeply([sort map {keys %{$_->{params} || {}}} @puts], [('text') x @puts],
+		'each put carrying its text alone');
+};
+
 subtest 'T420: no Slack, no notifications' => sub {
 	my $h = contract_harness(pipeline => {manual => 'true'});
 	my ($p, $why) = dry_pipeline($h);

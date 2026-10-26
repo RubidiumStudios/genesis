@@ -1675,15 +1675,15 @@ sub _notification_step {
 		$text = join(' ', @{$slack->{mentions_on_failure}}) . ': ' . $text;
 	}
 
-	my @steps = ({
-		put    => 'slack',
-		params => {
-			channel  => $slack->{channel},
-			username => $slack->{username} || 'runwaybot',
-			icon_url => $slack->{icon_url} || $slack->{icon},
-			text     => $text,
-		},
-	});
+	# An app's webhook fixes its channel, name and icon; only a legacy one
+	# honours them, so each is sent only where written.
+	my %params = (text => $text);
+	$params{channel}  = $slack->{channel}  if $slack->{channel};
+	$params{username} = $slack->{username} if $slack->{username};
+	my $icon = $slack->{icon_url} || $slack->{icon};
+	$params{icon_url} = $icon if $icon;
+
+	my @steps = ({ put => 'slack', params => \%params });
 
 	return { in_parallel => \@steps };
 }

@@ -2968,9 +2968,9 @@ sub _pipeline_config_schema {
 						description => 'Where the pipeline posts to Slack',
 						schema      => {
 							webhook             => {type => 'string', required => 1, description => 'Vault reference to the webhook URL'},
-							channel             => {type => 'string', required => 1, description => 'The channel posted to'},
-							username            => {type => 'string', description => 'The name posted as'},
-							icon                => {type => 'string', description => 'The icon URL posted with'},
+							channel             => {type => 'string', description => 'The channel posted to, for a legacy webhook'},
+							username            => {type => 'string', description => 'The name posted as, for a legacy webhook'},
+							icon                => {type => 'string', description => 'The icon URL posted with, for a legacy webhook'},
 							mentions_on_failure => {type => 'any', description => 'Handles prefixed to a failure'},
 						}
 					},
