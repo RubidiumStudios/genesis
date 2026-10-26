@@ -3,6 +3,7 @@ use strict;
 use warnings;
 
 use base 'Genesis::CI::Shuttle';
+use Genesis::Config ();
 
 ### Class Methods {{{
 
@@ -19,6 +20,7 @@ sub options_schema {
 		region    => {type => 'string', description => 'The bucket region'},
 		endpoint  => {type => 'string', description => 'A non-default endpoint'},
 		auth      => {type => 'string', description => 'Vault reference for the credentials'},
+		tls_skip_verify => {type => 'boolean', default => Genesis::Config::FALSE, description => "Skip verifying the store's TLS certificate"},
 		image     => {type => 'string', default => 'klaue/shuttle-resource', description => 'The resource image'},
 		image_tag => {type => 'string', default => 'latest', description => 'The resource image tag'},
 	};

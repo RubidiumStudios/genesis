@@ -486,6 +486,7 @@ sub _ran_resource {
 		path         => "$dn/ran",
 		seed_version => JSON::PP::true,
 		(map {defined $shuttle->{$_} ? ($_ => $shuttle->{$_}) : ()} qw/region endpoint/),
+		($shuttle->{tls_skip_verify} ? (tls_skip_verify => JSON::PP::true) : ()),
 		($shuttle->{auth} ? (map {($_ => _unwrap_ref({secret_ref => "$shuttle->{auth}:$_"}))}
 			qw/access_key_id secret_access_key/) : ()),
 	);

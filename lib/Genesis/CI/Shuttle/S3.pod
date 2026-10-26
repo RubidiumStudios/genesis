@@ -17,7 +17,7 @@ Genesis::CI::Shuttle::S3 - the keys an S3 shuttle block reads
 
 =head1 DESCRIPTION
 
-One of the two backends L<Genesis::CI::Shuttle> dispatches to, selected by
+The backend L<Genesis::CI::Shuttle> dispatches to, selected by
 C<backend: s3> under C<pipeline.shuttle>. It declares the keys the S3
 shuttle resource reads and inherits its validation from the base, having no
 rule a declaration cannot state.
@@ -34,9 +34,10 @@ the emitted resource takes is the emitter's question and not this file's.
 
     my $declared = Genesis::CI::Shuttle::S3->options_schema;
 
-The six keys an S3 shuttle block may carry: C<bucket>, which is required,
-C<region>, C<endpoint>, and C<auth>, and C<image> and C<image_tag>, which
-default to the community shuttle resource at C<latest>.
+The seven keys an S3 shuttle block may carry: C<bucket>, which is required,
+C<region>, C<endpoint>, and C<auth>; C<tls_skip_verify>, false by default,
+for a store whose certificate cannot be verified (contract a9); and C<image>
+and C<image_tag>, which default to the shuttle resource at C<latest>.
 
 B<Returns:> a hash reference of key name to schema entry.
 

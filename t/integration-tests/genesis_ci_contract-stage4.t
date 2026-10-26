@@ -43,6 +43,7 @@ subtest 'Stage 4 rows over the default shuttle' => sub {
 	is($ran->{source}{bucket}, 'pipes', "a9: in the configured bucket");
 	ok(!grep({exists $ran->{source}{$_}} qw/backend prefix json_key image image_tag auth/),
 		'a9: and none of the keys the resource ignores');
+	ok(!$ran->{source}{tls_skip_verify}, 'a9: and verifies TLS by default');
 
 	my ($type) = grep {$_->{name} eq 'shuttle'} @{$p->{resource_types} || []};
 	is_deeply($type && $type->{source}, {repository => 'klaue/shuttle-resource', tag => 'latest'},
@@ -81,6 +82,7 @@ subtest 'a9: the configured shuttle source' => sub {
 		'pipeline.shuttle.auth'     => 'secret/ci/shuttle',
 		'pipeline.shuttle.image'    => 'example/shuttle',
 		'pipeline.shuttle.image_tag' => 'v2',
+		'pipeline.shuttle.tls_skip_verify' => 'true',
 	});
 	my ($p, $why) = dry_pipeline($h);
 	ok($p, 'the dry apply prints a pipeline') or return diag($why);
@@ -90,6 +92,7 @@ subtest 'a9: the configured shuttle source' => sub {
 		'the region and endpoint as written');
 	is($src->{access_key_id}, '((secret/ci/shuttle.access_key_id))', 'the key id as a reference');
 	is($src->{secret_access_key}, '((secret/ci/shuttle.secret_access_key))', 'and the secret');
+	ok($src->{tls_skip_verify}, 'tls_skip_verify as configured, for a store whose certificate cannot be verified');
 
 	my ($type) = grep {$_->{name} eq 'shuttle'} @{$p->{resource_types} || []};
 	is_deeply($type && $type->{source}, {repository => 'example/shuttle', tag => 'v2'},
