@@ -21,7 +21,7 @@ $ENV{NOCOLOR} = 1;
 my $ENV_NAME = $Harness::Contract::ENV_NAME;
 my $TYPE     = $Harness::Contract::TYPE;
 my $DN       = "$ENV_NAME-$TYPE";
-my $NOTIFY   = "notify-$DN";
+my $NOTIFY   = "notify-$ENV_NAME";
 my $DEPLOY   = "deploy-$ENV_NAME";
 my $BRANCH   = "$ENV_NAME-branch";
 

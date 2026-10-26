@@ -342,7 +342,7 @@ my $_slack = { channel => '#deploys', webhook => '((slack-webhook))' };
 subtest 'Notify job: no bosh-config get, whatever is tracked' => sub {
 	for my $tracked (undef, 1, ['cloud'], [qw/cloud runtime cpi/]) {
 		my $pl = _describe(_ast_for(slack => $_slack, defined $tracked ? (track_bosh_configs => $tracked) : ()));
-		my @names = _get_names($pl, 'notify-sandbox-deployment');
+		my @names = _get_names($pl, 'notify-sandbox');
 		is_deeply(\@names, ['sandbox-branch'],
 			'the branch alone with track_bosh_configs '.(defined $tracked ? (ref $tracked ? "[@$tracked]" : $tracked) : 'unset'));
 	}

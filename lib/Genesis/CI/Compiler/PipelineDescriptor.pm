@@ -162,7 +162,7 @@ sub describe {
 					my $member_alias = $wf_data->{aliases}{$member} || $member;
 					push @group_jobs, "deploy-$member_alias";
 					if (!$wf_data->{auto}{$member}) {
-						my $notify_name = _notify_job_name($member_alias, $deploy_type);
+						my $notify_name = _notify_job_name($member_alias);
 						if ($group_notifications) {
 							push @grouped_notifications, $notify_name;
 						} else {
@@ -707,10 +707,10 @@ sub _locker_resources {
 }
 
 # }}}
-# _notify_job_name - notify-<env>-<type> (contract b8) {{{
+# _notify_job_name - notify-<env>, as deploy-<env> (contract b1, b8) {{{
 sub _notify_job_name {
-	my ($alias, $deploy_type) = @_;
-	return "notify-$alias-$deploy_type";
+	my ($alias) = @_;
+	return "notify-$alias";
 }
 
 # }}}
@@ -721,7 +721,7 @@ sub _notify_job {
 
 	my $config = $ast->configuration || {};
 	my %to     = $config->{tagged} ? (tags => [$env]) : ();
-	my $name   = _notify_job_name($alias, $deploy_type);
+	my $name   = _notify_job_name($alias);
 
 	# The branch the deploy reads is the only input and trigger (contract
 	# c13); the dry run is the BOSH diff of what it would deploy (e12).
@@ -785,7 +785,7 @@ sub _deploy_job {
 		push @gets, { get => "$alias-branch", trigger => $trigger };
 	} else {
 		push @gets, { get => "$alias-branch", trigger => JSON::PP::false,
-			passed => [_notify_job_name($alias, $deploy_type)] };
+			passed => [_notify_job_name($alias)] };
 	}
 
 	# Task library (optional external git resource with custom task files)

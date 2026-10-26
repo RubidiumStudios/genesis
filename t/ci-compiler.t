@@ -1172,7 +1172,7 @@ subtest 'Concourse - native generation from modern AST' => sub {
 	# Verify jobs
 	like $output, qr/sandbox-cf/, "sandbox deploy job present";
 	like $output, qr/preprod-cf/, "preprod deploy job present";
-	like $output, qr/notify-preprod-cf\b/, "preprod notify job present (non-auto env)";
+	like $output, qr/name: notify-preprod\s*$/m, "preprod notify job present (non-auto env)";
 
 	# Verify task configuration references.  The deploy task's run path is
 	# the genesis binary embedded in the repository and its only argument
@@ -1736,7 +1736,7 @@ subtest 'Concourse - grouped notifications' => sub {
 
 	# With grouped notifications, notify jobs should be in a separate group
 	like $output, qr/name: notifications/, "notifications group present";
-	like $output, qr/notify-prod-cf\b/, "notify job present for non-auto env";
+	like $output, qr/name: notify-prod\s*$/m, "notify job present for non-auto env";
 };
 
 subtest 'Concourse - custom groups' => sub {

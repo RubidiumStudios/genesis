@@ -174,7 +174,7 @@ subtest 'per-env style: notify jobs created and inlined with deploy' => sub {
 	);
 	my $pipeline = _describe($ast);
 
-	my $nj = _find_job($pipeline, 'notify-sandbox-deployment');
+	my $nj = _find_job($pipeline, 'notify-sandbox');
 	ok $nj, 'notify job created for non-auto env';
 
 	my $dj = _find_job($pipeline, 'deploy-sandbox');
@@ -208,13 +208,13 @@ subtest 'grouped style: notify jobs in separate group, deploy gets changes direc
 	);
 	my $pipeline = _describe($ast);
 
-	my $nj = _find_job($pipeline, 'notify-sandbox-deployment');
+	my $nj = _find_job($pipeline, 'notify-sandbox');
 	ok $nj, 'notify job created for grouped style';
 
 	# 'notifications' group must exist
 	my ($notif_group) = grep { $_->{name} eq 'notifications' } @{$pipeline->{groups}};
 	ok $notif_group, 'notifications group emitted';
-	ok grep({ $_ eq 'notify-sandbox-deployment' } @{$notif_group->{jobs}}),
+	ok grep({ $_ eq 'notify-sandbox' } @{$notif_group->{jobs}}),
 		'notify job is in the notifications group';
 
 	# Deploy job must NOT depend on notify job (gets changes directly)
@@ -242,7 +242,7 @@ subtest 'minimal style: no notify jobs, only on_failure hook in deploy' => sub {
 	);
 	my $pipeline = _describe($ast);
 
-	ok !_find_job($pipeline, 'notify-sandbox-deployment'),
+	ok !_find_job($pipeline, 'notify-sandbox'),
 		'no notify job for minimal style';
 
 	my $dj = _find_job($pipeline, 'deploy-sandbox');
@@ -268,7 +268,7 @@ subtest 'none style: no slack resources, no notify jobs, no hooks' => sub {
 	);
 	my $pipeline = _describe($ast);
 
-	ok !_find_job($pipeline, 'notify-sandbox-deployment'),
+	ok !_find_job($pipeline, 'notify-sandbox'),
 		'no notify job for none style';
 	ok !_find_resource($pipeline, 'slack'),
 		'no slack resource for none style';
@@ -340,14 +340,14 @@ subtest 'per_env_overrides: env uses its own channel and mentions' => sub {
 	my $pipeline = _describe($ast);
 
 	# Sandbox notify job should use global channel
-	my $sb_nj   = _find_job($pipeline, 'notify-sandbox-deployment');
+	my $sb_nj   = _find_job($pipeline, 'notify-sandbox');
 	ok $sb_nj, 'sandbox notify job present';
 	my $sb_put  = $sb_nj->{plan}[-1];
 	$sb_put = $sb_put->{in_parallel}[0] if ref($sb_put) eq 'HASH' && $sb_put->{in_parallel};
 	is $sb_put->{params}{channel}, '#deployments', 'sandbox uses global channel';
 
 	# Prod notify job should use override channel
-	my $prod_nj = _find_job($pipeline, 'notify-prod-deployment');
+	my $prod_nj = _find_job($pipeline, 'notify-prod');
 	ok $prod_nj, 'prod notify job present';
 	my $prod_put = $prod_nj->{plan}[-1];
 	$prod_put = $prod_put->{in_parallel}[0] if ref($prod_put) eq 'HASH' && $prod_put->{in_parallel};
@@ -384,7 +384,7 @@ subtest 'Legacy notifications: grouped maps to grouped style' => sub {
 	);
 	my $pipeline = _describe($ast);
 
-	my $nj = _find_job($pipeline, 'notify-sandbox-deployment');
+	my $nj = _find_job($pipeline, 'notify-sandbox');
 	ok $nj, 'notify job created (grouped compat)';
 
 	my ($notif_group) = grep { $_->{name} eq 'notifications' } @{$pipeline->{groups}};
@@ -408,7 +408,7 @@ subtest 'Legacy notifications: inline maps to per-env (notify job with passed de
 	);
 	my $pipeline = _describe($ast);
 
-	my $nj = _find_job($pipeline, 'notify-sandbox-deployment');
+	my $nj = _find_job($pipeline, 'notify-sandbox');
 	ok $nj, 'notify job created for legacy inline style';
 
 	my $dj   = _find_job($pipeline, 'deploy-sandbox');
@@ -429,7 +429,7 @@ subtest 'No Slack config: no slack resource, no notify jobs' => sub {
 	my $ast = _ast_for(env => 'sandbox');
 	my $pipeline = _describe($ast);
 
-	ok !_find_job($pipeline, 'notify-sandbox-deployment'),
+	ok !_find_job($pipeline, 'notify-sandbox'),
 		'no notify job when no Slack configured';
 	ok !_find_resource($pipeline, 'slack'), 'no slack resource';
 	ok !_find_rtype($pipeline, 'slack-notification'), 'no slack-notification resource type';
@@ -452,7 +452,7 @@ subtest 'auto env: no notify job even with per-env style' => sub {
 	);
 	my $pipeline = _describe($ast);
 
-	ok !_find_job($pipeline, 'notify-sandbox-deployment'),
+	ok !_find_job($pipeline, 'notify-sandbox'),
 		'no notify job for auto env';
 };
 
