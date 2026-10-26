@@ -68,7 +68,8 @@ sub _entomb_secrets {
 		my $local_vault = $self->_setup_local_vault();
 
 		my $credhub = $self->credhub_target();
-		prime_credhub_cache($credhub);
+		my $writes  = $self->builder->writes_credhub;
+		$writes ? prime_credhub_cache($credhub) : eval {prime_credhub_cache($credhub)};
 
 		#Design decision: use value-type credhub for each key, and only populate what is needed.
 		my $base_path = $self->env->secrets_base();
@@ -76,7 +77,8 @@ sub _entomb_secrets {
 		my $w = length("$secrets_count");
 		my $entombment_prefix = "genesis-entombed/"; # can be set to another value to prevent conflicts if needed
 		info(
-			"[[  - >>copying Vault values to Credhub: #c{%s} => #B{%s}:",
+			"[[  - >>%s: #c{%s} => #B{%s}:",
+			$writes ? 'copying Vault values to Credhub' : 'naming Credhub references for Vault values, writing nothing',
 			$base_path, $credhub->base().($entombment_prefix ? "$entombment_prefix" : "")
 		);
 
@@ -153,8 +155,7 @@ sub _entomb_secret_for_vault {
 	# Capture the pre-write value for display before put_secret may
 	# update the credhub cache.
 	my $cred_name = credhub_var_name($cred_path, $key, $value, $entombment_prefix);
-	my $existing  = $credhub->get($cred_name);
-	my $action    = put_secret($credhub, $cred_name, $value);
+	my ($existing, $action) = $self->_put_or_name($credhub, $cred_name, $value);
 
 	# 8-char sha for display (the full cred_name already embeds it,
 	# but the rendered output prints it separately).
@@ -179,13 +180,23 @@ sub _entomb_secret {
 	$prefix //= 'genesis-entombed/';
 
 	my $cred_name = credhub_var_name($path, $key, $value, $prefix);
-	my $existing  = $credhub->get($cred_name);
-	my $action    = put_secret($credhub, $cred_name, $value);
+	my ($existing, $action) = $self->_put_or_name($credhub, $cred_name, $value);
 	my ($secret_sha) = $cred_name =~ /--([0-9a-f]{8})$/;
 
 	my $credhub_var = "(($cred_name))";
 	my $color = {new => "gi", exists => "yi", altered => "ri", failed => "Yr"}->{$action};
 	return ($credhub_var, $secret_sha, $action, $color, $existing);
 }
+
+# _put_or_name - write one entombed value, or only say what a write would do {{{
+sub _put_or_name {
+	my ($self, $credhub, $cred_name, $value) = @_;
+	return ($credhub->get($cred_name), put_secret($credhub, $cred_name, $value))
+		if $self->builder->writes_credhub;
+	# A read-only render may stand where CredHub cannot be reached at all.
+	my $existing = eval {$credhub->get($cred_name)};
+	return ($existing, !defined $existing ? 'new' : $existing eq $value ? 'exists' : 'altered');
+}
+# }}}
 
 1;

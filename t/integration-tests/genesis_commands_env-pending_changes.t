@@ -49,9 +49,19 @@ my $BLUEPRINT =
 	qq{MANIFEST\n}.
 	qq{echo manifest.yml\n};
 
+# What an entombed deploy names the harness's one vault value by, which is
+# what the director and exodus hold for it.
+sub entombed_ref {
+	my ($value) = @_;
+	require Genesis::Env::Secrets::Entombment;
+	return '(('.Genesis::Env::Secrets::Entombment::credhub_var_name(
+		'_/secret/harness/pending', 'password', $value, 'genesis-entombed/').'))';
+}
+
 sub deployed_manifest {
 	my ($marker, $password) = @_;
-	return "---\nname: qa-bosh\nharness: $marker\npassword: $password\n".
+	$password = entombed_ref($password);
+	return "---\nname: qa-bosh\nharness: $marker\npassword: \"$password\"\n".
 		"releases:\n- name: harness\n  version: 1.2.3\n  url: https://releases.example/harness-1.2.3.tgz\n".
 		"stemcells:\n- alias: default\n  os: ubuntu-jammy\n  version: \"1.1\"\n";
 }
@@ -126,10 +136,25 @@ subtest 'T421: what deploying the branch would change, read-only' => sub {
 	like($all, qr/stemcell ubuntu-jammy\/1\.1/, 'and the stemcell');
 
 	unlike($all, qr/\Q$SECRET\E/, 'a vault value never in clear');
+	# Spruce heads each difference with its path on a line of its own;
+	# entombing's own progress line names the reference it computed.
+	unlike($all, qr/^\s*password\s*$/m, 'and an unchanged one, entombed, shows no difference');
 
 	my %wrote = map {($_->{command} => 1)} grep {my $c = $_->{command}; grep {$_ eq $c} @WRITES} bosh_runs($h);
 	is_deeply([sort keys %wrote], [], 'no bosh command that writes');
 	assert_w_restored($before, 'the working state as it was');
+};
+
+subtest 'T421: a changed vault value shows as its entombed reference changing' => sub {
+	my ($h) = pending_harness();
+	my $rotated = 'rotated-and-never-in-clear';
+	$h->_write_record('secret/harness/pending', password => $rotated);
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'pending-changes');
+	my $all = "$out$err";
+	is($exit, 0, 'it succeeds, with no CredHub to write to') or diag($all);
+	like($all, qr/\Q@{[entombed_ref($SECRET)]}\E/, "the deployed value's reference");
+	like($all, qr/\Q@{[entombed_ref($rotated)]}\E/, 'and the one the deploy would send');
+	unlike($all, qr/\Q$SECRET\E|\Q$rotated\E/, 'neither value in clear');
 };
 
 subtest 'T421: a director that differs from exodus is drift' => sub {

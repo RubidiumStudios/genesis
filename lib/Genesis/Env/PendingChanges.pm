@@ -83,8 +83,6 @@ sub _manifest {
 	my $env = $self->{env};
 	_heading('Manifest');
 
-	# The unredacted type reads the vault and writes nothing; the deployable
-	# one would entomb, copying vault values into CredHub.
 	my $provider = $self->_provider;
 	my $current  = $self->_current;
 	my @secrets  = _redacted_paths(eval {$provider->redacted(subset => 'pruned')->data});
@@ -108,7 +106,7 @@ sub _manifest {
 			"deployed, so something was deployed outside Genesis:\n\n%s", $diff) if $diff;
 	}
 
-	my $vars = eval {$provider->unredacted(subset => 'bosh_vars')->data};
+	my $vars = eval {$provider->deployment(subset => 'bosh_vars')->data};
 	if ($vars && %$vars) {
 		my @var_secrets = _redacted_paths(eval {$provider->redacted(subset => 'bosh_vars')->data});
 		$self->_compare('the last deployed BOSH variables', _yaml_artifact($record, 'vars'),
@@ -193,18 +191,18 @@ sub _uploads {
 
 ### Helpers {{{
 
-# _provider - the environment's manifest provider, cloud configs downloaded {{{
+# _provider - the manifest provider, cloud configs downloaded, entombing by name alone {{{
 sub _provider {
 	my ($self) = @_;
-	return $self->{provider} //=
-		$self->{env}->download_required_configs('blueprint', 'manifest')->manifest_provider;
+	return $self->{provider} //= $self->{env}->download_required_configs('blueprint', 'manifest')
+		->manifest_provider->without_credhub_writes;
 }
 
 # }}}
-# _current - the branch's pruned manifest, rendered without entombing {{{
+# _current - the branch's pruned deployment manifest, as the deploy would send it {{{
 sub _current {
 	my ($self) = @_;
-	return $self->{current} //= $self->_provider->unredacted(subset => 'pruned')->data;
+	return $self->{current} //= $self->_provider->deployment(subset => 'pruned')->data;
 }
 
 # }}}
@@ -222,7 +220,6 @@ sub _compare {
 # _diff - spruce diff of two manifests, vault values masked unless unredacted {{{
 sub _diff {
 	my ($self, $old, $new, $secrets, $old_label, $new_label) = @_;
-	($old, $new) = _entombed_alike($old, $new, $secrets);
 	($old, $new) = _masked($old, $new, $secrets) if $self->{redact};
 	return _spruce({object => $old, label => $old_label}, {object => $new, label => $new_label});
 }
@@ -252,40 +249,20 @@ sub _director_manifest {
 }
 
 # }}}
-# _entombed_alike - copies where a value matching its old entombed reference takes it {{{
+# _masked - copies of two manifests with the vault values in clear replaced {{{
 #
-# A deployed entombed manifest names each vault value by a reference whose
-# last part is a hash of the value, so the branch's clear value is unchanged
-# where it hashes to it.  Where the reference's path begins is not marked,
-# so every tail of it is tried.
-sub _entombed_alike {
-	my ($old, $new, $paths) = @_;
-	($old, $new) = map {JSON::PP->new->decode(JSON::PP->new->encode($_))} ($old, $new);
-	require Digest::SHA;
-	for my $path (@$paths) {
-		my ($o, $n) = (_at($old, $path), _at($new, $path));
-		next unless $o && $n && !ref $$o && !ref $$n;
-		my ($name, $key, $sha) = ($$o =~ /^\(\((.+)--([^-]+)--([0-9a-f]{8})\)\)$/) or next;
-		my @parts = split m{/}, $name;
-		my $match = grep {
-			substr(Digest::SHA::sha1_hex(join('/', @parts[$_..$#parts])."--$key--$$n"), 0, 8) eq $sha
-		} 0..$#parts;
-		$$n = $$o if $match;
-	}
-	return ($old, $new);
-}
-
-# }}}
-# _masked - copies of two manifests with the vault-sourced values replaced {{{
+# An entombed value is its CredHub reference, the name a deploy sends and an
+# operator reads, so it is shown and only a value in clear is masked.
 sub _masked {
 	my ($old, $new, $paths) = @_;
 	$old = JSON::PP->new->decode(JSON::PP->new->encode($old));
 	$new = JSON::PP->new->decode(JSON::PP->new->encode($new));
+	my $ref = qr/^\(\(.*\)\)$/;
 	for my $path (@$paths) {
 		my ($o, $n) = (_at($old, $path), _at($new, $path));
 		my $same = defined $o && defined $n && JSON::PP->new->canonical->encode([$$o]) eq JSON::PP->new->canonical->encode([$$n]);
-		$$n = $same ? $MASK : $MASK_DIFF if $n;
-		$$o = $MASK if $o;
+		$$n = $same ? $MASK : $MASK_DIFF if $n && ($$n // '') !~ $ref;
+		$$o = $MASK if $o && ($$o // '') !~ $ref;
 	}
 	return ($old, $new);
 }

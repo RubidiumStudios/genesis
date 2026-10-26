@@ -143,6 +143,30 @@ B<Examples:>
   my $provider = Genesis::Env::ManifestProvider->new($env);
   # Returns: a Genesis::Env::ManifestProvider object
 
+=head2 without_credhub_writes
+
+  my $provider = $env->manifest_provider->without_credhub_writes;
+
+Makes every entombing manifest this provider builds name its CredHub
+references without writing any value to CredHub, so the manifest carries the
+exact references a deploy would send and nothing changes. Entombing still
+reads CredHub where it can, to say whether each reference would be new,
+existing or altered. It is set before the first manifest is built, because a
+provider memoizes the manifests it builds, and it cannot be unset, so a
+provider that has rendered without writes never hands that manifest to a
+deploy. C<pending-changes> uses it (D123).
+
+B<Returns:> the provider, for chaining.
+
+=head2 writes_credhub
+
+  $self->builder->writes_credhub or ...;
+
+Whether entombing this provider's manifests writes to CredHub, which is true
+unless C<without_credhub_writes> was called.
+
+B<Returns:> a boolean.
+
 =head2 known_types
 
   my %types = $provider->known_types();

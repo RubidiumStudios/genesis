@@ -52,12 +52,14 @@ The releases and stemcells the manifest names that the director lacks.
 
 =back
 
-The branch's manifest is rendered as the C<unredacted> type, never the
-deployable one, because rendering an entombed manifest copies vault values
-into CredHub. A deployed entombed manifest names each vault value by a
-reference ending in a hash of the value, so a value that hashes to its old
-reference reads as unchanged. With redaction on, each value the redacted
-manifest hides shows only as C<< <redacted> >> or C<< <redacted: changed> >>.
+The branch's manifest is the deployable type, rendered through a provider set
+C<without_credhub_writes>, so an entombed environment's vault values appear as
+the exact references the deploy would send,
+C<((genesis-entombed/E<lt>pathE<gt>--E<lt>keyE<gt>--E<lt>shaE<gt>))>, and a
+changed value shows as its reference changing, while nothing is written to
+CredHub. With redaction on, a vault value in clear, as in an environment that
+does not entomb, shows only as C<< <redacted> >> or
+C<< <redacted: changed> >>; a reference is never masked.
 
 =head1 CLASS METHODS
 
@@ -132,12 +134,12 @@ director's. A C<latest> version is satisfied by any version held.
 =head2 _provider()
 
 The environment's manifest provider, its cloud configs downloaded for the
-blueprint, memoized.
+blueprint, set C<without_credhub_writes>, memoized.
 
 =head2 _current()
 
-The branch's pruned manifest as the C<unredacted> type, memoized, so the
-manifest and uploads sections read one render.
+The branch's pruned deployment manifest, memoized, so the manifest and uploads
+sections read one render.
 
 =head2 _compare($what, $old, $new, $secrets, $old_label, $new_label, $absent)
 
@@ -151,8 +153,7 @@ B<Examples:>
 
 =head2 _diff($old, $new, $secrets, $old_label, $new_label)
 
-The spruce diff of two manifests after C<_entombed_alike>, and after
-C<_masked> where redaction is on.
+The spruce diff of two manifests, after C<_masked> where redaction is on.
 
 B<Returns:> the diff text, empty where the two agree.
 
@@ -186,24 +187,11 @@ B<Examples:>
 The deployment's live manifest from C<bosh manifest>, or undef where the
 director holds none.
 
-=head2 _entombed_alike($old, $new, $paths)
-
-Copies of two manifests in which a vault-sourced value of C<$new> whose
-counterpart in C<$old> is an entombed reference hashing to it takes that
-reference, so it reads as unchanged. The reference does not mark where its
-path begins, so every tail of it is tried.
-
-B<Returns:> the two copies.
-
-B<Examples:>
-
-    ($old, $new) = _entombed_alike($director, $current, \@secrets);
-
 =head2 _masked($old, $new, $paths)
 
-Copies of two manifests with each value at C<$paths> replaced, by
+Copies of two manifests with each value in clear at C<$paths> replaced, by
 C<< <redacted> >> where the two agree and C<< <redacted: changed> >> on the
-new side where they do not.
+new side where they do not. A C<((...))> reference is left as it is.
 
 B<Returns:> the two copies.
 

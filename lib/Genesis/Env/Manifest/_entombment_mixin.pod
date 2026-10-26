@@ -285,6 +285,21 @@ B<Examples:>
   my ($var, $sha, $action) = $manifest->_entomb_secret(...);
   # returns $action of 'unchanged' -- the credential was already correct
 
+=head2 _put_or_name($credhub, $cred_name, $value)
+
+Writes one entombed value through C<put_secret>, or, where the provider says
+C<writes_credhub> is false, only reads what CredHub holds under the name and
+says what a write would do. A read that fails, as where CredHub cannot be
+reached, reads as nothing held.
+
+B<Returns:> the value held before, or undef, and the action: C<new>,
+C<exists>, C<altered>, or, from a real write, C<failed>.
+
+B<Examples:>
+
+  my ($existing, $action) = $self->_put_or_name($credhub, $name, $value);
+  # without writes, a value CredHub lacks: (undef, 'new'), and nothing written
+
 =head1 AUTHOR
 
 Written by the Genesis team.

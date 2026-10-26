@@ -51,6 +51,19 @@ sub new {
 }
 
 # }}}
+# without_credhub_writes - entomb by name alone, writing nothing to CredHub {{{
+sub without_credhub_writes {
+	$_[0]->{no_credhub_writes} = 1;
+	return $_[0];
+}
+
+# }}}
+# writes_credhub - whether entombing this provider's manifests writes CredHub {{{
+sub writes_credhub {
+	return !$_[0]->{no_credhub_writes};
+}
+
+# }}}
 # known_types - return the list of known manifest type (dynamically determined) {{{
 sub known_types {
 	my @types = keys %$manifest_types;
