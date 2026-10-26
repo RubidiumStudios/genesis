@@ -4166,6 +4166,9 @@ C<vault> is the vault a pipeline task writes exodus through. Its C<url> is
 required, and C<namespace>, C<auth>, and C<options> are optional. It is
 required under an automated provider for the same reason the shuttle is,
 because a task nobody is watching cannot be asked where to write.
+C<options> declares two booleans, C<tls_verify> and C<no_strongbox>, which a
+task receives as C<VAULT_SKIP_VERIFY> and C<VAULT_NO_STRONGBOX>; typed, so a
+C<false> written as text is false.
 
 C<locker> is the locker the two deploy locks use. The block declares the
 locker and its credentials and says nothing about either lock, so how a

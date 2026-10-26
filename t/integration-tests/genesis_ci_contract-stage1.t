@@ -86,6 +86,7 @@ subtest 'Stage 1 rows the configuration changes' => sub {
 			'pipeline.provider.task.version' => '1.2',
 			'pipeline.vault.auth.type'    => 'token',
 			'pipeline.vault.auth.path'    => 'secret/ci/vault',
+			'pipeline.vault.options.tls_verify' => 'false',
 		},
 		pipeline => {manual => 'true'},
 	);
@@ -106,6 +107,8 @@ subtest 'Stage 1 rows the configuration changes' => sub {
 	is($env{VAULT_AUTH_TOKEN}, '((secret/ci/vault.token))', 'f5: token auth gives VAULT_AUTH_TOKEN');
 	ok(!exists $env{VAULT_TOKEN} && !exists $env{VAULT_ROLE_ID} && !exists $env{VAULT_SECRET_ID},
 		'f5: and no other vault credential');
+	# A boolean set as text, as genesis config --set writes it, is still false.
+	is($env{VAULT_SKIP_VERIFY}, 'true', 'f5: tls_verify false skips verification');
 	is($env{CI_NO_REDACT}, 1, 'f9: pipeline.unredacted sets CI_NO_REDACT');
 };
 

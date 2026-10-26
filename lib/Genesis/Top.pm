@@ -2929,7 +2929,15 @@ sub _pipeline_config_schema {
 					url       => {type => 'string', required => 1, description => 'Vault URL'},
 					namespace => {type => 'string', description => 'Vault namespace'},
 					auth      => _credential_schema(vault => 'The task credential, as a type and its vault paths'),
-					options   => {type => 'any',    description => 'Provider-specific vault options'},
+					# Typed, so a value set as text reads as the boolean it names.
+					options   => {
+						type        => 'hash',
+						description => 'How a task reaches the vault',
+						schema      => {
+							tls_verify   => {type => 'boolean', description => "Verify the vault's TLS certificate"},
+							no_strongbox => {type => 'boolean', description => 'The vault runs without strongbox'},
+						},
+					},
 				}
 			},
 
