@@ -1903,7 +1903,15 @@ sub _blueprint_fragments {
 		my $kit = $self->top->local_kit_version(
 			$declared->{name}, $declared->{version}
 		);
-		return () unless $kit;
+		# No kit would mean no fragments, and a set that reads short has the
+		# mirror take them off the branch.
+		bail(
+			"Cannot name the blueprint fragments of #C{%s}: the kit #C{%s} it ".
+			"declares cannot be loaded from #C{%s}.",
+			$self->name,
+			join('/', grep {defined && length} $declared->{name}, $declared->{version}),
+			$self->top->local_kits_path
+		) unless $kit;
 
 		# A shallow copy carries the kit, so the environment the caller
 		# handed us is left as bare as it arrived.

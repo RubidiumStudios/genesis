@@ -1084,11 +1084,17 @@ B<Examples:>
 
 Returns the absolute path to the directory where compiled kits are stored.
 Resolves from (in priority order): the C<kits_path> setting in the Genesis
-RC configuration, then the C<kits_path> key in C<.genesis/config>. Expands
-C<~> and relative paths against the repository root.
+RC configuration, then the C<kits_path> key in C<.genesis/config>, then the
+schema's default, C<$GENESIS_ROOT/.genesis/kits>. Expands C<~> and relative
+paths against the repository root.
 
-B<Returns:> An absolute path string, or C<undef> when neither source defines
-the path.
+C<$GENESIS_ROOT> is this Top's own root, never the process environment's.
+A Top opened over a tree read out of a commit (C<materialised_tree>) applies
+no schema defaults and need not be the root the process names, and reading
+either from the environment had it find no kit at all, so the propagation set
+read at a commit silently lost every blueprint fragment.
+
+B<Returns:> An absolute path string.
 
 B<Examples:>
 

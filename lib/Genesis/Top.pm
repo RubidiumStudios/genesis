@@ -2289,11 +2289,14 @@ sub genesis_version {
 sub local_kits_path {
 	my ($self) = @_;
 
-	# Check user config first (highest precedence)
-	my $kits_path = expand_path(
-		$Genesis::RC->get('kits_path') // $self->config->get('kits_path'),
-		$self->path()
-	);
+	# Check user config first (highest precedence).  The schema default is
+	# owned here, since a materialised tree applies none, and $GENESIS_ROOT
+	# is this Top's root rather than whatever root the process names.
+	my $root = $self->path();
+	my $kits_path = $Genesis::RC->get('kits_path') // $self->config->get('kits_path')
+		// '$GENESIS_ROOT/.genesis/kits';
+	$kits_path =~ s/\$(?:\{GENESIS_ROOT\}|GENESIS_ROOT\b)/$root/g;
+	return expand_path($kits_path, $root);
 }
 
 # }}}

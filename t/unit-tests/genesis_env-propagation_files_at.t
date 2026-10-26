@@ -528,4 +528,82 @@ EOF
 		'and the non-triggering half names those two and nothing else');
 };
 
+# The ops-blueprint fixture as a compiled archive, which is what a real
+# repository carries; the rows above read it as a dev kit, which a commit
+# finds by another road.
+sub compiled_ops_blueprint {
+	require File::Temp;
+	my $build = File::Temp->newdir;
+	my $kit   = "$build/opsbp-1.0.0";
+	run({onfailure => 'Failed to stage the kit'}, 'cp', '-R', 't/src/ops-blueprint', $kit);
+	helper::put_file("$kit/kit.yml", "---\nname: opsbp\nversion: 1.0.0\n".
+		"author: FiveTwenty <agents\@fivetwenty.io>\ngenesis_version_min: 2.8.0\n");
+	run({onfailure => 'Failed to archive the kit'},
+		'tar', '-czf', "$build/opsbp-1.0.0.tar.gz", '-C', "$build", 'opsbp-1.0.0');
+	return ($build, "$build/opsbp-1.0.0.tar.gz");
+}
+
+my $OPSBP_ENV = <<'EOF';
+---
+kit:
+  name:     opsbp
+  version:  1.0.0
+  features: []
+genesis:
+  env: qa
+EOF
+
+subtest "a compiled kit's blueprint fragments travel at the commit" => sub {
+	plan tests => 3;
+
+	my $h = make_harness(envs => ['qa'], root => 'bosh');
+	fixture_vault($h);
+	my ($keep, $archive) = compiled_ops_blueprint();
+	install_compiled_kit($h, $archive);
+	my $control = commit_on_control($h,
+		files   => {'bosh/qa.yml' => $OPSBP_ENV, 'bosh/ops/extra.yml' => "---\nextra: fragment\n"},
+		message => 'name the compiled kit and add the fragment its blueprint names',
+	);
+
+	my $in_root = in_root($h);
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $top = Genesis::Top->new($h->a . '/bosh');
+	my $env = Genesis::Env->bare('qa', $top);
+
+	ok(in_set('bosh/ops/extra.yml', $env->propagation_files_at($control, git => $git)),
+		'the fragment is in the set read at the commit');
+	ok(in_set('bosh/ops/extra.yml', $top->load_env('qa')->propagation_files),
+		'as in the working-tree set');
+
+	# The read must not lean on whatever root the process environment names.
+	local $ENV{GENESIS_ROOT} = '/nowhere/genesis-root';
+	ok(in_set('bosh/ops/extra.yml', $env->propagation_files_at($control, git => $git)),
+		'whatever GENESIS_ROOT the process carries');
+};
+
+subtest 'a kit the commit carries but cannot load refuses rather than reading short' => sub {
+	plan tests => 2;
+
+	my $h = make_harness(envs => ['qa'], root => 'bosh');
+	fixture_vault($h);
+	my ($keep, $archive) = compiled_ops_blueprint();
+	install_compiled_kit($h, $archive);
+	# The archive is carried where the set looks for it, and the kits path
+	# the configuration names is somewhere it is not, so the kit cannot load.
+	$h->set_repo_config('kits_path', 'elsewhere', root => 'bosh');
+	my $control = commit_on_control($h,
+		files   => {'bosh/qa.yml' => $OPSBP_ENV},
+		message => 'name the kit its configured kits path does not hold',
+	);
+
+	my $in_root = in_root($h);
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $env = Genesis::Env->bare('qa', Genesis::Top->new($h->a . '/bosh'));
+
+	local $ENV{GENESIS_IGNORE_EVAL};
+	my @set = eval {$env->propagation_files_at($control, git => $git)};
+	ok($@, 'the read refuses') or diag(join("\n", @set));
+	like($@ // '', qr/opsbp/, 'naming the kit');
+};
+
 done_testing;
