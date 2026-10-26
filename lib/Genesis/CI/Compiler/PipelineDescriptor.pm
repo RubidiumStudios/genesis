@@ -162,7 +162,7 @@ sub describe {
 					my $member_alias = $wf_data->{aliases}{$member} || $member;
 					push @group_jobs, "deploy-$member_alias";
 					if (!$wf_data->{auto}{$member}) {
-						my $notify_name = "notify-$member_alias-$deploy_type-changes";
+						my $notify_name = _notify_job_name($member_alias, $deploy_type);
 						if ($group_notifications) {
 							push @grouped_notifications, $notify_name;
 						} else {
@@ -708,46 +708,41 @@ sub _locker_resources {
 }
 
 # }}}
+# _notify_job_name - notify-<env>-<type> (contract b8) {{{
+sub _notify_job_name {
+	my ($alias, $deploy_type) = @_;
+	return "notify-$alias-$deploy_type";
+}
+
+# }}}
 # _notify_job - notification job for non-auto environments {{{
 sub _notify_job {
 	my ($self, $ast, $env, $alias, $deploy_type, $trigger_from,
 		$is_create_env, $wf_data) = @_;
 
 	my $config = $ast->configuration || {};
-	my $tagged = $config->{tagged};
-	my %to     = $tagged ? (tags => [$env]) : ();
-	my $passed = $trigger_from ? $wf_data->{aliases}{$trigger_from} : '';
-	my $passed_job = $passed ? "deploy-$passed" : '';
+	my %to     = $config->{tagged} ? (tags => [$env]) : ();
+	my $name   = _notify_job_name($alias, $deploy_type);
 
-	my @gets = ({ get => "$alias-changes", trigger => JSON::PP::true });
-	push @gets, { get => "$alias-cache", trigger => JSON::PP::true }
-		if $trigger_from;
-	push @gets, { get => 'git', passed => [$passed_job], trigger => JSON::PP::false }
-		if $passed_job && !$config->{'require-passed-caches'};
-
-	unless ($is_create_env) {
-		my %_bc_suffix = (cloud => 'cloud-config', runtime => 'runtime-config', cpi => 'cpi-config');
-		for my $type (@{$self->_bosh_config_types($ast, $env, $wf_data)}) {
-			push @gets, { get => "$alias-$_bc_suffix{$type}", %to, trigger => JSON::PP::true };
-		}
-	}
-
+	# The branch the deploy reads is the only input and trigger (contract
+	# c13); the dry run is the BOSH diff of what it would deploy (e12).
 	my $task_cfg = $self->_task_config($ast, $env, $alias, $trigger_from, $wf_data,
-		{ command => 'ci-show-changes' });
+		{ cli_args => [$env, 'deploy', '--dry-run'] });
 
 	my $pipeline_name = $ast->metadata->{name} || 'genesis-pipeline';
 	my $notif = $self->_notification_step($ast,
-		"$pipeline_name: Changes staged for $env-$deploy_type",
+		"$pipeline_name: Changes are staged to be deployed to $env-$deploy_type, ".
+		"see $name job for change summary, then schedule and run a deploy via Concourse",
 		{ env => $env });
 
 	my @plan = (
-		{ in_parallel => \@gets },
+		{ in_parallel => [{ get => "$alias-branch", trigger => JSON::PP::true }] },
 		{ task => 'show-pending-changes', %to, config => $task_cfg },
 	);
 	push @plan, $notif if $notif;
 
 	return {
-		name   => "notify-$alias-$deploy_type-changes",
+		name   => $name,
 		public => JSON::PP::true,
 		serial => JSON::PP::true,
 		plan   => \@plan,
@@ -785,7 +780,7 @@ sub _deploy_job {
 		push @gets, { get => "$alias-branch", trigger => $trigger };
 	} else {
 		push @gets, { get => "$alias-branch", trigger => JSON::PP::false,
-			passed => ["notify-$alias-$deploy_type-changes"] };
+			passed => [_notify_job_name($alias, $deploy_type)] };
 	}
 
 	# Task library (optional external git resource with custom task files)
@@ -1094,10 +1089,10 @@ sub _outcome_hooks {
 	my ($self, $ast, $env, $alias, $deploy_type, $wf_data, $is_redeploy) = @_;
 
 	my $name      = $ast->metadata->{name} || 'genesis-pipeline';
-	my $action    = $is_redeploy ? 'Redeploy of'    : 'Deployment to';
+	my $action    = $is_redeploy ? 'redeploy of'    : 'deployment to';
 	my $ok_action = $is_redeploy ? 'redeployed'     : 'deployed';
-	my $ok_msg    = "$name: Successfully ${ok_action} $env-$deploy_type";
-	my $fail_msg  = "$name: $action $env-$deploy_type failed";
+	my $ok_msg    = "$name: Concourse successfully ${ok_action} $env-$deploy_type";
+	my $fail_msg  = "$name: Concourse $action $env-$deploy_type failed";
 
 	my $signal_cfg  = $self->_env_signal_config($ast, $env, $wf_data);
 	my $notif_style = $self->notification_style($ast);
@@ -1412,7 +1407,7 @@ sub _task_config {
 	my $vault   = $ast->integrations->{vault} || {};
 	my $root    = $sc->{root} || '.';
 	# Deploy tasks run the root's embedded CLI from the root; the shim shape
-	# below survives only for the pre-deploy show-changes task.
+	# below survives only for the redeploy lane (Stage 6).
 	my $cli     = $opts->{cli_args};
 	my $input   = $opts->{input} || ($cli ? "$alias-branch" : undef);
 	my $cmd     = $opts->{command} || 'ci-pipeline-deploy';
@@ -1588,7 +1583,7 @@ sub _errand_config {
 # }}}
 # notification_style - resolve the active notification style {{{
 #
-# Returns: 'per-env' | 'grouped' | 'minimal' | 'none'
+# Returns: 'per-env' | 'parallel' | 'grouped' | 'minimal' | 'none'
 # Sources: integrations.slack.style (new format), or legacy
 # configuration.notifications.style mapped to per-env/grouped.
 #

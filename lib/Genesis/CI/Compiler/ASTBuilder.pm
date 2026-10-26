@@ -233,6 +233,7 @@ sub _build_from_multi_file {
 
 	# Metadata
 	my $metadata = $pipeline->{metadata} || {};
+	$metadata->{deployment_type} //= $self->{top}->type if $self->{top};
 
 	# Branches
 	my $branches = $pipeline->{branches} || {
@@ -545,6 +546,8 @@ sub _normalize_auto_update {
 #
 # Accepts either the new structured format:
 #   integrations.slack: { webhook, channel, style, mentions_on_failure, per_env_overrides }
+# or the .genesis/config block, which sets its style itself:
+#   integrations.notifications: { style, slack: { webhook, channel, ... } }
 # or the legacy notifications array format:
 #   integrations.notifications: [{ type: slack, webhook, channel, ... }]
 #
@@ -557,6 +560,25 @@ sub _normalize_slack_config {
 		# New format already present, so ensure structural defaults
 		$s->{mentions_on_failure} //= [];
 		$s->{per_env_overrides}   //= {};
+		return 1;
+	}
+
+	# The .genesis/config block (D122), its style named as the legacy one was
+	my $block = $integrations->{notifications};
+	if (ref($block) eq 'HASH' && ref($block->{slack}) eq 'HASH') {
+		my $sn      = $block->{slack};
+		my $webhook = $sn->{webhook};
+		my %style   = (inline => 'per-env', parallel => 'parallel', grouped => 'grouped');
+		$integrations->{slack} = {
+			webhook             => (defined $webhook && $webhook !~ /^\(\(/)
+				? {secret_ref => $webhook} : $webhook,
+			channel             => $sn->{channel},
+			username            => $sn->{username},
+			icon_url            => $sn->{icon},
+			mentions_on_failure => $sn->{mentions_on_failure} || [],
+			per_env_overrides   => {},
+			style               => $style{$block->{style} || 'inline'} || 'per-env',
+		};
 		return 1;
 	}
 

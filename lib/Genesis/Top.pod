@@ -4177,11 +4177,14 @@ here. Its C<url> is required, C<username>, C<password>, and C<ca_cert> are
 optional, and C<skip_ssl_validation> defaults to false. It is required under
 an automated provider as well.
 
-C<notifications> is optional under every provider. Its C<style> is the
-repository default rendering and defaults to C<default>, and C<slack> and
-C<email> carry whatever entries the notifier reads. An environment overrides
-the style through its own C<genesis.pipeline.notifications> block, which
-L</_pipeline_env_keys_schema> declares.
+C<notifications> is optional under every provider. Its C<style> is one of
+the legacy pipeline's, C<inline> (the default, a manual deploy waiting on
+its notify job), C<parallel> or C<grouped>. C<slack> is a hash: C<webhook>,
+a vault reference, and C<channel> are required, and C<username>, C<icon> and
+C<mentions_on_failure> are optional. C<email> carries whatever entries are
+written and is not yet emitted. An environment's own
+C<genesis.pipeline.notifications> block, which L</_pipeline_env_keys_schema>
+declares, is accepted, and the compiler does not yet read it.
 
 The section also carries C<pipeline.name>, which is the pipeline's label
 in its provider and nothing more. It composes no branch, since the branch

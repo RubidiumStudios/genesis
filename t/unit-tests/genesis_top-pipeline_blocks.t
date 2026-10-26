@@ -125,18 +125,20 @@ subtest 'notifications are optional and overridable per environment' => sub {
 	lives_ok {load_with($h, automated_pipeline_block())}
 		'the whole block may be left out';
 
+	# D122: slack is a hash naming the webhook and channel, and the style
+	# is one of the legacy pipeline's.
 	my $top = load_with($h, join("\n", automated_pipeline_block(),
-		'  notifications:', '    slack: ci-alerts'));
-	is $top->config->get('pipeline.notifications.style'), 'default',
+		'  notifications:', '    slack:', '      webhook: ci/slack:webhook', '      channel: "#ci"'));
+	is $top->config->get('pipeline.notifications.style'), 'inline',
 		'the style resolves to the repository default';
 
-	write_nested_env('qa', '    notifications:', '      style: verbose');
+	write_nested_env('qa', '    notifications:', '      style: parallel');
 	$top = load_with($h, join("\n", automated_pipeline_block(),
-		'  notifications:', '    style: compact'));
-	is $top->config->get('pipeline.notifications.style'), 'compact',
+		'  notifications:', '    style: grouped'));
+	is $top->config->get('pipeline.notifications.style'), 'grouped',
 		'a written style is the repository default';
 	is $top->_merged_env_params('qa')->{genesis}{pipeline}{notifications}{style},
-		'verbose',
+		'parallel',
 		'and an environment may override it without changing that default';
 };
 

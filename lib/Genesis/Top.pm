@@ -2961,8 +2961,19 @@ sub _pipeline_config_schema {
 				type        => 'hash',
 				description => 'How the pipeline notifies, and where',
 				schema => {
-					style => {type => 'string', default => 'default', description => 'The repository default rendering'},
-					slack => {type => 'any', description => 'Slack entries'},
+					style => {type => 'enum', values => [qw/inline parallel grouped/], default => 'inline',
+						description => 'Whether a manual deploy waits on its notify job, or the notify jobs sit apart'},
+					slack => {
+						type        => 'hash',
+						description => 'Where the pipeline posts to Slack',
+						schema      => {
+							webhook             => {type => 'string', required => 1, description => 'Vault reference to the webhook URL'},
+							channel             => {type => 'string', required => 1, description => 'The channel posted to'},
+							username            => {type => 'string', description => 'The name posted as'},
+							icon                => {type => 'string', description => 'The icon URL posted with'},
+							mentions_on_failure => {type => 'any', description => 'Handles prefixed to a failure'},
+						}
+					},
 					email => {type => 'any', description => 'Email entries'},
 				}
 			},

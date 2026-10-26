@@ -1149,8 +1149,9 @@ subtest 'Concourse - native generation from modern AST' => sub {
 	# Verify pipeline name appears
 	like $output, qr/test-pipeline/, "pipeline name appears in output";
 
-	# Verify git resource
-	like $output, qr/name: git/, "git resource present";
+	# The control-wide git resource is pruned: the notify job, its last
+	# reader, takes its environment's branch (D122, contract c13).
+	unlike $output, qr/name: git$/m, "no git resource";
 	like $output, qr{git\@github\.com:myorg/cf-deployments\.git}, "github URI constructed";
 
 	# Verify slack resource
@@ -1171,7 +1172,7 @@ subtest 'Concourse - native generation from modern AST' => sub {
 	# Verify jobs
 	like $output, qr/sandbox-cf/, "sandbox deploy job present";
 	like $output, qr/preprod-cf/, "preprod deploy job present";
-	like $output, qr/notify-preprod-cf-changes/, "preprod notify job present (non-auto env)";
+	like $output, qr/notify-preprod-cf\b/, "preprod notify job present (non-auto env)";
 
 	# Verify task configuration references.  The deploy task's run path is
 	# the genesis binary embedded in the repository and its only argument
@@ -1735,7 +1736,7 @@ subtest 'Concourse - grouped notifications' => sub {
 
 	# With grouped notifications, notify jobs should be in a separate group
 	like $output, qr/name: notifications/, "notifications group present";
-	like $output, qr/notify-prod-cf-changes/, "notify job present for non-auto env";
+	like $output, qr/notify-prod-cf\b/, "notify job present for non-auto env";
 };
 
 subtest 'Concourse - custom groups' => sub {

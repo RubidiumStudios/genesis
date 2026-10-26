@@ -338,29 +338,14 @@ subtest 'Auto env deploy job: no bosh-config get, whatever is tracked' => sub {
 
 my $_slack = { channel => '#deploys', webhook => '((slack-webhook))' };
 
-subtest 'Notify job: bosh-config gets trigger when configured' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => 1, slack => $_slack));
-	my @names = _get_names($pl, 'notify-sandbox-deployment-changes');
-
-	ok(grep({ $_ eq 'sandbox-cloud-config'   } @names), 'cloud-config get in notify job');
-	ok(grep({ $_ eq 'sandbox-runtime-config' } @names), 'runtime-config get in notify job');
-};
-
-subtest 'Notify job: no bosh-config gets when not configured' => sub {
-	my $pl = _describe(_ast_for(slack => $_slack));
-	my @names = _get_names($pl, 'notify-sandbox-deployment-changes');
-
-	ok(!grep({ $_ eq 'sandbox-cloud-config'   } @names), 'no cloud-config get in notify');
-	ok(!grep({ $_ eq 'sandbox-runtime-config' } @names), 'no runtime-config get in notify');
-};
-
-subtest 'Notify job: bosh-config gets are triggering' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => 1, slack => $_slack));
-	my @gets = _job_gets($pl, 'notify-sandbox-deployment-changes');
-	my ($cc) = grep { ref $_ eq 'HASH' && ($_->{get}||'') eq 'sandbox-cloud-config' } @gets;
-
-	ok($cc, 'cloud-config get found');
-	ok($cc->{trigger}, 'cloud-config get triggers notify job');
+# The notify job triggers on its branch alone (D122, contract c13).
+subtest 'Notify job: no bosh-config get, whatever is tracked' => sub {
+	for my $tracked (undef, 1, ['cloud'], [qw/cloud runtime cpi/]) {
+		my $pl = _describe(_ast_for(slack => $_slack, defined $tracked ? (track_bosh_configs => $tracked) : ()));
+		my @names = _get_names($pl, 'notify-sandbox-deployment');
+		is_deeply(\@names, ['sandbox-branch'],
+			'the branch alone with track_bosh_configs '.(defined $tracked ? (ref $tracked ? "[@$tracked]" : $tracked) : 'unset'));
+	}
 };
 
 # =========================================================================
