@@ -3046,10 +3046,19 @@ because under D112 control means what C<R> holds, not what the local checkout
 does. A directory under no git control fails the call itself, which is how
 that case is told apart without a separate check.
 
+Under C<GENESIS_PIPELINE_TASK>, a clone holding no control ref at all, which
+is what the git resource's single-branch checkout of a deployment branch is,
+fetches control from the remote L</_resolve_remote> finds into
+C<refs/remotes/E<lt>remoteE<gt>/E<lt>controlE<gt>> and reads it there (D121), so the
+shape is control's rather than the deployment branch's own tree. An
+operator's clone is left alone, its pre-flight telling it control has not
+arrived.
+
 B<Parameters:> None.
 
 B<Returns:> The commit's full sha, or C<undef> where the root is under no git
-control or control exists neither locally nor on any remote.
+control or control exists neither locally nor on any remote, after the
+fetch a pipeline task makes.
 
 B<Errors:> None.
 
@@ -3063,6 +3072,25 @@ B<Examples:>
 
     my $sha = $top->_control_commit;
     # returns undef in a directory that is not a git checkout
+
+=head2 _control_refs($control)
+
+    my %sha = $top->_control_refs('control');
+
+The local control branch and every remote's copy of it that this clone
+holds, as one C<git for-each-ref>.
+
+B<Parameters:> C<$control>, the control branch's name.
+
+B<Returns:> A list of ref name and sha pairs, empty where the clone holds
+none or the directory is under no git control.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my %sha = $top->_control_refs('control');
+    # ('refs/heads/control' => '1d02...', 'refs/remotes/origin/control' => '1d02...')
 
 =head2 _resolve_remote
 

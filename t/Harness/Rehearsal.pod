@@ -31,8 +31,9 @@ Locker resources have no versions; their puts take and release pools.
 =item Running a job
 
 Its plan is walked in order through C<do> and C<in_parallel>. A git C<get>
-is a fresh clone of its branch into the job's own work directory, under the
-input's name. A task runs its own C<run.path> in its C<run.dir> with its
+is checked out as the git resource checks one out: a clone of that branch
+alone (C<--single-branch>) into the job's own work directory, under the
+input's name, at the version's commit with HEAD detached. A task runs its own C<run.path> in its C<run.dir> with its
 C<params>, through L<Harness::Propagation/run_task($h, %task)>, so the
 harness's BOSH and vault answer it. A task that fails stops the plan. The
 outcome hook, C<on_success> or C<on_failure>, is then put, and the

@@ -1346,13 +1346,17 @@ sub _no_pipeline_shape {
 sub _control_commit {
 	my ($self) = @_;
 	my $control = $self->control_branch;
-	my ($out, $rc) = run({stderr => 0},
-		'git', '-C', $self->path, 'for-each-ref',
-		'--format=%(refname)%09%(objectname)',
-		"refs/heads/$control", "refs/remotes/*/$control");
-	return undef if $rc || !defined $out;
-
-	my %sha = map {split /\t/} split /\n/, $out;
+	my %sha = $self->_control_refs($control) or do {
+		# A pipeline task's single-branch clone holds no control (D121), so
+		# control is fetched from the remote rather than read off this tree.
+		# An operator's clone without it is told so, by the pre-flight.
+		return undef unless $ENV{GENESIS_PIPELINE_TASK};
+		my $remote = $self->_resolve_remote($control)->{remote};
+		run({stderr => 0}, 'git', '-C', $self->path, 'fetch', '-q', $remote,
+			"+refs/heads/$control:refs/remotes/$remote/$control") if defined $remote;
+		$self->_control_refs($control);
+	};
+	return undef unless %sha;
 	my @refs = ("refs/heads/$control");
 	if (grep {m{^refs/remotes/}} keys %sha) {
 		my $remote = $self->_resolve_remote($control)->{remote};
@@ -1362,6 +1366,18 @@ sub _control_commit {
 		return $sha{$ref} if $sha{$ref};
 	}
 	return undef;
+}
+
+# }}}
+# _control_refs - the local and remote control refs this clone holds, ref to sha {{{
+sub _control_refs {
+	my ($self, $control) = @_;
+	my ($out, $rc) = run({stderr => 0},
+		'git', '-C', $self->path, 'for-each-ref',
+		'--format=%(refname)%09%(objectname)',
+		"refs/heads/$control", "refs/remotes/*/$control");
+	return () if $rc || !defined $out;
+	return map {split /\t/} split /\n/, $out;
 }
 
 # }}}

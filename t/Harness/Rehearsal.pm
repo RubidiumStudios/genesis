@@ -135,10 +135,7 @@ sub _run_job {
 			} elsif (my $get = $step->{get}) {
 				my $res = $self->_resource($get);
 				$got{$get} = $self->version($get);
-				if ($res->{type} eq 'git') {
-					run({onfailure => "rehearsal: cannot check $get out"},
-						'git', 'clone', '-q', '-b', $res->{source}{branch}, "file://$self->{h}{r}", "$dir/$get");
-				}
+				$self->_checkout($res, "$dir/$get", $got{$get}) if $res->{type} eq 'git';
 			} elsif ($step->{task}) {
 				my $c = $step->{config};
 				my ($out, $err, $rc) = $self->{h}->run_task(dir => "$dir/$c->{run}{dir}",
@@ -157,6 +154,16 @@ sub _run_job {
 	delete $self->{parked}{$name};
 	$self->{seen}{$name}{$_} = $got{$_} for grep {exists $got{$_}} $self->_triggers($job);
 	push @{$self->{runs}}, {%run, outcome => $outcome};
+}
+
+# As the git resource gets a version: that branch alone, at the version's
+# commit, with HEAD detached.
+sub _checkout {
+	my ($self, $res, $dir, $version) = @_;
+	run({onfailure => "rehearsal: cannot check $res->{name} out"}, 'git', 'clone', '-q',
+		'--single-branch', '-b', $res->{source}{branch}, "file://$self->{h}{r}", $dir);
+	run({dir => $dir, onfailure => "rehearsal: cannot check $res->{name} out at $version"},
+		'git', 'checkout', '-q', $version);
 }
 
 sub _put_all {
