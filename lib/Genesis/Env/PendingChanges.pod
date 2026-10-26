@@ -28,16 +28,19 @@ It prints four sections, each even when it has nothing to say:
 
 From the newest successful exodus record's C<git.commit> to the branch's
 head, each labelled I<propagated>, with the control commit its marker names,
-or I<manual>, and the files it changes under the deployment root. An
-environment never deployed, or whose deployed commit is not on the branch,
-says so and lists the branch.
+I<seed> for the commit C<pipeline-apply> cut the branch with, or I<manual>,
+and the files it changes under the deployment root. An environment never
+deployed, or whose deployed commit is not on the branch, says so and lists
+the branch.
 
 =item Manifest
 
 The branch's manifest spruce-diffed against the director's live manifest and
 against the last one recorded in exodus, a difference between those two
 reported as drift, and the BOSH variables against the deployed ones. A
-create-env environment has the exodus baseline alone.
+create-env environment has the exodus baseline alone. For a first deploy,
+where neither holds a manifest, the whole manifest is shown as additions
+against an empty one, since then the whole manifest is the change.
 
 =item BOSH configs
 
@@ -185,7 +188,7 @@ B<Examples:>
 =head2 _director_manifest()
 
 The deployment's live manifest from C<bosh manifest>, or undef where the
-director holds none.
+director holds none or answers with anything but a manifest.
 
 =head2 _masked($old, $new, $paths)
 

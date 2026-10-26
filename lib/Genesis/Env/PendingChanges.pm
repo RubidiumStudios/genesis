@@ -70,7 +70,9 @@ sub _commits {
 		my ($subject) = split /\n/, $commit->{message};
 		my ($control) = Genesis::CI::Marker::in_text($commit->{message});
 		info("[[  - >>#C{%s} %s %s", substr($commit->{sha}, 0, 8),
-			defined $control ? "#G{propagated} from control\@".substr($control, 0, 8) : '#Y{manual}',
+			  defined $control ? "#G{propagated} from control\@".substr($control, 0, 8)
+			: Genesis::CI::Marker::is_seed($commit->{message}) ? '#K{seed}'
+			: '#Y{manual}',
 			$subject);
 		info("[[      >>%s", $_) for $git->commit_files($commit->{sha}, @scope);
 	}
@@ -90,6 +92,14 @@ sub _manifest {
 	my $record   = eval {$env->with_vault->deployments->latest_successful};
 	my $exodus   = _yaml_artifact($record, 'manifest');
 	my $director = $env->use_create_env ? undef : $self->_director_manifest;
+
+	# A first deploy: nothing anywhere to compare with, so the whole manifest
+	# is the change, shown as additions against an empty one.
+	unless ($director || $exodus) {
+		$self->_compare('nothing deployed, a first deploy', {}, $current, \@secrets,
+			'nothing', 'branch', '');
+		return;
+	}
 
 	if ($env->use_create_env) {
 		info("[[  >>a create-env environment has no director; comparing with the last deploy alone.");
@@ -245,7 +255,8 @@ sub _director_manifest {
 	my ($out, $rc) = $env->with_bosh->bosh->execute(
 		{interactive => 0, deployment => $env->deployment_name}, 'manifest');
 	return undef if $rc || !defined $out || $out !~ /\S/;
-	return load_yaml($out);
+	my $manifest = eval {load_yaml($out)};
+	return ref($manifest) eq 'HASH' ? $manifest : undef;
 }
 
 # }}}

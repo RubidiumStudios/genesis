@@ -45,6 +45,20 @@ my %TRAILERS = (
 	RELEASE_STAGE() => 'Genesis-Release-Stage',
 );
 
+# seed_subject - the subject of the commit the apply cuts a branch with {{{
+sub seed_subject {
+	my ($branch) = @_;
+	return sprintf('Initialize %s branch [ci skip]', $branch);
+}
+
+# }}}
+# is_seed - whether a commit message is the apply's seed commit {{{
+sub is_seed {
+	my ($text) = @_;
+	return (($text // '') =~ /\AInitialize \S+ branch \[ci skip\]\s*\z/) ? 1 : 0;
+}
+
+# }}}
 # build - render the marker subject for one delivery {{{
 #
 # The sha is written exactly as it is handed over, because only the caller has

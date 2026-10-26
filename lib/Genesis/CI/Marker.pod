@@ -28,6 +28,32 @@ owns rather than one of its own.
 
 =head1 FUNCTIONS
 
+=head2 seed_subject($branch)
+
+The subject of the commit C<pipeline-apply> cuts a deployment branch with, an
+orphan root holding only C<init>, which carries C<[ci skip]> so the branch's
+first version triggers nothing. It lives here, beside the marker, so the apply
+that writes it and C<is_seed>, which recognises it, read one spelling.
+
+B<Returns:> C<Initialize E<lt>branchE<gt> branch [ci skip]>.
+
+B<Examples:>
+
+    seed_subject('qa/bosh');   # 'Initialize qa/bosh branch [ci skip]'
+
+=head2 is_seed($text)
+
+Whether a commit message is the apply's seed commit, so a reader listing a
+branch's commits can say I<seed> where it would otherwise say I<manual>, the
+seed carrying no marker.
+
+B<Returns:> 1 or 0.
+
+B<Examples:>
+
+    is_seed("Initialize qa/bosh branch [ci skip]\n");   # 1
+    is_seed("a hand edit");                             # 0
+
 =head2 build
 
     my $subject = Genesis::CI::Marker::build($control_sha, $env);

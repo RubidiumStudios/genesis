@@ -13,6 +13,7 @@ use Genesis::Top;
 use Genesis::Env;
 use Genesis::CI::Legacy qw//;
 use Genesis::CI::Compiler;
+use Genesis::CI::Marker ();
 use Genesis::CI::ProviderCompiler;
 use Genesis::CI::Preflight;
 use Genesis::CI::ProviderRegistry;
@@ -1469,7 +1470,7 @@ sub _apply_init_branches {
 		} else {
 			$git->create_orphan_branch($branch,
 				files   => {init => INIT_FILE_BODY},
-				message => sprintf('Initialize %s branch [ci skip]', $branch),
+				message => Genesis::CI::Marker::seed_subject($branch),
 			);
 			$git->push_append_only($branch);
 			info("  #G{created} #C{%s}", $branch);

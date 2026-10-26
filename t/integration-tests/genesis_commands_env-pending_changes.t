@@ -90,9 +90,10 @@ sub pending_harness {
 	refresh($h, 'a');
 
 	fixture_bosh($h, hooks => {blueprint => $BLUEPRINT});
-	bosh_answer($h, manifest => $opts{director_manifest}
+	# A deployment never deployed is on no director either.
+	bosh_answer($h, manifest => $opts{never_deployed} ? '' : $opts{director_manifest}
 		// deployed_manifest('the-deployed-version', $SECRET));
-	bosh_answer($h, '/deployment_configs?deployment=qa-bosh' =>
+	bosh_answer($h, '/deployment_configs?deployment=qa-bosh' => $opts{never_deployed} ? '[]' :
 		'[{"config":{"id":"1","type":"cloud","name":"default"}}]');
 	bosh_answer($h, '/configs?latest=true' =>
 		'[{"id":"2","type":"cloud","name":"default","content":"azs: [{name: z2}]\n"},'.
@@ -170,8 +171,16 @@ subtest 'T421: an environment never deployed says so' => sub {
 	my ($h) = pending_harness(never_deployed => 1);
 	my ($out, $err, $exit) = run_genesis($h, 'qa', 'pending-changes');
 	is($exit, 0, 'it succeeds') or diag("$out$err");
-	like("$out$err", qr/never been deployed/, 'it says so');
-	like("$out$err", qr/manual.*a hand edit on the branch/, 'and lists the branch');
+	my $all = "$out$err";
+	like($all, qr/never been deployed/, 'it says so');
+	like($all, qr/manual.*a hand edit on the branch/, 'and lists the branch');
+	like($all, qr/seed.*Initialize \S+ branch \[ci skip\]/, "the apply's seed commit labelled seed");
+	unlike($all, qr/manual.*Initialize/, 'and not manual');
+	like($all, qr/first deploy.*\n(?:.*\n)*?.*the-coming-version/,
+		'the whole manifest, as additions against nothing deployed');
+	like($all, qr/\Q@{[entombed_ref($SECRET)]}\E/, 'its vault value as the reference the deploy would send');
+	unlike($all, qr/since the last deploy:/, 'and no director config said to have moved since a deploy there was none of');
+	unlike($all, qr/\Q$SECRET\E/, 'never in clear');
 };
 
 done_testing;
