@@ -1,0 +1,290 @@
+=head1 NAME
+
+Genesis::Env::PendingChanges - what deploying an environment's branch would change, read-only
+
+=head1 SYNOPSIS
+
+    use Genesis::Env::PendingChanges;
+
+    my $env     = Genesis::Top->new('.')->load_env('qa')->with_vault;
+    my $pending = Genesis::Env::PendingChanges->new($env, redact => 1)->report;
+    # prints the four sections; $pending is true where anything is pending
+
+=head1 DESCRIPTION
+
+The report behind C<genesis E<lt>envE<gt> pending-changes> (D123), which the
+pipeline's notify job runs where it once ran C<deploy --dry-run>. That dry run
+was unsafe there: the BOSH CLI uploads every release the manifest names by
+C<url> before it creates the task, and the dry run runs the kit's
+C<pre-deploy> hook and reactions. This report does none of that. It uploads
+nothing, takes no lock, runs no hook or reaction, writes nothing to the vault,
+CredHub, the director or the repository, and only reads.
+
+It prints four sections, each even when it has nothing to say:
+
+=over 4
+
+=item Commits since the last deploy
+
+From the newest successful exodus record's C<git.commit> to the branch's
+head, each labelled I<propagated>, with the control commit its marker names,
+or I<manual>, and the files it changes under the deployment root. An
+environment never deployed, or whose deployed commit is not on the branch,
+says so and lists the branch.
+
+=item Manifest
+
+The branch's manifest spruce-diffed against the director's live manifest and
+against the last one recorded in exodus, a difference between those two
+reported as drift, and the BOSH variables against the deployed ones. A
+create-env environment has the exodus baseline alone.
+
+=item BOSH configs
+
+The configs the kit synthesizes that the director lacks or holds differently,
+which the deploy would upload, and every cloud or runtime config whose latest
+version on the director differs from the one the deployment last ran with,
+whoever uploaded it.
+
+=item Uploads
+
+The releases and stemcells the manifest names that the director lacks.
+
+=back
+
+The branch's manifest is rendered as the C<unredacted> type, never the
+deployable one, because rendering an entombed manifest copies vault values
+into CredHub. A deployed entombed manifest names each vault value by a
+reference ending in a hash of the value, so a value that hashes to its old
+reference reads as unchanged. With redaction on, each value the redacted
+manifest hides shows only as C<< <redacted> >> or C<< <redacted: changed> >>.
+
+=head1 CLASS METHODS
+
+=head2 new($env, %opts)
+
+A report for one loaded environment, which must already hold its vault.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env>
+
+The C<Genesis::Env>.
+
+=item C<redact>
+
+True to show vault values only as changed or unchanged.
+
+=back
+
+B<Returns:> the report object; nothing is read until C<report>.
+
+B<Examples:>
+
+    my $report = Genesis::Env::PendingChanges->new($env, redact => 1);
+
+=head1 INSTANCE METHODS
+
+=head2 report()
+
+Prints the four sections, then whether anything is pending.
+
+B<Returns:> the number of sections and items that found something pending,
+so false where nothing is.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Whatever loading the environment's manifest, reading the vault or reaching
+the director raises; the notify job's failure message is for exactly that.
+
+=back
+
+=head1 INTERNAL METHODS
+
+=head2 _commits()
+
+The commits section. Reads the deployed commit from C<deployed_record>, walks
+the branch from there with C<log_subjects>, labels each by its marker, and
+lists its files with C<commit_files> under the git prefix.
+
+=head2 _manifest()
+
+The manifest section: the branch's manifest against the director and exodus,
+drift between those two, and the BOSH variables against exodus's.
+
+=head2 _configs()
+
+The configs section, reusing C<bosh-configs>' synthesis and comparison for the
+configs the deploy would upload, and C</deployment_configs> against
+C</configs?latest=true> for those moved on the director.
+
+=head2 _uploads()
+
+The uploads section, the manifest's releases and stemcells against the
+director's. A C<latest> version is satisfied by any version held.
+
+=head2 _provider()
+
+The environment's manifest provider, its cloud configs downloaded for the
+blueprint, memoized.
+
+=head2 _current()
+
+The branch's pruned manifest as the C<unredacted> type, memoized, so the
+manifest and uploads sections read one render.
+
+=head2 _compare($what, $old, $new, $secrets, $old_label, $new_label, $absent)
+
+Prints one baseline's diff against the branch, or that there is none, or
+C<$absent> where the baseline is missing, and counts a difference as pending.
+
+B<Examples:>
+
+    $self->_compare('the director\'s live manifest', $director, $current,
+        \@secrets, 'director', 'branch', 'the director holds no manifest');
+
+=head2 _diff($old, $new, $secrets, $old_label, $new_label)
+
+The spruce diff of two manifests after C<_entombed_alike>, and after
+C<_masked> where redaction is on.
+
+B<Returns:> the diff text, empty where the two agree.
+
+B<Examples:>
+
+    my $diff = $self->_diff($exodus, $director, \@secrets, 'exodus', 'director');
+
+=head2 _spruce($old, $new)
+
+C<spruce_diff>'s differences, decided by its exit code, with the C<^D> the
+pseudo-terminal leaves on macOS removed.
+
+B<Returns:> the differences, or C<''> where there are none.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Could not diff ...">: spruce failed rather than found differences.
+
+=back
+
+B<Examples:>
+
+    my $diff = _spruce({content => $old, label => 'id 1'}, {content => $new, label => 'id 2'});
+
+=head2 _director_manifest()
+
+The deployment's live manifest from C<bosh manifest>, or undef where the
+director holds none.
+
+=head2 _entombed_alike($old, $new, $paths)
+
+Copies of two manifests in which a vault-sourced value of C<$new> whose
+counterpart in C<$old> is an entombed reference hashing to it takes that
+reference, so it reads as unchanged. The reference does not mark where its
+path begins, so every tail of it is tried.
+
+B<Returns:> the two copies.
+
+B<Examples:>
+
+    ($old, $new) = _entombed_alike($director, $current, \@secrets);
+
+=head2 _masked($old, $new, $paths)
+
+Copies of two manifests with each value at C<$paths> replaced, by
+C<< <redacted> >> where the two agree and C<< <redacted: changed> >> on the
+new side where they do not.
+
+B<Returns:> the two copies.
+
+B<Examples:>
+
+    ($old, $new) = _masked($old, $new, [['password']]);
+
+=head2 _at($data, $path)
+
+A reference to the value at a path of keys and indices, so a caller can
+replace it in place.
+
+B<Returns:> the reference, or undef where the path is absent.
+
+B<Examples:>
+
+    ${_at($manifest, ['instance_groups', 0, 'name'])} = 'renamed';
+
+=head2 _redacted_paths($data, @at)
+
+The paths at which a redacted manifest shows C<REDACTED>, which are the
+values that come from the vault.
+
+B<Returns:> a list of arrayrefs.
+
+B<Examples:>
+
+    my @paths = _redacted_paths($provider->redacted(subset => 'pruned')->data);
+
+=head2 _yaml_artifact($record, $type)
+
+One artifact of a deployment record, parsed as YAML.
+
+B<Returns:> the data, or undef where the record or artifact is missing.
+
+B<Examples:>
+
+    my $exodus = _yaml_artifact($record, 'manifest');
+
+=head2 _json($bosh, $path)
+
+A director API answer from C<bosh curl>, decoded from JSON.
+
+B<Returns:> the data, or undef where the call or the decode fails.
+
+B<Examples:>
+
+    my $latest = _json($bosh, '/configs?latest=true') || [];
+
+=head2 _heading($title)
+
+Prints one section's heading.
+
+B<Examples:>
+
+    _heading('Uploads');
+
+=head1 LIMITATIONS
+
+=over 4
+
+=item *
+
+The configs the kit synthesizes are shown as C<bosh-configs compare> shows
+them, unmasked, since they are generated rather than read from the vault.
+
+=item *
+
+A vault value is recognised by the redacted rendering of the branch's
+manifest, so one the branch no longer carries is not masked on the old side.
+
+=item *
+
+The uploads section compares names and versions, not SHA1s, so a release
+rebuilt under the same version reads as present.
+
+=back
+
+=head1 SEE ALSO
+
+L<Genesis::Commands::Env> (C<pending_changes>), L<Genesis::Env::ManifestProvider>,
+L<Genesis::CI::Marker>, L<Service::BOSH::Director>.
+
+=cut

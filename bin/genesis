@@ -432,6 +432,44 @@ define_command("manifest", {
 });
 
 # }}}
+# genesis pending-changes - What deploying the branch would change, read-only {{{
+define_command("pending-changes", {
+	summary => "Show what deploying the environment's branch would change.",
+	usage => "<env> pending-changes [<options...>]",
+	description =>
+		"Show what a deploy of the environment's deployment branch would change, ".
+		"without changing anything: no upload, no lock, no hook or reaction, and ".
+		"nothing written.  It prints four sections:\n".
+		"\n".
+		"[[  #C{Commits}  >>the commits since the deployed one, each labelled ".
+		"propagated, with its control commit, or manual, and the files it ".
+		"changes.\n".
+		"[[  #C{Manifest} >>the branch's manifest against the director's live ".
+		"manifest and the last one Genesis deployed, a difference between those ".
+		"two reported as drift, and the BOSH variables against the deployed ones.\n".
+		"[[  #C{BOSH configs} >>the configs the kit synthesizes that differ from ".
+		"the director's, and the director configs changed since the deployment ".
+		"last ran.\n".
+		"[[  #C{Uploads}  >>the releases and stemcells the deploy would upload.\n".
+		"\n".
+		"Values from the vault show only as changed or unchanged unless ".
+		"#y{--no-redact} is given.  It exits 0 whether or not anything is ".
+		"pending, and non-zero only when it cannot tell.",
+	function_group => Genesis::Commands::ENVIRONMENT,
+	scope => 'env',
+	# It reads what the branch would deploy, so it stands on the branch's tip,
+	# and as a read it moves no ref.
+	branch_class => Genesis::Commands::DEPLOYED_STATE,
+	option_group => Genesis::Commands::ENV_OPTIONS,
+	options => [
+		'redact!' =>
+			"Show values from the vault only as changed or unchanged.  On by ".
+			"default unless output goes to a terminal or CI_NO_REDACT is set, as ".
+			"for deploy.",
+	]
+});
+
+# }}}
 # genesis deploy - Pull in Cloud Config, Generate a manifest, deploy {{{
 define_command("deploy", {
 	summary => "Generate the manifest for the environment and deploy it to the BOSH director.",

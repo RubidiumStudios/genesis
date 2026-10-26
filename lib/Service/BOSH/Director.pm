@@ -694,7 +694,14 @@ sub run_errand {
 }
 
 # }}}
-# stemcells - list the present stemcells on the BOSH director {{{
+# releases - the releases the director holds, each a name and version {{{
+sub releases {
+	my $rows = read_json_from($_[0]->execute('releases', '--json'))->{Tables}[0]{Rows} || [];
+	return map {{name => $_->{name}, version => $_->{version} =~ s/\*$//r}} @$rows;
+}
+
+# }}}
+# stemcells - the stemcells the director holds, keyed os@version {{{
 sub stemcells {
 	my %stemcells;
 	my $stemcell_rows = read_json_from(

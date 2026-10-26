@@ -1445,6 +1445,18 @@ sub deploy_redacts {
 }
 
 # }}}
+# pending_changes - what deploying the branch would change, read-only (D123) {{{
+sub pending_changes {
+	option_defaults(redact => deploy_redacts());
+	command_usage(1) if @_ != 1;
+
+	my $env = Genesis::Top->new('.')->load_env($_[0])->with_vault();
+	require Genesis::Env::PendingChanges;
+	Genesis::Env::PendingChanges->new($env, redact => get_options->{redact})->report;
+	return 0;
+}
+
+# }}}
 sub deploy {
 	option_defaults(
 		redact   => deploy_redacts(),

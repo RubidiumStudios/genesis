@@ -51,6 +51,13 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		# repository it was asked to read.  Their flags are not swept: the
 		# bosh command passes its options through to the bosh cli, so the
 		# set it declares is not the set it accepts.
+		# T421: a read of what the branch would deploy, which moves no ref
+		# and takes the deploy's redaction switch (D123).
+		'pending-changes' => {
+			class   => Genesis::Commands::DEPLOYED_STATE,
+			options => [qw/redact!/],
+			absent  => [qw/dry-run|n yes|y force/],
+		},
 		'info' => {
 			class   => Genesis::Commands::DEPLOYED_STATE,
 			options => [qw/as-deployed/],

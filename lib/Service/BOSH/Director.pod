@@ -1548,6 +1548,34 @@ B<Examples:>
   my $ok = $director->cleanup(all => 1);
   # Returns: 1 on success
 
+=head2 releases
+
+  my @releases = $director->releases();
+
+The releases the director holds, read from C<bosh releases --json>, each a
+hash of C<name> and C<version>, the version without the trailing C<*> BOSH
+puts on one a deployment uses. It reads only, and is what tells a caller
+which of a manifest's releases a deploy would upload.
+
+B<Returns:> A list of hashrefs, one per release version, empty where the
+director holds none.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Whatever C<execute> or C<read_json_from> raises when the director cannot be
+reached or answers something that is not JSON.
+
+=back
+
+B<Examples:>
+
+  my %have = map {("$_->{name}/$_->{version}" => 1)} $director->releases;
+  print "would upload\n" unless $have{'bpm/1.2.3'};
+
 =head2 stemcells
 
   my %stemcells  = $director->stemcells();   # list context

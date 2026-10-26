@@ -44,7 +44,7 @@ our @EXPORT = qw/
 	fixture_vault fixture_applied fixture_pipeline_record certify
 	fixture_hold fixture_proposed fixture_director fixture_bosh
 	break_vault break_vault_writes break_vault_reads restore_vault
-	record_at record_keys proposed_for vault_read_log bosh_runs fixture_preflight fixture_kit
+	record_at record_keys proposed_for vault_read_log bosh_runs bosh_answer fixture_preflight fixture_kit
 	fixture_command install_compiled_kit shimmed_git real_tool
 	fixture_fly
 
@@ -3069,6 +3069,17 @@ if [ "\$1" = "interpolate" ]; then
   exec "@{[_real_tool('bosh')]}" "\$@"
 fi
 
+# A row that set an answer for this subcommand, or for this curl path, gets
+# it verbatim (bosh_answer), ahead of the built-in answers below.
+bosh_answer="$dir/answers/\$subcommand"
+if [ "\$subcommand" = "curl" ]; then
+  bosh_answer="$dir/answers/curl/\$(printf '%s' "\$bosh_run_last" | tr '/?=&' '____')"
+fi
+if [ -f "\$bosh_answer" ]; then
+  cat "\$bosh_answer"
+  exit 0
+fi
+
 case "\$subcommand" in
 deploy)
   if [ -n "\${GENESIS_HARNESS_BOSH_FAILS:-}" ]; then
@@ -3392,6 +3403,26 @@ sub vault_read_log {
 	my $file = $self->{vault_log} or return [];
 	return [] unless -f $file;
 	return [grep {length} split /\n/, (helper::get_file($file) // '')];
+}
+
+# }}}
+# bosh_answer - what the harness director prints for one subcommand or curl path {{{
+#
+# The double answers four subcommands of its own.  A row that needs another,
+# a live manifest, the releases, the stemcells, or a curl of one API path,
+# names it here with the text the director prints, and the double prints it
+# verbatim ahead of its own answers.  A curl is keyed by its path.
+sub bosh_answer {
+	my ($self, $what, $text) = @_;
+	my $dir = "$self->{tmp}/bosh/answers";
+	my $key = $what;
+	if ($what =~ m{^/}) {
+		$dir .= '/curl';
+		($key = $what) =~ tr{/?=&}{____};
+	}
+	helper::mkdir_or_fail($dir) unless -d $dir;
+	helper::put_file("$dir/$key", $text);
+	return $self;
 }
 
 # }}}

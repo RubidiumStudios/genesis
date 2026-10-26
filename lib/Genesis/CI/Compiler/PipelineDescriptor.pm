@@ -724,9 +724,9 @@ sub _notify_job {
 	my $name   = _notify_job_name($alias);
 
 	# The branch the deploy reads is the only input and trigger (contract
-	# c13); the dry run is the BOSH diff of what it would deploy (e12).
+	# c13); pending-changes says what deploying it would change (e12, D123).
 	my $task_cfg = $self->_task_config($ast, $env, $alias, $trigger_from, $wf_data,
-		{ cli_args => [$env, 'deploy', '--dry-run'] });
+		{ cli_args => [$env, 'pending-changes'] });
 
 	my $pipeline_name = $ast->metadata->{name} || 'genesis-pipeline';
 	my $notif = $self->_notification_step($ast,

@@ -1574,6 +1574,19 @@ C<path:key>, which is how C<Service::Vault::get> asks for one field.  A row
 counting reads of a whole record matches the path, and a row counting keyed
 reads matches the longer form.
 
+=head2 bosh_answer($h, $what, $text)
+
+    bosh_answer($h, manifest => "---\nname: qa-bosh\n");
+    bosh_answer($h, '/configs?latest=true' => '[]');
+
+Sets what the harness director prints for a subcommand it has no answer of
+its own for, C<manifest>, C<releases>, C<stemcells> and the like, or, where
+C<$what> starts with C</>, for a C<curl> of that API path. The double prints
+C<$text> verbatim and succeeds, ahead of its built-in answers, so a row may
+also replace one of those.
+
+B<Returns:> C<$h>.
+
 =head2 bosh_runs($h, %opts)
 
 Every call the harness director answered, in order, each a hashref, and an

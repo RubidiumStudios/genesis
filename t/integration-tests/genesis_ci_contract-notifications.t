@@ -93,8 +93,8 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 
 	my $task = task_step($nj) || {};
 	my $dtask = task_step(pipeline_job($p, $DEPLOY)) || {};
-	is_deeply($task->{config}{run}{args}, [$ENV_NAME, 'deploy', '--dry-run'],
-		"e12: it runs the deploy's dry run");
+	is_deeply($task->{config}{run}{args}, [$ENV_NAME, 'pending-changes'],
+		"e12: it runs pending-changes, never the deploy's dry run (D123)");
 	is_deeply([@{$task->{config}{run} || {}}{qw/dir path/}], [@{$dtask->{config}{run} || {}}{qw/dir path/}],
 		"e12: from the deploy's directory and binary");
 	is_deeply($task->{config}{image_resource}, $dtask->{config}{image_resource}, "e12: on its image");

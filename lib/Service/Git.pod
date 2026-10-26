@@ -1332,6 +1332,50 @@ B<Examples:>
   my @files = $git->diff_names('HEAD~1', 'HEAD');
   # returns ('ops/thing.yml')
 
+=head2 commit_files
+
+  my @files = $git->commit_files($commit);
+  my @files = $git->commit_files($commit, @pathspecs);
+
+The names of the files one commit changes, read with C<git show --name-only>,
+so a root commit, which has no parent to diff against, answers its whole tree.
+A merge commit answers nothing, as C<git show> lists no files for one by
+default.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$commit>
+
+The commit to read.
+
+=item C<@pathspecs>
+
+Optional git-root-relative paths that scope the answer.
+
+=back
+
+B<Returns:> The list of paths, git-root-relative. Empty when the commit
+changes nothing under the pathspecs.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "Cannot list the files <commit> changes in <root>" >> - raised with the
+C<Genesis::Exit::DATAERR> exit code when git cannot read the commit, because
+an empty list would read as a commit that changed nothing.
+
+=back
+
+B<Examples:>
+
+  my @files = $git->commit_files($sha, 'doomsday/');
+  # returns ('doomsday/lab.yml')
+
 =head2 commit_stat
 
   my @lines = $git->commit_stat($commit);

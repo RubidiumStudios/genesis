@@ -45,6 +45,8 @@ my %expected = (
 	'info'               => Genesis::Commands::DEPLOYED_STATE,
 	'bosh'               => Genesis::Commands::DEPLOYED_STATE,
 	'deploy'             => Genesis::Commands::DEPLOYED_STATE,
+	# T421: it reads what the branch's tip would deploy (D123).
+	'pending-changes'    => Genesis::Commands::DEPLOYED_STATE,
 );
 
 subtest 'one class per pipeline-aware registration' => sub {

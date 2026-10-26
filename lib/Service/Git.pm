@@ -869,6 +869,21 @@ sub diff_names {
 }
 
 # }}}
+# commit_files - the files one commit changes, a root commit included {{{
+sub commit_files {
+	my ($self, $commit, @pathspecs) = @_;
+	my @cmd = ('git', 'show', '--name-only', '--format=', $commit);
+	push @cmd, '--', @pathspecs if @pathspecs;
+	my ($out, $rc, $err) = run({ dir => $self->{root}, stderr => 0 }, @cmd);
+	bail(
+		{exitcode => DATAERR},
+		"Cannot list the files #C{%s} changes in #C{%s}:\n%s",
+		$commit, $self->{root}, ($err // $out // 'git gave no reason')
+	) if $rc;
+	return grep { /\S/ } split /\n/, ($out || '');
+}
+
+# }}}
 # commit_stat - the diff --stat lines for one commit, scoped to a pathspec {{{
 #
 # Each entry of the aggregate body carries the files one control commit
