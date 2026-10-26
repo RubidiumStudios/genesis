@@ -715,7 +715,8 @@ Reaps any prior renewer recorded on C<$self> before forking.
 
   $vault->stop_token_renewer();
 
-Signals and reaps the background renewer child if one is running.
+Signals and reaps the background renewer child if one is running. The reap
+leaves the caller's C<$?> as it found it.
 
 The stop sequence is:
 
@@ -757,6 +758,13 @@ none is running. Primarily a test seam.
 Automatically invoked when the vault object goes out of scope. Calls
 L</stop_token_renewer> to ensure no renewer child outlives its parent
 vault instance.
+
+It localises C<$?>, C<$!> and C<$@>. A vault that lives to the end of the
+process is destroyed in global destruction, after the END blocks have settled
+the exit status, and the reap's C<waitpid> would otherwise replace that
+status with the renewer's own. Without the guard every pipeline task holding
+an AppRole vault exited 0 whatever it had failed at, and Concourse marked a
+failed deploy green.
 
 =head1 INTERNAL METHODS
 

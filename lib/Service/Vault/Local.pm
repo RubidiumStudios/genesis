@@ -275,6 +275,8 @@ sub shutdown {
 # }}}
 # DESTROY - perl descructor: will shutdown local vault if it hasn't been already shut down {{{
 sub DESTROY {
+	# Global destruction runs after END has settled the exit status.
+	local ($?, $!, $@);
 	$_[0]->shutdown if $_[0]->{safe_pid};
 }
 

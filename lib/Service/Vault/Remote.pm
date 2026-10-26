@@ -428,6 +428,9 @@ sub _on_auth_success {
 # DESTROY - reap any running token renewer when the vault goes out of scope {{{
 sub DESTROY {
 	my ($self) = @_;
+	# Runs in global destruction, after END has settled the exit status,
+	# which the reap's waitpid would otherwise overwrite.
+	local ($?, $!, $@);
 	$self->stop_token_renewer;
 	return;
 }
@@ -494,6 +497,7 @@ sub stop_token_renewer {
 	my ($self) = @_;
 	my $pid = delete $self->{__renewer_pid};
 	return unless $pid;
+	local $?; # the reap's status is not the caller's
 
 	kill 'TERM', $pid;
 
