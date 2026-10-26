@@ -1,15 +1,13 @@
 #!/usr/bin/env perl
-# Proves T226, the predecessor's name read through the merged environment
-# hierarchy with no kit behind the read; T326, one read of the predecessor's
-# exodus record per deploy, taken before the environment itself is loaded;
-# and T328, the check's three cases with L unchanged on every path.
+# Proves T419's prior-env half: a deploy whose predecessor never deployed is
+# not refused for it, propagation's hold ordering every delivery (D121); and
+# T326, one read of the predecessor's exodus record per deploy, taken before
+# the environment itself is loaded, for the walk that still reads it.
 #
-# The first subtest builds no director on purpose.  A deploy that reaches the
-# predecessor check only after it has loaded the environment and connected to
-# BOSH cannot refuse a repository that has no director to connect to, so a
-# harness without one is how a row sees which side of the load the check sits
-# on.  Every other subtest calls fixture_bosh, because a deploy that is meant
-# to reach its end needs the three things that builder puts up.
+# The first subtest builds no director on purpose, so a deploy that gets past
+# the pre-flight meets the director it cannot reach and says so.  Every other
+# subtest calls fixture_bosh, because a deploy that is meant to reach its end
+# needs the three things that builder puts up.
 #
 # Every run passes --no-propagate.  The auto-cascade hands off to a child
 # genesis propagate, which fails today, and a row about what the deploy read
@@ -38,8 +36,8 @@ $ENV{NOCOLOR} = 1;
 my $LEAF = 'us-east-qa';
 my $SITE = 'us-east';
 
-subtest 'the predecessor is named by a site file, and read before the load' => sub {
-	plan tests => 7;
+subtest 'a predecessor named by a site file that never deployed refuses nothing' => sub {
+	plan tests => 5;
 
 	# inherited_harness is this shape by name: it writes the pipeline keys at
 	# a site file rather than at the leaf, which is the merged read the
@@ -61,15 +59,14 @@ subtest 'the predecessor is named by a site file, and read before the load' => s
 	my (undef, $err, $exit) = run_genesis($h,
 		$LEAF, 'deploy', '--no-propagate', '-y', 'r');
 
-	is($exit, Genesis::Exit::DATAERR,
-		'the inherited predecessor was found, and its refusal exits DATAERR');
-	like(unfolded($err), qr/never been successfully deployed/,
-		'so the check read the key the site file carries');
-	like(unfolded($err), qr/\blab\b/, 'naming the predecessor it names');
-	like(unfolded($err), qr/\Q$LEAF\E/,
-		'and naming the environment it refused to deploy');
-	unlike(unfolded($err), qr/director/i,
-		'and it refused before the environment was loaded or a director dialled');
+	# D121: propagation's hold orders every delivery, so a predecessor that
+	# never deployed no longer refuses the deploy, which goes on past the
+	# pre-flight to load the environment, whose fixture kit has no blueprint.
+	isnt($exit, Genesis::Exit::DATAERR, 'the never-deployed predecessor refuses nothing');
+	unlike(unfolded($err), qr/never been successfully deployed/,
+		'and is not named as a reason to stop');
+	like(unfolded($err), qr/Kit pipeline\S* \(dev\) is not supported/,
+		'the deploy went on past the pre-flight, to the kit it loads');
 
 	# The other half of T226, written down rather than left to follow from
 	# the row above.  It states a contract this fixture cannot falsify, and
@@ -124,8 +121,9 @@ subtest "the predecessor's record is read once, before the environment loads" =>
 subtest 'the three prior-env cases, with L unchanged on each' => sub {
 	plan tests => 9;
 
+	# D121: none refuses, the prior-env check being gone.
 	my %expect = (
-		'no record'   => Genesis::Exit::DATAERR,
+		'no record'   => 0,
 		'no control'  => 0,
 		'post-failed' => 0,
 	);

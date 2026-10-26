@@ -207,11 +207,13 @@ subtest 'the gate is the last refusal the pre-flight raises on its own' => sub {
 	my ($preflight) = $body =~ m/\nsub _deploy_preflight \{(.*?)\n\}\n/s;
 	isnt($preflight, undef, 'the pre-flight was found to read');
 
-	my $prior = index($preflight, '_assert_prior_env_deployed');
-	my $gate  = index($preflight, 'assert_provider_gate');
-	my $warn  = index($preflight, '_warn_about_the_tip');
+	# The last refusal before the gate is the branch with no repository, the
+	# prior-env check having gone (D121).
+	my $refusal = index($preflight, 'carries no repository');
+	my $gate    = index($preflight, 'assert_provider_gate');
+	my $warn    = index($preflight, '_warn_about_the_tip');
 
-	ok($prior > -1 && $gate > $prior,
+	ok($refusal > -1 && $gate > $refusal,
 		'the gate is asked after every refusal no acknowledgement can settle');
 	ok($warn > $gate,
 		'and before the warnings, so nothing of ours refuses after it');

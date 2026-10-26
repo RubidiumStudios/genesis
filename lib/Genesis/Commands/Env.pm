@@ -1221,11 +1221,10 @@ sub _deploy_preflight {
 	}
 
 	# 6.  The predecessor, control's (D112), its record read once for the
-	# check and the walk.
+	# walk.  Nothing refuses on it: propagation's hold orders delivery (D121).
 	my $bare         = Genesis::Env->bare($name, $top);
 	my $prior        = $top->pipeline_topology->{parent_of}{$name} // '';
 	my $prior_record = _prior_env_record($bare, $prior);
-	_assert_prior_env_deployed($bare, $prior, $prior_record) if $prior;
 
 	# 7.  The provider gate, the last refusal of ours; -y never answers it.
 	Genesis::CI::Preflight::assert_provider_gate($top, $options,
@@ -2085,26 +2084,6 @@ sub _prior_env_record {
 		};
 	}
 	return undef;
-}
-
-# }}}
-# _assert_prior_env_deployed - the predecessor must have deployed at all {{{
-#
-# A hard invariant with no --yes override.  It judges the record
-# _prior_env_record already read rather than reading again, and it asks only
-# whether the predecessor has ever deployed; which commit it certified is the
-# due computation's question, and a predecessor that never certified one still
-# holds everything below it rather than failing this check.
-sub _assert_prior_env_deployed {
-	my ($env, $prior_name, $record) = @_;
-	return 1 if $record;
-
-	bail({exitcode => DATAERR},
-		"Cannot deploy #C{%s}: its pipeline predecessor #C{%s} has never been ".
-		"successfully deployed.\n\nDeploy #C{%s} first, then retry.  Nothing ".
-		"was deployed.",
-		$env->name, $prior_name, $prior_name
-	);
 }
 
 # }}}
