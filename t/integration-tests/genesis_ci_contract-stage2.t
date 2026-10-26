@@ -39,6 +39,11 @@ subtest 'Stage 2 rows over a default doomsday root' => sub {
 		or diag(join(', ', map {$_->{name}} @{$p->{jobs} || []}));
 	my $jb = $prop[0];
 	is($jb && $jb->{serial}, 1, 'b2: serial');
+	my @groups = @{$p->{groups} || []};
+	is_deeply([map {$_->{name}} grep {grep {$_ eq 'propagate'} @{$_->{jobs}}} @groups], ['propagation'],
+		'b2: in the propagation group alone');
+	is_deeply(@groups ? $groups[-1] : {}, {name => 'propagation', jobs => ['propagate']},
+		'b2: which holds it alone, after the deployments');
 
 	my @gets = grep {$_->{get}} plan_steps($jb);
 	my ($cget) = grep {$_->{get} eq 'control-branch'} @gets;

@@ -218,12 +218,11 @@ sub describe {
 		}
 	}
 
-	# One propagate job per pipeline, on control (contract b2, c4).
+	# One propagate job per pipeline, on control, in its own group after the
+	# deployments' where there are groups at all (contract b2, c4).
 	push @resources, $self->_control_resource($ast);
 	push @jobs, $self->_propagate_job($ast, \@ran_names);
-	if (@groups) {
-		$groups[0]{jobs} = [sort @{$groups[0]{jobs}}, 'propagate'];
-	}
+	push @groups, {name => 'propagation', jobs => ['propagate']} if @groups;
 
 	# The control-branch resource only where a job uses it, decided by
 	# reference so it stays right as those jobs change.
