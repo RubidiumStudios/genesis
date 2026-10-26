@@ -790,7 +790,7 @@ sub make_harness {
 		# (D22, noted 2026-10-19), so such a repository carries one unless a
 		# row names its own or fixture_bosh brings one.
 		kit       => exists $opts{kit} ? $opts{kit}
-			: (($opts{provider} // 'manual') ne 'manual' && !$opts{bosh}) ? 't/src/ops-blueprint' : undef,
+			: (($opts{provider} // 'manual') ne 'manual' && !$opts{bosh}) ? 'omega-v2.7.0' : undef,
 		# An automated pipeline's tasks run the root's own genesis, and its
 		# compile refuses a root without one (contract e7).
 		embed     => $opts{embed} // (($opts{provider} // 'manual') ne 'manual'),

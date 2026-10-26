@@ -170,7 +170,8 @@ value carrying a slash is read as a path under the checkout root instead, so a
 row that wants a kit the suite already ships elsewhere, such as
 C<t/src/ops-blueprint>, names that path rather than a copy of the kit written
 for these rows alone.  Under an automated provider the kit defaults to
-C<t/src/ops-blueprint>, because the pipeline's compile loads each environment
+C<omega-v2.7.0>, which renders with nothing beside it, because the pipeline's
+compile loads each environment
 with its kit (D22, noted 2026-10-19), unless the row passes C<bosh>, whose
 C<fixture_bosh> brings its own; C<kit =E<gt> undef> declines it.  The
 two kits written for these rows are C<exodus-reader>, whose manifest reads the
