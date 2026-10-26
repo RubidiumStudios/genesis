@@ -101,8 +101,8 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 	is_deeply($task->{config}{params}, $dtask->{config}{params}, 'e12: with its params');
 	is_deeply($task->{config}{inputs}, [{name => $BRANCH}], 'e12: reading the branch');
 
-	my @put = slack_puts($nj);
-	is(scalar(@put), 1, 'd9: it puts to slack once');
+	my @put = slack_puts($nj->{plan});
+	is(scalar(@put), 1, 'd9: its plan puts to slack once');
 	is($put[0] && $put[0]{params}{text},
 		"$TYPE: Changes are staged to be deployed to $DN, see $NOTIFY job for change summary, ".
 		"then schedule and run a deploy via Concourse", 'd9: the staged text');
@@ -120,6 +120,18 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 	is($ok && $ok->{params}{text}, "$TYPE: Concourse successfully deployed $DN", 'd10: success text');
 	is($fail && $fail->{params}{text}, "\@oncall: $TYPE: Concourse deployment to $DN failed",
 		'd10: failure text, with the mentions');
+	my ($err)   = slack_puts($dp->{on_error});
+	my ($abort) = slack_puts($dp->{on_abort});
+	is($err && $err->{params}{text}, "\@oncall: $TYPE: Concourse deployment to $DN errored",
+		'd10: errored text, with the mentions');
+	is($abort && $abort->{params}{text}, "$TYPE: Concourse deployment to $DN was aborted",
+		'd10: aborted text, without them');
+
+	my $could_not = "\@oncall: $TYPE: Could not determine the changes staged for $DN, see $NOTIFY job";
+	for my $outcome (qw/on_failure on_error/) {
+		my ($np) = slack_puts($nj->{$outcome});
+		is($np && $np->{params}{text}, $could_not, "d9: the notify job $outcome says so, with the mentions");
+	}
 	ok(grep({($_->{put} // '') eq "${DN}_ran"} plan_steps($dp->{on_success})),
 		'd2: the _ran put stays on success');
 	ok(!grep({($_->{put} // '') =~ /_ran$/} map {plan_steps($dp->{$_})} qw/on_failure on_abort on_error/),

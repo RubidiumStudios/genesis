@@ -741,11 +741,17 @@ sub _notify_job {
 	);
 	push @plan, $notif if $notif;
 
+	# A version no one hears of cannot be deployed under inline, so say so.
+	my $unknown = $self->_notification_step($ast,
+		"$pipeline_name: Could not determine the changes staged for $env-$deploy_type, see $name job",
+		{ env => $env, is_failure => 1 });
+
 	return {
 		name   => $name,
 		public => JSON::PP::true,
 		serial => JSON::PP::true,
 		plan   => \@plan,
+		($unknown ? (on_failure => $unknown, on_error => $unknown) : ()),
 	};
 }
 
@@ -1091,8 +1097,12 @@ sub _outcome_hooks {
 	my $name      = $ast->metadata->{name} || 'genesis-pipeline';
 	my $action    = $is_redeploy ? 'redeploy of'    : 'deployment to';
 	my $ok_action = $is_redeploy ? 'redeployed'     : 'deployed';
-	my $ok_msg    = "$name: Concourse successfully ${ok_action} $env-$deploy_type";
-	my $fail_msg  = "$name: Concourse $action $env-$deploy_type failed";
+	my %msg = (
+		success => ["$name: Concourse successfully ${ok_action} $env-$deploy_type", 0],
+		failure => ["$name: Concourse $action $env-$deploy_type failed", 1],
+		error   => ["$name: Concourse $action $env-$deploy_type errored", 1],
+		abort   => ["$name: Concourse $action $env-$deploy_type was aborted", 0],
+	);
 
 	my $signal_cfg  = $self->_env_signal_config($ast, $env, $wf_data);
 	my $notif_style = $self->notification_style($ast);
@@ -1101,14 +1111,11 @@ sub _outcome_hooks {
 	for my $outcome (qw(success failure abort error)) {
 		my @steps;
 
-		# Notifications: suppressed entirely for 'none'; success suppressed for 'minimal'
-		if ($outcome eq 'success'
-			&& $notif_style ne 'minimal' && $notif_style ne 'none') {
-			my $notif = $self->_notification_step($ast, $ok_msg, { env => $env });
-			push @steps, @{$notif->{in_parallel}} if $notif;
-		} elsif ($outcome eq 'failure' && $notif_style ne 'none') {
-			my $notif = $self->_notification_step($ast, $fail_msg,
-				{ env => $env, is_failure => 1 });
+		# Notifications: none for 'none'; 'minimal' keeps only those that mention
+		my ($text, $is_failure) = @{$msg{$outcome}};
+		if ($notif_style ne 'none' && ($is_failure || $notif_style ne 'minimal')) {
+			my $notif = $self->_notification_step($ast, $text,
+				{ env => $env, is_failure => $is_failure });
 			push @steps, @{$notif->{in_parallel}} if $notif;
 		}
 
