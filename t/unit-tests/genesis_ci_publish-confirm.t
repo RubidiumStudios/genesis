@@ -148,6 +148,29 @@ subtest 'with no terminal the delta goes to the log and the run proceeds' => sub
 	is($unread, "n\n", 'and nothing was read from standard input');
 };
 
+# Contract e5: the pipeline's propagate asks nothing.  A Concourse task has a
+# pseudo-terminal, so the terminal test alone asked, and the run hung.
+subtest 'a pipeline task at a terminal shows the delta and asks nothing' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::CI::Publish::in_controlling_terminal = sub {1};
+	local $ENV{GENESIS_PIPELINE_TASK} = 1;
+
+	my $go;
+	set_stdin("n\n");
+	my ($out, $err) = output_from {
+		$go = Genesis::CI::Publish::confirm_publish($git, 'origin', \@specs)
+	};
+	my $unread = <STDIN>;
+	reset_stdin;
+	my $said = unfolded($out, $err);
+
+	is($go, 1, 'the publish goes ahead');
+	like($said, qr{lab/bosh: 1 commit, 1 file changed, 0 removed}, 'the delta reached the log');
+	unlike($said, qr{Publish these branches\?}, 'and nothing was asked');
+	is($unread, "n\n", 'and nothing was read from standard input');
+};
+
 subtest 'a branch the remote has never held shows its whole delivery' => sub {
 	plan tests => 4;
 	no warnings 'redefine';

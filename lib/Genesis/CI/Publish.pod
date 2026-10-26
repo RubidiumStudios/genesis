@@ -242,7 +242,10 @@ there is no controlling terminal it goes to the log and the run proceeds, so a
 pipeline job and a propagate child print the same delta an operator would have
 seen. C<yes> suppresses the ask and nothing else, and it is read before the
 terminal is consulted at all, so a flag that answers the question cannot also
-decide whether the question's subject is printed.
+decide whether the question's subject is printed. A pipeline task, one with
+C<GENESIS_PIPELINE_TASK> set, is never asked either (contract e5): Concourse
+gives a task a pseudo-terminal, so the terminal test alone would ask a
+question nobody is there to answer, and the run would hang until it gave up.
 
 Each line carries the branch, the number of commits the push would send, the
 number of files it would change, and the number it would remove. A branch the

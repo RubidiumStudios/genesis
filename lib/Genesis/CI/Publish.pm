@@ -233,6 +233,8 @@ sub confirm_publish {
 	}
 
 	return 1 if $opts{yes};
+	# A pipeline task has a pseudo-terminal and nobody at it (contract e5).
+	return 1 if $ENV{GENESIS_PIPELINE_TASK};
 	return 1 unless in_controlling_terminal();
 
 	# The run holds the switch lock while it asks, so a confirmation nobody
