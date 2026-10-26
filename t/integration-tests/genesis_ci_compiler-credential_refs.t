@@ -47,9 +47,11 @@ subtest 'approle from a path, with one component given on its own' => sub {
 		'pipeline.source_control.auth.type' => 'ssh',
 		'pipeline.source_control.auth.path' => 'secret/ci/git',
 	);
-	like($yml, qr{VAULT_ROLE_ID: "?\(\(secret/ci/a:role_id\)\)}, 'role_id from the path, under its own name');
-	like($yml, qr{VAULT_SECRET_ID: "?\(\(secret/shared/x:sid\)\)}, 'secret_id from its own reference');
-	like($yml, qr{private_key: "?\(\(secret/ci/git:private_key\)\)}, 'the ssh key from its path');
+	# Concourse resolves a ((...)) from its own vault as ((path.field)); the
+	# colon form is Genesis's, for a deployment-vault path a worker reads.
+	like($yml, qr{VAULT_ROLE_ID: "?\(\(secret/ci/a\.role_id\)\)}, 'role_id from the path, under its own name');
+	like($yml, qr{VAULT_SECRET_ID: "?\(\(secret/shared/x\.sid\)\)}, 'secret_id from its own reference');
+	like($yml, qr{private_key: "?\(\(secret/ci/git\.private_key\)\)}, 'the ssh key from its path');
 	# The committer is the configured source_control.identity, which the
 	# compiler once ignored for a default of its own (T380).
 	like($yml, qr{GIT_AUTHOR_NAME: "?Genesis CI}, 'and tasks commit as the configured identity');
@@ -61,8 +63,8 @@ subtest 'https from a path' => sub {
 		'pipeline.source_control.auth.type' => 'https',
 		'pipeline.source_control.auth.path' => 'secret/ci/git',
 	);
-	like($yml, qr{username: "?\(\(secret/ci/git:username\)\)}, 'the username from the path');
-	like($yml, qr{password: "?\(\(secret/ci/git:password\)\)}, 'and the password');
+	like($yml, qr{username: "?\(\(secret/ci/git\.username\)\)}, 'the username from the path');
+	like($yml, qr{password: "?\(\(secret/ci/git\.password\)\)}, 'and the password');
 };
 
 done_testing;

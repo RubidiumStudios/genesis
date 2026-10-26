@@ -88,8 +88,8 @@ subtest 'a9: the configured shuttle source' => sub {
 	my $src = (pipeline_resource($p, $RAN) || {})->{source} || {};
 	is_deeply([@$src{qw/region endpoint/}], ['us-west-2', 'https://minio.example.com'],
 		'the region and endpoint as written');
-	is($src->{access_key_id}, '((secret/ci/shuttle:access_key_id))', 'the key id as a reference');
-	is($src->{secret_access_key}, '((secret/ci/shuttle:secret_access_key))', 'and the secret');
+	is($src->{access_key_id}, '((secret/ci/shuttle.access_key_id))', 'the key id as a reference');
+	is($src->{secret_access_key}, '((secret/ci/shuttle.secret_access_key))', 'and the secret');
 
 	my ($type) = grep {$_->{name} eq 'shuttle'} @{$p->{resource_types} || []};
 	is_deeply($type && $type->{source}, {repository => 'example/shuttle', tag => 'v2'},

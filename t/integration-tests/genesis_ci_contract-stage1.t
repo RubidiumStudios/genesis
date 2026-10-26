@@ -41,8 +41,8 @@ subtest 'Stage 1 rows over a default doomsday root' => sub {
 
 	is($br->{source}{branch}, "$ENV_NAME/$TYPE", 'a1: the branch resource watches <env>/<type>');
 	ok(length($br->{source}{uri} // ''), 'a2: it has a uri');
-	like($br->{source}{private_key} // '', qr/^\(\(secret\/ci\/git:private_key\)\)$/,
-		'a3: its ssh credential is a reference to the declared component');
+	like($br->{source}{private_key} // '', qr/^\(\(secret\/ci\/git\.private_key\)\)$/,
+		"a3: its ssh credential is a reference to the declared component, in Concourse's own form");
 	ok(!exists $br->{source}{ignore_paths}, 'a4: it filters no paths');
 
 	ok($jb, "b1: the deploy job is named deploy-$ENV_NAME")
@@ -68,7 +68,7 @@ subtest 'Stage 1 rows over a default doomsday root' => sub {
 
 	is($env{GENESIS_PIPELINE_TASK}, 1, 'f1: GENESIS_PIPELINE_TASK is set');
 	ok(!exists $env{GENESIS_HONOR_ENV}, 'f2: GENESIS_HONOR_ENV is not');
-	like($env{GIT_PRIVATE_KEY} // '', qr/^\(\(secret\/ci\/git:private_key\)\)$/, 'f3: the git credential is a reference');
+	like($env{GIT_PRIVATE_KEY} // '', qr/^\(\(secret\/ci\/git\.private_key\)\)$/, 'f3: the git credential is a reference');
 	is_deeply([@env{qw/GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL/}], ['Genesis CI', 'ci@genesis.example.com'],
 		'f4: the commit identity is the configured one');
 	ok(!exists $env{VAULT_ROLE_ID} && !exists $env{VAULT_AUTH_TOKEN},
@@ -103,7 +103,7 @@ subtest 'Stage 1 rows the configuration changes' => sub {
 		'e2: no --recreate under recreate_on_deploy always, the deploy reading the key itself');
 	is_deeply($task->{config}{image_resource}{source}, {repository => 'example/task', tag => '1.2'},
 		'e8: the configured task image');
-	is($env{VAULT_AUTH_TOKEN}, '((secret/ci/vault:token))', 'f5: token auth gives VAULT_AUTH_TOKEN');
+	is($env{VAULT_AUTH_TOKEN}, '((secret/ci/vault.token))', 'f5: token auth gives VAULT_AUTH_TOKEN');
 	ok(!exists $env{VAULT_TOKEN} && !exists $env{VAULT_ROLE_ID} && !exists $env{VAULT_SECRET_ID},
 		'f5: and no other vault credential');
 	is($env{CI_NO_REDACT}, 1, 'f9: pipeline.unredacted sets CI_NO_REDACT');

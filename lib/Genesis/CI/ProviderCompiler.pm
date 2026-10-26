@@ -295,7 +295,9 @@ sub secret_ref {
 		$ref = $ref->{secret_ref};
 	}
 
-	# Default Concourse format; override in subclass for other platforms
+	# Concourse resolves ((path.field)) from its own vault; Genesis's
+	# <path>:<key> is for deployment-vault paths a worker reads.
+	$ref =~ s/:([^:\/]+)$/.$1/;
 	return "(($ref))";
 }
 

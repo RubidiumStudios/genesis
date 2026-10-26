@@ -422,6 +422,14 @@ differently overrides this. It is the one place a reference is spelled:
 L<Genesis::CI::Compiler::PipelineDescriptor> calls it for every reference
 it writes into a pipeline.
 
+A reference names a value in the vault Concourse resolves from, not the
+deployment's vault, so it takes Concourse's form, C<((path.field))>.
+Genesis's own C<E<lt>pathE<gt>:E<lt>keyE<gt>>, which an operator writes in
+F<.genesis/config>, has its key's colon turned into Concourse's dot, the
+colon form being kept for a deployment-vault path a worker reads. Concourse
+looks a path up relative to C</concourse/E<lt>teamE<gt>/E<lt>pipelineE<gt>/> and
+then C</concourse/E<lt>teamE<gt>/>.
+
 B<Parameters:>
 
 =over 4
@@ -438,6 +446,8 @@ B<Examples:>
 
     $compiler->secret_ref('vault-token');          # '((vault-token))'
     $compiler->secret_ref({secret_ref => 'tok'});  # '((tok))'
+    $compiler->secret_ref('secret/ci/git:private_key');
+    # '((secret/ci/git.private_key))'
 
 =head2 topological_sort($graph)
 
