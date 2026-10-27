@@ -491,20 +491,19 @@ B<Examples:>
 
 =head2 _get_process
 
-  my $info = _get_process($filter, $timeout);
+  my $info = _get_process($matcher, $timeout);
 
-Polls the process table at 0.05-second intervals for up to C<$timeout>
-seconds, searching for a line matching C<$filter> via C<ps -eo
-'pid,ppid,command'>. Returns a hash reference on the first match.
+Polls L</_process_table> at 0.05-second intervals for up to C<$timeout>
+seconds for a process C<$matcher> accepts, and returns the lowest-pid one.
 
 B<Parameters:>
 
 =over 4
 
-=item $filter
+=item $matcher
 
-A grep pattern (as accepted by the shell C<grep> command) used to filter
-C<ps> output.
+A code reference handed each process as a hash of C<pid>, C<ppid> and
+C<cmd>, answering whether it is the one sought.
 
 =item $timeout
 
@@ -519,8 +518,65 @@ matching process is found within the timeout; C<undef> otherwise.
 
 B<Examples:>
 
-  my $info = _get_process("\\s\\+[s]afe local -m --as local_vault_dev_12345", 2);
+  my $info = _get_process(sub {$_[0]{cmd} =~ /^safe local -m --as local_vault_dev_12345\b/}, 2);
   # Returns: { pid => 23456, ppid => 12345, cmd => 'safe local -m --as local_vault_dev_12345' }
+
+=head2 _process_table
+
+  my @procs = _process_table();
+  my @procs = _process_table(proc => '/some/proc');
+
+Every process, each a hash of C<pid>, C<ppid> and C<cmd>, the command line
+with its arguments joined by spaces. Where there is a C</proc> it is read
+directly: each C</proc/E<lt>pidE<gt>/stat> gives the parent, read after the
+last C<)> since the command name may hold one, and C<cmdline> the command, so
+a process with an empty command line, a kernel thread, is left out. Where
+there is none, as on macOS, C<ps -eo pid,ppid,command> answers through
+L</_ps_table>, C<ps> being part of that base system.
+
+C</proc> is read in preference because container images strip C<procps>:
+C<genesiscommunity/concourse> has no C<ps>, so an entombing deploy in a
+pipeline task could not see the vault it had just started and bailed over it.
+
+B<Parameters:>
+
+=over 4
+
+=item proc
+
+Another tree to read as C</proc>, for tests; C<$Service::Vault::Local::PROC_ROOT>
+sets the default the same way.
+
+=back
+
+B<Returns:> A list of hash references, empty where neither source answers.
+
+B<Examples:>
+
+  my ($me) = grep {$_->{pid} == $$} _process_table();
+  # Returns: { pid => $$, ppid => getppid(), cmd => 'perl ...' }
+
+=head2 _ps_table
+
+  my @procs = _ps_table();
+
+L</_process_table>'s answer from C<ps -eo pid,ppid,command>, for a system with
+no C</proc>.
+
+B<Returns:> A list of hash references, empty where C<ps> is absent.
+
+=head2 _slurp_if
+
+  my $text = _slurp_if($path);
+
+A file's whole content, or undef where it cannot be opened, as a C</proc>
+entry for a process that has just gone cannot.
+
+B<Returns:> The content, or undef.
+
+B<Examples:>
+
+  my $stat = _slurp_if("/proc/$pid/stat") // next;
 
 =head2 _port_free
 
@@ -689,8 +745,10 @@ B<Examples:>
 
   my $bool = _process_running($pid);
 
-Returns true if process C<$pid> is currently running, checked via
-C<ps -o 'pid,command' -p PID> exit code.
+Returns true if process C<$pid> is currently running, checked with
+C<kill 0>, which signals nothing; C<EPERM> counts as running, since only a
+process that is there can refuse. It ran C<ps -p> once, and in an image with
+no C<ps> every process read as gone, so shutdown never signalled anything.
 
 B<Parameters:>
 
@@ -702,7 +760,7 @@ The process ID to check.
 
 =back
 
-B<Returns:> True (exit code 0 from C<ps>) if the process exists; false otherwise.
+B<Returns:> 1 if the process exists; 0 otherwise, or for no pid.
 
 B<Examples:>
 

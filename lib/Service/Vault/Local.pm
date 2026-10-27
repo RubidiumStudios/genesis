@@ -437,7 +437,9 @@ sub _lookup_vault_target {
 # is running normally.  Allow a leading path on both binaries.
 sub _get_safe_process {
 	my ($alias, $timeout) = @_;
-	return _get_process("\\s\\+[^ ]*[s]afe local -m --as $alias", $timeout);
+	return _get_process(sub {
+		$_[0]{cmd} =~ m{^(?:\S*/)?safe local -m --as \Q$alias\E(?:\s|$)}
+	}, $timeout);
 }
 
 # The server is whichever engine safe chose, and safe >= 1.20.0 will drive
@@ -447,35 +449,84 @@ sub _get_safe_process {
 # server started, went unseen, and create() abandoned it.
 sub _get_vault_process {
 	my ($ppid, $timeout) = @_;
-	return _get_process("\\s\\+$ppid\\s\\+[^ ]*\\([v]ault\\|[b]ao\\) server", $timeout);
+	return _get_process(sub {
+		$_[0]{ppid} == $ppid && $_[0]{cmd} =~ m{^(?:\S*/)?(?:vault|bao) server(?:\s|$)}
+	}, $timeout);
 }
 
+# _get_process - the lowest-pid process a matcher accepts, polled until the timeout {{{
 sub _get_process {
-	my ($filter, $timeout) = @_;
+	my ($matcher, $timeout) = @_;
 	$timeout = sprintf("%0.f", ($timeout//5)/0.05);
 	my $i = 0;
 	while ($i < $timeout ) {
 		$i += 1;
 		select(undef,undef,undef,0.05);
-		my $ps_line = scalar(qx(ps -eo 'pid,ppid,command' | grep '$filter' | sed -e 's/^ *//' | head -n 1));
-		trace "psline: $ps_line";
-		chomp $ps_line;
-		next unless $ps_line;
-
-		my ($pid, $ppid, $cmd) = split(/ +/, $ps_line, 3);
-		return {pid => $pid, ppid => $ppid, cmd => $cmd}
+		my ($found) = sort {$a->{pid} <=> $b->{pid}} grep {$matcher->($_)} _process_table();
+		trace "process: %s", $found ? "$found->{pid} $found->{ppid} $found->{cmd}" : 'none';
+		return $found if $found;
 	}
 	return undef;
 }
 
+# }}}
+# _process_table - every process as {pid, ppid, cmd} {{{
+#
+# Read from /proc where there is one, since container images strip procps and
+# ps is then absent; ps is for systems with no /proc, macOS, where it is part
+# of the base system.  PROC_ROOT, or a proc option, points at another tree.
+our $PROC_ROOT = '/proc';
+sub _process_table {
+	my (%opts) = @_;
+	my $proc = $opts{proc} // $PROC_ROOT;
+	return _ps_table() unless -d $proc && opendir(my $dh, $proc);
+
+	my @table;
+	for my $pid (grep {/^\d+$/} readdir $dh) {
+		my $stat = _slurp_if("$proc/$pid/stat") // next;
+		# The command name sits in parentheses and may hold ") ", so the
+		# fields are read after the last one.
+		my ($ppid) = $stat =~ /^.*\)\s+\S+\s+(\d+)/s or next;
+		my $cmd = _slurp_if("$proc/$pid/cmdline") // next;
+		$cmd =~ s/\0+\z//;
+		$cmd =~ tr/\0/ /;
+		push @table, {pid => $pid, ppid => $ppid, cmd => $cmd} if length $cmd;
+	}
+	closedir $dh;
+	return @table;
+}
+
+sub _ps_table {
+	my @table;
+	for (split /\n/, scalar(qx(ps -eo 'pid,ppid,command' 2>/dev/null)) // '') {
+		my ($pid, $ppid, $cmd) = split(/ +/, s/^\s+//r, 3);
+		push @table, {pid => $pid, ppid => $ppid, cmd => $cmd // ''}
+			if defined $ppid && $pid =~ /^\d+$/;
+	}
+	return @table;
+}
+
+sub _slurp_if {
+	my ($path) = @_;
+	open(my $fh, '<', $path) or return undef;
+	local $/;
+	my $text = <$fh>;
+	close $fh;
+	return $text;
+}
+
+# }}}
+# _process_running - whether a pid is a live process, with no ps {{{
 sub _process_running {
 	my $pid = shift;
-	trace "Checking for process ID $pid...";
-	my $out = scalar(qx(ps -o 'pid,command' -p $pid | grep '^\\s*$pid'));
-	my $rc = $? >> 8;
-	trace "[rc: $rc] $out";
-	return $rc == '0';
+	return 0 unless $pid;
+	# EPERM still says the process is there; only a pid we may not signal.
+	my $alive = kill(0, $pid) || $!{EPERM} ? 1 : 0;
+	trace "Process %s is %s", $pid, $alive ? 'running' : 'gone';
+	return $alive;
 }
+
+# }}}
 # }}}
 1;
 # vim: fdm=marker:foldlevel=1:noet
