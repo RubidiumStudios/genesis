@@ -1543,6 +1543,7 @@ sub deliver_pending {
 		);
 		$pending->{commit}    = $result->{commit};
 		$pending->{delivered} = $result->{delivered};
+		$pending->{added}     = $result->{added};
 		$pending->{removed}   = $result->{removed};
 		$pending->{overwrote} = $result->{overwrote};
 		push @overwrote, @{$result->{overwrote} || []};

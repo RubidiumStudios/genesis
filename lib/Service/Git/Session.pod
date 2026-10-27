@@ -894,11 +894,16 @@ rather than left standing. The C<changed> and C<deleted> lists are the
 caller's own diff, meant to skip blobs that cannot have moved and to name
 files in the report, and they never decide what is delivered.
 
-A path the mirror overwrites whose content differed from the source although
-the delivered commit did not change it is a hand edit the branch was
-carrying, and it comes back in C<overwrote> so the run can name it. An
-overwrite is never silent. A path the branch does not hold at all is an
-addition rather than an edit and is not reported.
+A path the mirror overwrites whose branch copy differs from what the last
+delivery left, the file at the control commit the branch's newest marker
+names, is a hand edit the branch was carrying, and it comes back in
+C<overwrote> so the run can name it. An overwrite is never silent. A path the
+branch does not hold at all is an addition rather than an edit, and comes back
+in C<added>. The test was once "differed although the delivered commit did not
+change it", read off the caller's C<changed>; that list holds triggering paths
+alone, so every non-triggering change a commit carried, a C<.genesis/config>
+edit above all, was named a hand edit. A branch with no marker yet still
+falls back to C<changed>.
 
 The set is a list of pathspecs rather than a list of files, since a dev kit's
 source is a directory and a fragment the blueprint names is in the set whether
@@ -978,9 +983,9 @@ in it is the PR-mode case.
 =item C<changed>, C<deleted>
 
 The caller's diff, both optional. C<changed> is the git-root-relative paths
-the delivered commit itself moved, spelled as C<@set> spells them, and it
-keeps those paths out of C<overwrote>, since an overwrite the delivery was
-asked for is not a hand edit. C<deleted> is accepted and not read yet.
+the delivered commit itself moved, spelled as C<@set> spells them. It decides
+C<overwrote> only on a branch with no marker yet; past the first delivery the
+marker's control commit decides it. C<deleted> is accepted and not read yet.
 
 =item C<base>
 
@@ -1017,9 +1022,10 @@ behind rather than against a branch that has not moved.
 =back
 
 B<Returns:> A hashref with C<commit>, the commit made, C<delivered> and
-C<removed>, the paths written and taken away, and C<overwrote>, the paths the
-branch held whose content differed from the source although the delivered
-commit did not change them. Under C<dry_run> the same three lists come back,
+C<removed>, the paths written and taken away, C<added>, those of C<delivered>
+the branch did not hold, and C<overwrote>, the paths the branch held whose
+copy differed from what the last delivery left. Under C<dry_run> the same four
+lists come back,
 C<commit> is undef, and the hashref carries C<dry_run> and C<tree> as well, so
 a caller can tell a preview from a delivery and can hand the next preview the
 tree this one would have made.

@@ -8,6 +8,7 @@ use strict;
 use warnings;
 
 use Genesis qw/bail bug run trace/;
+use Genesis::CI::Marker ();
 use Genesis::CI::RunFailure qw/one_line/;
 use Genesis::Exit qw/TEMPFAIL DATAERR SOFTWARE/;
 use Cwd qw/getcwd/;
@@ -793,9 +794,25 @@ sub apply_files {
 	# The report is worked out here, above the first write, because afterwards
 	# the branch holds the source and nothing on disk still says what it held
 	# before.
-	my %held    = map {$_ => 1} @on_branch;
-	my %changed = map {$_ => 1} @{$opts{changed} || []};
-	my @overwrote = grep {$held{$_} && !$changed{$_}} @to_write;
+	my %held  = map {$_ => 1} @on_branch;
+	my @added = grep {!$held{$_}} @to_write;
+
+	# What the last delivery left is the file at the control commit the
+	# branch's newest marker names, so a hand edit is a held path that
+	# differs from it.  The caller's changed list holds triggering paths
+	# alone, so it cannot say this for a config change a commit carried.
+	# A branch with no marker yet has only that list to go on.
+	my @overwrote;
+	my $left = Genesis::CI::Marker::newest($git, $base // 'HEAD');
+	if (defined $left) {
+		my @held_written = grep {$held{$_}} @to_write;
+		my %edited = map {$_ => 1}
+			(@held_written ? $git->diff_names($left, $base // 'HEAD', @held_written) : ());
+		@overwrote = grep {$edited{$_}} @held_written;
+	} else {
+		my %changed = map {$_ => 1} @{$opts{changed} || []};
+		@overwrote = grep {$held{$_} && !$changed{$_}} @to_write;
+	}
 
 	# The dry run is the one preview, and it writes nothing at all, so nothing
 	# is staged, no commit is made, and the writer's two assertions never run,
@@ -812,6 +829,7 @@ sub apply_files {
 			commit    => undef,
 			dry_run   => 1,
 			delivered => [@to_write],
+			added     => [@added],
 			removed   => [@stale],
 			overwrote => [@overwrote],
 			# The tree this delivery would have made, so the delivery after
@@ -914,6 +932,7 @@ sub apply_files {
 	return {
 		commit    => $git->sha('HEAD'),
 		delivered => [@to_write],
+		added     => [@added],
 		removed   => [@stale],
 		overwrote => [@overwrote],
 	};

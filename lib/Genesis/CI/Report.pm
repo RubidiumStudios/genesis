@@ -427,7 +427,10 @@ sub render_run {
 				substr($pending->{control_commit}, 0, 7),
 				$pending->{subject},
 				length($word) ? "  $word" : '';
-			info "      #G{M} %s", $_ for _paths($git, $pending->{delivered});
+			# A path the branch did not hold is an addition, as git spells it.
+			my %added = map {$_ => 1} @{$pending->{added} || []};
+			info "      %s %s", ($added{$_} ? '#C{A}' : '#G{M}'), (_paths($git, [$_]))[0]
+				for @{$pending->{delivered} || []};
 			info "      #R{D} %s", $_ for _paths($git, $pending->{removed});
 
 			# An overwrite is never silent, and it is named per file, because

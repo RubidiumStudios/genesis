@@ -110,6 +110,25 @@ subtest 'the commit axis takes its words from the enum' => sub {
 		'a word outside the enum is refused by name');
 };
 
+# A delivered path the branch did not hold reads A, as git spells an
+# addition, and only a held one reads M; the report once printed M for all.
+subtest 'a delivered path reads A when it was added and M when it changed' => sub {
+	plan tests => 4;
+
+	my ($out, $died) = rendered(a_record(pending => [{
+		control_commit => 'abcdef1234567890abcdef1234567890abcdef12',
+		subject        => 'Add an ops file',
+		outcome        => 'delivered',
+		delivered      => ['ops/new.yml', 'qa.yml'],
+		added          => ['ops/new.yml'],
+		removed        => ['init'],
+	}]));
+	is($died, undef, 'the delivery renders');
+	like($out, qr/^\s+A ops\/new\.yml$/m, 'the added path reads A');
+	like($out, qr/^\s+M qa\.yml$/m, 'the changed path reads M');
+	like($out, qr/^\s+D init$/m, 'and the removed one D');
+};
+
 # The three rows below reach held_qualifier the way a run reaches it, which is
 # through _settle, so each hands the renderer a record whose outcome is null.
 # A record that arrives carrying an outcome never meets the qualifier at all,

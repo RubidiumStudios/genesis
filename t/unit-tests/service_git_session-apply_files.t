@@ -223,6 +223,65 @@ subtest 'a hand edit is overwritten and named' => sub {
 		name => 'the branch holds its source after the overwrite');
 };
 
+# A hand edit is a branch copy that differs from what the last delivery left,
+# the file at the control commit the branch's newest marker names.  A
+# non-triggering path a commit changed is never in the caller's changed list,
+# so reading "not changed by this commit" as "edited by hand" named every
+# config change an overwrite, whether this commit or a skipped one carried it.
+subtest 'a carried non-triggering change is not a hand edit, and an addition is added' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(
+		envs => ['qa'], root => 'bosh',
+		kit  => 't/src/ops-blueprint', embed => 1,
+	);
+	fixture_vault($h);
+	init_branch($h, 'qa');
+
+	my $first = commit_on_control($h,
+		files   => {'bosh/ops/extra.yml' => "---\nextra: yes\n"},
+		message => 'add the fragment the blueprint names',
+		push    => 1,
+	);
+	deliver($h, 'qa', copy => 'a', control => $first);
+
+	# A config-only commit, which routes to nobody and rides on the next
+	# delivery, then a triggering one that also adds a file.
+	$h->set_repo_config('pipeline.name', 'renamed-pipeline', root => 'bosh');
+	my $second = commit_on_control($h,
+		files   => {
+			'bosh/dev/manifest.yml'   => "---\nsimple: you know it differently\n",
+			'bosh/dev/extra-spec.yml' => "---\nspec: brand new\n",
+		},
+		message => 'edit the kit and add a file to it',
+		push    => 1,
+	);
+
+	my $in_root = in_root($h);
+	my $git = Service::Git->new($h->a . '/bosh');
+	my $env = Genesis::Top->new($h->a . '/bosh')->load_env('qa');
+
+	my $session = $git->session(remote => 'origin');
+	$session->begin;
+	$session->switch($h->slug('qa'));
+	my $result = $session->apply_files($second,
+		env     => $env,
+		changed => ['bosh/dev/extra-spec.yml', 'bosh/dev/manifest.yml'],
+		message => Genesis::CI::Marker::build($second, 'qa'),
+	);
+	$session->finish;
+
+	ok($result->{commit}, 'the delivery committed');
+	ok(grep({$_ eq 'bosh/.genesis/config'} @{$result->{delivered}}),
+		'the carried config change is delivered');
+	is_deeply([@{$result->{overwrote}}], [],
+		'and nothing is named a hand edit');
+	is_deeply([@{$result->{added} || []}], ['bosh/dev/extra-spec.yml'],
+		'the path the branch did not hold is reported as added');
+	ok(!grep({$_ eq 'bosh/dev/manifest.yml'} @{$result->{added} || []}),
+		'and a path it held is not');
+};
+
 # Proves T117: the writer commits with the message its caller handed it and
 # builds none of its own, so a direct-mode call carries one marker naming the
 # delivered control commit, a PR-mode call carries the aggregate's subject and
@@ -554,6 +613,13 @@ subtest 'a dry run writes nothing and checks nothing' => sub {
 	# would then have nothing to read the removed list against.
 	deliver($h, 'qa', copy => 'a', control => $first, keep => ['init']);
 
+	# A hand edit on the branch, which is what the preview names as an
+	# overwrite: a branch copy that differs from what the delivery left.
+	hand_commit($h, $h->slug('qa'), copy => 'a',
+		files   => {'bosh/ops/extra.yml' => "---\nextra: edited by hand\n"},
+		message => 'fix it on the branch, just this once',
+	);
+
 	# One file the set keeps moves between the delivery and the source, so
 	# the preview has a path to name as one that would land.
 	my $source = commit_on_control($h,
@@ -609,10 +675,10 @@ subtest 'a dry run writes nothing and checks nothing' => sub {
 
 	is($result->{commit}, undef, 'no commit was made');
 	is($result->{dry_run}, 1, 'the result says it was a preview');
-	is_deeply($result->{delivered}, ['bosh/dev/manifest.yml'],
+	is_deeply($result->{delivered}, ['bosh/dev/manifest.yml', 'bosh/ops/extra.yml'],
 		'the preview still says what would land');
-	is_deeply($result->{overwrote}, ['bosh/dev/manifest.yml'],
-		'the preview still names what a delivery would overwrite');
+	is_deeply($result->{overwrote}, ['bosh/ops/extra.yml'],
+		'the preview still names what a delivery would overwrite, the hand edit and not the move');
 	is_deeply([sort @{$result->{removed}}], ['init'],
 		'the preview still says what would go');
 
