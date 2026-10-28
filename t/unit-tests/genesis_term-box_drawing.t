@@ -211,6 +211,49 @@ subtest '_multiline_row - empty cells render without crashing' => sub {
 	like $result, qr/\|/, 'empty row still has borders';
 };
 
+# ---------------------------------------------------------------------------
+# boxed - a titled box of paragraphs, sized to its width
+# ---------------------------------------------------------------------------
+sub widths {map {Genesis::Term::csize($_)} split /\n/, $_[0]}
+
+subtest 'boxed - a titled box, every line its width' => sub {
+	local $ENV{GENESIS_NO_UTF8};   delete $ENV{GENESIS_NO_UTF8};
+	local $ENV{GENESIS_NO_BOXES};  delete $ENV{GENESIS_NO_BOXES};
+	my $box = Genesis::Term::boxed('Manual Pipeline', [
+		'A paragraph long enough that it has to wrap inside a box only forty columns wide.',
+		'',
+		'[[  >>genesis propagate',
+	], width => 40);
+	my @lines = split /\n/, $box;
+	is_deeply [widths($box)], [(40) x @lines], 'every line is the width';
+	like $lines[0], qr/^\x{250F}\x{2501}+ Manual Pipeline \x{2501}+\x{2513}$/, 'the title sits in the top edge';
+	like $lines[-1], qr/^\x{2517}\x{2501}+\x{251B}$/, 'the bottom edge closes it';
+	ok !(grep {!/^\x{2503} .* \x{2503}$/} @lines[1 .. $#lines - 1]), 'and every body line is walled';
+	ok scalar(grep {/^\x{2503}\s+\x{2503}$/} @lines), 'an empty paragraph is a blank line';
+	ok scalar(grep {/^\x{2503}   genesis propagate\s+\x{2503}$/} @lines), 'an indented line keeps its indent';
+};
+
+subtest 'boxed - colour does not move the right edge' => sub {
+	local $ENV{NOCOLOR};
+	delete $ENV{NOCOLOR};
+	my $box = Genesis::Term::boxed('T', ['plain and #G{green} and #C{cyan}'], width => 30);
+	is_deeply [widths($box)], [(30) x 3], 'measured by what shows, not by the escapes';
+};
+
+subtest 'boxed - ASCII where boxes are turned off' => sub {
+	local $ENV{GENESIS_NO_BOXES} = 1;
+	my @lines = split /\n/, Genesis::Term::boxed('T', ['x'], width => 20);
+	like $lines[0], qr/^\+-+ T -+\+$/, 'a plain top edge';
+	like $lines[1], qr/^\| x\s+\|$/, 'plain walls';
+};
+
+subtest 'boxed - at most eighty columns by default' => sub {
+	local $ENV{GENESIS_OUTPUT_COLUMNS} = 200;
+	is_deeply [widths(Genesis::Term::boxed('T', ['x']))], [(80) x 3], 'capped at eighty';
+	local $ENV{GENESIS_OUTPUT_COLUMNS} = 60;
+	is_deeply [widths(Genesis::Term::boxed('T', ['x']))], [(60) x 3], 'and narrower on a narrower terminal';
+};
+
 done_testing;
 
 # vim: ts=4 sw=4 sts=4 noet fdm=marker foldlevel=1 nu

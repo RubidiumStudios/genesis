@@ -27,7 +27,7 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
 $ENV{NOCOLOR} = 1;
 
 subtest 'the manual provider skips the stages it has nothing for' => sub {
-	plan tests => 3;
+	plan tests => 6;
 
 	# The vault is stood up, because the command checks for one before it
 	# reads the provider and the skip under test comes after that.
@@ -40,8 +40,14 @@ subtest 'the manual provider skips the stages it has nothing for' => sub {
 		'the manual apply exits 0, because a skipped stage is not a failure');
 	isnt($exit, CONFIG,
 		'and not the configuration code, which would say the run was refused');
-	like($said, qr/manual provider has no pipeline to set/i,
+	# A titled box says what the manual provider means and how to move to an
+	# automated one, by command rather than by editing a generated file.
+	like($said, qr/Manual Pipeline.*manual provider.*sets no hosted pipeline/s,
 		'the operator is told which stage was skipped and why');
+	like($said, qr/genesis config --set pipeline\.provider\.type concourse/,
+		'how to choose an automated provider, by command');
+	unlike($said, qr/github-actions/, 'naming none that cannot compile a pipeline');
+	unlike($said, qr/in \.genesis\/config to one of/, 'and no hand edit of the generated file');
 };
 
 subtest 'a leftover ci directory is ignored and never named' => sub {

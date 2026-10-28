@@ -57,7 +57,7 @@ sub enabled_pipeline {
 # register_provider has no counterpart that takes an entry out again, so
 # a type registered anywhere above would still be there when this ran.
 subtest 'the registry is consulted by both families and owned by neither' => sub {
-	plan tests => 6;
+	plan tests => 7;
 
 	# The three the registry answers for every caller, asserted on the
 	# module itself rather than through whatever happens to inherit it.
@@ -70,6 +70,9 @@ subtest 'the registry is consulted by both families and owned by neither' => sub
 	is_deeply [Genesis::CI::ProviderRegistry->automated_providers],
 		[qw/concourse github-actions/],
 		'and the automated list is every type but manual';
+	is_deeply [Genesis::CI::ProviderRegistry->compilable_providers],
+		[qw/concourse/],
+		'and the compilable list those of them with a compiler';
 
 	is Genesis::CI::ProviderRegistry->provider_class('concourse'),
 		'Genesis::CI::Provider::Concourse',

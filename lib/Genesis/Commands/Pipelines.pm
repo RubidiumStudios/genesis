@@ -5,7 +5,7 @@ use warnings;
 
 use Genesis;
 use Genesis::State;
-use Genesis::Term qw/bullet/;
+use Genesis::Term qw/bullet boxed/;
 use Genesis::Commands;
 use Genesis::Exit qw/CONFIG ABORTED TEMPFAIL/;
 use Genesis::Config;
@@ -153,16 +153,7 @@ sub apply {
 	);
 
 	if ($platform eq 'manual') {
-		info(
-			"\n#Y{The manual provider has no pipeline to set.}\n\n".
-			"#i{Genesis is your CLI - deploys happen at your terminal, ".
-			"not in a hosted pipeline.}\n\n".
-			"To have Genesis set a pipeline as well, change ".
-			"#C{pipeline.provider.type} in #C{.genesis/config} to one of: %s, ".
-			"then run #C{genesis pipeline-apply} again.",
-			join(', ', map {"#C{$_}"}
-				Genesis::CI::ProviderRegistry->automated_providers())
-		);
+		info("\n%s", _manual_pipeline_notice());
 		exit 0;
 	}
 
@@ -1393,6 +1384,35 @@ sub _compile_pipeline {
 	}
 
 	return $result;
+}
+
+# }}}
+# _manual_pipeline_notice - what the manual provider means, and the way off it {{{
+#
+# Names a command rather than a hand edit of the generated configuration,
+# and only the providers that can compile a pipeline.
+sub _manual_pipeline_notice {
+	my @types = Genesis::CI::ProviderRegistry->compilable_providers();
+	my $type  = @types == 1 ? $types[0] : '<type>';
+	return boxed('Manual Pipeline', [
+		"This pipeline uses the #C{manual} provider.  #C{pipeline-apply} has cut ".
+		"the deployment branches and recorded the pipeline, and sets no hosted ".
+		"pipeline: you propagate and deploy from your terminal.",
+		'',
+		'[[  >>#G{genesis propagate}',
+		'[[  >>#G{genesis <env> deploy}',
+		'',
+		"To have Genesis set an automated pipeline instead, choose the provider ".
+		"and apply again".(@types == 1 ? ':' : sprintf(", where #C{<type>} is one of %s:",
+			join(', ', map {"#C{$_}"} @types))),
+		'',
+		"[[  >>#G{genesis config --set pipeline.provider.type $type}",
+		'[[  >>#G{genesis pipeline-apply}',
+		'',
+		"An automated provider needs its own #C{pipeline.*} settings, its source ".
+		"control, vault, locker and shuttle; see ".
+		"#C{docs/ci/user/configuration-reference.md} in the Genesis repository.",
+	]);
 }
 
 # }}}

@@ -26,7 +26,7 @@ our @EXPORT = qw/
 	csprintf csize
 	bullet checkbox
 	decolorize
-	boxify
+	boxify boxed
 	build_markdown_table
 	tableify
 	process_markdown_block
@@ -412,6 +412,31 @@ sub boxify {
 	}
 	return $box_glyphs{$line}[{left=>0,right=>1,span=>2,div=>3}->{$position}];
 }
+
+# boxed - a titled box of wrapped paragraphs, at most eighty columns {{{
+sub boxed {
+	my ($title, $paragraphs, %opts) = @_;
+	my $width = $opts{width} // do {my $w = terminal_width(); $w > 80 ? 80 : $w};
+	my $inner = $width - 4;
+
+	my $label = csprintf('#Wk{%s}', $title);
+	my $fill  = $width - 6 - csize($label);
+	my @out   = (boxify('top','left') . boxify('top','span') x 2 . " $label " .
+		boxify('top','span') x ($fill > 0 ? $fill : 0) . boxify('top','right'));
+
+	for my $paragraph (@$paragraphs) {
+		my @lines = length($paragraph) ? split(/\n/, wrap($paragraph, $inner)) : ('');
+		for my $line (map {csprintf('%s', $_)} @lines) {
+			my $pad = $inner - csize($line);
+			push @out, boxify('line','left') . " $line" . ' ' x ($pad > 0 ? $pad : 0) .
+				' ' . boxify('line','right');
+		}
+	}
+	push @out, boxify('bot','left') . boxify('bot','span') x ($width - 2) . boxify('bot','right');
+	return join("\n", @out);
+}
+
+# }}}
 
 my $in_csprint_debug=0;
 sub csprintf {

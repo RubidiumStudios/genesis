@@ -85,6 +85,12 @@ sub automated_providers {
 }
 
 # }}}
+# compilable_providers - the automated providers that can compile a pipeline {{{
+sub compilable_providers {
+	return grep {$_providers{$_}{class}} automated_providers();
+}
+
+# }}}
 # register_provider - add a registry entry at run time {{{
 #
 # For tests that stand a provider class up and for a future out-of-tree

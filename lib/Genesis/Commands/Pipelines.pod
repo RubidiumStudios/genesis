@@ -1511,6 +1511,20 @@ B<Examples:>
     branches => [{branch => 'qa/bosh', rules => $rules}], dry_run => 1);
   # names qa/bosh and the rule types it would carry, and returns {}
 
+=head2 _manual_pipeline_notice
+
+  info("\n%s", _manual_pipeline_notice());
+
+The box a manual-provider C<pipeline-apply> closes with, titled C<Manual
+Pipeline>: what the manual provider means, the commands an operator then runs,
+and how to move to an automated provider. It names C<genesis config --set
+pipeline.provider.type> rather than a hand edit of the generated
+C<.genesis/config>, offers only the providers
+C<< Genesis::CI::ProviderRegistry->compilable_providers >> lists, and points to
+C<docs/ci/user/configuration-reference.md> for each provider's settings.
+
+B<Returns:> the box, from C<Genesis::Term::boxed>.
+
 =head2 _refuse_branch_collisions
 
   _refuse_branch_collisions($git, $remote, @branches);

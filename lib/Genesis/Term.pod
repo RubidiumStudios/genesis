@@ -202,6 +202,47 @@ B<Examples:>
   print boxify('line', 'div');   # prints '┃' (or '|' in ASCII mode)
   print boxify('bot', 'right');  # prints '┛' (or '+' in ASCII mode)
 
+=head2 boxed
+
+  my $box = boxed($title, \@paragraphs, %opts);
+
+A titled box of paragraphs, drawn with L</boxify>'s glyphs, so it falls back to
+ASCII under C<GENESIS_NO_UTF8> or C<GENESIS_NO_BOXES>. The title sits in the top
+edge. Each paragraph is wrapped with L</wrap> to the box's inside width, its
+C<#X{...}> colour markup rendered with L</csprintf>, and each line padded to the
+right wall by L</csize>, so colour never moves the edge. An empty paragraph is
+a blank line, and a C<[[  E<gt>E<gt>> paragraph keeps its indent.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$title>
+
+The text in the top edge.
+
+=item C<\@paragraphs>
+
+The body, one string per paragraph, in Genesis colour markup.
+
+=item C<width>
+
+The box's outer width; by default the terminal's, at most eighty columns.
+
+=back
+
+B<Returns:>
+
+The box as one string, its lines joined by newlines, with no trailing newline.
+
+B<Examples:>
+
+  info("\n%s", boxed('Manual Pipeline', [
+    'This pipeline uses the #C{manual} provider.',
+    '',
+    '[[  >>#G{genesis propagate}',
+  ]));
+
 =head2 csprintf
 
   my $str = csprintf($fmt, @args);

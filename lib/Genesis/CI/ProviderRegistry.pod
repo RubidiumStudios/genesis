@@ -110,6 +110,18 @@ from the list when a provider is added.
 
 B<Returns:> the type names, as a sorted list.
 
+=head2 compilable_providers()
+
+    my @types = Genesis::CI::ProviderRegistry->compilable_providers;
+    # ('concourse')
+
+The automated providers that have a compiling class, so a pipeline can be
+compiled and set for them. A type that resolves on the CLI side only, as
+C<github-actions> does today, is left out, so guidance that names providers an
+operator may switch to names none whose apply would refuse.
+
+B<Returns:> the type names, as a sorted list.
+
 =head2 register_provider($type, $info)
 
     Genesis::CI::ProviderRegistry->register_provider('zeppelin',
