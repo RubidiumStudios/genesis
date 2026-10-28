@@ -1396,6 +1396,41 @@ sub _compile_pipeline {
 }
 
 # }}}
+# _refuse_branch_collisions - refuse where a branch name blocks a deployment branch {{{
+#
+# A branch named for the environment alone, from before deployments had
+# branches of their own (D66), blocks <env>/<type>: git cannot hold both.
+# It may carry several deployment types' commits, so retiring it leads.
+sub _refuse_branch_collisions {
+	my ($git, $remote, @branches) = @_;
+	my @lines;
+	for my $branch (@branches) {
+		for my $hit ($git->branch_name_collisions($branch, remote => $remote)) {
+			my $x     = $hit->{name};
+			my $where = join(' and ', ($hit->{here} ? 'here' : ()),
+				($hit->{remote} ? "on #C{$hit->{remote}}" : ()));
+			my $on    = $hit->{remote} // 'origin';
+			push @lines, sprintf(
+				"#C{%s} cannot be created: the branch #C{%s} (%s) is in the way, since git ".
+				"cannot hold both.\n\n".
+				"#C{%s} is probably a per-environment branch from before each deployment ".
+				"had its own, and it may carry several deployment types' commits, which ".
+				"#C{%s} must not inherit.  Delete it once nothing uses it, and the apply ".
+				"cuts #C{%s} afresh for propagate to fill:\n\n".
+				"[[    >>#C{git branch -D %s}\n[[    >>#C{git push %s :%s}\n\n".
+				"Or, where it only ever carried this deployment's commits, rename it:\n\n".
+				"[[    >>#C{git branch -m %s %s}\n[[    >>#C{git push %s :%s}\n".
+				"[[    >>#C{git push -u %s %s}",
+				$branch, $x, $where, $x, $branch, $branch,
+				$x, $on, $x,
+				$x, $branch, $on, $x, $on, $branch);
+		}
+	}
+	bail({exitcode => CONFIG}, "%s\n\nNothing was written.", join("\n\n", @lines)) if @lines;
+	return;
+}
+
+# }}}
 # _apply_init_branches - create every missing deployment branch {{{
 #
 # This command is the only creator of a deployment branch, and the branch has
@@ -1438,6 +1473,11 @@ sub _apply_init_branches {
 	$top->fetch_pipeline_envs($git,
 		command => 'pipeline-apply',
 		outcome => 'No branch was created and no pipeline was set.') if $remote;
+
+	# Asked of every branch before any is written, so a run that would stop
+	# part way never starts, and the dry run reports what the run would hit.
+	my @branches = map {$top->branch_for($_)} @{$top->pipeline_topology->{order}};
+	_refuse_branch_collisions($git, $remote, @branches);
 
 	my %report = (created => [], published => [], standing => []);
 	for my $name (@{$top->pipeline_topology->{order}}) {

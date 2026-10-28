@@ -1509,6 +1509,36 @@ sub remote_url {
 }
 
 # }}}
+# branch_name_collisions - branches git would refuse beside a new one {{{
+#
+# Git cannot hold X and X/Y at once, so a branch named for any parent of the
+# new one, or below it, blocks its creation here and its push there.
+sub branch_name_collisions {
+	my ($self, $branch, %opts) = @_;
+	my @parts   = split m{/}, $branch;
+	my %parents = map {(join('/', @parts[0..$_]) => 1)} 0 .. $#parts - 1;
+	my $clashes = sub {$parents{$_[0]} || index($_[0], "$branch/") == 0};
+
+	my %found;
+	my ($local) = run({dir => $self->{root}, stderr => 0},
+		'git', 'for-each-ref', '--format=%(refname:short)', 'refs/heads');
+	$found{$_}{here} = 1 for grep {$clashes->($_)} split /\n/, ($local // '');
+
+	if ($opts{remote}) {
+		my $remote = $self->_remote_for($opts{remote_name}, 'branch_name_collisions');
+		my ($out, $rc, $err) = run({dir => $self->{root}, passfail => 0},
+			'git', 'ls-remote', '--heads', $remote);
+		bail("ls-remote against #C{%s} failed: %s",
+			$remote, ($err || $out || "rc=$rc") =~ s/\s+$//r) if $rc;
+		for (split /\n/, ($out // '')) {
+			next unless m{\srefs/heads/(\S+)\s*$} && $clashes->($1);
+			$found{$1}{remote} = $remote;
+		}
+	}
+	return map {{name => $_, %{$found{$_}}}} sort keys %found;
+}
+
+# }}}
 # remote_branch_exists - check whether a branch exists on the remote {{{
 #
 # The remote is asked for the fully qualified ref, and the answer is then

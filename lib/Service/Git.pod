@@ -2283,6 +2283,50 @@ B<Examples:>
   # returns 'https://github.com/org/repo.git' even where an insteadOf
   # rewrite sends that URL's traffic somewhere else
 
+=head2 branch_name_collisions
+
+  my @hits = $git->branch_name_collisions('qa/bosh');
+  my @hits = $git->branch_name_collisions('qa/bosh', remote => 1);
+
+The branches git would refuse beside a new one. Git cannot hold C<X> and
+C<X/Y> at once, so a branch named for any parent of C<$branch> (C<qa> for
+C<qa/bosh>), or lying below it, blocks its creation here and its push to the
+remote. Local branches are always read; with C<remote>, the remote's heads are
+read with one C<ls-remote> as well.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The branch about to be created.
+
+=item C<remote>, C<remote_name>
+
+True to ask the remote too, and the remote to ask, which defaults to the
+pipeline's.
+
+=back
+
+B<Returns:> A list of hashrefs, one per colliding name, with C<name>, and
+C<here> where it is local and C<remote> naming the remote where it is there.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<< "ls-remote against <remote> failed: ..." >> where the remote cannot be read.
+
+=back
+
+B<Examples:>
+
+  my @hits = $git->branch_name_collisions('qa/bosh', remote => 1);
+  # ({name => 'qa', here => 1, remote => 'origin'})
+
 =head2 remote_branch_exists
 
   my $bool = $git->remote_branch_exists($branch, $remote);

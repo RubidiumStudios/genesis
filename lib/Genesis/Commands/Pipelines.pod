@@ -1511,6 +1511,38 @@ B<Examples:>
     branches => [{branch => 'qa/bosh', rules => $rules}], dry_run => 1);
   # names qa/bosh and the rule types it would carry, and returns {}
 
+=head2 _refuse_branch_collisions
+
+  _refuse_branch_collisions($git, $remote, @branches);
+
+Refuses the apply, dry run and writing run alike and before any branch is
+written, where a branch name blocks one of C<@branches>. The usual cause is a
+branch named for the environment alone, from before each deployment had its
+own (D66): git cannot hold C<qa> and C<qa/bosh>. Such a branch served every
+deployment root of its environment and may carry several types' commits, so
+the refusal leads with deleting it, here and on the remote, after which the
+apply cuts the branch afresh for propagate to fill, and offers renaming only
+for a branch that carried this deployment's commits alone. The dry run once
+said "would create" for a branch git could not create, and the writing run
+died on git's own "cannot lock ref".
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Bails at C<CONFIG>, one paragraph per collision, each naming the branch, the
+one in the way and where it is, with the commands to delete or rename it,
+ending "Nothing was written."
+
+=back
+
+B<Examples:>
+
+  _refuse_branch_collisions($git, 1, 'qa/bosh');
+  # qa/bosh cannot be created: the branch qa (here and on origin) is in the way...
+
 =head2 _apply_init_branches
 
   my $report = _apply_init_branches($top, $git);
