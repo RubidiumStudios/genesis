@@ -364,8 +364,8 @@ sub decompile_kit {
 }
 
 sub fetch_kit {
-	my @kits = @_;
 	my $top = Genesis::Top->new('.');
+	my @kits = map {_kit_sig_for($top, $_)} @_;
 	my @possible_kits = keys %{$top->local_kits};
 
 	unless (scalar(@kits)) {
@@ -417,6 +417,28 @@ sub fetch_kit {
 
 	# Test the kit
 }
+
+# _kit_sig_for - an environment named in place of a kit means its kit {{{
+#
+# Read from the environment's merged files and never through its kit, which
+# is what is being fetched and may not be here yet.
+sub _kit_sig_for {
+	my ($top, $arg) = @_;
+	(my $name = $arg) =~ s/\.yml$//;
+	return $arg unless $top->has_env($name);
+
+	local $ENV{GENESIS_UNEVALED_PARAMS} = 1;
+	my $env = Genesis::Env->bare($name, $top);
+	my ($kit, $version) = map {scalar $env->lookup("kit.$_")} qw/name version/;
+	bail("Environment #C{%s} names no kit to fetch", $name) unless $kit;
+	bail(
+		"Environment #C{%s} uses the dev kit, so there is no kit to fetch",
+		$name
+	) if $kit eq 'dev';
+	return $version && $version ne 'latest' ? "$kit/$version" : $kit;
+}
+
+# }}}
 
 sub compare_kits {
 

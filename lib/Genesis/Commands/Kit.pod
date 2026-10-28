@@ -396,12 +396,15 @@ B<Examples:>
 
 =head2 fetch_kit()
 
-  genesis fetch-kit [name[/version] ...] [--as-dev] [--force] [--to <dir>]
+  genesis fetch-kit [name[/version]|<env> ...] [--as-dev] [--force] [--to <dir>]
+  genesis <env> fetch-kit
 
 Downloads one or more Genesis kit archives from the configured remote
 provider.  If no kit names are specified, all locally known kits are fetched.
 Each kit may optionally include a version specifier (e.g., C<cf/1.2.3>); if
-omitted, the latest available version is fetched.
+omitted, the latest available version is fetched.  An environment named in
+place of a kit, or leading the command, fetches the kit and version that
+environment uses, through C<_kit_sig_for>.
 
 When C<--as-dev> is specified, the downloaded kit is also decompiled into the
 C<dev/> directory of the current deployment repo.
@@ -414,7 +417,8 @@ B<Parameters:>
 
 List of kit specifiers in the form C<name> or C<name/version>.  A bare
 version string (semver) is also accepted when only one local kit is present,
-in which case that kit's name is used automatically.
+in which case that kit's name is used automatically.  An environment's name,
+with or without C<.yml>, stands for the kit it uses.
 
 =back
 
@@ -801,6 +805,47 @@ B<Examples:>
 
   _decompile_kit($top, '/path/to/cf-1.5.0.tar.gz');
   # Returns: nothing; extracts kit files into $top->path('dev')
+
+=head2 _kit_sig_for($top, $arg)
+
+  my $sig = _kit_sig_for($top, $arg);
+
+Turns one C<fetch-kit> argument into a kit signature.  An argument naming an
+environment of C<$top> (with or without C<.yml>) becomes that environment's
+C<kit.name/kit.version>, read from its merged files as a bare environment with
+params left unevaluated, so neither the kit, which is what is being fetched,
+nor the vault is needed.  A C<latest> or absent version gives the name alone,
+which fetches the latest.  Any other argument is returned unchanged.
+
+B<Parameters:> C<$top>, the repository; C<$arg>, the argument as given.
+
+B<Returns:> the kit signature, C<name>, C<name/version>, or the argument.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Environment %s names no kit to fetch">
+
+The environment's files carry no C<kit.name>.
+
+=item C<"Environment %s uses the dev kit, so there is no kit to fetch">
+
+The environment's C<kit.name> is C<dev>.
+
+=item Whatever C<Genesis::Env::bare> raises
+
+For an environment file that will not merge.
+
+=back
+
+B<Examples:>
+
+  _kit_sig_for($top, 'lab-west.yml');
+  # Returns: 'vault/2.0.1', where lab.yml names that kit
+
+  _kit_sig_for($top, 'vault/2.0.0');
+  # Returns: 'vault/2.0.0', unchanged
 
 =head1 SEE ALSO
 

@@ -141,6 +141,7 @@ unit-tests/genesis_repo-cli.t                         # Commands::Repo CLI regis
 unit-tests/genesis_bosh-cli.t                         # Commands::Bosh CLI registration (bosh-configs)
 unit-tests/genesis_commands_bosh-configs.t            # bosh-configs actions against a mocked env and director
 unit-tests/genesis_commands_core-config.t             # Commands::Core::config behaviour
+unit-tests/genesis_commands_kit-fetch_kit_env.t       # fetch-kit takes an environment and fetches the kit it names
 # Kit Provider tests (POD-driven)
 unit-tests/genesis_kit_provider-core.t              # Genesis::Kit::Provider base class/factory
 unit-tests/genesis_kit_provider_github-core.t        # Genesis::Kit::Provider::Github

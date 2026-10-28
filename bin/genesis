@@ -1730,15 +1730,16 @@ define_command("list-kits", {
 # genesis fetch-kit - Download a Genesis Kit from the Internet. {{{
 define_command("fetch-kit", {
 	summary => "Download one or more Genesis kits from a Genesis kit provider.",
-	usage => "fetch-kit [<kit-name>|<kit-name/version>|<kit-version> ...]",
-	# TODO:  add <env> fetch-kit support to fetch kit used by env
+	usage => "fetch-kit [<kit-name>|<kit-name/version>|<kit-version>|<env> ...]\n".
+	         "<env> fetch-kit",
 	alias => 'fk',
 	description =>
 		"Fetch the specified kit version for this deployent.  With no arguments, ".
 		"it will update all local kits.  If you have a single local kit, you can ".
-		"specify a list of versions of that kit to be fetched.",
+		"specify a list of versions of that kit to be fetched.  An environment, ".
+		"named in place of a kit, fetches the kit and version it uses.",
 	function_group => Genesis::Commands::KIT,
-	scope => 'repo',
+	scope => ['env','repo'],
 	option_group => Genesis::Commands::REPO_OPTIONS,
 	options => [
 		'force|f' =>
