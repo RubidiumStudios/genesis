@@ -25,7 +25,8 @@ use strict;
 use warnings;
 
 use Exporter qw/import/;
-use Genesis qw/bug info warning/;
+use Genesis qw/bug info warning run/;
+use Genesis::CI::Marker ();
 use Genesis::CI::Report qw/note_detail/;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean/;
@@ -229,7 +230,14 @@ sub confirm_publish {
 			$delta->{deleted},
 			$delta->{new_branch}
 				? ", on a branch #C{$remote} does not hold yet" : '';
-		info "      %s", $_ for @{$delta->{commits}};
+		# Each commit and its files, as the report names them, so what is
+		# about to be published is read before the ask (D83, T436).
+		for my $entry (@{$delta->{entries} || []}) {
+			info "      %s", $entry->{label};
+			info "        %s %s",
+				($_->[0] eq 'A' ? '#C{A}' : $_->[0] eq 'D' ? '#R{D}' : '#G{M}'), $_->[1]
+				for @{$entry->{files}};
+		}
 	}
 
 	return 1 if $opts{yes};
@@ -325,10 +333,44 @@ sub publish_delta {
 	return {
 		new_branch => 0,
 		commits    => \@commits,
+		entries    => _delta_entries($git, "$tracking..refs/heads/$branch"),
 		count      => scalar(@commits),
 		changed    => scalar(@{$diff->{changed}}),
 		deleted    => scalar(@{$diff->{deleted}}),
 	};
+}
+
+# }}}
+# _delta_entries - each commit in a range, oldest first, with its files {{{
+#
+# A delivery's subject is its marker, so it is named by the control commit
+# the marker names and that commit's subject, as the report names it; any
+# other commit by its own sha and subject.
+sub _delta_entries {
+	my ($git, $range) = @_;
+
+	my @entries;
+	for my $line (reverse $git->log_subjects($range, format => '%H %s')) {
+		my ($sha, $subject) = split / /, $line, 2;
+		my $label   = sprintf('%s %s', substr($sha, 0, 7), $subject // '');
+		my $control = Genesis::CI::Marker::in_text($subject);
+		if ($control) {
+			my ($said) = eval {$git->log_subjects($control, format => '%s', limit => 1)};
+			$label = sprintf('control@%s "%s"', substr($control, 0, 7), $said)
+				if defined $said;
+		}
+
+		my ($out) = run({dir => $git->root, stderr => 0},
+			'git', 'diff-tree', '--no-commit-id', '--name-status', '-r', '--root', $sha);
+		my @files = map {
+			my ($status, $path) = split /\t/, $_, 2;
+			[($status =~ /^[AD]/ ? substr($status, 0, 1) : 'M'),
+			 ($git->unprefixed($path))[0]];
+		} grep {/\S/} split /\n/, $out // '';
+
+		push @entries, {label => $label, files => \@files};
+	}
+	return \@entries;
 }
 
 # }}}

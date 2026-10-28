@@ -251,8 +251,13 @@ Each line carries the branch, the number of commits the push would send, the
 number of files it would change, and the number it would remove. A branch the
 remote does not hold yet is said to be new on that remote, and its counts are
 its whole history rather than a range, because that is what the push carries.
-The commit subjects are printed under a branch that has a range to read and
-not under a new one, whose history is as long as the repository's.
+Under a branch that has a range to read, each commit the push would send is
+printed oldest first, a delivery as C<control@E<lt>shaE<gt> "E<lt>subjectE<gt>">
+from the marker it carries and any other commit by its own sha and subject,
+and beneath each its files as C<A>, C<M> and C<D> lines, which is the report
+I8 defines and what D83 has the confirmation show before it asks (T436).
+Nothing is printed per commit under a new branch, whose history is as long as
+the repository's.
 
 B<Parameters:>
 
@@ -334,9 +339,10 @@ every spec is a range.
 =back
 
 B<Returns:> A hashref carrying C<count> as the number of commits the push
-would send, C<commits> as their subjects, C<changed> and C<deleted> as file
-counts, and C<new_branch> where the remote has no such branch yet. A new
-branch carries its counts and an empty C<commits>, because its history is as
+would send, C<commits> as their subjects, C<entries> as those commits oldest
+first through L</_delta_entries>, C<changed> and C<deleted> as file counts,
+and C<new_branch> where the remote has no such branch yet. A new branch
+carries its counts and no C<commits> or C<entries>, because its history is as
 long as the repository's and the showing is a sentence rather than a log.
 
 B<Errors:> Raises a bug where the branch has no local ref, naming the branch
@@ -369,6 +375,33 @@ B<Examples:>
     #   deleted => 0 }
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _delta_entries
+
+    my $entries = Genesis::CI::Publish::_delta_entries($git, "$tracking..$local");
+
+Each commit in a range, oldest first, with its files, for the confirmation's
+showing (T436).  A delivery's subject is its marker, so it is labelled by the
+control commit the marker names and that commit's subject, as the report
+labels it; a commit with no marker, or one whose control commit this clone
+cannot read, by its own short sha and subject.  Its files are read with
+C<git diff-tree --name-status>, so they are what the commit itself changed,
+and each status is folded to C<A>, C<D> or C<M>, with the paths given relative
+to the deployment root.
+
+B<Parameters:> C<$git>, the repository handle; C<$range>, a revision range
+git can walk.
+
+B<Returns:> an arrayref of C<< {label => $text, files => [[$status, $path], ...]} >>.
+
+B<Errors:> whatever C<Service::Git::log_subjects> raises for a range it cannot
+read.
+
+B<Examples:>
+
+    _delta_entries($git, 'refs/remotes/origin/qa/bosh..refs/heads/qa/bosh');
+    # [{label => 'control@7884fe4 "Migrate vault CI config"',
+    #   files => [['A', '.genesis/config'], ['D', 'init']]}]
 
 =head2 _recheck_control
 

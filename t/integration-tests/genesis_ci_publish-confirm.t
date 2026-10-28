@@ -77,4 +77,35 @@ subtest '-y is shown the same delta' => sub {
 	unlike($said, qr{Publish these branches\?}, 'and nothing was asked');
 };
 
+# Proves T436: the delta names each commit and its files before the push,
+# and the report after it gives outcomes without naming them again.
+subtest 'the files are named once, before the push' => sub {
+	# Five rows, and one more for the run's own restoration assertion.
+	plan tests => 6;
+
+	my $h = make_harness(envs => ['lab'], mode => 'direct',
+		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
+	fixture_vault($h);
+	ready_envs($h);
+
+	my $c = commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nops: fourteen\n"},
+		message => 'share a third op',
+		push    => 1,
+	);
+
+	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
+	my $said = join("\n", $out // '', $err // '');
+
+	is($exit, 0, 'the run published');
+	my ($before, $after) = split /Publishing to /, $said, 2;
+	like($before // '', qr{control\@\Q@{[substr($c, 0, 7)]}\E "share a third op"},
+		'the delta names the control commit it carries');
+	like($before // '', qr{^\s+[AM] ops/shared\.yml$}m,
+		'and its file, before the push');
+	like($after // '', qr{lab: propagated}, 'the report gives the outcome after it');
+	is(scalar(() = $said =~ /^\s+[AM] ops\/shared\.yml$/mg), 1,
+		'and the file is named once');
+};
+
 done_testing;

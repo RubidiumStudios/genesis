@@ -362,6 +362,8 @@ sub render_run {
 
 	my $git     = $opts{git};
 	my $preview = $opts{preview} ? 1 : 0;
+	# The publish confirmation already named every delivered file (T436).
+	my $files   = $opts{files} // 1;
 	my %known   = map {$_ => 1} ENV_OUTCOMES;
 	$known{+WOULD_PROPAGATE} = 1 if $preview;
 
@@ -430,10 +432,12 @@ sub render_run {
 				length($word) ? "  #Y{$word}" : '';
 			_render_rides($pending);
 			# A path the branch did not hold is an addition, as git spells it.
-			my %added = map {$_ => 1} @{$pending->{added} || []};
-			info "      %s %s", ($added{$_} ? '#C{A}' : '#G{M}'), (_paths($git, [$_]))[0]
-				for @{$pending->{delivered} || []};
-			info "      #R{D} %s", $_ for _paths($git, $pending->{removed});
+			if ($files) {
+				my %added = map {$_ => 1} @{$pending->{added} || []};
+				info "      %s %s", ($added{$_} ? '#C{A}' : '#G{M}'), (_paths($git, [$_]))[0]
+					for @{$pending->{delivered} || []};
+				info "      #R{D} %s", $_ for _paths($git, $pending->{removed});
+			}
 
 			# An overwrite is never silent, and it is named per file, because
 			# the branch was carrying a hand edit that the mirror has just

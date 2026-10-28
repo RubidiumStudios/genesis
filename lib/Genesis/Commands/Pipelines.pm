@@ -689,9 +689,12 @@ sub propagate {
 	$record->{warnings} = _preview_warnings($top->source_control_remote,
 		$control, $control_state, $initial, \@dag_order) if $dry_run && $record;
 
+	# A run that reached the publish has shown every delivered file in the
+	# confirmation, so its report gives outcomes without them (T436).
 	$dry_run
 		? Genesis::CI::Report::render_preview($record, git => $git)
-		: Genesis::CI::Report::render_run($record, git => $git);
+		: Genesis::CI::Report::render_run($record, git => $git,
+			($publish ? (files => 0) : ()));
 
 	# Counted once the publish has settled each outcome; a preview counts its own verb.
 	my $delivered = 0;

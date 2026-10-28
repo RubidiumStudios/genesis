@@ -218,4 +218,28 @@ subtest 'a branch neither side holds is refused by name' => sub {
 		'the branch is named, and so is the mistake';
 };
 
+# Proves T436: what would be published is named down to the file, and named
+# before the ask.
+subtest 'the delta names each commit\'s files before the ask' => sub {
+	plan tests => 2;
+	no warnings 'redefine';
+	local *Genesis::CI::Publish::in_controlling_terminal = sub {1};
+
+	set_stdin("y\n");
+	my ($out, $err) = output_from {
+		Genesis::CI::Publish::confirm_publish($git, 'origin', \@specs)
+	};
+	reset_stdin;
+	my $said = join("\n", $out // '', $err // '');
+
+	like($said, qr{share an op with lab\s*\n\s+A ops/shared\.yml\s*\n.*Publish these branches\?}s,
+		'the commit, then its file, then the ask');
+
+	($out, $err) = output_from {
+		Genesis::CI::Publish::confirm_publish($git, 'origin', \@specs, yes => 1)
+	};
+	like(join("\n", $out // '', $err // ''), qr{^\s+A ops/shared\.yml$}m,
+		'and the same under -y, where nothing is asked');
+};
+
 done_testing;

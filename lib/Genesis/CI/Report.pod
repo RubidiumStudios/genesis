@@ -397,6 +397,13 @@ True to print the environment axis alone, which is what an aborted run wants:
 nothing was published, so a pending commit printed as delivered would name a
 delivery the abort has just undone.  Optional.
 
+=item C<files>
+
+False to leave out each delivered commit's C<A>, C<M> and C<D> lines, which a
+run that reached the publish has already shown in the confirmation (T436).
+C<overwrote-hand-edit> is an outcome under I8 and is printed either way.
+Defaults to true.  Optional.
+
 =back
 
 B<Returns:> True.
