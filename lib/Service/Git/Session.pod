@@ -987,6 +987,16 @@ the delivered commit itself moved, spelled as C<@set> spells them. It decides
 C<overwrote> only on a branch with no marker yet; past the first delivery the
 marker's control commit decides it. C<deleted> is accepted and not read yet.
 
+=item C<left>
+
+The control commit the last delivery left the branch at, optional, which a
+hand edit is judged against in place of the commit the branch's newest marker
+names.  A preview commits no marker, so after its first delivery its C<base>
+is a tree that carries none, and C<Genesis::CI::Walk::deliver_pending> passes
+the control commit the delivery before would have marked (T434).  Without it
+such a preview fell back to C<changed> and named every carried path, and every
+path a riding commit changed, as a hand edit.
+
 =item C<base>
 
 The ref or tree the delivery is worked out against, optional, and the preview

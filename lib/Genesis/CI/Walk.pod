@@ -1293,6 +1293,11 @@ assertion runs after every delivery rather than once at the end of the run.
 The session has to be standing on the environment's deployment branch already,
 because the writer commits where it finds itself.
 
+A preview commits nothing, so from its second delivery on it hands the writer
+the control commit the delivery before would have marked, as C<left>, and the
+writer judges a hand edit against that rather than against a marker the
+previewed tree does not carry (T434).
+
 B<Parameters:>
 
 =over 4

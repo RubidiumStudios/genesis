@@ -802,8 +802,10 @@ sub apply_files {
 	# differs from it.  The caller's changed list holds triggering paths
 	# alone, so it cannot say this for a config change a commit carried.
 	# A branch with no marker yet has only that list to go on.
+	# A preview commits no marker, so after its first delivery the caller
+	# names the control commit the one before would have marked (T434).
 	my @overwrote;
-	my $left = Genesis::CI::Marker::newest($git, $base // 'HEAD');
+	my $left = $opts{left} // Genesis::CI::Marker::newest($git, $base // 'HEAD');
 	if (defined $left) {
 		my @held_written = grep {$held{$_}} @to_write;
 		my %edited = map {$_ => 1}

@@ -1582,6 +1582,7 @@ sub deliver_pending {
 	my $base = $args{base};
 
 	my @overwrote;
+	my $left;
 	for my $pending (@{$record->{pending}}) {
 		my $message = Genesis::CI::Marker::build(
 			$pending->{control_commit}, $env->name
@@ -1594,7 +1595,9 @@ sub deliver_pending {
 			message => $message,
 			($args{dry_run} ? (dry_run => 1) : ()),
 			($base ? (base => $base) : ()),
+			(defined $left ? (left => $left) : ()),
 		);
+		$left = $pending->{control_commit} if $args{dry_run};
 		$pending->{commit}    = $result->{commit};
 		$pending->{delivered} = $result->{delivered};
 		$pending->{added}     = $result->{added};
