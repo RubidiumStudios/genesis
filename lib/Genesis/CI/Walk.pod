@@ -1193,12 +1193,33 @@ takes the whole gate hashref, and there the key says only that the gate ahead
 was written in the hold form rather than that the entry set a hold.  The one
 entry a hold is written from is the gate's own, and it is a pending entry.
 
+A commit split from its fix is never a blocker (D61, noted 2026-10-28, T431).
+A due commit whose set cannot be read, because its environment names a kit
+the commit does not yet carry or for any other reason
+L</route_commit> raises, is not routed on its own: it is kept, with the
+first line of the error as its C<reason>, and rides as an entry of C<rides>
+on the next commit that routes, pending or held, whose delivery mirrors a set
+that carries its change.  Where no later commit routes but a later one can be
+read, the newest such commit carries them, routed with no triggering files.
+Where none can be read, the newest due commit is the broken one, which is the
+set a delivery reads, and the error is raised again so the environment fails
+on it.  A C<Genesis::CI::RunFailure> is about the run, not the commit, and is
+raised at once.
+
+B<Errors:> the error of the newest commit whose set could not be read, where
+no later commit could be; a C<Genesis::CI::RunFailure> from routing; and
+whatever C<hold_check> raises.
+
 B<Examples:>
 
   Genesis::CI::Walk::walk_env(git => $git, env => $env, record => $rec,
                               control => $sha, base => undef,
                               hold_check => sub { undef });
   # every due commit lands in $rec->{pending}, in control order
+
+  # control: A bumps qa to a kit it lacks, B adds the kit
+  Genesis::CI::Walk::walk_env(...);
+  # $rec->{pending} holds B, with rides => [{control_commit => A, ...}]
 
 =head2 apply_hold
 

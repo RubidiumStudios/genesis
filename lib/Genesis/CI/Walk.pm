@@ -679,23 +679,26 @@ sub walk_env {
 	my $gate = $args{gate};
 
 	my $held_by;
-	for my $commit (@due) {
-		# The routing question is asked before the hold is, because a commit
-		# that routes nowhere records no outcome at all and being behind a
-		# hold does not give it one.
-		my $routed = route_commit($git, $env, $commit->{sha});
-		next unless $routed;
+	my (@unread, $unread_error, $readable_after);
+	my $place = sub {
+		my ($commit, $routed) = @_;
 		my $files = $routed->{triggering};
+
+		# A commit whose set could not be read rides with this one, whose
+		# delivery mirrors a set that carries its change (D61, noted
+		# 2026-10-28), and whatever this commit meets, it meets too.
+		my %rides = @unread ? (rides => [splice @unread]) : ();
 
 		if ($held_by) {
 			push @{$record->{held}}, {
+				%rides,
 				control_commit => $commit->{sha},
 				subject        => $commit->{subject},
 				files          => $files,
 				reason         => 'behind-held-commit',
 				behind         => $held_by,
 			};
-			next;
+			return;
 		}
 
 		# The gate travels with the commits already ahead of it, so a commit
@@ -707,23 +710,25 @@ sub walk_env {
 		if ($gate && !$git->is_ancestor($commit->{sha}, $gate->{gate})) {
 			push @{$record->{held}}, {
 				%$gate,
+				%rides,
 				control_commit => $commit->{sha},
 				subject        => $commit->{subject},
 				files          => $files,
 			};
-			next;
+			return;
 		}
 
 		my $hold = $args{hold_check}->($commit, $files);
 		if ($hold) {
 			push @{$record->{held}}, {
 				%$hold,
+				%rides,
 				control_commit => $commit->{sha},
 				subject        => $commit->{subject},
 				files          => $files,
 			};
 			$held_by = $commit->{sha};
-			next;
+			return;
 		}
 
 		# The gate is delivered, and it is the last commit that is, so its own
@@ -747,6 +752,7 @@ sub walk_env {
 		# branch itself has already taken back.
 		push @{$record->{pending}}, {
 			%gated,
+			%rides,
 			control_commit => $commit->{sha},
 			subject        => $commit->{subject},
 			files          => $files,
@@ -756,6 +762,40 @@ sub walk_env {
 				? (hold_trailer_reason => $gate->{hold_trailer_reason})
 				: ()),
 		};
+	};
+
+	for my $commit (@due) {
+		# The routing question is asked before the hold is, because a commit
+		# that routes nowhere records no outcome at all and being behind a
+		# hold does not give it one.  A commit whose set cannot be read is
+		# not a blocker while a later one can be (D61, noted 2026-10-28); a
+		# run failure is not about the commit, and ends the run as before.
+		my $routed = eval {route_commit($git, $env, $commit->{sha})};
+		if (my $err = $@) {
+			die $err if Scalar::Util::blessed($err)
+				&& $err->isa('Genesis::CI::RunFailure');
+			push @unread, {
+				control_commit => $commit->{sha},
+				subject        => $commit->{subject},
+				reason         => _load_error($err),
+			};
+			($unread_error, $readable_after) = ($err, undef);
+			next;
+		}
+		unless ($routed) {
+			$readable_after = $commit if @unread;
+			next;
+		}
+		$place->($commit, $routed);
+	}
+
+	# Commits whose sets could not be read and that no later commit routed
+	# for: the newest readable commit after them delivers them, and where
+	# there is none the newest due commit is the broken one, which is the
+	# set a delivery would read, so the environment fails on its error.
+	if (@unread) {
+		die $unread_error unless $readable_after;
+		$place->($readable_after, {triggering => [], carried => []});
 	}
 
 	return $record;

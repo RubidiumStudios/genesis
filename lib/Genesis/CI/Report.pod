@@ -759,6 +759,28 @@ B<Examples:>
   my @paths = Genesis::CI::Report::_paths($git, ['bosh/qa.yml']);
   # returns ('qa.yml') where the repository is rooted at bosh/
 
+=head2 _render_rides
+
+    Genesis::CI::Report::_render_rides($pending);
+
+Names, under a pending or held commit, each commit riding with it because its
+own set could not be read (D61, noted 2026-10-28): its short sha, its subject,
+and the reason, so the operator sees that it was carried and why.
+
+B<Parameters:> C<$entry>, a pending or held entry, whose C<rides> may be
+absent.
+
+B<Returns:> nothing of use.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  Genesis::CI::Report::_render_rides({rides => [{control_commit => $a,
+    subject => 'bump qa', reason => 'qa declares the kit ...'}]});
+  # with control@0a0f983 bump qa: its set could not be read at that commit,
+  # so it rides with this one (qa declares the kit ...)
+
 =head1 SEE ALSO
 
 L<Genesis::CI::Walk>, which builds the record this renders.

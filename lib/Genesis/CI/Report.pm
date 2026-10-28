@@ -427,6 +427,7 @@ sub render_run {
 				substr($pending->{control_commit}, 0, 7),
 				$pending->{subject},
 				length($word) ? "  $word" : '';
+			_render_rides($pending);
 			# A path the branch did not hold is an addition, as git spells it.
 			my %added = map {$_ => 1} @{$pending->{added} || []};
 			info "      %s %s", ($added{$_} ? '#C{A}' : '#G{M}'), (_paths($git, [$_]))[0]
@@ -445,11 +446,22 @@ sub render_run {
 			info "    #Yi{control\@%s} %s  %s",
 				substr($held->{control_commit}, 0, 7), $held->{subject},
 				_commit_word($held->{outcome} // 'held', $preview);
+			_render_rides($held);
 			info "      #Y{H} %s", hold_reason($held);
 		}
 	}
 
 	return 1;
+}
+
+# }}}
+# _render_rides - the commits whose sets could not be read, riding along {{{
+sub _render_rides {
+	my ($entry) = @_;
+	info "      #Yi{with control\@%s} %s: its set could not be read at that ".
+	     "commit, so it rides with this one (%s)",
+		substr($_->{control_commit}, 0, 7), $_->{subject}, $_->{reason}
+		for @{$entry->{rides} || []};
 }
 
 # }}}
