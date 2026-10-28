@@ -227,7 +227,8 @@ The body, one string per paragraph, in Genesis colour markup.
 
 =item C<width>
 
-The box's outer width; by default the terminal's, at most eighty columns.
+The box's outer width; by default the terminal's, so the box and its wrapped
+text follow however wide the terminal is.
 
 =back
 

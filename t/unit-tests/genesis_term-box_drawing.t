@@ -247,11 +247,11 @@ subtest 'boxed - ASCII where boxes are turned off' => sub {
 	like $lines[1], qr/^\| x\s+\|$/, 'plain walls';
 };
 
-subtest 'boxed - at most eighty columns by default' => sub {
+subtest 'boxed - follows the terminal by default' => sub {
 	local $ENV{GENESIS_OUTPUT_COLUMNS} = 200;
-	is_deeply [widths(Genesis::Term::boxed('T', ['x']))], [(80) x 3], 'capped at eighty';
+	is_deeply [widths(Genesis::Term::boxed('T', ['x']))], [(200) x 3], 'as wide as a wide terminal';
 	local $ENV{GENESIS_OUTPUT_COLUMNS} = 60;
-	is_deeply [widths(Genesis::Term::boxed('T', ['x']))], [(60) x 3], 'and narrower on a narrower terminal';
+	is_deeply [widths(Genesis::Term::boxed('T', ['x']))], [(60) x 3], 'and as narrow as a narrow one';
 };
 
 done_testing;

@@ -413,10 +413,10 @@ sub boxify {
 	return $box_glyphs{$line}[{left=>0,right=>1,span=>2,div=>3}->{$position}];
 }
 
-# boxed - a titled box of wrapped paragraphs, at most eighty columns {{{
+# boxed - a titled box of wrapped paragraphs, as wide as the terminal {{{
 sub boxed {
 	my ($title, $paragraphs, %opts) = @_;
-	my $width = $opts{width} // do {my $w = terminal_width(); $w > 80 ? 80 : $w};
+	my $width = $opts{width} // terminal_width();
 	my $inner = $width - 4;
 
 	my $label = csprintf('#Wk{%s}', $title);
