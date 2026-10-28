@@ -657,6 +657,36 @@ sub deployed_target {
 	my $record = $env->deployed_record;
 	return undef unless $record && $record->{git} && $record->{git}{commit};
 
+	# A commit this clone holds that is on neither copy of the deployment
+	# branch was deployed from somewhere else, before the pipeline delivered
+	# to it (T430), and its tree is not one this Genesis can be asked to read.
+	# A commit it does not hold is left to the session's refusal (T245).
+	my $commit = $record->{git}{commit};
+	my $git    = $top->git;
+	my $branch = $top->branch_for($name);
+	my $remote = $top->source_control_remote;
+	if ($git->holds_commit($commit) && !grep {
+			$git->branch_exists($_) && $git->is_ancestor($commit, $_)
+		} ($branch, "$remote/$branch")) {
+		my $short = substr($commit, 0, 8);
+		bail(
+			{exitcode => CONFIG},
+			"Refusing to target the deployed commit for #C{%s}.\n\n".
+			"The deployed commit #C{%s}, named by #C{%s}, is not on #C{%s}: it ".
+			"was deployed from another branch, before this pipeline delivered to ".
+			"#C{%s}, and only a commit on the deployment branch can be stood on.\n\n".
+			"Run the command without the flag, or deploy from #C{%s} first.  ".
+			"Nothing was changed.",
+			$name, $short, $env->exodus_base . '/deployments', $branch, $branch,
+			$branch
+		) if $flagged;
+		info(
+			"The deployed commit #C{%s} is not on #C{%s}: it was deployed from ".
+			"another branch, before this pipeline, so it is not read.",
+			$short, $branch);
+		return undef;
+	}
+
 	# The path the commit was read from goes back beside it, because the
 	# refusal names the record as well as the commit.  The record is the
 	# input, and an operator told only which commit is missing is not told
