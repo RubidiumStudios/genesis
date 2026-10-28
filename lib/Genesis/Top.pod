@@ -2979,6 +2979,12 @@ Refuses a shape whose tree failed the configuration checks, naming control or
 the ref C<--from> named, the commit, and each failure, and saying that a
 preview reads the fix from the working tree before it is committed.
 
+It leads with L</_unsaved_control_edits>, which names a fix made in this clone
+that the shape cannot see: uncommitted changes under the deployment root, and
+local control commits not yet pushed.  That is the likeliest reason control
+still fails, and an operator who has just edited the file should not be left
+reading a complaint about it as though the edit had not happened.
+
 B<Parameters:>
 
 =over 4
@@ -2999,6 +3005,26 @@ B<Examples:>
     # Control at 4cf1438 fails the configuration checks, so the pipeline's
     # shape cannot be read from it:
     #   - ci: unknown configuration key: ...
+
+=head2 _unsaved_control_edits
+
+    my $lead = $top->_unsaved_control_edits;
+
+What this clone holds that the shape read from control cannot see: the paths
+under the deployment root with uncommitted changes, untracked files aside, and
+the number of commits local control is ahead of the commit the shape was read
+at, where the shape came from the remote's control.
+
+B<Returns:> The text to lead a refusal with, ending in a blank line, or the
+empty string where there is nothing unsaved.
+
+B<Examples:>
+
+    $top->_unsaved_control_edits;
+    # This reads control as committed, not this working tree, which has
+    # uncommitted changes to:
+    #   - vault/.genesis/config
+    # Commit them on control and push them.
 
 =head2 _no_pipeline_shape
 

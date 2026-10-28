@@ -1156,15 +1156,49 @@ sub _refuse_invalid_shape {
 	my ($self, $shape) = @_;
 	my $at = substr($self->{__shape_commit} // '', 0, 7);
 	bail({exitcode => CONFIG},
+		"%s".
 		"%s at #C{%s} fails the configuration checks, so the pipeline's shape ".
 		"cannot be read from it:\n%s\n\n".
 		"Fix the configuration on #C{%s} and push it.  A preview, such as ".
 		"#C{genesis pipeline-describe}, reads the fix from the working tree ".
 		"before it is committed.",
+		$self->_unsaved_control_edits,
 		defined($self->{__shape_ref}) ? "#C{$self->{__shape_ref}}" : 'Control',
 		$at, join('', map {"\n[[".bullet('', inline => 1, indent => 2).">>$_"}
 			@{$shape->{__config_problems}}),
 		$self->control_branch);
+}
+
+# }}}
+# _unsaved_control_edits - what this clone holds that the shape cannot see {{{
+#
+# The shape is control as committed, and on the remote where there is one,
+# so the likeliest reason it still fails is a fix made here and not yet
+# committed or pushed.  Said first, ahead of the failure.
+sub _unsaved_control_edits {
+	my ($self) = @_;
+	my $text = '';
+
+	my ($status) = run({dir => $self->path, stderr => 0}, 'git', 'status', '--porcelain', '--', '.');
+	my @dirty = map {substr($_, 3)} grep {length > 3 && !/^\?\?/} split /\n/, ($status // '');
+	$text .= sprintf(
+		"This reads control as committed, not this working tree, which has ".
+		"uncommitted changes to:\n%s\nCommit them on #C{%s} and push them.\n\n",
+		join("\n", map {"[[  - >>#C{$_}"} @dirty), $self->control_branch
+	) if @dirty;
+
+	my $shape = $self->{__shape_commit};
+	my $local = $shape && (run({dir => $self->path, stderr => 0},
+		'git', 'rev-parse', '-q', '--verify', 'refs/heads/'.$self->control_branch))[0];
+	if ($local && $local ne $shape) {
+		my ($ahead) = run({dir => $self->path, stderr => 0},
+			'git', 'rev-list', '--count', "$shape..$local");
+		$text .= sprintf(
+			"Local #C{%s} is %d commit%s ahead of the control this reads; push %s.\n\n",
+			$self->control_branch, $ahead, $ahead == 1 ? '' : 's', $ahead == 1 ? 'it' : 'them'
+		) if $ahead;
+	}
+	return $text;
 }
 
 # }}}
