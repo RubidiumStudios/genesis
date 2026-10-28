@@ -404,6 +404,7 @@ integration-tests/genesis_commands_pipelines-apply_orphaned_marker.t # a rewrite
 integration-tests/genesis_commands_pipelines-apply_creation_only.t # branch creation belongs to the apply alone, so pipeline-prepare is gone and genesis new cuts no branch
 integration-tests/genesis_commands_pipelines-apply_manual.t  # the manual provider gets every stage but the pipeline, and a dry run previews them all and writes nothing
 integration-tests/genesis_commands_pipelines-apply_branch_collision.t  # a per-environment branch blocking <env>/<type> is refused before anything is written, naming how to retire it
+integration-tests/genesis_commands_pipelines-apply_found_state.t  # a re-run says what was new, changed, or already in place, and writes nothing unchanged
 integration-tests/genesis_commands_pipelines-hold.t          # pipeline-hold records the hold, and the walk stops delivering behind it
 integration-tests/genesis_commands_pipelines-release.t       # pipeline-release deletes the record, and nothing else clears a hold
 integration-tests/genesis_commands_pipelines-hold_root.t     # the no-argument hold and release cover one deployment root and leave a second one alone
