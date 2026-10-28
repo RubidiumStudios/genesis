@@ -3002,8 +3002,8 @@ B<Errors:> Always bails at C<CONFIG>.
 B<Examples:>
 
     $top->_refuse_invalid_shape($at);
-    # Control at 4cf1438 fails the configuration checks, so the pipeline's
-    # shape cannot be read from it:
+    # origin/control at 4cf1438 fails the configuration checks, so the
+    # pipeline's shape cannot be read from it:
     #   - ci: unknown configuration key: ...
 
 =head2 _unsaved_control_edits
@@ -3021,8 +3021,8 @@ empty string where there is nothing unsaved.
 B<Examples:>
 
     $top->_unsaved_control_edits;
-    # This reads control as committed, not this working tree, which has
-    # uncommitted changes to:
+    # This reads origin/control as committed, not this working tree, which
+    # has uncommitted changes to:
     #   - vault/.genesis/config
     # Commit them on control and push them.
 
@@ -3077,6 +3077,10 @@ read off it even while its local branch carries commits not yet pushed,
 because under D112 control means what C<R> holds, not what the local checkout
 does. A directory under no git control fails the call itself, which is how
 that case is told apart without a separate check.
+
+The ref it answered from is kept, short (C<origin/control> or C<control>), so
+a refusal over control's tree can say which copy of control it read rather
+than a bare commit.
 
 Under C<GENESIS_PIPELINE_TASK>, a clone holding no control ref at all, which
 is what the git resource's single-branch checkout of a deployment branch is,

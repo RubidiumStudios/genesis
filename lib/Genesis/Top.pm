@@ -1163,7 +1163,7 @@ sub _refuse_invalid_shape {
 		"#C{genesis pipeline-describe}, reads the fix from the working tree ".
 		"before it is committed.",
 		$self->_unsaved_control_edits,
-		defined($self->{__shape_ref}) ? "#C{$self->{__shape_ref}}" : 'Control',
+		"#C{".($self->{__shape_ref} // $self->{__control_ref} // $self->control_branch)."}",
 		$at, join('', map {"\n[[".bullet('', inline => 1, indent => 2).">>$_"}
 			@{$shape->{__config_problems}}),
 		$self->control_branch);
@@ -1178,13 +1178,14 @@ sub _refuse_invalid_shape {
 sub _unsaved_control_edits {
 	my ($self) = @_;
 	my $text = '';
+	my $read = $self->{__control_ref} // $self->control_branch;
 
 	my ($status) = run({dir => $self->path, stderr => 0}, 'git', 'status', '--porcelain', '--', '.');
 	my @dirty = map {substr($_, 3)} grep {length > 3 && !/^\?\?/} split /\n/, ($status // '');
 	$text .= sprintf(
-		"This reads control as committed, not this working tree, which has ".
+		"This reads #C{%s} as committed, not this working tree, which has ".
 		"uncommitted changes to:\n%s\nCommit them on #C{%s} and push them.\n\n",
-		join("\n", map {"[[  - >>#C{$_}"} @dirty), $self->control_branch
+		$read, join("\n", map {"[[  - >>#C{$_}"} @dirty), $self->control_branch
 	) if @dirty;
 
 	my $shape = $self->{__shape_commit};
@@ -1194,8 +1195,8 @@ sub _unsaved_control_edits {
 		my ($ahead) = run({dir => $self->path, stderr => 0},
 			'git', 'rev-list', '--count', "$shape..$local");
 		$text .= sprintf(
-			"Local #C{%s} is %d commit%s ahead of the control this reads; push %s.\n\n",
-			$self->control_branch, $ahead, $ahead == 1 ? '' : 's', $ahead == 1 ? 'it' : 'them'
+			"Local #C{%s} is %d commit%s ahead of #C{%s}, which is what this reads; push %s.\n\n",
+			$self->control_branch, $ahead, $ahead == 1 ? '' : 's', $read, $ahead == 1 ? 'it' : 'them'
 		) if $ahead;
 	}
 	return $text;
@@ -1397,7 +1398,10 @@ sub _control_commit {
 		unshift @refs, "refs/remotes/$remote/$control" if defined $remote;
 	}
 	for my $ref (@refs) {
-		return $sha{$ref} if $sha{$ref};
+		next unless $sha{$ref};
+		# Kept so a refusal can say which copy of control it read.
+		$self->{__control_ref} = $ref =~ s{^refs/(?:remotes|heads)/}{}r;
+		return $sha{$ref};
 	}
 	return undef;
 }

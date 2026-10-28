@@ -58,8 +58,8 @@ subtest 'the previews read the fix and name what control fails' => sub {
 };
 
 subtest 'the commands that act refuse, naming control' => sub {
-	# Six rows per command, and one restoration assertion for each run.
-	plan tests => 21;
+	# Seven rows per command, and one restoration assertion for each run.
+	plan tests => 24;
 
 	for my $argv (['pipeline-apply'], ['propagate'], ['qa', 'deploy']) {
 		my (undef, $err, $exit) = run_genesis($h, @$argv);
@@ -67,6 +67,8 @@ subtest 'the commands that act refuse, naming control' => sub {
 		is($exit, Genesis::Exit::CONFIG, "`genesis @$argv` refuses at CONFIG");
 		like($said, qr/control at \Q$short\E fails the configuration checks/i,
 			'naming control and its commit');
+		like($said, qr{\borigin/control at \Q$short\E\b},
+			'by the ref it was read from');
 		like($said, qr/\bci: is no longer read/, 'and the failure, ci retired (T404)');
 		unlike($err, $MOJIBAKE, 'in a list whose bullets are not encoded twice');
 
@@ -81,8 +83,8 @@ subtest 'the commands that act refuse, naming control' => sub {
 };
 
 subtest 'a fix committed but not pushed is named as unpushed' => sub {
-	# Three rows, and the run's restoration assertion.
-	plan tests => 4;
+	# Four rows, and the run's restoration assertion.
+	plan tests => 5;
 
 	# The fix committed on local control and never pushed, so the shape is
 	# still read from control on the remote, at the failing commit.
@@ -92,6 +94,7 @@ subtest 'a fix committed but not pushed is named as unpushed' => sub {
 	my $said = unfolded($err);
 	is($exit, Genesis::Exit::CONFIG, 'it still refuses at CONFIG');
 	like($said, qr/local control is 1 commit ahead/i, 'saying local control is ahead');
+	like($said, qr{ahead of origin/control\b}, 'of the ref it reads');
 	like($said, qr/push/i, 'and to push it');
 };
 
