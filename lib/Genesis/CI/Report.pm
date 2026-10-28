@@ -419,14 +419,15 @@ sub render_run {
 		# The commit axis, in control order, which is what the environment
 		# received first and then what it is holding behind it.
 		for my $pending (@{$env->{pending} || []}) {
-			# The word is appended rather than printed into a fixed slot,
-			# because a commit the publish left without one has no word to
-			# print and a slot would leave two spaces hanging off the line.
+			# The subject is quoted, and a delivered commit prints no word,
+			# its environment's line already saying so (D126); the enum is
+			# still asked, so an unknown word is still refused.
 			my $word = _commit_word($pending->{outcome}, $preview);
-			info "    #Gi{control\@%s} %s%s",
+			$word = '' if $word eq 'delivered' || $word eq WOULD_DELIVER;
+			info "    #Gi{control\@%s} \"%s\"%s",
 				substr($pending->{control_commit}, 0, 7),
 				$pending->{subject},
-				length($word) ? "  $word" : '';
+				length($word) ? "  #Y{$word}" : '';
 			_render_rides($pending);
 			# A path the branch did not hold is an addition, as git spells it.
 			my %added = map {$_ => 1} @{$pending->{added} || []};
@@ -443,7 +444,7 @@ sub render_run {
 				for _paths($git, $pending->{overwrote});
 		}
 		for my $held (@{$env->{held} || []}) {
-			info "    #Yi{control\@%s} %s  %s",
+			info "    #Yi{control\@%s} \"%s\"  #Y{%s}",
 				substr($held->{control_commit}, 0, 7), $held->{subject},
 				_commit_word($held->{outcome} // 'held', $preview);
 			_render_rides($held);
@@ -460,7 +461,7 @@ sub _render_rides {
 	my ($entry) = @_;
 	info "      #Ci{squashing %d commits} into the first delivery",
 		$entry->{squashed} if $entry->{squashed};
-	info "      #Yi{with control\@%s} %s: its set could not be read at that ".
+	info "      #Yi{with control\@%s} \"%s\": its set could not be read at that ".
 	     "commit, so it rides with this one (%s)",
 		substr($_->{control_commit}, 0, 7), $_->{subject}, $_->{reason}
 		for @{$entry->{rides} || []};

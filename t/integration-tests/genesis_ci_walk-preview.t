@@ -96,8 +96,10 @@ subtest 'the preview names each commit, its files, and its verdict' => sub {
 	like($err, qr/^\s*qa\b/m, 'it names the environment');
 	like($err, qr/^\s*qa:\s*would propagate/m,
 		'an environment with commits due reads would propagate');
-	like($err, qr/\Q@{[substr($first, 0, 7)]}\E.*would deliver/,
-		'the first commit reads would deliver');
+	# Under would propagate, a commit it would deliver prints no word of its
+	# own (D126).
+	like($err, qr/^\s*control\@\Q@{[substr($first, 0, 7)]}\E "[^"]*"\s*$/m,
+		'the first commit is listed as one it would deliver');
 	like($err, qr/\Q@{[substr($first, 0, 7)]}\E[\s\S]*?\Qqa.yml\E/,
 		'the files that would land are named');
 	unlike($err, qr{^\s+M dev/kit\.yml$}m,

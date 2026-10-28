@@ -163,7 +163,9 @@ subtest 'the diff base names what control still has to deliver' => sub {
 	# this row is about is that the base named the settled branch and so
 	# found the one commit standing after it.
 	my ($block) = $err =~ /^\s*qa: would propagate\n(.*)\z/ms;
-	is(scalar(() = ($block // '') =~ /would deliver/g), 1,
+	# A commit it would deliver prints no word (D126), so the commit lines
+	# themselves are counted.
+	is(scalar(() = ($block // '') =~ /^\s*control\@\S+ "/mg), 1,
 		'exactly one commit is due to it');
 	like($err, qr{kit-overrides\.yml}, 'and names the file control added');
 	unlike($err, qr{No changes to propagate},

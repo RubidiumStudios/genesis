@@ -53,6 +53,13 @@ into the record by L</render_preview>, which is the only thing that knows the
 run did not happen, and the commit's is composed as the line is printed,
 because nothing writes a per-commit outcome until the publish does.
 
+A commit line quotes the subject after C<control@E<lt>shaE<gt>>, and prints
+the commit's outcome only where it differs from its environment's (D126,
+T435): a held commit reads C<held>, in yellow, and a delivered commit, or one
+a preview would deliver, prints no word, the environment's line already saying
+so.  The record still carries C<delivered> on every delivered commit, so I8 is
+unchanged.
+
 The module also declares C<AWAITING_APPLY>, which is the qualifier an
 environment the pipeline has never been applied to carries, and one with no
 deployment branch on either side carries with it.  It is a constant rather
@@ -480,10 +487,10 @@ B<Examples:>
   #   This is a preview.  Nothing will be written.
   #
   #   lab: would propagate
-  #     control@1a2b3c4 Tune lab  would deliver
+  #     control@1a2b3c4 "Tune lab"
   #       M lab.yml
   #   qa: held, awaiting deployment (lab at control@1a2b3c4)
-  #     control@1a2b3c4 Tune lab  held
+  #     control@1a2b3c4 "Tune lab"  held
   #       H held by lab (lab.yml), lab awaiting deployment
 
 =head2 preview_warnings
@@ -658,7 +665,9 @@ The commit axis reads its words out of the enum the way the environment axis
 reads its own, so the enum is load-bearing on all three axes rather than on
 one of them.  A word from outside it is a defect in whoever wrote the record,
 and the guard names it rather than printing it.  Under a preview C<delivered>
-reads C<would deliver>, and C<held> reads as it stands.
+reads C<would deliver>, and C<held> reads as it stands.  The renderer then
+prints neither C<delivered> nor C<would deliver> on the line (D126); the word
+is still composed here, so the guard still runs on every commit.
 
 A commit carrying no word at all is answered without the guard, because the
 publish writes a word only onto the commits it published.  Under a preview

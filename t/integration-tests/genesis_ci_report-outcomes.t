@@ -110,9 +110,11 @@ subtest 'four routed commits, four lines, delivered or held' => sub {
 
 	my (undef, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
 
-	like($err, qr/\Q@{[substr($due[0], 0, 7)]}\E.*delivered/,
+	# A delivered commit prints no word of its own (D126): its line ends at
+	# its quoted subject, where a held one goes on to say held.
+	like($err, qr/^\s*control\@\Q@{[substr($due[0], 0, 7)]}\E "[^"]*"\s*$/m,
 		'the first is delivered');
-	like($err, qr/\Q@{[substr($due[1], 0, 7)]}\E.*delivered/,
+	like($err, qr/^\s*control\@\Q@{[substr($due[1], 0, 7)]}\E "[^"]*"\s*$/m,
 		'the second is delivered');
 	like($err, qr/\Q@{[substr($due[2], 0, 7)]}\E.*held/, 'the third is held');
 	like($err, qr/\Q@{[substr($due[3], 0, 7)]}\E.*held/,

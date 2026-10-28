@@ -192,6 +192,7 @@ unit-tests/genesis_ci_walk-load_error.t             # an error's reason is its f
 unit-tests/genesis_ci_walk-hold_for.t               # an ancestor's manual flag is the topology node's, read off no environment
 unit-tests/genesis_ci_runfailure-one_line.t         # one line out of a failure, and the width a caller may ask it to fit
 unit-tests/genesis_ci_report-render_run.t           # an error prints whole, and the commit axis reads the enum
+unit-tests/genesis_ci_report-commit_lines.t         # a commit line quotes its subject and says only held
 unit-tests/genesis_ci_status-pull_request_state.t   # the report degrades where no owner and repository pair resolves
 unit-tests/genesis_ci_publish-confirm.t             # the delta is shown three ways, and -y answers the ask alone
 unit-tests/genesis_ci_publish-recheck_control.t     # every refusal the pre-publish control check raises

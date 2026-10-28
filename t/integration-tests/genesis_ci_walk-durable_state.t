@@ -379,7 +379,8 @@ subtest 'two overlapping runs read only durable state' => sub {
 
 	my (undef, $c_err) =
 		run_genesis_in($h, $copy, {answers => ['y']}, 'propagate');
-	like($c_err, qr/\Q@{[substr($due, 0, 7)]}\E.*deliver/,
+	# A delivered commit's line ends at its quoted subject (D126).
+	like($c_err, qr/^\s*control\@\Q@{[substr($due, 0, 7)]}\E "[^"]*"\s*$/m,
 		'the second copy computed the same delivery');
 	is(harness_marker($h, $h->slug('qa')), $due,
 		'it published what copy A could not');

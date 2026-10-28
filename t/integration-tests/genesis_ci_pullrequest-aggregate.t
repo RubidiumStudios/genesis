@@ -181,7 +181,7 @@ subtest 'a gate ends the aggregate and holds what follows' => sub {
 	my $said = unfolded($out, $err);
 	my $short_after = substr($after, 0, 7);
 	like($said,
-		qr/control\@\Q$short_after\E Raise the cf instance count again\s+held/,
+		qr/control\@\Q$short_after\E "Raise the cf instance count again"\s+held/,
 		'the later commit is recorded held');
 	like($said,
 		qr/gate: rotate the uaa signing key before anything after it/,
@@ -279,7 +279,7 @@ subtest 'a gate this environment never receives still ends the aggregate' => sub
 
 	my $said = unfolded($out, $err);
 	like($said,
-		qr/control\@\Q@{[substr($after, 0, 7)]}\E Raise the cf instance count again\s+held/,
+		qr/control\@\Q@{[substr($after, 0, 7)]}\E "Raise the cf instance count again"\s+held/,
 		'the later commit is recorded held');
 };
 

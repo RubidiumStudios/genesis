@@ -60,7 +60,7 @@ subtest 'an unseeded branch takes one squash at the tip' => sub {
 
 	my $ref = 'refs/remotes/origin/'.$h->slug('qa');
 	my ($dry) = unfolded(run_genesis($h, 'propagate', '--dry-run'));
-	like($dry, qr{control\@\Q@{[substr($tip, 0, 7)]}\E tune qa\s+would deliver},
+	like($dry, qr{control\@\Q@{[substr($tip, 0, 7)]}\E "tune qa"},
 		'the preview would deliver the tip');
 	like($dry, qr{squashing $n commits}, 'and names the commits it squashes');
 	is(scalar(commits_on($h, $ref)), 1, 'and delivers nothing');

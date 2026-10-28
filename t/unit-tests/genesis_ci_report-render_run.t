@@ -86,10 +86,12 @@ subtest 'the commit axis takes its words from the enum' => sub {
 		subject        => 'Tune qa',
 	};
 
+	# A delivered commit prints no word, its environment's line already
+	# saying so (D126), but the enum still decides that it is known.
 	my ($out, $died) =
 		rendered(a_record(pending => [{%$commit, outcome => 'delivered'}]));
 	is($died, undef, 'a commit the enum knows renders');
-	like($out, qr/\bdelivered\b/, 'and reads with the enum word');
+	unlike($out, qr/\bdelivered\b/, 'and a delivered one prints no word');
 
 	# A commit nothing wrote a word onto is one that went nowhere, and the
 	# axis says nothing about it rather than reading it the word for the one
