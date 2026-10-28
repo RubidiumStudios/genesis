@@ -1678,15 +1678,23 @@ sub _before_introduction {
 # _load_error - a short reason from a load that raised {{{
 #
 # The record carries one line per environment, because the report prints it
-# beside the environment's name and bail's own text is several decorated
-# lines of which the first substantive one says what went wrong.
+# beside the environment's name.  bail has already labelled and wrapped its
+# text, so the reason is its first paragraph joined back to one line, with
+# the label and any colour taken off (T433).
 sub _load_error {
 	my ($err) = @_;
 	return 'unknown reason' unless defined($err) && length($err);
-	my ($first) = grep {/\S/} split /\n/, "$err";
-	$first //= 'unknown reason';
+	(my $text = "$err") =~ s/\e\[[0-9;]*m//g;
+	my ($first) = grep {/\S/} split /\n\s*\n/, $text;
+	return 'unknown reason' unless defined $first;
+	# A plain die can carry a stack trace with no blank line before it, and
+	# the trace is no part of the reason.
+	$first = join("\n", map {s/ at \S+ line \d+\.?$//r}
+		grep {!/\bcalled at \S+ line \d+/} split /\n/, $first);
+	$first =~ s/\s+/ /g;
+	$first =~ s/^\s*\[[^\]]*\]\s*//;
 	$first =~ s/^\s+|\s+$//g;
-	return $first;
+	return length($first) ? $first : 'unknown reason';
 }
 
 # }}}

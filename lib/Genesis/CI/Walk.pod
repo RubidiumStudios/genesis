@@ -1684,8 +1684,14 @@ B<Examples:>
 A short reason from a load that raised.
 
 The record carries one line per environment, because the report prints it
-beside the environment's name, while the raised text is several decorated
-lines of which the first substantive one says what went wrong.
+beside the environment's name, and a riding commit's reason (D61, noted
+2026-10-28) is printed the same way.  The raised text has usually been
+through C<bail>, which labels it C<[FATAL]> and wraps it to the terminal, so
+its first line can end mid-sentence (T433).  The reason is therefore the
+first paragraph, up to the first blank line, joined back to one line, with
+the label, any colour, and any stack trace a plain C<die> carried (lines
+naming C<called at FILE line N>, and a trailing C<at FILE line N.>) taken
+off.
 
 B<Parameters:>
 
@@ -1697,12 +1703,19 @@ Whatever the failed load left in C<$@>.
 
 =back
 
-B<Returns:> The first substantive line, trimmed, or C<'unknown reason'>.
+B<Returns:> The first paragraph as one line, or C<'unknown reason'>.
+
+B<Errors:> None.
 
 B<Examples:>
 
-  Genesis::CI::Walk::_load_error("\nNo such environment 'qa'\n  at ...\n");
-  # returns "No such environment 'qa'"
+  Genesis::CI::Walk::_load_error("[FATAL] qa declares the kit vault/2.0.1, which the\n".
+    "        commit 0a0f983f96 does not carry.\n\n        A deployment branch ...\n");
+  # returns "qa declares the kit vault/2.0.1, which the commit 0a0f983f96 does not carry."
+
+  Genesis::CI::Walk::_load_error("the blueprint hook exited 1 at x.pl line 3.\n".
+    "\tmain::f() called at x.pl line 9\n");
+  # returns "the blueprint hook exited 1"
 
 =head1 AUTHOR
 
