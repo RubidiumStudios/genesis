@@ -831,20 +831,29 @@ sub list_rulesets {
 }
 
 # }}}
-# set_ruleset - create or replace one named ruleset {{{
-#
-# Returns ($ok, $reason) rather than bailing, because the apply reports
-# what it could not grant and carries on.  A ruleset of the same name is
-# replaced, so a re-run is idempotent and does not accumulate rules.
-sub set_ruleset {
+# get_ruleset - one ruleset, whole {{{
+sub get_ruleset {
+	my ($self, $owner_repo, $id) = @_;
+	bail("Missing owner/repo for get_ruleset") unless $owner_repo;
+	bail("Missing id for get_ruleset")         unless defined $id;
+
+	my ($code, $msg, $data) = $self->_api(
+		"GET", $self->rulesets_url($owner_repo, $id), undef, undef, 0, $self->{creds}
+	);
+	return undef unless $code == 200;
+
+	my $set = eval {load_json($data)};
+	return ref($set) eq 'HASH' ? $set : undef;
+}
+
+# }}}
+# ruleset_change - how a named ruleset stands against the one we would send {{{
+sub ruleset_change {
 	my ($self, $owner_repo, %opts) = @_;
-	bail("Missing owner/repo for set_ruleset") unless $owner_repo;
-	bail("Missing name for set_ruleset")       unless $opts{name};
+	bail("Missing owner/repo for ruleset_change") unless $owner_repo;
+	bail("Missing name for ruleset_change")       unless $opts{name};
 
-	my ($standing) = grep {($_->{name} // '') eq $opts{name}}
-		@{$self->list_rulesets($owner_repo)};
-
-	my $payload = JSON::PP->new->canonical->encode({
+	my $want = {
 		name        => $opts{name},
 		target      => $opts{target} // 'branch',
 		enforcement => 'active',
@@ -855,16 +864,69 @@ sub set_ruleset {
 			},
 		},
 		rules => $opts{rules} || [],
-	});
+	};
+	my %change = (want => $want, added => [], removed => [], changed => []);
+
+	my ($summary) = grep {($_->{name} // '') eq $opts{name}}
+		@{$self->list_rulesets($owner_repo)};
+	return {%change, outcome => 'created'} unless $summary;
+
+	$change{id} = $summary->{id};
+	my $standing = $self->get_ruleset($owner_repo, $summary->{id})
+		or return {%change, outcome => 'updated'};
+
+	my %had  = map {($_->{type} => $_)} @{$standing->{rules} || []};
+	my %will = map {($_->{type} => $_)} @{$want->{rules}};
+	$change{added}   = [grep {!$had{$_}}  map {$_->{type}} @{$want->{rules}}];
+	$change{removed} = [grep {!$will{$_}} map {$_->{type}} @{$standing->{rules} || []}];
+	$change{changed} = [grep {$had{$_} && !_covers($had{$_}, $will{$_})}
+		map {$_->{type}} @{$want->{rules}}];
+
+	my $same = !@{$change{added}} && !@{$change{removed}} && !@{$change{changed}}
+		&& _covers($standing, {map {($_ => $want->{$_})} qw/target enforcement conditions/});
+	return {%change, outcome => ($same ? 'unchanged' : 'updated')};
+}
+
+# }}}
+# _covers - whether what stands holds everything we would send {{{
+sub _covers {
+	my ($have, $want) = @_;
+	if (ref($want) eq 'HASH') {
+		return 0 unless ref($have) eq 'HASH';
+		for my $key (keys %$want) {
+			return 0 unless exists $have->{$key} && _covers($have->{$key}, $want->{$key});
+		}
+		return 1;
+	}
+	if (ref($want) eq 'ARRAY') {
+		return 0 unless ref($have) eq 'ARRAY' && @$have == @$want;
+		my $json = JSON::PP->new->canonical->allow_nonref;
+		my @have = sort map {$json->encode($_)} @$have;
+		my @want = sort map {$json->encode($_)} @$want;
+		return join("\0", @have) eq join("\0", @want);
+	}
+	return (defined $have ? "$have" : '') eq (defined $want ? "$want" : '');
+}
+
+# }}}
+# set_ruleset - create or replace one named ruleset, unless it already stands {{{
+sub set_ruleset {
+	my ($self, $owner_repo, %opts) = @_;
+	bail("Missing owner/repo for set_ruleset") unless $owner_repo;
+	bail("Missing name for set_ruleset")       unless $opts{name};
+
+	my $change = $self->ruleset_change($owner_repo, %opts);
+	return (1, undef, $change) if $change->{outcome} eq 'unchanged';
 
 	my ($code, $msg) = $self->_api(
-		($standing ? "PUT" : "POST"),
-		$self->rulesets_url($owner_repo, $standing ? $standing->{id} : undef),
-		{'Content-Type' => 'application/json'}, $payload, 0, $self->{creds}
+		(defined $change->{id} ? "PUT" : "POST"),
+		$self->rulesets_url($owner_repo, $change->{id}),
+		{'Content-Type' => 'application/json'},
+		JSON::PP->new->canonical->encode($change->{want}), 0, $self->{creds}
 	);
 
-	return (1, undef) if $code == 200 || $code == 201;
-	return (0, sprintf("HTTP %s - %s", $code, $msg));
+	return (1, undef, $change) if $code == 200 || $code == 201;
+	return (0, sprintf("HTTP %s - %s", $code, $msg), $change);
 }
 
 # }}}

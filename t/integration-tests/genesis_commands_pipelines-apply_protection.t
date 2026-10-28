@@ -224,8 +224,13 @@ subtest 'a second run replaces the ruleset the first one wrote' => sub {
 
 	my $h  = make_harness(envs => ['qa'], github => 1);
 	my $gh = $h->gh;
+	push_from($h, 'a', $h->control);
 
 	run_genesis($h, 'pipeline-apply');
+	# A re-run that would send the same rules sends nothing (D124), so the
+	# second run has a change to send.
+	write_env_file($h, 'qa', pipeline => {require_pr => 'true'});
+	push_from($h, 'a', $h->control);
 	my (undef, undef, $exit) = run_genesis($h, 'pipeline-apply');
 	is($exit, 0, 'the second run exits 0');
 

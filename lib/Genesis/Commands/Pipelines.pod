@@ -1430,7 +1430,9 @@ Asks the repository for the protection each branch was derived, sending one
 ruleset per branch and naming it C<genesis-E<lt>branchE<gt>>. The name is what
 a replace matches on, so a re-run replaces the ruleset it wrote last time
 rather than adding another beside it, and an operator reading the repository's
-settings can tell which rules Genesis owns.
+settings can tell which rules Genesis owns. A ruleset that already covers what
+would be sent is not sent at all (D124), and each branch is reported, through
+L</_report_protection>, as protected, updated, or already protected.
 
 A branch the token cannot protect is reported by name with the settings it
 needed, and the run carries on, because a user without admin should still be
@@ -1440,9 +1442,12 @@ Nothing here derives a rule. The caller has already done that through
 C<_protection_rules_for>, so this function takes the client, the pair, and
 the branches it is to send and reads no environment of its own.
 
-Under C<dry_run> it names each branch and the settings that branch would be
-given, sends nothing, and reports nothing missing, because a repository that
-was never asked has refused nothing.
+Under C<dry_run> it reads each standing ruleset through
+C<Service::Github::ruleset_change> and sends nothing. A branch with no
+ruleset is named with the settings it would be given; the rest read as
+would-be updates, naming the rules added, removed or changed, or as already
+protected. It reports nothing missing, because a repository that was never
+asked to write has refused nothing.
 
 B<Parameters:>
 
@@ -1468,8 +1473,8 @@ arrayref that branch is to carry.
 
 =item C<dry_run>
 
-Whether C<--dry-run> was given, in which case each branch and the settings it
-would be given are named and no ruleset is sent.
+Whether C<--dry-run> was given, in which case the standing rulesets are read,
+each branch is reported as it would be, and no ruleset is sent.
 
 =back
 
@@ -1486,7 +1491,8 @@ B<Errors:>
 =item *
 
 C<"Missing owner/repo for set_ruleset"> and C<"Missing name for set_ruleset">
-- raised via C<bail()> through C<Service::Github::set_ruleset>.
+- raised via C<bail()> through C<Service::Github::set_ruleset>, and their
+C<ruleset_change> counterparts under C<dry_run>.
 
 =item *
 
@@ -1510,6 +1516,32 @@ B<Examples:>
   my $missing = _apply_branch_protection($gh, 'genesis/bosh-deployments',
     branches => [{branch => 'qa/bosh', rules => $rules}], dry_run => 1);
   # names qa/bosh and the rule types it would carry, and returns {}
+
+=head2 _report_protection
+
+  _report_protection($branch, $change, $dry_run);
+
+Says what the protection found and did for one branch (D124), from
+C<Service::Github::ruleset_change>'s answer: C<protected> for a new ruleset,
+C<updated protection on> (C<would update protection on> under a dry run) with
+the rule types added, removed and changed, and C<already protected>, in grey
+italics, where nothing was or would be sent. A new ruleset under a dry run is
+reported by the caller, which names the settings it would send.
+
+B<Parameters:> C<$branch>, the branch; C<$change>, the
+C<ruleset_change> answer; C<$dry_run>, whether this is a preview.
+
+B<Returns:> nothing of use.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _report_protection('qa/bosh', {outcome => 'updated', added => ['pull_request']}, 0);
+  # updated protection on qa/bosh, adding pull_request
+
+  _report_protection('control', {outcome => 'unchanged'}, 1);
+  # already protected control
 
 =head2 _manual_pipeline_notice
 
@@ -1586,7 +1618,8 @@ The refresh runs next, so what the remote carries is read from refs this run
 brought down rather than from whatever the clone happened to hold.
 
 Both the clone and the remote are asked whether the branch is there. A branch
-the remote carries is standing and is not touched. A branch the clone holds
+the remote carries is standing, is reported as C<already standing> (D124), and
+is not touched. A branch the clone holds
 and the remote lacks is published rather than refused, since recreating it is
 not allowed and leaving it would keep it from everybody else. Everything else
 is created and then published.
@@ -1703,13 +1736,20 @@ what was applied rather than what was hosted. It runs on an C<--output-dir>
 run too, which writes the compiled artifacts rather than setting the
 pipeline, so that run records what it applied as any other run does.
 
-Where C<dry_run> is true the whole stage is walked and nothing is written.
-The pass loads each environment and works out its dependency set exactly as
-the writing pass does, so a run that would mark an environment incomplete
-says so, and the branch between the two is at the vault call alone. The
-applied record is named in words rather than by its vault address, for the
-reason the C<skip_vault> warning names it that way, which is that composing
-the address is itself a read that a preview has no reason to make.
+Each record is read before it is written (D124). One that matches what would
+be written is reported as C<already recorded>, in grey italics, and not
+rewritten, so the applied record's C<at> keeps the time of the apply that
+last changed it. One that differs is reported as C<updated>, naming what
+moved: the control commit and the provider, from old to new, for the applied
+record; the dependency set and the discovery mark it held, for an
+environment's. One that is absent, or cannot be read, is C<recorded>.
+
+Where C<dry_run> is true the whole stage is walked, the records are read, and
+nothing is written. The pass loads each environment and works out its
+dependency set exactly as the writing pass does, so a run that would mark an
+environment incomplete says so, and the branch between the two is at the
+vault write alone. Each answer reads in its would-be form, C<would record> or
+C<would update>, and C<already recorded> alike.
 
 Where C<skip_vault> is true there is no vault to write to, so it warns,
 names the record it left unwritten and the flag that stopped it, and answers
@@ -1750,8 +1790,8 @@ run says what it left unwritten.
 
 =item C<dry_run>
 
-Whether C<--dry-run> was given, in which case every record the stage would
-write is named and none of them is written.
+Whether C<--dry-run> was given, in which case every record is read and
+reported as it would be, and none of them is written.
 
 =back
 

@@ -205,8 +205,36 @@ if ($kind eq 'other') {
 	if (!$state->{admin}) {
 		$status = 403;
 		$answer = {message => 'Resource not accessible by personal access token'};
+	} elsif (($method eq 'GET' || $method eq 'HEAD') && defined $id) {
+		# One ruleset answers whole, as GitHub's does, with the parameters
+		# GitHub fills in on a pull_request rule that nobody sent, so a
+		# reader that compares what stands against what it would send has to
+		# compare only what it sends.
+		my ($set) = grep {$_->{id} == $id} @{$state->{rulesets} || []};
+		if ($set) {
+			my %defaults = (
+				dismiss_stale_reviews_on_push     => JSON::PP::false,
+				require_code_owner_review         => JSON::PP::false,
+				require_last_push_approval        => JSON::PP::false,
+				required_review_thread_resolution => JSON::PP::false,
+			);
+			$answer = {%$set, rules => [map {
+				$_->{type} eq 'pull_request'
+					? {%$_, parameters => {%defaults, %{$_->{parameters} || {}}}}
+					: $_
+			} @{$set->{rules} || []}]};
+		} else {
+			$status = 404;
+			$answer = {message => 'Not Found'};
+		}
 	} elsif ($method eq 'GET' || $method eq 'HEAD') {
-		$answer = $state->{rulesets} || [];
+		# The listing is summaries, as GitHub's is: no rules and no
+		# conditions, which only the single ruleset carries.
+		$answer = [map {
+			my %summary = %$_;
+			delete @summary{qw/rules conditions/};
+			\%summary;
+		} @{$state->{rulesets} || []}];
 	} else {
 		# A create or a replace lands in the state, so the listing the next
 		# call makes sees what was sent, and a second apply replaces the

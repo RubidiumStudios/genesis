@@ -1505,17 +1505,127 @@ C<"Missing owner/repo for list_rulesets"> -- raised via C<bail()>.
 B<Examples:>
 
   my $sets = $gh->list_rulesets('genesis-community/genesis');
-  # returns an arrayref of every ruleset the repository carries
+  # returns an arrayref of every ruleset the repository carries, each a
+  # summary without its rules or conditions (see get_ruleset)
 
   my ($mine) = grep {$_->{name} eq 'genesis-control'} @$sets;
   # picks out the one ruleset a caller owns
 
+=head2 get_ruleset
+
+  my $set = $gh->get_ruleset($owner_repo, $id);
+
+One ruleset, whole. GitHub's listing carries only each ruleset's summary, so
+its rules and conditions are read here, by id.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$owner_repo>
+
+The repository in C<owner/repo> form. Required.
+
+=item C<$id>
+
+The ruleset's id, from L</list_rulesets>. Required.
+
+=back
+
+B<Returns:> the ruleset as GitHub answers it, a hashref carrying C<rules>,
+C<conditions>, C<enforcement> and C<target> among others; or C<undef> where
+the token may not read it, it is gone, or the answer is not JSON.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for get_ruleset"> and C<"Missing id for get_ruleset">
+-- raised via C<bail()>.
+
+=back
+
+B<Examples:>
+
+  my $set = $gh->get_ruleset('genesis-community/genesis', 7);
+  # returns {id => 7, name => 'genesis-qa/bosh', rules => [...], ...}
+
+  my $set = $gh->get_ruleset('genesis-community/genesis', 99);
+  # returns undef for a ruleset that does not exist
+
+=head2 ruleset_change
+
+  my $change = $gh->ruleset_change($owner_repo, %opts);
+
+How the named ruleset stands against the one L</set_ruleset> would send for
+the same options, read and never written, so a preview and a writing run
+answer alike (D124).
+
+The standing ruleset covers what would be sent when every key sent is there
+with the same value; keys GitHub fills in that nothing sent, such as a
+C<pull_request> rule's C<dismiss_stale_reviews_on_push>, are not compared, so
+GitHub's own defaults never read as a change. Lists compare as sets.
+
+B<Parameters:> as L</set_ruleset>.
+
+B<Returns:> a hashref:
+
+=over 4
+
+=item C<outcome>
+
+C<created> where no ruleset of the name stands; C<unchanged> where the
+standing one covers what would be sent; C<updated> otherwise, including a
+standing ruleset that could not be read whole.
+
+=item C<added>, C<removed>, C<changed>
+
+Arrayrefs of rule types: sent but not standing, standing but not sent, and
+standing with different parameters. All empty for C<created>, and for an
+C<updated> whose difference is in the target, enforcement or conditions, or
+that could not be read.
+
+=item C<id>
+
+The standing ruleset's id, absent for C<created>.
+
+=item C<want>
+
+The ruleset body that would be sent.
+
+=back
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Missing owner/repo for ruleset_change"> and C<"Missing name for
+ruleset_change"> -- raised via C<bail()>.
+
+=back
+
+B<Examples:>
+
+  my $change = $gh->ruleset_change('genesis-community/genesis',
+    name     => 'genesis-qa/bosh',
+    patterns => ['qa/bosh'],
+    rules    => [{type => 'non_fast_forward'}, {type => 'pull_request',
+                 parameters => {required_approving_review_count => 1}}]);
+  # returns {outcome => 'updated', added => ['pull_request'], ...}
+  # where the standing ruleset holds non_fast_forward alone
+
 =head2 set_ruleset
 
-  my ($ok, $reason) = $gh->set_ruleset($owner_repo, %opts);
+  my ($ok, $reason, $change) = $gh->set_ruleset($owner_repo, %opts);
 
 Creates the named ruleset, or replaces the one of that name where it already
-stands, so a re-run is idempotent and does not accumulate rules.
+stands, so a re-run does not accumulate rules; and sends nothing where the
+standing one already covers what would be sent (D124), so an unchanged re-run
+writes nothing.
 
 B<Parameters:>
 
@@ -1550,9 +1660,11 @@ C<parameters>.
 
 =back
 
-B<Returns:> C<($ok, $reason)> rather than bailing, so the caller can report
-what it could not grant and carry on. C<$reason> is undefined where C<$ok>
-is true.
+B<Returns:> C<($ok, $reason, $change)> rather than bailing, so the caller can
+report what it could not grant and carry on. C<$reason> is undefined where
+C<$ok> is true. C<$change> is L</ruleset_change>'s answer, read before the
+write, so the caller can say whether the ruleset was created, updated, or
+already in place.
 
 B<Errors:>
 
@@ -1567,15 +1679,16 @@ C<"Missing owner/repo for set_ruleset"> and C<"Missing name for set_ruleset">
 
 B<Examples:>
 
-  my ($ok, $reason) = $gh->set_ruleset('genesis-community/genesis',
+  my ($ok, $reason, $change) = $gh->set_ruleset('genesis-community/genesis',
     name     => 'genesis-qa/bosh',
     patterns => ['qa/bosh'],
     rules    => [{type => 'non_fast_forward'}]);
-  # returns (1, undef) once the branch blocks force pushes
+  # returns (1, undef, {outcome => 'created', ...}) once the branch blocks
+  # force pushes, and (1, undef, {outcome => 'unchanged', ...}) on a re-run
 
   my ($ok, $reason) = $gh->set_ruleset('genesis-community/genesis',
     name => 'genesis-control', patterns => ['control'], rules => []);
-  # returns (0, 'HTTP 403 - Forbidden') for a token without admin
+  # returns (0, 'HTTP 403 - Forbidden', {...}) for a token without admin
 
 =head1 INTERNAL METHODS
 
@@ -1584,9 +1697,10 @@ B<Examples:>
   my ($code, $line, $body, $headers, $err) = $gh->_api($method, $url, @curl_args);
 
 One API call, judged by the host's answer (D119, noted 2026-10-13). It takes
-and answers what C<Genesis::curl> does, and the seven calls the pipeline makes,
+and answers what C<Genesis::curl> does, and the eight calls the pipeline makes,
 L</get_authorized_user>, L</list_prs>, L</pr_reviews>, L</create_pr>,
-L</update_pr>, L</list_rulesets> and L</set_ruleset>, go through it.
+L</update_pr>, L</list_rulesets>, L</get_ruleset> and L</set_ruleset>, go
+through it.
 
 A client built without a C<host>, or for github.com, passes every answer
 through untouched. For any other host:
@@ -1702,6 +1816,32 @@ B<Examples:>
 
   $gh->_attach_review('genesis-community/genesis', $pr);
   # $pr->{review} is undef, where the only review was a comment
+
+=head2 _covers
+
+  my $same = Service::Github::_covers($have, $want);
+
+A function, not a method. Whether C<$have> holds everything C<$want> does:
+every key of a hash in C<$want> is in C<$have> with a covering value, keys
+only C<$have> carries are ignored, two lists hold the same members in any
+order, and two scalars stringify alike, so a JSON boolean and a Perl C<1>
+agree. This is how L</ruleset_change> lets GitHub's own defaults stand
+without reading them as a change.
+
+B<Parameters:> C<$have>, what stands; C<$want>, what would be sent.
+
+B<Returns:> 1 or 0.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _covers({type => 'pull_request', parameters => {a => 1, b => 0}},
+          {type => 'pull_request', parameters => {a => 1}});
+  # returns 1, since b was never sent
+
+  _covers(['squash', 'rebase'], ['rebase']);
+  # returns 0
 
 =head1 SEE ALSO
 

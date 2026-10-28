@@ -76,7 +76,9 @@ subtest 'the dry run previews the whole command and writes nothing' => sub {
 
 	is_deeply(branches_on_r($h), [$h->control],
 		'no branch was created');
-	ok(!(grep {($_->{url} // '') =~ m{/rulesets}} gh_calls($gh)),
+	# The preview reads the standing rulesets (D124), so only a write counts.
+	ok(!(grep {($_->{url} // '') =~ m{/rulesets} && ($_->{method} // '') =~ /^(?:POST|PUT)$/}
+			gh_calls($gh)),
 		'no ruleset was sent');
 	no_secret($h->applied_path . ':provider',
 		'no record was written');

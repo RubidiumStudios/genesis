@@ -1504,7 +1504,7 @@ sub _apply_init_branches {
 		my $branch = $top->branch_for($name);
 
 		if ($remote && $git->remote_branch_exists($branch)) {
-			info("  #Gi{standing} #C{%s}", $branch);
+			info("  #Ki{already standing} #C{%s}", $branch);
 			push @{$report{standing}}, $branch;
 			next;
 		}
@@ -1616,26 +1616,30 @@ sub _apply_branch_protection {
 
 	my %missing;
 	for my $spec (@{$opts{branches} || []}) {
-		# A dry run sends nothing, and the rules are named rather than
-		# counted, because which settings a branch is about to be given is
-		# the whole of what an operator is previewing here.  Nothing can be
-		# reported missing, since the repository was never asked, so the
-		# preview leaves the missing set empty.
-		if ($opts{dry_run}) {
-			info("  #Y{would protect} #C{%s} with %s",
-				$spec->{branch},
-				join(', ', map {$_->{type}} @{$spec->{rules} || []}));
-			next;
-		}
-
-		my ($ok, $reason) = $gh->set_ruleset($owner_repo,
+		my %ruleset = (
 			name     => sprintf('genesis-%s', $spec->{branch}),
 			target   => 'branch',
 			patterns => [$spec->{branch}],
 			rules    => $spec->{rules},
 		);
+
+		# A dry run reads what stands and sends nothing, so nothing can be
+		# reported missing and the preview leaves the missing set empty.
+		if ($opts{dry_run}) {
+			my $change = $gh->ruleset_change($owner_repo, %ruleset);
+			if ($change->{outcome} eq 'created') {
+				info("  #Y{would protect} #C{%s} with %s",
+					$spec->{branch},
+					join(', ', map {$_->{type}} @{$spec->{rules} || []}));
+			} else {
+				_report_protection($spec->{branch}, $change, 1);
+			}
+			next;
+		}
+
+		my ($ok, $reason, $change) = $gh->set_ruleset($owner_repo, %ruleset);
 		if ($ok) {
-			info("  #G{protected} #C{%s}", $spec->{branch});
+			_report_protection($spec->{branch}, $change, 0);
 			next;
 		}
 
@@ -1650,6 +1654,27 @@ sub _apply_branch_protection {
 	}
 
 	return \%missing;
+}
+
+# }}}
+# _report_protection - say what the protection found and did for one branch {{{
+sub _report_protection {
+	my ($branch, $change, $dry_run) = @_;
+
+	if ($change->{outcome} eq 'unchanged') {
+		info("  #Ki{already protected} #C{%s}", $branch);
+	} elsif ($change->{outcome} eq 'created') {
+		info("  #G{protected} #C{%s}", $branch);
+	} else {
+		my @what = (
+			(map {"adding $_"}   @{$change->{added}   || []}),
+			(map {"removing $_"} @{$change->{removed} || []}),
+			(map {"changing $_"} @{$change->{changed} || []}),
+		);
+		info("  %s #C{%s}%s",
+			$dry_run ? '#Y{would update protection on}' : '#G{updated protection on}',
+			$branch, @what ? ', '.join(', ', @what) : '');
+	}
 }
 
 # }}}
@@ -1701,21 +1726,42 @@ sub _apply_records {
 			: '(undefined)'
 	) unless ($opts{control_commit} // '') =~ m/^[0-9a-f]{40}$/;
 
-	# A dry run branches at the vault call and nowhere else, so the preview
-	# walks the same stage the writing run walks and differs only in what it
-	# does when it gets there.  The record is named in words rather than by
-	# its vault address, for the reason the skip-vault warning names it that
-	# way, which is that composing the address is itself a read and a
-	# preview should not make one to describe a write it is not making.
-	if ($opts{dry_run}) {
-		info("  #Y{would record} the applied pipeline");
+	# A record that cannot be read is answered as absent, so the writing run
+	# writes it and the dry run says it would.
+	my $had = eval {$top->applied_record} || {};
+	my @moved = (
+		(($had->{control_commit} // '') ne $opts{control_commit}
+			? sprintf('moving control from #C{%s} to #C{%s}',
+				substr($had->{control_commit} // '', 0, 8), substr($opts{control_commit}, 0, 8))
+			: ()),
+		(($had->{provider} // '') ne ($opts{provider} // '')
+			? sprintf('moving the provider from #C{%s} to #C{%s}',
+				$had->{provider} // '', $opts{provider} // '')
+			: ()),
+	);
+	if (!%$had) {
+		if ($opts{dry_run}) {
+			info("  #Y{would record} the applied pipeline");
+		} else {
+			$top->applied_record(
+				control_commit => $opts{control_commit},
+				provider       => $opts{provider},
+			);
+			info("  #G{recorded} the applied pipeline at #C{%s}",
+				$top->applied_record_path);
+		}
+	} elsif (!@moved) {
+		info("  #Ki{already recorded} the applied pipeline at #C{%s}",
+			$top->applied_record_path);
+	} elsif ($opts{dry_run}) {
+		info("  #Y{would update} the applied pipeline, %s", join(', ', @moved));
 	} else {
 		$top->applied_record(
 			control_commit => $opts{control_commit},
 			provider       => $opts{provider},
 		);
-		info("  #G{recorded} the applied pipeline at #C{%s}",
-			$top->applied_record_path);
+		info("  #G{updated} the applied pipeline at #C{%s}, %s",
+			$top->applied_record_path, join(', ', @moved));
 	}
 
 	# One pass over the topology computes each environment's set and writes
@@ -1757,24 +1803,35 @@ sub _apply_records {
 			);
 		}
 
-		# The same branch again, at the same place.  The set was computed
-		# above whichever way this run is going, so a dry run reports the
-		# dependencies it counted and the incomplete mark it would have
-		# written, and only the write itself is withheld.
+		# The set was computed above whichever way this run is going, so a
+		# dry run reports what it counted and only the write is withheld.
+		my $discovery = $complete ? 'complete' : 'incomplete';
+		my $counted   = sprintf("#C{%s} with %d dependenc%s%s",
+			$name, scalar(@$deps), (@$deps == 1 ? 'y' : 'ies'),
+			($complete ? '' : ' #Y{(discovery incomplete)}'));
+		my $was = eval {$env->pipeline_record};
+		my @was = $was ? (
+			(join(',', @{$was->{dependencies} || []}) ne join(',', @$deps)
+				? sprintf('was %d: %s', scalar(@{$was->{dependencies} || []}),
+					join(', ', @{$was->{dependencies} || []}) || 'none')
+				: ()),
+			($was->{discovery} ne $discovery
+				? "discovery was $was->{discovery}" : ()),
+		) : ();
+
+		if ($was && !@was) {
+			info("  #Ki{already recorded} %s", $counted);
+			next;
+		}
 		if ($opts{dry_run}) {
-			info("  #Y{would record} #C{%s} with %d dependenc%s%s",
-				$name, scalar(@$deps), (@$deps == 1 ? 'y' : 'ies'),
-				($complete ? '' : ' #Y{(discovery incomplete)}'));
+			info("  #Y{%s} %s%s", $was ? 'would update' : 'would record',
+				$counted, @was ? ' ('.join('; ', @was).')' : '');
 			next;
 		}
 
-		$env->pipeline_record(
-			dependencies => $deps,
-			discovery    => ($complete ? 'complete' : 'incomplete'),
-		);
-		info("  #G{recorded} #C{%s} with %d dependenc%s%s",
-			$name, scalar(@$deps), (@$deps == 1 ? 'y' : 'ies'),
-			($complete ? '' : ' #Y{(discovery incomplete)}'));
+		$env->pipeline_record(dependencies => $deps, discovery => $discovery);
+		info("  #G{%s} %s%s", $was ? 'updated' : 'recorded',
+			$counted, @was ? ' ('.join('; ', @was).')' : '');
 	}
 
 	return 1;
