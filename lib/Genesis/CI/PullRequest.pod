@@ -115,6 +115,12 @@ stood at the delivered commit. The pull request carries that body verbatim,
 so the commit and the pull request can never disagree about what is being
 proposed.
 
+A first delivery is a squash (D125), whose newest entry carries C<squashed>,
+and whose history may run to thousands of commits, so its body names their
+number and the tip alone, C<Squashes N control commits into the first
+delivery, ending at:>, with no per-commit stat; the reviewer reads the whole
+set in the pull request's diff against C<init>.
+
 The sha in the subject is abbreviated, which is the form every other builder
 in the tree hands the marker. Nothing downstream loses by it:
 C<Genesis::CI::Marker::in_text> parses four to forty hex digits, so the

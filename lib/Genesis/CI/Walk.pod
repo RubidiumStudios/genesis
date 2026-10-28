@@ -1184,6 +1184,16 @@ A coderef called as C<< $hold_check->($commit, $files) >>, answering a
 hashref where the commit is held and undefined where it is not.  L</plan>
 passes one that asks the environment's ancestors through L</hold_for>.
 
+=item C<squash>
+
+Optional.  True for a branch that carries no marker, which L</plan> passes
+where neither the branch nor the squash recovery names one.  The first
+delivery is then one squash at the newest due commit (D125, T432): no set is
+read but that commit's, the whole of it routes, every path triggering since
+the branch holds none, and the entry carries C<squashed>, the number of due
+commits it stands for.  The gate and C<hold_check> are asked of it as of any
+commit.
+
 =back
 
 B<Returns:> The record it was given, with C<pending> and C<held> filled in.

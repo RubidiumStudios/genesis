@@ -458,6 +458,8 @@ sub render_run {
 # _render_rides - the commits whose sets could not be read, riding along {{{
 sub _render_rides {
 	my ($entry) = @_;
+	info "      #Ci{squashing %d commits} into the first delivery",
+		$entry->{squashed} if $entry->{squashed};
 	info "      #Yi{with control\@%s} %s: its set could not be read at that ".
 	     "commit, so it rides with this one (%s)",
 		substr($_->{control_commit}, 0, 7), $_->{subject}, $_->{reason}

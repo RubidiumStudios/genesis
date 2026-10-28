@@ -85,10 +85,25 @@ sub aggregate_message {
 		Genesis::CI::Marker::build(
 			$git->sha($newest->{control_commit}, short => 1), $env->name),
 		'',
-		sprintf('Carries %d control commit%s:',
-			scalar(@$commits), @$commits == 1 ? '' : 's'),
-		'',
 	);
+
+	# A first delivery is a squash (D125), whose history could run to
+	# thousands of commits, so the body names their number and the tip, and
+	# the reviewer reads the whole set in the diff against init.
+	if ($newest->{squashed}) {
+		push @lines,
+			sprintf('Squashes %d control commit%s into the first delivery, '.
+				'ending at:', $newest->{squashed},
+				$newest->{squashed} == 1 ? '' : 's'),
+			'',
+			sprintf('%s %s', $git->sha($newest->{control_commit}, short => 1),
+				$newest->{subject}),
+			'';
+		$commits = [];
+	} else {
+		push @lines, sprintf('Carries %d control commit%s:',
+			scalar(@$commits), @$commits == 1 ? '' : 's'), '';
+	}
 
 	for my $commit (@$commits) {
 		push @lines, sprintf('%s %s',

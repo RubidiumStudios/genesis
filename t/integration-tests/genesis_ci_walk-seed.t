@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
-# Proves T145 and T146: an unseeded branch is walked from E, its first
-# delivery deletes init and carries a marker, and E is holdable like any
-# other commit.
+# Proves T145 and T146, as D125 revised them: an unseeded branch's due
+# commits run from E, its first delivery is one squash at the tip that deletes
+# init and carries a marker, and that squash is holdable like any commit.
 use strict;
 use warnings;
 use utf8;
@@ -69,15 +69,16 @@ subtest 'the walk starts at E and the first delivery deletes init' => sub {
 	my (undef, undef, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 	is($exit, 0, 'the run succeeded');
 
+	# One delivery, a squash of E and the commit after it at the tip (D125).
 	my ($log) = run({dir => $h->a}, 'git', 'log', '--format=%H',
 		'refs/remotes/origin/'.$h->slug('qa'));
 	my @commits = grep {/\S/} split /\n/, $log;
-	is(scalar(@commits), 3, 'the init commit plus two deliveries');
+	is(scalar(@commits), 2, 'the init commit plus one delivery');
 
 	my $first = $commits[-2];
 	like(scalar(run({dir => $h->a}, 'git', 'log', '--format=%s', '-1', $first)),
-		qr/\Qcontrol\E\@\Q@{[substr($e, 0, 7)]}\E/,
-		'the first delivery names E and not the tip');
+		qr/\Qcontrol\E\@\Q@{[substr($later, 0, 7)]}\E/,
+		'the delivery names the tip, E squashed into it');
 
 	my @files = @{tree_of($h->a, 'refs/remotes/origin/'.$h->slug('qa'))};
 	ok(!(grep {$_ eq 'init'} @files), 'the first delivery deleted init');

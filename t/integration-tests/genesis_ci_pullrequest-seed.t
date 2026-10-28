@@ -69,8 +69,9 @@ subtest 'the first pull request is the seed' => sub {
 
 	my ($body) = run({dir => $h->a}, 'git', 'log', '-1', '--format=%b',
 		"origin/$pr");
-	like($body, qr/Carries 2 control commits:/,
-		'and carries everything due from E onward');
+	# A first delivery is one squash of everything due from E onward (D125).
+	like($body, qr/Squashes 2 control commits into the first delivery/,
+		'and squashes everything due from E onward');
 
 	my @files = $git->ls_tree("origin/$pr", '.');
 	ok(!(grep {$_ eq 'init'} @files), 'the first delivered commit deleted init');

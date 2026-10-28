@@ -681,13 +681,13 @@ sub walk_env {
 	my $held_by;
 	my (@unread, $unread_error, $readable_after);
 	my $place = sub {
-		my ($commit, $routed) = @_;
+		my ($commit, $routed, %with) = @_;
 		my $files = $routed->{triggering};
 
 		# A commit whose set could not be read rides with this one, whose
 		# delivery mirrors a set that carries its change (D61, noted
 		# 2026-10-28), and whatever this commit meets, it meets too.
-		my %rides = @unread ? (rides => [splice @unread]) : ();
+		my %rides = (%with, @unread ? (rides => [splice @unread]) : ());
 
 		if ($held_by) {
 			push @{$record->{held}}, {
@@ -763,6 +763,19 @@ sub walk_env {
 				: ()),
 		};
 	};
+
+	# A branch with no marker takes its first delivery as one squash at the
+	# tip (D125): no set is read but the tip's, and the whole of it triggers,
+	# since the branch holds none of it.  The holds still ask of the tip.
+	if ($args{squash} && @due) {
+		my $tip   = $due[-1];
+		my $kinds = $env->_propagation_file_kinds_at($tip->{sha}, git => $git);
+		$place->($tip, {
+			triggering => [sort grep {$kinds->{$_}}  keys %$kinds],
+			carried    => [sort grep {!$kinds->{$_}} keys %$kinds],
+		}, squashed => scalar(@due));
+		return $record;
+	}
 
 	for my $commit (@due) {
 		# The routing question is asked before the hold is, because a commit
@@ -1513,6 +1526,7 @@ sub plan {
 				control    => $control_sha,
 				base       => $base,
 				gate       => $gate,
+				squash     => !defined($marker),
 				hold_check => sub {
 					my ($commit, $files) = @_;
 					return hold_for(

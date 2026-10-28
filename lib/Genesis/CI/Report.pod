@@ -765,7 +765,9 @@ B<Examples:>
 
 Names, under a pending or held commit, each commit riding with it because its
 own set could not be read (D61, noted 2026-10-28): its short sha, its subject,
-and the reason, so the operator sees that it was carried and why.
+and the reason, so the operator sees that it was carried and why.  A first
+delivery's squash (D125) is named here too, as the number of commits it
+squashes, read from the entry's C<squashed>.
 
 B<Parameters:> C<$entry>, a pending or held entry, whose C<rides> may be
 absent.

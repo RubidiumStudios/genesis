@@ -124,12 +124,13 @@ subtest 'a dry run reads the topology control carries' => sub {
 
 	like($err, qr{^\s*qa:\s+would propagate}m,
 		'the preview names the environment only control knows about');
-	# Two, because nothing has been delivered to qa, so the seeding commit
-	# is due beside the one this row laid down.  The count is taken from qa's
-	# own block, since lab has never been delivered to either.
+	# Nothing has been delivered to qa, so the seeding commit is due beside
+	# the one this row laid down, and a first delivery squashes the two
+	# (D125).  The count is taken from qa's own block, since lab has never
+	# been delivered to either.
 	my ($block) = $err =~ /^\s*qa: would propagate\n(.*)\z/ms;
-	is(scalar(() = ($block // '') =~ /would deliver/g), 2,
-		'both of the commits due to it are previewed');
+	like($block // '', qr/squashing 2 commits/,
+		'both of the commits due to it are previewed, as one squash');
 	unlike($err, qr/No environments with pipeline metadata found/,
 		'the topology was not read off the feature branch');
 };

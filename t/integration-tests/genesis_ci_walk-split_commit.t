@@ -27,9 +27,9 @@ sub env_file {
 	       "genesis:\n  env: qa\n";
 }
 
-# A repository whose qa names compiled/0.0.1, carried, with qa/bosh cut and
-# never delivered to; then the commit that bumps qa to compiled/0.0.2 without
-# its archive.
+# A repository whose qa names compiled/0.0.1, carried, with qa/bosh already
+# delivered to, since a first delivery is a squash that reads no history
+# (D125); then the commit that bumps qa to compiled/0.0.2 without its archive.
 sub broken_bump {
 	# A dev kit as well, so the commit that introduced qa.yml, on the dev
 	# kit, is readable and the bump is the only commit that is not.
@@ -41,6 +41,8 @@ sub broken_bump {
 	fixture_applied($h, control => $h->git('a')->sha($h->control));
 	fixture_pipeline_record($h, 'qa');
 	init_branch($h, 'qa');
+	run_genesis($h, {answers => ['y']}, 'propagate');
+	refresh($h, 'a');
 
 	my $broken = commit_on_control($h, files => {'qa.yml' => env_file('0.0.2')},
 		message => 'bump qa to compiled 0.0.2', push => 1);
@@ -48,8 +50,9 @@ sub broken_bump {
 }
 
 subtest 'a commit whose fix follows it rides with the fix' => sub {
-	# Five rows, and one more for the run's own restoration assertion.
-	plan tests => 6;
+	# Five rows, and one more for each of the two runs' restoration
+	# assertions, the seeding run's included.
+	plan tests => 7;
 
 	my ($h, $broken) = broken_bump();
 	install_compiled_kit($h, "$kits/compiled-0.0.2.tar.gz");
@@ -73,11 +76,14 @@ subtest 'a commit whose fix follows it rides with the fix' => sub {
 };
 
 subtest 'a newest due commit that cannot be read still fails' => sub {
-	# Three rows, and one more for the run's own restoration assertion.
-	plan tests => 4;
+	# Three rows, and one more for each of the two runs' restoration
+	# assertions, the seeding run's included.
+	plan tests => 5;
 
 	my ($h, $broken) = broken_bump();
 	refresh($h, 'a');
+	my $ref    = 'refs/remotes/origin/'.$h->slug('qa');
+	my ($tip)  = run({dir => $h->a}, 'git', 'rev-parse', $ref);
 
 	my ($out, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 	my $said = unfolded($out, $err);
@@ -85,8 +91,9 @@ subtest 'a newest due commit that cannot be read still fails' => sub {
 	# load, before any set is read; what the row holds is that it fails.
 	isnt($exit, 0, 'the run does not succeed');
 	like($said, qr{\bqa: failed\b}, 'the environment fails');
-	my @files = @{tree_of($h->a, 'refs/remotes/origin/'.$h->slug('qa'))};
-	ok((grep {$_ eq 'init'} @files), 'and nothing was delivered');
+	refresh($h, 'a');
+	my ($now) = run({dir => $h->a}, 'git', 'rev-parse', $ref);
+	is($now, $tip, 'and nothing was delivered');
 };
 
 done_testing;

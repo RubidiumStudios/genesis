@@ -211,8 +211,11 @@ subtest "control's own first commit is summarised too" => sub {
 		"origin/$pr");
 	like($body, qr/seed the control branch/,
 		'the body carries an entry for the first commit');
-	like($body, qr/prod\.yml\s+\|\s+\d+ \+/,
-		'summarised against nothing, which is what it was added to');
+	# A first delivery is a squash (D125), whose body names the commits it
+	# squashes and the tip, here control's root commit, with no per-commit
+	# stat; the reviewer reads the set in the diff against init.
+	like($body, qr/Squashes 1 control commit into the first delivery/,
+		'as the tip of the first delivery\'s squash');
 };
 
 # A gate need not be a commit this environment receives.  gate_state reads the
