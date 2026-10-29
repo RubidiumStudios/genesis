@@ -41,7 +41,9 @@ sub branch_get  {
 }
 
 # What fly validate-pipeline refuses: a step naming no resource, a passed
-# naming no job or a job that does not read that resource, an unknown type.
+# naming no job or a job that does not read that resource, an unknown type,
+# and two gets of one name in a job.  A step names its resource by resource
+# where it has one, and by its own name otherwise, as Concourse reads it.
 sub pipeline_faults {
 	my ($p) = @_;
 	my %res   = map {($_->{name} => $_)} @{$p->{resources} || []};
@@ -49,14 +51,17 @@ sub pipeline_faults {
 		map {{name => $_}} qw/git registry-image time s3/;
 	my %reads;
 	for my $job (@{$p->{jobs} || []}) {
-		$reads{$job->{name}}{$_->{get}} = 1 for grep {$_->{get}} plan_steps($job);
+		$reads{$job->{name}}{$_->{resource} // $_->{get}} = 1 for grep {$_->{get}} plan_steps($job);
 	}
 	my @faults;
 	push @faults, "resource $_->{name} has unknown type $_->{type}"
 		for grep {!$types{$_->{type}}} values %res;
 	for my $job (@{$p->{jobs} || []}) {
+		my %got;
+		push @faults, "$job->{name}: get $_->{get} repeated name"
+			for grep {$got{$_->{get}}++ == 1} grep {$_->{get}} plan_steps($job);
 		for my $step (plan_steps($job)) {
-			my $r = $step->{get} // $step->{put} // next;
+			my $r = $step->{resource} // $step->{get} // $step->{put} // next;
 			push @faults, "$job->{name} names no resource $r" unless $res{$r};
 			for my $up (@{$step->{passed} || []}) {
 				push @faults, "$job->{name}: passed $up is no job reading $r"
