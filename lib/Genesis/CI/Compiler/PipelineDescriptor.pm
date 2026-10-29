@@ -733,6 +733,9 @@ sub _notify_job_name {
 # variables are written literally and become the posting build's own URL.
 use constant JOBS_URL =>
 	'$ATC_EXTERNAL_URL/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs';
+# The notify task's summary, an output of its own, as the staged put reads it.
+use constant SUMMARY_OUTPUT => 'summary';
+use constant SUMMARY_FILE   => 'summary/summary.txt';
 sub _build_link {
 	return '<'.JOBS_URL.'/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_JOB_NAME #$BUILD_NAME>';
 }
@@ -752,16 +755,23 @@ sub _notify_job {
 	my $name   = _notify_job_name($alias);
 
 	# The branch the deploy reads is the only input and trigger (contract
-	# c13); pending-changes says what deploying it would change (e12, D123).
-	my $task_cfg = $self->_task_config($ast, $env, $alias, $trigger_from, $wf_data,
-		{ cli_args => [$env, 'pending-changes'] });
+	# c13); pending-changes says what deploying it would change (e12, D123),
+	# and writes its summary to an output the staged message sends (D122).
+	# The task runs from the root, so the output is reached back up from it.
+	my $root     = ($ast->integrations->{source_control} || {})->{root} || '.';
+	my $up       = join('/', ('..') x (1 + ($root eq '.' ? 0 : scalar(grep {length} split m{/}, $root))));
+	my $task_cfg = $self->_task_config($ast, $env, $alias, $trigger_from, $wf_data, {
+		cli_args => [$env, 'pending-changes', '--summary-file', "$up/".SUMMARY_FILE],
+		outputs  => [{ name => SUMMARY_OUTPUT }],
+	});
 
 	my $pipeline_name = $ast->metadata->{name} || 'genesis-pipeline';
 	my $notif = $self->_notification_step($ast,
-		"$pipeline_name: Changes are staged to be deployed to $env-$deploy_type, ".
-		"see "._build_link()." for change summary, then schedule and run a deploy via ".
+		"$pipeline_name: Changes are staged to be deployed to $env-$deploy_type.\n".
+		"\$TEXT_FILE_CONTENT\n".
+		"See "._build_link()." for the change summary, then schedule and run a deploy via ".
 		_job_link("deploy-$alias"),
-		{ env => $env });
+		{ env => $env, text_file => SUMMARY_FILE });
 
 	my @plan = (
 		{ in_parallel => [{ get => "$alias-branch", trigger => JSON::PP::true }] },
@@ -1460,6 +1470,7 @@ sub _task_config {
 		run            => { path => '.genesis/bin/genesis', args => $cli,
 		                    dir  => $input . ($root eq '.' ? '' : "/$root") },
 		inputs         => \@inputs,
+		($opts->{outputs} ? (outputs => $opts->{outputs}) : ()),
 	};
 }
 
@@ -1624,6 +1635,7 @@ sub _notification_step {
 	# An app's webhook fixes its channel, name and icon; only a legacy one
 	# honours them, so each is sent only where written.
 	my %params = (text => $text);
+	$params{text_file} = $opts->{text_file} if $opts->{text_file};
 	$params{channel}  = $slack->{channel}  if $slack->{channel};
 	$params{username} = $slack->{username} if $slack->{username};
 	my $icon = $slack->{icon_url} || $slack->{icon};

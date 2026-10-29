@@ -98,8 +98,15 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 
 	my $task = task_step($nj) || {};
 	my $dtask = task_step(pipeline_job($p, $DEPLOY)) || {};
-	is_deeply($task->{config}{run}{args}, [$ENV_NAME, 'pending-changes'],
-		"e12: it runs pending-changes, never the deploy's dry run (D123)");
+	my @args = @{$task->{config}{run}{args} || []};
+	is_deeply([@args[0..2]], [$ENV_NAME, 'pending-changes', '--summary-file'],
+		"e12: it runs pending-changes, never the deploy's dry run (D123), writing its summary (T446)");
+	# The summary path is relative to the run directory, and has to land in
+	# the task's own output, at the task's working directory, to be sent.
+	my @at = grep {length} split m{/}, ($task->{config}{run}{dir} // '')."/".($args[3] // '');
+	my @resolved; for (@at) {$_ eq '..' ? pop @resolved : push @resolved, $_}
+	is(join('/', @resolved), 'summary/summary.txt', 'T446: into the summary output');
+	is_deeply($task->{config}{outputs}, [{name => 'summary'}], 'T446: which the task declares');
 	is_deeply([@{$task->{config}{run} || {}}{qw/dir path/}], [@{$dtask->{config}{run} || {}}{qw/dir path/}],
 		"e12: from the deploy's directory and binary");
 	is_deeply($task->{config}{image_resource}, $dtask->{config}{image_resource}, "e12: on its image");
@@ -112,10 +119,13 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 	my $build = "<$at/\$BUILD_JOB_NAME/builds/\$BUILD_NAME|\$BUILD_JOB_NAME #\$BUILD_NAME>";
 	my @put = slack_puts($nj->{plan});
 	is(scalar(@put), 1, 'd9: its plan puts to slack once');
+	# T446 (D122's note of 2026-10-29): the summary between the staged line
+	# and the two links T443 set, sent from the task's output.
 	is($put[0] && $put[0]{params}{text},
-		"$TYPE: Changes are staged to be deployed to $DN, see $build for change summary, ".
-		"then schedule and run a deploy via <$at/$DEPLOY|$DEPLOY>",
-		'd9: the staged text, linking its build and the deploy job (T443)');
+		"$TYPE: Changes are staged to be deployed to $DN.\n\$TEXT_FILE_CONTENT\n".
+		"See $build for the change summary, then schedule and run a deploy via <$at/$DEPLOY|$DEPLOY>",
+		'd9: the staged text, its summary, linking its build and the deploy job (T443, T446)');
+	is($put[0] && $put[0]{params}{text_file}, 'summary/summary.txt', 'T446: the summary sent from its file');
 	is($put[0] && $put[0]{params}{channel}, '#deploys', 'd9: on the channel');
 	my @plan = @{$nj->{plan} || []};
 	ok(@plan && grep({($_->{put} // '') eq 'slack'} plan_steps($plan[-1])), 'd9: after its task');
@@ -195,8 +205,9 @@ subtest 'T420: an app webhook needs no channel, name or icon' => sub {
 	ok($p, 'a webhook alone loads and compiles') or return diag($why);
 	my @puts = map {slack_puts($_)} @{$p->{jobs} || []};
 	ok(scalar(@puts), 'and the jobs put to slack');
-	is_deeply([sort map {keys %{$_->{params} || {}}} @puts], [('text') x @puts],
-		'each put carrying its text alone');
+	# The staged put also names its summary file (T446), and nothing more.
+	is_deeply([sort map {grep {$_ ne 'text_file'} keys %{$_->{params} || {}}} @puts], [('text') x @puts],
+		'each put carrying its text alone, and the staged one its summary file');
 };
 
 subtest 'T420: no Slack, no notifications' => sub {
