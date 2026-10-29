@@ -64,6 +64,12 @@ sub writes_credhub {
 }
 
 # }}}
+# entombment_results - the counts the last entombing of this provider tallied {{{
+sub entombment_results {
+	return $_[0]->{entombment_results};
+}
+
+# }}}
 # known_types - return the list of known manifest type (dynamically determined) {{{
 sub known_types {
 	my @types = keys %$manifest_types;

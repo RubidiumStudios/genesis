@@ -167,6 +167,27 @@ unless C<without_credhub_writes> was called.
 
 B<Returns:> a boolean.
 
+=head2 entombment_results
+
+  my $counts = $provider->entombment_results;
+
+The counts the last entombing of one of this provider's manifests tallied,
+one per vault value the manifest references: C<total>, and C<new>, C<exists>,
+C<altered> and C<failed> by what entombing found in CredHub for each. A
+read-only render prints none of entombing's progress, so its reader reports
+these instead, as C<pending-changes> does in one line (D123).
+
+B<Returns:> a hashref, or C<undef> where no manifest of this provider has been
+entombed. A manifest that references no vault value leaves C<< {total => 0} >>.
+
+B<Errors:> none.
+
+B<Examples:>
+
+  $provider->deployment(subset => 'pruned')->data;
+  my $n = ($provider->entombment_results // {})->{exists};
+  # Returns: how many referenced values CredHub already holds
+
 =head2 known_types
 
   my %types = $provider->known_types();

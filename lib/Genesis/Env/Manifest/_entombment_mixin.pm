@@ -30,9 +30,14 @@ sub _entomb_secrets {
 
 	return 1 if $self->{entombed}; # don't do this more than once...
 
-	$self->env->notify("entombing secrets into Credhub for enhanced security...");
+	# A read-only render names references and writes nothing, so its reader
+	# reports the counts itself (D123) and the progress here stays silent.
+	my $writes = $self->builder->writes_credhub;
+	my $say    = $writes ? sub {info(@_)} : sub {};
+
+	$self->env->notify("entombing secrets into Credhub for enhanced security...") if $writes;
 	my $src_vault = $self->env->vault;
-	info (
+	$say->(
 		{pending => 1},
 		"[[  - >>determining vault paths used by manifest from %s...",
 		$src_vault->name
@@ -41,10 +46,10 @@ sub _entomb_secrets {
 	my $secret_paths = $self->get_vault_paths(notify=>0);
 	my $secrets_count = scalar(keys %$secret_paths);
 	if ($secrets_count) {
-		info "found %d paths.", $secrets_count;
+		$say->("found %d paths.", $secrets_count);
 		my %secret_keys = ();
 
-		info (
+		$say->(
 			{pending => 1},
 			"[[  - >>retrieving secrets from used vault paths...",
 		);
@@ -63,12 +68,11 @@ sub _entomb_secrets {
 			$secret_values{$_} = $src_vault->get("/$_")
 				unless (defined($secret_values{$_}));
 		}
-		info ("#g{done!}");
+		$say->("#g{done!}");
 
 		my $local_vault = $self->_setup_local_vault();
 
 		my $credhub = $self->credhub_target();
-		my $writes  = $self->builder->writes_credhub;
 		$writes ? prime_credhub_cache($credhub) : eval {prime_credhub_cache($credhub)};
 
 		#Design decision: use value-type credhub for each key, and only populate what is needed.
@@ -76,12 +80,14 @@ sub _entomb_secrets {
 		my $idx = 0;
 		my $w = length("$secrets_count");
 		my $entombment_prefix = "genesis-entombed/"; # can be set to another value to prevent conflicts if needed
-		info(
-			"[[  - >>%s: #c{%s} => #B{%s}:",
-			$writes ? 'copying Vault values to Credhub' : 'naming Credhub references for Vault values, writing nothing',
+		$say->(
+			"[[  - >>copying Vault values to Credhub: #c{%s} => #B{%s}:",
 			$base_path, $credhub->base().($entombment_prefix ? "$entombment_prefix" : "")
 		);
 
+		# The lines an unchanged value prints are erased on a terminal and
+		# only there, since the codes that erase them are noise in a log.
+		my $tty = -t STDERR;
 		my $previous_lines=0;
 		my %results = (new => 0, failed => 0, altered => 0, 'exists' => 0);
 		for my $secret (sort keys %secret_keys) {
@@ -101,19 +107,22 @@ sub _entomb_secrets {
 					$local_vault, $secret, $key, $value, $credhub, $cred_path, $entombment_prefix
 				);
 				$results{$action} += 1;
+				++$idx;
+				next unless $writes;
 				my $msg = wrap(sprintf(
 					"[[    [%*d/%*d] >>%s:#c{%s} #Kk{[sha1: }#Wk{%s}#Kk{]} #G{=>} #B{%s} ...#%s{%s}",
-					$w, ++$idx, $w, $secrets_count, "#y{$vault_label}", $key, $secret_sha,
+					$w, $idx, $w, $secrets_count, "#y{$vault_label}", $key, $secret_sha,
 					$credhub_var, $action_color, $action
 				), terminal_width);
 				print STDERR "\r[A[2K" for (1..$previous_lines);
 				info $msg;
-				$previous_lines=($existing && $existing eq $value) ? scalar(lines($msg)) : 0;
+				$previous_lines=($tty && $existing && $existing eq $value) ? scalar(lines($msg)) : 0;
 			}
 		}
 		print STDERR "\r[A[2K" for (1..$previous_lines);
+		$self->builder->{entombment_results} = {%results, total => $idx};
 		# FIXME: use pretty_duration and style consistent with *_secrets output
-		info(
+		$say->(
 			"[[  - >>$idx of $secrets_count secrets processed: %s new, %s already exist, %s altered, %s failed",
 			@results{('new','exists','altered','failed')}
 		);
@@ -132,19 +141,21 @@ sub _entomb_secrets {
 		$self->{entombed} = 1;
 		return 1
 	} else {
-		info "no vault paths in use.\n";
+		$self->builder->{entombment_results} = {total => 0};
+		$say->("no vault paths in use.\n");
 		return 0
 	}
 }
 
 sub _setup_local_vault {
 	my ($self) = @_;
+	my $writes = $self->builder->writes_credhub;
 	info (
 		{pending => 1},
 		"[[  - >>starting local in-memory vault to hold references to Credhub...",
-	);
+	) if $writes;
 	my $local_vault = $self->local_vault;
-	info ("#g{done!}");
+	info ("#g{done!}") if $writes;
 	return $local_vault;
 }
 
