@@ -22,13 +22,20 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
 # The harness names its Concourse https://ci.harness.example, team main, and
-# a stub fly answers get-pipeline with whatever live.yml holds.
-my $live = "$ENV{HOME}/live.yml";
+# a stub fly answers get-pipeline with whatever live.yml holds.  It validates
+# a pipeline unless invalid.txt holds Concourse's errors, and answers
+# set-pipeline --dry-run with dry-run.txt, or, where there is none, as a fly
+# too old to know the flag, which is the spruce fallback (T376, T439).
+my $live    = "$ENV{HOME}/live.yml";
+my $dry     = "$ENV{HOME}/dry-run.txt";
+my $invalid = "$ENV{HOME}/invalid.txt";
 mkdir_or_fail("$ENV{HOME}/bin");
 mkfile_or_fail("$ENV{HOME}/bin/fly", 0755, join("\n",
 	'#!/bin/sh',
 	'case "$*" in',
 	'  *--version*) echo 7.11.0;;',
+	"  *validate-pipeline*) if [ -f '$invalid' ]; then cat '$invalid'; echo 'error: configuration invalid'; exit 1; fi; echo 'looks good';;",
+	"  *set-pipeline*) if [ -f '$dry' ]; then cat '$dry'; else echo \"error: unknown flag \\`dry-run'\" >&2; exit 1; fi;;",
 	"  *get-pipeline*) cat '$live';;",
 	'esac', ''));
 $ENV{GENESIS_FLY_BIN} = "$ENV{HOME}/bin/fly";
@@ -41,15 +48,51 @@ my (undef, $cerr, $cexit) = run_genesis($h, 'pipeline-apply', '--dry-run',
 	'--skip-vault', '--output-dir', $out);
 my $compiled = load_yaml(slurp("$out/pipeline.yml"));
 
+subtest 'the comparison is Concourse\'s own' => sub {
+	# Four rows, and one more for each of the two runs' restoration
+	# assertions.
+	plan tests => 6;
+
+	mkfile_or_fail($live, to_yaml($compiled));
+	mkfile_or_fail($dry, "no changes to apply\n");
+	my ($said, $err, $exit) = run_genesis($h, 'pipeline-diff');
+	$said = unfolded($said, $err);
+	is($exit, 0, 'pipeline-diff succeeds') or diag($err);
+	like($said, qr/No differences/, "fly's no changes reads as no differences");
+
+	mkfile_or_fail($dry, "jobs:\n  job deploy-qa has changed:\n  + trigger: true\n".
+		"pipeline name: bosh\n\nDry-run mode was set, exiting.\n");
+	($said, $err, $exit) = run_genesis($h, 'pipeline-diff');
+	$said = join("\n", $said // '', $err // '');
+	like($said, qr/job deploy-qa has changed:\s+\+ trigger: true/, "and fly's diff is printed");
+	unlike($said, qr/Dry-run mode was set/, "without fly's closing lines");
+	unlink $dry;
+};
+
+subtest 'a pipeline Concourse would refuse is reported, not compared' => sub {
+	# Three rows, and the run's own restoration assertion.
+	plan tests => 4;
+
+	mkfile_or_fail($invalid, "jobs.redeploy-qa.plan.do[0].on_error.get(run_qa-bosh): repeated name\n");
+	mkfile_or_fail($dry, "no changes to apply\n");
+	my ($said, $err, $exit) = run_genesis($h, 'pipeline-diff');
+	$said = unfolded($said, $err);
+	isnt($exit, 0, 'pipeline-diff fails');
+	like($said, qr/repeated name/, "naming Concourse's error");
+	unlike($said, qr/No differences/, 'and compares nothing');
+	unlink $invalid, $dry;
+};
+
 subtest 'key order alone is no difference' => sub {
-	# Two rows, and the run's own restoration assertion.
-	plan tests => 3;
+	# Three rows, and the run's own restoration assertion.
+	plan tests => 4;
 
 	mkfile_or_fail($live, to_yaml($compiled));
 	my ($said, $err, $exit) = run_genesis($h, 'pipeline-diff');
 	$said = unfolded($said, $err);
 	is($exit, 0, 'pipeline-diff succeeds') or diag($err);
 	like($said, qr/No differences/, 'and finds none in a reordered copy');
+	like($said, qr/spruce/, 'a fly with no --dry-run is compared through spruce, saying so');
 };
 
 subtest 'a value that differs is named by its path' => sub {

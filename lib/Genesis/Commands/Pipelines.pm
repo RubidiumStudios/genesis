@@ -981,6 +981,14 @@ sub diff {
 	my $dir = workdir;
 	mkfile_or_fail("$dir/compiled.yml", $compiled);
 
+	# Concourse is asked first whether it would take the pipeline at all, so
+	# one it would refuse is never reported as a difference (T439).
+	my ($valid, $vrc) = $result->{provider}->fly({target => $target},
+		'validate-pipeline', '-c', "$dir/compiled.yml");
+	bail({exitcode => CONFIG},
+		"The compiled pipeline is not one Concourse would accept:\n\n%s",
+		$valid // 'fly gave no reason') if $vrc;
+
 	my ($live, $rc) = $result->{provider}->fly({target => $target},
 		'get-pipeline', '-p', $name);
 	if ($rc != 0) {
@@ -992,7 +1000,27 @@ sub diff {
 	}
 	mkfile_or_fail("$dir/live.yml", $live);
 
-	# Compared as data, since fly returns the pipeline in its own key order and
+	# Concourse's own comparison, which knows its normalisation of what it
+	# stores; spruce over the raw YAML reads that as differences (T439).
+	my ($dry, $drc) = $result->{provider}->fly({target => $target},
+		'set-pipeline', '-p', $name, '-c', "$dir/compiled.yml", '--dry-run');
+	unless ($drc && ($dry // '') =~ /unknown flag/) {
+		bail("Could not compare the pipeline through fly: %s", $dry // 'no reason given')
+			if $drc;
+		if (($dry // '') =~ /no changes to apply/) {
+			info("#G{No differences}.  The compiled pipeline matches the live ".
+				"pipeline.");
+		} else {
+			(my $shown = $dry // '') =~ s/\n*\S*pipeline name:.*\z//s;
+			output({raw => 1}, "$shown\n");
+		}
+		exit 0;
+	}
+	info("#Yi{This fly has no set-pipeline --dry-run, so the pipelines are ".
+		"compared through spruce diff, which reads Concourse's normalisation ".
+		"of the live pipeline as differences.}");
+
+	# The fallback compares as data, since fly returns the pipeline in its own key order and
 	# spells null its own way; JSON spells both sides alike.
 	for my $side (qw/live compiled/) {
 		my ($json, $rc, $err) = run({stderr => 0}, 'spruce json "$1"', "$dir/$side.yml");

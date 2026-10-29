@@ -1264,12 +1264,22 @@ is running differs from the one this repository would set.  It is a preview
 (D112, noted 2026-10-16): it compiles the deployment root's working tree under
 L</_preview_shape($top)>'s banner, or the ref C<--from> names.
 
-The live pipeline is read with C<fly get-pipeline>, so a target that does not
-carry the pipeline is reported as nothing to diff against rather than as a
-failure, with the command that would set it named beside the report.  Both
-sides are read as data through C<spruce json> and compared with C<spruce
-diff>, so key order and the spelling of a null are never reported as a
-difference (T376).
+The compiled pipeline is first put to C<fly validate-pipeline>, and one
+Concourse would refuse is reported with Concourse's own errors at C<CONFIG>,
+nothing compared (T439).  The live pipeline is read with C<fly get-pipeline>,
+so a target that does not carry the pipeline is reported as nothing to diff
+against rather than as a failure, with the command that would set it named
+beside the report.
+
+The comparison is Concourse's own, C<fly set-pipeline --dry-run>, which sets
+nothing and knows how Concourse normalises what it stores (C<in_parallel> as
+C<steps>, an omitted C<trigger: false>, a C<null> image name, numbers as
+strings, job order), so none of that is reported as a difference (T439).  Its
+"no changes to apply" reads as no differences, and otherwise its diff is
+printed without its closing lines.  A C<fly> with no C<--dry-run> falls back,
+saying so, to reading both sides as data through C<spruce json> and comparing
+them with C<spruce diff>, where key order and the spelling of a null are no
+difference but Concourse's normalisation is (T376).
 
 B<Parameters:> None.  The environment is not an argument to this command.
 
@@ -1298,7 +1308,10 @@ B<Errors:> Refuses at C<CONFIG> before it compiles where the provider is not
 Concourse or C<prior_env> forms a cycle, through
 L</_concourse_compile($top, $command)> (T386).  Bails where the compiled AST
 carries no name, where the Concourse provider produced no F<pipeline.yml>,
-and where either side cannot be read as data.
+where C<fly set-pipeline --dry-run> fails for any reason but an unknown flag,
+and, in the fallback, where either side cannot be read as data.  Bails at
+C<CONFIG> with Concourse's errors where C<fly validate-pipeline> refuses the
+compiled pipeline.
 
 B<Examples:>
 
@@ -1306,8 +1319,13 @@ B<Examples:>
   # No differences.  The compiled pipeline matches the live pipeline.
 
   genesis pipeline-diff
-  # groups.bosh.jobs
-  # + one list entry added: ...
+  # jobs:
+  #   job redeploy-qa has changed:
+  #   + - get: run_qa-bosh ...
+
+  genesis pipeline-diff
+  # The compiled pipeline is not one Concourse would accept:
+  #   jobs.redeploy-qa.plan.do[0].on_error...get(run_qa-bosh): repeated name
 
 =head2 status([$env])
 
