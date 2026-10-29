@@ -339,6 +339,22 @@ sub _all {
 }
 # }}}
 
+# _shell_user - who ran this run, for the audit's user.shell (T449) {{{
+#
+# A pipeline task has no login session and no USER, so the chain ends at the
+# account the process runs as, marked as a pipeline run.
+sub _shell_user {
+	my $row = parse_fixed_width_table({array_rows => 1},
+		lines(run({stderr => '/dev/null'}, 'who', '-mH'))
+	)->[1] // [];
+	my $user = $row->[0] // $ENV{USER} // $ENV{LOGNAME} // scalar(getpwuid($<)) // "uid $<";
+	delete($row->[3]) if $row->[3] && $row->[3] =~ /^tmux\(/; # a tmux session name is no host
+	$user .= " $row->[3]" if $row->[3];
+	$user .= ' (pipeline task)' if $ENV{GENESIS_PIPELINE_TASK};
+	return $user;
+}
+
+# }}}
 # _base_deployment_content - generates base deployment audit content {{{
 sub _base_deployment_content {
 	my ($self, $action, $result) = @_;
@@ -370,14 +386,8 @@ sub _base_deployment_content {
 		};
 		$base->{bosh_target} = { map { $_ => $env->bosh_env->{$_} } grep { defined $env->bosh_env->{$_} } keys %{$env->bosh_env} };
 
-		my $user_data = parse_fixed_width_table({array_rows => 1},
-			lines(run({stderr => '/dev/null'},'who', '-mH'))
-		)->[1] // [];
-		my $user = $user_data->[0] // $ENV{USER};
-		delete($user_data->[3]) if $user_data->[3] && $user_data->[3] =~ /^tmux\(/; # Remove tmux session name if present)'
-		$user .= (" ".$user_data->[3]) if $user_data->[3];
 		$base->{user} = {
-			shell         => $user,
+			shell         => _shell_user(),
 			repo          => scalar($env->top->kit_provider->remote->get_authorized_user), # FIXME: only works for git-based kit providers
 			vault         => scalar($env->vault->user),
 			concourse     => $ENV{CONCOURSE_USERNAME} || undef,

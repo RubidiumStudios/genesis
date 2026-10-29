@@ -477,6 +477,26 @@ B<Examples:>
   my @list = $mgr->_all();         # list context - returns list
   print scalar(@list);              # prints the count of deployments
 
+=head2 _shell_user
+
+  my $user = Genesis::Env::DeploymentManager::_shell_user();
+
+Who ran this run, for the audit's C<user.shell>, which the audit requires: the
+login session's user from C<who -mH>, with where it came from unless that is
+a tmux session name; else C<USER>, else C<LOGNAME>, else the account the
+process runs as. A pipeline task has no login session and no C<USER>, so it
+reaches the last, and under C<GENESIS_PIPELINE_TASK> the answer is marked
+C<(pipeline task)>, so the record does not read as a person of that account
+having deployed (T449).
+
+B<Returns:> the string.
+
+B<Errors:> none.
+
+B<Examples:>
+
+  _shell_user();  # 'alice (10.0.0.5)' at a login, 'root (pipeline task)' in a task
+
 =head2 _base_deployment_content
 
   my $hashref = $mgr->_base_deployment_content($action, $result);
@@ -486,8 +506,8 @@ C<build()>.
 
 The returned hashref always includes C<action>, C<result>,
 C<genesis_version>, and C<reason>. Unless C<$result> is C<'assumed'>, it also
-collects kit metadata, user identity (from C<who -mH> and environment
-variables), and artifact paths. For C<$action eq 'deploy'> it additionally
+collects kit metadata, user identity (C<user.shell> from C<_shell_user>, and
+the vault, kit, Concourse and BOSH users), and artifact paths. For C<$action eq 'deploy'> it additionally
 includes C<parameters> and a C<manifest.sha2> computed with SHA-256.
 
 On a repository that has a pipeline, the record also carries a C<git> block,
