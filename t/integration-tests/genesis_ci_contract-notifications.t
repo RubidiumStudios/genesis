@@ -205,9 +205,28 @@ subtest 'T420: an app webhook needs no channel, name or icon' => sub {
 	ok($p, 'a webhook alone loads and compiles') or return diag($why);
 	my @puts = map {slack_puts($_)} @{$p->{jobs} || []};
 	ok(scalar(@puts), 'and the jobs put to slack');
-	# The staged put also names its summary file (T446), and nothing more.
-	is_deeply([sort map {grep {$_ ne 'text_file'} keys %{$_->{params} || {}}} @puts], [('text') x @puts],
-		'each put carrying its text alone, and the staged one its summary file');
+	# The staged put also names its summary file (T446), and every put is
+	# silent (T448), and nothing more.
+	is_deeply([sort map {grep {!/^(text_file|silent)$/} keys %{$_->{params} || {}}} @puts], [('text') x @puts],
+		'each put carrying its text alone, beside its summary file and silence');
+};
+
+# Proves T448's pipeline half (contract f10, d9, d10): every task writes at
+# 120 columns, since a task has no terminal and Genesis would wrap at 80, and
+# every Slack put is silent, keeping the resource's curl trace out of the log.
+subtest 'T448: a pipeline log reads whole' => sub {
+	my $h = contract_harness(config => {'pipeline.notifications.slack.webhook' => 'slack:webhook'},
+		pipeline => {manual => 'true'});
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'it compiles') or return diag($why);
+	my @jobs  = @{$p->{jobs} || []};
+	my @tasks = map {my $j = $_; grep {$_->{task}} map {plan_steps($j->{$_})} qw/plan on_error on_abort/} @jobs;
+	ok(scalar(@tasks), 'the jobs run tasks');
+	is_deeply([map {$_->{config}{params}{GENESIS_OUTPUT_COLUMNS}} @tasks], [(120) x @tasks],
+		'f10: every task at 120 columns');
+	my @puts = map {my $j = $_; map {slack_puts($j->{$_})} qw/plan on_success on_failure on_error on_abort/} @jobs;
+	ok(scalar(@puts), 'the jobs put to slack');
+	is_deeply([map {$_->{params}{silent} ? 1 : 0} @puts], [(1) x @puts], 'd9, d10: every Slack put silent');
 };
 
 subtest 'T420: no Slack, no notifications' => sub {

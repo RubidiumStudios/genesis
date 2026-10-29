@@ -1418,6 +1418,8 @@ sub _task_config {
 		# The pipeline running, not an operator: every pre-flight gate reads
 		# it, and Service::BOSH keeps HTTPS_PROXY under it.
 		GENESIS_PIPELINE_TASK => 1,
+		# A task has no terminal, so Genesis would wrap at 80 (contract f10).
+		GENESIS_OUTPUT_COLUMNS => 120,
 		CI_NO_REDACT     => $config->{unredacted} || 0,
 		GIT_AUTHOR_NAME  => ($sc->{commit_author} ? $sc->{commit_author}{name}  : undef)
 			|| 'Concourse Bot',
@@ -1499,6 +1501,7 @@ sub _errand_config {
 
 	my %params = (
 		GENESIS_PIPELINE_TASK => 1,
+		GENESIS_OUTPUT_COLUMNS => 120,
 		CI_NO_REDACT      => $config->{unredacted} || 0,
 		CURRENT_ENV       => $env,
 		ERRAND_NAME       => $errand_name,
@@ -1634,7 +1637,8 @@ sub _notification_step {
 
 	# An app's webhook fixes its channel, name and icon; only a legacy one
 	# honours them, so each is sent only where written.
-	my %params = (text => $text);
+	# Silent keeps the resource's curl trace out of the log (d9, d10).
+	my %params = (text => $text, silent => JSON::PP::true);
 	$params{text_file} = $opts->{text_file} if $opts->{text_file};
 	$params{channel}  = $slack->{channel}  if $slack->{channel};
 	$params{username} = $slack->{username} if $slack->{username};

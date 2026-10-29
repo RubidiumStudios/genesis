@@ -144,6 +144,12 @@ sub _print_commits {
 	my @commits = @{$c->{commits}};
 	return info("[[  >>#G{none}") unless @commits;
 
+	# One width for every date, so each label starts in one column and a
+	# wrapped first line hangs under it.
+	$_->{when} = defined $_->{epoch} ? sprintf('%s  (%s)', _stamp($_->{epoch}), _ago($_->{epoch})) : ''
+		for @commits;
+	($self->{when_width}) = sort {$b <=> $a} map {length $_->{when}} @commits;
+
 	my @groups;
 	for my $e (@commits) {
 		my $key = join("\0", $e->{kind}, $e->{author} // '', _norm($e->{subject}));
@@ -168,12 +174,11 @@ sub _print_commits {
 # _print_commit - one commit's two lines, and its files under --verbose {{{
 sub _print_commit {
 	my ($self, $e) = @_;
-	my $when = defined $e->{epoch} ? sprintf('%s  (%s)', _stamp($e->{epoch}), _ago($e->{epoch})) : '';
 	my $what = $e->{kind} eq 'propagated'
 		? sprintf('#G{propagated} from control@%s', substr($e->{control}, 0, 8))
 		: sprintf('#Y{manual} commit %s', substr($e->{sha}, 0, 8));
 	my $count = scalar @{$e->{files}};
-	info("[[  >>%s  %s by %s%s", $when, $what, $e->{author} // 'unknown',
+	info("[[  %-*s  >>%s by %s%s", $self->{when_width} // 0, $e->{when} // '', $what, $e->{author} // 'unknown',
 		$e->{squash} ? " (squash of $e->{squash} control commits)" : '');
 	info("[[                >>\"%s\"  #K{(%d file%s)}", $e->{subject} // '', $count, $count == 1 ? '' : 's');
 	return unless $self->{verbose};
@@ -649,9 +654,14 @@ sub _meta {
 
 # }}}
 # _stat - the diff stat from a base to HEAD under the deployment root {{{
+#
+# Drawn to the output's width less the report's indent, and no wider than
+# 120, so git shortens the bar rather than the output wrapping it.
 sub _stat {
 	my ($git, $base) = @_;
-	my ($out, $rc) = run({dir => $git->root, stderr => 0}, 'git', 'diff', '--stat=100',
+	my $width = terminal_width() - 2;
+	$width = 120 if $width > 120;
+	my ($out, $rc) = run({dir => $git->root, stderr => 0}, 'git', 'diff', "--stat=$width",
 		($git->prefix ? ('--relative='.$git->prefix) : ()), $base // $EMPTY_TREE, 'HEAD');
 	return () if $rc || !defined $out;
 	return grep {/\S/} split /\n/, $out;

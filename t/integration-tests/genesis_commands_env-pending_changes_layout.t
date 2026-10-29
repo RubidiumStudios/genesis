@@ -23,6 +23,7 @@ use Harness::Propagation;
 
 use Test::More;
 use File::Temp ();
+use POSIX ();
 
 use Genesis;
 
@@ -90,6 +91,8 @@ sub repository {
 	for my $step (@{$o{then} || []}) {
 		my ($kind, $message, @rest) = @$step;
 		if ($kind eq 'control') {
+			# An optional third element back-dates the control commit's author.
+			local $ENV{GIT_AUTHOR_DATE} = $rest[1] if $rest[1];
 			my $c = commit_on_control($h, files => {'qa.yml' => $rest[0]}, message => $message, push => 1);
 			deliver($h, 'qa', control => $c);
 		} else {
@@ -209,6 +212,42 @@ subtest 'commits that change nothing on the director' => sub {
 	like($all, qr/rc\.$_\+pipeline/, "--verbose lists the run's commit $_") for 2, 3;
 	unlike($all, qr/more "Embed genesis/, 'and folds nothing');
 	like($all, qr/^\s+qa\.yml\s*$/m, 'and names each commit\'s files');
+};
+
+# Proves T448's report half: at 80 columns every commit's date is padded to
+# one width, so its label starts in the same column on every commit and a
+# wrapped first line hangs under it, and the diff stat fits the output.
+subtest 'the report at 80 columns' => sub {
+	# Months old, so its fuzzy date is wider than the hand commit's and its
+	# first line, at "about N months ago", runs past 80 columns.
+	my $h = repository(then => [
+		[control => 'the coming content', env_file('the-coming-version'),
+			POSIX::strftime('%Y-%m-%dT%H:%M:%S', localtime(time - 90 * 86400))],
+		# Long enough that a stat drawn 100 columns wide has a full bar.
+		[hand    => 'a hand edit on the branch', 'qa-notes.txt', join('', map {"note $_\n"} 1 .. 300)],
+	]);
+	local $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+	my ($all, $exit) = report($h);
+	is($exit, 0, 'it succeeds') or diag($all);
+	my @lines = split /\n/, $all;
+	my (@at, @hang);
+	for my $i (0 .. $#lines) {
+		next unless $lines[$i] =~ /^  \w{3} \d\d \d\d:\d\d  \(.*?\)\s+(?=propagated|manual)/;
+		push @at, length $&;
+		my $next = $lines[$i+1] // '';
+		# A line after the first that is not the subject line is its wrap.
+		push @hang, length(($next =~ /^( *)/)[0]) if $next !~ /^ {16}"/ && $next =~ /\S/;
+	}
+	is(scalar(@at), 2, 'two commit lines') or diag($all);
+	is($at[0], $at[1], 'their labels in one column') or diag($all);
+	is($_, $at[0], 'a wrapped first line hanging under its label') for @hang;
+	# The output's own wrapping keeps every line within 80, so a stat drawn
+	# too wide shows as a bar broken onto a line of its own, with no "|".
+	my ($stat) = $all =~ /\nFiles changed since [^\n]*\n((?:  .*\n)+)/;
+	my @rows = grep {/\S/} split /\n/, $stat // '';
+	pop @rows;
+	ok(@rows && !grep({!/\|/} @rows), 'each file\'s stat on its own line, drawn within the output')
+		or diag($stat // $all);
 };
 
 # Proves T446's command half: --summary-file writes the summary's paragraphs,
