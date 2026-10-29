@@ -96,6 +96,10 @@ sub describe {
 				push @resources, $ran;
 				push @ran_names, $ran->{name} if @{$wf_data->{will_trigger}{$env} || []};
 			}
+			# The redeploy's request queue (contract a7).
+			if (my $run = $self->_run_resource($ast, $wf_data->{deployment_name}{$env})) {
+				push @resources, $run;
+			}
 
 			# Signal resource
 			my $signal_cfg = $self->_env_signal_config($ast, $env, $wf_data);
@@ -461,19 +465,34 @@ sub _control_resource {
 # holding both S3 credentials, under their own names.
 sub _ran_resource {
 	my ($self, $ast, $dn) = @_;
+	return $self->_shuttle_resource($ast, $dn, 'ran', "${dn}_ran", 'bullhorn');
+}
+
+# _run_resource - the deployment's redeploy request queue (contract a7) {{{
+sub _run_resource {
+	my ($self, $ast, $dn) = @_;
+	return $self->_shuttle_resource($ast, $dn, 'run', "run_$dn", 'inbox-arrow-down');
+}
+
+# }}}
+# _shuttle_resource - one stream on the configured shuttle (contract a9) {{{
+sub _shuttle_resource {
+	my ($self, $ast, $dn, $stream, $name, $icon) = @_;
 	my $shuttle = $ast->integrations->{shuttle} or return;
 	return unless $dn;
 	my %source = (
 		bucket       => $shuttle->{bucket},
-		path         => "$dn/ran",
+		path         => "$dn/$stream",
 		seed_version => JSON::PP::true,
 		(map {defined $shuttle->{$_} ? ($_ => $shuttle->{$_}) : ()} qw/region endpoint/),
 		($shuttle->{tls_skip_verify} ? (tls_skip_verify => JSON::PP::true) : ()),
 		($shuttle->{auth} ? (map {($_ => _unwrap_ref({secret_ref => "$shuttle->{auth}:$_"}))}
 			qw/access_key_id secret_access_key/) : ()),
 	);
-	return { name => "${dn}_ran", type => 'shuttle', icon => 'bullhorn', source => \%source };
+	return { name => $name, type => 'shuttle', icon => $icon, source => \%source };
 }
+
+# }}}
 
 # }}}
 # _propagate_job - the one job that runs genesis propagate {{{
@@ -866,7 +885,13 @@ sub _redeploy_job {
 	my %to     = $config->{tagged} ? (tags => [$env]) : ();
 	my $dn     = $wf_data->{deployment_name}{$env};
 
-	my @gets = ({ get => "$alias-branch", trigger => JSON::PP::false });
+	# A request on its queue is its one trigger, where there is a shuttle to
+	# carry it (contract c7).
+	my $run  = $self->_run_resource($ast, $dn);
+	my @gets = (
+		($run ? ({ get => $run->{name}, trigger => JSON::PP::true }) : ()),
+		{ get => "$alias-branch", trigger => JSON::PP::false },
+	);
 	if (my $tl_get = $self->_task_library_get($ast)) {
 		push @gets, $tl_get;
 	}
@@ -882,6 +907,24 @@ sub _redeploy_job {
 	my ($lock_steps, $unlock_steps) = $self->_lock_steps($ast, $env, $wf_data, %to);
 
 	my %hooks = $self->_outcome_hooks($ast, $env, $alias, $deploy_type, $wf_data, 1);
+
+	# The request is handed back, never put, so the job cannot re-trigger
+	# itself: returned on success, returned failed otherwise (contract d5).
+	if ($run) {
+		my %back = (
+			on_success => { return => JSON::PP::true },
+			on_failure => { return => JSON::PP::true, fail => JSON::PP::true },
+			on_error   => { return => JSON::PP::true, fail => JSON::PP::true },
+		);
+		for my $hook (sort keys %back) {
+			my $step  = { get => $run->{name}, params => $back{$hook} };
+			my $have  = $hooks{$hook};
+			my @steps = !$have ? ()
+				: $have->{in_parallel} ? @{$have->{in_parallel}} : ($have);
+			$hooks{$hook} = @steps ? { in_parallel => [@steps, $step] } : $step;
+		}
+	}
+
 	my $plan_step = {};
 	$plan_step->{$_} = $hooks{$_} for sort keys %hooks;
 	$plan_step->{ensure} = { do => $unlock_steps } if @$unlock_steps;

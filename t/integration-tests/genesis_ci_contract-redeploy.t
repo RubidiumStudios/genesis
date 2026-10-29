@@ -44,9 +44,8 @@ subtest 'the redeploy job, manual' => sub {
 	ok($group && grep({$_ eq "redeploy-$ENV_NAME"} @{$group->{jobs}}),
 		'b3: in the deployment group beside the deploy');
 
-	my @gets = grep {$_->{get}} plan_steps($rj);
-	is_deeply([map {$_->{get}} @gets], ["$ENV_NAME-branch"], 'c11: it gets the branch alone');
-	is(scalar(grep {$_->{trigger}} @gets), 0, 'c11: and nothing triggers it');
+	my ($bget) = grep {($_->{get} // '') eq "$ENV_NAME-branch"} plan_steps($rj);
+	ok($bget && !$bget->{trigger}, 'c11: it gets the branch, which never triggers it');
 
 	my $task = task_step($rj) || {};
 	my $run  = $task->{config}{run} || {};
@@ -79,6 +78,40 @@ subtest 'the redeploy job, manual' => sub {
 		'none of the retired mode\'s resources');
 	ok(!grep({$_ eq 'ci-pipeline-deploy'} map {@{$_->{config}{run}{args} || []}} grep {$_->{task}} plan_steps($rj)),
 		'and not its ci-pipeline-deploy');
+};
+
+# Proves T438: the request queue the redeploy runs on.
+subtest 'the redeploy request queue' => sub {
+	my $h = contract_harness();
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'the dry apply prints a pipeline') or return diag($why);
+
+	my $run = pipeline_resource($p, "run_$DN") || {};
+	my $ran = pipeline_resource($p, "${DN}_ran") || {};
+	is($run->{type}, 'shuttle', 'a7: a shuttle resource run_<dn>');
+	is($run->{source}{path}, "$DN/run", 'a7: on the path <dn>/run');
+	is($run->{source}{seed_version}, 1, 'a7: with seed_version');
+	is_deeply({%{$run->{source} || {}}, path => undef}, {%{$ran->{source} || {}}, path => undef},
+		'a7: on the same source as <dn>_ran');
+
+	my $rj   = pipeline_job($p, "redeploy-$ENV_NAME") || {};
+	my $plan = $rj->{plan}[0] || {};
+	my @triggers = grep {$_->{get} && $_->{trigger}} plan_steps($plan->{do} || []);
+	is_deeply([map {$_->{get}} @triggers], ["run_$DN"], 'c7: the queue is its one trigger');
+
+	my %back = map {
+		my $hook = $_;
+		# YAML's true is a boolean object, so each param is read as 1 or 0.
+		($hook => [map {my $p = $_->{params} || {}; +{map {($_ => $p->{$_} ? 1 : 0)} keys %$p}}
+			grep {($_->{get} // '') eq "run_$DN"} plan_steps($plan->{$hook} || {})]);
+	} qw/on_success on_failure on_error on_abort/;
+	is_deeply($back{on_success}, [{return => 1}], 'd5: handed back on success with return');
+	is_deeply($back{on_failure}, [{return => 1, fail => 1}], 'd5: and on failure with return and fail');
+	is_deeply($back{on_error}, [{return => 1, fail => 1}], 'd5: and on error the same');
+	ok(!grep({($_->{put} // '') eq "run_$DN"} map {plan_steps($_)} @{$p->{jobs} || []}),
+		'd5: and nothing ever puts it');
+	is(scalar(grep {my $j = $_; grep {($_->{get} // '') eq "run_$DN"} plan_steps($j)} @{$p->{jobs} || []}), 1,
+		'a7: and only the redeploy job reads it');
 };
 
 done_testing;
