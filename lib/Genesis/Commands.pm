@@ -648,24 +648,31 @@ sub deployed_target {
 	require Genesis::Env;
 	my $env = Genesis::Env->bare($name, Genesis::Top->new($top->path));
 
-	# An environment that has never deployed successfully names no commit,
-	# and neither does a record written before the field existed, so both
-	# take the tip, which is where they stood before the flags existed.  A
-	# flagged run is not refused for it, because the operator asked for the
-	# deployed commit of an environment that has none, and the command's own
-	# reading of an undeployed environment says more than a refusal could.
+	# A flagged run stands only on a recorded commit on the deployment
+	# branch (D128); a default run takes the tip, since it deploys nothing.
 	my $record = $env->deployed_record;
-	return undef unless $record && $record->{git} && $record->{git}{commit};
+	my $branch = $top->branch_for($name);
+	my $where  = $env->exodus_base . '/deployments';
+	unless ($record && $record->{git} && $record->{git}{commit}) {
+		return undef unless $flagged;
+		bail(
+			{exitcode => CONFIG},
+			"Refusing to target the deployed commit for #C{%s}.\n\n".
+			"No successful deploy recorded in #C{%s} names a commit, so there ".
+			"is nothing on #C{%s} to deploy again, and its tip may carry content ".
+			"that has never been deployed.\n\n".
+			"Deploy #C{%s} from #C{%s} without the flag first.  Nothing was ".
+			"changed.",
+			$name, $where, $branch, $name, $branch
+		);
+	}
 
-	# A commit this clone holds that is on neither copy of the deployment
-	# branch was deployed from somewhere else, before the pipeline delivered
-	# to it (T430), and its tree is not one this Genesis can be asked to read.
-	# A commit it does not hold is left to the session's refusal (T245).
+	# One test, whatever this clone holds: a pipeline task's single-branch
+	# clone does not hold a commit deployed from another branch at all.
 	my $commit = $record->{git}{commit};
 	my $git    = $top->git;
-	my $branch = $top->branch_for($name);
 	my $remote = $top->source_control_remote;
-	if ($git->holds_commit($commit) && !grep {
+	unless (grep {
 			$git->branch_exists($_) && $git->is_ancestor($commit, $_)
 		} ($branch, "$remote/$branch")) {
 		my $short = substr($commit, 0, 8);
@@ -674,11 +681,11 @@ sub deployed_target {
 			"Refusing to target the deployed commit for #C{%s}.\n\n".
 			"The deployed commit #C{%s}, named by #C{%s}, is not on #C{%s}: it ".
 			"was deployed from another branch, before this pipeline delivered to ".
-			"#C{%s}, and only a commit on the deployment branch can be stood on.\n\n".
+			"#C{%s}, or the branch has been rewritten since, and only a commit on ".
+			"the deployment branch can be stood on.\n\n".
 			"Run the command without the flag, or deploy from #C{%s} first.  ".
 			"Nothing was changed.",
-			$name, $short, $env->exodus_base . '/deployments', $branch, $branch,
-			$branch
+			$name, $short, $where, $branch, $branch, $branch
 		) if $flagged;
 		info(
 			"The deployed commit #C{%s} is not on #C{%s}: it was deployed from ".

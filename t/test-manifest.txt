@@ -531,6 +531,7 @@ integration-tests/genesis_commands_env-child_withheld.t  # what withholds the pr
 integration-tests/genesis_commands_env-deployed_commit.t  # both deployed-commit flags share one sentence and refuse where no pipeline is enabled
 integration-tests/genesis_commands_env-deployed_off_branch.t  # a deployed commit off the deployment branch is never stood on: the default run takes the tip, a flag is refused
 integration-tests/genesis_commands_env-redeploy.t  # --redeploy deploys the recorded commit, not the tip, and records the same pair again
+integration-tests/genesis_commands_env-redeploy_on_branch.t  # the two flags stand only on a recorded commit on the deployment branch; no record, or a commit off it held or not, is refused
 integration-tests/genesis_commands_env-pending_changes.t  # pending-changes says what a deploy of the branch would change, and changes nothing (D123)
 integration-tests/genesis_commands_env-secrets_certified.t  # a rotation against the tip says the version it served is not the certified one
 integration-tests/genesis_commands_repo-init.t   # repo-init validate + execute against real workdirs (fs, git, tarball, symlink)

@@ -9,8 +9,9 @@
 # opens only under a pipeline, and each writes nothing.
 #
 # Proves T245: a record naming a commit the repository can no longer reach is
-# refused by name at Genesis::Exit::DATAERR, naming the record as well as the
-# commit, with nothing deployed and the working tree left as it was.
+# refused by name at Genesis::Exit::CONFIG (D128; it was DATAERR), naming the
+# record and the branch as well as the commit, with nothing deployed and the
+# working tree left as it was.
 #
 # What the rows catch: an implementation that declared the two flags and left
 # them inert, which exits 0 rather than CONFIG; one that refused with a bare
@@ -79,7 +80,10 @@ subtest 'both flags refuse where the pipeline is not enabled' => sub {
 		push    => 1,
 	);
 	init_branch($g, 'qa');
-	deliver($g, 'qa', control => $gc);
+	my $gd = deliver($g, 'qa', control => $gc);
+	# Deployed from the branch, since a flag with no such record is refused
+	# at CONFIG too (D128), for a reason that is not the one under test.
+	certify($g, 'qa', commit => $gd, control_commit => $gc);
 	refresh($g, 'a');
 	stand_on($g, $g->control);
 
@@ -262,7 +266,9 @@ YAML
 };
 
 # Proves T245: a record naming a commit a rewritten branch no longer reaches
-# refuses by name at Genesis::Exit::DATAERR, with nothing deployed.
+# refuses by name at Genesis::Exit::CONFIG, with nothing deployed.  D128 moved
+# the refusal from the session's DATAERR to the flag's ancestry check, which
+# asks whether the commit is on the branch rather than whether it is held.
 #
 # What the rows catch: an implementation that switched first and discovered
 # the missing commit afterwards, which leaves the tree detached and fails the
@@ -271,7 +277,7 @@ YAML
 # the branch decide, which answers a branch carrying nothing with the deploy's
 # own complaint rather than with the refusal about the recorded commit.
 subtest 'an unreachable deployed commit refuses by name' => sub {
-	plan tests => 8;
+	plan tests => 10;
 
 	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
 
@@ -306,10 +312,11 @@ subtest 'an unreachable deployed commit refuses by name' => sub {
 
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0}, 'qa', 'deploy', '--redeploy');
 
-	is($exit, Genesis::Exit::DATAERR, 'the redeploy exits DATAERR');
-	like($err, qr/\Q$deployed\E/, 'the refusal names the commit');
+	is($exit, Genesis::Exit::CONFIG, 'the redeploy exits CONFIG');
+	like($err, qr/\Q@{[substr($deployed, 0, 8)]}\E/, 'the refusal names the commit');
 	like($err, qr{/secret/exodus/qa/bosh/deployments},
 		'the refusal names the record the commit came from');
+	like($err, qr{\Qqa/bosh\E\b(?!/)}, 'and the branch it is not on');
 	unlike($out, qr/bosh deploy/i, 'nothing was deployed');
 	assert_w_restored($before, 'the refusal left working state alone');
 
@@ -338,11 +345,12 @@ subtest 'an unreachable deployed commit refuses by name' => sub {
 
 	my (undef, $gerr, $gexit) = run_genesis($g, {restore => 0},
 		'qa', 'deploy', '--redeploy');
-	is($gexit, Genesis::Exit::DATAERR,
+	is($gexit, Genesis::Exit::CONFIG,
 		'a branch left carrying no repository refuses the same way');
-	like($gerr, qr/\Q$gd\E/, 'that refusal names the commit too');
+	like($gerr, qr/\Q@{[substr($gd, 0, 8)]}\E/, 'that refusal names the commit too');
 	like($gerr, qr{/secret/exodus/qa/bosh/deployments},
 		'and the record the commit came from');
+	like($gerr, qr{\Qqa/bosh\E\b(?!/)}, 'and the branch');
 };
 
 # Proves T243's remaining half, which is that the branch the operator is

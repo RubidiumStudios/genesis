@@ -1066,15 +1066,20 @@ again with the vault the repository configures, which is the root the
 command is about to load for itself a moment later, and only a run that
 named the deployed commit pays for it.
 
-A recorded commit this clone holds that is on neither the local nor the
-remote copy of the environment's deployment branch was deployed from another
-branch, before the pipeline delivered to it (T430): typically the last deploy
-made by an earlier pipeline from a per-environment branch.  Its tree is not
-one this Genesis can be asked to read, so it is never stood on.  A run whose
-target came from its registration's default says so and answers C<undef>,
-and the gate goes on as it would for the tip; a run that named a flag bails
-at C<Genesis::Exit::CONFIG>.  A commit this clone does not hold at all is
-left to the branch session's own refusal (T245).
+A flag stands only on a recorded commit that is on the local or the remote
+copy of the environment's deployment branch (D128).  An environment with no
+successful deploy recorded, or whose record names no commit, has nothing to
+deploy again, and its tip may carry content that has never been deployed, so
+a flagged run bails at C<Genesis::Exit::CONFIG>; a default-target run answers
+C<undef> and takes the tip, since it deploys nothing.  A recorded commit on
+neither copy of the branch was deployed from another branch, before the
+pipeline delivered to it (T430), typically from an earlier pipeline's
+per-environment branch, or the branch has been rewritten since.  The test is
+ancestry alone, whether or not this clone holds the commit, since a pipeline
+task's single-branch clone holds no other branch's commits.  A default-target
+run says so in an C<info> line and answers C<undef>; a flagged run bails at
+C<Genesis::Exit::CONFIG>.  The branch session's own refusal of a commit it
+cannot reach (T245) stays as the backstop for its other callers.
 
 In list context the path that record was read from comes back beside the
 commit, which is the environment's exodus base with C</deployments> on the
@@ -1132,10 +1137,15 @@ branch, and the control branch, because those are the two branches the file
 travels on. A run that resolved its target from its registration's default
 meets no refusal here and takes the tip instead.
 
-Raised a third time, at the same code, when either flag is given and the
-recorded commit is not on the deployment branch, naming the commit, the
-record it came from, and the branch. A default-target run is told the same
-in an C<info> line and takes the tip.
+Raised a third time, at the same code, when either flag is given for an
+environment with no successful deploy recorded, or whose record names no
+commit, naming the record path and the deployment branch. A default-target
+run meets no refusal here and takes the tip.
+
+Raised a fourth time, at the same code, when either flag is given and the
+recorded commit is not on the deployment branch, whether or not this clone
+holds it, naming the commit, the record it came from, and the branch. A
+default-target run is told the same in an C<info> line and takes the tip.
 
 =back
 
@@ -1146,6 +1156,9 @@ B<Examples:>
 
   Genesis::Commands::deployed_target('qa', $top);
   # Exits CONFIG, in `genesis qa deploy --redeploy` with the pipeline off
+
+  Genesis::Commands::deployed_target('qa', $top);
+  # Exits CONFIG, in `genesis qa deploy --redeploy` where qa never deployed
 
   my ($commit, $record) = Genesis::Commands::deployed_target('qa', $top);
   # Returns: the recorded commit, and /secret/exodus/qa/bosh/deployments

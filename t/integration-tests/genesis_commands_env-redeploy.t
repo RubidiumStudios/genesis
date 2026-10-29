@@ -376,6 +376,12 @@ subtest 'the redeploy keeps the provider gate and the stale warning' => sub {
 
 	my $g = ready_harness(envs => ['qa'], bosh => 1, provider => 'concourse');
 
+	# The seeding names no deployed commit, and a redeploy of an environment
+	# with none is refused at CONFIG (D128) before the gate is reached.
+	certify($g, 'qa',
+		commit         => tip_of($g, $g->slug('qa')),
+		control_commit => harness_marker($g, $g->slug('qa')));
+
 	# The one thing that moves the repository out of step with its own
 	# applied record.  The environment's own file is a pipeline-defining
 	# path, and this writes it on control alone, so the change is one only a
@@ -506,21 +512,19 @@ subtest 'a successful redeploy propagates nothing' => sub {
 	is(scalar(grep {($_->{argv}[0] // '') eq 'propagate'} child_runs($h)), 1,
 		'an ordinary manual deploy still spawns one propagate child');
 
-	# And a --redeploy that resolves no commit deploys the tip, hears both
-	# warnings about it, and hands off to a child like the ordinary deploy it
-	# is.  The row is what holds the two rows above to the commit this run
-	# resolved rather than to the flag it was given.  A fresh harness, whose
-	# seeding certifies without naming a deployed commit, because the runs
-	# above have since written records that name one.
+	# And a --redeploy that resolves no commit is refused (D128; it deployed
+	# the tip before), so it hands off to nothing either.  A fresh harness,
+	# whose seeding certifies without naming a deployed commit, because the
+	# runs above have since written records that name one.
 	my $n = ready_harness(envs => ['qa'], bosh => 1);
 	child_recorder($n);
 	stand_on($n, $n->control);
 	my (undef, $nerr, $nexit) =
 		run_genesis($n, 'qa', 'deploy', '--redeploy', '-y');
-	is($nexit, 0, 'the redeploy that resolved no commit succeeded')
+	is($nexit, Genesis::Exit::CONFIG, 'the redeploy that resolved no commit is refused')
 		or diag("what the redeploy said:\n$nerr");
-	is(scalar(grep {($_->{argv}[0] // '') eq 'propagate'} child_runs($n)), 1,
-		'a redeploy that resolved no commit spawns one too')
+	is(scalar(grep {($_->{argv}[0] // '') eq 'propagate'} child_runs($n)), 0,
+		'and spawns no propagate child')
 		or diag("what the redeploy said:\n$nerr");
 };
 
@@ -672,22 +676,19 @@ subtest 'recreate_on_deploy reaches every deploy as declared' => sub {
 	# their delivery put on the branch, so every redeploy in them resolves
 	# one.  This repository is left as the seeding made it, certified without
 	# a deployed commit named, so the --redeploy below resolves nothing and
-	# deploys the tip.  Such a run is an ordinary deploy in every way that
-	# matters, and redeploy-only is what the design gives to a redeploy, so
-	# the row asks for no flag.  It is what holds the setting to the commit
-	# the run resolved rather than to the flag the operator typed.
+	# is refused (D128; it deployed the tip without --recreate before), and
+	# no deploy reaches BOSH to be given the flag or not.
 	my $s = ready_harness(envs => ['qa'], bosh => 1,
 		pipeline => {recreate_on_deploy => 'redeploy-only'});
 	stand_on($s, $s->control);
 
 	my (undef, $serr, $sexit) = run_genesis($s,
 		'qa', 'deploy', '--redeploy', '--no-propagate', '-y');
-	is($sexit, 0, 'a redeploy that resolved no commit proceeded')
+	is($sexit, Genesis::Exit::CONFIG, 'a redeploy that resolved no commit is refused')
 		or diag("what the redeploy said:\n$serr");
 
-	my @tip_deploys = bosh_runs($s, command => 'deploy');
-	unlike(join(' ', @{$tip_deploys[-1]{argv}}), qr/--recreate\b/,
-		'redeploy-only passes nothing where the redeploy resolved no commit')
+	is(scalar(bosh_runs($s, command => 'deploy')), 0,
+		'and no deploy reached BOSH')
 		or diag("what the redeploy said:\n$serr");
 };
 
