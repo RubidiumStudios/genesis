@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # Proves T413: the pipeline `genesis pipeline-apply --dry-run` prints holds the
 # plumbing contract's Stage 2 Pull rows that need no shuttle, the control
-# resource and the one propagate job.  c5, the job's _ran triggers, lands with
+# resource and the one propagate job.  c5, the job's _deployed triggers, lands with
 # a8's shuttle resource in 4 Pull.  Each row names the contract row it asserts.
 use strict;
 use warnings;

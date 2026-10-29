@@ -96,7 +96,11 @@ sub describe {
 				push @resources, $ran;
 				push @ran_names, $ran->{name} if @{$wf_data->{will_trigger}{$env} || []};
 			}
-			# The redeploy's request queue (contract a7).
+			# The redeploy's event, which propagation never reads, and its
+			# request queue (contract a7, a8; D127).
+			if (my $redone = $self->_redeployed_resource($ast, $wf_data->{deployment_name}{$env})) {
+				push @resources, $redone;
+			}
 			if (my $run = $self->_run_resource($ast, $wf_data->{deployment_name}{$env})) {
 				push @resources, $run;
 			}
@@ -465,13 +469,20 @@ sub _control_resource {
 # holding both S3 credentials, under their own names.
 sub _ran_resource {
 	my ($self, $ast, $dn) = @_;
-	return $self->_shuttle_resource($ast, $dn, 'ran', "${dn}_ran", 'bullhorn');
+	return $self->_shuttle_resource($ast, $dn, 'deployed', "${dn}_deployed", 'bullhorn');
 }
 
-# _run_resource - the deployment's redeploy request queue (contract a7) {{{
+# _redeployed_resource - the deployment's redeploy event (contract a8, D127) {{{
+sub _redeployed_resource {
+	my ($self, $ast, $dn) = @_;
+	return $self->_shuttle_resource($ast, $dn, 'redeployed', "${dn}_redeployed", 'bullhorn-outline');
+}
+
+# }}}
+# _run_resource - the deployment's redeploy request queue (contract a7, D127) {{{
 sub _run_resource {
 	my ($self, $ast, $dn) = @_;
-	return $self->_shuttle_resource($ast, $dn, 'run', "run_$dn", 'inbox-arrow-down');
+	return $self->_shuttle_resource($ast, $dn, 'redeploy', "redeploy_$dn", 'inbox-arrow-down');
 }
 
 # }}}
@@ -1054,10 +1065,12 @@ sub _outcome_hooks {
 			push @steps, @{$notif->{in_parallel}} if $notif;
 		}
 
-		# The deployment's _ran event, on success alone (contract d2, d6)
+		# The deployment's event, named for the job that wrote it, on success
+		# alone (contract d2, d3, d6; D127)
 		my $dn = $wf_data->{deployment_name}{$env};
 		if ($outcome eq 'success' && $dn && $ast->integrations->{shuttle}) {
-			push @steps, { put => "${dn}_ran", get_params => { skip => JSON::PP::true } };
+			my $event = $is_redeploy ? "${dn}_redeployed" : "${dn}_deployed";
+			push @steps, { put => $event, get_params => { skip => JSON::PP::true } };
 		}
 
 		# Signal: all four outcomes
@@ -1892,13 +1905,19 @@ loaded from control with its kit: C<Env::use_create_env> and
 C<Env::bosh_env> (D22, noted 2026-10-19).  Every pool is one C<E<lt>poolE<gt>-lock> resource, however many
 jobs hold it, and the deploy is in C<serial_groups: [E<lt>dnE<gt>]>.
 
-Where C<pipeline.shuttle> is set, each deployment has a C<E<lt>dnE<gt>_ran>
-event, a C<shuttle> resource on the path C<E<lt>dnE<gt>/ran> with
-C<seed_version>.  The deploy puts it on success alone, with no params, and
-the propagate job triggers on that of each deployment another environment
-names as its C<prior_env>, a tail's success making nothing due (D23, D25,
-D75).  C<auth> names the vault
-path holding the S3 C<access_key_id> and C<secret_access_key>.
+Where C<pipeline.shuttle> is set, each deployment has two events named for
+the job that writes them (D127), C<E<lt>dnE<gt>_deployed> on the path
+C<E<lt>dnE<gt>/deployed> and C<E<lt>dnE<gt>_redeployed> on
+C<E<lt>dnE<gt>/redeployed>, and the redeploy's request queue
+C<redeploy_E<lt>dnE<gt>> on C<E<lt>dnE<gt>/redeploy>, each a C<shuttle> resource
+with C<seed_version>.  The deploy puts C<_deployed> and the redeploy
+C<_redeployed>, on success alone, with no params; the propagate job triggers
+on the C<_deployed> of each deployment another environment names as its
+C<prior_env>, a tail's success making nothing due, and never on a
+C<_redeployed>, a redeploy delivering nothing (D23, D25, D75, D127).  The
+redeploy triggers on its queue and hands each request back in its outcome
+hooks.  C<auth> names the vault path holding the S3 C<access_key_id> and
+C<secret_access_key>.
 
 =head1 SYNOPSIS
 

@@ -137,9 +137,9 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 		my ($np) = slack_puts($nj->{$outcome});
 		is($np && $np->{params}{text}, $could_not, "d9: the notify job $outcome says so, with the mentions");
 	}
-	ok(grep({($_->{put} // '') eq "${DN}_ran"} plan_steps($dp->{on_success})),
-		'd2: the _ran put stays on success');
-	ok(!grep({($_->{put} // '') =~ /_ran$/} map {plan_steps($dp->{$_})} qw/on_failure on_abort on_error/),
+	ok(grep({($_->{put} // '') eq "${DN}_deployed"} plan_steps($dp->{on_success})),
+		'd2: the _deployed put stays on success (D127)');
+	ok(!grep({($_->{put} // '') =~ /_(?:re)?deployed$/} map {plan_steps($dp->{$_})} qw/on_failure on_abort on_error/),
 		'd6: and on no other outcome');
 };
 

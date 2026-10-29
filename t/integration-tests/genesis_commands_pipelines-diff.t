@@ -73,7 +73,7 @@ subtest 'a pipeline Concourse would refuse is reported, not compared' => sub {
 	# Three rows, and the run's own restoration assertion.
 	plan tests => 4;
 
-	mkfile_or_fail($invalid, "jobs.redeploy-qa.plan.do[0].on_error.get(run_qa-bosh): repeated name\n");
+	mkfile_or_fail($invalid, "jobs.redeploy-qa.plan.do[0].on_error.get(redeploy_qa-bosh): repeated name\n");
 	mkfile_or_fail($dry, "no changes to apply\n");
 	my ($said, $err, $exit) = run_genesis($h, 'pipeline-diff');
 	$said = unfolded($said, $err);

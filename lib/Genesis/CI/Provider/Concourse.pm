@@ -361,7 +361,7 @@ sub provider_options_schema {
 sub capabilities {
 	return {
 		deployment_locks      => 1,  # the locker resource
-		cross_pipeline_events => 1,  # the shuttle's request queue and _ran event
+		cross_pipeline_events => 1,  # the shuttle's request queue and its events
 		optional_git_triggers => 1,  # trigger: false on a get
 		scheduled_jobs        => 1,  # the time resource
 		per_commit_runs       => 1,  # version: every

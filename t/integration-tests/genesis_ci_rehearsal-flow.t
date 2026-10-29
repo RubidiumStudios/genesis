@@ -66,7 +66,7 @@ subtest 'one environment: propagate, deploy, rest' => sub {
 	like(blob_at($h->{r}, $h->slug('qa'), 'qa.yml') // '', qr/rehearsed: yes/, "qa's branch carries the change");
 	is((newest_record($h, $h->env_path('qa').'/deployments') || {})->{git}{control_commit}, $sha,
 		"qa's exodus record names the control commit");
-	is($r->version('qa-doomsday_ran'), 1, 'the deploy put its _ran once');
+	is($r->version('qa-doomsday_deployed'), 1, 'the deploy put its _deployed once');
 	is_deeply($r->held, {}, 'every pool is free at rest');
 };
 
@@ -79,7 +79,7 @@ subtest 'chained us-qa to us-prod: each deploy wakes the next propagation' => su
 	$r->settle;
 
 	is_deeply([$r->jobs_run], ['propagate', 'deploy-us-qa', 'propagate', 'deploy-us-prod'],
-		"propagate, us-qa's deploy, propagate on its _ran, us-prod's deploy, rest") or diag(said($r));
+		"propagate, us-qa's deploy, propagate on its _deployed, us-prod's deploy, rest") or diag(said($r));
 	is((newest_record($h, $h->env_path('us-prod').'/deployments') || {})->{git}{control_commit}, $sha,
 		"us-prod's exodus record names the control commit");
 	is_deeply($r->held, {}, 'every pool is free at rest');

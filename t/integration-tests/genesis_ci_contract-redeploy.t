@@ -68,8 +68,10 @@ subtest 'the redeploy job, manual' => sub {
 	is_deeply([map {$_->{params}{locked_by}} grep {$_->{put}} @do], [$DN, $DN],
 		'g1, g2: locked by <dn>');
 
-	is(scalar(grep {($_->{put} // '') eq "${DN}_ran"} plan_steps($plan->{on_success} || {})), 1,
-		'd3: it puts <dn>_ran on success');
+	is(scalar(grep {($_->{put} // '') eq "${DN}_redeployed"} plan_steps($plan->{on_success} || {})), 1,
+		'd3: it puts <dn>_redeployed on success (D127)');
+	ok(!grep({($_->{put} // '') eq "${DN}_deployed"} plan_steps($rj)),
+		'D127: and never <dn>_deployed, which only the deploy writes');
 	ok(!grep({($_->{put} // '') =~ /run_propagate/} plan_steps($rj)),
 		'd4: and never run_propagate');
 
@@ -86,18 +88,19 @@ subtest 'the redeploy request queue' => sub {
 	my ($p, $why) = dry_pipeline($h);
 	ok($p, 'the dry apply prints a pipeline') or return diag($why);
 
-	my $run = pipeline_resource($p, "run_$DN") || {};
-	my $ran = pipeline_resource($p, "${DN}_ran") || {};
-	is($run->{type}, 'shuttle', 'a7: a shuttle resource run_<dn>');
-	is($run->{source}{path}, "$DN/run", 'a7: on the path <dn>/run');
+	my $Q   = "redeploy_$DN";
+	my $run = pipeline_resource($p, $Q) || {};
+	my $ran = pipeline_resource($p, "${DN}_redeployed") || {};
+	is($run->{type}, 'shuttle', 'a7: a shuttle resource redeploy_<dn> (D127)');
+	is($run->{source}{path}, "$DN/redeploy", 'a7: on the path <dn>/redeploy');
 	is($run->{source}{seed_version}, 1, 'a7: with seed_version');
 	is_deeply({%{$run->{source} || {}}, path => undef}, {%{$ran->{source} || {}}, path => undef},
-		'a7: on the same source as <dn>_ran');
+		'a7: on the same source as the events');
 
 	my $rj   = pipeline_job($p, "redeploy-$ENV_NAME") || {};
 	my $plan = $rj->{plan}[0] || {};
 	my @triggers = grep {$_->{get} && $_->{trigger}} plan_steps($plan->{do} || []);
-	is_deeply([map {$_->{get}} @triggers], ["run_$DN"], 'c7: the queue is its one trigger');
+	is_deeply([map {$_->{get}} @triggers], [$Q], 'c7: the queue is its one trigger');
 
 	# A hand-back names the queue by resource, since Concourse refuses a job
 	# with two steps of one name.
@@ -105,7 +108,7 @@ subtest 'the redeploy request queue' => sub {
 		my $hook = $_;
 		# YAML's true is a boolean object, so each param is read as 1 or 0.
 		($hook => [map {my $p = $_->{params} || {}; +{map {($_ => $p->{$_} ? 1 : 0)} keys %$p}}
-			grep {($_->{resource} // $_->{get} // '') eq "run_$DN" && !$_->{trigger}}
+			grep {($_->{resource} // $_->{get} // '') eq $Q && !$_->{trigger}}
 			grep {$_->{get}} plan_steps($plan->{$hook} || {})]);
 	} qw/on_success on_failure on_error on_abort/;
 	# Concourse refuses two gets of one name in a job (each names an
@@ -116,9 +119,9 @@ subtest 'the redeploy request queue' => sub {
 	is_deeply($back{on_success}, [{return => 1}], 'd5: handed back on success with return');
 	is_deeply($back{on_failure}, [{return => 1, fail => 1}], 'd5: and on failure with return and fail');
 	is_deeply($back{on_error}, [{return => 1, fail => 1}], 'd5: and on error the same');
-	ok(!grep({($_->{put} // '') eq "run_$DN"} map {plan_steps($_)} @{$p->{jobs} || []}),
+	ok(!grep({($_->{put} // '') eq $Q} map {plan_steps($_)} @{$p->{jobs} || []}),
 		'd5: and nothing ever puts it');
-	is(scalar(grep {my $j = $_; grep {($_->{get} // '') eq "run_$DN"} plan_steps($j)} @{$p->{jobs} || []}), 1,
+	is(scalar(grep {my $j = $_; grep {($_->{resource} // $_->{get} // '') eq $Q} plan_steps($j)} @{$p->{jobs} || []}), 1,
 		'a7: and only the redeploy job reads it');
 };
 
