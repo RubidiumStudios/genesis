@@ -346,6 +346,20 @@ provider's C<fly_command> names, and then pauses,
 unpauses, exposes, or hides it according to what was asked for. A dry run
 prints what would be set and stops.
 
+Before the pipeline is touched it asks its own question (T440), because
+C<fly set-pipeline> answers a declined confirmation with exit 0 and writes its
+prompt to the terminal, so its answer cannot be read back.  The compiled
+pipeline is put to C<fly validate-pipeline>, and one Concourse would refuse
+stops the run at C<CONFIG> with Concourse's errors.  C<fly set-pipeline
+--dry-run> then says what setting it would change: where nothing would, the
+pipeline is reported C<already set> and nothing is paused, set or unpaused
+(D124); where something would, its diff is printed and, without C<yes>, the
+operator is asked at a terminal, while with no terminal the run stops at
+C<ABORTED> saying nothing was set and naming C<-y>, as it does on a no.  Only
+then is the pipeline paused, set with C<fly set-pipeline -n>, and unpaused and
+exposed or hidden.  A C<fly> with no C<--dry-run> keeps the old path, with
+C<fly>'s own confirmation.
+
 Each option resolves from the caller's C<%opts>, given in the configuration
 file's spelling (the caller normalises any CLI spelling first), then the
 C<pipeline.provider> options held on the compiler, then the legacy layout, then
@@ -380,7 +394,10 @@ B<Errors:> raises what C<generate()> raises when neither C<yaml> nor a
 C<parse()> gives a pipeline to set, the provider's refusal at C<CONFIG>
 when no target is to be found, "Cannot determine pipeline name" when nothing
 names the pipeline, and a message naming the C<fly> subcommand that
-failed when one does.
+failed when one does.  Stops at C<CONFIG> with Concourse's errors where
+C<fly validate-pipeline> refuses the pipeline, and at C<ABORTED>, saying
+nothing was set, where a change is not confirmed: declined at the terminal,
+or with no terminal and no C<yes>.
 
 B<Examples:>
 

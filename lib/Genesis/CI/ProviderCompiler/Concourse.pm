@@ -8,6 +8,9 @@ use warnings;
 use parent 'Genesis::CI::ProviderCompiler';
 
 use Genesis;
+use Genesis::Exit ();
+use Genesis::Term qw/in_controlling_terminal/;
+use Genesis::UI qw/prompt_for_boolean/;
 use Genesis::Top;
 use Genesis::Config;
 use Genesis::CI::Legacy;
@@ -290,19 +293,55 @@ sub deploy {
 	my $provider = $self->provider;
 	my %at       = ((defined $target ? (target => $target) : ()), insecure => $insecure);
 
+	# Write pipeline to temp file
+	my $dir = workdir;
+	mkfile_or_fail("${dir}/pipeline.yml", $yaml);
+
+	# The apply asks its own question before the pipeline is touched, because
+	# fly answers a declined confirmation with exit 0 and its prompt writes to
+	# the terminal, so its answer cannot be read back (T440).  Concourse is
+	# asked whether it would take the pipeline, then what setting it would
+	# change.
+	my ($valid, $vrc) = $provider->fly({%at}, 'validate-pipeline', '-c', "$dir/pipeline.yml");
+	bail({exitcode => Genesis::Exit::CONFIG},
+		"The compiled pipeline is not one Concourse would accept:\n\n%s",
+		$valid // 'fly gave no reason') if $vrc;
+
+	my ($dry, $drc) = $provider->fly({%at}, 'set-pipeline', '--team', $team,
+		'-p', $pipeline_name, '-c', "$dir/pipeline.yml", '--dry-run');
+	my $asked = !($drc && ($dry // '') =~ /unknown flag/);
+	if ($asked) {
+		bail("Could not compare pipeline %s through fly: %s", $pipeline_name,
+			$dry // 'no reason given') if $drc;
+		if (($dry // '') =~ /no changes to apply/) {
+			info("  #Ki{already set} #C{%s}: it matches what this run compiled",
+				$pipeline_name);
+			return;
+		}
+		(my $shown = $dry // '') =~ s/\n*\S*pipeline name:.*\z//s;
+		info({raw => 1}, "%s\n", $shown);
+
+		unless ($yes) {
+			bail({exitcode => Genesis::Exit::ABORTED},
+				"Nothing was set: there is no terminal to confirm the change to ".
+				"#C{%s} at.  Review it above, then run with #C{-y} to set it.",
+				$pipeline_name) unless in_controlling_terminal();
+			bail({exitcode => Genesis::Exit::ABORTED},
+				"Nothing was set: the change to #C{%s} was declined.", $pipeline_name)
+				unless prompt_for_boolean("Set pipeline $pipeline_name? [y|n]", 0);
+		}
+	}
+
 	# Pause pipeline before updating (safe to do even when not found yet)
 	my ($out, $rc) = $provider->fly({%at}, 'pause-pipeline', '-p', $pipeline_name);
 	bail("Could not pause pipeline '%s': %s", $pipeline_name, $out)
 		unless $rc == 0 || $out =~ /pipeline '.*' not found/;
 
-	# Write pipeline to temp file
-	my $dir = workdir;
-	mkfile_or_fail("${dir}/pipeline.yml", $yaml);
-
-	# Upload pipeline
+	# Upload pipeline: confirmed above, so fly asks nothing; a fly with no
+	# --dry-run still asks itself, as before.
 	$provider->fly({%at, interactive => 1,
 		onfailure => "Could not upload pipeline $pipeline_name"},
-		'set-pipeline', ($yes ? ('-n') : ()), '--team', $team,
+		'set-pipeline', (($yes || $asked) ? ('-n') : ()), '--team', $team,
 		'-p', $pipeline_name, '-c', "$dir/pipeline.yml");
 
 	# Unpause pipeline (unless pipeline.provider.pause_after_set or --ci-pause)

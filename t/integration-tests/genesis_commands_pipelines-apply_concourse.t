@@ -27,18 +27,30 @@ $ENV{GENESIS_FLY_BIN} = "$ENV{HOME}/bin/fly";
 mkfile_or_fail("$ENV{HOME}/.flyrc",
 	"targets:\n  harness-main:\n    api: https://ci.harness.example\n    team: main\n");
 
-# A fly that logs its arguments, and answers --version with $version.
+# A fly that logs its arguments, answers --version with $version, and answers
+# set-pipeline --dry-run with $dry, a change to the pipeline unless a row
+# says otherwise (T440).
 sub stub_fly {
-	my ($version) = @_;
+	my ($version, $dry) = @_;
+	$dry //= "jobs:\n  job deploy-qa has changed:\n  + serial: true\n";
 	unlink $log;
+	my $answer = "$ENV{HOME}/bin/fly-dry-run.txt";
+	mkfile_or_fail($answer, $dry);
 	mkfile_or_fail("$ENV{HOME}/bin/fly", 0755, join("\n",
 		'#!/bin/sh',
 		"echo \"\$*\" >> '$log'",
 		"case \"\$*\" in *--version*) echo $version; exit 0;; esac",
+		"case \"\$*\" in *--dry-run*) cat '$answer'; exit 0;; esac",
 		'exit 0', ''));
 }
 
 sub fly_calls { -f $log ? grep {!/--version/} split /\n/, slurp($log) : () }
+
+# The calls that change the pipeline, which a dry run and a validation do not.
+sub fly_writes {
+	map {/(pause-pipeline|set-pipeline|unpause-pipeline|expose-pipeline|hide-pipeline)/ ? $1 : ()}
+		grep {!/--dry-run|validate-pipeline/} fly_calls();
+}
 
 sub remote_refs {
 	my ($h) = @_;
@@ -57,7 +69,7 @@ subtest 'the apply sets the pipeline at the target ~/.flyrc names' => sub {
 	is($exit, 0, 'the apply succeeds') or diag($err);
 
 	my @calls = fly_calls();
-	my @verbs = map {/(pause-pipeline|set-pipeline|unpause-pipeline|expose-pipeline|hide-pipeline)/ ? $1 : ()} @calls;
+	my @verbs = fly_writes();
 	is_deeply([@verbs[0..2]], [qw/pause-pipeline set-pipeline unpause-pipeline/],
 		'pausing, setting, then unpausing the pipeline')
 		or diag(join("\n", @calls));
@@ -84,6 +96,37 @@ subtest 'a fly the apply cannot use refuses before anything is written' => sub {
 	isnt($exit, 0, 'the apply refuses') or diag($err);
 	is(remote_refs($h), $before, 'no deployment branch was created on the remote');
 	no_secret($h->applied_path, 'and no applied record was written');
+};
+
+# Proves T440: the apply asks its own question, so a set nobody confirmed is
+# never reported as made.  A spawned run has no terminal, which is the shape
+# the escape was found in.
+subtest 'with nobody to confirm it, the pipeline is not set' => sub {
+	# Four rows; the apply writes branches and records, so no restoration row.
+	plan tests => 4;
+
+	stub_fly('7.11.0');
+	my $h = make_harness(envs => ['qa'], provider => 'concourse');
+	my (undef, $err, $exit) = run_genesis($h, {restore => 0}, 'pipeline-apply');
+	my $said = unfolded($err);
+	isnt($exit, 0, 'the apply does not succeed') or diag($err);
+	like($said, qr/job deploy-qa has changed/, 'it shows what it would set');
+	like($said, qr/[Nn]othing was set.*-y/, 'says nothing was set, naming -y');
+	is_deeply([fly_writes()], [], 'and neither pauses, sets nor unpauses the pipeline')
+		or diag(join("\n", fly_calls()));
+};
+
+subtest 'a pipeline already set is left as it is' => sub {
+	# Three rows; the apply writes branches and records, so no restoration row.
+	plan tests => 3;
+
+	stub_fly('7.11.0', "no changes to apply\n");
+	my $h = make_harness(envs => ['qa'], provider => 'concourse');
+	my (undef, $err, $exit) = run_genesis($h, {restore => 0}, 'pipeline-apply', '-y');
+	is($exit, 0, 'the apply succeeds') or diag($err);
+	like(unfolded($err), qr/already set/, 'saying the pipeline is already set');
+	ok(!grep({$_ eq 'set-pipeline'} fly_writes()), 'and it is not set again')
+		or diag(join("\n", fly_calls()));
 };
 
 done_testing;
