@@ -801,6 +801,13 @@ sub _deploy_job {
 			passed => [_notify_job_name($alias)] };
 	}
 
+	# The predecessor's _deployed, read for nothing and triggering nothing, so
+	# Concourse lays the chain out left to right (contract c14, c3).
+	if ($trigger_from) {
+		my $prev = $self->_ran_resource($ast, $wf_data->{deployment_name}{$trigger_from});
+		push @gets, { get => $prev->{name}, trigger => JSON::PP::false } if $prev;
+	}
+
 	# Task library (optional external git resource with custom task files)
 	if (my $tl_get = $self->_task_library_get($ast)) {
 		push @gets, $tl_get;
