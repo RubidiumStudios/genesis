@@ -176,7 +176,6 @@ unit-tests/genesis_ci_pipeline_descriptor-deploy_task.t   # plain-CLI deploy tas
 unit-tests/genesis_ci_pipeline_descriptor-notifications.t # notifications descriptor
 unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library descriptor
 # Failing - feature implementation incomplete; re-enable once green
-#unit-tests/genesis_ci_pipeline_descriptor-redeploy.t
 #unit-tests/genesis_ci_pipeline_descriptor-signal.t
 #ci-pipeline.t                                            # an ASTBuilder row over the multi-file topology answers undef, and the rest of the file is green
 
@@ -493,6 +492,7 @@ integration-tests/genesis_ci_contract-stage1.t                # the dry apply's 
 integration-tests/genesis_ci_contract-stage2.t                # and its control resource and one propagate job, Stage 2's
 integration-tests/genesis_ci_contract-stage3.t                # and each deploy's two lock pools, Stage 3's
 integration-tests/genesis_ci_contract-stage4.t                # and each deployment's _ran event on the shuttle, Stage 4's
+integration-tests/genesis_ci_contract-redeploy.t              # and the redeploy job, pulled forward from Stage 6 as a manual one
 integration-tests/genesis_ci_contract-notifications.t         # and a manual environment's notify job and every deploy's Slack messages (D122)
 integration-tests/genesis_ci_rehearsal-flow.t                 # a change flows through that pipeline, under a stand-in scheduler with the locks simulated
 integration-tests/genesis_ci_compiler-schema_contract.t       # the compiler reads nothing the schema does not declare

@@ -72,7 +72,6 @@ sub describe {
 
 		my @wf_job_names;
 		my @notify_job_names;
-		my @redeploy_job_names;
 		for my $env (@{$wf_data->{environments}}) {
 			my $alias         = $wf_data->{aliases}{$env} || $env;
 			my $is_auto       = $wf_data->{auto}{$env};
@@ -124,23 +123,13 @@ sub describe {
 			push @jobs, $dj;
 			push @wf_job_names, $dj->{name};
 
-			# Redeploy lane
-			my $redeploy_mode = $wf_data->{redeploy}{$env} || '';
-			if ($redeploy_mode) {
-				if ($redeploy_mode eq 'cron') {
-					my $start = $wf_data->{redeploy_cron_start}{$env} || '04:00';
-					my $stop  = $wf_data->{redeploy_cron_stop}{$env}  || '05:00';
-					push @resources, $self->_redeploy_resource(
-						$ast, $env, $alias, $start, $stop
-					);
-				}
-				my $rj = $self->_redeploy_job(
-					$ast, $env, $alias, $deploy_type, $redeploy_mode,
-					$is_create_env, $wf_data
-				);
-				push @jobs, $rj;
-				push @redeploy_job_names, $rj->{name};
-			}
+			# One redeploy job per environment, beside its deploy, manual until
+			# Stage 6 gives it its triggers (contract b3, 2026-10-28; Q44).
+			my $rj = $self->_redeploy_job(
+				$ast, $env, $alias, $deploy_type, $wf_data
+			);
+			push @jobs, $rj;
+			push @wf_job_names, $rj->{name};
 		}
 
 		# Auto-update resources and job
@@ -160,7 +149,7 @@ sub describe {
 				my @group_jobs;
 				for my $member (@{$custom_groups->{$group_name}}) {
 					my $member_alias = $wf_data->{aliases}{$member} || $member;
-					push @group_jobs, "deploy-$member_alias";
+					push @group_jobs, "deploy-$member_alias", "redeploy-$member_alias";
 					if (!$wf_data->{auto}{$member}) {
 						my $notify_name = _notify_job_name($member_alias);
 						if ($group_notifications) {
@@ -210,12 +199,6 @@ sub describe {
 			};
 		}
 
-		if (@redeploy_job_names) {
-			push @groups, {
-				name => 'redeploy',
-				jobs => [sort @redeploy_job_names],
-			};
-		}
 	}
 
 	# One propagate job per pipeline, on control, in its own group after the
@@ -804,20 +787,10 @@ sub _deploy_job {
 	my @priv = @{$config->{task}{privileged} || []};
 	$deploy_task->{privileged} = JSON::PP::true if grep { $_ eq $alias } @priv;
 
-	# Locker steps: each pool in order, released in reverse (contract g4, g5)
-	my @lock_steps;
-	my @unlock_steps;
-	my $locker = $ast->integrations->{locker} || {};
-	my $dn     = $wf_data->{deployment_name}{$env};
-	if ($locker->{url}) {
-		for my $pool ($self->_lock_pools($env, $wf_data)) {
-			my ($name, $key) = @$pool;
-			push @lock_steps, { put => "$name-lock", %to,
-				params => { lock_op => 'lock', key => $key, locked_by => $dn } };
-			unshift @unlock_steps, { put => "$name-lock", %to,
-				params => { lock_op => 'unlock', key => $key, locked_by => $dn } };
-		}
-	}
+	my $dn = $wf_data->{deployment_name}{$env};
+	my ($lock_steps, $unlock_steps) = $self->_lock_steps($ast, $env, $wf_data, %to);
+	my @lock_steps   = @$lock_steps;
+	my @unlock_steps = @$unlock_steps;
 
 	# Build do block
 	my @do;
@@ -855,153 +828,70 @@ sub _deploy_job {
 }
 
 # }}}
-# _redeploy_resource - Concourse time resource for cron-mode redeploy {{{
-sub _redeploy_resource {
-	my ($self, $ast, $env, $alias, $start, $stop) = @_;
+# _lock_steps - the locker puts a deploying job takes and gives back {{{
+#
+# Each pool in order, released in reverse (contract g4, g5), locked by the
+# deployment's name, shared by deploy and redeploy (g1, g2).
+sub _lock_steps {
+	my ($self, $ast, $env, $wf_data, %to) = @_;
 
-	my $config = $ast->configuration || {};
-	my $tagged = $config->{tagged};
-	my %to = $tagged ? (tags => [$env]) : ();
-
-	return {
-		name   => "$alias-redeploy-cron",
-		type   => 'time',
-		icon   => 'clock-outline',
-		%to,
-		source => {
-			start    => $start,
-			stop     => $stop,
-			location => 'UTC',
-		},
-	};
+	my (@lock, @unlock);
+	my $locker = $ast->integrations->{locker} || {};
+	my $dn     = $wf_data->{deployment_name}{$env};
+	if ($locker->{url}) {
+		for my $pool ($self->_lock_pools($env, $wf_data)) {
+			my ($name, $key) = @$pool;
+			push @lock, { put => "$name-lock", %to,
+				params => { lock_op => 'lock', key => $key, locked_by => $dn } };
+			unshift @unlock, { put => "$name-lock", %to,
+				params => { lock_op => 'unlock', key => $key, locked_by => $dn } };
+		}
+	}
+	return (\@lock, \@unlock);
 }
 
 # }}}
-# _redeploy_job - redeploy job for an environment {{{
+# _redeploy_job - the redeploy job for an environment, manual for now {{{
 #
-# Redeploys an environment without change detection or cache generation.
-# Trigger modes: manual (no auto-trigger), cron (time resource), signal (like manual).
+# Redeploys what the environment last deployed: `deploy --redeploy` reads the
+# deployed commit from exodus and checks it out from the branch, which is
+# the job's one input and never its trigger (contract b3, c11, e3).  It
+# takes the deploy's locks and queue (g1, g2, g9), and its outcome hooks put
+# _ran on success and never run_propagate (d3, d4).  Its triggers and the
+# queue's hand-back are Stage 6 (Q44).
 sub _redeploy_job {
-	my ($self, $ast, $env, $alias, $deploy_type, $trigger_mode,
-		$is_create_env, $wf_data) = @_;
+	my ($self, $ast, $env, $alias, $deploy_type, $wf_data) = @_;
 
 	my $config = $ast->configuration || {};
-	my $sc     = $ast->integrations->{source_control} || {};
-	my $root   = $sc->{root} || '.';
-	my $tagged = $config->{tagged};
-	my %to     = $tagged ? (tags => [$env]) : ();
-	my $name   = $ast->metadata->{name} || 'genesis-pipeline';
+	my %to     = $config->{tagged} ? (tags => [$env]) : ();
+	my $dn     = $wf_data->{deployment_name}{$env};
 
-	my $bindir = 'git';
-	my $srcdir = "$alias-changes";
-	$bindir .= "/$root" if $root ne '.';
-
-	# Resource gets, with no change-detection triggers
-	my $signal_cfg = $self->_env_signal_config($ast, $env, $wf_data);
-	my @gets;
-	if ($trigger_mode eq 'cron') {
-		push @gets, {
-			get     => "$alias-redeploy-cron",
-			trigger => JSON::PP::true,
-		};
-	} elsif ($trigger_mode eq 'signal' && $signal_cfg) {
-		push @gets, {
-			get     => "$alias-signal",
-			trigger => JSON::PP::true,
-			version => { status => 'success' },
-		};
-	}
-	push @gets, { get => "$alias-changes", trigger => JSON::PP::false };
-	push @gets, { get => 'git', trigger => JSON::PP::false }
-		unless $config->{'require-passed-caches'};
-	unless ($is_create_env) {
-		my %_bc_suffix = (cloud => 'cloud-config', runtime => 'runtime-config', cpi => 'cpi-config');
-		for my $type (@{$self->_bosh_config_types($ast, $env, $wf_data)}) {
-			push @gets, { get => "$alias-$_bc_suffix{$type}", %to, trigger => JSON::PP::false };
-		}
-	}
-
-	# Task library
+	my @gets = ({ get => "$alias-branch", trigger => JSON::PP::false });
 	if (my $tl_get = $self->_task_library_get($ast)) {
 		push @gets, $tl_get;
 	}
 
-	# Deploy task, which reuses ci-pipeline-deploy with no prior_env
-	my $deploy_task = {
+	my $task = {
 		task => 'bosh-redeploy', %to,
 		config => $self->_task_config($ast, $env, $alias, undef, $wf_data,
-			{ command        => 'ci-pipeline-deploy',
-			  genesis_bindir => $bindir,
-			  genesis_srcdir => $srcdir }),
-		ensure => { put => 'git', params => { repository => 'out/git' } },
+			{ cli_args => [$env, 'deploy', '--redeploy', '-SFy'] }),
 	};
 	my @priv = @{$config->{task}{privileged} || []};
-	$deploy_task->{privileged} = JSON::PP::true if grep { $_ eq $alias } @priv;
+	$task->{privileged} = JSON::PP::true if grep { $_ eq $alias } @priv;
 
-	# Locker steps, mirroring the lock topology of _deploy_job
-	my @lock_steps;
-	my @unlock_steps;
-	my $locker = $ast->integrations->{locker} || {};
-	if ($locker->{url}) {
-		my $bosh_parent = $wf_data->{bosh_parent}{$env}       || '';
-		my $bu_lock     = $wf_data->{bosh_upgrade_lock}{$env} // 1;
-		my $is_director = $wf_data->{is_bosh_director}{$env}  || 0;
-
-		my $bosh_lock_alias;
-		if ($bosh_parent && $bu_lock) {
-			$bosh_lock_alias = $wf_data->{aliases}{$bosh_parent} || $bosh_parent;
-		} elsif ($is_director || !$is_create_env) {
-			$bosh_lock_alias = $alias;
-		}
-
-		if ($bosh_lock_alias) {
-			push @lock_steps, {
-				put => "$bosh_lock_alias-bosh-lock", %to,
-				params => {
-					lock_op => 'lock', key => 'dont-upgrade-bosh-on-me',
-					locked_by => "$env-redeploy",
-				},
-			};
-			push @unlock_steps, {
-				put => "$bosh_lock_alias-bosh-lock", %to,
-				params => {
-					lock_op => 'unlock', key => 'dont-upgrade-bosh-on-me',
-					locked_by => "$env-redeploy",
-				},
-			};
-		}
-
-		push @lock_steps, {
-			put => "$alias-deployment-lock", %to,
-			params => {
-				lock_op => 'lock', key => 'i-need-to-deploy-myself',
-				locked_by => "$env-redeploy",
-			},
-		};
-		push @unlock_steps, {
-			put => "$alias-deployment-lock", %to,
-			params => {
-				lock_op => 'unlock', key => 'i-need-to-deploy-myself',
-				locked_by => "$env-redeploy",
-			},
-		};
-	}
-
-	my @do;
-	push @do, @lock_steps;
-	push @do, { in_parallel => \@gets };
-	push @do, $deploy_task;
+	my ($lock_steps, $unlock_steps) = $self->_lock_steps($ast, $env, $wf_data, %to);
 
 	my %hooks = $self->_outcome_hooks($ast, $env, $alias, $deploy_type, $wf_data, 1);
 	my $plan_step = {};
 	$plan_step->{$_} = $hooks{$_} for sort keys %hooks;
-	$plan_step->{ensure} = { do => \@unlock_steps } if @unlock_steps;
-	$plan_step->{do} = \@do;
+	$plan_step->{ensure} = { do => $unlock_steps } if @$unlock_steps;
+	$plan_step->{do} = [@$lock_steps, { in_parallel => \@gets }, $task];
 
 	return {
 		name   => "redeploy-$alias",
 		public => JSON::PP::true,
 		serial => JSON::PP::true,
+		($dn ? (serial_groups => [$dn]) : ()),
 		plan   => [$plan_step],
 	};
 }
@@ -1412,14 +1302,11 @@ sub _task_config {
 	my $sc      = $ast->integrations->{source_control} || {};
 	my $vault   = $ast->integrations->{vault} || {};
 	my $root    = $sc->{root} || '.';
-	# Deploy tasks run the root's embedded CLI from the root; the shim shape
-	# below survives only for the redeploy lane (Stage 6).
+	# Every task runs the root's embedded CLI, from the root, with the command
+	# an operator would type; the retired ci-* commands have no caller.
 	my $cli     = $opts->{cli_args};
-	my $input   = $opts->{input} || ($cli ? "$alias-branch" : undef);
-	my $cmd     = $opts->{command} || 'ci-pipeline-deploy';
-	my $bindir  = $opts->{genesis_bindir} || 'git';
-	my $srcdir  = $opts->{genesis_srcdir} || 'git';
-	my $passed  = $trigger_from || '';
+	bug("_task_config was given no cli_args, so no command to run") unless $cli && @$cli;
+	my $input   = $opts->{input} || "$alias-branch";
 
 	my $task_cfg = $config->{task} || {};
 	my $reg      = $config->{registry} || {};
@@ -1446,19 +1333,6 @@ sub _task_config {
 		VAULT_ADDR       => $vault->{url} || '',
 	);
 
-	# Directory and mode vars addressed the retired ci-* commands' notion of
-	# an input/output/cache workspace.  The plain CLI has none of that.
-	unless ($cli) {
-		$params{CURRENT_ENV}          = $env;
-		$params{GIT_BRANCH}           = $sc->{default_branch}
-			|| $ast->branches->{Genesis::Top::CI_PIPELINE_CONTROL_KEY()} || 'main';
-		$params{PREVIOUS_ENV}         = $passed || '~';
-		$params{CACHE_DIR}            = "$alias-cache";
-		$params{OUT_DIR}              = 'out/git';
-		$params{WORKING_DIR}          = "$alias-changes";
-		$params{BOSH_NON_INTERACTIVE} = 'true';
-	}
-
 	# Each component under the variable Service::Vault::Remote reads it from.
 	if ($vault->{auth}) {
 		my $auth = Genesis::Top::credential_components(vault => $vault->{auth});
@@ -1480,16 +1354,11 @@ sub _task_config {
 			$params{GIT_PASSWORD} = _unwrap_ref($auth->{password});
 		}
 	}
-	$params{GIT_GENESIS_ROOT} = $root if !$cli && $root ne '.';
-	$params{DEBUG}            = $config->{debug} if $config->{debug};
+	$params{DEBUG} = $config->{debug} if $config->{debug};
 
-	# A CLI task reads one branch, the env's own for a deploy and control
-	# for propagate: its trigger and its source of record.
-	my @inputs = $cli ? ({ name => $input }) : ({ name => "$alias-changes" });
-	unless ($cli) {
-		push @inputs, { name => "$alias-cache" } if $passed;
-		push @inputs, { name => 'git' } unless $config->{'require-passed-caches'};
-	}
+	# A task reads one branch, the env's own for a deploy and control for
+	# propagate: its trigger and its source of record.
+	my @inputs = ({ name => $input });
 
 	# Task library input, which exposes the library files to the task
 	if (my $tl = $config->{task_library}) {
@@ -1505,14 +1374,9 @@ sub _task_config {
 		platform       => 'linux',
 		image_resource => { type => 'registry-image', source => $img_src },
 		params         => \%params,
-		run            => $cli
-			? { path => '.genesis/bin/genesis', args => $cli,
-			    dir  => $input . ($root eq '.' ? '' : "/$root") }
-			: { path => "$bindir/.genesis/bin/genesis", args => [$cmd] },
+		run            => { path => '.genesis/bin/genesis', args => $cli,
+		                    dir  => $input . ($root eq '.' ? '' : "/$root") },
 		inputs         => \@inputs,
-		# 'out' existed to stage the commit-back; exodus carries deploy
-		# state now, so a CLI deploy produces no artifact.
-		($cli ? () : (outputs => [{ name => 'out' }])),
 	};
 }
 
