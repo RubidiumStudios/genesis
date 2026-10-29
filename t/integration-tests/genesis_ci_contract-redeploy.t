@@ -99,12 +99,20 @@ subtest 'the redeploy request queue' => sub {
 	my @triggers = grep {$_->{get} && $_->{trigger}} plan_steps($plan->{do} || []);
 	is_deeply([map {$_->{get}} @triggers], ["run_$DN"], 'c7: the queue is its one trigger');
 
+	# A hand-back names the queue by resource, since Concourse refuses a job
+	# with two steps of one name.
 	my %back = map {
 		my $hook = $_;
 		# YAML's true is a boolean object, so each param is read as 1 or 0.
 		($hook => [map {my $p = $_->{params} || {}; +{map {($_ => $p->{$_} ? 1 : 0)} keys %$p}}
-			grep {($_->{get} // '') eq "run_$DN"} plan_steps($plan->{$hook} || {})]);
+			grep {($_->{resource} // $_->{get} // '') eq "run_$DN" && !$_->{trigger}}
+			grep {$_->{get}} plan_steps($plan->{$hook} || {})]);
 	} qw/on_success on_failure on_error on_abort/;
+	# Concourse refuses two gets of one name in a job (each names an
+	# artifact); puts of one resource may repeat, as the lock puts do.
+	my @names = map {$_->{get}} grep {$_->{get}} plan_steps($rj);
+	my %seen;
+	is_deeply([grep {$seen{$_}++ == 1} @names], [], 'no two gets in the job share a name');
 	is_deeply($back{on_success}, [{return => 1}], 'd5: handed back on success with return');
 	is_deeply($back{on_failure}, [{return => 1, fail => 1}], 'd5: and on failure with return and fail');
 	is_deeply($back{on_error}, [{return => 1, fail => 1}], 'd5: and on error the same');

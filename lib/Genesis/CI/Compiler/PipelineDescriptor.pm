@@ -910,14 +910,17 @@ sub _redeploy_job {
 
 	# The request is handed back, never put, so the job cannot re-trigger
 	# itself: returned on success, returned failed otherwise (contract d5).
+	# Concourse refuses two gets of one name in a job, so each hand-back
+	# gets the queue under a name of its own.
 	if ($run) {
 		my %back = (
-			on_success => { return => JSON::PP::true },
-			on_failure => { return => JSON::PP::true, fail => JSON::PP::true },
-			on_error   => { return => JSON::PP::true, fail => JSON::PP::true },
+			on_success => ['returned', { return => JSON::PP::true }],
+			on_failure => ['failed',   { return => JSON::PP::true, fail => JSON::PP::true }],
+			on_error   => ['errored',  { return => JSON::PP::true, fail => JSON::PP::true }],
 		);
 		for my $hook (sort keys %back) {
-			my $step  = { get => $run->{name}, params => $back{$hook} };
+			my ($as, $params) = @{$back{$hook}};
+			my $step  = { get => "$run->{name}-$as", resource => $run->{name}, params => $params };
 			my $have  = $hooks{$hook};
 			my @steps = !$have ? ()
 				: $have->{in_parallel} ? @{$have->{in_parallel}} : ($have);
