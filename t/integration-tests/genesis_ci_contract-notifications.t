@@ -106,11 +106,16 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 	is_deeply($task->{config}{params}, $dtask->{config}{params}, 'e12: with its params');
 	is_deeply($task->{config}{inputs}, [{name => $BRANCH}], 'e12: reading the branch');
 
+	# T443: each message links its own build, from the metadata the Slack
+	# resource expands, and the staged one links the deploy job to run next.
+	my $at    = '$ATC_EXTERNAL_URL/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs';
+	my $build = "<$at/\$BUILD_JOB_NAME/builds/\$BUILD_NAME|\$BUILD_JOB_NAME #\$BUILD_NAME>";
 	my @put = slack_puts($nj->{plan});
 	is(scalar(@put), 1, 'd9: its plan puts to slack once');
 	is($put[0] && $put[0]{params}{text},
-		"$TYPE: Changes are staged to be deployed to $DN, see $NOTIFY job for change summary, ".
-		"then schedule and run a deploy via Concourse", 'd9: the staged text');
+		"$TYPE: Changes are staged to be deployed to $DN, see $build for change summary, ".
+		"then schedule and run a deploy via <$at/$DEPLOY|$DEPLOY>",
+		'd9: the staged text, linking its build and the deploy job (T443)');
 	is($put[0] && $put[0]{params}{channel}, '#deploys', 'd9: on the channel');
 	my @plan = @{$nj->{plan} || []};
 	ok(@plan && grep({($_->{put} // '') eq 'slack'} plan_steps($plan[-1])), 'd9: after its task');
@@ -122,17 +127,25 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 	my $dp = deploy_plan($p);
 	my ($ok)   = slack_puts($dp->{on_success});
 	my ($fail) = slack_puts($dp->{on_failure});
-	is($ok && $ok->{params}{text}, "$TYPE: Concourse successfully deployed $DN", 'd10: success text');
-	is($fail && $fail->{params}{text}, "\@oncall: $TYPE: Concourse deployment to $DN failed",
+	is($ok && $ok->{params}{text}, "$TYPE: Concourse successfully deployed $DN ($build)", 'd10: success text');
+	is($fail && $fail->{params}{text}, "\@oncall: $TYPE: Concourse deployment to $DN failed ($build)",
 		'd10: failure text, with the mentions');
 	my ($err)   = slack_puts($dp->{on_error});
 	my ($abort) = slack_puts($dp->{on_abort});
-	is($err && $err->{params}{text}, "\@oncall: $TYPE: Concourse deployment to $DN errored",
+	is($err && $err->{params}{text}, "\@oncall: $TYPE: Concourse deployment to $DN errored ($build)",
 		'd10: errored text, with the mentions');
-	is($abort && $abort->{params}{text}, "$TYPE: Concourse deployment to $DN was aborted",
+	is($abort && $abort->{params}{text}, "$TYPE: Concourse deployment to $DN was aborted ($build)",
 		'd10: aborted text, without them');
 
-	my $could_not = "\@oncall: $TYPE: Could not determine the changes staged for $DN, see $NOTIFY job";
+	my $rp = (pipeline_job($p, "redeploy-$ENV_NAME") || {})->{plan}[0] || {};
+	my ($rok)   = slack_puts($rp->{on_success});
+	my ($rfail) = slack_puts($rp->{on_failure});
+	is($rok && $rok->{params}{text}, "$TYPE: Concourse successfully redeployed $DN ($build)",
+		"T443: the redeploy's success links its build");
+	is($rfail && $rfail->{params}{text}, "\@oncall: $TYPE: Concourse redeploy of $DN failed ($build)",
+		"T443: and its failure");
+
+	my $could_not = "\@oncall: $TYPE: Could not determine the changes staged for $DN, see $build";
 	for my $outcome (qw/on_failure on_error/) {
 		my ($np) = slack_puts($nj->{$outcome});
 		is($np && $np->{params}{text}, $could_not, "d9: the notify job $outcome says so, with the mentions");

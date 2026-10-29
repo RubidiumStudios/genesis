@@ -727,6 +727,21 @@ sub _notify_job_name {
 }
 
 # }}}
+# _build_link, _job_link - Slack links from the build metadata (D122, T443) {{{
+#
+# The Slack resource expands Concourse's build metadata in its text, so the
+# variables are written literally and become the posting build's own URL.
+use constant JOBS_URL =>
+	'$ATC_EXTERNAL_URL/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs';
+sub _build_link {
+	return '<'.JOBS_URL.'/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_JOB_NAME #$BUILD_NAME>';
+}
+sub _job_link {
+	my ($job) = @_;
+	return '<'.JOBS_URL."/$job|$job>";
+}
+
+# }}}
 # _notify_job - notification job for non-auto environments {{{
 sub _notify_job {
 	my ($self, $ast, $env, $alias, $deploy_type, $trigger_from,
@@ -744,7 +759,8 @@ sub _notify_job {
 	my $pipeline_name = $ast->metadata->{name} || 'genesis-pipeline';
 	my $notif = $self->_notification_step($ast,
 		"$pipeline_name: Changes are staged to be deployed to $env-$deploy_type, ".
-		"see $name job for change summary, then schedule and run a deploy via Concourse",
+		"see "._build_link()." for change summary, then schedule and run a deploy via ".
+		_job_link("deploy-$alias"),
 		{ env => $env });
 
 	my @plan = (
@@ -755,7 +771,7 @@ sub _notify_job {
 
 	# A version no one hears of cannot be deployed under inline, so say so.
 	my $unknown = $self->_notification_step($ast,
-		"$pipeline_name: Could not determine the changes staged for $env-$deploy_type, see $name job",
+		"$pipeline_name: Could not determine the changes staged for $env-$deploy_type, see "._build_link(),
 		{ env => $env, is_failure => 1 });
 
 	return {
@@ -1050,11 +1066,12 @@ sub _outcome_hooks {
 	my $name      = $ast->metadata->{name} || 'genesis-pipeline';
 	my $action    = $is_redeploy ? 'redeploy of'    : 'deployment to';
 	my $ok_action = $is_redeploy ? 'redeployed'     : 'deployed';
+	my $link = ' ('._build_link().')';
 	my %msg = (
-		success => ["$name: Concourse successfully ${ok_action} $env-$deploy_type", 0],
-		failure => ["$name: Concourse $action $env-$deploy_type failed", 1],
-		error   => ["$name: Concourse $action $env-$deploy_type errored", 1],
-		abort   => ["$name: Concourse $action $env-$deploy_type was aborted", 0],
+		success => ["$name: Concourse successfully ${ok_action} $env-$deploy_type$link", 0],
+		failure => ["$name: Concourse $action $env-$deploy_type failed$link", 1],
+		error   => ["$name: Concourse $action $env-$deploy_type errored$link", 1],
+		abort   => ["$name: Concourse $action $env-$deploy_type was aborted$link", 0],
 	);
 
 	my $signal_cfg  = $self->_env_signal_config($ast, $env, $wf_data);
