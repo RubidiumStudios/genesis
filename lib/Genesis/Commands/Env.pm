@@ -1447,12 +1447,19 @@ sub deploy_redacts {
 # }}}
 # pending_changes - what deploying the branch would change, read-only (D123) {{{
 sub pending_changes {
-	option_defaults(redact => deploy_redacts());
+	# Redacted at a terminal too, unlike the deploy: the command is a read,
+	# and its log can be a public pipeline's (D123).
+	option_defaults(redact => !(($ENV{CI_NO_REDACT} // '') =~ /^(1|true)$/i));
 	command_usage(1) if @_ != 1;
 
 	my $env = Genesis::Top->new('.')->load_env($_[0])->with_vault();
+	my $opts = get_options;
 	require Genesis::Env::PendingChanges;
-	Genesis::Env::PendingChanges->new($env, redact => get_options->{redact})->report;
+	Genesis::Env::PendingChanges->new($env,
+		redact       => $opts->{redact},
+		verbose      => $opts->{verbose},
+		summary_file => $opts->{'summary-file'},
+	)->report;
 	return 0;
 }
 

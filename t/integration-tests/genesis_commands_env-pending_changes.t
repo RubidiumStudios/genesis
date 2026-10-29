@@ -115,13 +115,19 @@ subtest 'T421: what deploying the branch would change, read-only' => sub {
 	my $all = "$out$err";
 	is($exit, 0, 'it succeeds with changes pending') or diag($all);
 
-	my @order = map {index($all, $_)} ('Commits since', 'Manifest', 'BOSH configs', 'Uploads');
+	# The order D123's note of 2026-10-29 lays out; the four sections were
+	# all there was before it.
+	# Headings are matched as whole lines, since the summary's own words
+	# ("2 BOSH configs") would otherwise be found first.
+	my @order = map {index($all, $_)} ('Summary:', "\nFiles changed since", "\nCommits, oldest first\n",
+		'What the deploy would change on the director', "\nManifest\n", "\nBOSH configs\n", "\nUploads\n");
 	ok(!grep({$_ < 0} @order) && "@order" eq join(' ', sort {$a <=> $b} @order),
-		'the four sections, in order') or diag($all);
+		'the sections, in order') or diag($all);
 
 	like($all, qr/propagated.*\Q@{[substr($c->{second}, 0, 8)]}\E/,
 		'the delivered commit, labelled propagated with its control commit');
-	like($all, qr/manual.*a hand edit on the branch/, 'the hand commit, labelled manual');
+	like($all, qr/manual commit .*\n.*"a hand edit on the branch"/,
+		'the hand commit, labelled manual, its subject beneath');
 	like($all, qr/qa-notes\.txt/, 'with the files it changes');
 	unlike($all, qr/\Q@{[substr($c->{deployed}, 0, 8)]}\E.*the deployed content/,
 		'and not the deployed commit');
@@ -167,15 +173,43 @@ subtest 'T421: a director that differs from exodus is drift' => sub {
 	unlike("$out$err", qr/\Q$SECRET\E/, 'still never in clear');
 };
 
+# Proves T447: under redaction a config diff shows the paths it changes and
+# never their values, since the director returns a config as uploaded; with
+# --no-redact both values show.  The director's config moved since the
+# deployment last ran, a password in clear changing with it.
+subtest 'T447: a config diff is masked under redaction' => sub {
+	my ($h) = pending_harness();
+	bosh_answer($h, '/configs?latest=true' =>
+		'[{"id":"2","type":"cloud","name":"default","content":"azs: [{name: z1}]\nvm_types: [{name: small, cloud_properties: {password: the-new-config-secret}}]\n"}]');
+	bosh_answer($h, '/configs/1' =>
+		'{"id":"1","type":"cloud","name":"default","content":"azs: [{name: z1}]\nvm_types: [{name: small, cloud_properties: {password: the-old-config-secret}}]\n"}');
+
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'pending-changes');
+	my $all = "$out$err";
+	is($exit, 0, 'it succeeds') or diag($all);
+	like($all, qr/cloud config default changed on the director/, 'the moved config is listed');
+	like($all, qr/password/, 'with the path that changed');
+	like($all, qr/<redacted: changed>/, 'its new value masked');
+	unlike($all, qr/the-old-config-secret|the-new-config-secret/, 'and neither value in clear');
+
+	($out, $err, $exit) = run_genesis($h, 'qa', 'pending-changes', '--no-redact');
+	$all = "$out$err";
+	is($exit, 0, 'the unredacted run succeeds') or diag($all);
+	like($all, qr/the-old-config-secret/, '--no-redact shows the old value');
+	like($all, qr/the-new-config-secret/, 'and the new');
+};
+
 subtest 'T421: an environment never deployed says so' => sub {
 	my ($h) = pending_harness(never_deployed => 1);
 	my ($out, $err, $exit) = run_genesis($h, 'qa', 'pending-changes');
 	is($exit, 0, 'it succeeds') or diag("$out$err");
 	my $all = "$out$err";
 	like($all, qr/never been deployed/, 'it says so');
-	like($all, qr/manual.*a hand edit on the branch/, 'and lists the branch');
-	like($all, qr/seed.*Initialize \S+ branch \[ci skip\]/, "the apply's seed commit labelled seed");
-	unlike($all, qr/manual.*Initialize/, 'and not manual');
+	like($all, qr/manual commit .*\n.*"a hand edit on the branch"/, 'and lists the branch');
+	# The seed is the range's base since D123's note of 2026-10-29, which
+	# withdrew its label: never listed, and named by the stat's heading.
+	like($all, qr/Files changed since the branch was cut/, "the apply's seed commit as the base");
+	unlike($all, qr/Initialize \S+ branch \[ci skip\]/, 'and never listed');
 	like($all, qr/first deploy.*\n(?:.*\n)*?.*the-coming-version/,
 		'the whole manifest, as additions against nothing deployed');
 	like($all, qr/\Q@{[entombed_ref($SECRET)]}\E/, 'its vault value as the reference the deploy would send');

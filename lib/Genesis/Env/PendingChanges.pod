@@ -1,3 +1,5 @@
+=encoding utf8
+
 =head1 NAME
 
 Genesis::Env::PendingChanges - what deploying an environment's branch would change, read-only
@@ -7,8 +9,9 @@ Genesis::Env::PendingChanges - what deploying an environment's branch would chan
     use Genesis::Env::PendingChanges;
 
     my $env     = Genesis::Top->new('.')->load_env('qa')->with_vault;
-    my $pending = Genesis::Env::PendingChanges->new($env, redact => 1)->report;
-    # prints the four sections; $pending is true where anything is pending
+    my $pending = Genesis::Env::PendingChanges->new($env,
+        redact => 1, summary_file => 'summary/summary.txt')->report;
+    # prints the report; $pending is true where anything is pending
 
 =head1 DESCRIPTION
 
@@ -18,40 +21,60 @@ was unsafe there: the BOSH CLI uploads every release the manifest names by
 C<url> before it creates the task, and the dry run runs the kit's
 C<pre-deploy> hook and reactions. This report does none of that. It uploads
 nothing, takes no lock, runs no hook or reaction, writes nothing to the vault,
-CredHub, the director or the repository, and only reads.
+CredHub, the director or the repository, and only reads; the one file it may
+write is the summary file its caller names.
 
-It prints four sections, each even when it has nothing to say:
+It reads everything before it prints anything, since rendering the manifest
+and reaching the director print their own progress, which then stands above
+the report. The report is laid out for scanning (D123's note of 2026-10-29):
 
 =over 4
 
-=item Commits since the last deploy
+=item The summary
 
-From the newest successful exodus record's C<git.commit> to the branch's
-head, each labelled I<propagated>, with the control commit its marker names,
-I<seed> for the commit C<pipeline-apply> cut the branch with, or I<manual>,
-and the files it changes under the deployment root. An environment never
-deployed, or whose deployed commit is not on the branch, says so and lists
-the branch.
+A frame, its header naming the environment and its type, holding one
+paragraph per point with a blank line between: how many commits are pending,
+over what span, changing how many files; where and when the environment last
+deployed, and by whom, or that it never has, or never from its branch; and
+what deploying would do, in one of five verdicts: nothing pending, commits that
+change nothing on the director (the deploy only records the commit, after
+which a redeploy works, D128), real changes counted by kind, a first deploy
+naming what it creates, and drift added to any of them.
 
-=item Manifest
+=item Files changed since ...
 
-The branch's manifest spruce-diffed against the director's live manifest and
-against the last one recorded in exodus, a difference between those two
-reported as drift, and the BOSH variables against the deployed ones. A
-create-env environment has the exodus baseline alone. For a first deploy,
-where neither holds a manifest, the whole manifest is shown as additions
-against an empty one, since then the whole manifest is the change.
+A C<git diff --stat> relative to the deployment root, from the deployed commit
+where it is on the branch ("since the last deploy"), and otherwise from the
+seed commit C<pipeline-apply> cut the branch with ("since the branch was
+cut"), which is never listed itself.
 
-=item BOSH configs
+=item Commits, oldest first
 
-The configs the kit synthesizes that the director lacks or holds differently,
-which the deploy would upload, and every cloud or runtime config whose latest
-version on the director differs from the one the deployment last ran with,
-whoever uploaded it.
+The same range, each commit on two lines: its control commit's date in
+absolute and fuzzy form, labelled I<propagated> with that control commit and
+its author, or I<manual> with its own; then its subject and a count of the
+files it changes, the names only under C<verbose>. A delivery whose control
+commit this clone does not hold shows its own marker line. Three or more
+consecutive commits of one kind and author whose subjects match once every
+version string and hex sha is replaced fold to their first and last, the
+count between, all of them listed under C<verbose>.
 
-=item Uploads
+=item The rule, then Manifest, BOSH configs and Uploads
 
-The releases and stemcells the manifest names that the director lacks.
+A labelled rule, "What the deploy would change on the director", then the
+branch's manifest spruce-diffed against the director's live manifest and the
+exodus copy, a difference between those two reported as drift, the BOSH
+variables against exodus's, and the referenced secrets in one line; the
+configs the kit synthesizes that the director lacks or holds differently,
+and every cloud or runtime config moved on the director since the deployment
+last ran; and the releases and stemcells the director lacks. A create-env
+environment has the exodus baseline alone and no configs or uploads; a first
+deploy shows the whole manifest as additions.
+
+=item The verdict
+
+The summary's verdict again, in the header's style, so the end of a long log
+reads like its start.
 
 =back
 
@@ -60,9 +83,10 @@ C<without_credhub_writes>, so an entombed environment's vault values appear as
 the exact references the deploy would send,
 C<((genesis-entombed/E<lt>pathE<gt>--E<lt>keyE<gt>--E<lt>shaE<gt>))>, and a
 changed value shows as its reference changing, while nothing is written to
-CredHub. With redaction on, a vault value in clear, as in an environment that
-does not entomb, shows only as C<< <redacted> >> or
-C<< <redacted: changed> >>; a reference is never masked.
+CredHub. With redaction on, a vault value in clear shows only as
+C<< <redacted> >> or C<< <redacted: changed> >>, a reference never masked, and
+a config diff masks every scalar it changes, keeping its paths, because the
+director returns a config as it was uploaded and never redacts it.
 
 =head1 CLASS METHODS
 
@@ -80,21 +104,33 @@ The C<Genesis::Env>.
 
 =item C<redact>
 
-True to show vault values only as changed or unchanged.
+True to show vault values, and every value a config diff changes, only as
+changed or unchanged.
+
+=item C<verbose>
+
+True to list each commit's files and every commit of a folded run.
+
+=item C<summary_file>
+
+A path to write the summary's paragraphs to, plain, one blank line between.
 
 =back
 
 B<Returns:> the report object; nothing is read until C<report>.
 
+B<Errors:> none.
+
 B<Examples:>
 
-    my $report = Genesis::Env::PendingChanges->new($env, redact => 1);
+    my $report = Genesis::Env::PendingChanges->new($env, redact => 1, verbose => 1);
 
 =head1 INSTANCE METHODS
 
 =head2 report()
 
-Prints the four sections, then whether anything is pending.
+Reads the commits and the director's side, writes the summary file where one
+is named, and prints the report.
 
 B<Returns:> the number of sections and items that found something pending,
 so false where nothing is.
@@ -108,46 +144,228 @@ B<Errors:>
 Whatever loading the environment's manifest, reading the vault or reaching
 the director raises; the notify job's failure message is for exactly that.
 
+=item *
+
+C<mkfile_or_fail>'s, where the summary file cannot be written.
+
 =back
+
+B<Examples:>
+
+    Genesis::Env::PendingChanges->new($env, redact => 1)->report;
 
 =head1 INTERNAL METHODS
 
-=head2 _commits()
+=head2 _read_commits()
 
-The commits section. Reads the deployed commit from C<deployed_record>, walks
-the branch from there with C<log_subjects>, labels each by its marker, and
-lists its files with C<commit_files> under the git prefix.
+The range and its commits: the deployed commit as the base where it is on the
+branch, the seed otherwise, the branch's start where its root is no seed. It
+fetches nothing; a pipeline task's clone holds control already, which the
+configuration load fetched (D121).
+
+B<Returns:> a hashref of C<branch>, C<deployed>, C<off_branch>, C<base>,
+C<since> (the heading's words), C<commits> oldest first and C<stat>.
+
+B<Errors:> C<log_subjects>' and C<commit_files>' refusals at
+C<Genesis::Exit::DATAERR>.
+
+B<Examples:>
+
+    my $c = $self->_read_commits;  # $c->{since} eq 'the last deploy'
+
+=head2 _entry($git, $commit, $scope)
+
+One commit as the report reads it: its C<kind> (C<propagated>, C<manual> or
+C<seed>), its files under the root, and the author, time and subject of the
+control commit its marker names, or its own where that commit is not held,
+marked C<unread>, or where it is no delivery. A squash's count is kept.
+
+B<Returns:> a hashref.
+
+B<Errors:> C<commit_files>'.
+
+B<Examples:>
+
+    my $e = _entry($git, {sha => $sha, message => $message}, ['doomsday/']);
+
+=head2 _print_files($c)
+
+Prints the files heading and the diff stat.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    $self->_print_files($c);  # Files changed since the branch was cut
+
+=head2 _print_commits($c)
+
+Prints the commits heading and each commit, folding like runs unless verbose.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    $self->_print_commits($c);
+
+=head2 _print_commit($e)
+
+Prints one commit's two lines, and its files under C<verbose>.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    $self->_print_commit($c->{commits}[0]);
 
 =head2 _manifest()
 
-The manifest section: the branch's manifest against the director and exodus,
-drift between those two, and the BOSH variables against exodus's.
+The manifest section, kept for printing: the branch against the director and
+exodus, drift, the BOSH variables, and the secrets line from the provider's
+C<entombment_results>. It notes a first deploy, a manifest change and drift
+for the summary.
+
+B<Errors:> the render's.
+
+B<Examples:>
+
+    $self->_section(manifest => sub {$self->_manifest});
 
 =head2 _configs()
 
-The configs section, reusing C<bosh-configs>' synthesis and comparison for the
-configs the deploy would upload, and C</deployment_configs> against
-C</configs?latest=true> for those moved on the director.
+The configs section, kept for printing, reusing C<bosh-configs>' synthesis
+and comparison for the configs the deploy would upload, and
+C</deployment_configs> against C</configs?latest=true> for those moved on the
+director, each diff through C<_config_diff>. It counts them for the summary.
+
+B<Errors:> the director's.
+
+B<Examples:>
+
+    $self->_section(configs => sub {$self->_configs});
 
 =head2 _uploads()
 
-The uploads section, the manifest's releases and stemcells against the
-director's. A C<latest> version is satisfied by any version held.
+The uploads section, kept for printing: the manifest's releases and stemcells
+against the director's, a C<latest> version satisfied by any version held.
+
+B<Errors:> the director's.
+
+B<Examples:>
+
+    $self->_section(uploads => sub {$self->_uploads});
+
+=head2 _summary($c)
+
+The summary's paragraphs, as plain text, from the commits and what the
+director sections noted.
+
+B<Returns:> a list of strings.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    my @p = $self->_summary($c);
+
+=head2 _changes()
+
+What the deploy would change on the director, as a phrase: the manifest, the
+configs and the uploads it found.
+
+B<Returns:> the phrase, or C<''> where there is nothing.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    $self->_changes;  # "changes the manifest and 2 BOSH configs"
+
+=head2 _verdict()
+
+The closing line and its colour: a first deploy, changes, nothing on the
+director, or nothing pending, red where there is drift.
+
+B<Returns:> the line and a colour code.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    my ($line, $colour) = $self->_verdict;
+
+=head2 _write_summary(@paragraphs)
+
+Writes the paragraphs to the summary file, a blank line between.
+
+B<Errors:> C<mkfile_or_fail>'s.
+
+B<Examples:>
+
+    $self->_write_summary(@p);
+
+=head2 _section($name, $fn)
+
+Runs one director section with its lines kept under C<$name>.
+
+B<Errors:> the section's.
+
+B<Examples:>
+
+    $self->_section(uploads => sub {$self->_uploads});
+
+=head2 _say(@line)
+
+Keeps one line, an C<info> format and its arguments, for the current section.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    $self->_say("[[  >>#G{none}");
+
+=head2 _record()
+
+The newest successful deployment record, read once.
+
+B<Returns:> the C<Genesis::Env::Deployment>, or undef.
+
+B<Errors:> none; a vault that cannot be read answers undef here and fails loud
+in the render.
+
+B<Examples:>
+
+    my $deployed = ($self->_record // return)->lookup('git.commit');
 
 =head2 _provider()
 
 The environment's manifest provider, its cloud configs downloaded for the
 blueprint, set C<without_credhub_writes>, memoized.
 
+B<Errors:> the config download's.
+
+B<Examples:>
+
+    my $provider = $self->_provider;
+
 =head2 _current()
 
-The branch's pruned deployment manifest, memoized, so the manifest and uploads
-sections read one render.
+The branch's pruned deployment manifest, memoized, so the manifest, uploads
+and summary read one render.
+
+B<Errors:> the render's.
+
+B<Examples:>
+
+    my $manifest = $self->_current;
 
 =head2 _compare($what, $old, $new, $secrets, $old_label, $new_label, $absent)
 
-Prints one baseline's diff against the branch, or that there is none, or
-C<$absent> where the baseline is missing, and counts a difference as pending.
+Keeps one baseline's diff against the branch, or that there is none, or
+C<$absent> where the baseline is missing, and counts a difference as pending
+and as a manifest change.
+
+B<Errors:> C<_spruce>'s.
 
 B<Examples:>
 
@@ -160,9 +378,25 @@ The spruce diff of two manifests, after C<_masked> where redaction is on.
 
 B<Returns:> the diff text, empty where the two agree.
 
+B<Errors:> C<_spruce>'s.
+
 B<Examples:>
 
     my $diff = $self->_diff($exodus, $director, \@secrets, 'exodus', 'director');
+
+=head2 _config_diff($old, $new, $plain)
+
+A config diff: C<$plain>, or spruce's diff of the two contents, unredacted;
+under redaction the two parsed and passed through C<_mask_changed> first.
+
+B<Returns:> the diff text, empty where the two agree.
+
+B<Errors:> C<_spruce>'s.
+
+B<Examples:>
+
+    my $diff = $self->_config_diff({content => $old, label => 'id 1'},
+        {content => $new, label => 'id 2'});
 
 =head2 _spruce($old, $new)
 
@@ -190,6 +424,12 @@ B<Examples:>
 The deployment's live manifest from C<bosh manifest>, or undef where the
 director holds none or answers with anything but a manifest.
 
+B<Errors:> none.
+
+B<Examples:>
+
+    my $director = $self->_director_manifest;
+
 =head2 _masked($old, $new, $paths)
 
 Copies of two manifests with each value in clear at C<$paths> replaced, by
@@ -198,9 +438,39 @@ new side where they do not. A C<((...))> reference is left as it is.
 
 B<Returns:> the two copies.
 
+B<Errors:> none.
+
 B<Examples:>
 
     ($old, $new) = _masked($old, $new, [['password']]);
+
+=head2 _mask_changed($old, $new)
+
+Copies of two documents with every scalar that differs between them masked,
+C<< <redacted> >> on the old side and C<< <redacted: changed> >> on the new,
+and every scalar under a key or index only one side has masked the same way.
+Scalars the two share are kept, so a diff of the copies shows the paths that
+moved and no value.
+
+B<Returns:> the two copies.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    my ($o, $n) = _mask_changed({password => 'a'}, {password => 'b'});
+
+=head2 _mask_all($data, $mask)
+
+A copy of a document with every scalar replaced by C<$mask>.
+
+B<Returns:> the copy.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    _mask_all({a => [1, 2]}, '<redacted>');
 
 =head2 _at($data, $path)
 
@@ -208,6 +478,8 @@ A reference to the value at a path of keys and indices, so a caller can
 replace it in place.
 
 B<Returns:> the reference, or undef where the path is absent.
+
+B<Errors:> none.
 
 B<Examples:>
 
@@ -220,6 +492,8 @@ values that come from the vault.
 
 B<Returns:> a list of arrayrefs.
 
+B<Errors:> none.
+
 B<Examples:>
 
     my @paths = _redacted_paths($provider->redacted(subset => 'pruned')->data);
@@ -229,6 +503,8 @@ B<Examples:>
 One artifact of a deployment record, parsed as YAML.
 
 B<Returns:> the data, or undef where the record or artifact is missing.
+
+B<Errors:> C<load_yaml>'s, for an artifact that is not YAML.
 
 B<Examples:>
 
@@ -240,13 +516,165 @@ A director API answer from C<bosh curl>, decoded from JSON.
 
 B<Returns:> the data, or undef where the call or the decode fails.
 
+B<Errors:> none.
+
 B<Examples:>
 
     my $latest = _json($bosh, '/configs?latest=true') || [];
 
+=head2 _message($git, $sha)
+
+A commit's full message.
+
+B<Returns:> the message, or undef where git cannot read it.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    Genesis::CI::Marker::is_seed(_message($git, $root));
+
+=head2 _meta($git, $sha)
+
+A commit's author, time and subject, read by C<git log>.
+
+B<Returns:> a hashref of C<author>, C<epoch> and C<subject>, or undef where
+this clone does not hold the commit.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    my $meta = _meta($git, $control) // {subject => $marker_line};
+
+=head2 _stat($git, $base)
+
+The diff stat from C<$base>, or the empty tree, to C<HEAD>, relative to the
+deployment root.
+
+B<Returns:> its lines, or none where git cannot answer.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    my @stat = _stat($git, $deployed);
+
+=head2 _stat_files($stat)
+
+How many files a diff stat names, from its closing line.
+
+B<Returns:> a count.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    _stat_files(\@stat);  # 7
+
+=head2 _norm($subject)
+
+A subject with every version string and every hex sha of seven to forty
+characters replaced by C<…>, the key like runs fold on.
+
+B<Returns:> the normalised subject.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    _norm('Embed genesis 3.2.0-rc.29+pipeline.ca27123e in doomsday');
+    # Returns: 'Embed genesis … in doomsday'
+
+=head2 _count($n, $one, $many)
+
+C<"N thing"> or C<"N things">.
+
+B<Returns:> the phrase, or an empty list for none.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    _count(2, 'BOSH config');  # '2 BOSH configs'
+
+=head2 _day($epoch)
+
+A commit time as a short day, C<Oct 29>, for the summary's span.
+
+B<Returns:> a string.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    _day($t);  # Oct 29
+
+=head2 _stamp($epoch)
+
+A commit time as a timestamp, C<Oct 29 10:00>, or C<?> where it is unknown.
+
+B<Returns:> a string.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    _stamp($t);  # Oct 29 10:00
+
+=head2 _ago($epoch)
+
+How long ago a commit time was, in C<strfuzzytime>'s words, read from the
+elapsed seconds, the one input C<strfuzzytime> takes without parsing a date.
+
+B<Returns:> a string.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    _ago($t);  # about 3 hours ago
+
+=head2 _width()
+
+The frame's width: the terminal's, no wider than 80 columns.
+
+B<Returns:> a column count.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    my $w = _width();
+
+=head2 _frame($title, $colour)
+
+Prints a frame line: C<══ $title ═══…> where a title is given, a plain line
+of C<═> otherwise, dim unless a colour is named.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    _frame('Summary: qa (bosh)');
+    _frame('Changes are pending for qa', 'Y');
+
+=head2 _rule($label)
+
+Prints the labelled rule, C<── $label ───…>, between the git half and the
+director's.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    _rule('What the deploy would change on the director');
+
 =head2 _heading($title)
 
 Prints one section's heading.
+
+B<Errors:> none.
 
 B<Examples:>
 
@@ -258,8 +686,13 @@ B<Examples:>
 
 =item *
 
-The configs the kit synthesizes are shown as C<bosh-configs compare> shows
-them, unmasked, since they are generated rather than read from the vault.
+A config has the director's copy as its only baseline, since a deploy records
+no config (Q46).
+
+=item *
+
+Under redaction a config's changed list entries are masked by position, so an
+entry that moved in its list reads as changed.
 
 =item *
 
@@ -270,6 +703,11 @@ manifest, so one the branch no longer carries is not masked on the old side.
 
 The uploads section compares names and versions, not SHA1s, so a release
 rebuilt under the same version reads as present.
+
+=item *
+
+A manifest change is counted as one change, not by instance group or
+property.
 
 =back
 

@@ -1,23 +1,38 @@
 package Genesis::Env::PendingChanges;
 use strict;
 use warnings;
+use utf8;
 
 use Genesis;
+use Genesis::Term qw/terminal_width/;
 use Genesis::CI::Marker ();
 use JSON::PP ();
+use POSIX ();
+use Time::Seconds ();
 
 # What deploying an environment's branch would change, read-only (D123).
 # See PendingChanges.pod.
 
-my $MASK      = '<redacted>';
-my $MASK_DIFF = '<redacted: changed>';
+my $MASK       = '<redacted>';
+my $MASK_DIFF  = '<redacted: changed>';
+my $EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
+my $RULE_WIDTH = 80;
+my $RUN        = 3;
 
 ### Class Methods {{{
 
 # new - a report for one loaded environment {{{
 sub new {
 	my ($class, $env, %opts) = @_;
-	return bless {env => $env, redact => $opts{redact} ? 1 : 0, pending => 0}, $class;
+	return bless {
+		env          => $env,
+		redact       => $opts{redact}  ? 1 : 0,
+		verbose      => $opts{verbose} ? 1 : 0,
+		summary_file => $opts{summary_file},
+		pending      => 0,
+		facts        => {configs => 0, uploads => 0},
+		lines        => {},
+	}, $class;
 }
 
 # }}}
@@ -25,102 +40,206 @@ sub new {
 
 ### Instance Methods {{{
 
-# report - print the four sections and answer whether anything is pending {{{
+# report - read everything, then print the report, and answer whether anything is pending {{{
 sub report {
 	my ($self) = @_;
-	$self->_commits;
-	$self->_manifest;
-	$self->_configs;
-	$self->_uploads;
-	info("\n%s", $self->{pending}
-		? "#Y{Changes are pending for} #C{".$self->{env}->name."}#Y{.}"
-		: "#G{Nothing is pending for} #C{".$self->{env}->name."}#G{.}");
+	my $env = $self->{env};
+
+	# Read before anything is printed: rendering the manifest and reaching
+	# the director print their own progress, which then stands above the
+	# report rather than inside it.
+	my $git = $self->_read_commits;
+	$self->_section(manifest => sub {$self->_manifest});
+	$self->_section(configs  => sub {$self->_configs});
+	$self->_section(uploads  => sub {$self->_uploads});
+
+	my @summary = $self->_summary($git);
+	$self->_write_summary(@summary) if defined $self->{summary_file};
+
+	_frame(sprintf('Summary: %s (%s)', $env->name, $env->type));
+	info("\n[[  >>%s", $_) for @summary;
+	_frame();
+
+	$self->_print_files($git);
+	$self->_print_commits($git);
+	_rule('What the deploy would change on the director');
+	for (['Manifest', 'manifest'], ['BOSH configs', 'configs'], ['Uploads', 'uploads']) {
+		_heading($_->[0]);
+		info(@$_) for @{$self->{lines}{$_->[1]}};
+	}
+
+	my ($verdict, $colour) = $self->_verdict;
+	_frame($verdict, $colour);
 	return $self->{pending};
 }
 
 # }}}
 # }}}
 
-### Sections {{{
+### The git half {{{
 
-# _commits - the branch's commits since the deployed one {{{
-sub _commits {
+# _read_commits - the range since the deployed commit, or the seed, and its commits {{{
+sub _read_commits {
 	my ($self) = @_;
 	my $env = $self->{env};
 	my $git = $env->top->git;
-	my $deployed = ($env->deployed_record // {})->{git}{commit};
+	my $record = $self->_record;
+	my $deployed = $record ? $record->lookup('git.commit') : undef;
 
-	_heading('Commits since the last deploy');
-	my $range = 'HEAD';
-	if (!$deployed) {
-		info("[[  >>#Y{%s has never been deployed}; the branch holds:", $env->name);
-	} elsif (!$git->is_ancestor($deployed, 'HEAD')) {
-		info("[[  >>#Y{the deployed commit %s is not on this branch}; the branch holds:",
-			substr($deployed, 0, 8));
+	my %c = (branch => $env->top->branch_for($env->name), deployed => $deployed);
+	if ($deployed && $git->is_ancestor($deployed, 'HEAD')) {
+		@c{qw/base since/} = ($deployed, 'the last deploy');
 	} else {
-		$range = "$deployed..HEAD";
+		$c{off_branch} = $deployed;
+		my ($root) = reverse grep {/\S/} split /\n/,
+			scalar(run({dir => $git->root, stderr => 0}, 'git', 'rev-list', '--max-parents=0', 'HEAD')) // '';
+		my $seed = $root && _message($git, $root);
+		if ($seed && Genesis::CI::Marker::is_seed($seed)) {
+			@c{qw/base since/} = ($root, 'the branch was cut');
+		} else {
+			$c{since} = 'the branch began';
+		}
 	}
 
-	my @commits = $git->log_subjects($range, body => 1);
-	return info("[[  >>#G{none}") unless @commits;
-	$self->{pending}++;
-
 	my @scope = $git->prefix ? ($git->prefix) : ();
-	for my $commit (@commits) {
-		my ($subject) = split /\n/, $commit->{message};
-		my ($control) = Genesis::CI::Marker::in_text($commit->{message});
-		info("[[  - >>#C{%s} %s %s", substr($commit->{sha}, 0, 8),
-			  defined $control ? "#G{propagated} from control\@".substr($control, 0, 8)
-			: Genesis::CI::Marker::is_seed($commit->{message}) ? '#K{seed}'
-			: '#Y{manual}',
-			$subject);
-		info("[[      >>%s", $_) for $git->commit_files($commit->{sha}, @scope);
+	my $range = $c{base} ? "$c{base}..HEAD" : 'HEAD';
+	$c{commits} = [map {_entry($git, $_, \@scope)} reverse $git->log_subjects($range, body => 1)];
+	$c{stat}    = [_stat($git, $c{base})];
+	$self->{pending}++ if @{$c{commits}};
+	return \%c;
+}
+
+# }}}
+# _entry - one commit, as the report reads it {{{
+sub _entry {
+	my ($git, $commit, $scope) = @_;
+	my ($subject) = split /\n/, $commit->{message};
+	my %e = (sha => $commit->{sha}, files => [$git->unprefixed($git->commit_files($commit->{sha}, @$scope))]);
+	my $own = _meta($git, $commit->{sha}) // {};
+	my ($control) = Genesis::CI::Marker::in_text($commit->{message});
+	if (defined $control) {
+		my $meta = _meta($git, $control);
+		%e = (%e, kind => 'propagated', control => $control, %{$meta // {%$own, subject => $subject, unread => 1}});
+		$e{squash} = $1 if $commit->{message} =~ /Squashes (\d+) control commits/;
+	} else {
+		%e = (%e, kind => Genesis::CI::Marker::is_seed($commit->{message}) ? 'seed' : 'manual', %$own, subject => $subject);
+	}
+	return \%e;
+}
+
+# }}}
+# _print_files - the range as a diff stat under the deployment root {{{
+sub _print_files {
+	my ($self, $c) = @_;
+	_heading("Files changed since $c->{since}");
+	return info("[[  >>#G{none}") unless @{$c->{stat}};
+	info("[[  >>%s", $_) for @{$c->{stat}};
+}
+
+# }}}
+# _print_commits - the range's commits, oldest first, like runs folded {{{
+sub _print_commits {
+	my ($self, $c) = @_;
+	_heading('Commits, oldest first');
+	my @commits = @{$c->{commits}};
+	return info("[[  >>#G{none}") unless @commits;
+
+	my @groups;
+	for my $e (@commits) {
+		my $key = join("\0", $e->{kind}, $e->{author} // '', _norm($e->{subject}));
+		if (@groups && $groups[-1]{key} eq $key) {push @{$groups[-1]{run}}, $e}
+		else {push @groups, {key => $key, run => [$e]}}
+	}
+	for my $g (@groups) {
+		my @run = @{$g->{run}};
+		if ($self->{verbose} || @run < $RUN) {
+			$self->_print_commit($_) for @run;
+			next;
+		}
+		$self->_print_commit($run[0]);
+		my @mid = @run[1 .. $#run-1];
+		info("[[  >>... %d more \"%s\" commits, %s to %s ...", scalar(@mid), _norm($run[0]{subject}),
+			_stamp($mid[0]{epoch}), _stamp($mid[-1]{epoch}));
+		$self->_print_commit($run[-1]);
 	}
 }
 
 # }}}
+# _print_commit - one commit's two lines, and its files under --verbose {{{
+sub _print_commit {
+	my ($self, $e) = @_;
+	my $when = defined $e->{epoch} ? sprintf('%s  (%s)', _stamp($e->{epoch}), _ago($e->{epoch})) : '';
+	my $what = $e->{kind} eq 'propagated'
+		? sprintf('#G{propagated} from control@%s', substr($e->{control}, 0, 8))
+		: sprintf('#Y{manual} commit %s', substr($e->{sha}, 0, 8));
+	my $count = scalar @{$e->{files}};
+	info("[[  >>%s  %s by %s%s", $when, $what, $e->{author} // 'unknown',
+		$e->{squash} ? " (squash of $e->{squash} control commits)" : '');
+	info("[[                >>\"%s\"  #K{(%d file%s)}", $e->{subject} // '', $count, $count == 1 ? '' : 's');
+	return unless $self->{verbose};
+	info("[[                  >>%s", $_) for @{$e->{files}};
+}
+
+# }}}
+# }}}
+
+### The director half {{{
+
 # _manifest - the branch's manifest against the director's and exodus's {{{
 sub _manifest {
 	my ($self) = @_;
 	my $env = $self->{env};
-	_heading('Manifest');
 
 	my $provider = $self->_provider;
 	my $current  = $self->_current;
 	my @secrets  = _redacted_paths(eval {$provider->redacted(subset => 'pruned')->data});
 
-	my $record   = eval {$env->with_vault->deployments->latest_successful};
+	my $record   = $self->_record;
 	my $exodus   = _yaml_artifact($record, 'manifest');
 	my $director = $env->use_create_env ? undef : $self->_director_manifest;
 
 	# A first deploy: nothing anywhere to compare with, so the whole manifest
 	# is the change, shown as additions against an empty one.
 	unless ($director || $exodus) {
+		$self->{facts}{first} = 1;
 		$self->_compare('nothing deployed, a first deploy', {}, $current, \@secrets,
 			'nothing', 'branch', '');
-		return;
-	}
-
-	if ($env->use_create_env) {
-		info("[[  >>a create-env environment has no director; comparing with the last deploy alone.");
 	} else {
-		$self->_compare('the director\'s live manifest', $director, $current, \@secrets,
-			'director', 'branch', 'the director holds no manifest for '.$env->deployment_name);
-	}
-	$self->_compare('the last manifest Genesis deployed (exodus)', $exodus, $current, \@secrets,
-		'exodus', 'branch', 'no deployed manifest is recorded in exodus');
+		if ($env->use_create_env) {
+			$self->_say("[[  >>a create-env environment has no director; comparing with the last deploy alone.");
+		} else {
+			$self->_compare('the director\'s live manifest', $director, $current, \@secrets,
+				'director', 'branch', 'the director holds no manifest for '.$env->deployment_name);
+		}
+		$self->_compare('the last manifest Genesis deployed (exodus)', $exodus, $current, \@secrets,
+			'exodus', 'branch', 'no deployed manifest is recorded in exodus');
 
-	if ($director && $exodus) {
-		my ($diff) = $self->_diff($exodus, $director, \@secrets, 'exodus', 'director');
-		info("[[  >>#R{drift:} the director's manifest differs from the last one Genesis ".
-			"deployed, so something was deployed outside Genesis:\n\n%s", $diff) if $diff;
+		if ($director && $exodus) {
+			my ($diff) = $self->_diff($exodus, $director, \@secrets, 'exodus', 'director');
+			if ($diff) {
+				$self->{facts}{drift} = 1;
+				$self->_say("[[  >>#R{drift:} the director's manifest differs from the last one Genesis ".
+					"deployed, so something was deployed outside Genesis:\n\n%s", $diff);
+			}
+		}
+
+		my $vars = eval {$provider->deployment(subset => 'bosh_vars')->data};
+		if ($vars && %$vars) {
+			my @var_secrets = _redacted_paths(eval {$provider->redacted(subset => 'bosh_vars')->data});
+			$self->_compare('the last deployed BOSH variables', _yaml_artifact($record, 'vars'),
+				$vars, \@var_secrets, 'exodus', 'branch', 'no deployed BOSH variables are recorded');
+		}
 	}
 
-	my $vars = eval {$provider->deployment(subset => 'bosh_vars')->data};
-	if ($vars && %$vars) {
-		my @var_secrets = _redacted_paths(eval {$provider->redacted(subset => 'bosh_vars')->data});
-		$self->_compare('the last deployed BOSH variables', _yaml_artifact($record, 'vars'),
-			$vars, \@var_secrets, 'exodus', 'branch', 'no deployed BOSH variables are recorded');
+	my $r = $provider->entombment_results;
+	if ($r && $r->{total}) {
+		$self->_say("[[  >>secrets: %d referenced, %s", $r->{total},
+			($r->{exists} // 0) == $r->{total} ? 'all already entombed in CredHub'
+			: sprintf('%d already entombed in CredHub, %d new, %d altered',
+				map {$r->{$_} // 0} qw/exists new altered/));
+	} elsif (@secrets) {
+		$self->_say("[[  >>secrets: %d vault values referenced%s", scalar(@secrets),
+			$self->{redact} ? ', shown only as changed or unchanged' : '');
 	}
 }
 
@@ -129,8 +248,7 @@ sub _manifest {
 sub _configs {
 	my ($self) = @_;
 	my $env = $self->{env};
-	_heading('BOSH configs');
-	return info("[[  >>a create-env environment uses no director configs.") if $env->use_create_env;
+	return $self->_say("[[  >>a create-env environment uses no director configs.") if $env->use_create_env;
 
 	my $bosh = $env->with_bosh->bosh;
 	require Genesis::Commands::Bosh;
@@ -139,10 +257,13 @@ sub _configs {
 	for my $config (@$configs) {
 		my $status = Genesis::Commands::Bosh::_bosh_configs_status($config);
 		next if $status eq 'identical';
-		$self->{pending}++; $said++;
-		info("[[  - >>%s config %s would be uploaded (%s on the director)%s",
+		$self->{pending}++; $said++; $self->{facts}{configs}++;
+		my $diff = $status eq 'missing' ? '' : $self->_config_diff(
+			{content => $config->{uploaded}, label => 'uploaded'},
+			{content => $config->{content},  label => 'synthesized'}, $config->{diff});
+		$self->_say("[[  - >>%s config %s would be uploaded (%s on the director)%s",
 			$config->{type}, $config->{name}, $status eq 'missing' ? 'missing' : 'different',
-			$config->{diff} ? ":\n\n$config->{diff}" : '');
+			$diff ? ":\n\n$diff" : '');
 	}
 
 	my $ran    = _json($bosh, '/deployment_configs?deployment='.$env->deployment_name) || [];
@@ -153,19 +274,22 @@ sub _configs {
 		my $key = "$config->{type}/$config->{name}";
 		if (!exists $ran{$key}) {
 			next unless @$ran;
-			$self->{pending}++; $said++;
-			info("[[  - >>%s config %s is new on the director since the last deploy:\n\n%s",
-				$config->{type}, $config->{name}, $config->{content} // '');
+			$self->{pending}++; $said++; $self->{facts}{configs}++;
+			my $content = $config->{content} // '';
+			$content = $self->_config_diff({content => '', label => 'none'},
+				{content => $content, label => "id $config->{id}"}) if $self->{redact};
+			$self->_say("[[  - >>%s config %s is new on the director since the last deploy:\n\n%s",
+				$config->{type}, $config->{name}, $content);
 		} elsif ($ran{$key} ne $config->{id}) {
 			my $old = (_json($bosh, "/configs/$ran{$key}") || {})->{content} // '';
-			my $diff = _spruce({content => $old, label => "id $ran{$key}"},
+			my $diff = $self->_config_diff({content => $old, label => "id $ran{$key}"},
 				{content => $config->{content} // '', label => "id $config->{id}"});
-			$self->{pending}++; $said++;
-			info("[[  - >>%s config %s changed on the director since the last deploy:\n\n%s",
+			$self->{pending}++; $said++; $self->{facts}{configs}++;
+			$self->_say("[[  - >>%s config %s changed on the director since the last deploy:\n\n%s",
 				$config->{type}, $config->{name}, $diff);
 		}
 	}
-	info("[[  >>#G{none}") unless $said;
+	$self->_say("[[  >>#G{none}") unless $said;
 }
 
 # }}}
@@ -173,8 +297,7 @@ sub _configs {
 sub _uploads {
 	my ($self) = @_;
 	my $env = $self->{env};
-	_heading('Uploads');
-	return info("[[  >>a create-env environment uploads nothing to a director.") if $env->use_create_env;
+	return $self->_say("[[  >>a create-env environment uploads nothing to a director.") if $env->use_create_env;
 
 	my $manifest = $self->_current;
 	my $bosh     = $env->with_bosh->bosh;
@@ -191,9 +314,105 @@ sub _uploads {
 		my $want = ($s->{version} // '') eq 'latest' ? $os : "$os/$s->{version}";
 		push @missing, "stemcell $os/$s->{version}" unless $os{$want};
 	}
-	return info("[[  >>#G{none}") unless @missing;
+	return $self->_say("[[  >>#G{none}") unless @missing;
 	$self->{pending}++;
-	info("[[  - >>the deploy would upload %s", $_) for @missing;
+	$self->{facts}{uploads} = scalar @missing;
+	$self->_say("[[  - >>the deploy would upload %s", $_) for @missing;
+}
+
+# }}}
+# }}}
+
+### The summary {{{
+
+# _summary - the summary's paragraphs, plain text {{{
+sub _summary {
+	my ($self, $c) = @_;
+	my $env = $self->{env};
+	my $f   = $self->{facts};
+	my @commits = grep {$_->{kind} ne 'seed'} @{$c->{commits}};
+	my @p;
+
+	if (@commits) {
+		my ($first, $last) = ($commits[0]{epoch}, $commits[-1]{epoch});
+		my $files = _stat_files($c->{stat});
+		my $span = (defined $first && defined $last && $last - $first >= 86400)
+			? sprintf(', %s to %s (%s)', _day($first), _day($last),
+				strfuzzytime(Time::Seconds->new($last - $first)))
+			: defined $last ? sprintf(', %s', _day($last)) : '';
+		push @p, sprintf('%d commit%s pending%s, changing %d file%s.',
+			scalar(@commits), @commits == 1 ? '' : 's', $span, $files, $files == 1 ? '' : 's');
+	} else {
+		push @p, 'No commits are pending: the branch is at the deployed commit.';
+	}
+
+	my $record = $self->_record;
+	my $when = $record ? sprintf('%s, by %s', strfuzzytime($record->completed),
+		$record->lookup('user.shell') // 'unknown') : undef;
+	if (!$record) {
+		push @p, sprintf('%s has never been deployed.', $env->name);
+	} elsif ($c->{off_branch} || !$c->{deployed}) {
+		push @p, sprintf('It has never deployed from %s: its last deploy (%s) ran from '.
+			'another branch, before the pipeline.', $c->{branch}, $when);
+	} else {
+		push @p, sprintf('Last deployed %s, at %s.', $when, substr($c->{deployed}, 0, 8));
+	}
+
+	my $changes = $self->_changes;
+	if ($f->{first}) {
+		my $m = $self->_current;
+		my @ig = @{$m->{instance_groups} || []};
+		my $vms = 0; $vms += ($_->{instances} // 0) for @ig;
+		push @p, sprintf('Deploying it creates deployment %s%s.', $env->deployment_name, join('', map {", $_"}
+			(@ig ? sprintf('with %d instance group%s (%d VM%s)', scalar(@ig), @ig == 1 ? '' : 's', $vms, $vms == 1 ? '' : 's') : ()),
+			_count(scalar(@{$m->{releases} || []}), 'release'),
+			(map {"stemcell ".($_->{os} // $_->{name} // '?')."/".($_->{version} // '?')} @{$m->{stemcells} || []})));
+	} elsif ($changes) {
+		push @p, "Deploying it $changes.";
+	} elsif (@commits) {
+		push @p, 'Deploying it changes nothing on the director: the manifest matches what is '.
+			'deployed, and no configs or uploads are due.  '.(($c->{off_branch} || !$c->{deployed})
+				? "The deploy records this branch's commit, after which redeploys work."
+				: 'The deploy only records the newer commit.');
+	} else {
+		push @p, 'The director matches the deployed commit; nothing is pending.';
+	}
+	push @p, "The director's manifest differs from the last one Genesis deployed, so ".
+		'something was deployed outside Genesis.' if $f->{drift};
+	return @p;
+}
+
+# }}}
+# _changes - what the deploy would change on the director, as a phrase, or '' {{{
+sub _changes {
+	my ($self) = @_;
+	my $f = $self->{facts};
+	my @what = (($f->{manifest} ? ('the manifest') : ()), _count($f->{configs}, 'BOSH config'));
+	my @parts = ((@what ? ('changes '.join(' and ', @what)) : ()),
+		($f->{uploads} ? ('uploads '._count($f->{uploads}, 'release or stemcell', 'releases or stemcells')) : ()));
+	return join(', and ', @parts);
+}
+
+# }}}
+# _verdict - the closing line and its colour {{{
+sub _verdict {
+	my ($self) = @_;
+	my $name = $self->{env}->name;
+	my $f = $self->{facts};
+	my ($line, $colour) =
+		  $f->{first}       ? ("A first deploy is pending for $name", 'Y')
+		: $self->_changes   ? ("Changes are pending for $name", 'Y')
+		: $self->{pending}  ? ("Nothing to deploy changes on the director for $name", 'G')
+		:                     ("Nothing is pending for $name", 'G');
+	$colour = 'R' if $f->{drift};
+	return ($line, $colour);
+}
+
+# }}}
+# _write_summary - the summary's paragraphs, plain, to the summary file {{{
+sub _write_summary {
+	my ($self, @p) = @_;
+	mkfile_or_fail($self->{summary_file}, join("\n\n", @p)."\n");
 }
 
 # }}}
@@ -201,6 +420,32 @@ sub _uploads {
 
 ### Helpers {{{
 
+# _section - run one director section, keeping what it says for later {{{
+sub _section {
+	my ($self, $name, $fn) = @_;
+	local $self->{section} = $name;
+	$self->{lines}{$name} = [];
+	$fn->();
+}
+
+# }}}
+# _say - keep one line of the current section {{{
+sub _say {
+	my ($self, @line) = @_;
+	push @{$self->{lines}{$self->{section}}}, [@line];
+	return;
+}
+
+# }}}
+# _record - the newest successful deployment record, or undef {{{
+sub _record {
+	my ($self) = @_;
+	$self->{record} = eval {$self->{env}->with_vault->deployments->latest_successful}
+		unless exists $self->{record};
+	return $self->{record};
+}
+
+# }}}
 # _provider - the manifest provider, cloud configs downloaded, entombing by name alone {{{
 sub _provider {
 	my ($self) = @_;
@@ -216,14 +461,15 @@ sub _current {
 }
 
 # }}}
-# _compare - print one baseline's diff against the branch {{{
+# _compare - keep one baseline's diff against the branch {{{
 sub _compare {
 	my ($self, $what, $old, $new, $secrets, $old_label, $new_label, $absent) = @_;
-	return info("[[  >>against %s: #Y{%s}", $what, $absent) unless $old;
+	return $self->_say("[[  >>against %s: #Y{%s}", $what, $absent) unless $old;
 	my ($diff) = $self->_diff($old, $new, $secrets, $old_label, $new_label);
-	return info("[[  >>against %s: #G{no differences}", $what) unless $diff;
+	return $self->_say("[[  >>against %s: #G{no differences}", $what) unless $diff;
 	$self->{pending}++;
-	info("[[  >>against %s:\n\n%s", $what, $diff);
+	$self->{facts}{manifest} = 1;
+	$self->_say("[[  >>against %s:\n\n%s", $what, $diff);
 }
 
 # }}}
@@ -232,6 +478,20 @@ sub _diff {
 	my ($self, $old, $new, $secrets, $old_label, $new_label) = @_;
 	($old, $new) = _masked($old, $new, $secrets) if $self->{redact};
 	return _spruce({object => $old, label => $old_label}, {object => $new, label => $new_label});
+}
+
+# }}}
+# _config_diff - a config diff, every scalar it changes masked under redaction {{{
+#
+# The director returns a config as it was uploaded, and a hook can generate
+# one with a value in clear, so under redaction a config shows what moved
+# and not its values (D123).
+sub _config_diff {
+	my ($self, $old, $new, $plain) = @_;
+	return $plain // _spruce($old, $new) unless $self->{redact};
+	my ($o, $n) = map {my $d = eval {load_yaml($_->{content} // '')}; ref $d ? $d : {}} ($old, $new);
+	($o, $n) = _mask_changed($o, $n);
+	return _spruce({object => $o, label => $old->{label}}, {object => $n, label => $new->{label}});
 }
 
 # }}}
@@ -279,6 +539,49 @@ sub _masked {
 }
 
 # }}}
+# _mask_changed - copies of two documents, every scalar that differs masked {{{
+sub _mask_changed {
+	my ($old, $new) = @_;
+	if (ref $old eq 'HASH' && ref $new eq 'HASH') {
+		my ($o, $n, %seen) = ({}, {});
+		for my $k (grep {!$seen{$_}++} (keys %$old, keys %$new)) {
+			if (exists $old->{$k} && exists $new->{$k}) {
+				($o->{$k}, $n->{$k}) = _mask_changed($old->{$k}, $new->{$k});
+			} elsif (exists $old->{$k}) {
+				$o->{$k} = _mask_all($old->{$k}, $MASK);
+			} else {
+				$n->{$k} = _mask_all($new->{$k}, $MASK_DIFF);
+			}
+		}
+		return ($o, $n);
+	}
+	if (ref $old eq 'ARRAY' && ref $new eq 'ARRAY') {
+		my ($o, $n) = ([], []);
+		for my $i (0 .. ($#$old > $#$new ? $#$old : $#$new)) {
+			if ($i <= $#$old && $i <= $#$new) {
+				($o->[$i], $n->[$i]) = _mask_changed($old->[$i], $new->[$i]);
+			} elsif ($i <= $#$old) {
+				$o->[$i] = _mask_all($old->[$i], $MASK);
+			} else {
+				$n->[$i] = _mask_all($new->[$i], $MASK_DIFF);
+			}
+		}
+		return ($o, $n);
+	}
+	return ($old, $new) if !ref $old && !ref $new && (defined $old ? defined $new && $old eq $new : !defined $new);
+	return (_mask_all($old, $MASK), _mask_all($new, $MASK_DIFF));
+}
+
+# }}}
+# _mask_all - a copy of a document with every scalar masked {{{
+sub _mask_all {
+	my ($data, $mask) = @_;
+	return {map {($_ => _mask_all($data->{$_}, $mask))} keys %$data} if ref $data eq 'HASH';
+	return [map {_mask_all($_, $mask)} @$data] if ref $data eq 'ARRAY';
+	return defined $data ? $mask : undef;
+}
+
+# }}}
 # _at - a reference to the value at a path, or undef where it is absent {{{
 sub _at {
 	my ($data, $path) = @_;
@@ -322,6 +625,99 @@ sub _json {
 	my ($out, $rc) = $bosh->execute({interactive => 0}, 'curl', $path);
 	return undef if $rc || !defined $out || $out !~ /\S/;
 	return eval {JSON::PP->new->decode($out)};
+}
+
+# }}}
+# _message - a commit's full message, or undef {{{
+sub _message {
+	my ($git, $sha) = @_;
+	my ($out, $rc) = run({dir => $git->root, stderr => 0}, 'git', 'log', '-1', '--format=%B', $sha);
+	return $rc ? undef : $out;
+}
+
+# }}}
+# _meta - a commit's author, time and subject, or undef where this clone lacks it {{{
+sub _meta {
+	my ($git, $sha) = @_;
+	my ($out, $rc) = run({dir => $git->root, stderr => 0},
+		'git', 'log', '-1', '--format=%an%x1f%at%x1f%s', "$sha^{commit}");
+	return undef if $rc || !defined $out || $out !~ /\x1f/;
+	chomp $out;
+	my ($author, $epoch, $subject) = split /\x1f/, $out, 3;
+	return {author => $author, epoch => $epoch, subject => $subject};
+}
+
+# }}}
+# _stat - the diff stat from a base to HEAD under the deployment root {{{
+sub _stat {
+	my ($git, $base) = @_;
+	my ($out, $rc) = run({dir => $git->root, stderr => 0}, 'git', 'diff', '--stat=100',
+		($git->prefix ? ('--relative='.$git->prefix) : ()), $base // $EMPTY_TREE, 'HEAD');
+	return () if $rc || !defined $out;
+	return grep {/\S/} split /\n/, $out;
+}
+
+# }}}
+# _stat_files - how many files a diff stat names {{{
+sub _stat_files {
+	my ($stat) = @_;
+	return 0 unless @$stat;
+	return $stat->[-1] =~ /^\s*(\d+) files? changed/ ? $1 : scalar(@$stat) - 1;
+}
+
+# }}}
+# _norm - a subject with its version strings and shas replaced, for folding runs {{{
+sub _norm {
+	my ($subject) = @_;
+	$subject //= '';
+	$subject =~ s/\d+(?:\.\d+)+[-+.\w]*/…/g;
+	$subject =~ s/\b[0-9a-f]{7,40}\b/…/g;
+	return $subject;
+}
+
+# }}}
+# _count - "N thing(s)", or nothing for none {{{
+sub _count {
+	my ($n, $one, $many) = @_;
+	return () unless $n;
+	return sprintf('%d %s', $n, $n == 1 ? $one : ($many // "${one}s"));
+}
+
+# }}}
+# _day, _stamp, _ago - a commit time, as a day, a timestamp, and how long ago {{{
+#
+# The fuzzy form is read from the seconds elapsed, the one input
+# strfuzzytime takes without parsing a date string.
+sub _day   {return POSIX::strftime('%b %-d', localtime($_[0]))}
+sub _stamp {return defined $_[0] ? POSIX::strftime('%b %d %H:%M', localtime($_[0])) : '?'}
+sub _ago   {
+	my $delta = time - $_[0];
+	return $delta < 0 ? 'in the future' : strfuzzytime(Time::Seconds->new($delta)).' ago';
+}
+
+# }}}
+# _width - the frame's width: the terminal's, no wider than a page {{{
+sub _width {
+	my $w = terminal_width();
+	return $w < $RULE_WIDTH ? $w : $RULE_WIDTH;
+}
+
+# }}}
+# _frame - a summary frame line, or the closing verdict in its style {{{
+sub _frame {
+	my ($title, $colour) = @_;
+	my $line = defined $title ? "══ $title " : '';
+	$line .= '═' x (_width() - length $line) if length($line) < _width();
+	info("\n#%s{%s}", $colour // 'K', $line);
+}
+
+# }}}
+# _rule - the labelled rule between the git half and the director's {{{
+sub _rule {
+	my ($label) = @_;
+	my $line = "── $label ";
+	$line .= '─' x (_width() - length $line) if length($line) < _width();
+	info("\n#K{%s}", $line);
 }
 
 # }}}
