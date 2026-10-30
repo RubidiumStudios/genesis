@@ -3071,6 +3071,23 @@ sub secret_fixes {
 	$self->manifest_provider->kit_files(); # the blueprint decides the secrets
 	my $plan = $self->secrets_plan(silent => 1);
 	my %fixes = (generate => [], rotate => [], provide => []);
+
+	# A path the manifest references that no kit secret defines has no
+	# definition to generate from, so it is the operator's, vaultified or
+	# not; only its absence is asked, since nothing says what valid is.
+	my %defined = map {('/'.($_->full_path =~ s{^/}{}r) => 1)} $plan->secrets;
+	my $base = $self->secrets_base;
+	for my $ref (sort keys %{$self->manifest_provider->vault_paths(notify => 0) || {}}) {
+		my $full = '/'.($ref =~ s{^/}{}r);
+		next if $defined{$full};
+		my ($path, $key) = split /:/, $full, 2;
+		next if $self->vault->has($path, $key);
+		push @{$fixes{provide}}, {
+			path => ($full =~ s{^\Q$base\E}{}r), full_path => $full, label => 'Manifest',
+			why => 'missing', prompt => 'referenced by the manifest; no kit defines it',
+		};
+	}
+
 	return \%fixes unless $plan->secrets;
 	$plan->store->fill($plan->secrets);
 	for my $secret ($plan->secrets) {

@@ -46,6 +46,8 @@ my $BLUEPRINT =
 	qq{name: qa-bosh\n}.
 	qq{generated: (( vault "secret/qa/bosh/harness/generated:password" ))\n}.
 	qq{provided: (( vault "secret/qa/bosh/harness/provided:token" ))\n}.
+	# No kit defines this one; only the manifest names it.
+	qq{manual: (( vault "secret/qa/bosh/harness/manual:value" ))\n}.
 	qq{releases:\n- name: harness\n  version: 1.2.3\n  url: https://releases.example/harness-1.2.3.tgz\n}.
 	qq{stemcells:\n- alias: default\n  os: ubuntu-jammy\n  version: "1.1"\n}.
 	qq{MANIFEST\n}.
@@ -73,7 +75,10 @@ YAML
 	# The harness vault outlives each repository, so what a row does not set
 	# is cleared of what an earlier row set.
 	run({env => {SAFE_TARGET => $h->{vault_target}}}, 'safe', 'rm', '-f', "secret/qa/bosh/harness/$_")
-		for qw/generated provided/;
+		for qw/generated provided manual/;
+	# The manifest-only secret is set unless a row is about its absence.
+	$h->_write_record('secret/qa/bosh/harness/manual', value => 'set-by-hand')
+		unless $set{no_manual};
 	$h->_write_record('secret/qa/bosh/harness/generated', password => 'already-generated')
 		if $set{generated};
 	$h->_write_record('secret/qa/bosh/harness/provided', token => 'already-provided')
@@ -160,6 +165,27 @@ subtest 'T450: -F generates what Genesis can' => sub {
 	ok(vault_has($h, 'secret/qa/bosh/harness/generated:password'), 'the missing secret is generated')
 		or diag($all);
 	is(scalar(bosh_runs($h, command => 'deploy')), 1, 'and the deploy reaches BOSH') or diag($all);
+};
+
+# D129 counts a vault path the manifest references that no kit defines as
+# user-provided, whether or not the environment is vaultified.
+subtest 'T451: a secret only the manifest names blocks the deploy' => sub {
+	my $h = repository(generated => 1, provided => 1, no_manual => 1);
+	my ($all, $exit) = preview($h);
+	is($exit, Genesis::Exit::CONFIG, 'the preview exits CONFIG') or diag($all);
+	like($all, qr/\nSecrets\n(?:.*\n)*?.*must be provided.*harness\/manual:value.*referenced by the manifest/,
+		'naming it as referenced by the manifest') or diag($all);
+	like($all, qr/Deploying it is blocked: 1 user-provided secret must be set first/, 'the verdict is blocked')
+		or diag($all);
+};
+
+subtest 'T450: -F refuses a secret only the manifest names' => sub {
+	my $h = repository(provided => 1, no_manual => 1);
+	my ($out, $err, $exit) = run_genesis($h, {restore => 0}, 'qa', 'deploy', '-F', '-y');
+	my $all = "$out$err";
+	is($exit, Genesis::Exit::CONFIG, 'the deploy exits CONFIG') or diag($all);
+	like($all, qr/harness\/manual:value/, 'naming it') or diag($all);
+	ok(!vault_has($h, 'secret/qa/bosh/harness/generated:password'), 'the generated secret was not written');
 };
 
 subtest 'T452: a failed preview still writes why' => sub {
