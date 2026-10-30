@@ -1820,6 +1820,8 @@ EOF
 	cmp_deeply(\%evs, {
 		GENESIS_ROOT => $env->path,
 		GENESIS_ENVIRONMENT => $env->name,
+		# T454: a hook calls back into the Genesis running it.
+		GENESIS_CALLBACK_BIN => Genesis::Env::hook_callback_bin(),
 		GENESIS_TYPE => $top->type,
 		GENESIS_CALL_BIN => Genesis::humanize_bin(),
 		GENESIS_CALL => "genesis",
