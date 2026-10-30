@@ -1648,7 +1648,26 @@ sub propagation_files_at {
 # Every path carries the mark its kind gives it, exactly as the working-tree
 # builder marks them, so the walk can read the set and its triggering half out
 # of one scratch tree rather than writing a second one for the second reading.
+#
+# A commit's tree never changes, so each environment's set at each commit is
+# read once in the process and answered from memory after, which is what lets
+# a delivery made once its branch is checked out use the set the walk read
+# standing on control (T453).  The walk and the delivery hold different
+# objects for one environment, so the memory is the process's, keyed on the
+# environment's name, the clone and the commit.
+my %KINDS_AT;
 sub _propagation_file_kinds_at {
+	my ($self, $commit, %opts) = @_;
+
+	require Service::Git;
+	my $git = $opts{git} ||= Service::Git->new('.');
+	my $key = join("\0", $self->name, $git->root, $git->sha($commit) // $commit);
+	return {%{$KINDS_AT{$key} //= $self->_read_propagation_file_kinds_at($commit, %opts)}};
+}
+
+# }}}
+# _read_propagation_file_kinds_at - read the set at a commit out of a scratch tree {{{
+sub _read_propagation_file_kinds_at {
 	my ($self, $commit, %opts) = @_;
 
 	require Service::Git;
@@ -3107,6 +3126,24 @@ sub secret_fixes {
 # }}}
 
 # Environment Variables
+# hook_callback_bin - the Genesis a hook calls back into (T454) {{{
+#
+# A packed binary runs the runtime it extracted to $GENESIS_HOME/.genesis,
+# while the process's GENESIS_CALLBACK_BIN names the packed file, which in a
+# pipeline task is the repository's own and changes with every branch the
+# clone checks out.  Where this process is that runtime, a hook is pointed at
+# it; the process's value stays as it is, because embed copies it.
+sub hook_callback_bin {
+	require Cwd;
+	my $runtime = ($ENV{GENESIS_HOME} // $ENV{HOME} // '').'/.genesis';
+	my $lib     = Cwd::abs_path("$runtime/lib");
+	my $running = Cwd::abs_path($INC{'Genesis.pm'} // '');
+	return "$runtime/genesis"
+		if -x "$runtime/genesis" && $lib && $running && index($running, "$lib/") == 0;
+	return $ENV{GENESIS_CALLBACK_BIN};
+}
+
+# }}}
 # get_environment_variables - returns a hash of all environment variables pertaining to this Genesis::Env object {{{
 sub get_environment_variables {
 	my ($self, $hook) = @_;
@@ -3120,6 +3157,10 @@ sub get_environment_variables {
 
 		$env{GENESIS_ROOT}        = $self->path;
 		$env{GENESIS_ENVIRONMENT} = $self->name;
+		# A hook calls back into the Genesis running it, not into whatever a
+		# working tree holds at the packed binary's path (T454).
+		my $callback = hook_callback_bin();
+		$env{GENESIS_CALLBACK_BIN} = $callback if defined $callback;
 		$env{GENESIS_TYPE}        = $self->type;
 		$env{GENESIS_PREFIX_TYPE} = $ENV{GENESIS_PREFIX_TYPE} || 'none';
 

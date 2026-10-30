@@ -237,6 +237,7 @@ unit-tests/genesis_env_deployment-artifact_chunking.t     # exodus artifact chun
 unit-tests/genesis_env_deployment-core.t                  # Deployment core
 unit-tests/genesis_env_deploymentmanager-core.t           # DeploymentManager core
 unit-tests/genesis_env_deploymentmanager-shell_user.t     # the audit's user.shell where a pipeline task has no login and no USER
+unit-tests/genesis_env-hook_callback_bin.t                 # a hook calls back into the extracted runtime, never a working tree; the process's value stays for embed
 unit-tests/genesis_env_deploymentmanager-git_context.t    # the exodus record's git block
 unit-tests/genesis_env_manifest-core.t                    # Env::Manifest core
 unit-tests/genesis_env_manifest-signature.t               # each manifest type signs what its merge reads
@@ -430,6 +431,7 @@ integration-tests/genesis_ci_walk-holds.t                     # an ancestor's un
 integration-tests/genesis_ci_walk-seed.t                      # an unseeded branch is walked from the commit that introduced it
 integration-tests/genesis_ci_walk-split_commit.t              # a commit whose set cannot be read rides with its fix; only a broken newest commit fails
 integration-tests/genesis_ci_walk-squash_first.t              # the first delivery to a branch with no marker is one squash at the tip
+integration-tests/genesis_ci_walk-set_read_on_control.t       # a writing propagate never reads a set with a deployment branch checked out; the delivery reuses the walk's read
 integration-tests/genesis_ci_walk-preview_hand_edit.t         # a preview names a hand edit only where there is one
 integration-tests/genesis_ci_walk-gates.t                     # a gate travels with the commits already due, and three things release it
 integration-tests/genesis_ci_walk-hold_record.t               # a hold record stops delivery in both modes while the branch stays deployable
