@@ -49,6 +49,8 @@ sub report {
 	# the director print their own progress, which then stands above the
 	# report rather than inside it.
 	my $git = $self->_read_commits;
+	# The secrets first: what is missing is named in the render (D129).
+	$self->_section(secrets  => sub {$self->_secrets});
 	$self->_section(manifest => sub {$self->_manifest});
 	$self->_section(configs  => sub {$self->_configs});
 	$self->_section(uploads  => sub {$self->_uploads});
@@ -63,7 +65,7 @@ sub report {
 	$self->_print_files($git);
 	$self->_print_commits($git);
 	_rule('What the deploy would change on the director');
-	for (['Manifest', 'manifest'], ['BOSH configs', 'configs'], ['Uploads', 'uploads']) {
+	for (['Secrets', 'secrets'], ['Manifest', 'manifest'], ['BOSH configs', 'configs'], ['Uploads', 'uploads']) {
 		_heading($_->[0]);
 		info(@$_) for @{$self->{lines}{$_->[1]}};
 	}
@@ -71,6 +73,12 @@ sub report {
 	my ($verdict, $colour) = $self->_verdict;
 	_frame($verdict, $colour);
 	return $self->{pending};
+}
+
+# }}}
+# blocked - whether the deploy needs a secret only an operator can provide {{{
+sub blocked {
+	return scalar @{(($_[0]->{fixes} || {})->{provide}) || []};
 }
 
 # }}}
@@ -189,6 +197,38 @@ sub _print_commit {
 # }}}
 
 ### The director half {{{
+
+# _secrets - what the deploy's -F would do to the secrets, and what it cannot {{{
+#
+# The render that follows reads each missing secret as the placeholder named
+# here, so it shows the manifest whole without a value the vault lacks.
+sub _secrets {
+	my ($self) = @_;
+	my $f = $self->{fixes} = $self->{env}->secret_fixes;
+	my %placeholder;
+	for ([generate => '<generated on deploy>'], [provide => '<must be provided>']) {
+		my ($kind, $text) = @$_;
+		$placeholder{'/'.($_->{full_path} =~ s{^/}{}r)} = $text for grep {$_->{why} eq 'missing'} @{$f->{$kind}};
+	}
+	$self->_provider->{secret_placeholders} = \%placeholder;
+
+	my $said = 0;
+	for my $e (@{$f->{generate}}) {
+		$said++; $self->{pending}++;
+		$self->_say("[[  - >>the deploy would generate #C{%s} (missing)", $e->{path});
+	}
+	for my $e (@{$f->{rotate}}) {
+		$said++; $self->{pending}++;
+		$self->_say("[[  - >>the deploy would rotate #C{%s} (invalid)", $e->{path});
+	}
+	for my $e (@{$f->{provide}}) {
+		$said++; $self->{pending}++;
+		$self->_say("[[  - >>#R{must be provided} #C{%s} (%s): %s", $e->{path}, $e->{why}, $e->{prompt} // '');
+	}
+	$self->_say("[[  >>#G{none}") unless $said;
+}
+
+# }}}
 
 # _manifest - the branch's manifest against the director's and exodus's {{{
 sub _manifest {
@@ -382,8 +422,17 @@ sub _summary {
 	} else {
 		push @p, 'The director matches the deployed commit; nothing is pending.';
 	}
+	# A first deploy's sentence names what it creates; what it does to the
+	# secrets on the way is said beside it.
+	if ($f->{first} && (my $secrets = join(', and ', grep {/secret/} split /, and /, $changes))) {
+		push @p, "The deploy also $secrets.";
+	}
 	push @p, "The director's manifest differs from the last one Genesis deployed, so ".
 		'something was deployed outside Genesis.' if $f->{drift};
+	if (my $n = $self->blocked) {
+		push @p, sprintf('Deploying it is blocked: %s must be set first.',
+			_count($n, 'user-provided secret'));
+	}
 	return @p;
 }
 
@@ -393,8 +442,11 @@ sub _changes {
 	my ($self) = @_;
 	my $f = $self->{facts};
 	my @what = (($f->{manifest} ? ('the manifest') : ()), _count($f->{configs}, 'BOSH config'));
+	my $s = $self->{fixes} || {};
 	my @parts = ((@what ? ('changes '.join(' and ', @what)) : ()),
-		($f->{uploads} ? ('uploads '._count($f->{uploads}, 'release or stemcell', 'releases or stemcells')) : ()));
+		($f->{uploads} ? ('uploads '._count($f->{uploads}, 'release or stemcell', 'releases or stemcells')) : ()),
+		(@{$s->{generate} || []} ? ('generates '._count(scalar(@{$s->{generate}}), 'missing secret')) : ()),
+		(@{$s->{rotate}   || []} ? ('rotates '._count(scalar(@{$s->{rotate}}), 'invalid secret')) : ()));
 	return join(', and ', @parts);
 }
 
@@ -405,7 +457,8 @@ sub _verdict {
 	my $name = $self->{env}->name;
 	my $f = $self->{facts};
 	my ($line, $colour) =
-		  $f->{first}       ? ("A first deploy is pending for $name", 'Y')
+		  $self->blocked    ? ("Deploying $name is blocked", 'R')
+		: $f->{first}       ? ("A first deploy is pending for $name", 'Y')
 		: $self->_changes   ? ("Changes are pending for $name", 'Y')
 		: $self->{pending}  ? ("Nothing to deploy changes on the director for $name", 'G')
 		:                     ("Nothing is pending for $name", 'G');
@@ -533,7 +586,8 @@ sub _masked {
 	my ($old, $new, $paths) = @_;
 	$old = JSON::PP->new->decode(JSON::PP->new->encode($old));
 	$new = JSON::PP->new->decode(JSON::PP->new->encode($new));
-	my $ref = qr/^\(\(.*\)\)$/;
+	# A reference, or the placeholder for a secret the vault lacks (D129).
+	my $ref = qr/^(?:\(\(.*\)\)|<(?:generated on deploy|must be provided|missing)>)$/;
 	for my $path (@$paths) {
 		my ($o, $n) = (_at($old, $path), _at($new, $path));
 		my $same = defined $o && defined $n && JSON::PP->new->canonical->encode([$$o]) eq JSON::PP->new->canonical->encode([$$n]);

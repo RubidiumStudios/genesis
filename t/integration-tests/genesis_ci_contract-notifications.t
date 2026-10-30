@@ -155,10 +155,15 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 	is($rfail && $rfail->{params}{text}, "\@oncall: $TYPE: Concourse redeploy of $DN failed ($build)",
 		"T443: and its failure");
 
-	my $could_not = "\@oncall: $TYPE: Could not determine the changes staged for $DN, see $build";
+	# T452 (D129): the failure says why from the summary file, which the
+	# preview writes on a block and on an error alike; D122's
+	# could-not-determine text is replaced.
+	my $could_not = "\@oncall: $TYPE: Could not offer the changes staged for $DN for deploy.\n".
+		"\$TEXT_FILE_CONTENT\nSee $build";
 	for my $outcome (qw/on_failure on_error/) {
 		my ($np) = slack_puts($nj->{$outcome});
 		is($np && $np->{params}{text}, $could_not, "d9: the notify job $outcome says so, with the mentions");
+		is($np && $np->{params}{text_file}, 'summary/summary.txt', "T452: and sends why from the summary file");
 	}
 	ok(grep({($_->{put} // '') eq "${DN}_deployed"} plan_steps($dp->{on_success})),
 		'd2: the _deployed put stays on success (D127)');

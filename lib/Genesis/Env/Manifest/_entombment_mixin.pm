@@ -58,13 +58,16 @@ sub _entomb_secrets {
 			$s =~ s#^/?#/#; # make sure the secret path starts with a /
 			push(@{$secret_keys{$s}}, $k)
 		}
-		my %secret_values = %{
+		# A read-only render stands in for a deploy that has not yet created
+		# every secret, so only the paths the vault holds are read (D129).
+		my @held = $writes ? keys %secret_keys : grep {$src_vault->has($_)} keys %secret_keys;
+		my %secret_values = @held ? %{
 			scalar(read_json_from(
-				$src_vault->query({redact_output => 1},"export", keys %secret_keys)
+				$src_vault->query({redact_output => 1},"export", @held)
 			))
-		};
+		} : ();
 		# BUG FIX for safe export on similar names
-		for (map {substr($_,1)} keys %secret_keys) {
+		for (map {substr($_,1)} @held) {
 			$secret_values{$_} = $src_vault->get("/$_")
 				unless (defined($secret_values{$_}));
 		}
@@ -98,6 +101,15 @@ sub _entomb_secrets {
 			$cred_path =~ s#^/#_/#;
 			for my $key (sort @{$secret_keys{$secret}}) {
 				my $value = $secret_values{substr($secret,1)}{$key};
+				# What the deploy would generate or must be given stands in
+				# the read-only render as a placeholder its reader names.
+				if (!$writes && !(defined($value) && length($value))) {
+					$local_vault->set($secret, $key,
+						($self->builder->{secret_placeholders} || {})->{"$secret:$key"} // '<missing>');
+					$results{missing}++;
+					++$idx;
+					next;
+				}
 				bail(
 					"Manifest references vault path #C{%s:%s} which has no value in ".
 					"the vault -- populate it (or fix the reference) and redeploy.",

@@ -3061,6 +3061,33 @@ sub secrets_plan {
 }
 
 # }}}
+# secret_fixes - what -F would do to the secrets, and what it cannot (D129) {{{
+#
+# Read-only and quiet: the same validation the deploy's check runs, sorted by
+# what fixing it takes.  A user-provided secret has no value to generate, so
+# missing or invalid it is the operator's to provide.
+sub secret_fixes {
+	my ($self) = @_;
+	$self->manifest_provider->kit_files(); # the blueprint decides the secrets
+	my $plan = $self->secrets_plan(silent => 1);
+	my %fixes = (generate => [], rotate => [], provide => []);
+	return \%fixes unless $plan->secrets;
+	$plan->store->fill($plan->secrets);
+	for my $secret ($plan->secrets) {
+		my ($result, $msg) = $secret->validate_value($plan);
+		next unless $result =~ /^(missing|error)$/;
+		my %entry = (path => ($secret->describe)[0], full_path => $secret->full_path,
+			label => $secret->label, why => $result eq 'missing' ? 'missing' : 'invalid');
+		if ($secret->isa('Genesis::Secret::UserProvided')) {
+			push @{$fixes{provide}}, {%entry, prompt => $secret->get('prompt')};
+		} else {
+			push @{$fixes{$result eq 'missing' ? 'generate' : 'rotate'}}, \%entry;
+		}
+	}
+	return \%fixes;
+}
+
+# }}}
 
 # Environment Variables
 # get_environment_variables - returns a hash of all environment variables pertaining to this Genesis::Env object {{{

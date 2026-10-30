@@ -3627,8 +3627,10 @@ sub fixture_kit {
 
 	helper::mkdir_or_fail($dir) unless -d $dir;
 	helper::mkdir_or_fail("$dir/hooks") unless -d "$dir/hooks";
+	# metadata is more kit.yml, such as the credentials and provided blocks
+	# a row needs secrets of each kind from.
 	helper::put_file("$dir/kit.yml",
-		"name: $name\nversion: $version\ngenesis_version_min: 3.0.0\n");
+		"name: $name\nversion: $version\ngenesis_version_min: 3.0.0\n".($opts{metadata} // ''));
 
 	for my $hook (sort keys %{$opts{hooks} || {}}) {
 		helper::put_file("$dir/hooks/$hook", 0755,

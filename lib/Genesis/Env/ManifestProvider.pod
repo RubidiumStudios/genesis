@@ -173,7 +173,10 @@ B<Returns:> a boolean.
 
 The counts the last entombing of one of this provider's manifests tallied,
 one per vault value the manifest references: C<total>, and C<new>, C<exists>,
-C<altered> and C<failed> by what entombing found in CredHub for each. A
+C<altered> and C<failed> by what entombing found in CredHub for each, and in
+a read-only render C<missing>, the values the vault lacks, which that render
+holds as the placeholder named for each in the provider's
+C<secret_placeholders> (or C<< <missing> >>) rather than refusing (D129). A
 read-only render prints none of entombing's progress, so its reader reports
 these instead, as C<pending-changes> does in one line (D123).
 

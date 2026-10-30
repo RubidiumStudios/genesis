@@ -59,9 +59,11 @@ consecutive commits of one kind and author whose subjects match once every
 version string and hex sha is replaced fold to their first and last, the
 count between, all of them listed under C<verbose>.
 
-=item The rule, then Manifest, BOSH configs and Uploads
+=item The rule, then Secrets, Manifest, BOSH configs and Uploads
 
 A labelled rule, "What the deploy would change on the director", then the
+secrets the deploy's C<-F> would generate or rotate and those an operator must
+provide first, from C<Genesis::Env::secret_fixes> (D129); then the
 branch's manifest spruce-diffed against the director's live manifest and the
 exodus copy, a difference between those two reported as drift, the BOSH
 variables against exodus's, and the referenced secrets in one line; the
@@ -74,9 +76,15 @@ deploy shows the whole manifest as additions.
 =item The verdict
 
 The summary's verdict again, in the header's style, so the end of a long log
-reads like its start.
+reads like its start. A secret to be provided makes it blocked, in red, and
+C<report>'s caller exits C<Genesis::Exit::CONFIG> on C<blocked>.
 
 =back
+
+A secret the vault lacks does not stop the render: the entombed render's
+local vault holds C<< <generated on deploy> >> or C<< <must be provided> >>
+in its place, which redaction leaves readable, so the manifest is shown
+whole.
 
 The branch's manifest is the deployable type, rendered through a provider set
 C<without_credhub_writes>, so an entombed environment's vault values appear as
@@ -154,7 +162,34 @@ B<Examples:>
 
     Genesis::Env::PendingChanges->new($env, redact => 1)->report;
 
+=head2 blocked()
+
+Whether the deploy needs a secret only an operator can provide, after
+C<report> has read the secrets.
+
+B<Returns:> the number of such secrets, so false where there are none.
+
+B<Errors:> none.
+
+B<Examples:>
+
+    return $report->blocked ? Genesis::Exit::CONFIG : 0;
+
 =head1 INTERNAL METHODS
+
+=head2 _secrets()
+
+The Secrets section, kept for printing: each secret the deploy would
+generate or rotate, and each it cannot because an operator must provide it,
+with its prompt. It names a placeholder for each missing one on the
+provider, C<secret_placeholders>, keyed C</path:key>, which the entombed
+render reads in its place.
+
+B<Errors:> C<secret_fixes>'.
+
+B<Examples:>
+
+    $self->_section(secrets => sub {$self->_secrets});
 
 =head2 _read_commits()
 

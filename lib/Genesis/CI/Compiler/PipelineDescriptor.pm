@@ -779,10 +779,13 @@ sub _notify_job {
 	);
 	push @plan, $notif if $notif;
 
-	# A version no one hears of cannot be deployed under inline, so say so.
+	# A version no one hears of cannot be deployed under inline, so say so,
+	# and why: the preview writes its summary on a block and on an error
+	# alike (D129).
 	my $unknown = $self->_notification_step($ast,
-		"$pipeline_name: Could not determine the changes staged for $env-$deploy_type, see "._build_link(),
-		{ env => $env, is_failure => 1 });
+		"$pipeline_name: Could not offer the changes staged for $env-$deploy_type for deploy.\n".
+		"\$TEXT_FILE_CONTENT\nSee "._build_link(),
+		{ env => $env, is_failure => 1, text_file => SUMMARY_FILE });
 
 	return {
 		name   => $name,

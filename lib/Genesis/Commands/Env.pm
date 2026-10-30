@@ -1452,15 +1452,33 @@ sub pending_changes {
 	option_defaults(redact => !(($ENV{CI_NO_REDACT} // '') =~ /^(1|true)$/i));
 	command_usage(1) if @_ != 1;
 
-	my $env = Genesis::Top->new('.')->load_env($_[0])->with_vault();
+	my ($name) = @_;
 	my $opts = get_options;
+	my $file = $opts->{'summary-file'};
 	require Genesis::Env::PendingChanges;
-	Genesis::Env::PendingChanges->new($env,
-		redact       => $opts->{redact},
-		verbose      => $opts->{verbose},
-		summary_file => $opts->{'summary-file'},
-	)->report;
-	return 0;
+	my $report;
+	my $ok = eval {
+		my $env = Genesis::Top->new('.')->load_env($name)->with_vault();
+		$report = Genesis::Env::PendingChanges->new($env,
+			redact       => $opts->{redact},
+			verbose      => $opts->{verbose},
+			summary_file => $file,
+		);
+		$report->report;
+		1;
+	};
+	unless ($ok) {
+		# The notify job's failure message sends the summary file, so it says
+		# why on every outcome this run reaches (D129).
+		my $err = $@;
+		require Genesis::CI::Walk;
+		mkfile_or_fail($file, "The changes could not be determined: ".
+			Genesis::CI::Walk::_load_error($err)."\n") if defined $file;
+		die $err;
+	}
+	# A secret only an operator can provide blocks the deploy, and the notify
+	# job failing on it keeps the deploy from being offered (D129).
+	return $report->blocked ? Genesis::Exit::CONFIG : 0;
 }
 
 # }}}
@@ -1892,6 +1910,23 @@ sub deploy {
 
 	# Check or fix secrets for required items
 	my $fix_secrets = delete($options{'fix-secrets'}) || $Genesis::RC->get('fix_on_deploy') ne 'never';
+
+	# A user-provided secret has no value to generate, and off a terminal
+	# there is no one to ask, so it refuses before any secret is written
+	# rather than failing at the render after the others are (D129).
+	if ($fix_secrets && !$dryrun && !in_controlling_terminal) {
+		my @provide = @{$env->secret_fixes->{provide}};
+		bail(
+			{exitcode => Genesis::Exit::CONFIG},
+			"Refusing to deploy #C{%s}: %s, and only an operator can set %s.\n\n%s\n\n".
+			"Set %s with #C{genesis %s add-secrets} at a terminal, then deploy again.  ".
+			"Nothing was changed.",
+			$env->name, count_nouns(scalar(@provide), 'user-provided secret').' '.(@provide == 1 ? 'is' : 'are').' missing or invalid',
+			@provide == 1 ? 'it' : 'them',
+			join("\n", map {sprintf("[[  - >>#C{%s} (%s): %s", $_->{path}, $_->{why}, $_->{prompt} // '')} @provide),
+			@provide == 1 ? 'it' : 'them', $env->name
+		) if @provide;
+	}
 	if ($fix_secrets && !$dryrun) {
 		my $secret_fixes = $env->_fix_secrets(noprompt => $noprompt);
 		bail(
