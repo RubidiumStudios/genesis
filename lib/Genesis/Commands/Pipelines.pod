@@ -2080,6 +2080,13 @@ asks only that its deployment root is committed, through
 L<Genesis::CI::Preflight/root_committed_problems($git)>, worded for a preview
 that needs a commit and not a push.
 
+A run in a pipeline task (C<GENESIS_PIPELINE_TASK> set, not a dry run) lets
+a control that is only C<behind> R through, since that is the version
+Concourse had found when it made the build rather than a stale clone, reads
+the shape from the snapshot's control, and ends by taking R's tip through
+L</_take_control_tip> (D30, noted 2026-10-30). Ahead and diverged are
+refused there as anywhere.
+
 B<Parameters:>
 
 =over 4
@@ -2150,6 +2157,79 @@ B<Examples:>
   # bails "Refusing to run genesis propagate.  genesis pipeline-apply has
   # never been run ...  qa/bosh carries 1 commit ...  Nothing was written."
   # exiting CONFIG, with every ref as it was
+
+=head2 _take_control_tip
+
+  _take_control_tip($top, $git, $session, $given, $tip);
+
+A pipeline task's last step before it propagates (D30, noted 2026-10-30).
+Where the commit the build was given is an ancestor of R's control, it moves
+the clone's control forward to R's tip and stands the working tree on it,
+through L<Service::Git/stand_on_fast_forward>, and says which commit the
+build was given and which it propagates. Nothing moves control on R. The
+build Concourse later makes for the tip finds nothing left to deliver.
+
+Where the tip's C<.genesis/bin/genesis> differs from the given commit's, the
+run replaces itself with the tip's, with its own arguments, so the tip is
+read by the Genesis it embeds (D130). The switch lock is let go first, and
+C<GENESIS_PROPAGATE_TIP> is set to the tip, so the replacement goes on as
+itself even where R has moved again. A tip that carries no executable
+Genesis leaves the run going on as itself.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The C<Genesis::Top> the run was opened on.
+
+=item C<$git>
+
+The C<Service::Git> handle on the clone.
+
+=item C<$session>
+
+The branch session whose lock the run holds.
+
+=item C<$given>
+
+The commit the working tree stood on when the run began.
+
+=item C<$tip>
+
+Control's commit on R, as the snapshot read it.
+
+=back
+
+B<Returns:> Nothing, where the run goes on; it does not return where it
+hands over.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Failed to run .genesis/bin/genesis: ..."> where the hand-over cannot
+start the tip's Genesis.
+
+=item *
+
+What L<Service::Git/stand_on_fast_forward> raises.
+
+=back
+
+B<Examples:>
+
+  _take_control_tip($top, $git, $session, '1fec0517...', '005f6dd6...');
+  # says "This build was given control@1fec0517, and origin/control has
+  # moved on since, so propagating from control@005f6dd6, the remote's tip."
+  # and returns with the clone on control at 005f6dd6
+
+  _take_control_tip($top, $git, $session, '1fec0517...', 'a1b2c3d4...');
+  # where a1b2c3d4 embeds another Genesis: says so, and runs
+  # .genesis/bin/genesis propagate in place of this process
 
 =head2 _protection_rules_for
 

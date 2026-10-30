@@ -591,6 +591,58 @@ B<Examples:>
   $git->checkout_detached('0000000000000000000000000000000000000000');
   # raises, naming the commit, where the repository does not have it
 
+=head2 stand_on_fast_forward
+
+  $git->stand_on_fast_forward($branch, $to);
+
+Moves a local branch forward to C<$to> and stands the working tree on it.
+This is the one branch change outside a session, admitted for a pipeline
+task's control alone (D30, noted 2026-10-30): the task's clone trails R by
+Concourse's check, and the run propagates R's tip. It only moves forward:
+both the branch, where it exists, and the commit the tree stands on must be
+ancestors of C<$to>. On the branch, it is C<git merge --ff-only>; off it,
+often on the detached HEAD the git resource checks out, the ref is moved
+with C<git update-ref> against its old value, and the branch checked out.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$branch>
+
+The local branch to move, which need not exist yet.
+
+=item C<$to>
+
+The commit to move it to.
+
+=back
+
+B<Returns:> C<$self>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+C<"Refusing to fast-forward %s to %s, which does not descend from both the
+branch and the commit the working tree stands on."> - exits C<SOFTWARE>,
+since every caller asked first.
+
+=item *
+
+C<"Failed to fast-forward '%s'">, C<"Failed to move '%s' to '%s'"> and
+C<"Failed to checkout '%s'"> - raised via C<run>'s C<onfailure>, as where
+the working tree has changes the move would overwrite.
+
+=back
+
+B<Examples:>
+
+  $git->stand_on_fast_forward('control', '005f6dd6...');
+  # returns $self; control is at 005f6dd6 and checked out
+
 =head2 create_branch
 
   $git->create_branch($name);

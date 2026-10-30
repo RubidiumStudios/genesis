@@ -416,6 +416,7 @@ integration-tests/genesis_commands_pipelines-hold_disabled.t # hold and release,
 integration-tests/genesis_commands_pipelines-hold_trailer.t  # a delivered hold trailer writes the hold record, and a rejected push takes none
 integration-tests/genesis_commands_pipelines-hold_readers.t  # the status table, the run's report, and the deploy name one hold in one sentence
 integration-tests/genesis_ci_preflight-control.t             # control exists, and it stands in step with the remote
+integration-tests/genesis_ci_preflight-behind_in_task.t      # a pipeline task behind R takes the tip, and the tip's Genesis where it changed; ahead and an operator still refuse
 integration-tests/genesis_ci_preflight-check_first.t         # propagate asks every question first, refuses once with every problem, and moves nothing until it acts
 integration-tests/genesis_ci_preflight-dry_run.t             # a preview reads R once into T, creates and moves nothing, and names each move it assumes
 integration-tests/genesis_ci_preflight-branch_origin.t        # the two refusals for a branch with no legitimate origin

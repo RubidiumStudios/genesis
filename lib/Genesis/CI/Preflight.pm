@@ -390,6 +390,7 @@ sub _control_standing {
 	}
 
 	return ($div) if $opts{permit_ahead} && $div->{state} eq 'ahead';
+	return ($div) if $opts{permit_behind} && $div->{state} eq 'behind';
 
 	my $counts = $div->{state} eq 'diverged'
 		? sprintf("is ahead of #C{%s/%s} by %s and behind it by %s, so it is ".

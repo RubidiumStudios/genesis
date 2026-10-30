@@ -435,6 +435,35 @@ sub checkout_detached {
 }
 
 # }}}
+# stand_on_fast_forward - move a branch forward to a commit and stand on it {{{
+#
+# The one branch change outside a session, which D30's note of 2026-10-30
+# admits for a pipeline task's control alone: it moves only forward, from the
+# branch and the commit the tree stands on, and refuses anything else.
+sub stand_on_fast_forward {
+	my ($self, $branch, $to) = @_;
+	my $from = $self->rev_parse("refs/heads/$branch");
+	bail({exitcode => SOFTWARE},
+		"Refusing to fast-forward #C{%s} to #C{%s}, which does not descend from ".
+		"both the branch and the commit the working tree stands on.",
+		$branch, $to)
+		unless $self->is_ancestor('HEAD', $to)
+			&& (!defined $from || $self->is_ancestor($from, $to));
+
+	if (($self->checked_out_branch // '') eq $branch) {
+		run({dir => $self->{root}, onfailure => "Failed to fast-forward '$branch'"},
+			'git', 'merge', '-q', '--ff-only', $to);
+	} else {
+		run({dir => $self->{root}, onfailure => "Failed to move '$branch' to '$to'"},
+			'git', 'update-ref', "refs/heads/$branch", $to, $from // '');
+		run({dir => $self->{root}, onfailure => "Failed to checkout '$branch'"},
+			'git', 'checkout', '-q', $branch);
+	}
+	$self->{_branch_cache}{$branch} = 1;
+	return $self;
+}
+
+# }}}
 # create_branch - create a new branch at the given ref (default HEAD) {{{
 sub create_branch {
 	my ($self, $name, $ref) = @_;

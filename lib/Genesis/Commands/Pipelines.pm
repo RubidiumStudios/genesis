@@ -1165,6 +1165,10 @@ sub _propagate_check_first {
 	my $control = $top->control_branch;
 	$top->assert_control_readable;
 
+	# A task's control trails R by Concourse's check, not by anyone's intent (D30).
+	my $in_task = $ENV{GENESIS_PIPELINE_TASK} && !$dry_run ? 1 : 0;
+	my $given   = $git->sha('HEAD');
+
 	# No pipeline section on the local control: nothing to ask R about (D64).
 	if ($git->branch_exists("refs/heads/$control")) {
 		# The deployment root's own config, which sits under the root's prefix
@@ -1228,7 +1232,8 @@ sub _propagate_check_first {
 			tracking      => $ns,
 			creates_local => $dry_run ? 0 : 1,
 			preview       => $dry_run,
-			permit_ahead  => $dry_run)) {
+			permit_ahead  => $dry_run,
+			permit_behind => $in_task)) {
 		push @problems, @standing, @unapplied;
 		$not_checked = {
 			because => 'the topology is read from control',
@@ -1324,11 +1329,41 @@ sub _propagate_check_first {
 		$git->create_branch($branch, $held->{$branch});
 		push @created, $branch;
 	}
+	_take_control_tip($top, $git, $session, $given, $held->{$control}) if $in_task;
+
 	return {
 		refreshed    => {ok => 1, kind => 'success', fetched => \@fetched,
 		                 created => \@created, absent => \@absent},
 		pr_branch_of => $pr_branch_of,
 		github       => $github};
+}
+
+# }}}
+# _take_control_tip - a pipeline task propagates R's control, as its Genesis {{{
+sub _take_control_tip {
+	my ($top, $git, $session, $given, $tip) = @_;
+	return unless defined $tip && defined $given && $given ne $tip
+		&& $git->is_ancestor($given, $tip);
+
+	my $control = $top->control_branch;
+	$git->stand_on_fast_forward($control, $tip);
+	info("This build was given #C{%s@%s}, and #C{%s/%s} has moved on since, so ".
+		"propagating from #C{%s@%s}, the remote's tip.",
+		$control, substr($given, 0, 8), $top->source_control_remote, $control,
+		$control, substr($tip, 0, 8));
+
+	my ($bin) = $git->prefixed('.genesis/bin/genesis');
+	my $path  = $top->path('.genesis/bin/genesis');
+	return if $ENV{GENESIS_PROPAGATE_TIP} || !-x $path
+		|| ($git->rev_parse("$given:$bin") // '') eq ($git->rev_parse("$tip:$bin") // '');
+
+	info("The tip carries a different #C{.genesis/bin/genesis}, so handing ".
+		"over to it to propagate #C{%s@%s}.", $control, substr($tip, 0, 8));
+	$session->release_lock;
+	$ENV{GENESIS_PROPAGATE_TIP} = $tip;
+	$_->flush for (*STDOUT{IO}, *STDERR{IO});
+	exec {$path} $path, @ARGV
+		or bail("Failed to run #C{%s}: %s", $path, $!);
 }
 
 # }}}

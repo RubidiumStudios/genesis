@@ -660,6 +660,13 @@ Optional. True for a preview, which reads control's commits and stands on
 nothing, so a control the clone lacks is no problem for it: it reads control
 on T (D44, noted 2026-10-16, withdrawing the refusal noted 2026-10-09).
 
+=item C<permit_behind>
+
+Optional. True for a run in a pipeline task, whose control trails R by
+Concourse's check rather than by anyone's intent, so C<behind> is no problem
+for it: the run takes R's tip instead (D30, noted 2026-10-30). C<diverged>
+is refused with it set as without it.
+
 =item C<permit_ahead>, C<unverifiable>
 
 As for L</require_control($top, $git, %opts)>.
