@@ -250,15 +250,19 @@ subtest 'create_pr' => sub {
 		} 'bails without title';
 	};
 
-	subtest 'bails on non-201 response' => sub {
+	subtest 'bails on non-201 response, with GitHub\'s own reason' => sub {
 		plan tests => 1;
 		reset_mocks();
 		my $gh = new_gh(GITHUB_AUTH_TOKEN => 'tok');
-		queue_curl_response(422, 'Unprocessable', '{"message":"validation failed"}', '');
-		dies_ok {
+		# What GitHub answers, over HTTP/2, whose status line has no words.
+		queue_curl_response(422, '422 ',
+			'{"message":"Validation Failed","errors":[{"resource":"PullRequest",'.
+			'"code":"custom","message":"A pull request already exists for org:branch."}]}', '');
+		throws_ok {
 			$gh->create_pr('org/repo',
 				head => 'branch', base => 'env', title => 'T')
-		} 'bails on 422';
+		} qr/HTTP\s+422\s+-\s+Validation\s+Failed:\s+A\s+pull\s+request\s+already\s+exists\s+for\s+org:branch\./,
+			'bails on 422, saying what GitHub said';
 	};
 };
 

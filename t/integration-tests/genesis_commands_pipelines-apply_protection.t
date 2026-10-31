@@ -166,8 +166,8 @@ subtest 'a deployment branch in PR mode merges by rebase only' => sub {
 };
 
 subtest 'a non-admin gets the list and the run carries on' => sub {
-	# Four rows, and one more for the run's own restoration assertion.
-	plan tests => 5;
+	# Five rows, and one more for the run's own restoration assertion.
+	plan tests => 6;
 
 	my $h = make_harness(envs => ['qa'], github => 1);
 	# The second build is what puts the double in its non-admin state, since
@@ -181,6 +181,10 @@ subtest 'a non-admin gets the list and the run carries on' => sub {
 	like($said, qr{qa/bosh}, 'the report names the branch');
 	like($said, qr/non_fast_forward/,
 		'the report names the setting that could not be granted');
+	# The lmelt PoC's warning said only "HTTP 422 - 422", HTTP/2's status
+	# line having no words; GitHub's reason is in the body.
+	like($said, qr/HTTP 403 - Resource not accessible by personal access token/,
+		'and gives GitHub\'s own reason');
 	have_secret($h->applied_path . ':control_commit',
 		'the applied record was still written');
 };

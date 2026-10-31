@@ -554,8 +554,8 @@ sub list_prs {
 	while ($url) {
 		my ($code, $msg, $data, $headers) = $self->_api("GET", $url, undef, undef, 0, $self->{creds});
 		bail(
-			"Failed to list pull requests for #C{%s}: HTTP %s - %s",
-			$owner_repo, $code, $msg
+			"Failed to list pull requests for #C{%s}: %s",
+			$owner_repo, _failure($code, $msg, $data)
 		) unless $code == 200;
 
 		my $page;
@@ -609,8 +609,8 @@ sub pr_reviews {
 		my ($code, $msg, $data, $headers) =
 			$self->_api("GET", $url, undef, undef, 0, $self->{creds});
 		bail(
-			"Failed to read the review state of pull request #%d for #C{%s}: ".
-			"HTTP %s - %s", $number, $owner_repo, $code, $msg
+			"Failed to read the review state of pull request #%d for #C{%s}: %s",
+			$number, $owner_repo, _failure($code, $msg, $data)
 		) unless $code == 200;
 
 		my $page;
@@ -745,8 +745,8 @@ sub create_pr {
 		{'Content-Type' => 'application/json'}, $payload, 0, $self->{creds}
 	);
 	bail(
-		"Failed to create pull request for #C{%s}: HTTP %s - %s",
-		$owner_repo, $code, $msg
+		"Failed to create pull request for #C{%s}: %s",
+		$owner_repo, _failure($code, $msg, $data)
 	) unless $code == 201;
 
 	my $pr;
@@ -777,8 +777,8 @@ sub update_pr {
 		{'Content-Type' => 'application/json'}, $payload, 0, $self->{creds}
 	);
 	bail(
-		"Failed to update pull request #%d for #C{%s}: HTTP %s - %s",
-		$number, $owner_repo, $code, $msg
+		"Failed to update pull request #%d for #C{%s}: %s",
+		$number, $owner_repo, _failure($code, $msg, $data)
 	) unless $code == 200;
 
 	my $pr;
@@ -918,7 +918,7 @@ sub set_ruleset {
 	my $change = $self->ruleset_change($owner_repo, %opts);
 	return (1, undef, $change) if $change->{outcome} eq 'unchanged';
 
-	my ($code, $msg) = $self->_api(
+	my ($code, $msg, $data) = $self->_api(
 		(defined $change->{id} ? "PUT" : "POST"),
 		$self->rulesets_url($owner_repo, $change->{id}),
 		{'Content-Type' => 'application/json'},
@@ -926,7 +926,28 @@ sub set_ruleset {
 	);
 
 	return (1, undef, $change) if $code == 200 || $code == 201;
-	return (0, sprintf("HTTP %s - %s", $code, $msg), $change);
+	return (0, _failure($code, $msg, $data), $change);
+}
+
+# }}}
+# _failure - a refused call in GitHub's own words, from its body {{{
+#
+# The status line carries no words over HTTP/2, so the body's message, and
+# each error's own message under it, is what says why.
+sub _failure {
+	my ($code, $line, $body) = @_;
+	my $answer = eval {JSON::PP->new->decode($body // '')};
+	my $said = ref($answer) eq 'HASH' ? $answer->{message} : undef;
+	if (defined $said && length $said) {
+		$said =~ s/\s+/ /g;
+		my @why = grep {defined && length}
+			map {ref($_) eq 'HASH' ? $_->{message} : $_} @{$answer->{errors} || []};
+		$said .= ': '.join('; ', @why) if @why;
+	} else {
+		$said = ($line // '') =~ s/^\s*\Q$code\E\s*//r =~ s/\s+$//r;
+		$said = 'no reason given' unless length $said;
+	}
+	return sprintf("HTTP %s - %s", $code, $said);
 }
 
 # }}}

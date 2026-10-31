@@ -1662,7 +1662,8 @@ C<parameters>.
 
 B<Returns:> C<($ok, $reason, $change)> rather than bailing, so the caller can
 report what it could not grant and carry on. C<$reason> is undefined where
-C<$ok> is true. C<$change> is L</ruleset_change>'s answer, read before the
+C<$ok> is true, and otherwise the status and GitHub's own words for it, from
+L</_failure>. C<$change> is L</ruleset_change>'s answer, read before the
 write, so the caller can say whether the ruleset was created, updated, or
 already in place.
 
@@ -1688,7 +1689,8 @@ B<Examples:>
 
   my ($ok, $reason) = $gh->set_ruleset('genesis-community/genesis',
     name => 'genesis-control', patterns => ['control'], rules => []);
-  # returns (0, 'HTTP 403 - Forbidden', {...}) for a token without admin
+  # returns (0, 'HTTP 403 - Resource not accessible by personal access
+  # token', {...}) for a token without admin
 
 =head1 INTERNAL METHODS
 
@@ -1816,6 +1818,50 @@ B<Examples:>
 
   $gh->_attach_review('genesis-community/genesis', $pr);
   # $pr->{review} is undef, where the only review was a comment
+
+=head2 _failure
+
+  my $said = Service::Github::_failure($code, $line, $body);
+
+A function, not a method. A refused call in GitHub's own words: the status,
+then the C<message> GitHub's JSON body carries, then each entry of its
+C<errors> list's own message after a colon, joined by semicolons. The status
+line is the fallback where the body says nothing, and it carries no words
+over HTTP/2, which is why the body is read first; a call with neither says
+C<no reason given>. Every refusal this class raises or returns, for the pull
+requests and the rulesets alike, is worded through it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$code>
+
+The HTTP status.
+
+=item C<$line>
+
+The status line C<Genesis::curl> answered with.
+
+=item C<$body>
+
+The response body, JSON or not.
+
+=back
+
+B<Returns:> C<"HTTP E<lt>codeE<gt> - E<lt>reasonE<gt>">.
+
+B<Errors:> None. A body that is not JSON falls back to the status line.
+
+B<Examples:>
+
+  _failure(422, '422 ', '{"message":"Validation Failed","errors":'.
+    '[{"message":"A pull request already exists for org:branch."}]}');
+  # returns 'HTTP 422 - Validation Failed: A pull request already exists
+  #   for org:branch.'
+
+  _failure(502, 'HTTP/1.1 502 Bad Gateway', '<html>...</html>');
+  # returns 'HTTP 502 - HTTP/1.1 502 Bad Gateway'
 
 =head2 _covers
 
