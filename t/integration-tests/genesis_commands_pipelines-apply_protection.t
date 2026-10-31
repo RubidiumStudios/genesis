@@ -189,16 +189,46 @@ subtest 'approvals are left standing' => sub {
 	# Two rows, and one more for the run's own restoration assertion.
 	plan tests => 3;
 
+	# A PR-mode branch, because the setting lives in the pull request rule,
+	# which GitHub requires to name it: absent is refused, so standing
+	# approvals are false, sent (D52; amended 2026-10-31).
 	my $h  = make_harness(envs => ['qa'], github => 1);
 	my $gh = $h->gh;
+	write_env_file($h, 'qa', pipeline => {require_pr => 'true'});
+	push_from($h, 'a', $h->control);
 
 	run_genesis($h, 'pipeline-apply');
 
+	my $rule = rule_named(rules_sent($gh, 'qa/bosh'), 'pull_request') || {};
+	is_deeply([exists $rule->{parameters}{dismiss_stale_reviews_on_push},
+			$rule->{parameters}{dismiss_stale_reviews_on_push} ? 1 : 0], [1, 0],
+		'a push dismisses no approval');
 	my @bodies = map {$_->{body} // ''} gh_calls($gh);
-	unlike(join("\n", @bodies), qr/dismiss_stale_reviews/,
-		'no dismiss-stale-reviews setting is sent');
 	unlike(join("\n", @bodies), qr/dismiss_stale_approvals/,
-		'no dismiss-stale-approvals setting is sent either');
+		'and no dismiss-stale-approvals setting is sent');
+};
+
+subtest 'the pull request rule carries every parameter GitHub requires' => sub {
+	# Three rows, and one more for the run's own restoration assertion.
+	plan tests => 4;
+
+	my $h  = make_harness(envs => ['qa'], github => 1);
+	my $gh = $h->gh;
+	write_env_file($h, 'qa', pipeline => {require_pr => 'true'});
+	push_from($h, 'a', $h->control);
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply');
+	my $said = unfolded($out, $err);
+	my $rule = rule_named(rules_sent($gh, 'qa/bosh'), 'pull_request') || {};
+	is_deeply([sort keys %{$rule->{parameters} || {}}],
+		[qw/allowed_merge_methods dismiss_stale_reviews_on_push require_code_owner_review
+			require_last_push_approval required_approving_review_count
+			required_review_thread_resolution/],
+		'the five the API requires, and the merge methods');
+	is_deeply([map {$rule->{parameters}{$_} ? 1 : 0}
+			qw/require_code_owner_review require_last_push_approval required_review_thread_resolution/],
+		[0, 0, 0], 'the three Genesis takes no view on at GitHub\'s defaults');
+	unlike($said, qr/Could not protect/, 'and GitHub takes the ruleset') or diag($said);
 };
 
 subtest 'a run with no token asks the repository for nothing' => sub {

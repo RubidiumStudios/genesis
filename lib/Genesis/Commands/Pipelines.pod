@@ -2263,6 +2263,11 @@ marker out of the pull request's body covers it.
 
 No rule dismisses a stale approval anywhere. Review safety lives in the
 mechanism instead, so an approval survives the rebuild a later run pushes.
+GitHub's rulesets API refuses a pull request rule that leaves any of its five
+required parameters out, so the rule names them all: one approving review,
+C<dismiss_stale_reviews_on_push> false for the reason just given, and code
+owner review, last-push approval and thread resolution false, GitHub's own
+defaults, on which Genesis takes no view.
 
 B<Parameters:>
 

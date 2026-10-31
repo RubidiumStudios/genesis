@@ -242,22 +242,44 @@ if ($kind eq 'other') {
 		my $sent = {};
 		eval {$sent = $json->decode($body // '{}'); 1} or $sent = {};
 		$state->{rulesets} ||= [];
-		if (defined $id) {
-			for my $set (@{$state->{rulesets}}) {
-				next unless $set->{id} == $id;
-				%$set = (%$sent, id => $id);
-			}
-			$status = 200;
+
+		# GitHub refuses a pull_request rule missing any parameter its schema
+		# requires, naming the rule by its index, and stores nothing.  The
+		# lmelt PoC met this as a bare 422 the double never gave.
+		my @required = qw/dismiss_stale_reviews_on_push require_code_owner_review
+			require_last_push_approval required_approving_review_count
+			required_review_thread_resolution/;
+		my @rules = @{$sent->{rules} || []};
+		my ($bad) = grep {
+			my $p = $rules[$_]{parameters} || {};
+			($rules[$_]{type} // '') eq 'pull_request' && grep {!exists $p->{$_}} @required;
+		} 0 .. $#rules;
+		if (defined $bad) {
+			$status = 422;
+			$answer = {
+				message => "Invalid request.\n\nInvalid property /rules/$bad: data matches no possible input.",
+				documentation_url => 'https://docs.github.com/rest/repos/rules#create-a-repository-ruleset',
+				status => '422',
+			};
+			close $state_fh;
 		} else {
-			$id = scalar(@{$state->{rulesets}}) + 1;
-			push @{$state->{rulesets}}, {%$sent, id => $id};
-			$status = 201;
+			if (defined $id) {
+				for my $set (@{$state->{rulesets}}) {
+					next unless $set->{id} == $id;
+					%$set = (%$sent, id => $id);
+				}
+				$status = 200;
+			} else {
+				$id = scalar(@{$state->{rulesets}}) + 1;
+				push @{$state->{rulesets}}, {%$sent, id => $id};
+				$status = 201;
+			}
+			seek($state_fh, 0, 0);
+			truncate($state_fh, 0);
+			print $state_fh $json->encode($state);
+			close $state_fh;
+			$answer = {id => $id};
 		}
-		seek($state_fh, 0, 0);
-		truncate($state_fh, 0);
-		print $state_fh $json->encode($state);
-		close $state_fh;
-		$answer = {id => $id};
 	}
 } elsif ($url =~ m{/repos/[^/]+/[^/]+/branches/(.+)/protection$}) {
 	unless ($state->{admin}) {

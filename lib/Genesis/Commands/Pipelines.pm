@@ -1664,23 +1664,28 @@ sub _protection_rules_for {
 		{type => 'required_linear_history'},
 	);
 
+	# GitHub refuses a pull_request rule missing any of these.  An approval
+	# survives the rebuild a later run pushes (D52), and the rest are
+	# GitHub's own defaults, which Genesis takes no view on.
+	my %pr = (
+		required_approving_review_count   => 1,
+		dismiss_stale_reviews_on_push     => JSON::PP::false,
+		require_code_owner_review         => JSON::PP::false,
+		require_last_push_approval        => JSON::PP::false,
+		required_review_thread_resolution => JSON::PP::false,
+	);
+
 	if ($opts{control}) {
 		push @rules, {
 			type       => 'pull_request',
-			parameters => {
-				required_approving_review_count => 1,
-				allowed_merge_methods           => ['squash', 'rebase'],
-			},
+			parameters => {%pr, allowed_merge_methods => ['squash', 'rebase']},
 		} if $top->control_requires_pr;
 		return \@rules;
 	}
 
 	push @rules, {
 		type       => 'pull_request',
-		parameters => {
-			required_approving_review_count => 1,
-			allowed_merge_methods           => ['rebase'],
-		},
+		parameters => {%pr, allowed_merge_methods => ['rebase']},
 	} if $opts{require_pr};
 
 	return \@rules;
