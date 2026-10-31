@@ -81,12 +81,13 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		# three of its flags are retired, and -y has a new meaning, so an
 		# option or an argument that came back would be a decision reversed
 		# and not a flag added.  The four keys below are read only where a
-		# command declares them.
+		# command declares them.  summary-file was added by D132, for the
+		# pipeline's pull request message.
 		'propagate' => {
 			class        => Genesis::Commands::PRE_DEPLOY,
-			options      => [qw/dry-run|n yes|y force/],
+			options      => [qw/dry-run|n yes|y force summary-file=s/],
 			absent       => [qw/no-fetch no-refresh no-push commit=s from=s/],
-			exactly      => 3,
+			exactly      => 4,
 			arguments    => [],
 			scope        => 'repo',
 			group        => Genesis::Commands::PIPELINE,
