@@ -830,11 +830,12 @@ sub _deploy_job {
 			passed => [_notify_job_name($alias)] };
 	}
 
-	# The predecessor's _deployed, read for nothing and triggering nothing, so
-	# Concourse lays the chain out left to right (contract c14, c3).
+	# The predecessor's _deployed, read for nothing and triggering nothing;
+	# passed is what has Concourse draw the line from its deploy (c14, c3).
 	if ($trigger_from) {
 		my $prev = $self->_ran_resource($ast, $wf_data->{deployment_name}{$trigger_from});
-		push @gets, { get => $prev->{name}, trigger => JSON::PP::false } if $prev;
+		push @gets, { get => $prev->{name}, trigger => JSON::PP::false,
+			passed => [$passed_job] } if $prev;
 	}
 
 	# Task library (optional external git resource with custom task files)
@@ -1957,8 +1958,14 @@ with C<seed_version>.  The deploy puts C<_deployed> and the redeploy
 C<_redeployed>, on success alone, with no params; the propagate job triggers
 on the C<_deployed> of each deployment another environment names as its
 C<prior_env>, a tail's success making nothing due, and never on a
-C<_redeployed>, a redeploy delivering nothing (D23, D25, D75, D127).  The
-redeploy triggers on its queue and hands each request back in its outcome
+C<_redeployed>, a redeploy delivering nothing (D23, D25, D75, D127).  A
+deploy whose environment names a C<prior_env> gets that deployment's
+C<_deployed> without triggering, C<passed> its deploy, which is what has
+Concourse draw the chain; a seeded version never passed it, so the deploy
+waits until its predecessor has deployed through the pipeline once
+(contract c14, revised 2026-10-30).  Propagate's get of it carries no
+C<passed>, since it triggers and a new pipeline's propagate would wait on a
+deploy only it can feed.  The redeploy triggers on its queue and hands each request back in its outcome
 hooks.  C<auth> names the vault path holding the S3 C<access_key_id> and
 C<secret_access_key>.
 

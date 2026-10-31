@@ -88,6 +88,10 @@ subtest 'c5: propagate triggers on the _deployed of a deployment with a successo
 	my @prod = grep {($_->{get} // '') =~ /_(?:re)?deployed$/} plan_steps(pipeline_job($p, 'deploy-prod'));
 	is_deeply([map {$_->{get}} @prod], [$RAN], "c14: deploy-prod gets qa's _deployed");
 	ok(@prod && !$prod[0]{trigger}, 'c14: without triggering on it');
+	is_deeply(@prod ? $prod[0]{passed} : undef, ["deploy-$ENV_NAME"],
+		"c14: passed through qa's deploy, which is what draws the line to it");
+	ok($get{$RAN} && !exists $get{$RAN}{passed},
+		'c14: and propagate, which triggers on it, waits on no deploy');
 	ok(!grep({($_->{get} // '') =~ /_(?:re)?deployed$/} plan_steps(pipeline_job($p, "deploy-$ENV_NAME"))),
 		'c14: and qa, which follows nothing, gets no event');
 	is(scalar(ran_puts_of($p, 'prod', $tail)), 1, 'and put on its success (d2)');
