@@ -182,6 +182,8 @@ sub _source_control_model {
 		root           => length($prefix) ? $prefix : '.',
 		(defined $sc->{auth}     ? (auth          => $sc->{auth})     : ()),
 		(defined $sc->{identity} ? (commit_author => $sc->{identity}) : ()),
+		(defined $sc->{api_token}
+			? (api_token => {secret_ref => $sc->{api_token}}) : ()),
 	};
 }
 

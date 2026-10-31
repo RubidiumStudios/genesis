@@ -2936,6 +2936,9 @@ sub _pipeline_config_schema {
 						%{_credential_schema(source_control => 'The clone credential, as a type and its vault paths')},
 						required => \&_automated_provider_configured,
 					},
+					# The token propagate opens pull requests with, where the
+					# clone's own credential is not one (contract f8).
+					api_token => {type => 'string', description => 'Vault reference, as path:key, to the GitHub token propagate opens pull requests with'},
 					identity => {
 						type        => 'hash',
 						required    => \&_automated_provider_configured,

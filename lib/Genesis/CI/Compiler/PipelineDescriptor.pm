@@ -518,6 +518,7 @@ sub _propagate_job {
 		{ text_file => SUMMARY_FILE(), kind => 'pull_request' });
 	my $root = ($ast->integrations->{source_control} || {})->{root} || '.';
 	my $up   = join('/', ('..') x (1 + ($root eq '.' ? 0 : scalar(grep {length} split m{/}, $root))));
+	my $token = $self->_pull_request_token($ast);
 
 	return {
 		name   => 'propagate',
@@ -528,6 +529,7 @@ sub _propagate_job {
 			(map {+{ get => $_, trigger => JSON::PP::true }} @{$ran_names || []}),
 			{ task => 'propagate', config => $self->_task_config($ast, undef, undef, undef, {}, {
 				input => 'control-branch',
+				($token ? (params => { GITHUB_AUTH_TOKEN => $token }) : ()),
 				$notif
 					? (cli_args => ['propagate', '--summary-file', "$up/".SUMMARY_FILE()],
 					   outputs  => [{ name => SUMMARY_OUTPUT() }])
@@ -536,6 +538,30 @@ sub _propagate_job {
 		],
 		($notif ? (ensure => $notif) : ()),
 	};
+}
+
+# }}}
+# _pull_request_token - the token propagate opens pull requests with (f8) {{{
+sub _pull_request_token {
+	my ($self, $ast) = @_;
+	my @pr = sort grep {$_} map {
+		my $nodes = (($ast->workflows->{$_} || {})->{graph} || {})->{nodes} || {};
+		map {$nodes->{$_}{require_pr} ? $_ : ()} keys %$nodes;
+	} $ast->workflow_names;
+	return undef unless @pr;
+
+	my $sc = $ast->integrations->{source_control} || {};
+	return _unwrap_ref($sc->{api_token}) if $sc->{api_token};
+	my $auth = $sc->{auth}
+		? Genesis::Top::credential_components(source_control => $sc->{auth}) : {};
+	return _unwrap_ref($auth->{password}) if defined $auth->{password};
+
+	bail({exitcode => CONFIG},
+		"%s %s by pull request, which propagate opens with a GitHub token, and ".
+		"the clone's credential is not one.  Set #C{pipeline.source_control.api_token} ".
+		"in .genesis/config to the vault #C{path:key} of a token that can open ".
+		"pull requests on the repository.",
+		join(', ', map {"#C{$_}"} @pr), @pr == 1 ? 'delivers' : 'deliver');
 }
 
 # }}}
@@ -1483,6 +1509,7 @@ sub _task_config {
 		}
 	}
 	$params{DEBUG} = $config->{debug} if $config->{debug};
+	%params = (%params, %{$opts->{params} || {}});
 
 	# A task reads one branch, the env's own for a deploy and control for
 	# propagate: its trigger and its source of record.
@@ -2007,6 +2034,12 @@ the shortcode C<%NOTIFICATION_EMOJI> gives its kind, ahead of the mentions
 to its C<summary> output with C<--summary-file>, which the job sends from its
 C<ensure>; the Slack resource sends nothing for an empty summary (D132,
 contract e4, e13, d11).
+
+Where an environment sets C<require_pr>, the propagate task carries
+C<GITHUB_AUTH_TOKEN> from C<pipeline.source_control.api_token>, else from an
+C<https> clone credential's password; with an C<ssh> credential and no
+C<api_token> the compile is refused at C<CONFIG>, naming the key and the
+environments (contract f8).
 
 =head1 SYNOPSIS
 

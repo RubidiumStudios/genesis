@@ -73,6 +73,7 @@ source_control:
   auth:
     type: ssh
     path: secret/ci/pipeline/git
+  api_token: secret/ci/pipeline/github:token
   identity:
     name:  Concourse Bot
     email: concourse@pipeline
@@ -81,6 +82,8 @@ source_control:
 `remote` and `uri` are derived from the control branch's upstream, and `repository` is the GitHub owner and repository the API targets. Each is a choice with a good default rather than a fact of the checkout, which is why each takes a key. The deployment root takes none, being a fact of the checkout, and neither does the branch a command happens to be run from, that being runtime state.
 
 `auth` and `identity` are for CI alone, and they are required wherever a pipeline task has to clone and commit on its own. `auth.type` is `ssh` or `https`, and `auth.path` names the vault secret holding the type's components under their own names: `private_key` for `ssh`, `username` and `password` for `https`. A component kept elsewhere is given on its own as `<path>:<key>`, which replaces the default for that component alone, so `{type: https, path: secret/ci/git, password: secret/shared/token:value}` reads the username from `secret/ci/git` and the password from the shared secret. The load refuses a block missing a component, and a component the type does not take. The old `auth.vault` key is refused, naming `path`.
+
+`api_token` is the GitHub token the pipeline's propagate job opens and updates pull requests with, as `<path>:<key>`, and it is read only where an environment sets `genesis.pipeline.require_pr`. Where it is not set, an `https` clone credential's password is used in its place, since that is a GitHub token too; an `ssh` clone credential is not one, so a pipeline with a pull request environment and `ssh` auth is refused at compile until `api_token` is set. The token needs read and write access to the repository's contents and pull requests.
 
 ## The vault, locker, and shuttle Blocks
 
