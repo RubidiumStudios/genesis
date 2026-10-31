@@ -736,6 +736,18 @@ use constant JOBS_URL =>
 # The notify task's summary, an output of its own, as the staged put reads it.
 use constant SUMMARY_OUTPUT => 'summary';
 use constant SUMMARY_FILE   => 'summary/summary.txt';
+
+# Each Slack message's kind, as the shortcode it begins with (D131).
+our %NOTIFICATION_EMOJI = (
+	staged       => ':inbox_tray:',
+	not_offered  => ':no_entry:',
+	success      => ':white_check_mark:',
+	redeployed   => ':recycle:',
+	failure      => ':x:',
+	error        => ':warning:',
+	abort        => ':black_square_for_stop:',
+	pull_request => ':twisted_rightwards_arrows:',
+);
 sub _build_link {
 	return '<'.JOBS_URL.'/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_JOB_NAME #$BUILD_NAME>';
 }
@@ -771,7 +783,7 @@ sub _notify_job {
 		"\$TEXT_FILE_CONTENT\n".
 		"See "._build_link()." for the change summary, then schedule and run a deploy via ".
 		_job_link("deploy-$alias"),
-		{ env => $env, text_file => SUMMARY_FILE });
+		{ env => $env, text_file => SUMMARY_FILE, kind => 'staged' });
 
 	my @plan = (
 		{ in_parallel => [{ get => "$alias-branch", trigger => JSON::PP::true }] },
@@ -785,7 +797,7 @@ sub _notify_job {
 	my $unknown = $self->_notification_step($ast,
 		"$pipeline_name: Could not offer the changes staged for $env-$deploy_type for deploy.\n".
 		"\$TEXT_FILE_CONTENT\nSee "._build_link(),
-		{ env => $env, is_failure => 1, text_file => SUMMARY_FILE });
+		{ env => $env, is_failure => 1, text_file => SUMMARY_FILE, kind => 'not_offered' });
 
 	return {
 		name   => $name,
@@ -1098,8 +1110,9 @@ sub _outcome_hooks {
 		# Notifications: none for 'none'; 'minimal' keeps only those that mention
 		my ($text, $is_failure) = @{$msg{$outcome}};
 		if ($notif_style ne 'none' && ($is_failure || $notif_style ne 'minimal')) {
+			my $kind = $outcome eq 'success' && $is_redeploy ? 'redeployed' : $outcome;
 			my $notif = $self->_notification_step($ast, $text,
-				{ env => $env, is_failure => $is_failure });
+				{ env => $env, is_failure => $is_failure, kind => $kind });
 			push @steps, @{$notif->{in_parallel}} if $notif;
 		}
 
@@ -1623,7 +1636,7 @@ sub _resolve_slack_config {
 # }}}
 # _notification_step - build notification plan step {{{
 #
-# opts: { env => '', is_failure => 0 }
+# opts: { env => '', is_failure => 0, kind => '' }
 # Returns { in_parallel => [...] } or undef.
 sub _notification_step {
 	my ($self, $ast, $message, $opts) = @_;
@@ -1638,6 +1651,9 @@ sub _notification_step {
 	if ($is_failure && @{$slack->{mentions_on_failure} || []}) {
 		$text = join(' ', @{$slack->{mentions_on_failure}}) . ': ' . $text;
 	}
+	# A message's kind leads it, so a run of them reads at a glance (D131).
+	$text = "$NOTIFICATION_EMOJI{$opts->{kind}} $text"
+		if $opts->{kind} && $NOTIFICATION_EMOJI{$opts->{kind}};
 
 	# An app's webhook fixes its channel, name and icon; only a legacy one
 	# honours them, so each is sent only where written.

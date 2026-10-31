@@ -122,7 +122,7 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 	# T446 (D122's note of 2026-10-29): the summary between the staged line
 	# and the two links T443 set, sent from the task's output.
 	is($put[0] && $put[0]{params}{text},
-		"$TYPE: Changes are staged to be deployed to $DN.\n\$TEXT_FILE_CONTENT\n".
+		":inbox_tray: $TYPE: Changes are staged to be deployed to $DN.\n\$TEXT_FILE_CONTENT\n".
 		"See $build for the change summary, then schedule and run a deploy via <$at/$DEPLOY|$DEPLOY>",
 		'd9: the staged text, its summary, linking its build and the deploy job (T443, T446)');
 	is($put[0] && $put[0]{params}{text_file}, 'summary/summary.txt', 'T446: the summary sent from its file');
@@ -137,28 +137,31 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 	my $dp = deploy_plan($p);
 	my ($ok)   = slack_puts($dp->{on_success});
 	my ($fail) = slack_puts($dp->{on_failure});
-	is($ok && $ok->{params}{text}, "$TYPE: Concourse successfully deployed $DN ($build)", 'd10: success text');
-	is($fail && $fail->{params}{text}, "\@oncall: $TYPE: Concourse deployment to $DN failed ($build)",
+	# T457 (D131): each text begins with its kind's emoji, ahead of the mentions.
+	is($ok && $ok->{params}{text}, ":white_check_mark: $TYPE: Concourse successfully deployed $DN ($build)",
+		'd10: success text');
+	is($fail && $fail->{params}{text}, ":x: \@oncall: $TYPE: Concourse deployment to $DN failed ($build)",
 		'd10: failure text, with the mentions');
 	my ($err)   = slack_puts($dp->{on_error});
 	my ($abort) = slack_puts($dp->{on_abort});
-	is($err && $err->{params}{text}, "\@oncall: $TYPE: Concourse deployment to $DN errored ($build)",
+	is($err && $err->{params}{text}, ":warning: \@oncall: $TYPE: Concourse deployment to $DN errored ($build)",
 		'd10: errored text, with the mentions');
-	is($abort && $abort->{params}{text}, "$TYPE: Concourse deployment to $DN was aborted ($build)",
+	is($abort && $abort->{params}{text},
+		":black_square_for_stop: $TYPE: Concourse deployment to $DN was aborted ($build)",
 		'd10: aborted text, without them');
 
 	my $rp = (pipeline_job($p, "redeploy-$ENV_NAME") || {})->{plan}[0] || {};
 	my ($rok)   = slack_puts($rp->{on_success});
 	my ($rfail) = slack_puts($rp->{on_failure});
-	is($rok && $rok->{params}{text}, "$TYPE: Concourse successfully redeployed $DN ($build)",
+	is($rok && $rok->{params}{text}, ":recycle: $TYPE: Concourse successfully redeployed $DN ($build)",
 		"T443: the redeploy's success links its build");
-	is($rfail && $rfail->{params}{text}, "\@oncall: $TYPE: Concourse redeploy of $DN failed ($build)",
+	is($rfail && $rfail->{params}{text}, ":x: \@oncall: $TYPE: Concourse redeploy of $DN failed ($build)",
 		"T443: and its failure");
 
 	# T452 (D129): the failure says why from the summary file, which the
 	# preview writes on a block and on an error alike; D122's
 	# could-not-determine text is replaced.
-	my $could_not = "\@oncall: $TYPE: Could not offer the changes staged for $DN for deploy.\n".
+	my $could_not = ":no_entry: \@oncall: $TYPE: Could not offer the changes staged for $DN for deploy.\n".
 		"\$TEXT_FILE_CONTENT\nSee $build";
 	for my $outcome (qw/on_failure on_error/) {
 		my ($np) = slack_puts($nj->{$outcome});
