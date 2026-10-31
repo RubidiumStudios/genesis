@@ -509,6 +509,16 @@ sub _shuttle_resource {
 # _propagate_job - the one job that runs genesis propagate {{{
 sub _propagate_job {
 	my ($self, $ast, $ran_names) = @_;
+
+	# The pull requests the run opened or updated, sent whatever the run's
+	# outcome; an empty summary sends nothing (D132, contract e4, e13, d11).
+	my $pipeline_name = $ast->metadata->{name} || 'genesis-pipeline';
+	my $notif = $self->_notification_step($ast,
+		"$pipeline_name: Propagation opened pull requests for review:\n\$TEXT_FILE_CONTENT",
+		{ text_file => SUMMARY_FILE(), kind => 'pull_request' });
+	my $root = ($ast->integrations->{source_control} || {})->{root} || '.';
+	my $up   = join('/', ('..') x (1 + ($root eq '.' ? 0 : scalar(grep {length} split m{/}, $root))));
+
 	return {
 		name   => 'propagate',
 		public => JSON::PP::true,
@@ -516,9 +526,15 @@ sub _propagate_job {
 		plan   => [
 			{ get => 'control-branch', trigger => JSON::PP::true },
 			(map {+{ get => $_, trigger => JSON::PP::true }} @{$ran_names || []}),
-			{ task => 'propagate', config => $self->_task_config($ast, undef, undef, undef, {},
-				{ cli_args => ['propagate'], input => 'control-branch' }) },
+			{ task => 'propagate', config => $self->_task_config($ast, undef, undef, undef, {}, {
+				input => 'control-branch',
+				$notif
+					? (cli_args => ['propagate', '--summary-file', "$up/".SUMMARY_FILE()],
+					   outputs  => [{ name => SUMMARY_OUTPUT() }])
+					: (cli_args => ['propagate']),
+			}) },
 		],
+		($notif ? (ensure => $notif) : ()),
 	};
 }
 
@@ -1984,6 +2000,13 @@ C<passed>, since it triggers and a new pipeline's propagate would wait on a
 deploy only it can feed.  The redeploy triggers on its queue and hands each request back in its outcome
 hooks.  C<auth> names the vault path holding the S3 C<access_key_id> and
 C<secret_access_key>.
+
+Where C<pipeline.notifications.slack> is set, every Slack message begins with
+the shortcode C<%NOTIFICATION_EMOJI> gives its kind, ahead of the mentions
+(D131), and the propagate task writes the pull requests it opened or updated
+to its C<summary> output with C<--summary-file>, which the job sends from its
+C<ensure>; the Slack resource sends nothing for an empty summary (D132,
+contract e4, e13, d11).
 
 =head1 SYNOPSIS
 

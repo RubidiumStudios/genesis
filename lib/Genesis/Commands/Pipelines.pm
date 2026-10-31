@@ -436,6 +436,10 @@ sub propagate {
 
 	my $opts    = get_options;
 	my $dry_run = $opts->{'dry-run'};
+
+	# Empty before anything can refuse, so no run resends the last one's (D132).
+	_write_pr_summary($opts->{'summary-file'}, []) if $opts->{'summary-file'};
+
 	my $top     = Genesis::Top->new('.');
 	my $git     = Service::Git->new('.');
 	my $control = $top->control_branch;
@@ -666,6 +670,10 @@ sub propagate {
 		1;
 	};
 	my $failure = $@;
+
+	# Whatever the run synced, before anything below can end it (D132).
+	_write_pr_summary($opts->{'summary-file'}, $record->{environments})
+		if $opts->{'summary-file'} && $record;
 
 	# The two failure classes no environment survives; they differ only in status.
 	Genesis::CI::Walk::abort_run(
@@ -1364,6 +1372,20 @@ sub _take_control_tip {
 	$_->flush for (*STDOUT{IO}, *STDERR{IO});
 	exec {$path} $path, @ARGV
 		or bail("Failed to run #C{%s}: %s", $path, $!);
+}
+
+# }}}
+# _write_pr_summary - the pull requests a run opened or updated, for Slack {{{
+sub _write_pr_summary {
+	my ($file, $environments) = @_;
+	my @lines = map {
+		my $pr = $_->{pr};
+		sprintf("%s: %s <%s|#%d>, %d commit%s", $_->{env}, $pr->{synced},
+			$pr->{url}, $pr->{number}, $pr->{commits} // 0,
+			($pr->{commits} // 0) == 1 ? '' : 's');
+	} grep {$_->{pr} && $_->{pr}{synced} && $_->{pr}{url}} @{$environments || []};
+	mkfile_or_fail($file, join('', map {"$_\n"} @lines));
+	return scalar @lines;
 }
 
 # }}}

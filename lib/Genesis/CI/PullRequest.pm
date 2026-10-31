@@ -757,6 +757,7 @@ sub deliver {
 	}
 
 	$pr->{action}         = 'rebuild';
+	$pr->{commits}        = scalar @$commits;
 	$pr->{control_commit} = $source;
 	$pr->{title}          = (split /\n/, $message)[0];
 	$pr->{body}           = ($message =~ s/^[^\n]*\n\n?//r) =~ s/\s+$//r;
@@ -1164,6 +1165,7 @@ sub sync_pull_request {
 	# that already carried it.
 	my $title = title_for($pr->{title}, $pr->{superseded});
 
+	$pr->{synced} = $pr->{number} ? 'updated' : 'opened';
 	my $answer = $pr->{number}
 		? $github->update_pr($owner_repo, $pr->{number},
 			title => $title, body => $pr->{body})

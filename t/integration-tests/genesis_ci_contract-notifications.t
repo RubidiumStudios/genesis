@@ -232,9 +232,48 @@ subtest 'T448: a pipeline log reads whole' => sub {
 	ok(scalar(@tasks), 'the jobs run tasks');
 	is_deeply([map {$_->{config}{params}{GENESIS_OUTPUT_COLUMNS}} @tasks], [(120) x @tasks],
 		'f10: every task at 120 columns');
-	my @puts = map {my $j = $_; map {slack_puts($j->{$_})} qw/plan on_success on_failure on_error on_abort/} @jobs;
+	my @puts = map {my $j = $_; map {slack_puts($j->{$_})} qw/plan on_success on_failure on_error on_abort ensure/} @jobs;
 	ok(scalar(@puts), 'the jobs put to slack');
-	is_deeply([map {$_->{params}{silent} ? 1 : 0} @puts], [(1) x @puts], 'd9, d10: every Slack put silent');
+	is_deeply([map {$_->{params}{silent} ? 1 : 0} @puts], [(1) x @puts], 'd9, d10, d11: every Slack put silent');
+};
+
+# Proves T459 (D132; contract e4, e13, d11): propagate writes the pull
+# requests it opened or updated to its own output, and its job sends the file
+# in its ensure, so a partial run that opened one still reports it, and an
+# empty file, which the resource sends nothing for, is a run that opened none.
+subtest 'T459: propagate reports its pull requests' => sub {
+	my $h = contract_harness(config => {%SLACK});
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'the dry apply prints a pipeline') or return diag($why);
+	is_deeply([pipeline_faults($p)], [], 'fly would accept it');
+	my $job  = pipeline_job($p, 'propagate') || {};
+	my $task = (grep {$_->{task}} plan_steps($job->{plan}))[0] || {};
+	my @args = @{$task->{config}{run}{args} || []};
+	is_deeply([@args[0..1]], ['propagate', '--summary-file'], 'e4: propagate, writing its summary');
+	my @at = grep {length} split m{/}, ($task->{config}{run}{dir} // '')."/".($args[2] // '');
+	my @resolved; for (@at) {$_ eq '..' ? pop @resolved : push @resolved, $_}
+	is(join('/', @resolved), 'summary/summary.txt', 'e13: into its summary output');
+	is(scalar(@args), 3, 'e4: and nothing else');
+	is_deeply($task->{config}{outputs}, [{name => 'summary'}], 'e13: which the task declares');
+
+	my @put = slack_puts($job->{ensure});
+	is(scalar(@put), 1, 'd11: its ensure puts to slack once');
+	is($put[0] && $put[0]{params}{text},
+		":twisted_rightwards_arrows: $TYPE: Propagation opened pull requests for review:\n\$TEXT_FILE_CONTENT",
+		'd11: the pull requests, after their emoji (D131), from the file alone');
+	is($put[0] && $put[0]{params}{text_file}, 'summary/summary.txt', 'd11: sent from the summary');
+	is($put[0] && $put[0]{params}{channel}, '#deploys', 'd11: on the channel');
+	ok(!grep({slack_puts($job->{$_})} qw/plan on_success on_failure on_error on_abort/),
+		'd11: and nowhere else');
+
+	my $quiet = contract_harness();
+	my ($q, $qwhy) = dry_pipeline($quiet);
+	ok($q, 'without Slack it compiles') or return diag($qwhy);
+	my $qjob  = pipeline_job($q, 'propagate') || {};
+	my $qtask = (grep {$_->{task}} plan_steps($qjob->{plan}))[0] || {};
+	is_deeply($qtask->{config}{run}{args}, ['propagate'], 'e4: without Slack, propagate alone');
+	ok(!$qtask->{config}{outputs}, 'e13: no output');
+	ok(!$qjob->{ensure}, 'd11: and no ensure');
 };
 
 subtest 'T420: no Slack, no notifications' => sub {

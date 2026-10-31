@@ -2292,6 +2292,12 @@ define_command("propagate", {
 			"Propagate by hand under a pipeline that owns the work.  At a ".
 			"terminal you are still asked to confirm; outside one the ".
 			"refusal stands.",
+
+		'summary-file=s' =>
+			"Also write, to this file, a line for each pull request the run ".
+			"opened or updated, in Slack's link markup, and nothing where it ".
+			"opened and updated none.  The pipeline's propagate job sends it ".
+			"as its Slack message.",
 	],
 	arguments => [],
 }, 'Genesis::Commands::Pipelines::propagate');

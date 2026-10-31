@@ -2859,6 +2859,50 @@ B<Examples:>
   _job_status_label({finished_build => {status => 'ok'}}); # 'ok'
   _job_status_label({});                                   # 'pending'
 
+=head2 _write_pr_summary
+
+  my $n = _write_pr_summary($file, $record->{environments});
+
+Writes the file C<genesis propagate --summary-file> names (D132): one line
+for each environment whose pull request the run opened or updated, in Slack's
+link markup, and nothing else. Propagate calls it with no environments before
+anything can refuse, so the file is present and empty for a run that stops
+early, and again with the run's environments once the pull requests are
+synced, so a partial run still lists what it opened. The pipeline's
+propagate job sends the file from its C<ensure>, and the Slack resource sends
+nothing for an empty one (contract d11).
+
+B<Parameters:>
+
+=over 4
+
+=item C<$file>
+
+The path to write, its directories made as needed.
+
+=item C<$environments>
+
+The run record's per-environment records, or an empty list. An environment is
+listed where its C<pr> carries C<synced> and C<url>, which
+L<Genesis::CI::PullRequest/sync_pull_request($github, $owner_repo, $record, %opts)>
+sets.
+
+=back
+
+B<Returns:> The number of lines written.
+
+B<Errors:> What L<Genesis/mkfile_or_fail> raises where the file cannot be
+written.
+
+B<Examples:>
+
+  _write_pr_summary('../summary/summary.txt', $record->{environments});
+  # writes "prod: opened <https://github.com/acme/deployments/pull/7|#7>,
+  # 2 commits\n" and returns 1
+
+  _write_pr_summary('../summary/summary.txt', []);
+  # writes an empty file and returns 0
+
 =head2 _write_trailer_holds($top, $run)
 
 Writes the propagation hold record for each environment whose delivery in this
