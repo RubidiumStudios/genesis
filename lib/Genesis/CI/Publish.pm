@@ -74,13 +74,13 @@ sub publish_run {
 	};
 	return $result unless @specs;
 
-	# The in-sync rule, asked a second time.  The pre-flight asked it once
+	# Control's standing, asked a second time.  The pre-flight asked it once
 	# before the walk, and a walk takes long enough for a teammate to push
 	# through the middle of it, so the last thing the run does before its
-	# first push is ask again.  A control that has moved refuses, and the
-	# refusal comes back as a sentence rather than as an exit, because the
-	# command owes the operator their branch back before it says why the run
-	# stopped.
+	# first push is ask again.  A control that left the commit the run
+	# propagated refuses, and the refusal comes back as a sentence rather
+	# than as an exit, because the command owes the operator their branch
+	# back before it says why the run stopped.
 	if (my $refused = _recheck_control($git, $args{control}, $remote)) {
 		$result->{refused} = $refused;
 		_reset_publish_set($session);
@@ -378,14 +378,16 @@ sub _delta_entries {
 
 ### INTERNAL {{{
 
-# _recheck_control - the in-sync rule, asked once more before the first push {{{
+# _recheck_control - control's standing, asked once more before the first push {{{
 #
 # A marker is a bare sha with no ancestry link to the deployment branch, so it
 # means something only where the commit it names can be fetched from the
 # remote, and the deploy that reads it may run on another machine.  Control
-# moving under the run is therefore the one condition that makes every
-# delivery stale, and it is the one the pre-flight cannot settle for good,
-# because it asks before the walk and the walk takes time.
+# leaving that commit under the run is therefore the one condition that makes
+# every delivery unreadable, and it is the one the pre-flight cannot settle for
+# good, because it asks before the walk and the walk takes time.  Control only
+# moving on leaves the commit on R, and the run pushes no control, so that
+# publishes (D30, noted 2026-10-30).
 #
 # Genesis never moves control, so each refusal names the corrective step and
 # leaves control where the operator's teammate put it.  The sentence is
@@ -404,14 +406,21 @@ sub _recheck_control {
 	my $state = $git->resolve_branch($control, remote => $remote);
 	return undef if $state && $state->{state} eq 'in-sync';
 
-	# The query has six answers and a seventh silence, and in-sync above is
-	# the only one that lets the push go out.  Each of the rest earns words
-	# of its own, because the step that repairs one repairs none of the
-	# others and an operator told to rebase a branch the remote has never
-	# had gets nowhere.
 	my $named    = $remote // 'the remote';
 	my $tracking = sprintf('%s/%s', $named, $control);
 	my $what     = $state ? $state->{state} : 'gone';
+
+	# The run pushes no control, and what it propagated is still on R's (D30).
+	if ($what eq 'behind') {
+		info("Control moved on to #C{%s@%s} on #C{%s} during this run; the next ".
+			"run delivers it.", $control,
+			substr($git->sha($tracking) // '', 0, 8), $named);
+		return undef;
+	}
+
+	# Each answer left earns words of its own, because the step that repairs
+	# one repairs none of the others and an operator told to rebase a branch
+	# the remote has never had gets nowhere.
 
 	my ($said, $remedy);
 	if ($what eq 'gone') {
@@ -431,11 +440,6 @@ sub _recheck_control {
 		$said = sprintf("carries %s that are not on #C{%s}, which are ".
 		                "unpushed", _commits($state->{ahead}), $tracking);
 		$remedy = sprintf("Push them with #C{git push %s %s}", $named, $control);
-	} elsif ($what eq 'behind') {
-		$said = sprintf("is behind #C{%s} by %s, so everything this run ".
-		                "computed is stale", $tracking, _commits($state->{behind}));
-		$remedy = sprintf("Rebase it with #C{git pull --rebase %s %s}",
-		                  $named, $control);
 	} elsif ($what eq 'diverged') {
 		$said = sprintf("is ahead of #C{%s} by %s and behind it by %s, so it ".
 		                "is both unpushed and stale", $tracking,

@@ -88,13 +88,12 @@ subtest 'a control carrying unpushed commits is pushed' => sub {
 		'and the step that repairs it is a push');
 };
 
-subtest 'a control that is behind is stale, and its count governs its noun' => sub {
-	plan tests => 2;
-	my $said = refusal_for({state => 'behind', ahead => 0, behind => 1});
-	like($said, qr/is behind #C\{origin\/control\} by 1 commit,/,
-		'one commit is one commit and not one commits');
-	like($said, qr/so everything this run computed is stale/,
-		'and the refusal says what that costs the run');
+subtest 'a control that is only behind lets the push go out (D30, 2026-10-30)' => sub {
+	plan tests => 1;
+	# The commit the run propagated from is still on R's control, and the run
+	# pushes no control, so a teammate moving it on conflicts with nothing.
+	is(refusal_for({state => 'behind', ahead => 0, behind => 1}), undef,
+		'a control a teammate moved on refuses nothing');
 };
 
 subtest 'a diverged control is both, and earns both steps' => sub {

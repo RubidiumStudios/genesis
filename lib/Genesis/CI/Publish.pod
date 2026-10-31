@@ -407,17 +407,22 @@ B<Examples:>
 
     my $refused = Genesis::CI::Publish::_recheck_control($git, 'control', 'origin');
 
-Asks the in-sync question a second time, immediately before the first push.
+Asks control's standing a second time, immediately before the first push.
 
 The pre-flight asks it once, before the walk, and a walk takes long enough for
 a teammate to push through the middle of it. A marker is a bare sha with no
-ancestry link to the deployment branch, so control moving under the run is the
-one condition that makes every delivery stale. The branch is fetched first, so
-the answer is about what the remote holds now rather than about a tracking ref
-nobody has refreshed since the run began.
+ancestry link to the deployment branch, so control leaving the commit the run
+propagated is the one condition that makes every delivery unreadable. The
+branch is fetched first, so the answer is about what the remote holds now
+rather than about a tracking ref nobody has refreshed since the run began.
 
-Each of the six states the query answers with earns a refusal of its own, as
-does control having gone from both sides, because the step that repairs one
+Control C<behind>, a teammate having only moved it on, leaves that commit on
+R, and the run pushes no control, so it lets the push go out and says that
+control moved on during the run and that the next run delivers it (D30, noted
+2026-10-30). This holds at a terminal as in a pipeline task.
+
+Each of the other five states the query answers with earns a refusal of its
+own, as does control having gone from both sides, because the step that repairs one
 repairs none of the others. Genesis never moves control, so every refusal
 names the corrective step and leaves control where it was found. The sentence
 is returned rather than printed, because the caller closes the session before
@@ -453,8 +458,8 @@ The remote to check against, by name.
 
 =back
 
-B<Returns:> C<undef> where control is in sync, which is the one state that lets
-the push go out, and otherwise the sentence the caller refuses with.
+B<Returns:> C<undef> where control is in sync or behind, the two states that
+let the push go out, and otherwise the sentence the caller refuses with.
 
 B<Errors:> None of its own. The fetch and the query raise as they do for every
 other caller.
@@ -465,9 +470,14 @@ B<Examples:>
     # returns undef, and the push goes out
 
     _recheck_control($git, 'control', 'origin');
-    # returns 'Refusing to publish.  The control branch control is behind
-    #   origin/control by 1 commit, so everything this run computed is
-    #   stale.  ...' where a teammate pushed during the walk
+    # says "Control moved on to control@5be1c0de on origin during this run;
+    # the next run delivers it." and returns undef, where a teammate pushed
+    # during the walk
+
+    _recheck_control($git, 'control', 'origin');
+    # returns 'Refusing to publish.  The control branch control is ahead of
+    #   origin/control by 1 commit and behind it by 1 commit, so it is both
+    #   unpushed and stale.  ...' where a teammate rewrote control
 
 =head2 _commits
 

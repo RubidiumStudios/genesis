@@ -2,13 +2,13 @@
 # Proves T339: a code says whether an unaided retry fixes the condition.  A
 # hand commit on a deployment branch is the operator's own state, so the run
 # exits DATAERR and refuses again on every run until they clear it.  A second
-# clone pushing to control between this run's refresh and its publish is
+# clone rewriting control between this run's refresh and its publish is
 # nobody's mistake, so the run exits TEMPFAIL and the job's next run publishes
 # with nobody having repaired anything first.
 #
-# The second story also proves T180: control is re-checked against the remote
-# before the first push, a control that moved refuses the publish naming
-# behind as stale, nothing is pushed, every branch the run wrote is put back,
+# The third story proves T180, as D30's second note of 2026-10-30 amended it:
+# control is re-checked against the remote before the first push, a control a
+# teammate only moved on publishes, saying the next run delivers what moved,
 # and control is never among the branches the run publishes.
 #
 # The retry is the assertion that matters.  Both refusals name a branch, say
@@ -80,7 +80,7 @@ subtest 'a hand commit refuses, and refuses again on an unaided retry' => sub {
 		'the hand commit is still there, because no run touched it');
 };
 
-subtest 'a control a teammate moved refuses once, and the retry publishes' => sub {
+subtest 'a control a teammate rewrote refuses once, and the retry publishes' => sub {
 	# Nine rows, and one more for each run's own restoration assertion.
 	plan tests => 11;
 
@@ -95,13 +95,18 @@ subtest 'a control a teammate moved refuses once, and the retry publishes' => su
 		push    => 1,
 	);
 
-	# A teammate publishes to control while the run is walking.  The entry
-	# is armed for the first commit of the run, and the count that fires it
-	# lives in the plan file, so it fires once and the second run walks
-	# unarmed, which is what makes that run the unaided retry.
-	my $theirs = move_on_r_at($h, $h->control, at => 'commit', nth => 1,
-		files   => {'ops/theirs.yml' => "---\nby: the teammate\n"},
-		message => 'a teammate pushed to control',
+	# A teammate force-pushes control while the run is walking, dropping the
+	# commit this run propagates.  The entry is armed for the first commit of
+	# the run, and the count that fires it lives in the plan file, so it fires
+	# once and the second run walks unarmed, which is what makes that run the
+	# unaided retry.  The armed push is a force push of copy B's control, so
+	# copy B is put back behind the operator's commit and commits there, and
+	# the push it makes is a rewrite rather than a move on.
+	move_on_r_at($h, $h->control, at => 'commit', nth => 1);
+	run({dir => $h->b}, 'git', 'reset', '-q', '--hard', 'HEAD~2');
+	my $theirs = commit_from_b($h,
+		files   => {'ops/shared.yml' => "---\nops: rewritten\n"},
+		message => 'a teammate rewrote control',
 	);
 
 	my $before = ref_in($h->r, 'refs/heads/lab/bosh');
@@ -111,8 +116,8 @@ subtest 'a control a teammate moved refuses once, and the retry publishes' => su
 
 	is($exit, Genesis::Exit::TEMPFAIL,
 		'the run refuses on state nobody has to clear');
-	like($said, qr/is behind .* so everything this run computed is stale/,
-		'and the refusal names behind as stale');
+	like($said, qr/so it is both unpushed and stale/,
+		'and the refusal names control as rewritten under it');
 	is(ref_in($h->r, 'refs/heads/lab/bosh'), $before,
 		'nothing reached the remote');
 	is(ref_in($h->a, 'refs/heads/lab/bosh'),
@@ -142,6 +147,43 @@ subtest 'a control a teammate moved refuses once, and the retry publishes' => su
 		'the publish names the branch it pushed');
 	unlike($said_again, qr/\Q@{[$h->control]}\E: published/,
 		'control was not among the branches the run published');
+};
+
+subtest 'a control a teammate moved on publishes, and says so' => sub {
+	# Five rows, and one more for the run's own restoration assertion.
+	plan tests => 6;
+
+	my $h = make_harness(envs => ['lab'], mode => 'direct',
+		kit => 'omega-v2.7.0', tracked => ['ops/shared.yml']);
+	fixture_vault($h);
+	ready_envs($h);
+
+	commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nops: twenty\n"},
+		message => 'share an op with every environment',
+		push    => 1,
+	);
+
+	# A teammate publishes to control while the run is walking, on top of
+	# the commit this run propagates, which therefore stays on R's control.
+	my $theirs = move_on_r_at($h, $h->control, at => 'commit', nth => 1,
+		files   => {'ops/theirs.yml' => "---\nby: the teammate\n"},
+		message => 'a teammate pushed to control',
+	);
+	my $before = ref_in($h->r, 'refs/heads/lab/bosh');
+
+	my ($out, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
+	my $said = unfolded($out, $err);
+
+	is($exit, 0, 'the run publishes, control having only moved on') or diag($said);
+	isnt(ref_in($h->r, 'refs/heads/lab/bosh'), $before, 'the branch reached the remote');
+	like($said, qr/moved on to \S*\Q@{[substr($theirs, 0, 8)]}\E.* during this run.* the next run delivers it/i,
+		'and the run says control moved on, and that the next run delivers it')
+		or diag($said);
+	is(ref_in($h->r, 'refs/heads/'.$h->control), $theirs,
+		'control is where the teammate left it');
+	unlike($said, qr/\Q@{[$h->control]}\E: published/,
+		'and control was not among the branches the run published');
 };
 
 done_testing;
