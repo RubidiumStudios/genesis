@@ -351,6 +351,8 @@ A repository that still carries a pipeline `ci.yml` has not moved to v3, and eve
 
 In outline, there are three steps. You read the `pipeline:` block of `ci.yml` for the provider, the git URI, the branch, the pipeline name, and the vault URL. You write them into the `pipeline:` block of `.genesis/config`, which declares every one of them. Then you remove `ci.yml` with `git rm ci.yml`, and that restores the pipeline commands. The topology does not come across as a `layout` string at all. Each environment's place in it goes into that environment's own file, under `genesis.pipeline.prior_env`.
 
+Anything else `ci.yml` carried outside its `pipeline:` key, which v2 merged over the generated pipeline, moves to the override file, `.genesis/pipeline-overrides-concourse.yml` (see "The Override File" above), which is merged over the compiled pipeline the same way. Review it before the first apply rather than copying it across blind: the v3 pipeline names its jobs and resources differently (`deploy-<env>`, `redeploy-<env>`, `notify-<env>`, `propagate`, `control-branch`, `<env>-branch`), so an entry that patched a v2 job or resource by name now matches nothing and adds a new one beside the generated pipeline instead. `genesis pipeline-apply --dry-run` prints the merged result to check against.
+
 Once migrated, give the pipeline its shape:
 
 ```bash
