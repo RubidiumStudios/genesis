@@ -1016,7 +1016,7 @@ again, and C<dry_run> says this is a preview, which reads everything a run
 reads and writes none of it. C<remote_tip>, where given, is the pull
 request branch's tip on R as the run's snapshot read it, undefined where R
 held none, and it is what the rebuild's push is leased against in place of
-L</expected_tip>'s tracking ref, which a pipeline task's clone never has
+L</expected_tip($git, $pr_branch)>'s tracking ref, which a pipeline task's clone never has
 (T462); without it, the tracking ref is read as before.
 
 =back
