@@ -64,11 +64,13 @@ subtest 'a branch moved on R has its own push rejected' => sub {
 	# so what is counted below is what the rejected run itself sent.
 	my $already = scalar(() = gh_calls($h->{gh}));
 
-	# Copy B moves the pull request branch on R behind this clone's back,
-	# which is the window the expected tip exists to close.  Copy A's own
-	# remote-tracking ref still names the first run's commit, and that is the
-	# value the arm reads and the publish leases against.
-	my $moved = move_on_r($h, $pr);
+	# Copy B moves the pull request branch on R after the run's refresh,
+	# which is the window the expected tip exists to close: armed for the
+	# run's first commit, after its snapshot of R and before its push.  The
+	# lease is the snapshot's value (T462), so a move made before the run
+	# would be read, reported as discarded, and overwritten, as D51 intends.
+	my $read  = remote_sha($h, $pr);
+	my $moved = move_on_r_at($h, $pr, at => 'commit', nth => 1);
 
 	my ($out, $err, $exit) = run_genesis($h, 'propagate', '-y');
 	my $said = unfolded($out, $err);
@@ -85,7 +87,8 @@ subtest 'a branch moved on R has its own push rejected' => sub {
 
 	refresh($h, 'a', $pr);
 	is($git->sha("origin/$pr"), $moved, "R still carries copy B's commit");
-	is($git->sha($pr), $moved, "and prod's branch in L was reset to T");
+	# T is what the run read before copy B moved the branch.
+	is($git->sha($pr), $read, "and prod's branch in L was reset to T");
 
 	my @sent = gh_calls($h->{gh});
 	splice(@sent, 0, $already);

@@ -473,6 +473,7 @@ integration-tests/genesis_ci_pullrequest-no_token.t           # a writing run wi
 integration-tests/genesis_ci_pullrequest-proposed_record.t    # a run that opens a pull request writes the run's own pointer to it
 integration-tests/genesis_ci_pullrequest-publish.t            # each branch is pushed against the tip the run read, and only the moved one is refused
 integration-tests/genesis_ci_pullrequest-summary_file.t       # propagate --summary-file lists the pull requests a run opened or updated, and is empty otherwise
+integration-tests/genesis_ci_pullrequest-fresh_clone.t        # a task clone tracking no pr branch rebuilds the one R carries, leased against the run's snapshot: merged is recreated, open is updated
 integration-tests/genesis_ci_pullrequest-rebuild.t            # what the rebuild destroys is counted and its authors named before it goes
 integration-tests/genesis_ci_pullrequest-recovery.t           # a merged pull request gives back the marker a squash took off the branch
 integration-tests/genesis_ci_pullrequest-review_arms.t        # an approved pull request is frozen and its new commits held

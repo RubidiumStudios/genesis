@@ -2109,7 +2109,11 @@ B<Returns:> A hashref. C<refreshed> is the result the refresh it replaces
 would have returned (C<ok>, C<kind>, C<fetched>, C<created>, C<absent>),
 present wherever a run or a preview proceeded, with C<created> empty for a
 preview. C<pr_branch_of> maps each
-environment that delivers by pull request to its branch. C<github> is
+environment that delivers by pull request to its branch. C<pr_tips> maps each
+of those branches to its tip on R as this read found it, undefined where R
+holds none, which the pull request arm leases its rebuild against (T462): a
+pipeline task's clone tracks no pull request branch, so its tracking ref
+would answer absent for a branch R carries. C<github> is
 C<{client, owner_repo, state_of}> as the questions read it, so the run asks
 GitHub nothing a second time. A repository with no enabled pipeline answers
 an empty hashref, having asked nothing.

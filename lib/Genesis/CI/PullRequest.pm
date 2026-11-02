@@ -608,7 +608,11 @@ sub deliver {
 	# Recorded above everything the arm writes, so the value the publish is
 	# handed is the one the rest of the arm reasoned from, and not the one the
 	# arm's own rewrite leaves behind.
-	$pr->{expected} = expected_tip($git, $pr->{branch});
+	# The run's snapshot of R where it took one: a task's clone tracks no
+	# pull request branch, so its tracking ref would lease against absence.
+	$pr->{expected} = exists $opts{remote_tip}
+		? $opts{remote_tip}
+		: expected_tip($git, $pr->{branch});
 
 	# Nothing is due, because the walk found a marker at or past the commit
 	# the proposed record names, so the record goes and the branch stands

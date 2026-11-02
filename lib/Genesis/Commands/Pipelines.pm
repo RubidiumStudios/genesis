@@ -447,6 +447,7 @@ sub propagate {
 	# Every question first, against a snapshot of R, and one refusal (D115).
 	my $checked = _propagate_check_first($top, $git, $opts);
 	my %pr_branch_of = %{$checked->{pr_branch_of} || {}};
+	my $pr_tips      = $checked->{pr_tips};
 
 	my $refreshed = $checked->{refreshed}
 		// $top->fetch_pipeline_envs($git, command => 'propagate');
@@ -573,6 +574,7 @@ sub propagate {
 							commits => \@pending,
 							state   => $pr_state_of{$env_name}, # what the refusal stood on
 							dry_run => $dry_run,
+							($pr_tips ? (remote_tip => $pr_tips->{$env_record->{pr}{branch} // ''}) : ()),
 						);
 						# A held environment is left for the report, which adds the qualifier.
 						$env_record->{outcome} = $word
@@ -1326,6 +1328,10 @@ sub _propagate_check_first {
 	$git->promote_snapshot(remote => $remote, namespace => $ns,
 		names => \@branches);
 
+	# Each pull request branch as R held it at this read, which is what its
+	# rebuild leases against; a task's clone tracks none of them (T462).
+	my %pr_tips = map {($_ => $held->{$_})} values %$pr_branch_of;
+
 	# Never the branch the tree stands on, and none for a preview.
 	my $here = $git->checked_out_branch // '';
 	my (@fetched, @created, @absent);
@@ -1343,6 +1349,7 @@ sub _propagate_check_first {
 		refreshed    => {ok => 1, kind => 'success', fetched => \@fetched,
 		                 created => \@created, absent => \@absent},
 		pr_branch_of => $pr_branch_of,
+		pr_tips      => \%pr_tips,
 		github       => $github};
 }
 

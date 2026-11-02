@@ -271,6 +271,14 @@ subtest 'a refused publish keeps the discard sentence' => sub {
 		files   => {'prod/extra.yml' => "---\nextra: yes\n"},
 		message => 'a teammate edits the proposal');
 
+	# The hand commit above is read at the refresh, so the rebuild reports
+	# discarding it and leases against it (T462).  What refuses the publish
+	# is a second move after the refresh, armed for the run's first commit,
+	# after the arm's read of the branch and before its push.
+	move_on_r_at($h, $pr, at => 'commit', nth => 1,
+		files   => {'prod/later.yml' => "---\nlater: yes\n"},
+		message => 'the teammate edits it again');
+
 	my ($out, $err) = run_genesis($h, 'propagate', '-y');
 	my $said = unfolded($out, $err);
 	# One pattern for the whole line, because what the row is about is the
