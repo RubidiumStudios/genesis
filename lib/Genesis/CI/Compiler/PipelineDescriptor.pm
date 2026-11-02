@@ -52,6 +52,10 @@ sub describe {
 	# Each deployment's _ran event, which propagate triggers on
 	my @ran_names;
 
+	# Whether there are redeploy jobs, and where they sit (D136).
+	my $redeploy = $self->_redeploy_settings($ast);
+	my @redeploy_job_names;
+
 	# Process each workflow
 	for my $wf_name (sort $ast->workflow_names) {
 		my $workflow = $ast->workflows->{$wf_name};
@@ -97,12 +101,14 @@ sub describe {
 				push @ran_names, $ran->{name};
 			}
 			# The redeploy's event, which propagation never reads, and its
-			# request queue (contract a7, a8; D127).
-			if (my $redone = $self->_redeployed_resource($ast, $wf_data->{deployment_name}{$env})) {
-				push @resources, $redone;
-			}
-			if (my $run = $self->_run_resource($ast, $wf_data->{deployment_name}{$env})) {
-				push @resources, $run;
+			# request queue (contract a7, a8; D127), where redeploys are on (D136).
+			if ($redeploy->{enabled}) {
+				if (my $redone = $self->_redeployed_resource($ast, $wf_data->{deployment_name}{$env})) {
+					push @resources, $redone;
+				}
+				if (my $run = $self->_run_resource($ast, $wf_data->{deployment_name}{$env})) {
+					push @resources, $run;
+				}
 			}
 
 			# Signal resource
@@ -132,12 +138,16 @@ sub describe {
 			push @wf_job_names, $dj->{name};
 
 			# One redeploy job per environment, beside its deploy, manual until
-			# Stage 6 gives it its triggers (contract b3, 2026-10-28; Q44).
-			my $rj = $self->_redeploy_job(
-				$ast, $env, $alias, $deploy_type, $wf_data
-			);
-			push @jobs, $rj;
-			push @wf_job_names, $rj->{name};
+			# Stage 6 gives it its triggers (contract b3, 2026-10-28; Q44), or
+			# none where pipeline.redeploy.enabled is false (b9, D136).
+			if ($redeploy->{enabled}) {
+				my $rj = $self->_redeploy_job(
+					$ast, $env, $alias, $deploy_type, $wf_data
+				);
+				push @jobs, $rj;
+				push @redeploy_job_names, $rj->{name};
+				push @wf_job_names, $rj->{name} unless $redeploy->{grouped};
+			}
 		}
 
 		# Auto-update resources and job
@@ -157,7 +167,9 @@ sub describe {
 				my @group_jobs;
 				for my $member (@{$custom_groups->{$group_name}}) {
 					my $member_alias = $wf_data->{aliases}{$member} || $member;
-					push @group_jobs, "deploy-$member_alias", "redeploy-$member_alias";
+					push @group_jobs, "deploy-$member_alias";
+					push @group_jobs, "redeploy-$member_alias"
+						if $redeploy->{enabled} && !$redeploy->{grouped};
 					if (!$wf_data->{auto}{$member}) {
 						my $notify_name = _notify_job_name($member_alias);
 						if ($group_notifications) {
@@ -208,6 +220,10 @@ sub describe {
 		}
 
 	}
+
+	# Every redeploy in one group, after the deployments' (b9, D136).
+	push @groups, {name => 'redeploys', jobs => [sort @redeploy_job_names]}
+		if $redeploy->{grouped} && @redeploy_job_names && @groups;
 
 	# One propagate job per pipeline, on control, in its own group after the
 	# deployments' where there are groups at all (contract b2, c4).
@@ -537,6 +553,20 @@ sub _propagate_job {
 			}) },
 		],
 		($notif ? (ensure => $notif) : ()),
+	};
+}
+
+# }}}
+# _redeploy_settings - pipeline.redeploy, defaulted (D136, contract b9) {{{
+sub _redeploy_settings {
+	my ($self, $ast) = @_;
+	my $block   = $ast->integrations->{redeploy} || {};
+	my $enabled = $block->{enabled} // 1;
+	# A string the loader would have refused, read as the loader reads it.
+	$enabled = 0 if !ref($enabled) && $enabled =~ /^(?:false|no|off|0)$/i;
+	return {
+		enabled => $enabled ? 1 : 0,
+		grouped => ($block->{style} // 'inline') eq 'grouped' ? 1 : 0,
 	};
 }
 
@@ -2034,6 +2064,13 @@ the shortcode C<%NOTIFICATION_EMOJI> gives its kind, ahead of the mentions
 to its C<summary> output with C<--summary-file>, which the job sends from its
 C<ensure>; the Slack resource sends nothing for an empty summary (D132,
 contract e4, e13, d11).
+
+C<pipeline.redeploy> governs the redeploy jobs, through
+C<_redeploy_settings> (D136, contract b9): C<enabled>, true by default, emits
+each environment's C<redeploy-E<lt>envE<gt>> job, queue and event, and false
+emits none of them; C<style: grouped> lists every redeploy job in one
+C<redeploys> group after the deployments' groups and before C<propagation>,
+where C<inline>, the default, leaves each beside its deploy.
 
 Where an environment sets C<require_pr>, the propagate task carries
 C<GITHUB_AUTH_TOKEN> from C<pipeline.source_control.api_token>, else from an

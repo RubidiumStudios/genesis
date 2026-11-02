@@ -5018,6 +5018,8 @@ every other error. Then come the capability gates of
 L</_validate_capability_gates>, before the environment blocks are read for
 their shape, because a key with no ability behind it is a fact about the
 provider rather than about how the operator wrote the block; then the
+redeploy schedules of L</_validate_redeploy_schedules>, a key that asks for a
+job the repository has turned off (D136); then the
 manifest store and the kit floors of L</_validate_manifest_store>, a fact
 about the pipeline as a whole; and then the one exodus mount of
 L</_validate_one_exodus_mount>, which comes after the store because the
@@ -5030,7 +5032,7 @@ key is not a hash carries no block to check, and is left to whatever reads
 the environment itself. The refusals
 themselves belong to L</_validate_slug_components>, to
 L</_validate_shape_values>,
-to L</_validate_capability_gates>, to
+to L</_validate_capability_gates>, to L</_validate_redeploy_schedules>, to
 L</_validate_manifest_store>, to L</_validate_one_exodus_mount>, to
 L</_validate_override_files>, and to L</_validate_env_pipeline_block>.
 
@@ -5271,6 +5273,48 @@ B<Examples:>
     $top->_validate_capability_gates;
     # exits CONFIG (78) where an environment sets genesis.pipeline.manual
     # under a provider that declares optional_git_triggers false
+
+=head2 _validate_redeploy_schedules
+
+    $top->_validate_redeploy_schedules();
+
+Refuses, at C<Genesis::Exit::CONFIG>, every environment that sets
+C<genesis.pipeline.redeploy_cron> while C<pipeline.redeploy.enabled> is
+false in C<.genesis/config>, naming the environment, the file the key was
+set in where an inherited file set it, and both keys (D136). With redeploys
+off, the pipeline emits no C<redeploy-E<lt>envE<gt>> job, so a schedule for
+one is a mistake rather than a preference, and the load says so instead of
+dropping it.
+
+Nothing is read where C<enabled> is true, its default. Each environment's
+block is read merged through L</_merged_env_params>, as
+L</_validate_capability_gates> reads it, and every refusal is gathered
+before the one refusal through L</_refuse_config>.
+
+B<Parameters:> None.
+
+B<Returns:> 1, where nothing is refused.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Exits C<CONFIG> (78) through L</_refuse_config>, one line per environment:
+C<"genesis.pipeline.redeploy_cron in %s: pipeline.redeploy.enabled is false
+in .genesis/config, so no redeploy job exists for it to trigger">.
+
+=back
+
+B<Examples:>
+
+    $top->_validate_redeploy_schedules;
+    # returns 1 with redeploys on, or with no environment scheduling one
+
+    $top->_validate_redeploy_schedules;
+    # exits CONFIG (78) where qa.yml sets redeploy_cron and
+    # pipeline.redeploy.enabled is false
 
 =head2 _validate_manifest_store
 

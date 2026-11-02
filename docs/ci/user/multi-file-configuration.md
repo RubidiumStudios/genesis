@@ -127,6 +127,18 @@ notifications:
 
 This is the repository default, and each environment's own `genesis.pipeline.notifications` overrides it.
 
+## The redeploy Block
+
+```yaml
+redeploy:
+  enabled: true    # the default
+  style: inline    # the default; or grouped
+```
+
+`enabled` decides whether the pipeline has redeploy jobs at all. Where it is true, every environment gets a `redeploy-<env>` job, which deploys again the commit its last successful deploy recorded, together with that job's request queue and its `_redeployed` event. Where it is false, none of the three is emitted for any environment, and an environment that sets `genesis.pipeline.redeploy_cron` is refused at load, naming both keys, since its schedule would have no job to trigger. Redeploying by hand with `genesis <env> deploy --redeploy` works either way.
+
+`style` decides where the redeploy jobs sit in the Concourse UI. `inline` keeps each beside its deploy in the deployment group; `grouped` lists them all in one `redeploys` group, after the deployment groups and before `propagation`, which suits a pipeline whose deployment view should show only what moves content forward. It has no effect where `enabled` is false.
+
 ## The Older Block Shape
 
 The three blocks below, `pipeline`, `targets`, and `integrations`, are the shape the configuration had under the multi-file layout, and the compiler's parser still normalises them. The repository schema does not declare them, so writing one into `.genesis/config` is refused by name at configuration load. They are documented here for reading an older repository and for working on the parser, and not as keys to write.

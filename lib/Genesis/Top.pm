@@ -2999,6 +2999,18 @@ sub _pipeline_config_schema {
 				}
 			},
 
+			# The pipeline's redeploy jobs, repository-wide (D136).
+			redeploy => {
+				type        => 'hash',
+				description => 'Whether the pipeline has redeploy jobs, and where they sit',
+				schema => {
+					enabled => {type => 'boolean', default => Genesis::Config::TRUE,
+						description => 'Emit each environment\'s redeploy job, queue and event'},
+					style   => {type => 'enum', values => [qw/inline grouped/], default => 'inline',
+						description => 'Beside each deploy, or all in one redeploys group'},
+				}
+			},
+
 			# Optional, with a repository default the environment's own
 			# genesis.pipeline.notifications.* overrides.
 			notifications => {
@@ -3444,6 +3456,7 @@ sub _validate_pipeline_config {
 	$self->_validate_slug_components;
 	$self->_validate_shape_values;      # before anything reads the shape
 	$self->_validate_capability_gates;
+	$self->_validate_redeploy_schedules;
 	$self->_validate_manifest_store;
 	$self->_validate_one_exodus_mount;  # after the store it lives in
 	$self->_validate_override_files;
@@ -3659,6 +3672,28 @@ sub _validate_capability_gates {
 
 	$self->_refuse_config(@errors) if @errors;
 
+	return 1;
+}
+
+# }}}
+# _validate_redeploy_schedules - no schedule for a redeploy job not emitted {{{
+sub _validate_redeploy_schedules {
+	my ($self) = @_;
+	return 1 if $self->config->get('pipeline.redeploy.enabled', 1);
+
+	my @errors;
+	for my $env_name ($self->_env_file_names) {
+		my $genesis = $self->_merged_env_params($env_name)->{genesis};
+		next unless ref($genesis) eq 'HASH' && ref($genesis->{pipeline}) eq 'HASH';
+		next unless exists $genesis->{pipeline}{redeploy_cron};
+		my $from = $self->_file_setting($env_name, 'genesis.pipeline.redeploy_cron');
+		push @errors, sprintf(
+			"#R{genesis.pipeline.redeploy_cron} in #C{%s}%s: #C{pipeline.redeploy.enabled} ".
+			"is false in #C{.genesis/config}, so no redeploy job exists for it to trigger",
+			$env_name,
+			(defined $from && $from ne "$env_name.yml" ? " (set in #C{$from})" : ''));
+	}
+	$self->_refuse_config(@errors) if @errors;
 	return 1;
 }
 
