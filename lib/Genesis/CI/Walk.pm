@@ -378,10 +378,12 @@ sub undeployed_set {
 		git => $git, triggering => 1);
 	return @triggering unless defined $certified && length $certified;
 
+	# Three dots: what changed since the merge base, so an ancestor certified
+	# past $upto has nothing undeployed, where two would compare the trees.
 	my %in_set = map {$_ => 1} @triggering;
 	my ($out, $rc) = run(
 		{dir => $git->root, stderr => 0},
-		'git', 'diff', '--name-only', "$certified..$upto"
+		'git', 'diff', '--name-only', "$certified...$upto"
 	);
 
 	# A range git will not resolve is an input this run cannot read, and it

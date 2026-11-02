@@ -765,6 +765,14 @@ B<Examples:>
 Every file in the environment's propagation set that changed on control
 between its certified commit and the commit under consideration.
 
+The diff runs from the two commits' merge base, C<certified...upto>, so it
+lists what changed after the certified commit and nothing else. An
+environment certified past the commit under consideration, which contains
+it, has nothing undeployed for it. A tree comparison, C<certified..upto>,
+would list every file that differs between the two, so an ancestor that had
+deployed past two commits changing one file would hold the first for as long
+as it kept deploying ahead (T461; the lmelt PoC's lab, 2026-11-01).
+
 An environment that has never certified a commit is holding everything below
 it, so with no certified commit the answer is the whole set rather than the
 empty list, and nothing here ever falls back to control's tip.
@@ -809,6 +817,10 @@ B<Examples:>
 
   my @held = Genesis::CI::Walk::undeployed_set($git, $env, undef, $sha);
   # returns the whole triggering set, because nothing is certified
+
+  my @held = Genesis::CI::Walk::undeployed_set($git, $env, $later, $sha);
+  # returns (), where $later descends from $sha: the environment deployed
+  # past it
 
 =head2 overlap
 

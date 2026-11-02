@@ -89,6 +89,33 @@ subtest 'a hold stops the delivery and holds everything after it' => sub {
 	unlike("$out$err", qr/entry point/i, 'the retired term appears nowhere');
 };
 
+# T461: the undeployed set is what changed after the certified commit, not
+# what differs between the two trees.  The lmelt PoC held lab behind mgmt
+# for good once mgmt deployed past two embeds, each changing the binary.
+subtest 'an ancestor certified past the commit releases it' => sub {
+	plan tests => 3;
+
+	my $h = chained_harness();
+	my $second = commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nshared: 2\n"},
+		message => 'Bump shared ops',
+		push    => 1,
+	);
+	my $third = commit_on_control($h,
+		files   => {'ops/shared.yml' => "---\nshared: 3\n"},
+		message => 'Bump shared ops again',
+		push    => 1,
+	);
+	certify($h, 'lab', control_commit => $third);
+
+	my ($out, $err) = run_genesis($h, {answers => ['y']}, 'propagate');
+
+	is(harness_marker($h, $h->slug('qa')), $third,
+		'qa receives both commits lab has deployed past');
+	unlike($err, qr/H held by lab/, 'with neither held by lab')
+		or diag($err);
+};
+
 subtest 'an ancestor that has certified nothing holds everything' => sub {
 	plan tests => 4;
 
