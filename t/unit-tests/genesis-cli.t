@@ -28,6 +28,18 @@ subtest 'bin/genesis' => sub {
 
 };
 
+# An alias is one name, or a list under aliases.  pipeline-apply declared
+# its alias as a list under alias, which registered the list's address as
+# the alias, so help printed ARRAY(0x...) and pipeline-push resolved to
+# nothing.
+subtest 'every alias is a name a command line can use' => sub {
+	my @refs = grep {ref(command_properties($_)->{alias})} sort(Genesis::Commands::known_commands());
+	is_deeply(\@refs, [], 'no command declares its alias as anything but a name');
+	ok(has_command('pipeline-push'), 'pipeline-push is a command');
+	ok(Genesis::Commands::is_equivalent_command('pipeline-push', 'pipeline-apply'),
+		'and it is pipeline-apply');
+};
+
 # Proves T323: one sweep reads the whole flag-carrying surface, so each
 # command asserts the options its registration declares and the class
 # marker it carries, and the retired seeding command is absent.

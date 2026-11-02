@@ -2138,7 +2138,7 @@ define_command("pipeline-apply", {
 		"file, which is the one configuration source.  Overrides are merged ".
 		"from #C{.genesis/pipeline-overrides-<provider>.yml}, which sits ".
 		"beside #C{.genesis/config}.",
-	alias          => [qw(pipeline-push)],
+	alias          => 'pipeline-push',
 	function_group => Genesis::Commands::PIPELINE,
 	branch_class   => Genesis::Commands::PRE_DEPLOY,
 	# The apply reads the shape from control and records the commit it
