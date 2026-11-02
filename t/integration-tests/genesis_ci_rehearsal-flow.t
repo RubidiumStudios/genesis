@@ -56,7 +56,10 @@ subtest 'one environment: propagate, deploy, rest' => sub {
 	my $sha = change($h, 'qa');
 	$r->settle;
 
-	is_deeply([$r->jobs_run], ['propagate', 'deploy-qa'], 'propagate runs, then deploy-qa, then nothing')
+	# D134: the deploy's _deployed wakes propagate once more, which finds
+	# nothing due, and the pipeline rests.
+	is_deeply([$r->jobs_run], ['propagate', 'deploy-qa', 'propagate'],
+		'propagate runs, then deploy-qa, then propagate on its _deployed, then nothing')
 		or diag(said($r));
 	my ($prop, $dep) = $r->runs;
 	is_deeply($prop->{commands}[0]{argv}, ['.genesis/bin/genesis', 'propagate'], 'propagate ran genesis propagate');
@@ -78,8 +81,9 @@ subtest 'chained us-qa to us-prod: each deploy wakes the next propagation' => su
 	my $sha = change($h, 'us-qa', site => 'us');
 	$r->settle;
 
-	is_deeply([$r->jobs_run], ['propagate', 'deploy-us-qa', 'propagate', 'deploy-us-prod'],
-		"propagate, us-qa's deploy, propagate on its _deployed, us-prod's deploy, rest") or diag(said($r));
+	is_deeply([$r->jobs_run], ['propagate', 'deploy-us-qa', 'propagate', 'deploy-us-prod', 'propagate'],
+		"propagate, us-qa's deploy, propagate on its _deployed, us-prod's deploy, ".
+		"propagate on the tail's (D134), rest") or diag(said($r));
 	is((newest_record($h, $h->env_path('us-prod').'/deployments') || {})->{git}{control_commit}, $sha,
 		"us-prod's exodus record names the control commit");
 	is_deeply($r->held, {}, 'every pool is free at rest');
@@ -98,7 +102,8 @@ subtest "contention: a deploy waits on its director's held pool" => sub {
 	is($parked && scalar(@{$parked->{commands}}), 0, 'before its task ran');
 
 	$r->release('qa-bosh', 'i-need-to-deploy-myself', 'qa-bosh')->settle;
-	is_deeply([$r->jobs_run], ['propagate', 'deploy-qa'], 'once the pool is released, the deploy runs')
+	is_deeply([$r->jobs_run], ['propagate', 'deploy-qa', 'propagate'],
+		'once the pool is released, the deploy runs, and its _deployed wakes propagate (D134)')
 		or diag(said($r));
 	is_deeply($r->held, {}, 'and every pool is free at rest');
 };

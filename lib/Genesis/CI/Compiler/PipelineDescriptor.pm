@@ -90,11 +90,11 @@ sub describe {
 				)};
 			}
 
-			# Propagate wakes on a deployment others follow; a tail's success
-			# makes nothing due (contract c5).
+			# Propagate wakes on every deploy, a tail's included: a deploy
+			# releases its own gate or hold as well as a follower's (c5, D134).
 			if (my $ran = $self->_ran_resource($ast, $wf_data->{deployment_name}{$env})) {
 				push @resources, $ran;
-				push @ran_names, $ran->{name} if @{$wf_data->{will_trigger}{$env} || []};
+				push @ran_names, $ran->{name};
 			}
 			# The redeploy's event, which propagation never reads, and its
 			# request queue (contract a7, a8; D127).
@@ -2015,8 +2015,8 @@ C<E<lt>dnE<gt>/redeployed>, and the redeploy's request queue
 C<redeploy_E<lt>dnE<gt>> on C<E<lt>dnE<gt>/redeploy>, each a C<shuttle> resource
 with C<seed_version>.  The deploy puts C<_deployed> and the redeploy
 C<_redeployed>, on success alone, with no params; the propagate job triggers
-on the C<_deployed> of each deployment another environment names as its
-C<prior_env>, a tail's success making nothing due, and never on a
+on the C<_deployed> of every deployment, a tail's included, since a deploy
+releases its own gate or hold as well as a follower's (D134), and never on a
 C<_redeployed>, a redeploy delivering nothing (D23, D25, D75, D127).  A
 deploy whose environment names a C<prior_env> gets that deployment's
 C<_deployed> without triggering, C<passed> its deploy, which is what has

@@ -58,8 +58,8 @@ subtest 'Stage 4 rows over the default shuttle' => sub {
 	is_deeply($type && $type->{source}, {repository => 'klaue/shuttle-resource', tag => 'latest'},
 		'a18: the shuttle type on the default image');
 
-	ok(!grep({($_->{get} // '') =~ /_(?:re)?deployed$/} plan_steps(pipeline_job($p, 'propagate'))),
-		"c5: propagate gets no event, qa being a tail");
+	is_deeply([map {$_->{get}} grep {($_->{get} // '') =~ /_(?:re)?deployed$/} plan_steps(pipeline_job($p, 'propagate'))],
+		[$RAN], "c5: propagate gets qa's _deployed, a tail's included (D134)");
 
 	my $plan = (pipeline_job($p, "deploy-$ENV_NAME") || {})->{plan}[0] || {};
 	my @put = ran_puts($plan->{on_success});
@@ -72,7 +72,7 @@ subtest 'Stage 4 rows over the default shuttle' => sub {
 		'd6: and on no other outcome');
 };
 
-subtest 'c5: propagate triggers on the _deployed of a deployment with a successor' => sub {
+subtest 'c5: propagate triggers on every deployment\'s _deployed' => sub {
 	my $h = contract_harness(envs => [$ENV_NAME, 'prod'], chained => 1);
 	my ($p, $why) = dry_pipeline($h);
 	ok($p, 'the dry apply prints a pipeline') or return diag($why);
@@ -80,7 +80,10 @@ subtest 'c5: propagate triggers on the _deployed of a deployment with a successo
 	my $tail = "prod-$Harness::Contract::TYPE\_deployed";
 	my %get = map {($_->{get} => $_)} grep {$_->{get}} plan_steps(pipeline_job($p, 'propagate'));
 	is($get{$RAN} && $get{$RAN}{trigger}, 1, "qa's, which prod follows");
-	ok(!$get{$tail}, "and not prod's, the tail");
+	# D134: a tail's own deploy releases its own gate or hold, so its event
+	# wakes propagation too.
+	is($get{$tail} && $get{$tail}{trigger}, 1, "and prod's, the tail (D134)");
+	ok(!$get{$tail}{passed}, 'D134: with no passed, as c14 keeps for propagate');
 	ok(!grep({/_redeployed$/} keys %get), 'D127: and never a _redeployed, a redeploy delivering nothing');
 	ok(pipeline_resource($p, $tail), "whose _deployed is still emitted (a8)");
 
