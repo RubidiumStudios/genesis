@@ -819,6 +819,8 @@ our %NOTIFICATION_EMOJI = (
 	error        => ':warning:',
 	abort        => ':black_square_for_stop:',
 	pull_request => ':twisted_rightwards_arrows:',
+	deploy_started   => ':rocket:',
+	redeploy_started => ':arrows_counterclockwise:',
 );
 sub _build_link {
 	return '<'.JOBS_URL.'/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_JOB_NAME #$BUILD_NAME>';
@@ -947,6 +949,7 @@ sub _deploy_job {
 	my @do;
 	push @do, @lock_steps;
 	push @do, { in_parallel => \@gets };
+	push @do, $self->_start_step($ast, $env, $deploy_type, 0);
 	push @do, $deploy_task;
 
 	unless ($is_create_env) {
@@ -976,6 +979,25 @@ sub _deploy_job {
 		($dn ? (serial_groups => [$dn]) : ()),
 		plan   => [$plan_step],
 	};
+}
+
+# }}}
+# _start_step - a deploy's or a redeploy's start, announced (D135, d12) {{{
+#
+# A list of one step or of none, so a plan can splice it in where it goes.
+# The try keeps a Slack failure from failing the job before it deploys.
+sub _start_step {
+	my ($self, $ast, $env, $deploy_type, $is_redeploy) = @_;
+	my $style = $self->notification_style($ast);
+	return () if $style eq 'none' || $style eq 'minimal';
+
+	my $name = $ast->metadata->{name} || 'genesis-pipeline';
+	my $notif = $self->_notification_step($ast,
+		sprintf("%s: Concourse started %s %s-%s (%s)", $name,
+			$is_redeploy ? 'redeploying' : 'deploying', $env, $deploy_type, _build_link()),
+		{ env => $env, kind => $is_redeploy ? 'redeploy_started' : 'deploy_started' })
+		or return ();
+	return { try => $notif->{in_parallel}[0] };
 }
 
 # }}}
@@ -1063,7 +1085,8 @@ sub _redeploy_job {
 	my $plan_step = {};
 	$plan_step->{$_} = $hooks{$_} for sort keys %hooks;
 	$plan_step->{ensure} = { do => $unlock_steps } if @$unlock_steps;
-	$plan_step->{do} = [@$lock_steps, { in_parallel => \@gets }, $task];
+	$plan_step->{do} = [@$lock_steps, { in_parallel => \@gets },
+		$self->_start_step($ast, $env, $deploy_type, 1), $task];
 
 	return {
 		name   => "redeploy-$alias",
@@ -2060,7 +2083,10 @@ C<secret_access_key>.
 
 Where C<pipeline.notifications.slack> is set, every Slack message begins with
 the shortcode C<%NOTIFICATION_EMOJI> gives its kind, ahead of the mentions
-(D131), and the propagate task writes the pull requests it opened or updated
+(D131); a deploy and a redeploy announce their start from inside their own
+plans, after their locks and gets and just before their task, through
+C<_start_step>, in a C<try> so a Slack failure cannot stop the deploy (D135,
+contract d12); and the propagate task writes the pull requests it opened or updated
 to its C<summary> output with C<--summary-file>, which the job sends from its
 C<ensure>; the Slack resource sends nothing for an empty summary (D132,
 contract e4, e13, d11).

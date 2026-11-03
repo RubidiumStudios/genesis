@@ -127,6 +127,23 @@ notifications:
 
 This is the repository default, and each environment's own `genesis.pipeline.notifications` overrides it.
 
+With Slack configured, each message begins with an emoji for its kind, so a run of them reads at a glance:
+
+| Message | Emoji |
+|---|---|
+| A deploy started, once it holds its locks | 🚀 `:rocket:` |
+| A redeploy started | 🔄 `:arrows_counterclockwise:` |
+| A deploy succeeded | ✅ `:white_check_mark:` |
+| A redeploy succeeded | ♻️ `:recycle:` |
+| A deploy or redeploy failed | ❌ `:x:` |
+| A deploy or redeploy errored | ⚠️ `:warning:` |
+| A deploy or redeploy was aborted | ⏹️ `:black_square_for_stop:` |
+| Changes are staged for a manual deploy | 📥 `:inbox_tray:` |
+| The staged changes could not be offered | ⛔ `:no_entry:` |
+| Propagation opened or updated pull requests | 🔀 `:twisted_rightwards_arrows:` |
+
+A start message never stops a deploy: a Slack outage or a bad webhook fails the message alone, and the deploy goes on.
+
 ## The redeploy Block
 
 ```yaml

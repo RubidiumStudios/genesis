@@ -276,6 +276,43 @@ subtest 'T459: propagate reports its pull requests' => sub {
 	ok(!$qjob->{ensure}, 'd11: and no ensure');
 };
 
+# Proves T466 (D135, contract d12): a deploy and a redeploy announce their
+# start from inside their own plans, after the locks and the gets and just
+# before the task, in a try, so a Slack failure cannot stop the deploy.
+subtest 'T466: deploy and redeploy announce their start' => sub {
+	my $h = contract_harness(config => {%SLACK}, pipeline => {manual => 'true'});
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'the dry apply prints a pipeline') or return diag($why);
+	my $at    = '$ATC_EXTERNAL_URL/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs';
+	my $build = "<$at/\$BUILD_JOB_NAME/builds/\$BUILD_NAME|\$BUILD_JOB_NAME #\$BUILD_NAME>";
+
+	for my $case (
+		[$DEPLOY,              ':rocket:',                  'deploying'],
+		["redeploy-$ENV_NAME", ':arrows_counterclockwise:', 'redeploying'],
+	) {
+		my ($job, $emoji, $verb) = @$case;
+		my @do = @{((pipeline_job($p, $job) || {})->{plan} || [{}])->[0]{do} || []};
+		my ($task) = grep {$do[$_]{task}} 0..$#do;
+		my ($try)  = grep {$do[$_]{try}}  0..$#do;
+		my ($gets) = grep {$do[$_]{in_parallel}} 0..$#do;
+		ok(defined $try, "d12: $job has a try in its plan") or next;
+		is($try, $task - 1, "d12: just before its task");
+		ok(defined $gets && $gets < $try, "d12: after its gets, which follow its locks");
+		my $put = $do[$try]{try} || {};
+		is($put->{put}, 'slack', "d12: putting to slack");
+		is($put->{params}{text}, "$emoji $TYPE: Concourse started $verb $DN ($build)",
+			"d12: $job announces its start (D131)");
+		ok($put->{params}{silent}, 'd12: silently');
+		is($put->{params}{channel}, '#deploys', 'd12: on the channel');
+	}
+
+	my $quiet = contract_harness(pipeline => {manual => 'true'});
+	my ($q, $qwhy) = dry_pipeline($quiet);
+	ok($q, 'without Slack it compiles') or return diag($qwhy);
+	ok(!(grep {$_->{try}} @{((pipeline_job($q, $DEPLOY) || {})->{plan} || [{}])->[0]{do} || []}),
+		'd12: and no deploy announces its start');
+};
+
 subtest 'T420: no Slack, no notifications' => sub {
 	my $h = contract_harness(pipeline => {manual => 'true'});
 	my ($p, $why) = dry_pipeline($h);
