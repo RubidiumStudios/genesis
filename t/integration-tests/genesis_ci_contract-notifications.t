@@ -84,6 +84,7 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 	is($slack->{type}, 'slack-notification', 'a19: a slack resource');
 	is_deeply($slack->{source}, {url => '((ci/slack.webhook))'},
 		"a19: on the webhook, in Concourse's dot form");
+	ok($slack->{expose_build_created_by}, 'd12: handed BUILD_CREATED_BY (D135)');
 	my ($type) = grep {$_->{name} eq 'slack-notification'} @{$p->{resource_types} || []};
 	is($type && $type->{source}{repository}, 'cfcommunity/slack-notification-resource',
 		'a19: and its type');
@@ -138,16 +139,19 @@ subtest 'T420 rows for a manual environment under the default style' => sub {
 	my ($ok)   = slack_puts($dp->{on_success});
 	my ($fail) = slack_puts($dp->{on_failure});
 	# T457 (D131): each text begins with its kind's emoji, ahead of the mentions.
-	is($ok && $ok->{params}{text}, ":white_check_mark: $TYPE: Concourse successfully deployed $DN ($build)",
+	# T466 (D135's note of 2026-11-03): a manual deploy, which only a person
+	# can start, names who did.
+	my $by = ', started by $BUILD_CREATED_BY';
+	is($ok && $ok->{params}{text}, ":white_check_mark: $TYPE: Concourse successfully deployed $DN ($build)$by",
 		'd10: success text');
-	is($fail && $fail->{params}{text}, ":x: \@oncall: $TYPE: Concourse deployment to $DN failed ($build)",
+	is($fail && $fail->{params}{text}, ":x: \@oncall: $TYPE: Concourse deployment to $DN failed ($build)$by",
 		'd10: failure text, with the mentions');
 	my ($err)   = slack_puts($dp->{on_error});
 	my ($abort) = slack_puts($dp->{on_abort});
-	is($err && $err->{params}{text}, ":warning: \@oncall: $TYPE: Concourse deployment to $DN errored ($build)",
+	is($err && $err->{params}{text}, ":warning: \@oncall: $TYPE: Concourse deployment to $DN errored ($build)$by",
 		'd10: errored text, with the mentions');
 	is($abort && $abort->{params}{text},
-		":black_square_for_stop: $TYPE: Concourse deployment to $DN was aborted ($build)",
+		":black_square_for_stop: $TYPE: Concourse deployment to $DN was aborted ($build)$by",
 		'd10: aborted text, without them');
 
 	my $rp = (pipeline_job($p, "redeploy-$ENV_NAME") || {})->{plan}[0] || {};
@@ -286,11 +290,13 @@ subtest 'T466: deploy and redeploy announce their start' => sub {
 	my $at    = '$ATC_EXTERNAL_URL/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs';
 	my $build = "<$at/\$BUILD_JOB_NAME/builds/\$BUILD_NAME|\$BUILD_JOB_NAME #\$BUILD_NAME>";
 
+	# The manual deploy, which only a person can start, names who did; the
+	# redeploy, which its queue can start, does not (D135's note).
 	for my $case (
-		[$DEPLOY,              ':rocket:',                  'deploying'],
-		["redeploy-$ENV_NAME", ':arrows_counterclockwise:', 'redeploying'],
+		[$DEPLOY,              ':rocket:',                  'deploying',   ', started by $BUILD_CREATED_BY'],
+		["redeploy-$ENV_NAME", ':arrows_counterclockwise:', 'redeploying', ''],
 	) {
-		my ($job, $emoji, $verb) = @$case;
+		my ($job, $emoji, $verb, $by) = @$case;
 		my @do = @{((pipeline_job($p, $job) || {})->{plan} || [{}])->[0]{do} || []};
 		my ($task) = grep {$do[$_]{task}} 0..$#do;
 		my ($try)  = grep {$do[$_]{try}}  0..$#do;
@@ -300,11 +306,23 @@ subtest 'T466: deploy and redeploy announce their start' => sub {
 		ok(defined $gets && $gets < $try, "d12: after its gets, which follow its locks");
 		my $put = $do[$try]{try} || {};
 		is($put->{put}, 'slack', "d12: putting to slack");
-		is($put->{params}{text}, "$emoji $TYPE: Concourse started $verb $DN ($build)",
+		is($put->{params}{text}, "$emoji $TYPE: Concourse started $verb $DN ($build)$by",
 			"d12: $job announces its start (D131)");
 		ok($put->{params}{silent}, 'd12: silently');
 		is($put->{params}{channel}, '#deploys', 'd12: on the channel');
 	}
+
+	# An automatic deploy, which the pipeline starts as often as a person,
+	# names nobody, in its start or its outcome.
+	my $auto = contract_harness(config => {%SLACK});
+	my ($ap, $awhy) = dry_pipeline($auto);
+	ok($ap, 'an automatic environment compiles') or return diag($awhy);
+	my $aplan = ((pipeline_job($ap, $DEPLOY) || {})->{plan} || [{}])->[0];
+	my ($astart) = map {$_->{try}} grep {$_->{try}} @{$aplan->{do} || []};
+	is($astart && $astart->{params}{text}, ":rocket: $TYPE: Concourse started deploying $DN ($build)",
+		'd12: an automatic deploy announces its start naming nobody');
+	my ($aok) = slack_puts($aplan->{on_success});
+	unlike($aok && $aok->{params}{text}, qr/started by/, 'd10: nor its success');
 
 	my $quiet = contract_harness(pipeline => {manual => 'true'});
 	my ($q, $qwhy) = dry_pipeline($quiet);

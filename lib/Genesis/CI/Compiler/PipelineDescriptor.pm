@@ -668,6 +668,8 @@ sub _notification_resources {
 				type   => 'slack-notification',
 				icon   => 'slack',
 				source => { url => _unwrap_ref($slack->{webhook}) },
+				# So a manual deploy's messages can name who started it (D135).
+				expose_build_created_by => JSON::PP::true,
 			};
 		}
 	}
@@ -808,6 +810,7 @@ use constant JOBS_URL =>
 # The notify task's summary, an output of its own, as the staged put reads it.
 use constant SUMMARY_OUTPUT => 'summary';
 use constant SUMMARY_FILE   => 'summary/summary.txt';
+use constant STARTED_BY     => ', started by $BUILD_CREATED_BY';
 
 # Each Slack message's kind, as the shortcode it begins with (D131).
 our %NOTIFICATION_EMOJI = (
@@ -949,7 +952,7 @@ sub _deploy_job {
 	my @do;
 	push @do, @lock_steps;
 	push @do, { in_parallel => \@gets };
-	push @do, $self->_start_step($ast, $env, $deploy_type, 0);
+	push @do, $self->_start_step($ast, $env, $deploy_type, 0, !$is_auto);
 	push @do, $deploy_task;
 
 	unless ($is_create_env) {
@@ -987,14 +990,15 @@ sub _deploy_job {
 # A list of one step or of none, so a plan can splice it in where it goes.
 # The try keeps a Slack failure from failing the job before it deploys.
 sub _start_step {
-	my ($self, $ast, $env, $deploy_type, $is_redeploy) = @_;
+	my ($self, $ast, $env, $deploy_type, $is_redeploy, $by_person) = @_;
 	my $style = $self->notification_style($ast);
 	return () if $style eq 'none' || $style eq 'minimal';
 
 	my $name = $ast->metadata->{name} || 'genesis-pipeline';
 	my $notif = $self->_notification_step($ast,
-		sprintf("%s: Concourse started %s %s-%s (%s)", $name,
-			$is_redeploy ? 'redeploying' : 'deploying', $env, $deploy_type, _build_link()),
+		sprintf("%s: Concourse started %s %s-%s (%s)%s", $name,
+			$is_redeploy ? 'redeploying' : 'deploying', $env, $deploy_type, _build_link(),
+			$by_person ? STARTED_BY : ''),
 		{ env => $env, kind => $is_redeploy ? 'redeploy_started' : 'deploy_started' })
 		or return ();
 	return { try => $notif->{in_parallel}[0] };
@@ -1188,6 +1192,8 @@ sub _outcome_hooks {
 	my $action    = $is_redeploy ? 'redeploy of'    : 'deployment to';
 	my $ok_action = $is_redeploy ? 'redeployed'     : 'deployed';
 	my $link = ' ('._build_link().')';
+	# Only a person starts a manual deploy, so its messages can name them (D135).
+	$link .= STARTED_BY if !$is_redeploy && !$wf_data->{auto}{$env};
 	my %msg = (
 		success => ["$name: Concourse successfully ${ok_action} $env-$deploy_type$link", 0],
 		failure => ["$name: Concourse $action $env-$deploy_type failed$link", 1],
