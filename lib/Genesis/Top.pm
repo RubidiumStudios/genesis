@@ -20,6 +20,7 @@ use Genesis::Config;
 use Genesis::Exit qw/CONFIG TEMPFAIL/;
 
 use Cwd ();
+use File::Spec ();
 use File::Path qw/rmtree/;
 use Time::Piece;
 
@@ -111,9 +112,13 @@ sub new {
 	my $root = @_ % 2 == 1 ? shift @_ : '.';
 	my %opts = @_;
 
-	# Validate that this is a proper Genesis repository
-	bail("'$root' is not a Genesis deployment repository")
-		unless $class->is_repo($root);
+	# Validate that this is a proper Genesis repository, saying where the
+	# roots are where that can be said (D120).
+	unless ($class->is_repo($root)) {
+		my $better = -d $root ? $class->no_root_refusal($root) : undef;
+		bail('%s', $better) if $better;
+		bail("'$root' is not a Genesis deployment repository");
+	}
 
 	# See the POD for materialised_tree and repair_config.
 	$opts{no_vault} = 1 if $opts{materialised_tree};
@@ -711,6 +716,79 @@ sub is_repo {
 	my ($class, $path) = @_;
 	# type: is the oldest v1 key for it, which the v1 upgrade reads too
 	return -d "$path/.genesis" && -f "$path/.genesis/config" && slurp("$path/.genesis/config") =~ /deployment_type:|^type:/m;
+}
+# }}}
+# no_root_refusal - what to say where a command finds no deployment root {{{
+#
+# Undefined where nothing better than the old words can be said: outside a
+# git work tree, or with neither a root on this branch nor a control (D120,
+# noted 2026-11-02).
+sub no_root_refusal {
+	my ($class, $path) = @_;
+	my $git = sub {
+		my ($out, $rc) = run({dir => $path, stderr => 0}, 'git', @_);
+		return $rc ? undef : $out;
+	};
+	my $top = $git->('rev-parse', '--show-toplevel') // return undef;
+	my $here = Cwd::abs_path($path);
+	my ($rel) = File::Spec->abs2rel($here, $top);
+	$rel = '' if $rel eq '.';
+
+	my @roots = $class->_roots_at($top, 'HEAD');
+	if (@roots) {
+		my ($inside) = grep {$_ ne '.' && "$rel/" =~ m{^\Q$_\E/}} @roots;
+		return sprintf(
+			"This directory is inside the deployment root #C{%s}, not at it, ".
+			"and Genesis runs from the root.  Change to it:\n  #C{cd %s}",
+			$inside, File::Spec->abs2rel("$top/$inside", $here)) if $inside;
+		return sprintf(
+			"This directory is not a Genesis deployment root.  The roots on this ".
+			"branch, #C{%s}, are:\n%s\nChange into the one you want:\n  #C{cd %s}",
+			_checked_out_label($git), _root_list(@roots),
+			File::Spec->abs2rel("$top/$roots[0]", $here));
+	}
+
+	my ($control) = grep {length} split /\n/,
+		($git->('for-each-ref', '--format=%(refname)',
+			'refs/heads/control', 'refs/remotes/*/control') // '');
+	return undef unless $control;
+	my @there = $class->_roots_at($top, $control);
+	return sprintf(
+		"This directory is not a Genesis deployment root, and the branch checked ".
+		"out here, #C{%s}, carries no deployment root.  The pipeline's roots live on ".
+		"#C{control}%s\nCheck control out and change into the root you want:\n".
+		"  #C{git checkout control}\n  #C{cd %s}",
+		_checked_out_label($git),
+		@there ? ":\n"._root_list(@there) : ', which carries none yet.',
+		@there ? File::Spec->abs2rel("$top/$there[0]", $top) : '<root>');
+}
+
+# _roots_at - the deployment roots a commit's tree carries, repository-relative
+sub _roots_at {
+	my ($class, $top, $ref) = @_;
+	my ($list, $rc) = run({dir => $top, stderr => 0},
+		'git', 'ls-tree', '-r', '--name-only', $ref);
+	return () if $rc || !defined $list;
+	return sort map {
+		my $path = $_;
+		my ($config) = run({dir => $top, stderr => 0}, 'git', 'show', "$ref:$path");
+		(($config // '') =~ /deployment_type:|^type:/m)
+			? ($path eq '.genesis/config' ? '.' : $path =~ s{/\.genesis/config$}{}r) : ();
+	} grep {m{(?:^|/)\.genesis/config$}} split /\n/, $list;
+}
+
+sub _root_list {
+	return join("\n", map {"  #C{".($_ eq '.' ? '. (the repository\'s top)' : $_)."}"} @_);
+}
+
+sub _checked_out_label {
+	my ($git) = @_;
+	my $branch = $git->('symbolic-ref', '--short', '-q', 'HEAD');
+	chomp $branch if defined $branch;
+	return $branch if defined $branch && length $branch;
+	my $sha = $git->('rev-parse', '--short', 'HEAD') // '';
+	chomp $sha;
+	return "a detached HEAD at $sha";
 }
 # }}}
 

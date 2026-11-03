@@ -503,6 +503,7 @@ integration-tests/genesis_ci_contract-redeploy.t              # and the redeploy
 integration-tests/genesis_ci_contract-notifications.t         # and a manual environment's notify job and every deploy's Slack messages (D122)
 integration-tests/genesis_ci_contract-pr_token.t              # propagate carries GITHUB_AUTH_TOKEN where an environment delivers by pull request, from api_token or the https password, and ssh alone refuses (f8)
 integration-tests/genesis_ci_contract-redeploy_block.t       # pipeline.redeploy: enabled emits the redeploy job, queue and event or none, refusing a redeploy_cron beside false; style grouped lists them apart (b9)
+integration-tests/genesis_top-no_root.t                         # a command with no deployment root says where the roots are: control's from a rootless branch, this branch's, or the one it sits inside (D120)
 integration-tests/genesis_ci_rehearsal-flow.t                 # a change flows through that pipeline, under a stand-in scheduler with the locks simulated
 integration-tests/genesis_ci_compiler-schema_contract.t       # the compiler reads nothing the schema does not declare
 integration-tests/genesis_ci_compiler-declared_blocks.t       # every declared block the compiler uses reaches it

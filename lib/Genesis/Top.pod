@@ -375,6 +375,68 @@ B<Examples:>
     }
     # Returns: 1 when path is a Genesis repo, '' otherwise
 
+=head2 no_root_refusal
+
+    my $text = Genesis::Top->no_root_refusal($path);
+
+What to tell an operator whose command found no deployment root at
+C<$path>, where something better than "is not a Genesis deployment
+repository" can be said (D120, noted 2026-11-02). L</new> refuses with it,
+and so does C<bin/genesis> for the environment-first form,
+C<genesis E<lt>envE<gt> E<lt>commandE<gt>>, where no C<E<lt>envE<gt>.yml>
+is found.
+
+Genesis searches no parent directory: C<$path> is the root or it is not.
+Where it is not, and it lies in a git work tree, the checked-out commit's
+tree is read for roots, each directory whose C<.genesis/config> declares
+C<deployment_type:> or the version 1 C<type:>:
+
+=over 4
+
+=item *
+
+Where the commit carries roots, and C<$path> sits inside one, that root is
+named with the C<cd> back up to it; where it sits inside none, this branch's
+roots are listed with the C<cd> into the first.
+
+=item *
+
+Where the commit carries none, and the repository has a C<control> branch,
+local or only a remote's, the branch checked out (or the detached commit) is
+named, control's roots are listed from its tree with no checkout, and the
+remedy is C<git checkout control> and the C<cd>.
+
+=back
+
+Nothing here switches a branch or changes a directory: with roots in
+subdirectories nothing says which one was meant.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+B<(required)> The directory a command found no root at.
+
+=back
+
+B<Returns:> The refusal's text, with Genesis's colour markup, or C<undef>
+outside a git work tree, or where the commit carries no root and the
+repository has no C<control>, where the old words stand.
+
+B<Errors:> None of its own. A git read that fails is read as nothing found.
+
+B<Examples:>
+
+    my $text = Genesis::Top->no_root_refusal('.');
+    # on a rootless main beside a control carrying doomsday/: "... the
+    # branch checked out here, main, carries no deployment root ...
+    # git checkout control / cd doomsday"
+
+    Genesis::Top->no_root_refusal('/tmp/elsewhere');
+    # returns undef, outside any git work tree
+
 =head2 kit_provider
 
     my $provider = $top->kit_provider;
@@ -2813,6 +2875,66 @@ B<Examples:>
 
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
+
+=head2 _roots_at
+
+    my @roots = Genesis::Top->_roots_at($top, $ref);
+
+The deployment roots a commit's tree carries, as paths relative to the
+repository's top, C<.> for a root at the top, sorted: every
+C<.genesis/config> in the tree whose content at C<$ref> declares
+C<deployment_type:> or the version 1 C<type:>, read with C<git ls-tree> and
+C<git show>, so nothing is checked out. Used by L</no_root_refusal>.
+
+B<Parameters:> C<$top>, the repository's top; C<$ref>, any commit-ish,
+C<HEAD> or a branch or a remote branch.
+
+B<Returns:> The list, empty where the tree carries none or C<$ref> does not
+resolve.
+
+B<Errors:> None; a git read that fails answers the empty list.
+
+B<Examples:>
+
+    Genesis::Top->_roots_at($top, 'refs/remotes/origin/control');
+    # returns ('bosh', 'doomsday')
+
+=head2 _root_list
+
+    my $text = Genesis::Top::_root_list(@roots);
+
+A function. The roots as indented lines in colour markup, the top's shown
+as C<. (the repository's top)>, for L</no_root_refusal>'s refusals.
+
+B<Parameters:> The roots, as L</_roots_at> gives them.
+
+B<Returns:> The lines, joined by newlines.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    Genesis::Top::_root_list('doomsday');
+    # returns "  #C{doomsday}"
+
+=head2 _checked_out_label
+
+    my $label = Genesis::Top::_checked_out_label($git);
+
+A function. What the working tree stands on, as a refusal names it: the
+branch's short name, or C<a detached HEAD at E<lt>shaE<gt>>.
+
+B<Parameters:> C<$git>, a closure running one git command in the directory
+and answering its output, or undefined on failure.
+
+B<Returns:> The label.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    Genesis::Top::_checked_out_label($git);
+    # returns 'main', or 'a detached HEAD at 1fbdf53'
 
 =head2 _shape_with_vault
 

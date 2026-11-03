@@ -2819,6 +2819,12 @@ sub main {
 						command_help("Unrecognized command, path or file '$arg'",2);
 					}
 				} else {
+					# <env> <command> outside a root: say where the roots are (D120).
+					require Genesis::Top;
+					if (@_ && has_command($_[0]) && !Genesis::Top->is_repo('.')) {
+						my $better = Genesis::Top->no_root_refusal('.');
+						bail('%s', $better) if $better;
+					}
 					command_help("Unrecognized command, path or file '$arg'",2);
 				}
 			}
