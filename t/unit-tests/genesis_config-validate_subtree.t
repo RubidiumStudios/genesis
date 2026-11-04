@@ -135,4 +135,26 @@ subtest 'what is wrong comes back as strings, named in full' => sub {
 		'both are reported from one call rather than one refusal at a time';
 };
 
+subtest "a boolean's check is given the value the configuration holds" => sub {
+	plan tests => 3;
+
+	my @seen;
+	my $checked = {flag => {type => 'boolean', description => 'A checked flag',
+		check => sub {push @seen, $_[0]; $_[0] ? undef : 'must be true'}}};
+
+	my $cfg = Genesis::Config->new();
+	$cfg->set('pipeline.provider.type', 'concourse');
+	$cfg->set('pipeline.provider.flag', 'false');
+	my @errors = map {csprintf($_)} $cfg->validate_subtree('pipeline.provider', $checked,
+		ignore => ['type']);
+	is $seen[0], Genesis::Config::FALSE(), 'false written as text reaches the check as false';
+	like join("\n", @errors), qr/pipeline\.provider\.flag: must be true/,
+		'so the check can refuse it';
+
+	@seen = ();
+	$cfg->set('pipeline.provider.flag', 'yes');
+	$cfg->validate_subtree('pipeline.provider', $checked, ignore => ['type']);
+	is $seen[0], Genesis::Config::TRUE(), 'and yes reaches it as true';
+};
+
 done_testing;

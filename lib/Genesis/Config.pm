@@ -888,7 +888,8 @@ sub _validate_key {
 		my $source = $self->get_source($key);
 		bug("Cannot normalize key '$key' - no source found") unless $source;
 		my $false = !ref($value) && defined($value) && $value =~ /^(?:false|no|off|0|)$/i;
-		$self->_update_source($source, $key, ($value && !$false) ? TRUE : FALSE);
+		$value = ($value && !$false) ? TRUE : FALSE;
+		$self->_update_source($source, $key, $value);
 	} elsif ($type eq 'enum') {
 		if (! in_array($value, @{$schema->{values}})) {
 			push @errors, "#R{$key}: unknown value: #ri{".($value ? $value : "<null>")."}; expected one of ".join(', ', @{$schema->{values}});
