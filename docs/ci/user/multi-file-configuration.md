@@ -56,6 +56,8 @@ provider:
 
 Three types are registered. `concourse` compiles and sets a pipeline. `github-actions` validates and resolves on the CLI side but has no compiling class yet, so a repository set to it is told so rather than given a pipeline, and it declares the one key that chooses between a single emitted file and several, `output_layout`. `manual` reads no key of its own and sets no pipeline at all, so a provider key written beside `type: manual` is refused like any other key nobody declared.
 
+Under Concourse, `public` decides whether every job's build log can be read without logging in. It is false unless you set it, and it shows only on a pipeline that is exposed, so a hidden pipeline looks the same either way.
+
 Each provider also declares what it is able to do, as six named capabilities, and a configuration key whose capability is false is refused at configuration load naming the key, the provider, and the capability. That is how `genesis.pipeline.manual` and `genesis.pipeline.redeploy_cron` are gated, and `pipeline.provider.group_commits` with them.
 
 ## The source_control Block

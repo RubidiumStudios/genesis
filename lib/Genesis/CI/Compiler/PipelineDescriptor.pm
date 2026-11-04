@@ -469,6 +469,13 @@ sub _image_source {
 }
 
 # }}}
+# _job_public - whether a job's build log is public (D138, contract b4) {{{
+sub _job_public {
+	my ($self, $ast) = @_;
+	return ($ast->configuration || {})->{public} ? JSON::PP::true : JSON::PP::false;
+}
+
+# }}}
 # _task_image_source - the image every emitted task runs in (contract e8) {{{
 sub _task_image_source {
 	my ($self, $ast) = @_;
@@ -559,7 +566,7 @@ sub _propagate_job {
 
 	return {
 		name   => 'propagate',
-		public => JSON::PP::true,
+		public => $self->_job_public($ast),
 		serial => JSON::PP::true,
 		plan   => [
 			{ get => 'control-branch', trigger => JSON::PP::true },
@@ -899,7 +906,7 @@ sub _notify_job {
 
 	return {
 		name   => $name,
-		public => JSON::PP::true,
+		public => $self->_job_public($ast),
 		serial => JSON::PP::true,
 		plan   => \@plan,
 		($unknown ? (on_failure => $unknown, on_error => $unknown) : ()),
@@ -998,7 +1005,7 @@ sub _deploy_job {
 
 	return {
 		name   => "deploy-$alias",
-		public => JSON::PP::true,
+		public => $self->_job_public($ast),
 		serial => JSON::PP::true,
 		($dn ? (serial_groups => [$dn]) : ()),
 		plan   => [$plan_step],
@@ -1115,7 +1122,7 @@ sub _redeploy_job {
 
 	return {
 		name   => "redeploy-$alias",
-		public => JSON::PP::true,
+		public => $self->_job_public($ast),
 		serial => JSON::PP::true,
 		($dn ? (serial_groups => [$dn]) : ()),
 		plan   => [$plan_step],
@@ -1505,7 +1512,7 @@ SCRIPT
 
 	return {
 		name   => 'update-genesis-assets',
-		public => JSON::PP::true,
+		public => $self->_job_public($ast),
 		serial => JSON::PP::true,
 		plan   => \@plan,
 	};
@@ -2091,6 +2098,9 @@ each environment's C<redeploy-E<lt>envE<gt>> job, queue and event, and false
 emits none of them; C<style: grouped> lists every redeploy job in one
 C<redeploys> group after the deployments' groups and before C<propagation>,
 where C<inline>, the default, leaves each beside its deploy.
+
+Every job's C<public> comes from C<pipeline.provider.public>, false unless
+set, through C<_job_public> (D138, contract b4).
 
 Where C<pipeline.registry> is set, every image the compiler names by default,
 each resource type, the default task image and the default shuttle image, is

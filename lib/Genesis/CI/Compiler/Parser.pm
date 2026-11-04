@@ -159,6 +159,7 @@ sub _parse_genesis_config {
 	} : {};
 	$parsed{pipeline}{configuration}{task} = {%{$parsed{provider}{task}}}
 		if ref($parsed{provider}{task}) eq 'HASH';
+	$parsed{pipeline}{configuration}{public} = $parsed{provider}{public} ? 1 : 0;
 	if (my $registry = $data->{registry}) {
 		$parsed{pipeline}{configuration}{registry} = {
 			uri => $registry->{uri},
