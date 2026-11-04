@@ -333,6 +333,28 @@ subtest 'ASTBuilder - legacy format' => sub {
 	ok $ast->provider_config->{concourse}{_legacy_pipeline_raw}, "legacy raw data preserved in provider_config";
 };
 
+# D137 takes an image the operator names as written; a legacy ci.yml named
+# its task image relative to the registry, so the legacy build keeps that.
+subtest 'ASTBuilder - legacy format prefixes a named task image with the registry' => sub {
+	my $build = sub {
+		my ($task) = @_;
+		Genesis::CI::Compiler::ASTBuilder->new()->build({
+			_source_format => 'legacy',
+			_legacy_raw    => {pipeline => {
+				name     => 'legacy', git => {branch => 'master'},
+				registry => {uri => 'registry.example.com', username => 'puller', password => 'secret'},
+				task     => $task,
+			}},
+			integrations => {}, targets => {},
+			pipeline     => {workflows => {default => {environments => [], auto_patterns => [], will_trigger => {}}}},
+		}, {});
+	};
+	is $build->({image => 'image-shared/genesis-task'})->configuration->{task}{image},
+		'registry.example.com/image-shared/genesis-task', "a named task image sits under the registry";
+	is $build->({})->configuration->{task}{image},
+		'genesiscommunity/concourse', "the default stays the default, for the compiler to prefix";
+};
+
 subtest 'ASTBuilder - modern format' => sub {
 	my $builder = Genesis::CI::Compiler::ASTBuilder->new();
 

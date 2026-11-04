@@ -395,20 +395,12 @@ sub description {
 sub _resource_types {
 	my ($self, $ast) = @_;
 
-	my $config   = $ast->configuration || {};
-	my $registry = $config->{registry} || {};
-	my $prefix   = $registry->{uri} ? "$registry->{uri}/" : '';
-
-	my %rs;
-	if ($registry->{username}) {
-		$rs{username} = $registry->{username};
-		$rs{password} = _unwrap_ref($registry->{password});
-	}
+	my $config = $ast->configuration || {};
 
 	my @types = map {{
 		name   => $_->[0],
 		type   => 'registry-image',
-		source => { %rs, repository => "$prefix$_->[1]" },
+		source => $self->_image_source($ast, undef, $_->[1]),
 	}} (
 		['script',      'cfcommunity/script-resource'],
 		['email',       'pcfseceng/email-resource'],
@@ -427,7 +419,7 @@ sub _resource_types {
 			push @types, {
 				name   => 'slack-notification',
 				type   => 'registry-image',
-				source => { %rs, repository => "${prefix}cfcommunity/slack-notification-resource" },
+				source => $self->_image_source($ast, undef, 'cfcommunity/slack-notification-resource'),
 			};
 		}
 	}
@@ -437,23 +429,52 @@ sub _resource_types {
 		push @types, {
 			name   => 'shuttle',
 			type   => 'registry-image',
-			source => { %rs,
-				repository => $prefix . ($shuttle->{image} || 'klaue/shuttle-resource'),
-				tag        => $shuttle->{image_tag} || 'latest' },
+			source => $self->_image_source($ast, $shuttle->{image}, 'klaue/shuttle-resource',
+				$shuttle->{image_tag} || 'latest'),
 		};
 	} elsif (my $signal = $config->{status_signal}) {
-		my $img = (ref $signal eq 'HASH' ? $signal->{image}     : undef)
-			|| 'cfcommunity/shuttle-resource';
+		my $img = ref $signal eq 'HASH' ? $signal->{image} : undef;
 		my $tag = (ref $signal eq 'HASH' ? $signal->{image_tag} : undef)
 			|| 'latest';
 		push @types, {
 			name   => 'shuttle',
 			type   => 'registry-image',
-			source => { %rs, repository => "$prefix$img", tag => $tag },
+			source => $self->_image_source($ast, $img, 'cfcommunity/shuttle-resource', $tag),
 		};
 	}
 
 	return \@types;
+}
+
+# }}}
+# _image_source - an image's registry-image source, through the registry (D137) {{{
+sub _image_source {
+	my ($self, $ast, $named, $default, $tag) = @_;
+	my $registry = ($ast->configuration || {})->{registry} || {};
+	my $uri      = $registry->{uri};
+	my ($host)   = ($uri // '') =~ m{^([^/]+)};
+	undef $named if defined $named && $named eq $default;
+
+	my $repository = defined $named ? $named : $uri ? "$uri/$default" : $default;
+	my $pulled_through = $uri && defined $registry->{username}
+		&& (!defined $named || $named =~ m{^\Q$host\E/});
+	return {
+		repository => $repository,
+		(defined $tag ? (tag => $tag) : ()),
+		($pulled_through ? (
+			username => _unwrap_ref($registry->{username}),
+			password => _unwrap_ref($registry->{password}),
+		) : ()),
+	};
+}
+
+# }}}
+# _task_image_source - the image every emitted task runs in (contract e8) {{{
+sub _task_image_source {
+	my ($self, $ast) = @_;
+	my $task = ($ast->configuration || {})->{task} || {};
+	return $self->_image_source($ast, $task->{image}, 'genesiscommunity/concourse',
+		$task->{version} || 'latest');
 }
 
 # }}}
@@ -1326,18 +1347,7 @@ sub _auto_update_job {
 	my $update_kit     = $auto_update->{update_kit}     // 1;
 	my $update_genesis = $auto_update->{update_genesis} // 1;
 
-	my $task_cfg = $config->{task} || {};
-	my $reg      = $config->{registry} || {};
-	my $pfx      = $reg->{uri} ? "$reg->{uri}/" : '';
-
-	my $img_src = {
-		repository => "$pfx" . ($task_cfg->{image} || 'genesiscommunity/concourse'),
-		tag        => $task_cfg->{version} || 'latest',
-	};
-	if ($reg->{username}) {
-		$img_src->{username} = $reg->{username};
-		$img_src->{password} = _unwrap_ref($reg->{password});
-	}
+	my $img_src = $self->_task_image_source($ast);
 
 	# Path helpers for repos rooted in a subdirectory
 	my $git_genesis_dir     = 'git';
@@ -1519,18 +1529,7 @@ sub _task_config {
 	bug("_task_config was given no cli_args, so no command to run") unless $cli && @$cli;
 	my $input   = $opts->{input} || "$alias-branch";
 
-	my $task_cfg = $config->{task} || {};
-	my $reg      = $config->{registry} || {};
-	my $pfx      = $reg->{uri} ? "$reg->{uri}/" : '';
-
-	my $img_src = {
-		repository => "$pfx" . ($task_cfg->{image} || 'genesiscommunity/concourse'),
-		tag        => $task_cfg->{version} || 'latest',
-	};
-	if ($reg->{username}) {
-		$img_src->{username} = $reg->{username};
-		$img_src->{password} = _unwrap_ref($reg->{password});
-	}
+	my $img_src = $self->_task_image_source($ast);
 
 	my %params = (
 		# The pipeline running, not an operator: every pre-flight gate reads
@@ -1605,18 +1604,7 @@ sub _errand_config {
 	my $sc     = $ast->integrations->{source_control} || {};
 	my $root   = $sc->{root} || '.';
 
-	my $task_cfg = $config->{task} || {};
-	my $reg      = $config->{registry} || {};
-	my $pfx      = $reg->{uri} ? "$reg->{uri}/" : '';
-
-	my $img_src = {
-		repository => "$pfx" . ($task_cfg->{image} || 'genesiscommunity/concourse'),
-		tag        => $task_cfg->{version} || 'latest',
-	};
-	if ($reg->{username}) {
-		$img_src->{username} = $reg->{username};
-		$img_src->{password} = _unwrap_ref($reg->{password});
-	}
+	my $img_src = $self->_task_image_source($ast);
 
 	my %params = (
 		GENESIS_PIPELINE_TASK => 1,
@@ -2103,6 +2091,17 @@ each environment's C<redeploy-E<lt>envE<gt>> job, queue and event, and false
 emits none of them; C<style: grouped> lists every redeploy job in one
 C<redeploys> group after the deployments' groups and before C<propagation>,
 where C<inline>, the default, leaves each beside its deploy.
+
+Where C<pipeline.registry> is set, every image the compiler names by default,
+each resource type, the default task image and the default shuttle image, is
+pulled through its C<uri>, and each such source carries the registry's
+C<username> and C<password> references, through C<_image_source> (D137,
+contract a18, e8).  An image the operator names, C<task.image> or
+C<shuttle.image>, is taken as written, and carries the credentials only when
+its repository begins with the registry's host; one equal to the compiler's
+default counts as the default, since the schema fills the default in.  A
+legacy C<ci.yml> named its task image relative to the registry, so
+ASTBuilder prefixes it there and the rule above then finds it under the host.
 
 Where an environment sets C<require_pr>, the propagate task carries
 C<GITHUB_AUTH_TOKEN> from C<pipeline.source_control.api_token>, else from an

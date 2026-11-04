@@ -2078,7 +2078,8 @@ B<Parameters:>
 
 =item C<$block>
 
-C<vault> or C<source_control>.
+C<vault>, C<source_control>, or C<registry>, whose one type is C<basic>
+(D137).
 
 =item C<$auth>
 
@@ -4538,7 +4539,8 @@ B<Parameters:>
 
 =item C<$block>
 
-C<vault> or C<source_control>.
+C<vault>, C<source_control>, or C<registry>, whose one type is C<basic>
+(D137).
 
 =item C<$description>
 
@@ -4569,7 +4571,8 @@ B<Parameters:>
 
 =item C<$block>
 
-C<vault> or C<source_control>.
+C<vault>, C<source_control>, or C<registry>, whose one type is C<basic>
+(D137).
 
 =item C<$auth>
 

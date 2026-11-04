@@ -89,7 +89,9 @@ sub _build_from_legacy {
 		ocfp        => _yaml_bool($p->{ocfp}, 0),
 		debug       => $p->{debug} || 0,
 		task        => {
-			image      => ($p->{task}{image} || 'genesiscommunity/concourse'),
+			image      => ($p->{task}{image}
+				? ($p->{registry} && $p->{registry}{uri} ? "$p->{registry}{uri}/" : '').$p->{task}{image}
+				: 'genesiscommunity/concourse'),
 			version    => ($p->{task}{version} || 'latest'),
 			privileged => ($p->{task}{privileged} || []),
 		},

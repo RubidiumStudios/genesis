@@ -159,6 +159,12 @@ sub _parse_genesis_config {
 	} : {};
 	$parsed{pipeline}{configuration}{task} = {%{$parsed{provider}{task}}}
 		if ref($parsed{provider}{task}) eq 'HASH';
+	if (my $registry = $data->{registry}) {
+		$parsed{pipeline}{configuration}{registry} = {
+			uri => $registry->{uri},
+			%{Genesis::Top::credential_components(registry => $registry->{auth})},
+		};
+	}
 
 	$parsed{_source_format} = 'genesis-config';
 	$parsed{_source_path}   = $self->{top}

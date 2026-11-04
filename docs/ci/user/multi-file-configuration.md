@@ -156,6 +156,18 @@ redeploy:
 
 `style` decides where the redeploy jobs sit in the Concourse UI. `inline` keeps each beside its deploy in the deployment group; `grouped` lists them all in one `redeploys` group, after the deployment groups and before `propagation`, which suits a pipeline whose deployment view should show only what moves content forward. It has no effect where `enabled` is false.
 
+## The registry Block
+
+```yaml
+registry:
+  uri: registry.example.com/mirror
+  auth:
+    type: basic
+    path: concourse/registry   # holds username and password
+```
+
+Where Concourse cannot pull from public registries, `registry` names the mirror it pulls through. `uri` prefixes every image Genesis names by default: each resource type the pipeline declares, the task image, and the shuttle image. Each of those sources carries the credential as references, `username` and `password` read from `path` or given one by one as `<path>:<key>`. An image you name yourself, `provider.task.image` or `shuttle.image`, is used exactly as you write it, so a mirror that keeps your own images under a different path than the public ones is written in full there; it carries the credential when it begins with the registry's host. Without the block every image is pulled as named.
+
 ## The Older Block Shape
 
 The three blocks below, `pipeline`, `targets`, and `integrations`, are the shape the configuration had under the multi-file layout, and the compiler's parser still normalises them. The repository schema does not declare them, so writing one into `.genesis/config` is refused by name at configuration load. They are documented here for reading an older repository and for working on the parser, and not as keys to write.

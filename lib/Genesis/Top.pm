@@ -3029,6 +3029,16 @@ sub _pipeline_config_schema {
 				}
 			},
 
+			# The registry every image the compiler names is pulled through (D137).
+			registry => {
+				type        => 'hash',
+				description => 'The image registry the pipeline pulls through',
+				schema => {
+					uri  => {type => 'string', required => 1, description => 'The prefix every image the compiler names by default is pulled through'},
+					auth => _credential_schema(registry => 'The credential the registry is pulled with, as a type and its vault paths'),
+				},
+			},
+
 			# Shaped by its backend; s3 is the one the shuttle resource has (D23).
 			shuttle => {
 				type          => 'custom_struct',
@@ -3236,6 +3246,7 @@ sub _pipeline_env_keys_schema {
 my %CREDENTIAL_COMPONENTS = (
 	vault          => {approle => [qw/role_id secret_id/], token => [qw/token/]},
 	source_control => {ssh => [qw/private_key/], https => [qw/username password/]},
+	registry       => {basic => [qw/username password/]},
 );
 
 # _credential_schema - a credential block: a type, a path, and its components {{{
