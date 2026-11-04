@@ -225,6 +225,11 @@ subtest 'no call site pairs a provider read with a separate guard' => sub {
 		# branch or a clone behind R is not the file being checked.
 		'lib/Genesis/Top.pm _validate_capability_gates',
 
+		# The environment's provider block is validated against the provider
+		# of the configuration in front of it, for the reason the gates are
+		# (D139).
+		'lib/Genesis/Top.pm _provider_env_options_schema',
+
 		# The override check (T389) judges the files of the configuration in
 		# front of it, for the same reason, and the load reads nothing of control.
 		'lib/Genesis/Top.pm _validate_override_files',

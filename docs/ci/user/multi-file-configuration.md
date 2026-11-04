@@ -45,7 +45,6 @@ provider:
   insecure: false
   min_fly_version: 7.9.0
   public: false
-  tagged: false
   pause_after_set: false
   group_commits: true
   task:
@@ -57,6 +56,17 @@ provider:
 Three types are registered. `concourse` compiles and sets a pipeline. `github-actions` validates and resolves on the CLI side but has no compiling class yet, so a repository set to it is told so rather than given a pipeline, and it declares the one key that chooses between a single emitted file and several, `output_layout`. `manual` reads no key of its own and sets no pipeline at all, so a provider key written beside `type: manual` is refused like any other key nobody declared.
 
 Under Concourse, `public` decides whether every job's build log can be read without logging in. It is false unless you set it, and it shows only on a pipeline that is exposed, so a hidden pipeline looks the same either way.
+
+Where some environments sit in networks only certain Concourse workers can reach, each such environment names those workers in its own file:
+
+```yaml
+genesis:
+  pipeline:
+    provider:
+      tag: datacenter-east     # or a list of tags
+```
+
+The tag goes on the steps that need the environment's network: the task of its deploy, redeploy and notify jobs, and a check against its director. Locks, events, Slack messages, branch fetches and `propagate` run on untagged workers, since the locker, the object store, Slack and GitHub sit beside Concourse; untagged workers must reach those, and tagged ones the director, the vault and GitHub. Set it in a file several environments share and every environment beneath it takes the tag. The older `tagged: true` beside the provider is refused; it put an environment's own name on every step, so to keep that, set `tag: <env>` in each environment.
 
 `group_commits` is true, a deploy taking the tip of whatever arrived on its branch. False would deploy each commit in turn, and that is not built yet, so false is refused when the configuration loads.
 

@@ -4484,6 +4484,27 @@ B<Examples:>
     # {concourse => {class => 'Genesis::CI::Provider::Concourse',
     #                module => 'Genesis/CI/Provider/Concourse.pm'}, ...}
 
+=head2 _provider_env_options_schema
+
+    my $schema = $top->_provider_env_options_schema();
+
+The keys an environment may write under C<genesis.pipeline.provider>: the
+configured provider class's C<provider_env_options_schema> (D139). It reads
+C<pipeline.provider.type> from the configuration being validated rather than
+through L</pipeline_provider_type>, for the reason
+L</_validate_capability_gates> does: the accessor answers control's type,
+which on a branch is not the file being checked. A provider that declares
+nothing, the manual one among them, gives an empty schema, so any key under
+the block is refused as unknown (D100).
+
+B<Returns:> a hash reference of key name to its declaration.
+
+B<Errors:> an unknown provider type is refused at CONFIG by the registry.
+
+B<Examples:>
+
+    $top->_provider_env_options_schema;   # {tag => {...}} under Concourse
+
 =head2 _pipeline_env_keys_schema
 
     my $schema = $top->_pipeline_env_keys_schema();
@@ -4502,7 +4523,8 @@ which is a list of crontab expressions in UTC, C<track_dependencies>,
 C<track_additional_files>, and C<track_bosh_configs>, which are the three
 sources the propagation set and the redeploy triggers are built from, and
 C<notifications>, which overrides the repository's own notification style
-for this environment alone.
+for this environment alone, and C<provider>, whose keys are whatever the
+configured provider declares through L</_provider_env_options_schema> (D139).
 
 Two of those carry a shape the declaration cannot state, and
 L</_validate_env_pipeline_block> checks both beside it.

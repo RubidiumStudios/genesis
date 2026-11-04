@@ -3183,6 +3183,16 @@ sub _provider_module_map {
 }
 
 # }}}
+# _provider_env_options_schema - what the configured provider lets an environment set {{{
+sub _provider_env_options_schema {
+	my ($self) = @_;
+	require Genesis::CI::ProviderRegistry;
+	my $type  = $self->config->get('pipeline.provider.type', 'manual') // 'manual';
+	my $class = Genesis::CI::ProviderRegistry->provider_class($type) or return {};
+	return $class->provider_env_options_schema;
+}
+
+# }}}
 # _pipeline_env_keys_schema - the genesis.pipeline block of an env file {{{
 sub _pipeline_env_keys_schema {
 	my ($self) = @_;
@@ -3193,6 +3203,13 @@ sub _pipeline_env_keys_schema {
 			prior_env  => {type => 'string',  description => 'The topology edge, the environment this one follows'},
 			require_pr => {type => 'boolean', description => 'Propagate through a pull request rather than directly'},
 			manual     => {type => 'boolean', description => "The deploy job waits for a human trigger"},
+
+			# What the configured provider lets an environment set (D139).
+			provider => {
+				type        => 'hash',
+				description => "The environment's settings for the configured provider",
+				schema      => $self->_provider_env_options_schema,
+			},
 
 			# Retired keys, refused naming what replaced them (T404).
 			locks          => _retired_key("both deploy locks are mandatory, backed by #C{pipeline.locker} in #C{.genesis/config}; remove it"),

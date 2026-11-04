@@ -239,6 +239,23 @@ B<Examples:>
     my $schema = Genesis::CI::Provider::Concourse->provider_options_schema;
     $schema->{target}{required};    # 1
 
+=head2 provider_env_options_schema()
+
+The keys an environment may write under C<genesis.pipeline.provider> for this
+provider, read from the merged environment (D79, D139). The default declares
+none, so a provider that offers nothing per environment writes nothing, and a
+key written under it is refused as unknown, as a repository-wide provider key
+is under a provider that does not declare it (D100).
+
+B<Returns:> a hash reference of key name to its declaration; empty by default.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    Genesis::CI::Provider::Manual->provider_env_options_schema;      # {}
+    Genesis::CI::Provider::Concourse->provider_env_options_schema;   # {tag => {...}}
+
 =head2 capabilities()
 
 What this provider is able to do, as the six capability booleans, declared

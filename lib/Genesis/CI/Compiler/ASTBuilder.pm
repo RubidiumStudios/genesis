@@ -478,6 +478,7 @@ sub build_from_env_files {
 			bosh_parent         => '',  # resolved in second pass below
 			bosh_upgrade_lock   => 1,   # default: enabled
 			track_bosh_configs  => $data->{track_bosh_configs},
+			worker_tags         => _worker_tags($data->{provider}),
 		};
 		$prior_env_map{$env} = $data->{prior_env} if $data->{prior_env};
 	}
@@ -504,6 +505,16 @@ sub build_from_env_files {
 # }}}
 # }}}
 ### Internal Helpers {{{
+
+# _worker_tags - an environment's worker tags as a list, from its provider block (D139) {{{
+sub _worker_tags {
+	my ($provider) = @_;
+	my $tag = ref($provider) eq 'HASH' ? $provider->{tag} : undef;
+	return [] unless defined $tag;
+	return ref($tag) eq 'ARRAY' ? [@$tag] : [$tag];
+}
+
+# }}}
 
 # _normalize_auto_update - normalize auto_update config to internal representation {{{
 #

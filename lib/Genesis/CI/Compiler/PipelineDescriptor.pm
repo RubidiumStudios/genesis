@@ -469,6 +469,16 @@ sub _image_source {
 }
 
 # }}}
+# _worker_tags - the tags on a step that reaches an environment's network (D139, contract b5) {{{
+sub _worker_tags {
+	my ($self, $ast, $env, $wf_data) = @_;
+	my $tags = ($wf_data->{worker_tags} || {})->{$env} || [];
+	# A legacy ci.yml's tagged: true named each environment's workers after it.
+	$tags = [$env] if !@$tags && ($ast->configuration || {})->{tagged};
+	return @$tags ? (tags => [@$tags]) : ();
+}
+
+# }}}
 # _job_public - whether a job's build log is public (D138, contract b4) {{{
 sub _job_public {
 	my ($self, $ast) = @_;
@@ -751,8 +761,7 @@ sub _env_resources {
 			my $target = $ast->targets->{$env} || {};
 			my $conn   = $target->{connection} || {};
 			my $auth   = $conn->{auth} || {};
-			my $tagged = ($ast->configuration || {})->{tagged};
-			my %to = $tagged ? (tags => [$env]) : ();
+			my %to = $self->_worker_tags($ast, $env, $wf_data);
 
 			my $ocfp = ($ast->configuration || {})->{ocfp};
 			my $config_name = 'default';
@@ -868,7 +877,7 @@ sub _notify_job {
 		$is_create_env, $wf_data) = @_;
 
 	my $config = $ast->configuration || {};
-	my %to     = $config->{tagged} ? (tags => [$env]) : ();
+	my %to     = $self->_worker_tags($ast, $env, $wf_data);
 	my $name   = _notify_job_name($alias);
 
 	# The branch the deploy reads is the only input and trigger (contract
@@ -922,8 +931,7 @@ sub _deploy_job {
 	my $config     = $ast->configuration || {};
 	my $sc         = $ast->integrations->{source_control} || {};
 	my $root       = $sc->{root} || '.';
-	my $tagged     = $config->{tagged};
-	my %to         = $tagged ? (tags => [$env]) : ();
+	my %to         = $self->_worker_tags($ast, $env, $wf_data);
 	my $name       = $ast->metadata->{name} || 'genesis-pipeline';
 	my $trigger    = $is_auto ? JSON::PP::true : JSON::PP::false;
 	my $passed     = $trigger_from ? $wf_data->{aliases}{$trigger_from} : '';
@@ -972,7 +980,7 @@ sub _deploy_job {
 	$deploy_task->{privileged} = JSON::PP::true if grep { $_ eq $alias } @priv;
 
 	my $dn = $wf_data->{deployment_name}{$env};
-	my ($lock_steps, $unlock_steps) = $self->_lock_steps($ast, $env, $wf_data, %to);
+	my ($lock_steps, $unlock_steps) = $self->_lock_steps($ast, $env, $wf_data);
 	my @lock_steps   = @$lock_steps;
 	my @unlock_steps = @$unlock_steps;
 
@@ -1038,17 +1046,19 @@ sub _start_step {
 # Each pool in order, released in reverse (contract g4, g5), locked by the
 # deployment's name, shared by deploy and redeploy (g1, g2).
 sub _lock_steps {
-	my ($self, $ast, $env, $wf_data, %to) = @_;
+	my ($self, $ast, $env, $wf_data) = @_;
 
+	# Untagged: the locker lives beside Concourse, not in the environment's
+	# network (D139).
 	my (@lock, @unlock);
 	my $locker = $ast->integrations->{locker} || {};
 	my $dn     = $wf_data->{deployment_name}{$env};
 	if ($locker->{url}) {
 		for my $pool ($self->_lock_pools($env, $wf_data)) {
 			my ($name, $key) = @$pool;
-			push @lock, { put => "$name-lock", %to,
+			push @lock, { put => "$name-lock",
 				params => { lock_op => 'lock', key => $key, locked_by => $dn } };
-			unshift @unlock, { put => "$name-lock", %to,
+			unshift @unlock, { put => "$name-lock",
 				params => { lock_op => 'unlock', key => $key, locked_by => $dn } };
 		}
 	}
@@ -1068,7 +1078,7 @@ sub _redeploy_job {
 	my ($self, $ast, $env, $alias, $deploy_type, $wf_data) = @_;
 
 	my $config = $ast->configuration || {};
-	my %to     = $config->{tagged} ? (tags => [$env]) : ();
+	my %to     = $self->_worker_tags($ast, $env, $wf_data);
 	my $dn     = $wf_data->{deployment_name}{$env};
 
 	# A request on its queue is its one trigger, where there is a shuttle to
@@ -1090,7 +1100,7 @@ sub _redeploy_job {
 	my @priv = @{$config->{task}{privileged} || []};
 	$task->{privileged} = JSON::PP::true if grep { $_ eq $alias } @priv;
 
-	my ($lock_steps, $unlock_steps) = $self->_lock_steps($ast, $env, $wf_data, %to);
+	my ($lock_steps, $unlock_steps) = $self->_lock_steps($ast, $env, $wf_data);
 
 	my %hooks = $self->_outcome_hooks($ast, $env, $alias, $deploy_type, $wf_data, 1);
 
@@ -1163,9 +1173,6 @@ sub _env_signal_config {
 sub _signal_resource {
 	my ($self, $ast, $env, $alias, $signal_cfg) = @_;
 
-	my $config  = $ast->configuration || {};
-	my $tagged  = $config->{tagged};
-	my %to      = $tagged ? (tags => [$env]) : ();
 	my $backend = $signal_cfg->{backend} || 'file';
 	my $prefix  = $signal_cfg->{prefix}  || $env;
 
@@ -1190,7 +1197,6 @@ sub _signal_resource {
 		name   => "$alias-signal",
 		type   => 'shuttle',
 		icon   => 'broadcast',
-		%to,
 		source => \%source,
 	};
 }
@@ -1784,7 +1790,7 @@ sub _extract_workflow_data {
 	    %redeploy, %redeploy_cron_start, %redeploy_cron_stop,
 	    %status_signal, %signal_prefix,
 	    %bosh_parent, %bosh_upgrade_lock, %is_bosh_director,
-	    %track_bosh_configs);
+	    %track_bosh_configs, %worker_tags);
 
 	for my $edge (@$edges) {
 		push @{ $will_trigger{$edge->{from}} }, $edge->{to};
@@ -1807,6 +1813,7 @@ sub _extract_workflow_data {
 		$bosh_upgrade_lock{$n}   = $nd->{bosh_upgrade_lock}   // 1;
 		$track_bosh_configs{$n}  = $nd->{track_bosh_configs}
 			if defined $nd->{track_bosh_configs};
+		$worker_tags{$n}         = $nd->{worker_tags} || [];
 	}
 	# Derive which envs are pipeline BOSH directors (referenced as bosh_parent)
 	for my $n (keys %bosh_parent) {
@@ -1845,6 +1852,7 @@ sub _extract_workflow_data {
 		bosh_upgrade_lock   => \%bosh_upgrade_lock,
 		is_bosh_director    => \%is_bosh_director,
 		track_bosh_configs  => \%track_bosh_configs,
+		worker_tags         => \%worker_tags,
 	};
 }
 
@@ -2101,6 +2109,14 @@ where C<inline>, the default, leaves each beside its deploy.
 
 Every job's C<public> comes from C<pipeline.provider.public>, false unless
 set, through C<_job_public> (D138, contract b4).
+
+An environment's C<genesis.pipeline.provider.tag> goes, through
+C<_worker_tags>, on the steps that reach its network alone: the task of its
+deploy, redeploy and notify jobs, its errands, and its BOSH-config check
+(D139, contract b5).  Lock puts, shuttle and Slack puts, branch gets and
+C<propagate> carry none, those services sitting beside Concourse.  A legacy
+C<ci.yml>'s C<tagged: true> gives each environment its own name as the tag,
+placed the same way.
 
 Where C<pipeline.registry> is set, every image the compiler names by default,
 each resource type, the default task image and the default shuttle image, is

@@ -186,7 +186,9 @@ true, through L</_pipeline_enabled($siblings, $config)>, and not before,
 so a block can be built a key at a time with the pipeline off. C<team>
 declares no default: a required key with a default would never be
 required. C<target> is declared only so that it is refused by name,
-through L</_target_retired($value)>,
+through L</_target_retired($value)>, and C<tagged> likewise through
+L</_tagged_retired($value)>, its place taken by each environment's
+C<genesis.pipeline.provider.tag> (D139),
 whether or not the pipeline is enabled: a target is an entry in one
 operator's F<~/.flyrc>, so a committed one means nothing on a teammate's
 machine, and each operator's is resolved where C<fly> is needed.
@@ -226,6 +228,21 @@ B<Examples:>
     $schema->{team}{required};                 # \&_pipeline_enabled
     $schema->{min_fly_version}{type};          # 'semver'
     $schema->{task}{schema}{privileged}{type}; # 'array'
+
+=head2 provider_env_options_schema()
+
+The one key an environment may write under C<genesis.pipeline.provider>:
+C<tag>, the Concourse worker tag, or a list of them, whose workers reach the
+environment's network (D139). The compiler puts it on the steps that reach
+that network, the task of the environment's deploy, redeploy and notify jobs
+and its BOSH-config check, and on nothing that reaches the services beside
+Concourse. Its shape is checked by L</_worker_tag_rule($value)>.
+
+B<Returns:> a hash reference of key name to its declaration.
+
+B<Examples:>
+
+    Genesis::CI::Provider::Concourse->provider_env_options_schema->{tag}{type};   # 'any'
 
 =head2 capabilities()
 
@@ -597,6 +614,40 @@ B<Errors:> None; the schema reports it as C<pipeline.provider.target: ...>.
 B<Examples:>
 
     _target_retired('ci');   # "is no longer read.  A fly target is ..."
+
+=head2 _worker_tag_rule($value)
+
+The C<check> rule of C<genesis.pipeline.provider.tag>: a non-empty string, or
+a non-empty list of them (D139).
+
+B<Parameters:> the value as written.
+
+B<Returns:> C<undef> when it is a tag or a list of tags, else the refusal,
+without the key.
+
+B<Errors:> None; the schema reports it against the environment.
+
+B<Examples:>
+
+    _worker_tag_rule('net-a');            # undef
+    _worker_tag_rule([qw/net-a dmz/]);    # undef
+    _worker_tag_rule({name => 'net-a'});  # "expected a worker tag or a list of them"
+
+=head2 _tagged_retired($value)
+
+The C<check> rule of the retired C<tagged>, which refuses any value, naming
+C<genesis.pipeline.provider.tag>, which replaced it, and how to keep the tags a
+true value gave (D139).
+
+B<Parameters:> the written value, unused.
+
+B<Returns:> the refusal, without the key.
+
+B<Errors:> None; the schema reports it as C<pipeline.provider.tagged: ...>.
+
+B<Examples:>
+
+    _tagged_retired(1);   # "is no longer read.  A tag belongs to ..."
 
 =head2 _group_commits_rule($value)
 

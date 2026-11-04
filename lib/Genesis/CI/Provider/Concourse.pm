@@ -328,7 +328,7 @@ sub provider_options_schema {
 		fly_bin_path    => {type => 'string', description => 'Path or name of the fly CLI this pipeline is set with; GENESIS_FLY_BIN overrides it'},
 
 		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
-		tagged   => {type => 'boolean', default => Genesis::Config::FALSE, description => "Pin each environment's containers to workers tagged with its name"},
+		tagged   => {type => 'any', retired => 1, check => \&_tagged_retired, description => 'Retired: each environment names its workers with genesis.pipeline.provider.tag'},
 
 		# An empty hash by default, or validation never reaches its keys.
 		task     => {
@@ -355,6 +355,15 @@ sub provider_options_schema {
 # }}}
 # capabilities - Concourse can do all but multi-file output {{{
 #
+# provider_env_options_schema - the worker tag an environment may name (D139) {{{
+sub provider_env_options_schema {
+	return {
+		tag => {type => 'any', check => \&_worker_tag_rule,
+			description => "The Concourse worker tag, or tags, whose workers reach this environment's network"},
+	};
+}
+
+# }}}
 # The six capability names, declared beside the fragment above, because
 # one class answers for both halves of a provider and the gates read this
 # from the class the provider map already names.
@@ -390,6 +399,23 @@ sub _pipeline_enabled {
 
 # }}}
 # _target_retired - a committed fly target is refused, with what replaces it {{{
+sub _worker_tag_rule {
+	my ($value) = @_;
+	my @tags = ref($value) eq 'ARRAY' ? @$value : ($value);
+	return undef if @tags && !grep {ref($_) || !defined($_) || !length($_)} @tags;
+	return "expected a worker tag or a list of them";
+}
+
+sub _tagged_retired {
+	return "is no longer read.  A tag belongs to the network an environment ".
+		"sits in rather than to its name, so each environment names the ".
+		"workers that reach it with #C{genesis.pipeline.provider.tag}, which ".
+		"a file several environments share can set once for all of them.  ".
+		"Remove the key; where it was true, set ".
+		"#C{genesis.pipeline.provider.tag: <env>} in each environment to keep ".
+		"the tags it gave.";
+}
+
 sub _group_commits_rule {
 	my ($value) = @_;
 	return undef if $value;

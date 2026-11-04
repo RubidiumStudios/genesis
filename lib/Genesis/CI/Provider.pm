@@ -131,6 +131,12 @@ sub provider_options_schema {
 }
 
 # }}}
+# provider_env_options_schema - the keys an environment may set for this provider {{{
+sub provider_env_options_schema {
+	return {};
+}
+
+# }}}
 # capabilities - what this provider can do, as six booleans (abstract) {{{
 #
 # The six capability names, declared beside the fragment so that one class

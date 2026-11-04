@@ -148,7 +148,7 @@ subtest 'the provider-specific keys are validated per provider type' => sub {
 	write_nested_env('qa');
 
 	lives_ok {load_with($h, automated_pipeline_block(provider_extra => [
-		'    public: true', '    tagged: true',
+		'    public: true', '    pause_after_set: false',
 		'    task:', '      image: genesiscommunity/concourse',
 		'      version: latest']))}
 		'the four Concourse keys validate under Concourse';
@@ -156,9 +156,9 @@ subtest 'the provider-specific keys are validated per provider type' => sub {
 		qr/pipeline\.provider\.public: expected a boolean/,
 		'and their types are enforced';
 	throws_ok {load_with($h, join("\n", 'pipeline:', '  enabled: true',
-		'  provider:', '    type: manual', '    tagged: true',
+		'  provider:', '    type: manual', '    public: true',
 		'  source_control:', '    repository: team/bosh'))}
-		qr/pipeline\.provider\.tagged: unknown configuration key/,
+		qr/pipeline\.provider\.public: unknown configuration key/,
 		'and they exist for Concourse alone';
 
 	my $top = load_with($h, automated_pipeline_block());
