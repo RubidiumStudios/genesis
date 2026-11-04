@@ -3923,7 +3923,11 @@ sub _declared_dependencies {
 
 # }}}
 # ci_mount - returns the Vault path under which all CI secrets are stored (env: GENESIS_CI_MOUNT) {{{
-sub default_ci_mount { $_[0]->secrets_mount . 'ci/'; }
+sub default_ci_mount {
+	my $store = $_[0]->top->pipeline_secrets_store;
+	return $_[0]->secrets_mount . 'ci/' unless $store;
+	return sprintf("%s/%s/", $store->{path_prefix}, $store->{team} // '');
+}
 sub ci_mount {
 	$_[0]->_memoize(sub {
 		(my $mount = $_[0]->lookup('genesis.ci_mount', $_[0]->default_ci_mount)) =~ s#^/?(.*?)/?$#/$1/#;
@@ -3932,12 +3936,34 @@ sub ci_mount {
 }
 
 # }}}
+# ci_pipeline_base - the pipeline scope under ci_mount, for what one root alone uses (D141) {{{
+sub ci_pipeline_base {
+	my $store = $_[0]->top->pipeline_secrets_store;
+	return $_[0]->ci_mount . ($store ? $store->{pipeline} : $_[0]->type) . '/';
+}
+
+# }}}
 # ci_base - returns the full Vault path under which the CI secrets for this environment are stored (env: GENESIS_CI_BASE) {{{
 sub ci_base {
 	$_[0]->_memoize(sub {
-		my $default = sprintf("%s%s/%s/", $_[0]->ci_mount, $_[0]->type, $_[0]->name);
+		my $default = $_[0]->ci_pipeline_base . $_[0]->name . '/';
 		(my $base = $_[0]->lookup('genesis.ci_base', $default)) =~ s#^/?(.*?)/?$#/$1/#;
 		return $base
+	});
+}
+
+# }}}
+# ci_vault - the store the CI paths live in: the pipeline's secrets store, else this environment's vault (D141) {{{
+sub ci_vault {
+	$_[0]->_memoize(sub {
+		my ($self) = @_;
+		my $store = $self->top->pipeline_secrets_store;
+		return $self->vault unless $store && $store->{url};
+		return Service::Vault::Remote->attach(
+			url       => $store->{url},
+			verify    => $store->{insecure} ? 0 : 1,
+			namespace => $store->{namespace} // '',
+		);
 	});
 }
 

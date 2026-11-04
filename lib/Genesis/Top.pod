@@ -2098,6 +2098,26 @@ B<Examples:>
     # {role_id => {secret_ref => 'secret/ci/a:role_id'},
     #  secret_id => {secret_ref => 'secret/x:sid'}}
 
+=head2 pipeline_secrets_store
+
+    my $store = $top->pipeline_secrets_store;
+
+Where Concourse resolves the pipeline's C<((...))> references: control's
+C<pipeline.provider.secrets_store> with its C<path_prefix> normalized (default
+C</concourse>, no trailing slash), and beside it the C<team> and the C<pipeline>
+name (C<pipeline.name>, else the deployment type) that complete Concourse's
+lookup paths (D141). It is undef where the pipeline is not enabled or names no
+store, which is what keeps the CI paths at their old defaults.
+
+B<Returns:> a hash reference of C<url>, C<namespace>, C<path_prefix>,
+C<shared_path>, C<insecure>, C<team> and C<pipeline>, or undef.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $top->pipeline_secrets_store->{path_prefix};   # '/concourse'
+
 =head2 pipeline_section
 
     my $section = $top->pipeline_section();

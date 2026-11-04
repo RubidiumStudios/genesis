@@ -1818,6 +1818,23 @@ sub pipeline_name {
 }
 
 # }}}
+# pipeline_secrets_store - where Concourse resolves the pipeline's references, or undef {{{
+sub pipeline_secrets_store {
+	my ($self) = @_;
+	return undef unless $self->pipeline_enabled;
+	my $config = $self->_shape->config;
+	my $store  = $config->get('pipeline.provider.secrets_store');
+	return undef unless ref($store) eq 'HASH';
+	(my $prefix = $store->{path_prefix} // '/concourse') =~ s#^/?(.*?)/?$#/$1#;
+	return {
+		%$store,
+		path_prefix => $prefix,
+		team        => $config->get('pipeline.provider.team'),
+		pipeline    => $self->pipeline_name // $self->type,
+	};
+}
+
+# }}}
 # pipeline_section - the pipeline section of the configuration, as control holds it {{{
 #
 # For a reader that takes the whole block, such as the compiler's parser, so

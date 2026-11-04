@@ -348,6 +348,18 @@ sub provider_options_schema {
 		},
 
 		pause_after_set => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Leave the pipeline paused after fly set-pipeline'},
+		# No default, so an absent block is told from an empty one (D141).
+		secrets_store   => {
+			type        => 'hash',
+			description => 'The store Concourse resolves the pipeline\'s ((...)) references from',
+			schema => {
+				url         => {type => 'string', description => "The store's URL; unset, the environment's own vault"},
+				namespace   => {type => 'string', description => 'The vault namespace, if any'},
+				path_prefix => {type => 'string', default => '/concourse', description => "Concourse's --vault-path-prefix"},
+				shared_path => {type => 'string', description => "Concourse's --vault-shared-path, if set"},
+				insecure    => {type => 'boolean', default => Genesis::Config::FALSE, description => "Skip verifying the store's TLS certificate"},
+			},
+		},
 		group_commits   => {type => 'boolean', default => Genesis::Config::TRUE, check => \&_group_commits_rule, description =>'Deploy the tip of what arrived rather than each commit in turn'},
 	};
 }

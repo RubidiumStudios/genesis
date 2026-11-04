@@ -68,6 +68,18 @@ genesis:
 
 The tag goes on the steps that need the environment's network: the task of its deploy, redeploy and notify jobs, and a check against its director. Locks, events, Slack messages, branch fetches and `propagate` run on untagged workers, since the locker, the object store, Slack and GitHub sit beside Concourse; untagged workers must reach those, and tagged ones the director, the vault and GitHub. Set it in a file several environments share and every environment beneath it takes the tag. The older `tagged: true` beside the provider is refused; it put an environment's own name on every step, so to keep that, set `tag: <env>` in each environment.
 
+`secrets_store` says where Concourse resolves the pipeline's `((...))` references, which may be a different vault from the one your environments use:
+
+```yaml
+provider:
+  secrets_store:
+    url: https://vault.ops.example.com   # unset: the environments' own vault
+    namespace: ops                       # if any
+    path_prefix: /concourse              # Concourse's --vault-path-prefix; the default
+```
+
+Concourse reads a reference `((name.key))` at `<path_prefix>/<team>/<pipeline>/name`, then at `<path_prefix>/<team>/name`. With `secrets_store` written, Genesis's CI paths follow that order: `ci_mount` is the team scope, `/concourse/<team>/`, for what every pipeline of the team shares; the pipeline scope `/concourse/<team>/<pipeline>/` holds what this repository's pipeline alone uses; and `ci_base` is `/concourse/<team>/<pipeline>/<env>/`. Hooks see the first and last as `GENESIS_CI_MOUNT` and `GENESIS_CI_BASE`, and an environment can still override either with `genesis.ci_mount` or `genesis.ci_base`. Each operator reaches the store through their own `safe` target for its URL. Without the block the CI paths stay where they always were, under the environment's secrets mount.
+
 `group_commits` is true, a deploy taking the tip of whatever arrived on its branch. False would deploy each commit in turn, and that is not built yet, so false is refused when the configuration loads.
 
 Each provider also declares what it is able to do, as six named capabilities, and a configuration key whose capability is false is refused at configuration load naming the key, the provider, and the capability. That is how `genesis.pipeline.manual` and `genesis.pipeline.redeploy_cron` are gated, and `pipeline.provider.group_commits` with them.
