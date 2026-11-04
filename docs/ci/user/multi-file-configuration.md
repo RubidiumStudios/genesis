@@ -58,6 +58,8 @@ Three types are registered. `concourse` compiles and sets a pipeline. `github-ac
 
 Under Concourse, `public` decides whether every job's build log can be read without logging in. It is false unless you set it, and it shows only on a pipeline that is exposed, so a hidden pipeline looks the same either way.
 
+`group_commits` is true, a deploy taking the tip of whatever arrived on its branch. False would deploy each commit in turn, and that is not built yet, so false is refused when the configuration loads.
+
 Each provider also declares what it is able to do, as six named capabilities, and a configuration key whose capability is false is refused at configuration load naming the key, the provider, and the capability. That is how `genesis.pipeline.manual` and `genesis.pipeline.redeploy_cron` are gated, and `pipeline.provider.group_commits` with them.
 
 ## The source_control Block

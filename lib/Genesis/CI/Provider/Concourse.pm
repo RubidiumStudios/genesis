@@ -348,7 +348,7 @@ sub provider_options_schema {
 		},
 
 		pause_after_set => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Leave the pipeline paused after fly set-pipeline'},
-		group_commits   => {type => 'boolean', default => Genesis::Config::TRUE, description => 'Deploy the tip of what arrived rather than each commit in turn'},
+		group_commits   => {type => 'boolean', default => Genesis::Config::TRUE, check => \&_group_commits_rule, description =>'Deploy the tip of what arrived rather than each commit in turn'},
 	};
 }
 
@@ -390,6 +390,15 @@ sub _pipeline_enabled {
 
 # }}}
 # _target_retired - a committed fly target is refused, with what replaces it {{{
+sub _group_commits_rule {
+	my ($value) = @_;
+	return undef if $value;
+	return "is false, which asks for each commit to be deployed in turn, and ".
+		"the pipeline does not deploy that way yet: only #C{true} is supported ".
+		"for now, a deploy taking the tip of what arrived.  Remove the key or ".
+		"set it to #C{true}.";
+}
+
 sub _target_retired {
 	return "is no longer read.  A fly target is an entry in one operator's ".
 		"#C{~/.flyrc}, so a committed one means nothing on a teammate's machine.  ".

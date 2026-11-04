@@ -598,6 +598,25 @@ B<Examples:>
 
     _target_retired('ci');   # "is no longer read.  A fly target is ..."
 
+=head2 _group_commits_rule($value)
+
+The C<check> rule of C<group_commits>, which refuses false (D140). False asks
+for each commit to be deployed in turn, C<version: every> on the deploy's
+branch get (contract b7), and the compiler does not emit that, so false would
+otherwise load and mean true. The rule goes when per-commit deploys are
+built.
+
+B<Parameters:> the value, a normalized boolean.
+
+B<Returns:> C<undef> for true, else the refusal, without the key.
+
+B<Errors:> None; the schema reports it as C<pipeline.provider.group_commits: ...>.
+
+B<Examples:>
+
+    _group_commits_rule(Genesis::Config::TRUE);    # undef
+    _group_commits_rule(Genesis::Config::FALSE);   # "is false, which asks ..."
+
 =head2 _load_fly_targets()
 
 Every C<fly> target a person could choose, merged from what C<fly
