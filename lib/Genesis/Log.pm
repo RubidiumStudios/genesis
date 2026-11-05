@@ -123,6 +123,7 @@ sub configure_log {
 			open my $fh, '>', $file;
 			truncate $fh, 0;
 			close $fh;
+			$self->_owner_only($file);
 		}
 		# TODO: time based truncation
 	}
@@ -830,6 +831,15 @@ sub _log {
 	return;
 }
 
+# _owner_only - a log file readable by its owner alone, checked once a process {{{
+sub _owner_only {
+	my ($self, $file) = @_;
+	return if $self->{owner_only}{$file}++;
+	my $mode = (stat $file)[2] // return;
+	chmod 0600, $file if $mode & 077;
+}
+
+# }}}
 # trace_log_files - file-backed logs that actually capture TRACE entries {{{
 #
 # Only these are worth directing an operator to for detail emitted via
@@ -1003,6 +1013,7 @@ sub flush_logs {
 					$file =~ s/^~/$ENV{HOME}/;
 					open $fh, '>>:encoding(UTF-8)', $file
 						or die "Could not open $log for writing logs: $!\n";
+					$self->_owner_only($file);
 
 					# Write command line as first entry if this is a new file
 					if ($ENV{GENESIS_FULL_CALL} && !$self->{command_logged}{$log} && -z $file) {

@@ -1646,6 +1646,26 @@ B<Examples:>
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
 
+=head2 _owner_only
+
+    $self->_owner_only($file);
+
+Narrows a log file to mode 0600 where it is readable or writable by anyone but
+its owner, since the trace log records every command Genesis runs. It is called
+where a file is truncated for the current command and where it is opened to be
+written, and acts once per file in a process, so the write path pays one
+C<stat> per file and no more.
+
+B<Parameters:> the log file's path, C<~> already expanded.
+
+B<Returns:> nothing.
+
+B<Errors:> None; a file that cannot be stated is left alone.
+
+B<Examples:>
+
+    $self->_owner_only("$ENV{HOME}/.genesis/logs/last-trace");
+
 =head2 _log
 
   $logger->_log($level, @contents);
