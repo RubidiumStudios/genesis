@@ -1837,6 +1837,14 @@ sub pipeline_secrets_store {
 }
 
 # }}}
+# pipeline_webhooks - whether the pipeline's git resources take webhooks (D143) {{{
+sub pipeline_webhooks {
+	my ($self) = @_;
+	return 0 unless ($self->pipeline_provider_type // '') eq 'concourse';
+	return $self->_shape->config->get('pipeline.provider.git.webhooks') ? 1 : 0;
+}
+
+# }}}
 # pipeline_secrets_vault - the vault the secrets store is in, or undef (D141) {{{
 sub pipeline_secrets_vault {
 	my ($self) = @_;

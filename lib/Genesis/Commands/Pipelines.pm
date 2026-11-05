@@ -113,12 +113,25 @@ sub apply {
 	my $result  = $platform eq 'manual' ? undef : _compile_pipeline($top, $platform);
 	$result->{provider}->check_prereqs() or exit 86 if $deploys;
 
+	# The webhook token the pipeline references, ahead of the check that
+	# would otherwise find it missing (D145).
+	my ($webhook_token, %coming);
+	if ($platform eq 'concourse') {
+		($webhook_token, my $would) = _apply_webhook_token($top,
+			dry_run    => $dry_run,
+			skip_vault => $opts->{'skip-vault'},
+			rotate     => $opts->{'rotate-webhook-token'},
+		);
+		$coming{_webhook_reference()} = $would if $would;
+	}
+
 	# Every secret it references, where Concourse will read it, before
 	# anything is set (D142).
 	_check_pipeline_secrets($top, $result->{output}{'pipeline.yml'},
 		dry_run    => $dry_run,
 		skip_vault => $opts->{'skip-vault'},
 		missing_ok => $opts->{'missing-secrets-ok'},
+		coming     => \%coming,
 	) if $platform eq 'concourse';
 
 	_apply_init_branches($top, $git, dry_run => $dry_run);
@@ -146,11 +159,15 @@ sub apply {
 			branches => \@branches,
 			dry_run  => $dry_run,
 		);
+		_apply_webhook_hook($top, $top->github_client, $owner_repo,
+			token => $webhook_token, dry_run => $dry_run) if $platform eq 'concourse';
 	} else {
 		info(
 			"  #Yi{skipped} the branch protection, because ".
 			"#C{GITHUB_AUTH_TOKEN} is not set"
 		);
+		_apply_webhook_hook($top, undef, undef, dry_run => $dry_run)
+			if $platform eq 'concourse';
 	}
 
 	_apply_records($top,
@@ -1514,6 +1531,10 @@ sub _check_pipeline_secrets {
 			info("  #Y{unverified}  %s (%s)", $ref, $why);
 			next;
 		}
+		if (my $coming = ($opts{coming} || {})->{$ref}) {
+			info("  #G{coming}      %s, which this apply %s", $ref, $coming);
+			next;
+		}
 		my @paths = _concourse_secret_paths($store, $name);
 		if (my ($found) = grep {$vault->has($_, $key)} @paths) {
 			info("  #G{found}       %s at #C{%s}", $ref, $found);
@@ -1535,6 +1556,150 @@ sub _check_pipeline_secrets {
 		@missing == 1 ? 'One secret' : scalar(@missing).' secrets',
 		@missing == 1 ? 'is' : 'are', @missing == 1 ? 'it' : 'them',
 		@missing == 1 ? 'it' : 'them', @missing == 1 ? 'it' : 'each');
+}
+
+# }}}
+# _webhook_reference, _webhook_store_path, _webhook_url_base - where the webhook lives (D145) {{{
+sub _webhook_reference {
+	require Genesis::CI::Compiler::PipelineDescriptor;
+	return Genesis::CI::Compiler::PipelineDescriptor::WEBHOOK_TOKEN_REF() =~ s/:/./r;
+}
+
+sub _webhook_store_path {
+	my ($top) = @_;
+	my $store = $top->pipeline_secrets_store or return undef;
+	require Genesis::CI::Compiler::PipelineDescriptor;
+	my ($name) = split /:/, Genesis::CI::Compiler::PipelineDescriptor::WEBHOOK_TOKEN_REF();
+	return "$store->{path_prefix}/$store->{team}/$store->{pipeline}/$name";
+}
+
+sub _webhook_url_base {
+	my ($top) = @_;
+	my $store = $top->pipeline_secrets_store or return undef;
+	my $url   = $top->_shape->config->get('pipeline.provider.url') or return undef;
+	return sprintf('%s/api/v1/teams/%s/pipelines/%s/resources/control-branch/check/webhook',
+		$url =~ s{/+$}{}r, $store->{team}, $store->{pipeline});
+}
+
+# }}}
+# _apply_webhook_token - the pipeline's webhook token in the store, kept or made (D145) {{{
+sub _apply_webhook_token {
+	my ($top, %opts) = @_;
+	return () unless $top->pipeline_webhooks;
+	my $path = _webhook_store_path($top) or return ();
+
+	info("\n#G{The webhook token} at #C{%s:token}", $path);
+	if ($opts{skip_vault}) {
+		info("  #Yi{unverified}, because #C{--skip-vault} was given");
+		return ();
+	}
+	my $vault  = eval {$top->pipeline_secrets_vault};
+	my $status = $vault ? (eval {$vault->status} // 'unreachable') : 'unreachable';
+	if ($status ne 'ok') {
+		warning("  #Y{unverified}, because the store is %s", $status);
+		return ();
+	}
+
+	my $have = $vault->has($path, 'token') ? $vault->get($path, 'token') : undef;
+	if (defined $have && length $have && !$opts{rotate}) {
+		info("  #Ki{already in place}");
+		return ($have);
+	}
+	my $verb = (defined $have && length $have) ? 'rotate' : 'generate';
+	if ($opts{dry_run}) {
+		info("  #Yi{would %s} it", $verb);
+		return (undef, "would $verb");
+	}
+	my $token = _random_token();
+	$vault->set($path, token => $token);
+	info("  #G{%s}", $verb eq 'rotate' ? 'rotated' : 'generated');
+	return ($token);
+}
+
+# }}}
+# _random_token - 256 bits from the system's cryptographic source, as hex {{{
+sub _random_token {
+	open my $fh, '<:raw', '/dev/urandom'
+		or bail("Could not read /dev/urandom to make the webhook token: %s", $!);
+	my $read = read($fh, my $bytes, 32);
+	close $fh;
+	bail("Could not read enough of /dev/urandom to make the webhook token")
+		unless ($read // 0) == 32;
+	return unpack('H*', $bytes);
+}
+
+# }}}
+# _apply_webhook_hook - the GitHub push hook that calls control-branch's check (D145) {{{
+sub _apply_webhook_hook {
+	my ($top, $gh, $owner_repo, %opts) = @_;
+	my $base = _webhook_url_base($top) or return;
+	my $on   = $top->pipeline_webhooks;
+	my $path = _webhook_store_path($top);
+	# What an operator configures by hand: the token is named, never shown.
+	my $shown = "$base?webhook_token=<the token at $path:token>";
+
+	unless ($gh && $owner_repo) {
+		info("  #Yi{skipped} the GitHub webhook, because #C{GITHUB_AUTH_TOKEN} is not set; ".
+			"configure a push hook calling #C{%s}", $shown) if $on;
+		return;
+	}
+
+	my ($code, $hooks, $why) = $gh->list_hooks($owner_repo);
+	unless (defined $hooks) {
+		warning("  #Y{unverified} the GitHub webhook, because the repository's hooks could not be read ".
+			"(%s); configure a push hook calling #C{%s}", $why, $shown) if $on;
+		return;
+	}
+	my @ours = grep {index($_->{config}{url} // '', $base) == 0} @$hooks;
+
+	unless ($on) {
+		for my $hook (@ours) {
+			if ($opts{dry_run}) {
+				info("  #Yi{would remove} the GitHub webhook calling #C{%s}", $base);
+				next;
+			}
+			my (undef, $err) = $gh->delete_hook($owner_repo, $hook->{id});
+			$err ? warning("  #Y{could not remove} the GitHub webhook calling #C{%s}: %s", $base, $err)
+			     : info("  #G{removed} the GitHub webhook calling #C{%s}", $base);
+		}
+		return;
+	}
+
+	my ($hook) = @ours;
+	unless (defined $opts{token}) {
+		if ($opts{dry_run}) {
+			info("  #Yi{would %s} the GitHub webhook calling #C{%s}", $hook ? 'update' : 'create', $base);
+		} else {
+			warning("  #Y{unverified} the GitHub webhook, because the token could not be read; ".
+				"configure a push hook calling #C{%s}", $shown);
+		}
+		return;
+	}
+
+	my $want = "$base?webhook_token=$opts{token}";
+	if ($hook && ($hook->{config}{url} // '') eq $want) {
+		info("  #Ki{already in place} the GitHub webhook calling #C{%s}", $base);
+		return;
+	}
+	if ($opts{dry_run}) {
+		info("  #Yi{would %s} the GitHub webhook calling #C{%s}", $hook ? 'update' : 'create', $base);
+		return;
+	}
+	my ($answered, $err) = $gh->set_hook($owner_repo, url => $want,
+		insecure => $top->_shape->config->get('pipeline.provider.insecure') ? 1 : 0,
+		($hook ? (id => $hook->{id}) : ()));
+	unless ($err) {
+		info("  #G{%s} the GitHub webhook calling #C{%s}", $hook ? 'updated' : 'created', $base);
+		return;
+	}
+	if ($answered == 422 && !$hook) {
+		my $pushes = grep {grep {$_ eq 'push'} @{$_->{events} || []}} @$hooks;
+		warning("  #Y{not created} the GitHub webhook: %s, with %d push hook%s already on the ".
+			"repository; configure one calling #C{%s} in place of another, or let the fallback ".
+			"poll find each push", $err, $pushes, $pushes == 1 ? '' : 's', $shown);
+		return;
+	}
+	warning("  #Y{unverified} the GitHub webhook: %s; configure a push hook calling #C{%s}", $err, $shown);
 }
 
 # }}}

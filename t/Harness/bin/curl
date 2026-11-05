@@ -10,8 +10,10 @@ use JSON::PP;
 my %REASON = (
 	200 => 'OK',
 	201 => 'Created',
+	204 => 'No Content',
 	403 => 'Forbidden',
 	404 => 'Not Found',
+	422 => 'Unprocessable Entity',
 );
 
 # The prerequisites check asks every tool it names for its version, and this
@@ -197,6 +199,49 @@ if ($kind eq 'other') {
 		$status = 201;
 		$answer = {number => $number, html_url => $html_url};
 	}
+} elsif ($url =~ m{/repos/[^/]+/[^/]+/hooks(?:/(\d+))?$}) {
+	# A repository's webhooks (D145), a setting like the rulesets, so a token
+	# that may not administer the repository is refused here too.  GitHub
+	# allows twenty hooks per event, and hook_limit lowers that for a row.
+	my $id = $1;
+	$state->{hooks} ||= [];
+	if (!$state->{admin}) {
+		$status = 404;
+		$answer = {message => 'Not Found'};
+	} elsif ($method eq 'GET' || $method eq 'HEAD') {
+		$answer = $state->{hooks};
+	} elsif ($method eq 'DELETE') {
+		$state->{hooks} = [grep {$_->{id} != ($id // 0)} @{$state->{hooks}}];
+		$status = 204;
+		$answer = {};
+	} else {
+		my $sent = {};
+		eval {$sent = $json->decode($body // '{}'); 1} or $sent = {};
+		my $limit = $state->{hook_limit} // 20;
+		my $pushes = grep {grep {$_ eq 'push'} @{$_->{events} || []}} @{$state->{hooks}};
+		if (!defined $id && $pushes >= $limit) {
+			$status = 422;
+			$answer = {message => 'Validation Failed', errors => [{resource => 'Hook', code => 'custom',
+				message => "The \"push\" event cannot have more than $limit hooks"}]};
+		} elsif (defined $id) {
+			for my $hook (@{$state->{hooks}}) {
+				next unless $hook->{id} == $id;
+				$hook->{config} = {%{$hook->{config} || {}}, %{$sent->{config} || {}}};
+				$hook->{$_} = $sent->{$_} for grep {exists $sent->{$_}} qw/events active/;
+			}
+			$status = 200;
+			$answer = {id => $id};
+		} else {
+			$id = 1 + (sort {$b <=> $a} 0, map {$_->{id}} @{$state->{hooks}})[0];
+			push @{$state->{hooks}}, {%$sent, id => $id};
+			$status = 201;
+			$answer = {id => $id};
+		}
+	}
+	seek($state_fh, 0, 0);
+	truncate($state_fh, 0);
+	print $state_fh $json->encode($state);
+	close $state_fh;
 } elsif ($url =~ m{/repos/[^/]+/[^/]+/rulesets(?:/(\d+))?$}) {
 	my $id = $1;
 	# A ruleset is a repository setting, so a token that may not read the

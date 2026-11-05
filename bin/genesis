@@ -2187,6 +2187,11 @@ define_command("pipeline-apply", {
 			"Skip vault connectivity when compiling.  Useful for dry runs ".
 			"and CI environments without a running vault.",
 
+		'rotate-webhook-token' =>
+			"Replace the pipeline's webhook token with a new one, and the ".
+			"GitHub hook that carries it, in the same run.  Applies only where ".
+			"pipeline.provider.git.webhooks is on.",
+
 		'missing-secrets-ok' =>
 			"Set the pipeline even where a secret it references is found ".
 			"nowhere Concourse would look for it.  The apply checks every ".

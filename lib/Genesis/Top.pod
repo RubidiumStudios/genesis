@@ -2121,6 +2121,22 @@ B<Examples:>
 
     $top->pipeline_secrets_store->{path_prefix};   # '/concourse'
 
+=head2 pipeline_webhooks
+
+    $top->pipeline_webhooks;   # 1 or 0
+
+Whether control's C<pipeline.provider.git.webhooks> is on under an enabled
+Concourse pipeline (D143), the switch for the webhook token on every git
+resource, propagate's check requests, and the apply's token and hook.
+
+B<Returns:> 1 or 0; 0 under any other provider or with the pipeline disabled.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _apply_webhook_token($top) if $top->pipeline_webhooks;
+
 =head2 pipeline_secrets_vault
 
     my $vault = $top->pipeline_secrets_vault;

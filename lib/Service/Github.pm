@@ -930,6 +930,59 @@ sub set_ruleset {
 }
 
 # }}}
+# hooks_url - a repository's webhooks, or one of them {{{
+sub hooks_url {
+	my ($self, $owner_repo, $id) = @_;
+	my $url = sprintf("%s/repos/%s/hooks", $self->base_url, $owner_repo);
+	$url .= "/$id" if defined $id;
+	return $url;
+}
+
+# }}}
+# list_hooks - the webhooks a repository carries, and whether they could be read {{{
+sub list_hooks {
+	my ($self, $owner_repo) = @_;
+	bail("Missing owner/repo for list_hooks") unless $owner_repo;
+	my ($code, $msg, $data) = $self->_api(
+		"GET", $self->hooks_url($owner_repo), undef, undef, 0, $self->{creds}
+	);
+	return ($code, undef, _failure($code, $msg, $data)) unless $code == 200;
+	my $hooks = eval {load_json($data)};
+	return ($code, ref($hooks) eq 'ARRAY' ? $hooks : []);
+}
+
+# }}}
+# set_hook - create a push webhook, or replace one's URL {{{
+sub set_hook {
+	my ($self, $owner_repo, %opts) = @_;
+	bail("Missing owner/repo for set_hook") unless $owner_repo;
+	bail("Missing url for set_hook")        unless $opts{url};
+	my $body = {
+		(defined $opts{id} ? () : (name => 'web', active => JSON::PP::true, events => ['push'])),
+		config => {url => $opts{url}, content_type => 'json',
+			insecure_ssl => ($opts{insecure} ? '1' : '0')},
+	};
+	my ($code, $msg, $data) = $self->_api(
+		(defined $opts{id} ? "PATCH" : "POST"), $self->hooks_url($owner_repo, $opts{id}),
+		{'Content-Type' => 'application/json'},
+		JSON::PP->new->canonical->encode($body), 0, $self->{creds}
+	);
+	return ($code, ($code == 200 || $code == 201) ? undef : _failure($code, $msg, $data));
+}
+
+# }}}
+# delete_hook - remove one webhook {{{
+sub delete_hook {
+	my ($self, $owner_repo, $id) = @_;
+	bail("Missing owner/repo for delete_hook") unless $owner_repo;
+	bail("Missing id for delete_hook")         unless defined $id;
+	my ($code, $msg, $data) = $self->_api(
+		"DELETE", $self->hooks_url($owner_repo, $id), undef, undef, 0, $self->{creds}
+	);
+	return ($code, ($code == 204 || $code == 200) ? undef : _failure($code, $msg, $data));
+}
+
+# }}}
 # _failure - a refused call in GitHub's own words, from its body {{{
 #
 # The status line carries no words over HTTP/2, so the body's message, and

@@ -1692,6 +1692,80 @@ B<Examples:>
   # returns (0, 'HTTP 403 - Resource not accessible by personal access
   # token', {...}) for a token without admin
 
+=head2 hooks_url
+
+  my $url = $gh->hooks_url($owner_repo, $id);
+
+The URL of a repository's webhooks, or of one of them where C<$id> is given.
+
+B<Parameters:> the repository as C<owner/repo>, and an optional hook id.
+
+B<Returns:> the URL.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  $gh->hooks_url('owner/repo');      # https://api.github.com/repos/owner/repo/hooks
+  $gh->hooks_url('owner/repo', 7);   # .../hooks/7
+
+=head2 list_hooks
+
+  my ($code, $hooks, $why) = $gh->list_hooks($owner_repo);
+
+The webhooks the repository carries, each as GitHub answers it, its C<config.url>
+among its keys (D145). A token that may not administer the repository is
+answered 404 or 403 by GitHub, and that comes back as an undefined list with
+GitHub's own reason, so the caller can report the hooks as unverified.
+
+B<Parameters:> the repository as C<owner/repo>.
+
+B<Returns:> the status, the list of hooks or undef, and the reason where undef.
+
+B<Errors:> bails without a repository.
+
+B<Examples:>
+
+  my (undef, $hooks) = $gh->list_hooks('owner/repo');
+  my @push = grep {grep {$_ eq 'push'} @{$_->{events}}} @$hooks;
+
+=head2 set_hook
+
+  my ($code, $why) = $gh->set_hook($owner_repo, url => $url, insecure => 0, id => $id);
+
+Creates a push webhook calling C<url>, or, given an C<id>, replaces that hook's
+URL (D145). The body goes to C<curl> redacted, since the URL carries the token.
+GitHub refuses a hook past its limit of twenty per event with a 422, which comes
+back as the status with GitHub's words.
+
+B<Parameters:> the repository, then C<url>, C<insecure> (GitHub skipping TLS
+verification when it delivers) and an optional C<id>.
+
+B<Returns:> the status, and the reason where it failed.
+
+B<Errors:> bails without a repository or a URL.
+
+B<Examples:>
+
+  my ($code, $why) = $gh->set_hook('owner/repo', url => $check_url);
+  # (422, 'HTTP 422 - Validation Failed: The "push" event cannot have more than 20 hooks')
+
+=head2 delete_hook
+
+  my ($code, $why) = $gh->delete_hook($owner_repo, $id);
+
+Removes one webhook.
+
+B<Parameters:> the repository and the hook's id.
+
+B<Returns:> the status, and the reason where it failed.
+
+B<Errors:> bails without a repository or an id.
+
+B<Examples:>
+
+  $gh->delete_hook('owner/repo', 7);   # (204, undef)
+
 =head1 INTERNAL METHODS
 
 =head2 _api

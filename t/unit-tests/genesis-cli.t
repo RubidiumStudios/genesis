@@ -112,7 +112,7 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		},
 		'pipeline-apply' => {
 			class        => Genesis::Commands::PRE_DEPLOY,
-			options      => [qw/dry-run|n yes|y missing-secrets-ok/],
+			options      => [qw/dry-run|n yes|y missing-secrets-ok rotate-webhook-token/],
 			absent       => [qw/platform|provider|p=s no-fetch/],
 			control_only => 1,
 		},

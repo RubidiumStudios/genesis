@@ -58,7 +58,7 @@ our @EXPORT = qw/
 	shuttle_spy shuttle_requests
 
 	github_double gh_pull_request gh_close_pr gh_merge_pr
-	gh_protection gh_repository gh_host gh_unreachable gh_reachable gh_no_token gh_calls
+	gh_protection gh_hooks gh_repository gh_host gh_unreachable gh_reachable gh_no_token gh_calls
 
 	automation_blocks automation_block_lines load_with automated_config
 	compilable_pipeline shuttle
@@ -4536,6 +4536,29 @@ sub gh_protection {
 		$state->{admin} = ($opts{admin} ? 1 : 0) if defined $opts{admin};
 		$state->{protection}{$opts{branch}} = $opts{settings} if $opts{branch};
 		return $state->{protection};
+	});
+}
+
+# }}}
+# gh_hooks - the repository's webhooks, and a row's own additions to them (D145) {{{
+#
+# With add, a hook another tool or another root keeps is laid down first, so a
+# row can prove the apply touches only its own; with limit, GitHub's twenty push
+# hooks per repository is lowered so a row can meet the refusal.  Answers the
+# hooks as they stand.
+sub gh_hooks {
+	my ($gh, %opts) = @_;
+	my $self = $gh->{harness};
+	return $self->_gh_change(sub {
+		my ($state) = @_;
+		$state->{hooks} ||= [];
+		$state->{hook_limit} = $opts{limit} if defined $opts{limit};
+		for my $url (@{$opts{add} || []}) {
+			my $id = 1 + (sort {$b <=> $a} 0, map {$_->{id}} @{$state->{hooks}})[0];
+			push @{$state->{hooks}}, {id => $id, name => 'web', active => JSON::PP::true,
+				events => ['push'], config => {url => $url, content_type => 'json'}};
+		}
+		return $state->{hooks};
 	});
 }
 

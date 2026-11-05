@@ -1474,6 +1474,14 @@ C<at> dates it.
 Merges a pull request by a named method, which C<method> gives and which
 defaults to C<rebase>, and closes it as merged.
 
+=head2 gh_hooks($gh, %opts)
+
+The repository's webhooks as the double holds them (D145). With C<add>, a list of
+URLs, push hooks of another tool or another root are laid down first, so a row
+can prove the apply touches only its own; with C<limit>, GitHub's twenty push
+hooks per repository is lowered so a row can meet the refusal. Returns the hooks
+as they stand.
+
 =head2 gh_protection($gh, %opts)
 
 Declares what the protection endpoints answer and returns what the run has

@@ -1865,6 +1865,120 @@ B<Examples:>
   _apply_records($top, control_commit => 'control', provider => 'manual');
   # raises a bug, because a branch name is not a commit sha
 
+=head2 _webhook_reference
+
+  my $ref = _webhook_reference();   # 'webhook.token'
+
+The webhook token's reference as the compiled pipeline spells it,
+C<WEBHOOK_TOKEN_REF> with its path and key joined by a dot, so the secret check
+can count it as coming when this apply will write it (D145).
+
+B<Returns:> the reference.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  $coming{_webhook_reference()} = 'would generate';
+
+=head2 _webhook_store_path
+
+  my $path = _webhook_store_path($top);
+
+Where the webhook token is kept: the store's pipeline scope,
+C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/E<lt>pipelineE<gt>/webhook>, under C<token> (D145).
+
+B<Parameters:> the repository handle.
+
+B<Returns:> the path, or undef without a secrets store.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _webhook_store_path($top);   # /concourse/main/bosh/webhook
+
+=head2 _webhook_url_base
+
+  my $base = _webhook_url_base($top);
+
+C<control-branch>'s check webhook without its token,
+C<E<lt>urlE<gt>/api/v1/teams/E<lt>teamE<gt>/pipelines/E<lt>pipelineE<gt>/resources/control-branch/check/webhook>,
+which is both the start of the hook's URL and how the apply tells its own hook
+from any other (D145).
+
+B<Parameters:> the repository handle.
+
+B<Returns:> the URL, or undef without a store or a Concourse URL.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _webhook_url_base($top);
+
+=head2 _apply_webhook_token
+
+  my ($token, $would) = _apply_webhook_token($top, dry_run => 0, skip_vault => 0, rotate => 0);
+
+The pipeline's webhook token, kept or made (D145). Where C<webhooks> is on it
+reads the token at the pipeline scope through C<pipeline_secrets_vault>: one that
+is there is left and answered; one that is not, or every one under C<rotate>, is
+replaced by a new one from L</_random_token> and written. A dry run writes nothing
+and answers what it would do instead, which the secret check then counts as
+coming. With C<skip_vault>, or a store not reachable and authenticated, it reports
+the token unverified and answers nothing. No value is printed.
+
+B<Parameters:> the repository handle, and C<dry_run>, C<skip_vault> and C<rotate>.
+
+B<Returns:> the token, or undef with what a dry run would do.
+
+B<Errors:> those of the vault's write.
+
+B<Examples:>
+
+  my ($token, $would) = _apply_webhook_token($top, dry_run => 1);   # (undef, 'would generate')
+
+=head2 _random_token
+
+  my $token = _random_token();
+
+256 bits from C</dev/urandom>, as 64 hex characters.
+
+B<Returns:> the token.
+
+B<Errors:> bails where C</dev/urandom> cannot be read in full.
+
+B<Examples:>
+
+  length(_random_token());   # 64
+
+=head2 _apply_webhook_hook
+
+  _apply_webhook_hook($top, $github, $owner_repo, token => $token, dry_run => 0);
+
+The repository's GitHub push hook calling C<control-branch>'s check webhook with
+the token (D145). The apply's own hook is the one whose URL begins with
+L</_webhook_url_base>, so a hook of another tool or another root is never
+touched. With C<webhooks> on it creates the hook, updates it where its URL
+differs, or reports it already in place; with them off it removes its own hook.
+Without C<GITHUB_AUTH_TOKEN>, without the rights to read the hooks, or without
+the token, it reports the hook skipped or unverified and prints the URL to
+configure with the token named and not shown; at GitHub's limit it reports the
+refusal and the push hooks already there, and the apply goes on either way. A
+dry run says what it would do.
+
+B<Parameters:> the repository handle, the GitHub client and C<owner/repo> (both
+undef without a token), then C<token> and C<dry_run>.
+
+B<Returns:> nothing.
+
+B<Errors:> None; every failure is a warning.
+
+B<Examples:>
+
+  _apply_webhook_hook($top, $top->github_client, 'owner/repo', token => $token);
+
 =head2 _check_pipeline_secrets
 
   _check_pipeline_secrets($top, $yaml, dry_run => 0, skip_vault => 0, missing_ok => 0);
@@ -1881,7 +1995,9 @@ the report is printed. Without a secrets store, under a provider other than
 Concourse, it does nothing.
 
 B<Parameters:> the repository handle, the compiled C<pipeline.yml> text, and
-C<dry_run>, C<skip_vault> and C<missing_ok>.
+C<dry_run>, C<skip_vault>, C<missing_ok> and C<coming>, a hash of reference to
+what this apply will do to write it, which is reported as coming rather than
+looked up (the webhook token a dry run would generate, D145).
 
 B<Returns:> nothing.
 
