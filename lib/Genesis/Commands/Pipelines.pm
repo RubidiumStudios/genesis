@@ -113,6 +113,14 @@ sub apply {
 	my $result  = $platform eq 'manual' ? undef : _compile_pipeline($top, $platform);
 	$result->{provider}->check_prereqs() or exit 86 if $deploys;
 
+	# Every secret it references, where Concourse will read it, before
+	# anything is set (D142).
+	_check_pipeline_secrets($top, $result->{output}{'pipeline.yml'},
+		dry_run    => $dry_run,
+		skip_vault => $opts->{'skip-vault'},
+		missing_ok => $opts->{'missing-secrets-ok'},
+	) if $platform eq 'concourse';
+
 	_apply_init_branches($top, $git, dry_run => $dry_run);
 
 	if ($ENV{GITHUB_AUTH_TOKEN}) {
@@ -1467,6 +1475,108 @@ sub describe {
 # }}}
 ### Internal Compiler Helpers {{{
 
+# _check_pipeline_secrets - every reference, where Concourse will read it (D142) {{{
+sub _check_pipeline_secrets {
+	my ($top, $yaml, %opts) = @_;
+	my $store = $top->pipeline_secrets_store or return;
+	my %used  = _secret_references($yaml);
+	return unless %used;
+
+	my ($vault, $why);
+	if ($opts{skip_vault}) {
+		$why = '--skip-vault was given';
+	} else {
+		$vault = eval {$top->pipeline_secrets_vault};
+		my $status = $vault ? (eval {$vault->status} // 'unreachable') : 'unreachable';
+		$why = "the store is $status" unless $status eq 'ok';
+	}
+
+	info("\n#G{Checking the pipeline's secrets} where Concourse reads them, %s",
+		$store->{url} ? "in #C{$store->{url}}" : "in the repository's vault");
+	my @missing;
+	for my $ref (sort keys %used) {
+		my ($name, $key) = _split_reference($ref);
+		unless (defined $name) {
+			info("  #Ki{not checked} %s, from a var source of its own", $ref);
+			next;
+		}
+		if ($why) {
+			info("  #Y{unverified}  %s (%s)", $ref, $why);
+			next;
+		}
+		my @paths = _concourse_secret_paths($store, $name);
+		if (my ($found) = grep {$vault->has($_, $key)} @paths) {
+			info("  #G{found}       %s at #C{%s}", $ref, $found);
+		} else {
+			info("  #R{missing}     %s, used by %s; Concourse reads %s",
+				$ref, join(', ', @{$used{$ref}}), join(', then ', map {"#C{$_}"} @paths));
+			push @missing, $ref;
+		}
+	}
+	return unless @missing && !$opts{dry_run} && !$opts{missing_ok};
+
+	bail({exitcode => CONFIG},
+		"Refusing to apply.  %s the pipeline references %s found nowhere ".
+		"Concourse would read %s, so the jobs that use %s would fail when they ".
+		"run.\n\nSet %s at one of the paths above, or give ".
+		"#C{--missing-secrets-ok} to set the pipeline anyway, as for a first ".
+		"apply whose secrets are set afterwards.  No branch was created and no ".
+		"pipeline was set.",
+		@missing == 1 ? 'One secret' : scalar(@missing).' secrets',
+		@missing == 1 ? 'is' : 'are', @missing == 1 ? 'it' : 'them',
+		@missing == 1 ? 'it' : 'them', @missing == 1 ? 'it' : 'each');
+}
+
+# }}}
+# _secret_references - each ((...)) in a compiled pipeline, with where it is used {{{
+sub _secret_references {
+	my ($yaml) = @_;
+	my $pipeline = eval {load_yaml($yaml // '')} or return ();
+	my %used;
+	my $walk; $walk = sub {
+		my ($node, $where) = @_;
+		if (ref($node) eq 'HASH') {
+			$walk->($node->{$_}, $where) for sort keys %$node;
+		} elsif (ref($node) eq 'ARRAY') {
+			$walk->($_, $where) for @$node;
+		} elsif (defined $node) {
+			while ($node =~ /\(\(\s*([^()]+?)\s*\)\)/g) {
+				push @{$used{$1}}, $where unless grep {$_ eq $where} @{$used{$1} || []};
+			}
+		}
+	};
+	for my $section (qw/resource_types resources jobs/) {
+		(my $kind = $section) =~ s/s$//;
+		$kind =~ s/_/ /g;
+		$walk->($_, "$kind $_->{name}") for grep {ref($_) eq 'HASH'} @{$pipeline->{$section} || []};
+	}
+	return %used;
+}
+
+# }}}
+# _split_reference - a reference's secret and field, or undef for a var source's {{{
+sub _split_reference {
+	my ($ref) = @_;
+	return () if $ref =~ /^[^".]+:/;   # ((source:path.field)) is another source's
+	my ($name, $key) = $ref =~ /^"?([^"]+?)"?(?:\.(.+))?$/;
+	return ($name, $key // 'value');
+}
+
+# }}}
+# _concourse_secret_paths - where Concourse looks for a secret, in its order {{{
+sub _concourse_secret_paths {
+	my ($store, $name) = @_;
+	$name =~ s{^/+}{};
+	my $prefix = $store->{path_prefix};
+	return (
+		"$prefix/$store->{team}/$store->{pipeline}/$name",
+		"$prefix/$store->{team}/$name",
+		(defined $store->{shared_path} && length $store->{shared_path}
+			? ("$prefix/" . ($store->{shared_path} =~ s{^/+|/+$}{}gr) . "/$name") : ()),
+	);
+}
+
+# }}}
 # _compile_pipeline - compile from the repository configuration {{{
 sub _compile_pipeline {
 	my ($top, $platform) = @_;

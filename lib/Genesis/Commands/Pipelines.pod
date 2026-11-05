@@ -1865,6 +1865,90 @@ B<Examples:>
   _apply_records($top, control_commit => 'control', provider => 'manual');
   # raises a bug, because a branch name is not a commit sha
 
+=head2 _check_pipeline_secrets
+
+  _check_pipeline_secrets($top, $yaml, dry_run => 0, skip_vault => 0, missing_ok => 0);
+
+Checks every C<((name.key))> reference in the compiled pipeline against the
+secrets store before anything is set (D142, T472). Each reference is looked up
+where Concourse reads it, through C<Genesis::Top-E<gt>pipeline_secrets_vault>, and
+reported as found (with the path), missing (with the jobs and resources that use
+it and every path Concourse reads), unverified (where C<--skip-vault> was given or
+the store is not reachable and authenticated), or not checked (a reference to a
+var source of its own). No value is ever printed. A missing reference refuses
+the apply, unless it is a dry run or C<--missing-secrets-ok> was given; either way
+the report is printed. Without a secrets store, under a provider other than
+Concourse, it does nothing.
+
+B<Parameters:> the repository handle, the compiled C<pipeline.yml> text, and
+C<dry_run>, C<skip_vault> and C<missing_ok>.
+
+B<Returns:> nothing.
+
+B<Errors:> bails at C<CONFIG> naming the count of missing secrets and the way
+past.
+
+B<Examples:>
+
+  _check_pipeline_secrets($top, $output->{'pipeline.yml'}, dry_run => $dry_run);
+
+=head2 _secret_references
+
+  my %used = _secret_references($yaml);
+
+Every C<((...))> reference in a compiled pipeline, each with the resource types,
+resources and jobs it appears in, named as C<resource control-branch> or
+C<job deploy-qa>. A pipeline that will not parse answers nothing.
+
+B<Parameters:> the pipeline's YAML text.
+
+B<Returns:> a hash of reference to a list of where it is used.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _secret_references($yaml);   # ('secret/ci/git.private_key' => ['resource qa-branch', ...])
+
+=head2 _split_reference
+
+  my ($name, $key) = _split_reference('secret/ci/git.private_key');
+
+A reference's secret path and field, the field being C<value> where none is
+given, as Concourse reads it; a quoted path loses its quotes. A reference to a var
+source of its own, C<((source:path.field))>, answers an empty list.
+
+B<Parameters:> the reference, without its parentheses.
+
+B<Returns:> the path and the field, or an empty list.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _split_reference('github.token');     # ('github', 'token')
+  _split_reference('vault-src:x.y');    # ()
+
+=head2 _concourse_secret_paths
+
+  my @paths = _concourse_secret_paths($store, $name);
+
+Where Concourse looks for a secret, in its order: the pipeline scope,
+C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/E<lt>pipelineE<gt>/name>, then the team scope,
+C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/name>, then the shared path where the store names one.
+
+B<Parameters:> the store, as C<Genesis::Top-E<gt>pipeline_secrets_store> gives it, and
+the secret's path.
+
+B<Returns:> the paths, in Concourse's order.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _concourse_secret_paths($store, 'secret/ci/git');
+  # ('/concourse/main/bosh/secret/ci/git', '/concourse/main/secret/ci/git')
+
 =head2 _compile_pipeline
 
   my $result = _compile_pipeline($top, $provider_type);

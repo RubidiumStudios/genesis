@@ -2121,6 +2121,25 @@ B<Examples:>
 
     $top->pipeline_secrets_store->{path_prefix};   # '/concourse'
 
+=head2 pipeline_secrets_vault
+
+    my $vault = $top->pipeline_secrets_vault;
+
+The vault the secrets store is in (D141): attached by the store's C<url> where it
+names one, with its namespace and TLS setting and no target, so each operator's
+own C<safe> target for that URL is used; the repository's vault, L</vault>, where
+it names none. It is undef where L</pipeline_secrets_store> is, and
+C<Genesis::Env-E<gt>ci_vault> answers through it. The attachment is memoized.
+
+B<Returns:> a C<Service::Vault> object, or undef.
+
+B<Errors:> those of C<Service::Vault::Remote-E<gt>attach> where no target reaches the
+store's URL.
+
+B<Examples:>
+
+    $top->pipeline_secrets_vault->has('/concourse/main/github', 'token');
+
 =head2 pipeline_section
 
     my $section = $top->pipeline_section();

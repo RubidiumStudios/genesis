@@ -2568,6 +2568,8 @@ sub _yaml_pair {
 # process makes, and _path_prefix already names the directory the wrapper sits
 # in, so the wrapper reaches a spawned command through run_genesis and the
 # parent's own path is left exactly as it was.
+our $PIPELINE_SECRET = 'concourse/main/secret/ci/git';
+
 sub fixture_vault {
 	my ($self) = @_;
 	return $self->{vault_target} if $self->{vault_target};
@@ -2578,6 +2580,16 @@ sub fixture_vault {
 
 	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
 		_real_safe(), 'rm', '-rf', $self->exodus_mount);
+
+	# The one secret the harness's own pipeline references, its clone key, at
+	# Concourse's team scope, so a real apply's secret check (D142) finds it as
+	# it would on a site that had set it.  forget_pipeline_secrets removes it.
+	# Concourse's prefix is a mount of its own in a real store, so it is one
+	# here; enabling it again is refused harmlessly.
+	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
+		_real_safe(), 'vault', 'secrets', 'enable', '-path=concourse', 'kv');
+	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
+		_real_safe(), 'set', $PIPELINE_SECRET, 'private_key=harness-clone-key');
 
 	$self->{vault_log}    = "$self->{tmp}/vault-reads.log";
 	$self->{vault_refuse} = "$self->{tmp}/vault-refused-writes";
@@ -2640,6 +2652,19 @@ EOS
 # }}}
 # _real_safe - the safe the recording wrapper hands its call on to {{{
 sub _real_safe { return _real_tool('safe') }
+
+# }}}
+# forget_pipeline_secrets - remove the secret fixture_vault set for the pipeline {{{
+#
+# For a row that proves what the apply's secret check (D142) does when a
+# reference resolves nowhere.  The next harness's fixture_vault sets it again.
+sub forget_pipeline_secrets {
+	my ($self) = @_;
+	my $target = $self->fixture_vault;
+	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
+		_real_safe(), 'rm', '-f', $PIPELINE_SECRET);
+	return $self;
+}
 
 # }}}
 # _real_tool - the tool on the path underneath the harness's own wrappers {{{

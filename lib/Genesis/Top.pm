@@ -1837,6 +1837,21 @@ sub pipeline_secrets_store {
 }
 
 # }}}
+# pipeline_secrets_vault - the vault the secrets store is in, or undef (D141) {{{
+sub pipeline_secrets_vault {
+	my ($self) = @_;
+	my $store = $self->pipeline_secrets_store or return undef;
+	return $self->vault unless $store->{url};
+	return $self->_memoize(sub {
+		Service::Vault::Remote->attach(
+			url       => $store->{url},
+			verify    => $store->{insecure} ? 0 : 1,
+			namespace => $store->{namespace} // '',
+		);
+	});
+}
+
+# }}}
 # pipeline_section - the pipeline section of the configuration, as control holds it {{{
 #
 # For a reader that takes the whole block, such as the compiler's parser, so

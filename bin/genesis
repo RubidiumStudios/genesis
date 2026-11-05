@@ -2187,6 +2187,13 @@ define_command("pipeline-apply", {
 			"Skip vault connectivity when compiling.  Useful for dry runs ".
 			"and CI environments without a running vault.",
 
+		'missing-secrets-ok' =>
+			"Set the pipeline even where a secret it references is found ".
+			"nowhere Concourse would look for it.  The apply checks every ".
+			"reference before it sets anything and refuses on a missing one; ".
+			"this is for the first apply of a pipeline whose secrets are set ".
+			"afterwards.  The report is printed either way.",
+
 		'debug-dir=s' =>
 			"Write intermediate compiler artifacts to this directory.",
 	],

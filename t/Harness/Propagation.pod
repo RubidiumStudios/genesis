@@ -922,6 +922,12 @@ what a row asserts is what the run actually sent.  A run that sent no C<PATCH>
 answers an empty list, which is how a row says that a pull request was left
 alone.
 
+=head2 forget_pipeline_secrets($h)
+
+Removes the secret L</fixture_vault($h)> set for the harness pipeline, so the
+apply's secret check (D142) finds its one reference nowhere. The next harness's
+C<fixture_vault> sets it again. Returns the harness.
+
 =head2 fixture_vault($h)
 
 Spins the suite's own local vault through C<helper::vault_start> and points the
@@ -942,6 +948,12 @@ Because that clearing takes the whole subtree, a harness whose C<exodus_mount>
 is shorter than the default C</secret/exodus/> is refused by name here rather
 than clearing records it does not own, which would include the records another
 harness in the same file is standing on.
+
+It also enables a C<concourse> KV mount, as a real store has, and sets the one
+secret the harness's own pipeline references, the clone key, at Concourse's team
+scope, C<concourse/main/secret/ci/git>, so a real apply's secret check (D142)
+finds it as it would on a site that had set it. L</forget_pipeline_secrets($h)>
+removes it for a row that proves the refusal.
 
 A recording C<safe> is laid down beside the target, in the directory
 C<run_genesis> puts first on the path of the command under test, and that
