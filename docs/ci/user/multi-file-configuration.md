@@ -84,6 +84,18 @@ Concourse reads a reference `((name.key))` at `<path_prefix>/<team>/<pipeline>/n
 
 Two limits. `shared_path` must be the value your Concourse server's `--vault-shared-path` is set to: Genesis cannot read the server's settings, so a shared path the server does not use would report a secret found where Concourse never looks. And a Concourse whose `--vault-lookup-templates` changes its lookup order is not modelled; the check assumes the default order above.
 
+`git` says how the pipeline learns that a branch moved:
+
+```yaml
+provider:
+  git:
+    webhooks: true            # the default is false: every branch is polled
+    control_check_every: 1m   # control's fallback poll; unset, Concourse's 1m
+    check_every: 1h           # every deployment branch's fallback poll; unset, 1m
+```
+
+With `webhooks` on, `pipeline-apply` keeps a webhook token for this pipeline in the secrets store and a GitHub push hook that checks control the moment anything is pushed, and propagate asks Concourse to check each deployment branch it has just pushed, so a deploy starts within seconds of its delivery. What neither reports, chiefly a pull request merged on GitHub, waits for the fallback poll, which is why the intervals are still worth setting: an hour for the deployment branches keeps GitHub's traffic low. The intervals are Concourse durations (`30s`, `5m`, `1h`) or `never`.
+
 `group_commits` is true, a deploy taking the tip of whatever arrived on its branch. False would deploy each commit in turn, and that is not built yet, so false is refused when the configuration loads.
 
 Each provider also declares what it is able to do, as six named capabilities, and a configuration key whose capability is false is refused at configuration load naming the key, the provider, and the capability. That is how `genesis.pipeline.manual` and `genesis.pipeline.redeploy_cron` are gated, and `pipeline.provider.group_commits` with them.

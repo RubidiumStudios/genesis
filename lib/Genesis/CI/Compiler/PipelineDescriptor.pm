@@ -513,7 +513,26 @@ sub _git_resource {
 # _control_resource - the control branch propagate reads and triggers on {{{
 sub _control_resource {
 	my ($self, $ast) = @_;
-	return { %{$self->_git_resource($ast)}, name => 'control-branch' };
+	return { %{$self->_git_resource($ast)}, name => 'control-branch',
+		$self->_git_checks($ast, 'control_check_every') };
+}
+
+# }}}
+# branch_resource_name - the resource an environment's deployment branch is (contract a1, D144) {{{
+sub branch_resource_name {
+	my ($class, $alias) = @_;
+	return "$alias-branch";
+}
+
+# }}}
+# _git_checks - how a git resource learns its branch moved (D143) {{{
+sub _git_checks {
+	my ($self, $ast, $interval_key) = @_;
+	my $git = ($ast->configuration || {})->{git} || {};
+	return (
+		(defined $git->{$interval_key} ? (check_every => $git->{$interval_key}) : ()),
+		($git->{webhooks} ? (webhook_token => _unwrap_ref({secret_ref => WEBHOOK_TOKEN_REF()})) : ()),
+	);
 }
 
 # }}}
@@ -750,8 +769,9 @@ sub _env_resources {
 
 	# The env branch is the change signal, and no deploy writes it: no filter.
 	push @resources, {
-		name => "$alias-branch", type => 'git', icon => 'github',
+		name => $self->branch_resource_name($alias), type => 'git', icon => 'github',
 		source => {%gs, branch => $wf_data->{branches}{$env}},
+		$self->_git_checks($ast, 'check_every'),
 	};
 
 	# BOSH config resources, emitted only when track_bosh_configs is set
@@ -848,6 +868,8 @@ use constant JOBS_URL =>
 use constant SUMMARY_OUTPUT => 'summary';
 use constant SUMMARY_FILE   => 'summary/summary.txt';
 use constant STARTED_BY     => ', started by $BUILD_CREATED_BY';
+# The webhook token's reference, as path:key under the pipeline scope (D143, D145).
+use constant WEBHOOK_TOKEN_REF => 'webhook:token';
 
 # Each Slack message's kind, as the shortcode it begins with (D131).
 our %NOTIFICATION_EMOJI = (
@@ -900,7 +922,7 @@ sub _notify_job {
 		{ env => $env, text_file => SUMMARY_FILE, kind => 'staged' });
 
 	my @plan = (
-		{ in_parallel => [{ get => "$alias-branch", trigger => JSON::PP::true }] },
+		{ in_parallel => [{ get => $self->branch_resource_name($alias), trigger => JSON::PP::true }] },
 		{ task => 'show-pending-changes', %to, config => $task_cfg },
 	);
 	push @plan, $notif if $notif;
@@ -949,9 +971,9 @@ sub _deploy_job {
 	# env's files, and a tracked config change redeploys instead.
 	my @gets;
 	if ($is_auto || !$inline) {
-		push @gets, { get => "$alias-branch", trigger => $trigger };
+		push @gets, { get => $self->branch_resource_name($alias), trigger => $trigger };
 	} else {
-		push @gets, { get => "$alias-branch", trigger => JSON::PP::false,
+		push @gets, { get => $self->branch_resource_name($alias), trigger => JSON::PP::false,
 			passed => [_notify_job_name($alias)] };
 	}
 
@@ -1086,7 +1108,7 @@ sub _redeploy_job {
 	my $run  = $self->_run_resource($ast, $dn);
 	my @gets = (
 		($run ? ({ get => $run->{name}, trigger => JSON::PP::true }) : ()),
-		{ get => "$alias-branch", trigger => JSON::PP::false },
+		{ get => $self->branch_resource_name($alias), trigger => JSON::PP::false },
 	);
 	if (my $tl_get = $self->_task_library_get($ast)) {
 		push @gets, $tl_get;
@@ -1540,7 +1562,7 @@ sub _task_config {
 	# an operator would type; the retired ci-* commands have no caller.
 	my $cli     = $opts->{cli_args};
 	bug("_task_config was given no cli_args, so no command to run") unless $cli && @$cli;
-	my $input   = $opts->{input} || "$alias-branch";
+	my $input   = $opts->{input} || $self->branch_resource_name($alias);
 
 	my $img_src = $self->_task_image_source($ast);
 
@@ -2109,6 +2131,13 @@ where C<inline>, the default, leaves each beside its deploy.
 
 Every job's C<public> comes from C<pipeline.provider.public>, false unless
 set, through C<_job_public> (D138, contract b4).
+
+C<pipeline.provider.git> sets, through C<_git_checks>, how C<control-branch> and
+each deployment branch's resource learn their branch moved (D143):
+C<webhooks> puts C<webhook_token: ((webhook.token))> on all of them, the
+reference C<WEBHOOK_TOKEN_REF> names, and C<control_check_every> and
+C<check_every> their polling intervals apart.  A deployment branch's resource is
+named by C<branch_resource_name>, which propagate reads too (D144).
 
 An environment's C<genesis.pipeline.provider.tag> goes, through
 C<_worker_tags>, on the steps that reach its network alone: the task of its

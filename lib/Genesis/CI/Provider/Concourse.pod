@@ -164,7 +164,15 @@ C<type: concourse>, each with its type, its default where it has one, and
 the description C<genesis config> renders as help.
 
 The keys are C<target>, C<url>, C<team>, C<insecure>, C<min_fly_version>, C<fly_bin_path>,
-C<public>, C<tagged>, C<task>, C<pause_after_set>, C<secrets_store>, and C<group_commits>.
+C<public>, C<tagged>, C<task>, C<pause_after_set>, C<git>, C<secrets_store>, and C<group_commits>.
+
+C<git> says how the pipeline's git resources learn a branch moved (D143):
+C<webhooks>, false by default, puts the webhook token's reference on
+C<control-branch> and every deployment branch's resource and turns on
+propagate's check requests and the apply's GitHub hook; C<control_check_every>
+and C<check_every> are C<control-branch>'s and the deployment branches' polling
+intervals, unset meaning Concourse's own C<1m>, each checked by
+L</_check_interval_rule($value)>.
 
 C<secrets_store> names the store Concourse resolves the pipeline's C<((...))>
 references from, by C<url> (unset, the environment's own vault), C<namespace>,
@@ -622,6 +630,23 @@ B<Errors:> None; the schema reports it as C<pipeline.provider.target: ...>.
 B<Examples:>
 
     _target_retired('ci');   # "is no longer read.  A fly target is ..."
+
+=head2 _check_interval_rule($value)
+
+The C<check> rule of C<git.control_check_every> and C<git.check_every>: a
+Concourse duration in Go's form, one or more number and unit pairs such as
+C<30s>, C<5m> or C<1h30m>, or C<never> (D143).
+
+B<Parameters:> the value as written.
+
+B<Returns:> C<undef> for a duration or C<never>, else the refusal, without the key.
+
+B<Errors:> None; the schema reports it as C<pipeline.provider.git.check_every: ...>.
+
+B<Examples:>
+
+    _check_interval_rule('1h');       # undef
+    _check_interval_rule('hourly');   # "expected a Concourse duration, ..."
 
 =head2 _worker_tag_rule($value)
 

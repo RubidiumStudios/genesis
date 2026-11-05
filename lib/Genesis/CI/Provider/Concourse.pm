@@ -348,6 +348,19 @@ sub provider_options_schema {
 		},
 
 		pause_after_set => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Leave the pipeline paused after fly set-pipeline'},
+		# How the git resources learn a branch moved (D143).
+		git => {
+			type        => 'hash',
+			description => 'How the pipeline\'s git resources learn a branch moved',
+			schema => {
+				webhooks            => {type => 'boolean', default => Genesis::Config::FALSE,
+					description => 'Webhook tokens on every git resource, propagate\'s check requests, and the GitHub hook'},
+				control_check_every => {type => 'string', check => \&_check_interval_rule,
+					description => "control-branch's polling interval (Concourse's default, 1m, where unset)"},
+				check_every         => {type => 'string', check => \&_check_interval_rule,
+					description => "Every deployment branch's polling interval (Concourse's default, 1m, where unset)"},
+			},
+		},
 		# No default, so an absent block is told from an empty one (D141).
 		secrets_store   => {
 			type        => 'hash',
@@ -411,6 +424,12 @@ sub _pipeline_enabled {
 
 # }}}
 # _target_retired - a committed fly target is refused, with what replaces it {{{
+sub _check_interval_rule {
+	my ($value) = @_;
+	return undef if $value =~ /^(?:never|(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h))+)$/;
+	return "expected a Concourse duration, such as 30s, 5m or 1h, or never";
+}
+
 sub _worker_tag_rule {
 	my ($value) = @_;
 	my @tags = ref($value) eq 'ARRAY' ? @$value : ($value);
