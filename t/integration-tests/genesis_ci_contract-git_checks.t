@@ -59,6 +59,23 @@ subtest 'absent, no git resource carries either' => sub {
 	}
 };
 
+# T474's compile half (D144): the propagate task is handed what it needs to ask
+# Concourse to check a branch it pushed, and only where webhooks are on.
+subtest 'webhooks: true hands propagate the check request' => sub {
+	my ($p, $why) = dry_pipeline(contract_harness(config => {'pipeline.provider.git.webhooks' => 'true'}));
+	ok($p, 'the dry apply prints a pipeline') or return diag($why);
+	my $params = task_step(pipeline_job($p, 'propagate'))->{config}{params} || {};
+	is($params->{GENESIS_CONCOURSE_URL},  'https://ci.harness.example', 'e4: the Concourse URL');
+	is($params->{GENESIS_CONCOURSE_TEAM}, 'main', 'its team');
+	ok(length($params->{GENESIS_CONCOURSE_PIPELINE} // ''), 'the pipeline name');
+	is($params->{GENESIS_CONCOURSE_WEBHOOK_TOKEN}, '((webhook.token))', 'and the token reference');
+
+	($p, $why) = dry_pipeline(contract_harness());
+	ok($p, 'the dry apply prints a pipeline') or return diag($why);
+	$params = task_step(pipeline_job($p, 'propagate'))->{config}{params} || {};
+	ok(!(grep {/^GENESIS_CONCOURSE_/} keys %$params), 'without webhooks, none of them');
+};
+
 subtest 'an interval that is not a Concourse duration is refused' => sub {
 	for my $bad ('hourly', '5 minutes', '10') {
 		my ($p, $why) = dry_pipeline(contract_harness(config => {'pipeline.provider.git.check_every' => $bad}));

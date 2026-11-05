@@ -272,6 +272,32 @@ B<Examples:>
 
     Genesis::CI::Provider::Concourse->capabilities->{deployment_locks};  # 1
 
+=head1 CLASS METHODS - FROM A PIPELINE TASK
+
+=head2 request_branch_checks(@resources)
+
+Asks Concourse to check each named resource now, by POSTing its check webhook,
+C<E<lt>urlE<gt>/api/v1/teams/E<lt>teamE<gt>/pipelines/E<lt>pipelineE<gt>/resources/E<lt>resourceE<gt>/check/webhook?webhook_token=E<lt>tokenE<gt>>,
+after propagate has pushed the branches they watch (D144). The URL, team, pipeline
+and token come from C<GENESIS_CONCOURSE_URL>, C<_TEAM>, C<_PIPELINE> and
+C<_WEBHOOK_TOKEN>, which the compiler hands the propagate task where
+C<pipeline.provider.git.webhooks> is on, and C<GENESIS_CONCOURSE_INSECURE> skips TLS
+verification. Without all four, or without a resource, it asks nothing. The URL
+carries the token, so it reaches the trace log redacted and is never printed. A
+request Concourse does not answer with a 2xx warns, naming the resource and the
+status, and never fails the run, the push being published and the fallback poll
+still catching it.
+
+B<Parameters:> the resource names, as C<Genesis::CI::Compiler::PipelineDescriptor-E<gt>branch_resource_name> gives them.
+
+B<Returns:> 1 where it asked, 0 where it had nothing to ask with.
+
+B<Errors:> None; each failure is a warning.
+
+B<Examples:>
+
+    Genesis::CI::Provider::Concourse->request_branch_checks('qa-branch');
+
 =head1 CLASS METHODS - VALIDATION
 
 =head2 validate_config($config, $path, $discriminator)

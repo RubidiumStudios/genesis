@@ -162,6 +162,9 @@ sub _parse_genesis_config {
 	$parsed{pipeline}{configuration}{public} = $parsed{provider}{public} ? 1 : 0;
 	$parsed{pipeline}{configuration}{git} = {%{$parsed{provider}{git}}}
 		if ref($parsed{provider}{git}) eq 'HASH';
+	# Where a task asks Concourse for something, as propagate's check requests do (D144).
+	my %concourse = map {($_ => $parsed{provider}{$_})} grep {defined $parsed{provider}{$_}} qw/url team insecure/;
+	$parsed{pipeline}{configuration}{concourse} = \%concourse if %concourse;
 	if (my $registry = $data->{registry}) {
 		$parsed{pipeline}{configuration}{registry} = {
 			uri => $registry->{uri},

@@ -424,6 +424,33 @@ sub _pipeline_enabled {
 
 # }}}
 # _target_retired - a committed fly target is refused, with what replaces it {{{
+# request_branch_checks - ask Concourse to check the resources of branches just pushed (D144) {{{
+sub request_branch_checks {
+	my ($class, @resources) = @_;
+	my %ci = map {($_ => $ENV{"GENESIS_CONCOURSE_$_"})} qw/URL TEAM PIPELINE WEBHOOK_TOKEN/;
+	return 0 unless @resources && !grep {!defined || !length} values %ci;
+
+	my $escape = sub {(my $s = shift) =~ s/([^A-Za-z0-9._~-])/sprintf('%%%02X', ord $1)/ge; $s};
+	my $base = sprintf('%s/api/v1/teams/%s/pipelines/%s/resources',
+		$ci{URL} =~ s{/+$}{}r, $escape->($ci{TEAM}), $escape->($ci{PIPELINE}));
+	info("\n#G{Asking Concourse} to check what was pushed...");
+	for my $resource (@resources) {
+		my $url = "$base/" . $escape->($resource) . '/check/webhook';
+		# The URL carries the token, so it reaches the trace log redacted.
+		my ($code, $rc) = run({stderr => 0}, 'curl', '-sS', '-o', '/dev/null', '-w', '%{http_code}',
+			'-X', 'POST', ($ENV{GENESIS_CONCOURSE_INSECURE} ? '-k' : ()),
+			{redact => "$url?webhook_token=" . $escape->($ci{WEBHOOK_TOKEN})});
+		if (!$rc && ($code // '') =~ /^2\d\d$/) {
+			info("  #G{%s}: checking now", $resource);
+		} else {
+			warning("  #Y{%s}: Concourse was not asked to check it (%s); its next poll will find the push",
+				$resource, $rc ? 'no answer' : "HTTP $code");
+		}
+	}
+	return 1;
+}
+
+# }}}
 sub _check_interval_rule {
 	my ($value) = @_;
 	return undef if $value =~ /^(?:never|(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h))+)$/;

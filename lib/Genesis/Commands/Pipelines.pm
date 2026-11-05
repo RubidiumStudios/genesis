@@ -664,6 +664,16 @@ sub propagate {
 			);
 
 			$record->{published} = $publish->{published} || []; # what _write_trailer_holds reads
+
+			# Concourse checks each deployment branch now, not at its next
+			# poll; a pull request branch has no resource (D144).
+			my %env_of_branch = map {($top->branch_for($_->{env}) => $_->{env})} @publish_specs;
+			require Genesis::CI::Provider::Concourse;
+			require Genesis::CI::Compiler::PipelineDescriptor;
+			Genesis::CI::Provider::Concourse->request_branch_checks(
+				map {Genesis::CI::Compiler::PipelineDescriptor->branch_resource_name($env_of_branch{$_})}
+				grep {defined $env_of_branch{$_}} @{$publish->{published} || []}
+			);
 		}
 
 		# Only once the branch is on the remote: GitHub opens from what it holds.

@@ -525,6 +525,22 @@ sub branch_resource_name {
 }
 
 # }}}
+# _check_request_params - what propagate needs to ask Concourse to check a branch (D144) {{{
+sub _check_request_params {
+	my ($self, $ast) = @_;
+	my $config = $ast->configuration || {};
+	return () unless ($config->{git} || {})->{webhooks};
+	my $ci = $config->{concourse} || {};
+	return (
+		GENESIS_CONCOURSE_URL           => $ci->{url},
+		GENESIS_CONCOURSE_TEAM          => $ci->{team},
+		GENESIS_CONCOURSE_PIPELINE      => $ast->metadata->{name},
+		GENESIS_CONCOURSE_WEBHOOK_TOKEN => _unwrap_ref({secret_ref => WEBHOOK_TOKEN_REF()}),
+		($ci->{insecure} ? (GENESIS_CONCOURSE_INSECURE => 1) : ()),
+	);
+}
+
+# }}}
 # _git_checks - how a git resource learns its branch moved (D143) {{{
 sub _git_checks {
 	my ($self, $ast, $interval_key) = @_;
@@ -602,7 +618,10 @@ sub _propagate_job {
 			(map {+{ get => $_, trigger => JSON::PP::true }} @{$ran_names || []}),
 			{ task => 'propagate', config => $self->_task_config($ast, undef, undef, undef, {}, {
 				input => 'control-branch',
-				($token ? (params => { GITHUB_AUTH_TOKEN => $token }) : ()),
+				params => {
+					($token ? (GITHUB_AUTH_TOKEN => $token) : ()),
+					$self->_check_request_params($ast),
+				},
 				$notif
 					? (cli_args => ['propagate', '--summary-file', "$up/".SUMMARY_FILE()],
 					   outputs  => [{ name => SUMMARY_OUTPUT() }])
