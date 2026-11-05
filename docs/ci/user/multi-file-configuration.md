@@ -73,12 +73,12 @@ The tag goes on the steps that need the environment's network: the task of its d
 ```yaml
 provider:
   secrets_store:
-    url: https://vault.ops.example.com   # unset: the environments' own vault
+    url: https://vault.ops.example.com   # unset: the repository's own vault (secrets_provider)
     namespace: ops                       # if any
     path_prefix: /concourse              # Concourse's --vault-path-prefix; the default
 ```
 
-Concourse reads a reference `((name.key))` at `<path_prefix>/<team>/<pipeline>/name`, then at `<path_prefix>/<team>/name`. With `secrets_store` written, Genesis's CI paths follow that order: `ci_mount` is the team scope, `/concourse/<team>/`, for what every pipeline of the team shares; the pipeline scope `/concourse/<team>/<pipeline>/` holds what this repository's pipeline alone uses; and `ci_base` is `/concourse/<team>/<pipeline>/<env>/`. Hooks see the first and last as `GENESIS_CI_MOUNT` and `GENESIS_CI_BASE`, and an environment can still override either with `genesis.ci_mount` or `genesis.ci_base`. Each operator reaches the store through their own `safe` target for its URL. Without the block the CI paths stay where they always were, under the environment's secrets mount.
+Concourse reads a reference `((name.key))` at `<path_prefix>/<team>/<pipeline>/name`, then at `<path_prefix>/<team>/name`. Under Concourse, Genesis's CI paths follow that order whether or not you write the block, which you need only to point elsewhere or change a default; leave it out entirely when Concourse reads the same vault your `secrets_provider` names, under `/concourse`: `ci_mount` is the team scope, `/concourse/<team>/`, for what every pipeline of the team shares; the pipeline scope `/concourse/<team>/<pipeline>/` holds what this repository's pipeline alone uses; and `ci_base` is `/concourse/<team>/<pipeline>/<env>/`. Hooks see the first and last as `GENESIS_CI_MOUNT` and `GENESIS_CI_BASE`, and an environment can still override either with `genesis.ci_mount` or `genesis.ci_base`. Each operator reaches the store through their own `safe` target for its URL. Under the manual provider, or with the pipeline disabled, the CI paths stay where they always were, under the environment's secrets mount.
 
 `group_commits` is true, a deploy taking the tip of whatever arrived on its branch. False would deploy each commit in turn, and that is not built yet, so false is refused when the configuration loads.
 

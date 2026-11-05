@@ -2106,8 +2106,11 @@ Where Concourse resolves the pipeline's C<((...))> references: control's
 C<pipeline.provider.secrets_store> with its C<path_prefix> normalized (default
 C</concourse>, no trailing slash), and beside it the C<team> and the C<pipeline>
 name (C<pipeline.name>, else the deployment type) that complete Concourse's
-lookup paths (D141). It is undef where the pipeline is not enabled or names no
-store, which is what keeps the CI paths at their old defaults.
+lookup paths (D141). Under an enabled Concourse pipeline it always answers, an
+absent block being the defaults, since Concourse always resolves through a
+credential manager (D141, noted 2026-11-05). It is undef under any other provider
+or with the pipeline disabled, which is what keeps the CI paths at their old
+defaults there.
 
 B<Returns:> a hash reference of C<url>, C<namespace>, C<path_prefix>,
 C<shared_path>, C<insecure>, C<team> and C<pipeline>, or undef.

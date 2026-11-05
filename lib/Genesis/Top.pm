@@ -1821,10 +1821,12 @@ sub pipeline_name {
 # pipeline_secrets_store - where Concourse resolves the pipeline's references, or undef {{{
 sub pipeline_secrets_store {
 	my ($self) = @_;
-	return undef unless $self->pipeline_enabled;
+	# Concourse always resolves through a credential manager, so under it the
+	# store exists whether the block is written or not (D141, noted 2026-11-05).
+	return undef unless ($self->pipeline_provider_type // '') eq 'concourse';
 	my $config = $self->_shape->config;
 	my $store  = $config->get('pipeline.provider.secrets_store');
-	return undef unless ref($store) eq 'HASH';
+	$store = {} unless ref($store) eq 'HASH';
 	(my $prefix = $store->{path_prefix} // '/concourse') =~ s#^/?(.*?)/?$#/$1#;
 	return {
 		%$store,

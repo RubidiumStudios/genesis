@@ -3958,7 +3958,9 @@ sub ci_vault {
 	$_[0]->_memoize(sub {
 		my ($self) = @_;
 		my $store = $self->top->pipeline_secrets_store;
-		return $self->vault unless $store && $store->{url};
+		return $self->vault unless $store;
+		# One store per pipeline, so the repository's vault, not this environment's own.
+		return $self->top->vault unless $store->{url};
 		return Service::Vault::Remote->attach(
 			url       => $store->{url},
 			verify    => $store->{insecure} ? 0 : 1,

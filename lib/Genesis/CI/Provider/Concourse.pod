@@ -168,10 +168,11 @@ C<public>, C<tagged>, C<task>, C<pause_after_set>, C<secrets_store>, and C<group
 
 C<secrets_store> names the store Concourse resolves the pipeline's C<((...))>
 references from, by C<url> (unset, the environment's own vault), C<namespace>,
-C<path_prefix> (default C</concourse>), C<shared_path> and C<insecure> (D141). It
-declares no default, so an absent block is told from an empty one: only a
-repository that writes it moves C<Genesis::Env>'s CI paths onto Concourse's
-lookup order.
+C<path_prefix> (default C</concourse>), C<shared_path> and C<insecure> (D141). An
+absent block is the defaults, the repository's vault under C</concourse>, since
+Concourse always resolves through a credential manager, so every Concourse
+repository's CI paths follow Concourse's lookup order and the block is written
+only to change one of them (D141, noted 2026-11-05).
 
 This fragment is the only place these keys are declared, and it is the
 whole of what the block admits beside the type, so a key that is not here

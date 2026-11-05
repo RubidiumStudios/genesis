@@ -32,17 +32,18 @@ sub load_qa {
 	# configuration's commit below carries it.
 	write_env_file($h, 'qa', genesis => $opts{genesis} || {}, commit => 0);
 	Genesis::run({dir => $h->a}, 'git', 'add', '--', 'qa.yml');
-	my $top = load_with($h, join("\n",
-		automated_config('concourse', 'url: https://ci.example.com', 'team: main',
-			@{$opts{store} || []}),
-		'  name: p'), deployment_type => 'bosh');
+	my $config = $opts{manual}
+		? join("\n", 'pipeline:', '  enabled: true', '  provider:', '    type: manual')
+		: automated_config('concourse', 'url: https://ci.example.com', 'team: main',
+			@{$opts{store} || []});
+	my $top = load_with($h, join("\n", $config, '  name: p'), deployment_type => 'bosh');
 	return $top->load_env('qa');
 }
 
 my @STORE = ('secrets_store:', '  url: https://ci-vault.example.com', '  namespace: ops');
 
 subtest 'the store names the vault the CI paths are read from' => sub {
-	plan tests => 4;
+	plan tests => 5;
 
 	my $env = load_qa(store => \@STORE);
 	my %attached;
@@ -55,8 +56,12 @@ subtest 'the store names the vault the CI paths are read from' => sub {
 	is $attached{namespace}, 'ops', 'in its namespace';
 	ok !exists $attached{alias}, 'and names no target, each operator resolving their own';
 
+	# D141's note: one store per pipeline, so the repository's vault and not
+	# an environment's own.
 	my $plain = load_qa();
-	is $plain->ci_vault, $plain->vault, "without a store it is the environment's own vault";
+	is $plain->ci_vault, $plain->top->vault, "without a block it is the repository's vault";
+	my $urlless = load_qa(store => ['secrets_store:', '  path_prefix: /ci']);
+	is $urlless->ci_vault, $urlless->top->vault, 'and so it is where the block names no url';
 };
 
 subtest 'the CI paths follow Concourse lookup order' => sub {
@@ -76,12 +81,21 @@ subtest 'the CI paths follow Concourse lookup order' => sub {
 		'the per-environment overrides still win';
 };
 
-subtest 'without a store the CI paths are as they were' => sub {
+subtest 'under Concourse an absent block is the defaults' => sub {
 	plan tests => 2;
 
 	my $env = load_qa();
+	is $env->ci_mount, '/concourse/main/', 'ci_mount is the team scope under /concourse';
+	is $env->ci_base,  '/concourse/main/p/qa/', 'and ci_base beneath it';
+};
+
+subtest 'under the manual provider the CI paths are as they were' => sub {
+	plan tests => 3;
+
+	my $env = load_qa(manual => 1);
 	is $env->ci_mount, '/secret/ci/', 'ci_mount under the secrets mount';
 	is $env->ci_base,  '/secret/ci/bosh/qa/', 'ci_base under it by type and name';
+	is $env->ci_vault, $env->vault, "and the store is the environment's own vault";
 };
 
 subtest 'the block is declared, and only for Concourse' => sub {
