@@ -180,7 +180,8 @@ sub install_lagging_vault {
 		my ($cmd, @args) = @_;
 		if ($cmd eq 'set') {
 			$state->{writes}++;
-			my (undef, @pairs) = @args;
+			# Each pair is handed to run redacted.
+			my (undef, @pairs) = map {ref($_) eq 'HASH' ? $_->{redact} : $_} @args;
 			# read-modify-write, through the standby's stale view
 			my %base = %{$state->{standby}};
 			for my $pair (@pairs) {

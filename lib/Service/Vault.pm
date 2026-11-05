@@ -622,11 +622,17 @@ sub _write_batch {
 	my ($self, $path, $batch, $written) = @_;
 	return unless @$batch;
 
-	my ($out,$rc) = $self->query('set', $path, @$batch);
-	bail(
-		"Could not write #C{%s} to vault at #M{%s}:\n%s",
-		$path,$self->{url},$out
-	) unless $rc == 0;
+	# Always redacted: the pairs reach safe and never the trace, and safe's
+	# echo of each value is kept out of the trace and out of the refusal.
+	my ($out,$rc) = $self->query({redact_output => 1}, 'set', $path, map {{redact => $_}} @$batch);
+	unless ($rc == 0) {
+		my @values = grep {length} map {(split /=/, $_, 2)[1] // ''} @$batch;
+		$out = join('|', map {quotemeta} @values) ? ($out // '') =~ s/@{[join('|', map {quotemeta} @values)]}/<redacted>/gr : ($out // '');
+		bail(
+			"Could not write #C{%s} to vault at #M{%s}:\n%s",
+			$path,$self->{url},$out
+		);
+	}
 
 	# Confirm everything written so far, not just this batch: a batch that
 	# merged into a stale base drops the earlier ones, not itself.

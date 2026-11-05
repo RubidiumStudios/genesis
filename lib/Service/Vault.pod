@@ -1004,6 +1004,11 @@ Writes one or more secrets to the vault. Trailing arguments are an
 even-sized list of key/value pairs, of which the single C<($key, $value)>
 form is the one-pair case.
 
+Every write is redacted, always: each pair reaches C<safe> as a redacted
+argument, so the trace records none of them, C<safe>'s echo of what it set is
+kept out of the trace, and a write that fails is refused with every value it
+carried masked.
+
 A lone key, or an explicit C<undef> value, starts an interactive C<safe
 set> prompt that hides input and requires confirmation; the caller must be
 in a controlling terminal.

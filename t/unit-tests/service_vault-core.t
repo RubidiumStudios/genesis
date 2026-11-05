@@ -507,7 +507,8 @@ subtest 'set($path, $key, $value) writes and returns value' => sub {
 
 	my $result = $v->set('/secret/myapp', 'password', 'hunter2');
 	is($result, 'hunter2', 'set() returns the value written');
-	like(join(' ', grep { !ref($_) } @query_args), qr/password=hunter2/,
+	# The pair goes redacted, so it is unwrapped; the options hash carries no redact.
+	like(join(' ', map { ref($_) eq 'HASH' ? ($_->{redact} // ()) : $_ } @query_args), qr/password=hunter2/,
 		'set() passes key=value to query');
 };
 
@@ -1019,7 +1020,9 @@ sub mock_capture_query {
 	my $self = shift;
 	shift if ref($_[0]) eq 'HASH';
 	my ($cmd, @args) = @_;
-	push(@{$self->{__sets}}, [@args]) if $cmd eq 'set' && $self->{__sets};
+	# Each pair is handed to run redacted, so it is unwrapped to be compared.
+	push(@{$self->{__sets}}, [map {ref($_) eq 'HASH' ? $_->{redact} : $_} @args])
+		if $cmd eq 'set' && $self->{__sets};
 	return ('', 0, '');
 }
 
