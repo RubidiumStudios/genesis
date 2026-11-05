@@ -670,12 +670,12 @@ sub run {
 		for (sort keys %{$opts{env} || {}}) {
 			if (defined($opts{env}{$_})) {
 				$ENV{$_} = $opts{env}{$_};
-				$tracemsg .= $opts{redact_env} # FIXME: This should also allow for a hash of keys to redact for fine-grained control
+				$tracemsg .= ($opts{redact_env} && !secrets_traced()) # FIXME: This should also allow for a hash of keys to redact for fine-grained control
 					? csprintf("\n#B{%s}='#Ci{<redacted>}'",$_)
 					: csprintf("\n#B{%s}='#C{%s}'",$_,$ENV{$_});
 			} else {
 				my $was = delete $ENV{$_};
-				$tracemsg .= ($opts{redact_env}
+				$tracemsg .= ($opts{redact_env} && !secrets_traced()
 					? csprintf("\n#B{%s} unset - was '#Ci{<redacted>}'",$_)
 					: csprintf("\n#B{%s} unset - was '#C{%s}' ",$_,$was)
 				) if defined($was);
@@ -710,7 +710,7 @@ sub run {
 		my $trace_arg = undef;
 		if (ref($cmd_arg) eq 'HASH' && (scalar(keys %{$cmd_arg}) eq 1) && defined($cmd_arg->{redact})) {
 			my $size = length($cmd_arg->{redact}//'');
-			$trace_arg = "<redacted:$size bytes>";
+			$trace_arg = secrets_traced() ? undef : "<redacted:$size bytes>";
 			$cmd_arg = $cmd_arg->{redact};
 		}
 		# FIXME: How to handle undefined values
@@ -774,7 +774,7 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 	if (defined($out)) {
 		if ($out =~ m/[\x00-\x08\x0b-\x0c\x0e\x1f\x7f-\xff]/) {
 			qtrace "[%sb of binary data omitted from debug]", length($out);
-		} elsif ($opts{redact_output}) {
+		} elsif ($opts{redact_output} && !secrets_traced()) {
 			qtrace "[%sb of redacted data omitted from debug]", length($out);
 		} else {
 			dump_var -1, run_output => $out;
@@ -844,6 +844,20 @@ sub read_json_from {
 	return $json;
 }
 
+# secrets_traced - whether the trace records redacted values, on purpose {{{
+#
+# GENESIS_TRACE_SECRETS, for debugging what a credential or a write carried;
+# the first time it is consulted it says, in the logs, that secrets are going
+# to the trace.
+my $secrets_trace_warned;
+sub secrets_traced {
+	return 0 unless envset('GENESIS_TRACE_SECRETS');
+	warning("#Y{GENESIS_TRACE_SECRETS} is set: secrets are being written to the trace log in the clear")
+		unless $secrets_trace_warned++;
+	return 1;
+}
+
+# }}}
 sub curl {
 	my ($url, $args);
 	if (ref($_[0]) eq 'HASH') {
@@ -908,7 +922,7 @@ sub curl {
 	my $status_line = "";
 
 	trace 'Running cURL: `'.'curl -'.$header_opt.'sSL $url '.join(' ',
-		map {ref($_) eq 'HASH' ? '<redacted>' : $_} @flags).'`';
+		map {ref($_) eq 'HASH' ? (secrets_traced() ? $_->{redact} : '<redacted>') : $_} @flags).'`';
 	my ($out, $rc, $err) = run({ stderr => 0 }, 'curl', '-'.$header_opt.'sSL', $url, @flags);
 	return (599, "Error executing curl command", $err) if ($rc);
 

@@ -49,6 +49,15 @@ subtest 'a bearer token and a body are handed to curl and kept out of the trace'
 	unlike($trace, qr/\Q$SECRET_BODY\E/, 'and no body');
 };
 
+subtest 'GENESIS_TRACE_SECRETS traces them on purpose, and says so' => sub {
+	local $ENV{GENESIS_TRACE_SECRETS} = 1;
+	my ($code, $trace) = traced('POST', 'https://api.example.test/repos/o/r/hooks', {},
+		qq({"config":{"url":"https://ci.example.test/check?$SECRET_BODY"}}), 0, "Bearer $SECRET_TOKEN");
+	like($trace, qr/\Q$SECRET_TOKEN\E/, 'the token is traced');
+	like($trace, qr/\Q$SECRET_BODY\E/, 'and the body');
+	like($trace, qr/GENESIS_TRACE_SECRETS.*secrets/is, 'with a warning that secrets are being traced');
+};
+
 subtest 'user and password credentials are kept out of the trace' => sub {
 	my ($code, $trace, $sent) = traced('GET', 'https://api.example.test/user', {},
 		undef, 0, "someone:$SECRET_PASS");

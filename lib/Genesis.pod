@@ -1622,6 +1622,24 @@ B<Examples:>
     my ($data, $rc, $err) = read_json_from(run({ stderr => 0 }, 'safe get secret/foo'));
     # Returns: (hashref, 0, '') on success; (undef, $rc, $err) on failure
 
+=head2 secrets_traced
+
+    my $clear = secrets_traced();
+
+Whether the trace records the values C<run> and C<curl> otherwise redact, which
+C<GENESIS_TRACE_SECRETS> turns on, deliberately, for debugging what a credential
+or a write carried. The first time it answers yes it logs a warning that secrets
+are being written to the trace log in the clear. User-facing failure messages
+stay redacted either way.
+
+B<Returns:> 1 where C<GENESIS_TRACE_SECRETS> is set, else 0.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    GENESIS_TRACE_SECRETS=1 genesis pipeline-apply --dry-run
+
 =head2 curl
 
     my ($status, $status_line, $body) = curl($method, $url);
