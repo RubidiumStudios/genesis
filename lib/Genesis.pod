@@ -1630,6 +1630,11 @@ B<Examples:>
 
 Executes a C<curl> HTTP request and returns the response.
 
+The credential, any C<Authorization> header and the request body are handed to
+C<curl> as redacted arguments, so neither this function's trace nor C<run>'s
+records them, and C<GENESIS_DEBUG>'s C<-v> is left off a call that carries a
+credential, since curl's verbose output echoes the request headers.
+
 Two calling styles:
 
 =over 4

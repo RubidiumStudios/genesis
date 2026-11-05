@@ -885,25 +885,30 @@ sub curl {
 	if ($method eq "HEAD") {
 		$header_opt = 'I';
 	}
+	# A credential, an Authorization header and a body go to curl as redacted
+	# arguments, so neither trace below records them.
 	push (@flags, "-D", "/dev/stderr")      if  $method ne "HEAD";
 	push @flags, qw/--post301 --post302/    if  $method eq "POST";
-	push @flags, "-H", "$_: $headers->{$_}" for (keys %$headers);
-	push @flags, "-d", $data                if  $data;
+	push @flags, "-H", ($_ =~ /^authorization$/i
+		? {redact => "$_: $headers->{$_}"} : "$_: $headers->{$_}") for (keys %$headers);
+	push @flags, "-d", {redact => $data}    if  $data;
 	push @flags, "-k"                       if  $skip_verify;
 	if ($creds) {
 		if ($creds =~ "^Bearer ") {
-			push @flags, "-H", "Authorization: $creds"
+			push @flags, "-H", {redact => "Authorization: $creds"}
 		} else {
-			push @flags, "-u", $creds
+			push @flags, "-u", {redact => $creds}
 		}
 	}
-	push @flags, "-v"                       if  (envset('GENESIS_DEBUG'));
+	# Verbose output echoes the request headers, the credential among them.
+	push @flags, "-v"                       if  (envset('GENESIS_DEBUG') && !$creds);
 	push @flags, "-o", $file                if  $file;
 
 	my $status = "";
 	my $status_line = "";
 
-	trace 'Running cURL: `'.'curl -'.$header_opt.'sSL $url '.join(' ',@flags).'`';
+	trace 'Running cURL: `'.'curl -'.$header_opt.'sSL $url '.join(' ',
+		map {ref($_) eq 'HASH' ? '<redacted>' : $_} @flags).'`';
 	my ($out, $rc, $err) = run({ stderr => 0 }, 'curl', '-'.$header_opt.'sSL', $url, @flags);
 	return (599, "Error executing curl command", $err) if ($rc);
 
