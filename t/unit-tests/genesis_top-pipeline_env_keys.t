@@ -97,6 +97,29 @@ subtest 'the tracked-files key is renamed and behaves as before' => sub {
 		'a parent-relative path is still refused';
 };
 
+# T480 (D152): notifications are the repository's settings, so the key that
+# loaded and did nothing in an environment file is refused.
+subtest 'the per-environment notifications key is refused' => sub {
+	plan tests => 4;
+
+	throws_ok {load_env_with({notifications => {style => 'grouped'}})}
+		qr/genesis\.pipeline\.notifications: is no longer read.*pipeline\.notifications.*\.genesis\/config/s,
+		'naming the key and where notifications are set';
+	lives_ok {load_env_with({manual => 'true'})} 'the same file without it loads';
+
+	my $g = make_harness(envs => [], pipeline => 1, vault => 0);
+	commit_on_control($g, message => 'a site key', files => {
+		'us.yml'         => "---\ngenesis:\n  pipeline:\n    notifications:\n      style: grouped\n",
+		'us-east-qa.yml' => "---\ngenesis:\n  env: us-east-qa\n",
+	});
+	my $refusal = '';
+	eval {my $t = Genesis::Top->new($g->a, no_vault => 1); $t->config; 1} or $refusal = $@;
+	$refusal = Genesis::Term::decolorize($refusal) =~ s/\s+/ /gr;
+	like($refusal, qr/genesis\.pipeline\.notifications\b.*\bin us-east-qa\b/,
+		'an inherited key is refused on the environment that inherits it');
+	like($refusal, qr/\bset in us\.yml\b/, 'naming the shared file that sets it');
+};
+
 # A key the schema itself refuses, retired or unknown, was refused on the
 # environment but never named the file that set it when that was a shared one,
 # which the custom checks above always did.  Green for an own-file key.

@@ -4580,9 +4580,10 @@ and C<manual>, which are the two per-environment gates, C<redeploy_cron>,
 which is a list of crontab expressions in UTC, C<track_dependencies>,
 C<track_additional_files>, and C<track_bosh_configs>, which are the three
 sources the propagation set and the redeploy triggers are built from, and
-C<notifications>, which overrides the repository's own notification style
-for this environment alone, and C<provider>, whose keys are whatever the
-configured provider declares through L</_provider_env_options_schema> (D139).
+C<provider>, whose keys are whatever the configured provider declares through
+L</_provider_env_options_schema> (D139). C<notifications> is declared retired
+and refused naming C<pipeline.notifications>, because notifications are the
+repository's settings (D152).
 
 Two of those carry a shape the declaration cannot state, and
 L</_validate_env_pipeline_block> checks both beside it.

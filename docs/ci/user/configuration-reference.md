@@ -23,7 +23,7 @@ A repository that still carries a pipeline `ci.yml` has not moved to v3, and eve
 | `track_dependencies` | The deployments this one reads, declared so that the applied record and the staleness check know about them. No trigger is emitted yet |
 | `track_bosh_configs` | Whether, or which, of the director's BOSH configs a Classic environment watches: `true` for cloud and runtime, or a list of `cloud`, `runtime` and `cpi`. A change notifies through the director's `notify-<bosh_env>-bosh-configs` job and triggers nothing. The key is refused on an OCFP environment, and `genesis pipeline-apply` copies the director's credentials for the check. See [BOSH config tracking](../../workflows/bosh-config-tracking.md) |
 | `track_additional_files` | Extra paths for this environment's propagation set, relative to the deployment root, with `<env>` substitution and globs. It replaces `required_files` |
-| `notifications` | Accepted at load, but not read; leave it unset. Notifications are the repository's settings |
+| `notifications` | Refused at load. Notifications are the repository's settings, in `pipeline.notifications` of `.genesis/config` |
 
 The block is read merged, so a key written in a site file is inherited by every environment beneath it. A key written in the environment's own file wins over the one it inherits. Every key here shapes the pipeline, so each must resolve from the environment's own files: a `(( vault ))` value, a credhub variable, or a reference those files do not resolve is refused, naming the file that sets it.
 

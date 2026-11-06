@@ -3291,10 +3291,9 @@ sub _pipeline_env_keys_schema {
 				description => "The director's BOSH config types a Classic environment watches, notifying on a change"
 			},
 
-			notifications => {
-				type        => 'any',
-				description => "Accepted and not read: notifications are the repository's settings"
-			},
+			# The pipeline's settings, never an environment's (D152).
+			notifications => _retired_key("notifications are the repository's settings, in ".
+				"#C{pipeline.notifications} of #C{.genesis/config}; remove it"),
 		}
 	};
 }

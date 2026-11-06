@@ -166,7 +166,7 @@ notifications:
     mentions_on_failure: ["@oncall"]
 ```
 
-Notifications are the repository's settings, for every environment alike. An environment's own `genesis.pipeline.notifications` is accepted at load but not read, so leave it unset. `email` is accepted and not emitted.
+Notifications are the repository's settings, for every environment alike. An environment's own `genesis.pipeline.notifications` is refused at load, naming the file that sets it. `email` is accepted and not emitted.
 
 With Slack configured, each message begins with an emoji for its kind, so a run of them reads at a glance:
 
