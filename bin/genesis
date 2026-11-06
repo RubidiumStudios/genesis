@@ -1836,62 +1836,77 @@ define_command("embed", {
 
 # }}}
 # genesis repipe - Deploy a Concourse CI/CD deployment pipeline. {{{
+# The apply's options, shared with repipe, which runs the apply.
+my @PIPELINE_APPLY_OPTIONS = (
+	'yes|y' =>
+		"Suppress interactive confirmations (for automation).",
+
+	'target|t=s' =>
+		"The fly target to apply through for this run (per `fly targets`).  ".
+		"Without it, this clone's genesis.fly-target pin, else the one ".
+		"~/.flyrc target whose URL and team are the configuration's.",
+
+	'paused|P' =>
+		"Leave the pipeline paused after applying.",
+
+	'dry-run|n' =>
+		"Report every step and write nothing to the repository, the ".
+		"remote, or the vault.  The run names each branch it would create ".
+		"or publish, each branch it would protect and with what, and each ".
+		"record it would write, and it prints the compiled pipeline where ".
+		"the provider has one.  No branch is cut, no protection is sent, ".
+		"and no record is written.  --output-dir and --debug-dir still ".
+		"fill their own directories, except under the manual provider, ".
+		"where the run exits before the compile and neither has anything ".
+		"to write.",
+
+	'output-dir|o=s' =>
+		"Write compiled artifacts to this directory instead of deploying.  ".
+		"On its own, the branch, protection, and record work still runs.  ".
+		"Given with --dry-run, that work is only reported, and this ".
+		"directory is written even so, except under the manual provider, ".
+		"where the run exits before the compile and there is nothing to ".
+		"write here.",
+
+	'skip-vault' =>
+		"Skip vault connectivity when compiling.  Useful for dry runs ".
+		"and CI environments without a running vault.",
+
+	'rotate-webhook-token' =>
+		"Replace the pipeline's webhook token with a new one, and the ".
+		"GitHub hook that carries it, in the same run.  Applies only where ".
+		"pipeline.provider.git.webhooks is on.",
+
+	'missing-secrets-ok' =>
+		"Set the pipeline even where a secret it references is found ".
+		"nowhere Concourse would look for it.  The apply checks every ".
+		"reference before it sets anything and refuses on a missing one; ".
+		"this is for the first apply of a pipeline whose secrets are set ".
+		"afterwards.  The report is printed either way.",
+
+	'debug-dir=s' =>
+		"Write intermediate compiler artifacts to this directory.",
+);
+
 define_command("repipe", {
-	summary => "Configure a Concourse pipeline for automating deployments.",
-	usage => 'repipe [<pipeline-layout>]',
+	deprecated => 'pipeline-apply',
+	summary => "Apply the pipeline; the deprecated spelling of #g{pipeline-apply}.",
+	usage => 'repipe',
+	description =>
+		"Runs #g{pipeline-apply}, with the same options and the same gates.",
 	alias => "push",
 	function_group => Genesis::Commands::PIPELINE,
+	branch_class   => Genesis::Commands::PRE_DEPLOY,
+	control_only   => 1,
+	preview        => 'dry-run',
 	scope => 'repo',
-	arguments => [
-		'pipeline-layout?' =>
-			"The name of the layout to push to Concourse.\n".
-			"Defaults to single layout present in config file, or 'default' if there ".
-			"are multiple layouts present.  You must specify this argument if you ".
-			"have multiple layouts without one of them being named 'default'"
-	],
+	arguments => [],
 	option_group => Genesis::Commands::REPO_OPTIONS,
-	options => [
-		'yes|y' =>
-			"Do not ask any questions, assume 'y' for any that would normally be ".
-			"asked.  Allows automation to repipe without requiring human ".
-			"intervention or expect-style scripting.",
-
-		'target|t=s' =>
-			"The name of your Concourse target (per `fly targets'), if it differs ".
-			"from the pipeline layout name.",
-
+	options => [@PIPELINE_APPLY_OPTIONS],
+	deprecated_options => [
 		'config|c=s' =>
 			"Kept for compatibility, and nothing reads it any more.  The ".
 			"pipeline comes from the pipeline section of .genesis/config.",
-
-		'paused|P' =>
-			"Keep the pipeline paused after repiping.",
-
-		'dry-run|n' =>
-			"Report every step and write nothing to the repository, the ".
-			"remote, or the vault.  The run names each branch it would create ".
-			"or publish, each branch it would protect and with what, and each ".
-			"record it would write, and it prints the compiled pipeline where ".
-			"the provider has one.  No branch is cut, no protection is sent, ".
-			"and no record is written.",
-
-		'output-dir|o=s' =>
-			"Write compiled pipeline artifacts to this directory.\n".
-			"On its own, the branch, protection, and record work still runs.  ".
-			"Given with --dry-run, that work is only reported, and this ".
-			"directory is written even so, except under the manual provider, ".
-			"where the run exits before the compile and there is nothing to ".
-			"write here.",
-
-		'skip-vault' =>
-			"Skip vault connectivity when compiling pipelines.  Useful for ".
-			"local compilation without a running vault.",
-
-		'debug-dir=s' =>
-			"Dump intermediate compiler artifacts (parsed config, AST, resolved ".
-			"pipeline, provider output) to this directory for debugging.",
-	],
-	deprecated_options => [
 		'vault=s' =>
 			"The name of a `safe' target (a Vault) where the secret credentials ".
 			"are stored.  Only accepted if the deployment repository does not ".
@@ -1901,6 +1916,7 @@ define_command("repipe", {
 # }}}
 # genesis graph - Draw a Concourse CI/CD deployment pipeline. {{{
 define_command("graph", {
+	deprecated => 'pipeline-graph',
 	summary => "Draw a Concourse pipeline.",
 	usage => "graph [<pipeline-layout>] | #g{dot} #y{-Tpng} > pipe.png",
 	description =>
@@ -1929,20 +1945,14 @@ define_command("graph", {
 # }}}
 # genesis describe - Describe a Concourse CI/CD deployment pipeline. {{{
 define_command("describe", {
+	deprecated => 'pipeline-describe',
 	summary => "Describe a Concourse pipeline, in words.",
-	usage => "describe [<pipeline-layout>]",
+	usage => "describe",
 	description =>
-		"Describe the genesis deployment repo pipeline for the given layout in ".
-		"human terms",
+		"Runs #g{pipeline-describe}, which describes the pipeline in human terms.",
 	function_group => Genesis::Commands::PIPELINE,
 	scope => 'repo',
-	arguments => [
-		'pipeline-layout?' =>
-			"The name of the layout to push to Concourse.\n".
-			"Defaults to single layout present in config file, or 'default' if there ".
-			"are multiple layouts present.  You must specify this argument if you ".
-			"have multiple layouts without one of them being named 'default'"
-	],
+	arguments => [],
 	option_group => Genesis::Commands::REPO_OPTIONS,
 	options => [
 		'config|c=s' =>
@@ -2121,7 +2131,7 @@ define_command("ci-pipeline-run-errand", {
 # genesis pipeline-apply - give the pipeline its shape on every provider {{{
 define_command("pipeline-apply", {
 	summary => "Apply the pipeline on the configured provider.",
-	usage   => "pipeline-apply [<pipeline-layout>]",
+	usage   => "pipeline-apply",
 	description =>
 		"Gives the pipeline its shape.  It creates each missing deployment ".
 		"branch and publishes it, asks the repository to protect control and ".
@@ -2147,61 +2157,9 @@ define_command("pipeline-apply", {
 	preview        => 'dry-run',
 	scope          => 'repo',
 	option_group   => Genesis::Commands::REPO_OPTIONS,
-	arguments      => [
-		'pipeline-layout?' =>
-			"Layout name to deploy.  Defaults to the single layout present, ".
-			"or 'default' if multiple layouts exist.",
-	],
-	options => [
-		'yes|y' =>
-			"Suppress interactive confirmations (for automation).",
-
-		'target|t=s' =>
-			"The fly target to apply through for this run (per `fly targets`).  ".
-			"Without it, this clone's genesis.fly-target pin, else the one ".
-			"~/.flyrc target whose URL and team are the configuration's.",
-
-		'paused|P' =>
-			"Leave the pipeline paused after applying.",
-
-		'dry-run|n' =>
-			"Report every step and write nothing to the repository, the ".
-			"remote, or the vault.  The run names each branch it would create ".
-			"or publish, each branch it would protect and with what, and each ".
-			"record it would write, and it prints the compiled pipeline where ".
-			"the provider has one.  No branch is cut, no protection is sent, ".
-			"and no record is written.  --output-dir and --debug-dir still ".
-			"fill their own directories, except under the manual provider, ".
-			"where the run exits before the compile and neither has anything ".
-			"to write.",
-
-		'output-dir|o=s' =>
-			"Write compiled artifacts to this directory instead of deploying.  ".
-			"On its own, the branch, protection, and record work still runs.  ".
-			"Given with --dry-run, that work is only reported, and this ".
-			"directory is written even so, except under the manual provider, ".
-			"where the run exits before the compile and there is nothing to ".
-			"write here.",
-
-		'skip-vault' =>
-			"Skip vault connectivity when compiling.  Useful for dry runs ".
-			"and CI environments without a running vault.",
-
-		'rotate-webhook-token' =>
-			"Replace the pipeline's webhook token with a new one, and the ".
-			"GitHub hook that carries it, in the same run.  Applies only where ".
-			"pipeline.provider.git.webhooks is on.",
-
-		'missing-secrets-ok' =>
-			"Set the pipeline even where a secret it references is found ".
-			"nowhere Concourse would look for it.  The apply checks every ".
-			"reference before it sets anything and refuses on a missing one; ".
-			"this is for the first apply of a pipeline whose secrets are set ".
-			"afterwards.  The report is printed either way.",
-
-		'debug-dir=s' =>
-			"Write intermediate compiler artifacts to this directory.",
-	],
+	# One pipeline per deployment root, so there is no layout to name.
+	arguments      => [],
+	options        => [@PIPELINE_APPLY_OPTIONS],
 }, 'Genesis::Commands::Pipelines::apply');
 # }}}
 # genesis pipeline-graph - print or write the Mermaid flowchart {{{

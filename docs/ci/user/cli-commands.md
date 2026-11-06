@@ -12,7 +12,7 @@ The `pipeline-apply` command gives the pipeline its shape. It compiles a CI pipe
 genesis pipeline-apply [options]
 ```
 
-`genesis repipe` is the deprecated spelling of this command. It warns, then does exactly what `pipeline-apply` does, and it keeps the `push` alias. Use `pipeline-apply` in anything new.
+`genesis repipe` is the deprecated spelling of this command. Its help says so and names `pipeline-apply`, and it warns the same when it runs, then does exactly what `pipeline-apply` does, with the same options and gates. It keeps the `push` alias. Use `pipeline-apply` in anything new. `graph` and `describe` are marked the same way, naming `pipeline-graph` and `pipeline-describe`.
 
 `pipeline-apply` compiles the pipeline your repository configures and uploads it to the CI system that pipeline names, through `fly set-pipeline` where that system is Concourse. It prompts for confirmation before uploading unless you pass `--yes`. The configuration is the `pipeline:` section of `.genesis/config`, and the provider is read from `pipeline.provider.type` rather than from any flag.
 
@@ -226,7 +226,7 @@ Options: `--config`, which is kept for compatibility.
 The `describe` command prints a human-readable description of your pipeline, listing each environment, whether it deploys automatically or requires manual approval, and what triggers it. It warns, then delegates to `genesis pipeline-describe`, which is the command to use instead.
 
 ```
-genesis describe [<pipeline-layout>] [options]
+genesis describe [options]
 ```
 
 Example output:

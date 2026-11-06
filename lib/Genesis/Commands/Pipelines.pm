@@ -47,8 +47,6 @@ sub embed {
 # }}}
 # apply - give the pipeline its shape on every provider (replaces repipe) {{{
 sub apply {
-	my ($layout) = @_;
-
 	my $opts = get_options;
 
 	# Read raw, ahead of the vault _get_top connects to.
@@ -979,8 +977,6 @@ sub _push_failure {
 # }}}
 # pipeline_graph - print, or write, the Mermaid flowchart {{{
 sub pipeline_graph {
-	my ($layout) = @_;
-
 	my $top = Genesis::Top->new('.', no_vault => 1); # a preview reads files only
 	_preview_shape($top); # returns only on an enabled pipeline
 
@@ -1002,8 +998,6 @@ sub _emit_graph {
 # }}}
 # pipeline_describe - human-readable pipeline progression {{{
 sub pipeline_describe {
-	my ($layout) = @_;
-
 	my $top = Genesis::Top->new('.', no_vault => 1); # a preview reads files only
 	_preview_shape($top); # returns only on an enabled pipeline
 
@@ -1472,14 +1466,12 @@ sub open_control_session {
 
 # repipe - deprecated; delegates to apply {{{
 sub repipe {
-	warning("'genesis repipe' is deprecated and will be removed in a future version.  Use 'genesis pipeline-apply' instead.");
 	apply(@_);
 }
 
 # }}}
 # graph - deprecated; legacy graphviz, with pipeline-graph as the successor {{{
 sub graph {
-	warning("'genesis graph' is deprecated and will be removed in a future version.  Use 'genesis pipeline-graph' instead.");
 	option_defaults(config => 'ci.yml');
 	my $layout = $_[0];
 	my $top    = Genesis::Top->new('.');
@@ -1493,7 +1485,6 @@ sub graph {
 # }}}
 # describe - deprecated; delegates to pipeline_describe {{{
 sub describe {
-	warning("'genesis describe' is deprecated and will be removed in a future version.  Use 'genesis pipeline-describe' instead.");
 	pipeline_describe(@_);
 }
 

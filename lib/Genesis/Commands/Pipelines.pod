@@ -92,10 +92,9 @@ B<Examples:>
   # Embed the currently running genesis binary into the deployment repo
   genesis embed
 
-=head2 apply([$layout])
+=head2 apply()
 
     genesis pipeline-apply
-    genesis pipeline-apply sandbox
     genesis pipeline-apply --target my-concourse --dry-run
 
 Gives the pipeline its shape on every provider. It refuses when
@@ -221,17 +220,8 @@ anything.  The compiler is the half that emits, so the upload itself, the
 resolved options it reads, and the C<--dry-run> YAML all come off the compiler
 the provider handed out.
 
-B<Parameters:>
-
-=over 4
-
-=item C<$layout> (optional)
-
-The pipeline layout to use.  It names the Concourse target where
-C<--target> does not, and the pipeline's own name stands in where neither
-of them is given.
-
-=back
+B<Parameters:> none. A deployment root has one pipeline, so there is no
+layout to name, and the command declares no positional argument.
 
 B<Options (via C<get_options>):>
 
@@ -354,16 +344,16 @@ B<Examples:>
   genesis pipeline-apply
   # Exits: Genesis::Exit::CONFIG, having written nothing
 
-=head2 repipe([$layout])
+=head2 repipe()
 
     genesis repipe
-    genesis repipe sandbox
 
-The deprecated name for L</"apply([$layout])">.  It prints a
-deprecation warning that names C<genesis pipeline-apply> and then
-delegates to C<apply> with the same layout and options, so everything
-the apply entry says holds here too.  It will be removed in a future
-version.
+The deprecated name for L</apply()>.  Its registration carries
+C<deprecated =E<gt> 'pipeline-apply'>, so its help says it is deprecated and
+names the replacement, and C<run_command> warns the same before it runs.  It
+declares the apply's options, branch class and control-only gate, and
+delegates to C<apply>, so everything the apply entry says holds here too.  It
+will be removed in a future version.
 
 B<Examples:>
 
@@ -378,7 +368,8 @@ B<Examples:>
 
 Generates and prints a Graphviz DOT-format representation of the pipeline
 dependency graph.  The DOT output can be piped to C<dot> or rendered with any
-Graphviz tool.
+Graphviz tool.  Deprecated in favour of L</pipeline_graph()>, which its
+registration's C<deprecated> flag names in its help and its run.
 
 B<Parameters:>
 
@@ -411,29 +402,21 @@ B<Examples:>
   # Render pipeline graph as PNG
   genesis graph | dot -Tpng -o pipeline.png
 
-=head2 describe([$layout])
+=head2 describe()
 
     genesis describe
-    genesis describe sandbox
 
-Parses the pipeline configuration and prints a human-readable description
-of the environments and their pass/trigger relationships.
+The deprecated name for L</pipeline_describe()>, to which it delegates.  Its
+registration's C<deprecated> flag names the replacement in its help and its
+run.  It parses the pipeline configuration and prints a human-readable
+description of the environments and their pass/trigger relationships.
 
 Where the repository configures a pipeline, the report opens with the
 resolved source-control values, each beside the tier it came from, so an
 override that has drifted away from what git says is visible rather than
 silent.
 
-B<Parameters:>
-
-=over 4
-
-=item C<$layout> (optional)
-
-The pipeline layout to use.  Defaults to the layout inferred from the CI
-config file when omitted.
-
-=back
+B<Parameters:> none.
 
 B<Options (via C<get_options>):>
 
@@ -1160,7 +1143,7 @@ B<Examples:>
   $session->finish;
   # the operator is back on the branch they ran this from
 
-=head2 pipeline_graph([$layout])
+=head2 pipeline_graph()
 
     genesis pipeline-graph [--output <file>]
 
@@ -1182,18 +1165,10 @@ to it can be checked before it is committed or merged.
 
 The root is opened with no vault, because the drawing reads files only, so a
 secrets provider out of reach does not stop it (T401). It declares the
-pre-deploy branch class and never refreshes, as L</pipeline_describe([$layout])>
+pre-deploy branch class and never refreshes, as L</pipeline_describe()>
 does (T392).
 
-B<Parameters:>
-
-=over 4
-
-=item C<$layout> (optional)
-
-The pipeline layout, accepted for the legacy call shape and not read.
-
-=back
+B<Parameters:> none.
 
 B<Returns:> Nothing. It prints the drawing, or writes the file and says where,
 and exits 0.
@@ -1211,7 +1186,7 @@ B<Examples:>
   # Reading the pipeline's shape from HEAD at 4cf1438, not from control.
   # Wrote graph.md
 
-=head2 pipeline_describe([$layout])
+=head2 pipeline_describe()
 
     genesis pipeline-describe
 
@@ -1221,10 +1196,10 @@ the environments it follows.
 
 The pipeline is described from C<< $top->pipeline_topology >>, after the
 source control values it derives.  Nothing is compiled: as for
-L</pipeline_graph([$layout])>, L</_preview_shape($top)> returns only on an
+L</pipeline_graph()>, L</_preview_shape($top)> returns only on an
 enabled pipeline.
 
-Like L</pipeline_graph([$layout])>, it opens its root with no vault: a preview
+Like L</pipeline_graph()>, it opens its root with no vault: a preview
 reads the repository's files and nothing in the vault, so a secrets provider
 out of reach neither stops it nor stands in front of a broken configuration's
 own refusal (T401).
@@ -1234,15 +1209,7 @@ naming every gap between it and control on T, and with C<--from E<lt>refE<gt>>
 it is the shape that ref holds, as L</_preview_shape($top)> describes, so a
 change to it can be checked before it is committed or merged.
 
-B<Parameters:>
-
-=over 4
-
-=item C<$layout> (optional)
-
-The pipeline layout, accepted for the legacy call shape and not read.
-
-=back
+B<Parameters:> none.
 
 B<Returns:> Nothing. It prints the description and exits 0.
 
@@ -2826,8 +2793,8 @@ B<Examples:>
 
     _preview_shape($top);
 
-Reads the shape a preview shows, for L</pipeline_graph([$layout])>,
-L</pipeline_describe([$layout])> and the dry run of L</apply([$layout])>
+Reads the shape a preview shows, for L</pipeline_graph()>,
+L</pipeline_describe()> and the dry run of L</apply()>
 (D112, noted 2026-10-16).  With C<--from> it calls
 L<Genesis::Top/read_shape_from> and prints a banner on standard error naming
 the ref, its commit, and that the shape is not control's.  Without it, the

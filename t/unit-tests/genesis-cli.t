@@ -110,11 +110,31 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			options => [qw/no-refresh/],
 			absent  => [qw/no-fetch/],
 		},
+		# One pipeline per deployment root, so the layout argument ci.yml's
+		# layouts needed is gone.
 		'pipeline-apply' => {
 			class        => Genesis::Commands::PRE_DEPLOY,
 			options      => [qw/dry-run|n yes|y missing-secrets-ok rotate-webhook-token/],
 			absent       => [qw/platform|provider|p=s no-fetch/],
 			control_only => 1,
+			arguments    => [],
+		},
+		# The three deprecated spellings carry the flag that names their
+		# replacement, which their help and their run both read.  repipe runs
+		# the apply, so it takes the apply's options and gates, and no layout.
+		'repipe' => {
+			class        => Genesis::Commands::PRE_DEPLOY,
+			options      => [qw/dry-run|n yes|y missing-secrets-ok rotate-webhook-token/],
+			control_only => 1,
+			arguments    => [],
+			deprecated   => 'pipeline-apply',
+		},
+		'describe' => {
+			arguments  => [],
+			deprecated => 'pipeline-describe',
+		},
+		'graph' => {
+			deprecated => 'pipeline-graph',
 		},
 		# The previews take --from, the one way to read the pipeline's shape
 		# at a commit rather than the working tree, and only they take it, so
@@ -207,6 +227,9 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			$surface{$cmd}{option_group},
 			"$cmd takes the option group it declares")
 			if exists $surface{$cmd}{option_group};
+		is(command_properties($cmd)->{deprecated}, $surface{$cmd}{deprecated},
+			"$cmd is deprecated in favour of $surface{$cmd}{deprecated}")
+			if exists $surface{$cmd}{deprecated};
 	}
 
 	# The seeding command is retired, so it is not part of the surface
