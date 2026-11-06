@@ -3141,8 +3141,7 @@ sub _pipeline_config_schema {
 				}
 			},
 
-			# Optional, with a repository default the environment's own
-			# genesis.pipeline.notifications.* overrides.
+			# Optional, and the repository's alone; no environment overrides it.
 			notifications => {
 				type        => 'hash',
 				description => 'How the pipeline notifies, and where',
@@ -3289,12 +3288,12 @@ sub _pipeline_env_keys_schema {
 			# A boolean or a list of config types, checked beside the declaration.
 			track_bosh_configs => {
 				type        => 'any',
-				description => 'BOSH config types whose change triggers a redeploy'
+				description => "The director's BOSH config types a Classic environment watches, notifying on a change"
 			},
 
 			notifications => {
 				type        => 'any',
-				description => "This environment's override of the repository's notification style"
+				description => "Accepted and not read: notifications are the repository's settings"
 			},
 		}
 	};
