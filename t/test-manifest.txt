@@ -21,6 +21,7 @@ sanity-tests/docs-workplan-superseded.t # The workplan describes the move to v3 
 # Naming: {lib-path}_{module}-{context}.t (e.g., genesis-struct.t, genesis_env-core.t)
 # Genesis.pm tests split by context:
 unit-tests/genesis-core.t        # Error/logging/env utilities
+unit-tests/genesis-curl_trace.t  # curl's trace hides credentials, Authorization headers and data
 unit-tests/genesis-string.t      # String utilities (ordify, count_nouns, sentence_join)
 unit-tests/genesis-semver.t      # Semantic versioning (semver, by_semver, new_enough)
 unit-tests/genesis-struct.t      # Data structures (struct_*, flatten, deep_merge)
@@ -40,6 +41,7 @@ unit-tests/service_bosh-create_env_proxy.t
 unit-tests/service_bosh-director.t
 unit-tests/service_bosh-stemcell.t
 unit-tests/service_vault-core.t          # Service::Vault base class + None with MockWrapper
+unit-tests/service_vault-set_redacted.t  # a write's values stay out of the trace and its refusal
 unit-tests/service_vault-strongbox_intent.t  # tri-state strongbox read from ~/.saferc
 unit-tests/service_vault-unseal_strongbox.t  # unseal keeps safe's stderr, flags partial unseal
 unit-tests/service_vault_remote-core.t   # Service::Vault::Remote with mocks
@@ -76,6 +78,7 @@ unit-tests/genesis_env-lookups.t         # lookup() and lookup_unevaled() varian
 unit-tests/genesis_env-relations.t       # relate() and relate_by_name() environment relationships
 unit-tests/genesis_env-ocfp.t            # is_ocfp(), ocfp_type(), ocfp_env() OCFP configuration
 unit-tests/genesis_env-bare.t            # Genesis::Env->bare: the merged read for a genesis.pipeline key
+unit-tests/genesis_env-ci_vault.t        # ci_vault and the CI paths, from the secrets store or the environment's vault (D141)
 unit-tests/genesis_env-operator_call_form.t # an operator written (( op(args) )) is refused before any merge
 unit-tests/genesis_env-bosh.t            # _parse_bosh_env(), is_bosh_director(), bosh_env(), bosh_alias()
 unit-tests/genesis_env-exodus.t          # Path construction: secrets/exodus/ci/ocfp_config mount/slug/base
@@ -97,6 +100,7 @@ unit-tests/genesis_log-styles.t
 unit-tests/genesis_log-stack.t
 unit-tests/genesis_log-routing.t
 unit-tests/genesis_log-convenience.t
+unit-tests/genesis_log-file_mode.t        # a log file is readable by its owner alone
 unit-tests/genesis_secret-base.t
 unit-tests/genesis_secret_dhparams-core.t
 unit-tests/genesis_secret_invalid-core.t
@@ -327,6 +331,8 @@ unit-tests/genesis_top-pipeline.t            # Top::pipeline()
 unit-tests/genesis_top-pipeline_section.t    # the pipeline section of the v3 .genesis/config schema
 unit-tests/genesis_top-pipeline_source_control.t  # the source-control block, its tiers, and its derivations
 unit-tests/genesis_top-pipeline_env_keys.t   # the genesis.pipeline block of an environment file, read merged
+unit-tests/genesis_top-pipeline_worker_tag.t # genesis.pipeline.provider.tag is a tag or a list, the provider's, and tagged is retired (D139)
+unit-tests/genesis_top-pipeline_git_checks.t # pipeline.provider.git's webhooks and check intervals at load (D143)
 unit-tests/genesis_top-merged_env_params.t   # the load-time merge is spruce's, so append and prune apply across the hierarchy
 unit-tests/genesis_top-pipeline_blocks.t     # the shuttle, vault, locker and notification blocks of the pipeline section
 unit-tests/genesis_top-pipeline_repo_keys.t  # the pipeline label and the repository-wide recreate key
@@ -503,6 +509,14 @@ integration-tests/genesis_ci_contract-redeploy.t              # and the redeploy
 integration-tests/genesis_ci_contract-notifications.t         # and a manual environment's notify job and every deploy's Slack messages (D122)
 integration-tests/genesis_ci_contract-pr_token.t              # propagate carries GITHUB_AUTH_TOKEN where an environment delivers by pull request, from api_token or the https password, and ssh alone refuses (f8)
 integration-tests/genesis_ci_contract-redeploy_block.t       # pipeline.redeploy: enabled emits the redeploy job, queue and event or none, refusing a redeploy_cron beside false; style grouped lists them apart (b9)
+integration-tests/genesis_ci_contract-registry.t              # every default image is pulled through pipeline.registry, with its credentials under its host (D137)
+integration-tests/genesis_ci_contract-public.t                # every job's public is pipeline.provider.public, false unless set (D138, b4)
+integration-tests/genesis_ci_contract-worker_tag.t            # an environment's worker tag lands on the steps that reach its network alone (D139, b5)
+integration-tests/genesis_ci_contract-group_commits.t         # group_commits false is refused (D140)
+integration-tests/genesis_ci_contract-git_checks.t            # webhook_token and the check intervals on control and each branch (D143)
+integration-tests/genesis_ci_propagate-check_requests.t       # propagate asks Concourse to check each branch it pushed (D144)
+integration-tests/genesis_commands_pipelines-apply_secrets.t  # the apply checks every reference where Concourse reads it, refusing one found nowhere (D142)
+integration-tests/genesis_commands_pipelines-apply_webhook.t  # the apply owns the webhook token and the GitHub hook (D145)
 integration-tests/genesis_top-no_root.t                         # a command with no deployment root says where the roots are: control's from a rootless branch, this branch's, or the one it sits inside (D120)
 integration-tests/genesis_ci_rehearsal-flow.t                 # a change flows through that pipeline, under a stand-in scheduler with the locks simulated
 integration-tests/genesis_ci_compiler-schema_contract.t       # the compiler reads nothing the schema does not declare
