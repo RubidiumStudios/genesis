@@ -117,7 +117,9 @@ subtest 'the shuttle backend refuses a directory' => sub {
 		'gcs is refused, s3 being the one backend';
 };
 
-subtest 'notifications are optional and overridable per environment' => sub {
+# D152 withdrew the per-environment override D122 had deferred, so the
+# environment's key is refused rather than read.
+subtest "notifications are optional and the repository's alone" => sub {
 	plan tests => 4;
 
 	write_nested_env('qa');
@@ -132,14 +134,16 @@ subtest 'notifications are optional and overridable per environment' => sub {
 	is $top->config->get('pipeline.notifications.style'), 'inline',
 		'the style resolves to the repository default';
 
-	write_nested_env('qa', '    notifications:', '      style: parallel');
 	$top = load_with($h, join("\n", automated_pipeline_block(),
 		'  notifications:', '    style: grouped'));
 	is $top->config->get('pipeline.notifications.style'), 'grouped',
 		'a written style is the repository default';
-	is $top->_merged_env_params('qa')->{genesis}{pipeline}{notifications}{style},
-		'parallel',
-		'and an environment may override it without changing that default';
+
+	write_nested_env('qa', '    notifications:', '      style: parallel');
+	throws_ok {load_with($h, join("\n", automated_pipeline_block(),
+		'  notifications:', '    style: grouped'))}
+		qr/genesis\.pipeline\.notifications: is no longer read/,
+		'and an environment may not override it (D152)';
 };
 
 subtest 'the provider-specific keys are validated per provider type' => sub {
