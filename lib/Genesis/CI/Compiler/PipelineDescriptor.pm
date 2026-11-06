@@ -823,17 +823,9 @@ sub _env_resources {
 sub _bosh_config_checks {
 	my ($self, $ast, $wf_data) = @_;
 
-	# director => type => [envs], and director => env => its tags
-	my (%tracked, %tags);
-	for my $env (@{$wf_data->{environments}}) {
-		my $director = $wf_data->{bosh_env}{$env};
-		next unless $director && !$self->_is_create_env($ast, $env);
-		my $types = $self->_bosh_config_types($ast, $env, $wf_data);
-		next unless @$types;
-		push @{$tracked{$director}{$_}}, $env for @$types;
-		my %to = $self->_worker_tags($ast, $env, $wf_data);
-		$tags{$director}{$env} = $to{tags} || [];
-	}
+	my ($tracked, $tags) = $self->_tracked_by_director($ast, $wf_data);
+	my %tracked = %$tracked;
+	my %tags    = %$tags;
 
 	my %icon = (cloud => 'cloud', runtime => 'run-fast', cpi => 'chip');
 	my $pipeline_name = $ast->metadata->{name} || 'genesis-pipeline';
@@ -894,6 +886,42 @@ sub _bosh_config_checks {
 		$envs{$name} = [sort keys %on];
 	}
 	return (\@resources, \@jobs, \%envs);
+}
+
+# }}}
+# _tracked_by_director - which environments track which of a director's configs {{{
+#
+# Returns (\%tracked, \%tags): director => type => [envs], and
+# director => env => its worker tags.
+sub _tracked_by_director {
+	my ($self, $ast, $wf_data) = @_;
+	my (%tracked, %tags);
+	for my $env (@{$wf_data->{environments}}) {
+		my $director = $wf_data->{bosh_env}{$env};
+		next unless $director && !$self->_is_create_env($ast, $env);
+		my $types = $self->_bosh_config_types($ast, $env, $wf_data);
+		next unless @$types;
+		push @{$tracked{$director}{$_}}, $env for @$types;
+		my %to = $self->_worker_tags($ast, $env, $wf_data);
+		$tags{$director}{$env} = $to{tags} || [];
+	}
+	return (\%tracked, \%tags);
+}
+
+# }}}
+# tracked_directors - each director a check reads, with the environments tracking it (D149) {{{
+sub tracked_directors {
+	my ($self) = @_;
+	my $ast = $self->{ast};
+	my %envs;
+	for my $wf_name ($ast->workflow_names) {
+		my $wf_data = $self->_extract_workflow_data($ast, $ast->workflows->{$wf_name});
+		my ($tracked) = $self->_tracked_by_director($ast, $wf_data);
+		for my $director (keys %$tracked) {
+			$envs{$director}{$_} = 1 for map {@$_} values %{$tracked->{$director}};
+		}
+	}
+	return {map {($_ => [sort keys %{$envs{$_}}])} keys %envs};
 }
 
 # }}}
@@ -2250,6 +2278,9 @@ agree on their worker tag, which goes on its resources and the job's gets, and
 the compile refuses at C<CONFIG> where they do not, naming each environment and
 its tag. The job is grouped as an environment's notify job is, and under
 custom groups goes in each group holding an environment on its director.
+C<tracked_directors> answers each such director with the environments tracking
+it, which C<pipeline-apply> reads to copy each director's credentials from its
+exodus record (D149).
 
 Where C<pipeline.registry> is set, every image the compiler names by default,
 each resource type, the default task image and the default shuttle image, is

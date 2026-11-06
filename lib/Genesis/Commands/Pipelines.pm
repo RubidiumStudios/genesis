@@ -123,6 +123,13 @@ sub apply {
 			rotate     => $opts->{'rotate-webhook-token'},
 		);
 		$coming{_webhook_reference()} = $would if $would;
+
+		# The credentials each director's config checks read (D149).
+		my %would_copy = _apply_director_credentials($top, $result->{ast},
+			dry_run    => $dry_run,
+			skip_vault => $opts->{'skip-vault'},
+		);
+		@coming{keys %would_copy} = values %would_copy;
 	}
 
 	# Every secret it references, where Concourse will read it, before
@@ -1614,6 +1621,82 @@ sub _apply_webhook_token {
 	$vault->set($path, token => $token);
 	info("  #G{%s}", $verb eq 'rotate' ? 'rotated' : 'generated');
 	return ($token);
+}
+
+# }}}
+# _apply_director_credentials - each tracked director's credentials, from its exodus record (D149) {{{
+#
+# Each pair is the key the check reads and the exodus key it is copied from.
+my @DIRECTOR_KEYS = (
+	[url => 'url'], [ca_cert => 'ca_cert'],
+	[client => 'admin_username'], [client_secret => 'admin_password'],
+);
+sub _apply_director_credentials {
+	my ($top, $ast, %opts) = @_;
+	my $store = $top->pipeline_secrets_store or return ();
+	require Genesis::CI::Compiler::PipelineDescriptor;
+	my $directors = Genesis::CI::Compiler::PipelineDescriptor->new(ast => $ast)->tracked_directors;
+	return () unless %$directors;
+
+	info("\n#G{The BOSH directors' credentials} the config checks read, from each director's exodus record");
+	if ($opts{skip_vault}) {
+		info("  #Yi{unverified}, because #C{--skip-vault} was given");
+		return ();
+	}
+	my $vault  = eval {$top->pipeline_secrets_vault};
+	my $status = $vault ? (eval {$vault->status} // 'unreachable') : 'unreachable';
+	if ($status ne 'ok') {
+		warning("  #Y{unverified}, because the store is %s", $status);
+		return ();
+	}
+
+	my %coming;
+	for my $director (sort keys %$directors) {
+		my $name = "bosh/$director";
+		my $path = "$store->{path_prefix}/$store->{team}/$store->{pipeline}/$name";
+		my ($record, $from, $why) = _director_record($top, $directors->{$director}[0]);
+		if ($why) {
+			warning("  #R{not copied}  %s: %s", $name, $why);
+			next;
+		}
+
+		my %want = map {($_->[0] => $record->{$_->[1]})} @DIRECTOR_KEYS;
+		my $have = $vault->has($path) ? ($vault->get($path) // {}) : {};
+		unless (grep {($have->{$_} // '') ne $want{$_}} keys %want) {
+			info("  #Ki{in place}    %s at #C{%s}", $name, $path);
+			next;
+		}
+		my $verb = %$have ? 'update' : 'copy';
+		if ($opts{dry_run}) {
+			info("  #Yi{would %s}  %s from #C{%s} to #C{%s}", $verb, $name, $from, $path);
+			$coming{"$name.$_"} = "would $verb" for keys %want;
+			next;
+		}
+		$vault->set($path, %want);
+		info("  #G{%s}  %s from #C{%s} to #C{%s}",
+			$verb eq 'copy' ? 'copied' : 'updated', $name, $from, $path);
+	}
+	return %coming;
+}
+
+# }}}
+# _director_record - the director's exodus record an environment deploys by, or why not {{{
+#
+# Returns ($record, $exodus_path) or (undef, $exodus_path, $why).
+sub _director_record {
+	my ($top, $env_name) = @_;
+	my ($path, $vault) = eval {$top->control_env($env_name)->director_exodus};
+	return (undef, undef, "the director of #C{$env_name} could not be found: "
+		.(($@ // '') =~ s/\s+\z//r || 'no director')) unless $path;
+
+	my $status = eval {$vault->status} // 'unreachable';
+	return (undef, $path, "the vault holding #C{$path} is $status") unless $status eq 'ok';
+	my $record = $vault->has($path) ? $vault->get($path) : undef;
+	return (undef, $path, "there is no exodus record at #C{$path}") unless ref($record) eq 'HASH';
+	my @lacking = grep {!defined $record->{$_} || $record->{$_} eq ''} map {$_->[1]} @DIRECTOR_KEYS;
+	return (undef, $path, sprintf("the exodus record at #C{%s} lacks %s", $path, join(', ', @lacking)))
+		if @lacking;
+	return ($record, $path);
 }
 
 # }}}

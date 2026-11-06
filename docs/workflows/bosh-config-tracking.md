@@ -95,25 +95,32 @@ naming each environment and its tag.
 ## The director's credentials
 
 The check reads the director with four references under one name,
-`bosh/<bosh_env>`: `url`, `ca_cert`, `client` and `client_secret`.  Whoever
-owns the director publishes them to the store Concourse reads, at the team
-scope or the shared path, so every pipeline on the team finds them:
+`bosh/<bosh_env>`: `url`, `ca_cert`, `client` and `client_secret`.
 
-```sh
-safe set concourse/<team>/bosh/<bosh_env> \
-  url=https://10.0.0.6:25555 client=<reader> \
-  ca_cert@<path to the director's CA> client_secret@<file holding it> \
-  >/dev/null 2>&1; echo "rc=$?"
-```
+`genesis pipeline-apply` writes them itself.  For each director an
+environment tracks, it reads the director's exodus record from the
+environment's vault, where the environment's own deploy finds it, and copies
+the record's `url`, `ca_cert`, `admin_username` and `admin_password` as
+`url`, `ca_cert`, `client` and `client_secret` to
+`<path_prefix>/<team>/<pipeline>/bosh/<bosh_env>` in the secrets store.  That
+is the pipeline scope, which Concourse reads first, so the copy is used even
+where someone has published the director's credentials at the team scope or
+the shared path.  The copy is the admin client because the record holds no
+other; it adds no exposure, since the pipeline's AppRole can already read the
+record.
 
-A read-only UAA client is enough, and is recommended over the admin one;
-Genesis does not check which it is.  When the director's client rotates, its
-owner publishes again, and Concourse reads the new value at the next check
-with nothing reapplied.
+The apply writes only where a value differs, and reports each director as
+copied, updated or in place, never printing a value; a dry run says what it
+would copy.  So when the director's client rotates, the next apply brings the
+copy up to date.  It needs write access to that scope of the store.
 
-`genesis pipeline-apply` checks the four like every other reference in the
-pipeline, and refuses where they are found nowhere, naming the paths Concourse
-reads, unless given `--missing-secrets-ok`.
+Where the record can't be read (no record, a key missing, or its vault out of
+reach), the director is reported not copied with the reason.  The secret check
+that follows then finds the four references missing and refuses the apply,
+naming the paths Concourse reads, unless given `--missing-secrets-ok`.  With
+`--skip-vault` nothing is read or written.
+
+A copy is not removed when no environment tracks its director any more.
 
 ---
 

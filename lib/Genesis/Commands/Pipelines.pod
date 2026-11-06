@@ -1939,6 +1939,65 @@ B<Examples:>
 
   my ($token, $would) = _apply_webhook_token($top, dry_run => 1);   # (undef, 'would generate')
 
+=head2 _apply_director_credentials
+
+  my %coming = _apply_director_credentials($top, $ast, dry_run => 0, skip_vault => 0);
+
+Copies the credentials each tracked director's BOSH-config checks read into the
+secrets store (D149). The directors are the compiled AST's, through
+C<PipelineDescriptor::tracked_directors>: every one an environment tracks with
+C<track_bosh_configs> not false. For each, the first environment tracking it
+names the exodus record, through L</_director_record>, and the record's
+C<url>, C<ca_cert>, C<admin_username> and C<admin_password> are written as
+C<url>, C<ca_cert>, C<client> and C<client_secret> at
+C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/E<lt>pipelineE<gt>/bosh/E<lt>directorE<gt>>, the
+pipeline scope Concourse reads first. That copy is the apply's own, written
+whatever an owner published at the team scope or the shared path.
+
+It writes only where a value differs, reporting the director copied, updated or
+in place, and never a value. A dry run writes nothing and says what it would
+copy, answering the references it would write so the secret check counts them
+coming. A director whose record cannot be read is reported not copied with the
+reason, and nothing is answered for it, so the check finds its references
+missing. With C<skip_vault>, or a store not reachable and authenticated, it
+reports the directors unverified and copies nothing.
+
+A copy is not removed when no environment tracks its director any more.
+
+B<Parameters:> the repository handle, the compiled AST, and C<dry_run> and
+C<skip_vault>.
+
+B<Returns:> a hash of C<bosh/E<lt>directorE<gt>.E<lt>keyE<gt>> to what a dry run would do,
+empty outside a dry run.
+
+B<Errors:> those of the store's write.
+
+B<Examples:>
+
+  my %coming = _apply_director_credentials($top, $ast, dry_run => 1);
+  # ('bosh/mgmt.url' => 'would copy', ...)
+
+=head2 _director_record
+
+  my ($record, $path, $why) = _director_record($top, 'us-west-1-prod');
+
+The exodus record of the director an environment deploys by, loaded from
+control and located by C<Env::director_exodus>, or why it cannot be read: the
+director not found, its vault not reachable and authenticated, no record at
+the path, or a record lacking one of the four keys the copy needs.
+
+B<Parameters:> the repository handle and the environment's name.
+
+B<Returns:> the record and its path, or undef, the path where known, and the
+reason.
+
+B<Errors:> none; each failure is answered as a reason.
+
+B<Examples:>
+
+  my ($record, $path, $why) = _director_record($top, 'qa');
+  # (undef, '/secret/exodus/mgmt/bosh', 'there is no exodus record at ...')
+
 =head2 _random_token
 
   my $token = _random_token();

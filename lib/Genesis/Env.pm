@@ -4045,6 +4045,22 @@ sub bosh_env {
 }
 
 # }}}
+# director_exodus - where this environment's director keeps its exodus record, as its deploy finds it {{{
+sub director_exodus {
+	my ($self) = @_;
+	return () if $self->use_create_env;
+	my ($alias, $dep_type, $vault_url, $mount) = $self->bosh_env;
+	return () unless $alias;
+	my $vault = $vault_url ? Service::Vault->find_single_match_or_bail($vault_url) : $self->vault;
+	return Service::BOSH::Director->_derive_exodus_pointers($alias, $self,
+		exodus_vault         => $vault,
+		exodus_mount         => $mount,
+		bosh_deployment_type => $dep_type,
+		rel_to_env           => 'parent',
+	);
+}
+
+# }}}
 # bosh_alias - return the alias of the bosh used to deploy this environment (diminutive of bosh_env) {{{
 sub bosh_alias {
 	return $_[0]->bosh_env->{name};
