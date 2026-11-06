@@ -4012,7 +4012,7 @@ sub _validate_env_pipeline_block {
 		my $v = $block{track_bosh_configs};
 		push @errors, "#R{genesis.pipeline.track_bosh_configs}: expected a ".
 			"boolean or a list of config types"
-			unless !ref($v) || ref($v) eq 'ARRAY';
+			unless !ref($v) || ref($v) =~ /^(?:ARRAY|JSON::PP::Boolean)$/;
 	}
 
 	# Worded as the capability gate words its own, so one refusal reads as one

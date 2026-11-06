@@ -122,10 +122,13 @@ subtest 'the dependency source is a list and has no opt-out' => sub {
 };
 
 subtest 'the BOSH-config key is per environment only' => sub {
-	plan tests => 2;
+	plan tests => 4;
 
 	lives_ok {load_env_with({track_bosh_configs => ['cloud', 'runtime']})}
 		'the per-environment placement is declared';
+	# Written bare, so the YAML reader hands them over as booleans.
+	lives_ok {load_env_with({track_bosh_configs => 'true'})} 'true is accepted';
+	lives_ok {load_env_with({track_bosh_configs => 'false'})} 'and so is false';
 
 	# The row rewrites the repository's own configuration, and the rows
 	# below load the same repository, so what was there is put back.
