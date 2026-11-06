@@ -696,7 +696,9 @@ sub _readback_value {
 	# number, so we compare the flattened forms rather than the raw ones.
 	return join(',', map {defined($_) ? "$_" : ''} @$value)
 		if ref($value) eq 'ARRAY';
-	return defined($value) ? "$value" : '';
+	# A read through safe drops a value's trailing newlines, so a PEM
+	# written whole never reads back the same; they are dropped here too.
+	return defined($value) ? "$value" =~ s/\n+\z//r : '';
 }
 
 # }}}

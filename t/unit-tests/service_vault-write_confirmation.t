@@ -351,6 +351,44 @@ subtest 'a value that reads back normalised still counts as landed' => sub {
 	cmp_ok $state->{reads}, '>=', 1, 'and the write was still read back';
 };
 
+subtest 'a value ending in a newline reads back without it and still counts as landed' => sub {
+	plan tests => 3;
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '1';
+	local $ENV{GENESIS_VAULT_CONFIRM_TIMEOUT} = '1';
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	# A read through safe hands every value back without its trailing
+	# newline, so a PEM written whole never reads back the same.
+	my $v = make_vault(name => 'pem');
+	my $state = install_lagging_vault($v);
+	my $inner_get = $v->{__get};
+	$v->{__get} = sub {
+		my $answer = $inner_get->(@_);
+		s/\n+\z// for grep {defined && !ref} values %$answer;
+		return $answer;
+	};
+
+	my $err = '';
+	eval {$v->set('secret/director', ca_cert => "-----BEGIN-----\nAAAA\n-----END-----\n"); 1}
+		or $err = $@;
+	is $err, '', 'the PEM is accepted';
+	cmp_ok $state->{reads}, '>=', 1, 'and the write was still read back';
+
+	# Only the newline is forgiven: a different value is still a lost write.
+	$v = make_vault(name => 'pem-wrong');
+	$state = install_lagging_vault($v);
+	$inner_get = $v->{__get};
+	$v->{__get} = sub {
+		my $answer = $inner_get->(@_);
+		$answer->{ca_cert} = 'something else' if defined $answer->{ca_cert};
+		return $answer;
+	};
+	$err = '';
+	eval {$v->set('secret/director', ca_cert => "-----BEGIN-----\nAAAA\n-----END-----\n"); 1}
+		or $err = $@;
+	like $err, qr/read back/i, 'while a value that differs otherwise is still caught';
+};
+
 subtest 'clear is confirmed before anything writes over it' => sub {
 	plan tests => 2;
 	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = '1';

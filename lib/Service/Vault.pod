@@ -1950,6 +1950,11 @@ comparing the raw forms reports a difference where the contents match.
 Both sides of the comparison in L</_confirm_written> go through this, which
 is what keeps a correct write from being read as a lost one.
 
+A read through C<safe> also hands every value back without its trailing
+newlines, so a PEM written whole would never read back the same; a scalar's
+trailing newlines are dropped on both sides for that reason. Only those are
+forgiven: any other difference is still a lost write.
+
 An array reference is joined with commas and every other value is
 stringified. An undefined value, and an undefined element within an array
 reference, both flatten to the empty string, so a missing value compares
@@ -1976,6 +1981,7 @@ B<Examples:>
   Service::Vault::_readback_value('admin');        # => 'admin'
   Service::Vault::_readback_value(['a', 'b']);     # => 'a,b'
   Service::Vault::_readback_value(42);             # => '42'
+  Service::Vault::_readback_value("PEM\n");        # => 'PEM'
   Service::Vault::_readback_value(undef);          # => ''
 
 =head2 _confirm_cleared
