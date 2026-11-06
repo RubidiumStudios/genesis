@@ -4024,9 +4024,32 @@ sub _validate_env_pipeline_block {
 		my $set  = defined $from && $from ne "$env_name.yml" ? " (set in #C{$from})" : '';
 		$_ = "$head in #C{$env_name}$set$rest";
 	}
+	push @errors, $self->_ocfp_tracks_bosh_configs($env_name, $block{track_bosh_configs});
 	$self->_refuse_config(@errors) if @errors;
 
 	return 1;
+}
+
+# }}}
+# _ocfp_tracks_bosh_configs - the refusal of BOSH-config tracking where the deploy uploads them (D147) {{{
+sub _ocfp_tracks_bosh_configs {
+	my ($self, $env_name, $track) = @_;
+	my $off = sub {my ($v) = @_; !$v || $v =~ /^(?:false|no|off|0)$/i};
+	return () if !defined $track || (ref($track) eq 'ARRAY' ? !@$track : $off->($track));
+
+	my $params   = $self->_merged_env_params($env_name);
+	my $features = ($params->{kit} // {})->{features};
+	return () unless grep {defined && $_ eq 'ocfp'} ref($features) eq 'ARRAY' ? @$features : ();
+	my $manage = ($params->{genesis} // {})->{'manage-cloud-configs'};
+	return () if defined $manage && $off->($manage);
+
+	my $key  = 'genesis.pipeline.track_bosh_configs';
+	my $from = $self->_file_setting($env_name, $key) // "$env_name.yml";
+	return sprintf(
+		"#R{%s} in #C{%s}, set in #C{%s}: an OCFP environment's deploy generates ".
+		"and uploads its own named configs, so there is nothing to watch.  Remove ".
+		"the key, or set #C{genesis.manage-cloud-configs} to false where someone ".
+		"else uploads them", $key, $env_name, $from);
 }
 
 # }}}

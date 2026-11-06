@@ -5729,7 +5729,9 @@ since a crontab expression carries commas of its own.
 Two shapes the declaration cannot state are checked beside it. A
 C<track_dependencies> entry is a deployment type at this environment or an
 C<< <env>/<type> >> pair elsewhere, and C<track_bosh_configs> is a boolean or
-a list of config type names.
+a list of config type names, a boolean arriving from the YAML reader as a
+C<JSON::PP::Boolean>. An OCFP environment tracking its configs is refused
+after them, through L</_ocfp_tracks_bosh_configs> (D147).
 
 Each refused key that the environment inherits rather than writes itself is
 followed by C<(set in E<lt>fileE<gt>)>, the file L</_file_setting> answers, as
@@ -5788,6 +5790,61 @@ B<Examples:>
 
     $top->_validate_env_pipeline_block('us-east-prod', {manual => 'maybe'});
     # exits CONFIG: genesis.pipeline.manual: expected a boolean
+
+=head2 _ocfp_tracks_bosh_configs
+
+    my @errors = $top->_ocfp_tracks_bosh_configs('us-east-prod', ['cloud']);
+
+The refusal of C<genesis.pipeline.track_bosh_configs> on an OCFP environment
+(D147), whose deploy generates and uploads its own named configs, so a check
+on the director would watch its own uploads. An environment is OCFP here
+where its merged C<kit.features> include C<ocfp> and its
+C<genesis.manage-cloud-configs> is not false: two of
+C<Genesis::Env::can_build_cloud_configs>'s three tests, the two a load can
+read without the kit. The third, the kit's version gate, is left to the
+environment's own load. A key that tracks nothing, false or an empty list,
+is not refused, since it asks for no check.
+
+The refusal names the file that sets the key, through L</_file_setting>,
+always, the environment's own file included, and the key that makes the
+environment Classic.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$env_name>
+
+The environment, whose merged parameters are read through
+L</_merged_env_params>.
+
+=item C<$track>
+
+The merged C<track_bosh_configs> value, or C<undef> where it is not set.
+
+=back
+
+B<Returns:> a list of one refusal string, or the empty list.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+None of its own; a file that will not merge is refused by
+L</_merged_env_params>.
+
+=back
+
+B<Examples:>
+
+    $top->_ocfp_tracks_bosh_configs('us-east-prod', ['cloud']);
+    # with kit.features [ocfp]: "genesis.pipeline.track_bosh_configs in
+    # us-east-prod, set in us-east-prod.yml: an OCFP environment's deploy ..."
+
+    $top->_ocfp_tracks_bosh_configs('us-east-prod', JSON::PP::false);
+    # ()
 
 =head2 _first_errors
 
