@@ -151,6 +151,21 @@ subtest 'a director with no exodus record is not copied, and the check refuses' 
 	unlike($fly, qr/set-pipeline/, 'before the pipeline is set');
 };
 
+# An HA store confirms every write by reading it back, and a director's CA is
+# a PEM, many lines long and longer than one write's batch.
+subtest 'a multi-line CA is copied and confirmed on a store that reads writes back' => sub {
+	local $ENV{GENESIS_VAULT_CONFIRM_WRITES} = 1;
+	my $pem = join("\n", '-----BEGIN CERTIFICATE-----', ('A' x 64) x 20,
+		'-----END CERTIFICATE-----', '');
+	my $h = on_director('mgmt-pem', no_record => 1);
+	$h->_write_record(exodus_path($h, 'mgmt-pem'), %RECORD, ca_cert => $pem);
+	my ($exit, $said) = apply($h, '-y');
+	is($exit, 0, 'the apply succeeds') or return diag($said);
+	like($said, qr/copied\s+bosh\/mgmt-pem\b/, 'reporting the copy');
+	my $path = copied_to($said, 'mgmt-pem');
+	is(vault_get($h, $path)->{client}, 'admin', 'and every key is written');
+};
+
 subtest 'an environment tracking nothing copies nothing' => sub {
 	my $h = on_director('mgmt-off', track => 'false');
 	my ($exit, $said) = apply($h, '-y');
