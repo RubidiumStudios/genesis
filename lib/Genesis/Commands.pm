@@ -1401,6 +1401,15 @@ sub command_usage { # {{{
 		terminal_width," #i{Note:} ", 7
 	)."\n" unless $command eq $called;
 
+	# The same flag run_command warns from, so the help and the run agree.
+	if (defined(my $replacement = $PROPS{$command}{deprecated})) {
+		$out .= "\n".wrap(
+			"#Y{This command is deprecated and will be removed in a future version of Genesis.}".
+			($replacement ? "  #Y{It has been replaced by} #G{$replacement}#Y{.}" : ''),
+			terminal_width, "#Yr{Deprecated:} ", 12
+		)."\n";
+	}
+
 	# TODO: List all the aliases (or other aliases if alias was used)
 
 	if ($rc && !under_test) {

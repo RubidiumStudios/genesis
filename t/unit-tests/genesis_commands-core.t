@@ -750,6 +750,36 @@ subtest 'command_usage - exits 0 full help' => sub {
 	like($stderr, qr/verbose/, "output includes option listing");
 };
 
+subtest 'command_usage - a deprecated command says so, naming its replacement' => sub {
+	reset_commands_state();
+
+	define_command('old-way', {
+		summary    => 'The old way',
+		deprecated => 'new-way',
+	});
+	define_command('gone-way', {
+		summary    => 'Going away',
+		deprecated => '',
+	});
+	define_command('current-way', {
+		summary => 'The current way',
+	});
+
+	prepare_command('old-way');
+	my (undef, $stderr) = output_from {exits_zero {command_usage(0)} 'help exits 0'};
+	like($stderr, qr/Deprecated.*will be removed.*new-way/s,
+		'the help says it is deprecated and names the replacement');
+
+	prepare_command('gone-way');
+	(undef, $stderr) = output_from {exits_zero {command_usage(0)} 'help exits 0'};
+	like($stderr, qr/Deprecated.*will be removed/s, 'and says so with no replacement too');
+	unlike($stderr, qr/replaced by/, 'naming none');
+
+	prepare_command('current-way');
+	(undef, $stderr) = output_from {exits_zero {command_usage(0)} 'help exits 0'};
+	unlike($stderr, qr/Deprecated/, 'a current command says nothing of it');
+};
+
 subtest 'command_usage - exits nonzero with error' => sub {
 	reset_commands_state();
 

@@ -1384,9 +1384,11 @@ B<Examples:>
 Displays the usage screen for the current command, then exits.
 
 The usage screen includes the command summary, usage line(s), an alias
-note if the command was called by an alias, the full description, and
-sections for arguments, environment variables, options, and optionally
-global options.
+note if the command was called by an alias, a deprecation note where the
+command's registration carries C<deprecated> (naming the replacement when the
+flag gives one, the same flag C<run_command> warns from), the full
+description, and sections for arguments, environment variables, options, and
+optionally global options.
 
 When C<$rc> is non-zero and the process is not under test, prints a brief
 usage hint and a fatal error message before exiting.  A non-zero C<$rc>
