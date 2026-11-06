@@ -62,7 +62,7 @@ $ast->{pipeline} = {
     { name => 'git', type => 'git', icon => 'github', source => { uri => '...', branch => '...' } },
     { name => 'slack', type => 'slack-notification', source => { url => '...' } },
     { name => 'sandbox-changes', type => 'git', source => { paths => [...] } },
-    { name => 'sandbox-cloud-config', type => 'bosh-config', source => { ... } },
+    { name => 'mgmt-bosh-cloud-config', type => 'bosh-config', source => { ... } },
     ...
   ],
   jobs => [
@@ -100,7 +100,9 @@ The descriptor generates several categories of resources:
 
 **Base resources** are created once per pipeline. `_git_resource()` creates the main git resource that tracks the deployment repository. It constructs the Git URI from the source control integration, sets the branch, and configures authentication (SSH key or username/password). `_notification_resources()` creates slack and/or email resources from the notification integrations.
 
-**Per-environment resources** are created by `_env_resources()` for each environment in each workflow. The one resource every environment gets is its branch, `$alias-branch`, because under branch propagation the branch itself is the change signal, so there is nothing left to path-filter. That branch resource replaces both the path-filtered changes resource and the predecessor's cache resource that earlier versions emitted. The `get` steps naming those two resources outlived the resources themselves, which is why the notify-job and deploy-job sections below still describe fetching both. BOSH config resources follow it, one per config type, where a type is `cloud`, `runtime`, or `cpi`, and they are emitted only for the types `track_bosh_configs` names and never for a create-env environment.
+**Per-environment resources** are created by `_env_resources()` for each environment in each workflow. The one resource every environment gets is its branch, `$alias-branch`, because under branch propagation the branch itself is the change signal, so there is nothing left to path-filter. That branch resource replaces both the path-filtered changes resource and the predecessor's cache resource that earlier versions emitted. The `get` steps naming those two resources outlived the resources themselves, which is why the notify-job and deploy-job sections below still describe fetching both.
+
+**BOSH config checks** are the director's, not the environment's, so `_bosh_config_checks()` emits them once per workflow: one `bosh-config` resource per director and config type, `<bosh_env>-bosh-<type>-config` with `all: true`, read with the director's published `((bosh/<bosh_env>.url))`, `ca_cert`, `client` and `client_secret`, for the types any environment on that director names in `track_bosh_configs`, and never for a create-env environment (D146, D148). One `notify-<bosh_env>-bosh-configs` job per director gets them with `trigger: true` and sends one Slack message; no deploy or redeploy gets them. The environments tracking a director must share a worker tag, which goes on the resources and the job's gets, and the compile refuses where they do not. The node's `bosh_env` comes from `Env::bosh_env` through ASTBuilder, the environment's own name where it is absent.
 
 **Locker resources** are created by `_locker_resources()` when a locker integration is configured. A BOSH director gets a shared BOSH lock resource on a named lock, `$alias-bosh-upgrade`, which its children acquire during their own deploys, so a child under a BOSH parent gets no BOSH lock resource of its own. A standalone environment, or a child that turns the upgrade lock off, gets a BOSH lock keyed on the director URL, and a create-env environment gets none. Every environment gets a deployment lock resource keyed on the environment and deployment type.
 

@@ -13,7 +13,7 @@ The `ci.yml` format the rest of this document describes is the legacy format. A 
 | `manual` | Marks the environment as one a person starts, which the graph labels and `genesis pipeline-status` reads, and which is provider-conditional as the section below states |
 | `redeploy_cron` | One crontab string, or a list of them, in UTC, triggering the environment's redeploy job |
 | `track_dependencies` | The deployments this one reads, declared so that the applied record and the staleness check know about them |
-| `track_bosh_configs` | Whether, or which, BOSH config changes trigger this environment's redeploy job |
+| `track_bosh_configs` | Whether, or which, of the director's BOSH configs a Classic environment watches, `true` for cloud and runtime or a list of `cloud`, `runtime` and `cpi`; a change notifies through the director's `notify-<bosh_env>-bosh-configs` job and triggers nothing, and the key is refused on an OCFP environment. See [BOSH config tracking](../../workflows/bosh-config-tracking.md) |
 | `track_additional_files` | Extra paths for this environment's propagation set, relative to the deployment root, with `<env>` substitution and globs |
 | `notifications` | The per-environment override of the repository's notification settings |
 

@@ -394,7 +394,8 @@ sub _build_workflow_graph {
 # _add_lock_pools - each node's own and director pools, the environment's answers {{{
 #
 # Loaded from control with its kit, as the legacy pipeline loaded it, so
-# create-env and the director are Env's own (D22, noted 2026-10-19).
+# create-env and the director are Env's own (D22, noted 2026-10-19).  The
+# director's name is kept too, for its BOSH-config checks (D146).
 sub _add_lock_pools {
 	my ($self, $nodes) = @_;
 	my $top = $self->{top} or return;
@@ -403,6 +404,7 @@ sub _add_lock_pools {
 		my ($name, $type) = $E->use_create_env ? () : $E->bosh_env;
 		$nodes->{$env}{deployment_name} = $E->deployment_name;
 		$nodes->{$env}{director_pool}   = $name ? sprintf('%s-%s', $name, $type || 'bosh') : '';
+		$nodes->{$env}{bosh_env}        = $name // '';
 	}
 }
 

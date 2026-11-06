@@ -150,6 +150,18 @@ sub describe {
 			}
 		}
 
+		# Each director's config checks, heard by a notify job of its own that
+		# no deploy or redeploy shares (D146, contract a16, c10).
+		my ($bc_resources, $bc_jobs, $bc_envs) = $self->_bosh_config_checks($ast, $wf_data);
+		my %have_resource = map {($_->{name} => 1)} @resources;
+		my %have_job      = map {($_->{name} => 1)} @jobs;
+		push @resources, grep {!$have_resource{$_->{name}}} @$bc_resources;
+		for my $job (grep {!$have_job{$_->{name}}} @$bc_jobs) {
+			push @jobs, $job;
+			push @wf_job_names, $job->{name};
+			push @notify_job_names, $job->{name};
+		}
+
 		# Auto-update resources and job
 		my $auto_update = $config->{auto_update};
 		if ($auto_update && $auto_update->{enabled}) {
@@ -179,6 +191,14 @@ sub describe {
 						}
 					}
 				}
+				# A director's config job goes with the environments on it.
+				my %member = map {($_ => 1)} @{$custom_groups->{$group_name}};
+				for my $bc (sort keys %$bc_envs) {
+					next unless grep {$member{$_}} @{$bc_envs->{$bc}};
+					push @{$group_notifications ? \@grouped_notifications : \@group_jobs}, $bc;
+				}
+				my %seen_job;
+				@group_jobs = grep {!$seen_job{$_}++} @group_jobs;
 				push @groups, {
 					name => $group_name,
 					jobs => [sort @group_jobs],
@@ -793,44 +813,87 @@ sub _env_resources {
 		$self->_git_checks($ast, 'check_every'),
 	};
 
-	# BOSH config resources, emitted only when track_bosh_configs is set
-	unless ($is_create_env) {
+	return \@resources;
+}
+
+# }}}
+# _bosh_config_checks - each director's config checks and the job that hears them (D146, D148) {{{
+#
+# Returns (\@resources, \@jobs, \%envs), %envs naming each job's environments.
+sub _bosh_config_checks {
+	my ($self, $ast, $wf_data) = @_;
+
+	# director => type => [envs], and director => env => its tags
+	my (%tracked, %tags);
+	for my $env (@{$wf_data->{environments}}) {
+		my $director = $wf_data->{bosh_env}{$env};
+		next unless $director && !$self->_is_create_env($ast, $env);
 		my $types = $self->_bosh_config_types($ast, $env, $wf_data);
-		if (@$types) {
-			my $target = $ast->targets->{$env} || {};
-			my $conn   = $target->{connection} || {};
-			my $auth   = $conn->{auth} || {};
-			my %to = $self->_worker_tags($ast, $env, $wf_data);
-
-			my $ocfp = ($ast->configuration || {})->{ocfp};
-			my $config_name = 'default';
-			if ($ocfp) {
-				$config_name = $wf_data->{genesis_envs}{$env} || $env;
-			}
-
-			my %bs = (
-				target        => $conn->{url},
-				client        => $auth->{client_id},
-				client_secret => _unwrap_ref($auth->{client_secret}),
-				ca_cert       => _unwrap_ref($conn->{ca_cert}),
-			);
-			$bs{name} = $config_name if $ocfp;
-
-			my %_bc_suffix = (cloud => 'cloud-config', runtime => 'runtime-config', cpi => 'cpi-config');
-			my %_bc_icon   = (cloud => 'cloud', runtime => 'run-fast', cpi => 'chip');
-			for my $type (@$types) {
-				push @resources, {
-					name   => "$alias-$_bc_suffix{$type}",
-					type   => 'bosh-config',
-					icon   => $_bc_icon{$type},
-					%to,
-					source => { %bs, config => $type, all => JSON::PP::true },
-				};
-			}
-		}
+		next unless @$types;
+		push @{$tracked{$director}{$_}}, $env for @$types;
+		my %to = $self->_worker_tags($ast, $env, $wf_data);
+		$tags{$director}{$env} = $to{tags} || [];
 	}
 
-	return \@resources;
+	my %icon = (cloud => 'cloud', runtime => 'run-fast', cpi => 'chip');
+	my $pipeline_name = $ast->metadata->{name} || 'genesis-pipeline';
+	my (@resources, @jobs, %envs);
+	for my $director (sort keys %tracked) {
+		my %by_tag = map {(join(',', @{$tags{$director}{$_}}) => 1)} keys %{$tags{$director}};
+		bail({exitcode => CONFIG},
+			"The BOSH configs of the #C{%s} director are checked from one worker, ".
+			"and the environments tracking them name different ".
+			"#C{genesis.pipeline.provider.tag}s: %s.  Give them the same tag.",
+			$director, join(', ', map {
+				"#C{$_} ".(join(', ', @{$tags{$director}{$_}}) || 'none')
+			} sort keys %{$tags{$director}})
+		) if keys %by_tag > 1;
+		my @tags = @{(values %{$tags{$director}})[0]};
+		my %to   = @tags ? (tags => [@tags]) : ();
+
+		# The director's own credentials, published under one name (D148).
+		my %ref = map {($_ => _unwrap_ref({secret_ref => "bosh/$director:$_"}))}
+			qw/url ca_cert client client_secret/;
+		my @types = grep {$tracked{$director}{$_}} qw/cloud runtime cpi/;
+		my @names = map {"$director-bosh-$_-config"} @types;
+		push @resources, map {+{
+			name   => "$director-bosh-$_-config",
+			type   => 'bosh-config',
+			icon   => $icon{$_},
+			%to,
+			source => {
+				target        => $ref{url},
+				ca_cert       => $ref{ca_cert},
+				client        => $ref{client},
+				client_secret => $ref{client_secret},
+				config        => $_,
+				all           => JSON::PP::true,
+			},
+		}} @types;
+
+		my $notif = $self->_notification_step($ast,
+			"$pipeline_name: A BOSH config on the $director director changed; see "._build_link().
+			" for which.\n".join('', map {
+				"• $_ config: ".join(', ', sort @{$tracked{$director}{$_}})."\n"
+			} @types).
+			"Each environment renders against its director's configs, so redeploy those ".
+			"under the one that changed to pick the change up.",
+			{ kind => 'bosh_configs' });
+
+		my $name = "notify-$director-bosh-configs";
+		push @jobs, {
+			name   => $name,
+			public => $self->_job_public($ast),
+			serial => JSON::PP::true,
+			plan   => [
+				{ in_parallel => [map {+{ get => $_, trigger => JSON::PP::true, %to }} @names] },
+				($notif ? ($notif) : ()),
+			],
+		};
+		my %on = map {map {($_ => 1)} @$_} values %{$tracked{$director}};
+		$envs{$name} = [sort keys %on];
+	}
+	return (\@resources, \@jobs, \%envs);
 }
 
 # }}}
@@ -902,6 +965,7 @@ our %NOTIFICATION_EMOJI = (
 	pull_request => ':twisted_rightwards_arrows:',
 	deploy_started   => ':rocket:',
 	redeploy_started => ':arrows_counterclockwise:',
+	bosh_configs     => ':gear:',
 );
 sub _build_link {
 	return '<'.JOBS_URL.'/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_JOB_NAME #$BUILD_NAME>';
@@ -1831,7 +1895,7 @@ sub _extract_workflow_data {
 	    %redeploy, %redeploy_cron_start, %redeploy_cron_stop,
 	    %status_signal, %signal_prefix,
 	    %bosh_parent, %bosh_upgrade_lock, %is_bosh_director,
-	    %track_bosh_configs, %worker_tags);
+	    %track_bosh_configs, %worker_tags, %bosh_env);
 
 	for my $edge (@$edges) {
 		push @{ $will_trigger{$edge->{from}} }, $edge->{to};
@@ -1855,6 +1919,8 @@ sub _extract_workflow_data {
 		$track_bosh_configs{$n}  = $nd->{track_bosh_configs}
 			if defined $nd->{track_bosh_configs};
 		$worker_tags{$n}         = $nd->{worker_tags} || [];
+		# The environment is its own director unless it names one, as in Env.
+		$bosh_env{$n}            = exists $nd->{bosh_env} ? $nd->{bosh_env} : $genesis_envs{$n};
 	}
 	# Derive which envs are pipeline BOSH directors (referenced as bosh_parent)
 	for my $n (keys %bosh_parent) {
@@ -1894,6 +1960,7 @@ sub _extract_workflow_data {
 		is_bosh_director    => \%is_bosh_director,
 		track_bosh_configs  => \%track_bosh_configs,
 		worker_tags         => \%worker_tags,
+		bosh_env            => \%bosh_env,
 	};
 }
 
@@ -2165,6 +2232,24 @@ deploy, redeploy and notify jobs, its errands, and its BOSH-config check
 C<propagate> carry none, those services sitting beside Concourse.  A legacy
 C<ci.yml>'s C<tagged: true> gives each environment its own name as the tag,
 placed the same way.
+
+A director's configs are checked once per director and config type, through
+C<_bosh_config_checks> (D146, contract a16, c10): a C<bosh-config> resource
+C<E<lt>bosh_envE<gt>-bosh-E<lt>typeE<gt>-config> with C<all: true>, for each
+type an environment on the director names in C<track_bosh_configs>, the
+director being the node's C<bosh_env> or the environment itself, and none for a
+create-env environment. Its source reads the director with the references
+C<((bosh/E<lt>bosh_envE<gt>.url))>, C<.ca_cert>, C<.client> and
+C<.client_secret>, which the director's owner publishes and the apply's secret
+check verifies (D148). One job per director, C<notify-E<lt>bosh_envE<gt>-bosh-configs>,
+gets its checks with C<trigger: true> and sends one Slack message of kind
+C<bosh_configs> naming the director, each type with the environments on it,
+and the build, whose inputs show which changed; without Slack it only gets.
+No deploy or redeploy gets a check. The environments tracking a director must
+agree on their worker tag, which goes on its resources and the job's gets, and
+the compile refuses at C<CONFIG> where they do not, naming each environment and
+its tag. The job is grouped as an environment's notify job is, and under
+custom groups goes in each group holding an environment on its director.
 
 Where C<pipeline.registry> is set, every image the compiler names by default,
 each resource type, the default task image and the default shuttle image, is

@@ -1,4 +1,9 @@
 #!/usr/bin/env perl
+# The descriptor's half of T476 and T478 (D146, D148; contract a16, c10): a
+# director's configs are checked once per director and config type, shared by
+# every environment on it that tracks the type, read with the director's
+# published credentials, and heard by one notify job per director that no
+# deploy or redeploy shares.
 use strict;
 use warnings;
 
@@ -6,9 +11,11 @@ use lib 't';
 use lib 'lib';
 use Test::More;
 use Test::Deep;
+use Test::Exception;
 
 $ENV{GENESIS_TESTING} = 'yes';
 $ENV{GENESIS_LIB}   ||= 'lib';
+$ENV{NOCOLOR}         = 1;
 
 use_ok 'Genesis::CI::Compiler::AST';
 use_ok 'Genesis::CI::Compiler::PipelineDescriptor';
@@ -17,11 +24,11 @@ use_ok 'Genesis::CI::Compiler::PipelineDescriptor';
 # Helpers
 # =========================================================================
 
+# Environments as name => {bosh_env, track, tags, auto}; a global
+# track_bosh_configs as the legacy ci.yml set it.
 sub _ast_for {
 	my (%o) = @_;
-
-	my $env   = $o{env}   || 'sandbox';
-	my $alias = $o{alias} || $env;
+	my %envs = %{$o{envs} || {sandbox => {}}};
 
 	my %integrations = (
 		source_control => { provider => 'github', repository => 'org/repo' },
@@ -36,105 +43,29 @@ sub _ast_for {
 	$config{track_bosh_configs} = $o{track_bosh_configs}
 		if exists $o{track_bosh_configs};
 
-	my %node = (
-		alias               => $alias,
-		stage_name          => $env,
-		genesis_env         => $env,
-		auto                => $o{auto} // 0,
-		type                => 'deployment',
-		require_pr          => 0,
-		manual              => 0,
-		redeploy            => '',
-		redeploy_cron_start => '',
-		redeploy_cron_stop  => '',
-		status_signal       => '',
-		signal_prefix       => '',
-		bosh_parent         => '',
-		bosh_upgrade_lock   => 1,
-	);
-	$node{track_bosh_configs} = $o{env_track_bosh_configs}
-		if exists $o{env_track_bosh_configs};
+	my %nodes = map {
+		my $e = $envs{$_};
+		($_ => {
+			alias       => $_, stage_name => $_, genesis_env => $_,
+			auto        => $e->{auto} // 0,
+			type        => 'deployment',
+			deployment_name => "$_-deployment",
+			(exists $e->{bosh_env} ? (bosh_env => $e->{bosh_env}) : ()),
+			(exists $e->{track} ? (track_bosh_configs => $e->{track}) : ()),
+			worker_tags => $e->{tags} || [],
+		})
+	} keys %envs;
 
 	return Genesis::CI::Compiler::AST->new(
 		metadata     => { name => 'test-pipeline', deployment_type => 'deployment' },
 		branches     => { control => 'main' },
 		integrations => \%integrations,
-		targets      => {
-			$env => {
-				type       => 'bosh-director',
-				connection => {
-					url     => 'https://bosh.example.com:25555',
-					ca_cert => 'fake-ca',
-					auth    => { client_id => 'admin', client_secret => 'secret' },
-				},
-			},
-		},
-		workflows => {
-			default => {
-				name  => 'default',
-				type  => 'deployment',
-				graph => {
-					nodes => { $env => \%node },
-					edges => $o{edges} || [],
-				},
-			},
-		},
-		configuration => \%config,
-	);
-}
-
-# Build AST with two envs, the second triggered by the first
-sub _two_env_ast {
-	my (%o) = @_;
-	my %config = (
-		task     => { image => 'genesiscommunity/concourse', version => 'latest' },
-		registry => {},
-	);
-	$config{track_bosh_configs} = $o{track_bosh_configs}
-		if exists $o{track_bosh_configs};
-
-	my %nodes = (
-		sandbox => {
-			alias => 'sandbox', stage_name => 'sandbox', genesis_env => 'sandbox',
-			auto => 1, type => 'deployment', require_pr => 0,
-			manual => 0, redeploy => '', redeploy_cron_start => '',
-			redeploy_cron_stop => '', status_signal => '',
-			signal_prefix => '', bosh_parent => '', bosh_upgrade_lock => 1,
-		},
-		prod => {
-			alias => 'prod', stage_name => 'prod', genesis_env => 'prod',
-			auto => 0, type => 'deployment', require_pr => 0,
-			manual => 0, redeploy => '', redeploy_cron_start => '',
-			redeploy_cron_stop => '', status_signal => '',
-			signal_prefix => '', bosh_parent => '', bosh_upgrade_lock => 1,
-		},
-	);
-	if (exists $o{prod_track_bosh_configs}) {
-		$nodes{prod}{track_bosh_configs} = $o{prod_track_bosh_configs};
-	}
-
-	my %targets = map { $_ => {
-		type => 'bosh-director',
-		connection => { url => "https://$_.example.com:25555", ca_cert => 'ca',
-		                auth => { client_id => 'admin', client_secret => 'secret' } },
-	}} qw(sandbox prod);
-
-	return Genesis::CI::Compiler::AST->new(
-		metadata     => { name => 'test-pipeline', deployment_type => 'deployment' },
-		branches     => { control => 'main' },
-		integrations => {
-			source_control => { provider => 'github', repository => 'org/repo' },
-			vault          => { url => 'https://vault.example.com' },
-		},
-		targets      => \%targets,
+		targets      => {},
 		workflows    => {
 			default => {
 				name  => 'default',
 				type  => 'deployment',
-				graph => {
-					nodes => \%nodes,
-					edges => [{ from => 'sandbox', to => 'prod' }],
-				},
+				graph => { nodes => \%nodes, edges => [] },
 			},
 		},
 		configuration => \%config,
@@ -146,249 +77,188 @@ sub _describe {
 	Genesis::CI::Compiler::PipelineDescriptor->new(ast => $ast)->describe();
 }
 
-sub _find_resource {
-	my ($pipeline, $name) = @_;
-	my ($r) = grep { $_->{name} eq $name } @{$pipeline->{resources}};
-	return $r;
+sub _resource {
+	my ($p, $name) = @_;
+	return (grep {$_->{name} eq $name} @{$p->{resources}})[0];
 }
 
-sub _find_job {
-	my ($pipeline, $name) = @_;
-	my ($j) = grep { $_->{name} eq $name } @{$pipeline->{jobs}};
-	return $j;
+sub _job {
+	my ($p, $name) = @_;
+	return (grep {$_->{name} eq $name} @{$p->{jobs}})[0];
 }
 
-# Return get steps from the parallel block of a job's plan.
-# Deploy jobs wrap everything in plan[0]{do}; notify jobs use a flat plan array.
-sub _job_gets {
-	my ($pipeline, $job_name) = @_;
-	my $job = _find_job($pipeline, $job_name) or return ();
-	my $plan  = $job->{plan} || [];
-	my $steps = ($plan->[0] && $plan->[0]{do}) ? $plan->[0]{do} : $plan;
-	my ($parallel) = grep { ref $_ eq 'HASH' && $_->{in_parallel} } @$steps;
-	return $parallel ? @{$parallel->{in_parallel}} : ();
+sub _config_resources {
+	my ($p) = @_;
+	return sort map {$_->{name}} grep {$_->{type} eq 'bosh-config'} @{$p->{resources}};
 }
 
-# Return get names from a job's parallel block
-sub _get_names {
-	my ($pipeline, $job_name) = @_;
-	return map { ref $_ eq 'HASH' && $_->{get} ? $_->{get} : () }
-		_job_gets($pipeline, $job_name);
+# Every get and put of a job, however its plan nests them.
+sub _steps {
+	my ($node) = @_;
+	return () unless ref $node;
+	return map {_steps($_)} @$node if ref $node eq 'ARRAY';
+	return () unless ref $node eq 'HASH';   # a boolean is blessed
+	my @inner = map {_steps($node->{$_})} grep {ref $node->{$_}} keys %$node;
+	return ((grep {exists $node->{$_}} qw/get put task/) ? $node : (), @inner);
 }
 
-# =========================================================================
-# AC7 (opt-in, off by default)
-# =========================================================================
-subtest 'Default (no track_bosh_configs): no bosh-config resources emitted' => sub {
-	my $pl = _describe(_ast_for());
+my $SLACK = { channel => '#deploys', webhook => '((slack-webhook))' };
 
-	ok(!_find_resource($pl, 'sandbox-cloud-config'),
-		'No cloud-config resource by default');
-	ok(!_find_resource($pl, 'sandbox-runtime-config'),
-		'No runtime-config resource by default');
-	ok(!_find_resource($pl, 'sandbox-cpi-config'),
-		'No cpi-config resource by default');
-};
-
-subtest 'track_bosh_configs: false suppresses all resources' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => 0));
-
-	ok(!_find_resource($pl, 'sandbox-cloud-config'),   'No cloud-config with false');
-	ok(!_find_resource($pl, 'sandbox-runtime-config'), 'No runtime-config with false');
-};
+my %TWO_ON_MGMT = (
+	qa   => { bosh_env => 'mgmt', track => ['cloud', 'runtime'] },
+	prod => { bosh_env => 'mgmt', track => ['cloud'] },
+);
 
 # =========================================================================
-# AC2 (Concourse emits bosh-config resources when configured)
+# T476: one check per director and type
 # =========================================================================
-subtest 'track_bosh_configs: true emits cloud-config and runtime-config' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => 1));
-
-	ok(_find_resource($pl, 'sandbox-cloud-config'),   'cloud-config resource emitted');
-	ok(_find_resource($pl, 'sandbox-runtime-config'), 'runtime-config resource emitted');
-	ok(!_find_resource($pl, 'sandbox-cpi-config'),    'cpi-config not emitted for true');
-};
-
-subtest 'track_bosh_configs: [cloud, runtime, cpi] emits all three types' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => ['cloud', 'runtime', 'cpi']));
-
-	ok(_find_resource($pl, 'sandbox-cloud-config'),   'cloud-config emitted');
-	ok(_find_resource($pl, 'sandbox-runtime-config'), 'runtime-config emitted');
-	ok(_find_resource($pl, 'sandbox-cpi-config'),     'cpi-config emitted');
-};
-
-# =========================================================================
-# AC3 (resource connection derived from env's bosh target)
-# =========================================================================
-subtest 'bosh-config resource source derived from env target connection' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => 1));
-	my $r  = _find_resource($pl, 'sandbox-cloud-config');
-
-	ok($r, 'cloud-config resource present');
-	is($r->{type}, 'bosh-config', 'type is bosh-config');
-	is($r->{source}{target}, 'https://bosh.example.com:25555', 'target URL correct');
-	is($r->{source}{client}, 'admin', 'client from auth.client_id');
-	is($r->{source}{client_secret}, 'secret', 'client_secret from auth.client_secret');
-	is($r->{source}{ca_cert}, 'fake-ca', 'ca_cert from connection.ca_cert');
-	is($r->{source}{config}, 'cloud', 'config type is cloud');
-	ok($r->{source}{all}, 'all: true set');
-};
-
-subtest 'runtime-config resource source correct' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => 1));
-	my $r  = _find_resource($pl, 'sandbox-runtime-config');
-
-	is($r->{source}{config}, 'runtime', 'config type is runtime');
-	is($r->{source}{target}, 'https://bosh.example.com:25555', 'target correct');
-};
-
-subtest 'cpi-config resource source correct' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => ['cpi']));
-	my $r  = _find_resource($pl, 'sandbox-cpi-config');
-
-	ok($r, 'cpi-config resource present');
-	is($r->{source}{config}, 'cpi', 'config type is cpi');
-	is($r->{type}, 'bosh-config', 'resource type is bosh-config');
-};
-
-# =========================================================================
-# AC4 (subset selection)
-# =========================================================================
-subtest 'track_bosh_configs: [cloud] emits only cloud-config' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => ['cloud']));
-
-	ok(_find_resource($pl, 'sandbox-cloud-config'),    'cloud-config emitted');
-	ok(!_find_resource($pl, 'sandbox-runtime-config'), 'runtime-config NOT emitted');
-	ok(!_find_resource($pl, 'sandbox-cpi-config'),     'cpi-config NOT emitted');
-};
-
-subtest 'track_bosh_configs: [runtime] emits only runtime-config' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => ['runtime']));
-
-	ok(!_find_resource($pl, 'sandbox-cloud-config'),  'cloud-config NOT emitted');
-	ok(_find_resource($pl, 'sandbox-runtime-config'), 'runtime-config emitted');
-	ok(!_find_resource($pl, 'sandbox-cpi-config'),    'cpi-config NOT emitted');
-};
-
-subtest 'track_bosh_configs: [cpi] emits only cpi-config' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => ['cpi']));
-
-	ok(!_find_resource($pl, 'sandbox-cloud-config'),   'cloud-config NOT emitted');
-	ok(!_find_resource($pl, 'sandbox-runtime-config'), 'runtime-config NOT emitted');
-	ok(_find_resource($pl, 'sandbox-cpi-config'),      'cpi-config emitted');
-};
-
-subtest 'track_bosh_configs: [cloud, cpi] emits cloud and cpi but not runtime' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => ['cloud', 'cpi']));
-
-	ok(_find_resource($pl, 'sandbox-cloud-config'),    'cloud-config emitted');
-	ok(!_find_resource($pl, 'sandbox-runtime-config'), 'runtime-config NOT emitted');
-	ok(_find_resource($pl, 'sandbox-cpi-config'),      'cpi-config emitted');
-};
-
-# =========================================================================
-# AC5 (per-env override)
-# =========================================================================
-subtest 'Per-env track_bosh_configs overrides global default (off)' => sub {
-	my $ast = _ast_for(
-		env_track_bosh_configs => ['cloud'],
-	);
-	my $pl = _describe($ast);
-
-	ok(_find_resource($pl, 'sandbox-cloud-config'),    'cloud-config emitted via per-env');
-	ok(!_find_resource($pl, 'sandbox-runtime-config'), 'runtime-config not in per-env list');
-};
-
-subtest 'Per-env false overrides global true' => sub {
-	my $ast = _two_env_ast(
-		track_bosh_configs      => 1,
-		prod_track_bosh_configs => 0,
-	);
-	my $pl = _describe($ast);
-
-	ok(_find_resource($pl, 'sandbox-cloud-config'),   'sandbox gets cloud-config (global)');
-	ok(!_find_resource($pl, 'prod-cloud-config'),     'prod suppressed by per-env false');
-};
-
-subtest 'Per-env superset overrides global subset' => sub {
-	my $ast = _two_env_ast(
-		track_bosh_configs      => ['cloud'],
-		prod_track_bosh_configs => ['cloud', 'runtime', 'cpi'],
-	);
-	my $pl = _describe($ast);
-
-	ok(_find_resource($pl, 'sandbox-cloud-config'),    'sandbox gets cloud (global)');
-	ok(!_find_resource($pl, 'sandbox-runtime-config'), 'sandbox no runtime (global)');
-	ok(_find_resource($pl, 'prod-cloud-config'),       'prod gets cloud');
-	ok(_find_resource($pl, 'prod-runtime-config'),     'prod gets runtime');
-	ok(_find_resource($pl, 'prod-cpi-config'),         'prod gets cpi');
-};
-
-# =========================================================================
-# Job get-step wiring
-# =========================================================================
-# Contract c3: a config change redeploys (c10), it never triggers the deploy.
-subtest 'Auto env deploy job: no bosh-config get, whatever is tracked' => sub {
-	for my $tracked (undef, 1, ['cloud'], [qw/cloud runtime cpi/]) {
-		my $pl = _describe(_ast_for(auto => 1, defined $tracked ? (track_bosh_configs => $tracked) : ()));
-		my @names = _get_names($pl, 'deploy-sandbox');
-		is(scalar(grep {/-config$/} @names), 0,
-			'no config get with track_bosh_configs '.(defined $tracked ? (ref $tracked ? "[@$tracked]" : $tracked) : 'unset'));
+subtest 'nothing tracked makes no check and no job' => sub {
+	for my $track (undef, 0, 'false', []) {
+		my $p = _describe(_ast_for(envs => {sandbox => {bosh_env => 'mgmt',
+			(defined $track ? (track => $track) : ())}}));
+		my $what = defined $track ? (ref $track ? '[]' : "'$track'") : 'unset';
+		is_deeply([_config_resources($p)], [], "no bosh-config resource with $what");
+		ok(!_job($p, 'notify-mgmt-bosh-configs'), "and no notify job with $what");
 	}
 };
 
-my $_slack = { channel => '#deploys', webhook => '((slack-webhook))' };
+subtest 'two environments on one director share its checks' => sub {
+	my $p = _describe(_ast_for(envs => \%TWO_ON_MGMT));
+	is_deeply([_config_resources($p)], ['mgmt-bosh-cloud-config', 'mgmt-bosh-runtime-config'],
+		'a16: one resource per director and type, none per environment');
 
-# The notify job triggers on its branch alone (D122, contract c13).
-subtest 'Notify job: no bosh-config get, whatever is tracked' => sub {
-	for my $tracked (undef, 1, ['cloud'], [qw/cloud runtime cpi/]) {
-		my $pl = _describe(_ast_for(slack => $_slack, defined $tracked ? (track_bosh_configs => $tracked) : ()));
-		my @names = _get_names($pl, 'notify-sandbox');
-		is_deeply(\@names, ['sandbox-branch'],
-			'the branch alone with track_bosh_configs '.(defined $tracked ? (ref $tracked ? "[@$tracked]" : $tracked) : 'unset'));
+	my $cloud = _resource($p, 'mgmt-bosh-cloud-config');
+	is($cloud->{source}{config}, 'cloud', 'the cloud check reads the cloud type');
+	ok($cloud->{source}{all}, 'with all: true, so every named config is covered');
+	ok(!exists $cloud->{source}{name}, 'and no single config name');
+	is(_resource($p, 'mgmt-bosh-runtime-config')->{source}{config}, 'runtime',
+		'the runtime check reads the runtime type');
+};
+
+subtest 'true tracks cloud and runtime, and a list exactly its types' => sub {
+	my $p = _describe(_ast_for(envs => {sandbox => {bosh_env => 'mgmt', track => 1}}));
+	is_deeply([_config_resources($p)], ['mgmt-bosh-cloud-config', 'mgmt-bosh-runtime-config'],
+		'true gives cloud and runtime');
+	$p = _describe(_ast_for(envs => {sandbox => {bosh_env => 'mgmt', track => ['cpi']}}));
+	is_deeply([_config_resources($p)], ['mgmt-bosh-cpi-config'], 'a list gives its own types');
+};
+
+subtest 'each director has its own checks' => sub {
+	my $p = _describe(_ast_for(envs => {
+		qa   => { bosh_env => 'east', track => ['cloud'] },
+		prod => { bosh_env => 'west', track => ['cloud'] },
+	}));
+	is_deeply([_config_resources($p)], ['east-bosh-cloud-config', 'west-bosh-cloud-config'],
+		'one cloud check per director');
+	ok(_job($p, "notify-$_-bosh-configs"), "and a notify job for $_") for qw/east west/;
+};
+
+subtest 'without a director named, the environment is its own' => sub {
+	# Env::bosh_env falls back to the environment's own name likewise.
+	my $p = _describe(_ast_for(envs => {sandbox => {track => ['cloud']}}));
+	is_deeply([_config_resources($p)], ['sandbox-bosh-cloud-config'], 'named for the environment');
+};
+
+subtest 'a create-env environment has no director to check' => sub {
+	my $p = _describe(_ast_for(envs => {sandbox => {bosh_env => '', track => ['cloud']}}));
+	is_deeply([_config_resources($p)], [], 'no check');
+};
+
+subtest 'the legacy global key still asks for the checks' => sub {
+	my $p = _describe(_ast_for(track_bosh_configs => ['cloud'],
+		envs => {sandbox => {bosh_env => 'mgmt'}}));
+	is_deeply([_config_resources($p)], ['mgmt-bosh-cloud-config'], 'from the configuration');
+};
+
+# =========================================================================
+# T478: the director's published credentials
+# =========================================================================
+subtest 'the check reads the director with its published credentials' => sub {
+	my $p = _describe(_ast_for(envs => \%TWO_ON_MGMT));
+	my $src = _resource($p, 'mgmt-bosh-cloud-config')->{source};
+	is($src->{target},        '((bosh/mgmt.url))',           'D148: target');
+	is($src->{ca_cert},       '((bosh/mgmt.ca_cert))',       'D148: ca_cert');
+	is($src->{client},        '((bosh/mgmt.client))',        'D148: client');
+	is($src->{client_secret}, '((bosh/mgmt.client_secret))', 'D148: client_secret');
+};
+
+# =========================================================================
+# T476: the notify job
+# =========================================================================
+subtest 'one job per director hears its checks' => sub {
+	my $p = _describe(_ast_for(envs => \%TWO_ON_MGMT, slack => $SLACK));
+	my $job = _job($p, 'notify-mgmt-bosh-configs');
+	ok($job, 'c10: notify-mgmt-bosh-configs is emitted') or return;
+
+	my @gets = grep {exists $_->{get}} _steps($job->{plan});
+	is_deeply([sort map {$_->{get}} @gets], ['mgmt-bosh-cloud-config', 'mgmt-bosh-runtime-config'],
+		'it gets both checks');
+	ok((!grep {!$_->{trigger}} @gets), 'each with trigger: true');
+
+	my ($put) = grep {($_->{put} // '') eq 'slack'} _steps($job->{plan});
+	ok($put, 'and puts one Slack message') or return;
+	my $text = $put->{params}{text};
+	like($text, qr/^:gear: /, 'D131: led by its kind');
+	like($text, qr/\bmgmt\b/, 'naming the director');
+	like($text, qr/cloud config[^\n]*\bprod\b[^\n]*\bqa\b/, 'the cloud config with both environments');
+	like($text, qr/runtime config[^\n]*\bqa\b/, 'the runtime config with its one');
+	like($text, qr/redeploy/i, 'and that a redeploy picks it up');
+};
+
+subtest 'no deploy or redeploy gets a check' => sub {
+	my $p = _describe(_ast_for(envs => \%TWO_ON_MGMT, slack => $SLACK));
+	for my $job (grep {$_->{name} !~ /-bosh-configs$/} @{$p->{jobs}}) {
+		my @got = grep {($_->{get} // '') =~ /-bosh-\w+-config$/} _steps($job->{plan});
+		ok(!@got, "c10: $job->{name} gets none");
 	}
 };
 
-# =========================================================================
-# Resource icons
-# =========================================================================
-subtest 'Cloud-config resource has cloud icon' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => ['cloud']));
-	my $r  = _find_resource($pl, 'sandbox-cloud-config');
-	is($r->{icon}, 'cloud', 'cloud icon set');
+subtest 'without Slack the job still hears the checks' => sub {
+	my $p = _describe(_ast_for(envs => \%TWO_ON_MGMT));
+	my $job = _job($p, 'notify-mgmt-bosh-configs');
+	ok($job, 'the job is emitted') or return;
+	ok(!(grep {exists $_->{put}} _steps($job->{plan})), 'with nothing to put');
 };
 
-subtest 'Runtime-config resource has run-fast icon' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => ['runtime']));
-	my $r  = _find_resource($pl, 'sandbox-runtime-config');
-	is($r->{icon}, 'run-fast', 'run-fast icon set');
-};
-
-subtest 'CPI-config resource has chip icon' => sub {
-	my $pl = _describe(_ast_for(track_bosh_configs => ['cpi']));
-	my $r  = _find_resource($pl, 'sandbox-cpi-config');
-	is($r->{icon}, 'chip', 'chip icon set');
+subtest 'the job sits in the deployments group' => sub {
+	my $p = _describe(_ast_for(envs => \%TWO_ON_MGMT, slack => $SLACK));
+	my @in = grep {grep {$_ eq 'notify-mgmt-bosh-configs'} @{$_->{jobs}}} @{$p->{groups}};
+	is(scalar(@in), 1, 'in exactly one group');
 };
 
 # =========================================================================
-# Multi-env (correct resources per env with independent targets)
+# T476: the worker tag (D139)
 # =========================================================================
-subtest 'Two-env pipeline emits per-env bosh-config resources' => sub {
-	my $pl = _describe(_two_env_ast(track_bosh_configs => 1));
-
-	ok(_find_resource($pl, 'sandbox-cloud-config'),   'sandbox-cloud-config emitted');
-	ok(_find_resource($pl, 'sandbox-runtime-config'), 'sandbox-runtime-config emitted');
-	ok(_find_resource($pl, 'prod-cloud-config'),      'prod-cloud-config emitted');
-	ok(_find_resource($pl, 'prod-runtime-config'),    'prod-runtime-config emitted');
+subtest 'one shared tag goes on the check and its get' => sub {
+	my %envs = map {$_ => {%{$TWO_ON_MGMT{$_}}, tags => ['net-a']}} keys %TWO_ON_MGMT;
+	my $p = _describe(_ast_for(envs => \%envs));
+	is_deeply(_resource($p, $_)->{tags}, ['net-a'], "b5: $_ carries the tag")
+		for _config_resources($p);
+	my @gets = grep {exists $_->{get}} _steps(_job($p, 'notify-mgmt-bosh-configs')->{plan});
+	is_deeply($_->{tags}, ['net-a'], "b5: and so does the get of $_->{get}") for @gets;
 };
 
-subtest 'Two-env: each resource has its own director target' => sub {
-	my $pl = _describe(_two_env_ast(track_bosh_configs => 1));
+subtest 'with no tag nothing is tagged' => sub {
+	my $p = _describe(_ast_for(envs => \%TWO_ON_MGMT));
+	ok(!exists _resource($p, $_)->{tags}, "$_ carries none") for _config_resources($p);
+};
 
-	my $sb = _find_resource($pl, 'sandbox-cloud-config');
-	my $pr = _find_resource($pl, 'prod-cloud-config');
+subtest 'environments disagreeing on the tag are refused' => sub {
+	my %envs = (
+		qa   => {%{$TWO_ON_MGMT{qa}},   tags => ['net-a']},
+		prod => {%{$TWO_ON_MGMT{prod}}, tags => ['net-b']},
+	);
+	throws_ok {_describe(_ast_for(envs => \%envs))}
+		qr/mgmt.*prod.*net-b.*qa.*net-a/s,
+		'naming the director, each environment and its tag';
+};
 
-	is($sb->{source}{target}, 'https://sandbox.example.com:25555', 'sandbox target');
-	is($pr->{source}{target}, 'https://prod.example.com:25555',    'prod target');
+subtest 'an environment tracking nothing does not take part in the tag' => sub {
+	my %envs = (
+		qa   => {%{$TWO_ON_MGMT{qa}}, tags => ['net-a']},
+		prod => {bosh_env => 'mgmt', tags => ['net-b']},
+	);
+	lives_ok {_describe(_ast_for(envs => \%envs))} 'the compile goes on';
 };
 
 done_testing;

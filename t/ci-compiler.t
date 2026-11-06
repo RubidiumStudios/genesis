@@ -1187,9 +1187,12 @@ subtest 'Concourse - native generation from modern AST' => sub {
 	like $output, qr/name: preprod-branch/, "preprod-branch resource declared";
 
 	# Verify BOSH config resources.  They are emitted only where
-	# track_bosh_configs asks for them, which the configuration above does.
-	like $output, qr/sandbox-cloud-config/, "sandbox-cloud-config resource present";
-	like $output, qr/sandbox-runtime-config/, "sandbox-runtime-config resource present";
+	# track_bosh_configs asks for them, which the configuration above does,
+	# one per director and type (D146); an environment naming no director
+	# is its own.
+	like $output, qr/name: us-west-sandbox-bosh-cloud-config$/m, "sandbox's cloud-config check present";
+	like $output, qr/name: us-west-sandbox-bosh-runtime-config$/m, "sandbox's runtime-config check present";
+	unlike $output, qr/name: sandbox-cloud-config$/m, "and no per-environment resource";
 
 	# Verify jobs
 	like $output, qr/sandbox-cf/, "sandbox deploy job present";
@@ -1822,7 +1825,7 @@ subtest 'Concourse - custom groups' => sub {
 ### Concourse Provider - OCFP Config Name Support
 ### ============================================================ ###
 
-subtest 'Concourse - OCFP config name support' => sub {
+subtest 'Concourse - an OCFP check names no config' => sub {
 	my $ast = Genesis::CI::Compiler::AST->new(
 		metadata => { name => 'ocfp-test', deployment_type => 'cf', source => 'modern' },
 		branches => { control => 'main' },
@@ -1872,11 +1875,12 @@ subtest 'Concourse - OCFP config name support' => sub {
 
 	_debug_write('concourse-ocfp.yml', $output // '');
 
-	# OCFP mode should use genesis_envs for config names
-	like $output, qr/sandbox-cloud-config/, "cloud-config resource present";
-	like $output, qr/sandbox-runtime-config/, "runtime-config resource present";
-	# The BOSH config resource should include the genesis_env-based config name
-	like $output, qr/name: us-west-1-sandbox/, "OCFP config name present in bosh-config source";
+	# The check is the director's and covers every named config with
+	# all: true, so it names none (D146); refusing the key on an OCFP
+	# environment is the load's (D147).
+	like $output, qr/name: us-west-1-sandbox-bosh-cloud-config$/m, "cloud-config check present";
+	like $output, qr/name: us-west-1-sandbox-bosh-runtime-config$/m, "runtime-config check present";
+	unlike $output, qr/^\s+name: us-west-1-sandbox$/m, "no config name in its source";
 };
 
 ### ============================================================ ###

@@ -1,205 +1,152 @@
-# BOSH Config Drift Tracking
+# BOSH Config Tracking
 
-Genesis pipelines can watch a BOSH director's cloud-config, runtime-config, and
-CPI-config for out-of-band changes.  When a config changes on the director,
-Concourse detects it through a `bosh-config` resource and re-triggers the
-associated jobs so operators are alerted (or so a pending-changes summary is
-regenerated).
+A Classic environment renders against configs someone else uploads to its
+director: the cloud config, the runtime configs, the CPI config.  When one of
+them changes, the environment needs a redeploy to pick it up.  A pipeline can
+watch the director for those changes and say so in Slack.
 
-Tracking is **opt-in** and defaults to off.  Pipelines that do not need drift
-detection produce no extra resources or job steps.
+Tracking is opt-in and off by default.  For now it notifies and nothing more;
+no deploy or redeploy is triggered (see [Why it only notifies](#why-it-only-notifies)).
+
+An OCFP environment generates its own named configs and uploads them as part
+of its deploy, so there is nothing to watch, and the key is refused there (see
+[OCFP environments](#ocfp-environments)).
 
 ---
 
 ## Configuration
 
-### Global default
+Set `genesis.pipeline.track_bosh_configs` in an environment file, or in a
+site file every environment beneath it inherits:
 
 ```yaml
-configuration:
-  track_bosh_configs: true          # cloud + runtime for every env
-  # or a subset:
-  track_bosh_configs: [cloud, runtime, cpi]
+# us-east-1-prod.yml
+genesis:
+  bosh_env: us-east-1-mgmt          # the director this environment deploys to
+  pipeline:
+    track_bosh_configs: true        # cloud and runtime
+    # or exactly the types to watch:
+    track_bosh_configs: [cloud, runtime, cpi]
 ```
-
-Accepted values:
 
 | Value | Types tracked |
-|-------|--------------|
-| `true` / `yes` / `1` | `cloud`, `runtime` |
-| `false` / `no` / `0` | none (off) |
-| `[cloud]` | cloud-config only |
-| `[runtime]` | runtime-config only |
-| `[cpi]` | CPI-config only |
-| `[cloud, runtime, cpi]` | all three |
+|-------|---------------|
+| `true` | `cloud`, `runtime` |
+| `false`, or unset | none |
+| a list of `cloud`, `runtime`, `cpi` | those |
 
-### Per-environment override
-
-Set `genesis.pipeline.track_bosh_configs` in an env YAML file to override the
-global default for that environment:
-
-```yaml
-# prod.yml
-genesis:
-  pipeline:
-    track_bosh_configs: cloud,runtime,cpi   # comma-separated types
-    # or:
-    track_bosh_configs: false               # suppress tracking for this env
-```
-
-The per-env value shadows the global `configuration.track_bosh_configs` for
-that env only.  Other envs continue to use the global setting.
+The director is the environment's `genesis.bosh_env`, or the environment
+itself where it names none.  A create-env environment has no director to
+watch, and tracks nothing.
 
 ---
 
-## Emitted resources
+## What the pipeline gets
 
-For each configured type and each environment, one `bosh-config` resource is
-emitted named `<alias>-<type>-config`:
+The configs belong to the director, not to the environment, and every
+environment on a director renders against the same ones.  So the pipeline
+watches each director once per config type, however many environments on it
+track that type.
 
-| Type | Resource name | Icon |
-|------|--------------|------|
-| `cloud` | `<alias>-cloud-config` | `cloud` |
-| `runtime` | `<alias>-runtime-config` | `run-fast` |
-| `cpi` | `<alias>-cpi-config` | `chip` |
+### One check per director and type
 
-Example for a `sandbox` environment with `track_bosh_configs: true`:
+Each is a `bosh-config` resource named `<bosh_env>-bosh-<type>-config`, with
+`all: true` so that every named config of the type is covered:
 
 ```yaml
-- name: sandbox-cloud-config
+- name: us-east-1-mgmt-bosh-cloud-config
   type: bosh-config
   icon: cloud
   source:
-    target:        https://sandbox.bosh.example.com:25555
-    client:        admin
-    client_secret: ((bosh-admin-secret))
-    ca_cert:       ((bosh-ca-cert))
+    target:        ((bosh/us-east-1-mgmt.url))
+    ca_cert:       ((bosh/us-east-1-mgmt.ca_cert))
+    client:        ((bosh/us-east-1-mgmt.client))
+    client_secret: ((bosh/us-east-1-mgmt.client_secret))
     config:        cloud
     all:           true
-
-- name: sandbox-runtime-config
-  type: bosh-config
-  icon: run-fast
-  source:
-    target:        https://sandbox.bosh.example.com:25555
-    client:        admin
-    client_secret: ((bosh-admin-secret))
-    ca_cert:       ((bosh-ca-cert))
-    config:        runtime
-    all:           true
 ```
 
-The source fields are derived automatically from the env's `targets:` entry —
-no manual configuration of BOSH credentials is required.
+The icons are `cloud`, `run-fast` and `chip` for the cloud, runtime and CPI
+checks.
+
+### One notify job per director
+
+`notify-<bosh_env>-bosh-configs` gets every check on its director with
+`trigger: true`, and sends one Slack message naming the director, each config
+type watched with the environments that render against it, and a link to the
+build, whose inputs show which one changed.  Without Slack the job still
+runs, so the change is visible in Concourse.
+
+No `deploy-` or `redeploy-` job gets a check.
+
+The job sits in the deployments' group, or in `notifications` where
+`pipeline.notifications.style` is `grouped`.
+
+### Worker tags
+
+A check reaches the director, so it runs on the workers that can: the
+`genesis.pipeline.provider.tag` of the environments tracking it, which goes on
+the resource and on the job's gets.  Those environments must agree on the tag,
+since one check serves them all, and the compile refuses where they do not,
+naming each environment and its tag.
 
 ---
 
-## How it affects jobs
+## The director's credentials
 
-### Notify job (`notify-<alias>-deployment-changes`)
+The check reads the director with four references under one name,
+`bosh/<bosh_env>`: `url`, `ca_cert`, `client` and `client_secret`.  Whoever
+owns the director publishes them to the store Concourse reads, at the team
+scope or the shared path, so every pipeline on the team finds them:
 
-When bosh-config tracking is enabled, the notify job gains a triggering `get:`
-for each tracked type.  This means a config change on the director automatically
-causes Concourse to run `ci-show-changes` and report the pending diff — even if
-no Git changes are staged.
-
-```yaml
-- get: sandbox-cloud-config
-  trigger: true
-- get: sandbox-runtime-config
-  trigger: true
+```sh
+safe set concourse/<team>/bosh/<bosh_env> \
+  url=https://10.0.0.6:25555 client=<reader> \
+  ca_cert@<path to the director's CA> client_secret@<file holding it> \
+  >/dev/null 2>&1; echo "rc=$?"
 ```
 
-### Auto-trigger deploy job (`<alias>-deployment`)
+A read-only UAA client is enough, and is recommended over the admin one;
+Genesis does not check which it is.  When the director's client rotates, its
+owner publishes again, and Concourse reads the new value at the next check
+with nothing reapplied.
 
-When `auto: true` is set on an environment and bosh-config tracking is enabled,
-the deploy job also gets a triggering get for each type.  A config change will
-kick off the full deployment automatically.
-
-```yaml
-- get: sandbox-cloud-config
-  trigger: true
-- get: sandbox-runtime-config
-  trigger: true
-```
-
-### Redeploy job (`<alias>-redeploy`)
-
-Redeploy jobs include a non-triggering `get:` for each tracked config type so
-the task container has the latest config snapshot available.  These do not
-trigger the job on their own.
+`genesis pipeline-apply` checks the four like every other reference in the
+pipeline, and refuses where they are found nowhere, naming the paths Concourse
+reads, unless given `--missing-secrets-ok`.
 
 ---
 
-## Examples
+## Why it only notifies
 
-### All environments: cloud + runtime
+A new check's first version fires its trigger, so the first apply, and every
+rename or recreation of the resource, would redeploy every environment on the
+director at once.  And a redeploy cannot yet tell whether a change touches it.
+The trigger moves to each environment's redeploy once the deploy records the
+configs it rendered against, so that a redeploy can compare.
 
-```yaml
-configuration:
-  track_bosh_configs: true
-```
-
-### Only the production environment tracks all three types
-
-```yaml
-configuration:
-  track_bosh_configs: [cloud, runtime]   # global: cloud + runtime
-
-# prod.yml
-genesis:
-  pipeline:
-    track_bosh_configs: cloud,runtime,cpi  # prod adds cpi
-```
-
-### Opt a specific environment out of global tracking
-
-```yaml
-configuration:
-  track_bosh_configs: true   # all envs by default
-
-# sandbox.yml
-genesis:
-  pipeline:
-    track_bosh_configs: false  # sandbox is too noisy, skip it
-```
-
-### Track only CPI-config globally
-
-```yaml
-configuration:
-  track_bosh_configs: [cpi]
-```
+The first check after an apply sends one notice, which is harmless.
 
 ---
 
-## BOSH config resource type
+## OCFP environments
 
-The `bosh-config` resource type is provided by
-`cfcommunity/bosh-config-resource`.  It is automatically declared as a resource
-type in the pipeline when any `bosh-config` resource is emitted — no manual
-`resource_types:` entry is needed.
+An environment whose merged `kit.features` include `ocfp`, with
+`genesis.manage-cloud-configs` not false, generates and uploads its own named
+configs as part of its deploy.  Setting `track_bosh_configs` there is refused
+at load, naming the key, the environment and the file that sets it.  Where an
+OCFP environment's configs are uploaded by someone else, set
+`genesis.manage-cloud-configs: false` and it tracks them as a Classic one does.
 
-The `all: true` flag in the source causes the resource to track **all named
-configs** of the given type (cloud, runtime, or cpi) rather than a single
-named config.  This is the correct setting for monitoring the complete director
-state.
-
----
-
-## OCFP mode
-
-When `configuration.ocfp: true` is set, each `bosh-config` resource source also
-includes a `name:` field set to the environment's full genesis env name (e.g.
-`us-west-1-sandbox`).  This narrows tracking to the specific named config used
-by that environment rather than all configs on the director.
+A Classic and an OCFP environment may share a director; only the Classic one's
+key makes a check.
 
 ---
 
-## Workaround: manual resource declaration
+## Legacy `ci.yml`
 
-If fine-grained control is needed beyond what the built-in tracking supports
-(for example, watching a specific named config rather than `all: true`), declare
-the resource manually via the `ci.yml` pass-through and omit
-`track_bosh_configs` for that environment.  The pass-through resource will be
-merged into the generated pipeline by the Concourse provider.
+A legacy `ci.yml`'s `configuration.track_bosh_configs` is still read as the
+default for every environment, and gives the same per-director checks.  Its
+`tagged: true` names each environment's workers after it, so two environments
+tracking one director under it disagree on the tag and are refused; give them
+a shared `genesis.pipeline.provider.tag` instead.
