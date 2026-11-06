@@ -11,8 +11,8 @@ If you are an operator who wants to set up automated deployment pipelines for yo
 | Document | What It Covers |
 |----------|----------------|
 | [Getting Started](user/getting-started.md) | Configuring a pipeline in `.genesis/config` and the environment files, then applying and propagating |
-| [Configuration Reference](user/configuration-reference.md) | The per-environment `genesis.pipeline` keys, and every option the legacy `ci.yml` format took |
-| [Layout DSL](user/layout-dsl.md) | The pipeline layout language for defining environment progression |
+| [Configuration Reference](user/configuration-reference.md) | The per-environment `genesis.pipeline` keys and every key of the `pipeline:` section |
+| [Translating a v2 Layout](user/layout-dsl.md) | How a `ci.yml` layout's chains and `auto` directives become `prior_env` and `manual` |
 | [Pipeline Section Configuration](user/multi-file-configuration.md) | The `pipeline:` section of `.genesis/config`, and the one override file that sits beside it |
 | [CLI Commands](user/cli-commands.md) | `genesis propagate` and the `pipeline-*` commands |
 | [Branches and Commands](user/branches-and-commands.md) | Which branch each command expects, the conditions a feature branch has to meet, and the two flags that target the deployed commit |

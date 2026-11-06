@@ -9,7 +9,7 @@ Where a command refuses, it exits with a code from `Genesis::Exit` rather than w
 The `pipeline-apply` command gives the pipeline its shape. It compiles a CI pipeline definition and, where the provider has one to set, deploys it to the CI platform.
 
 ```
-genesis pipeline-apply [<pipeline-layout>] [options]
+genesis pipeline-apply [options]
 ```
 
 `genesis repipe` is the deprecated spelling of this command. It warns, then does exactly what `pipeline-apply` does, and it keeps the `push` alias. Use `pipeline-apply` in anything new.
@@ -18,7 +18,20 @@ genesis pipeline-apply [<pipeline-layout>] [options]
 
 There is no fallback to `ci.yml`. A repository whose `pipeline:` section is absent or not enabled has no pipeline to apply, and `pipeline-apply` says so instead of compiling anything. A repository that still carries a `ci.yml` with a top-level `pipeline:` key is refused earlier still, by a check that names the migration and exits `Genesis::Exit::CONFIG`, so no pipeline command reads that file.
 
-The optional positional argument selects which pipeline layout to deploy when your configuration defines multiple layouts via `pipeline.layouts`. If you have a single `pipeline.layout`, the argument is ignored. If you have multiple layouts and one is named `default`, it is selected when no argument is given.
+A deployment root has one pipeline, so the command takes no layout. A layout name given as a positional argument, a leftover of `ci.yml`'s `layouts`, is accepted and ignored.
+
+The apply runs from `control`, committed and in step with the remote, and does its work in this order:
+
+1. Writes the secrets it owns:
+   - the pipeline's webhook token, where `pipeline.provider.git.webhooks` is on;
+   - each tracked director's credentials, copied from the director's exodus record, where an environment sets `genesis.pipeline.track_bosh_configs`.
+2. Checks every other `((name.key))` the pipeline references where Concourse will look for it, reporting each as found, missing or unverified, never with its value. A missing one refuses the apply.
+3. Cuts the deployment branches.
+4. Sets the branch rulesets and the GitHub push hook, where `GITHUB_AUTH_TOKEN` allows it.
+5. Writes the applied record.
+6. Sets the pipeline.
+
+Each write is reported as new, changed, or already in place, so a second run changes nothing that already stands.
 
 ### Options
 
@@ -32,7 +45,11 @@ The optional positional argument selects which pipeline layout to deploy when yo
 
 `--output-dir` or `-o` writes compiled pipeline artifacts to a directory instead of deploying. This produces the pipeline YAML, an `ast.json` file containing the full AST, and any other provider output files.
 
-`--skip-vault` bypasses Vault connectivity during compilation. When set, the pipeline is compiled without connecting to Vault, which means spruce vault operators will not be resolved. This is useful for local inspection of the generated YAML.
+`--skip-vault` reads and writes no vault. The secret check reports every reference unverified rather than found or missing, and neither the webhook token nor a director's credentials is written. It suits a local look at the generated YAML.
+
+`--missing-secrets-ok` sets the pipeline even where a secret it references is found nowhere Concourse would look, as for a first apply whose secrets are published afterwards. The check's report is printed either way.
+
+`--rotate-webhook-token` replaces the pipeline's webhook token, and the GitHub hook that carries it, in the same run. It applies only where `pipeline.provider.git.webhooks` is on.
 
 `--debug-dir` writes intermediate compiler artifacts to a directory for debugging. The artifacts are numbered by compilation stage:
 

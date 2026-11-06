@@ -1,33 +1,107 @@
 # Configuration Reference
 
-A v3 repository configures its pipeline in two places. The repository's own settings live in `.genesis/config` under the `pipeline` key, and each environment's settings live in that environment's own file under `genesis.pipeline`. The schema is the contract, so every key a command reads is declared, validation runs at configuration load for every command, and a key the schema does not declare is refused by name rather than aliased.
+A v3 repository configures its pipeline in two places:
 
-The `ci.yml` format the rest of this document describes is the legacy format. A repository that still carries a pipeline `ci.yml` has not moved to v3, every pipeline command refuses it and names the migration, and the "Migration from v2" section of `workplans/Branch-based-Workflow-Architecture.md` says what the move by hand involves.
+- **The repository's own settings** live in `.genesis/config`, under the `pipeline` key.
+- **Each environment's settings** live in that environment's own file, under `genesis.pipeline`.
+
+The schema is the contract. Every key a command reads is declared, and validation runs at configuration load for every command. A key the schema does not declare is refused by name rather than aliased. A retired key is refused naming what replaced it.
+
+`.genesis/config` is generated. Change it with `genesis config --set <key> <value>` and `genesis config --unset <key>`, never by hand. That command validates the result it would write, and refuses to write one that does not load.
+
+A repository that still carries a pipeline `ci.yml` has not moved to v3, and every pipeline command refuses it. Each `ci.yml` setting's v3 home, and the order of the move, are in the operator's migration guide, *Pipeline Migration: v2 to v3*.
 
 ## Per-environment `genesis.pipeline` keys
 
 | Key | What it does |
 |-----|--------------|
-| `prior_env` | Names this environment's parent in the topology. An environment with no `prior_env` takes control's commits without waiting on an ancestor |
-| `require_pr` | Routes delivery through `<pr_prefix><env>/<type>` and a pull request into the deployment branch, and is also the rule `genesis pipeline-apply` applies to that branch's protection |
-| `manual` | Marks the environment as one a person starts, which the graph labels and `genesis pipeline-status` reads, and which is provider-conditional as the section below states |
-| `redeploy_cron` | One crontab string, or a list of them, in UTC, triggering the environment's redeploy job |
-| `track_dependencies` | The deployments this one reads, declared so that the applied record and the staleness check know about them |
-| `track_bosh_configs` | Whether, or which, of the director's BOSH configs a Classic environment watches, `true` for cloud and runtime or a list of `cloud`, `runtime` and `cpi`; a change notifies through the director's `notify-<bosh_env>-bosh-configs` job and triggers nothing, and the key is refused on an OCFP environment. See [BOSH config tracking](../../workflows/bosh-config-tracking.md) |
-| `track_additional_files` | Extra paths for this environment's propagation set, relative to the deployment root, with `<env>` substitution and globs |
-| `notifications` | The per-environment override of the repository's notification settings |
+| `prior_env` | Names the environment this one follows. A change waits until that environment has deployed it, and the deploy is chained after that environment's. An environment with no `prior_env` takes control's commits without waiting on another |
+| `require_pr` | Delivers to this environment through a pull request, from `<pr_prefix><env>/<type>` into the deployment branch. A reviewer approves and merges it. `genesis pipeline-apply` also requires a pull request on that branch |
+| `manual` | The environment's deploy waits for a person to start it, as the section below states |
+| `provider.tag` | The worker tag, or a list of tags, whose workers reach this environment's network. It goes on the steps that need that network: the environment's deploy, redeploy and notify tasks, and its director's BOSH config checks. Concourse only |
+| `redeploy_cron` | One crontab string, or a list of them, in UTC. Accepted, but no schedule is emitted yet |
+| `track_dependencies` | The deployments this one reads, declared so that the applied record and the staleness check know about them. No trigger is emitted yet |
+| `track_bosh_configs` | Whether, or which, of the director's BOSH configs a Classic environment watches: `true` for cloud and runtime, or a list of `cloud`, `runtime` and `cpi`. A change notifies through the director's `notify-<bosh_env>-bosh-configs` job and triggers nothing. The key is refused on an OCFP environment, and `genesis pipeline-apply` copies the director's credentials for the check. See [BOSH config tracking](../../workflows/bosh-config-tracking.md) |
+| `track_additional_files` | Extra paths for this environment's propagation set, relative to the deployment root, with `<env>` substitution and globs. It replaces `required_files` |
+| `notifications` | Accepted at load, but not read; leave it unset. Notifications are the repository's settings |
 
-The block is read merged, so a key written in a site file is inherited by every environment beneath it, and a key written in the environment's own file wins over the one it inherits.
+The block is read merged, so a key written in a site file is inherited by every environment beneath it. A key written in the environment's own file wins over the one it inherits. Every key here shapes the pipeline, so each must resolve from the environment's own files: a `(( vault ))` value, a credhub variable, or a reference those files do not resolve is refused, naming the file that sets it.
+
+The environment's director is `genesis.bosh_env`, outside the block, as for a deploy by hand. It also names the director's lock pool, `<bosh_env>-bosh`.
+
+These keys are retired and refused, each naming its replacement: `locks`, `status_signal`, `signal_prefix`, `required_files`, `redeploy`, `redeploy_cron_start` and `redeploy_cron_stop`.
 
 ### `manual`
 
-Every environment built from environment files already takes `trigger: false` on the deployment branch's `get` in the deploy job, so the pipeline fetches the branch and then waits for a person to start the job, and writing `manual` does not change that get. What the key reaches today is how the pipeline is read rather than how it is emitted. The Mermaid graph labels the environment `MANUAL`, and `genesis pipeline-status` reads the key when it says that a descendant is held by an ancestor awaiting its trigger.
+An environment deploys automatically unless it sets `manual: true`. Its deploy job then takes `trigger: false` on its deployment branch's `get`: the pipeline fetches each delivery and waits for a person to start the job. Where Slack is configured, its notify job posts what deploying the delivery would change. The Mermaid graph labels the environment `MANUAL`, and `genesis pipeline-status` reads the key.
 
-The key is valid only where the provider emits a triggering resource, because a key about triggering says nothing where the provider emits no trigger at all. That ability has a name, `optional_git_triggers`, and every provider declares whether it has it. Concourse declares it true. The manual provider declares all six of its abilities false, because `genesis pipeline-apply` sets no pipeline at all under it. Nothing fetches, nothing triggers, and there is no `get` for the key to sit on, so an operator runs `genesis <env> deploy` by hand instead. GitHub Actions declares the ability false as well, until the class that emits for it is written.
+An environment whose deploy waits for a person certifies nothing until that person acts, so the environments after it stay held meanwhile. `genesis pipeline-status` prints the reason as `awaiting its trigger` beside the environment that holds them.
 
-Where the ability is absent the key is refused at configuration load, by name, and the refusal names the key, the provider, and the capability together. Writing `genesis.pipeline.manual` in an environment file of a repository that has its pipeline enabled and sits on the manual provider therefore fails every command rather than only the pipeline ones, because a key that cannot mean anything is better said out loud than accepted and dropped when the pipeline is emitted. A repository whose `pipeline.enabled` is false is not validated at all, so it carries the key with no refusal.
+The key is valid only where the provider emits a triggering resource, because a key about triggering says nothing where the provider emits no trigger at all. That ability has a name, `optional_git_triggers`, and every provider declares whether it has it:
 
-An environment whose deploy job waits for a person certifies nothing until that person acts, so its descendants stay held meanwhile, and `genesis pipeline-status` prints the reason as `awaiting its trigger` beside the ancestor that holds them.
+- **Concourse** declares it true.
+- **The manual provider** declares all six of its abilities false, because `genesis pipeline-apply` sets no pipeline at all under it. Nothing fetches, nothing triggers, and there is no `get` for the key to sit on, so an operator runs `genesis <env> deploy` by hand instead.
+- **GitHub Actions** declares it false as well, until the class that emits for it is written.
+
+Where the ability is absent the key is refused at configuration load, by name, and the refusal names the key, the provider, and the capability together. Writing `genesis.pipeline.manual` in an environment file of a repository that has its pipeline enabled and sits on the manual provider therefore fails every command, not only the pipeline ones. A key that cannot mean anything is better said out loud than accepted and dropped when the pipeline is emitted. A repository whose `pipeline.enabled` is false is not validated at all, so it carries the key with no refusal.
+
+## The `pipeline` section of `.genesis/config`
+
+```yaml
+pipeline:
+  enabled:   true                  # false by default; set it last
+  name:      bosh                  # defaults to deployment_type
+  provider:
+    type:    concourse             # or manual (the default)
+    url:     https://ci.example.com
+    team:    platform
+    # ... the provider's own keys, below
+  source_control: { ... }
+  vault:          { ... }
+  locker:         { ... }
+  shuttle:        { ... }
+  notifications:  { ... }          # optional
+  registry:       { ... }          # optional
+  redeploy:       { ... }          # optional
+  exodus_mount:       /secret/exodus/
+  recreate_on_deploy: never
+  unredacted:         false
+```
+
+`source_control`, `vault`, `locker` and `shuttle` are required wherever the provider sets a pipeline, which today is Concourse.
+
+Every credential is named by a vault reference and never written in the file. The compiled pipeline turns each into a Concourse variable, `((path.key))`, which Concourse resolves from its own vault when a build runs. A *credential block* (`source_control.auth`, `vault.auth`, `registry.auth`) names a `type` and a `path`. Each component is then read from that path under its own name, or from its own `<path>:<key>` where it is stored under another name:
+
+```yaml
+auth:
+  type:    approle
+  path:    vault/approle             # role_id and secret_id, under those names
+  role_id: vault/approle:approle_id  # or one component from elsewhere
+```
+
+### `pipeline.name`
+
+The pipeline's name in its provider, which defaults to `deployment_type`. It is the Concourse pipeline `fly set-pipeline` sets, and the name of the deployments' group. Under Concourse it is also the pipeline scope of the secrets store. A pipeline must not take the name of a v2 pipeline that is still set, or the apply would overwrite it.
+
+### `pipeline.provider`
+
+`type` picks the provider: `manual` (the default), which sets no pipeline, or `concourse`. The Concourse provider's keys:
+
+| Key | What it does |
+|-----|--------------|
+| `url`, `team` | The Concourse URL and team. Required. Each operator's own fly target is found by these, or given with `--target`; `target` is retired |
+| `insecure` | Skip TLS verification with fly |
+| `public` | Make every job's build log public. False by default |
+| `task.image`, `task.version` | The image every task runs in, by default `genesiscommunity/concourse:latest`. It needs git 2.34.1 or later. An image named here is taken as written, host included |
+| `task.privileged` | Environments whose deploy task runs privileged, such as a create-env director |
+| `git.webhooks` | `true` puts a webhook token on every git resource, has propagate ask Concourse to check each branch it pushes, and has `genesis pipeline-apply` keep the token and a GitHub push hook. False by default |
+| `git.check_every`, `git.control_check_every` | How often the deployment branches, and control, are polled: a Concourse duration (`30s`, `5m`, `1h`) or `never`. Concourse's default, 1m, where unset. With webhooks on, `1h` for the deployment branches keeps GitHub's traffic low |
+| `secrets_store` | The vault Concourse resolves the pipeline's references from, where it is not the repository's own: `url`, `namespace`, `path_prefix` (default `/concourse`), `shared_path` (where Concourse has one configured) and `insecure`. Unset, the store is the repository's vault under `/concourse` |
+| `pause_after_set` | Leave the pipeline paused after it is set. `genesis pipeline-apply --paused` does the same for one run |
+| `min_fly_version`, `fly_bin_path` | The lowest fly the pipeline may be set with, and which fly to run; `GENESIS_FLY_BIN` overrides the latter |
+| `group_commits` | Deploy the tip of what arrived rather than each commit in turn. Only `true` is supported, and `false` is refused |
+
+`tagged` is retired: each environment names its own workers with `genesis.pipeline.provider.tag`.
 
 ## pipeline.source_control
 
@@ -40,11 +114,11 @@ pipeline:
     # or, as its URL, on any host:
     #   repository: https://git.example.com/team/bosh-deployments.git
     #   repository: git@git.example.com:team/bosh-deployments.git
-    control_branch: control
     pr_prefix:      pr/
     auth:
-      type:  ssh            # or https
-      vault: secret/ci/git
+      type: ssh            # or https
+      path: git            # private_key, or username and password
+    api_token: github:token
     identity:
       name:  Genesis CI
       email: ci@example.com
@@ -52,11 +126,35 @@ pipeline:
 
 `repository` names the repository, written as `owner/repo`, which means github.com, or as the repository's https or ssh URL, which carries its own host. Every form names one repository, so they are interchangeable. It can be left out where the clone's remotes leave no doubt which repository they point at.
 
+`auth` is the clone credential every task clones and pushes with: an SSH deploy key with write access, read as `((<path>.private_key))`, or an HTTPS username and token, read as `((<path>.username))` and `((<path>.password))`. Use the repository's automation account, not a person's. `auth.vault` is retired, and refused naming `path`.
+
+`api_token` is the `path:key` of the GitHub token propagate opens pull requests with. It is needed wherever an environment sets `require_pr` and the clone credential is SSH, because GitHub's API takes no SSH key; with HTTPS auth the clone credential's password serves. It must belong to an automation account, because GitHub does not let a pull request's author approve it.
+
+`identity` is the name and email every pipeline task commits under. It is required; there is no default.
+
+`control_branch` is `control`, and a different name is a break-glass setting only. `control_requires_pr` makes `genesis pipeline-apply` require a pull request on control too. `pr_prefix`, `pr/` by default, prefixes each pull request branch.
+
 A `genesis propagate` with an environment that sets `require_pr` needs `GITHUB_AUTH_TOKEN`, because what a reviewer decided is what decides whether that environment's pull request branch is rebuilt or left alone. Without it the run refuses before writing anything, naming the variable and those environments. `--dry-run` still runs, and says that a real run would refuse.
 
-Pull requests and branch protection are GitHub's API, and they are called on the repository's own host: `https://api.github.com` for github.com, and `https://<host>/api/v3`, GitHub Enterprise Server's API, for any other host. Nothing is asked only to find out whether a host is GitHub. The answers to those calls say it, by the `X-GitHub-Request-Id` and `X-GitHub-Media-Type` headers GitHub puts on every answer. A host other than github.com is remembered in `~/.genesis/cache/github-hosts.yml`, with the GitHub Enterprise Server version it answered with. A host that answers without those headers is asked once more, and then refused, naming the host, the address asked and what came back. Only a command that calls the API meets that refusal: `genesis pipeline-apply` with a token, a `genesis propagate` that opens a pull request, and the pull request column of `genesis pipeline-status`, which says the host is not GitHub and goes on. A repository on another kind of host still loads, and runs every command that calls no API: with no environment setting `require_pr`, and with `GITHUB_AUTH_TOKEN` unset where `genesis pipeline-apply` runs, which then skips the branch protection and says so.
+Pull requests and branch protection are GitHub's API, and they are called on the repository's own host: `https://api.github.com` for github.com, and `https://<host>/api/v3`, GitHub Enterprise Server's API, for any other host.
 
-The remote is not configured. A remote's name and its protocol are each cloner's own choice, made when they clone and before `.genesis/config` is there to read, so the remote Genesis reads, refreshes and publishes through is whichever of the clone's remotes points at the repository, under any name and any protocol. A clone with one remote uses it, unless its URL names a different repository. Where two remotes point at the repository, the one the control branch tracks is used. Where the remotes point at more than one repository and `repository` is unset, as with a fork beside the original, the configuration load refuses rather than guess, because a clone of a fork tracks the fork. `pipeline.source_control.remote` is no longer read, and a configuration that still sets it is refused, naming what replaces it.
+Nothing is asked only to find out whether a host is GitHub. The answers to those calls say it, by the `X-GitHub-Request-Id` and `X-GitHub-Media-Type` headers GitHub puts on every answer. A host other than github.com is remembered in `~/.genesis/cache/github-hosts.yml`, with the GitHub Enterprise Server version it answered with. A host that answers without those headers is asked once more, and then refused, naming the host, the address asked and what came back.
+
+Only a command that calls the API meets that refusal:
+
+- `genesis pipeline-apply` with a token;
+- a `genesis propagate` that opens a pull request;
+- the pull request column of `genesis pipeline-status`, which says the host is not GitHub and goes on.
+
+A repository on another kind of host still loads, and runs every command that calls no API. That means no environment setting `require_pr`, and `GITHUB_AUTH_TOKEN` unset where `genesis pipeline-apply` runs, which then skips the branch protection and says so.
+
+The remote is not configured. A remote's name and its protocol are each cloner's own choice, made when they clone and before `.genesis/config` is there to read. So the remote Genesis reads, refreshes and publishes through is whichever of the clone's remotes points at the repository, under any name and any protocol:
+
+- A clone with one remote uses it, unless its URL names a different repository.
+- Where two remotes point at the repository, the one the control branch tracks is used.
+- Where the remotes point at more than one repository and `repository` is unset, as with a fork beside the original, the configuration load refuses rather than guess, because a clone of a fork tracks the fork.
+
+`pipeline.source_control.remote` is no longer read, and a configuration that still sets it is refused, naming what replaces it.
 
 A remote whose URL cannot be matched to the repository, such as an internal mirror on another host, is pinned instead:
 
@@ -64,296 +162,108 @@ A remote whose URL cannot be matched to the repository, such as an internal mirr
 git config genesis.remote <remote>
 ```
 
-For example, a clone whose `mirror` remote points at `https://git.corp.example/mirrors/bosh-deployments.git` runs `git config genesis.remote mirror`. The pin lives in the clone's own `.git/config`, never globally, so it is never committed and never cloned. A `genesis.remote` set with `git config --global` is ignored with a warning, because it would pin every repository on the machine. The pin is read before the match and wins, and a pin naming a remote the clone does not have is refused rather than passed over. `genesis pipeline-describe` shows how the remote was found, `matched`, `pinned` or `derived`, and for a pin it names the clone's `.git/config` as where it lives. Remove the pin with `git config --unset genesis.remote`.
+For example, a clone whose `mirror` remote points at `https://git.corp.example/mirrors/bosh-deployments.git` runs `git config genesis.remote mirror`. The pin lives in the clone's own `.git/config`, never globally, so it is never committed and never cloned. A `genesis.remote` set with `git config --global` is ignored with a warning, because it would pin every repository on the machine.
+
+The pin is read before the match and wins, and a pin naming a remote the clone does not have is refused rather than passed over. `genesis pipeline-describe` shows how the remote was found, `matched`, `pinned` or `derived`, and for a pin it names the clone's `.git/config` as where it lives. Remove the pin with `git config --unset genesis.remote`.
 
 CI clones the repository by a URL composed from `repository` and `auth.type`: `git@<host>:<owner>/<repo>.git` for `ssh`, the default, and `https://<host>/<owner>/<repo>.git` for `https`. `uri` overrides it, for a host that cannot be reached that way.
 
-## Top-Level Structure
-
-```yaml
-pipeline:
-  name:           <string>       # Required
-  vault:          <map>          # Required
-  git:            <map>          # Required
-  boshes:         <map>          # Required
-  slack:          <map>          # At least one of slack or email required
-  email:          <map>          # At least one of slack or email required
-  layout:         <string>       # Required (or layouts)
-  layouts:        <map>          # Required (or layout)
-  task:           <map>          # Optional
-  locker:         <map>          # Optional
-  groups:         <map>          # Optional
-  errands:        <list>         # Optional
-  auto-update:    <map>          # Optional
-  registry:       <map>          # Optional
-  notifications:  <string>       # Optional
-  public:         <boolean>      # Optional, default false
-  tagged:         <boolean>      # Optional, default false
-  unredacted:     <boolean>      # Optional, default false
-  ocfp:           <boolean>      # Optional, default false
-  debug:          <boolean>      # Optional, default false
-  require-passed-caches: <bool>  # Optional
-```
-
-No other top-level keys are permitted under `pipeline`. The validator rejects unrecognized keys with an error message identifying the offending key.
-
-## pipeline.name
-
-A string that names the pipeline. This becomes the Concourse pipeline name when deployed via `fly set-pipeline`, and appears in notification messages. It is also used as the default Concourse group name when custom groups are not configured.
-
 ## pipeline.vault
 
-Configures the Vault instance that the pipeline uses at runtime to retrieve secrets for deployments.
+The deployment vault every pipeline task logs in to, to read secrets, generate missing ones, and write exodus.
 
 ```yaml
 vault:
-  url:       https://vault.example.com           # Required
-  role:      (( vault "secret/ci:role_id" ))      # AppRole role ID
-  secret:    (( vault "secret/ci:secret_id" ))    # AppRole secret ID
-  verify:    true                                 # TLS verification, default true
-  no-strongbox: false                             # Skip strongbox init
-  namespace: my-namespace                         # Vault enterprise namespace
+  url:       https://vault.example.com
+  namespace: my-namespace          # Vault Enterprise only
+  auth:
+    type: approle                  # or token
+    path: vault/approle            # role_id and secret_id
+  options:
+    tls_verify:   true
+    no_strongbox: false
 ```
 
-The `url` field is the only strictly required field. The `role` and `secret` fields provide AppRole credentials that the pipeline uses to authenticate to Vault. These are typically spruce `(( vault ... ))` operators that get resolved when you run `genesis pipeline-apply` against a Vault you are already authenticated to.
-
-When `verify` is set to false, the pipeline sets `VAULT_SKIP_VERIFY=true` in the environment of every task that communicates with Vault. The `namespace` field sets `VAULT_NAMESPACE` for Vault Enterprise deployments. The `no-strongbox` flag sets `VAULT_NO_STRONGBOX` to skip the Strongbox initialization that Genesis normally performs.
-
-Allowed keys: `url`, `role`, `secret`, `verify`, `no-strongbox`, `namespace`.
-
-## pipeline.git
-
-Configures the Git repository that the pipeline monitors for changes and pushes deployment results back to.
-
-```yaml
-git:
-  owner:       my-org                              # GitHub/GitLab org
-  repo:        my-deployments                      # Repository name
-  uri:         git@github.com:my-org/my-repo.git   # Alternative to owner/repo
-  branch:      master                              # Branch to monitor, default master
-  root:        .                                   # Subdirectory, default .
-  private_key: (( vault "secret/ci:git_key" ))     # SSH auth
-  username:    bot-user                             # HTTPS auth (alternative)
-  password:    (( vault "secret/ci:git_pass" ))    # HTTPS auth (alternative)
-  version_depth: 0                                 # Git clone depth
-  commits:
-    user_name:  Concourse Bot                      # Git commit author name
-    user_email: concourse@pipeline                 # Git commit author email
-```
-
-Authentication is required and must be exactly one of two modes. You either provide `private_key` for SSH authentication, or `username` and `password` for HTTPS authentication. Specifying both is an error.
-
-When using SSH authentication, you must also specify either `uri` or both `owner` and `repo`. The validator enforces this. When `owner` and `repo` are provided without `uri`, the system constructs the URI as `git@github.com:owner/repo.git`.
-
-The `root` field is for monorepo setups where the Genesis deployment repository lives in a subdirectory. When set to something other than `.`, all Git resource paths are prefixed with this value, and the pipeline sets `GIT_GENESIS_ROOT` so Genesis knows where to find environment files.
-
-The `commits` subsection controls the Git author identity used when the pipeline pushes state files and cache data back to the repository. If omitted, the defaults are "Concourse Bot" and "concourse@pipeline".
-
-## pipeline.boshes
-
-Defines the BOSH directors that the pipeline deploys to. Each key is the Genesis environment name (matching the environment YAML filename without the `.yml` extension). The keys in this map determine which environments the pipeline manages.
-
-```yaml
-boshes:
-  sandbox:
-    url:         https://10.0.0.1:25555
-    ca_cert:     (( vault "secret/bosh/sandbox/ssl/ca:certificate" ))
-    username:    admin
-    password:    (( vault "secret/bosh/sandbox/admin:password" ))
-    alias:       sandbox                     # Display name, defaults to key
-    genesis_env: my-sandbox                  # Override Genesis env name
-
-  proto:
-    alias: proto-bosh
-    # No url/ca_cert/username/password means this is a create-env deployment
-```
-
-For standard BOSH director deployments, all four connection fields (`url`, `ca_cert`, `username`, `password`) are required. The validator checks this and reports which fields are missing.
-
-For create-env (proto-BOSH) deployments, you omit the connection fields entirely. The validator detects create-env environments by loading the environment via `Genesis::Top` and checking `use_create_env`. For create-env environments, only the `alias` field is allowed.
-
-The `alias` field provides a human-friendly name used in Concourse job and resource names. If your environment is named `us-west-2-prod`, setting `alias: prod` makes the Concourse UI much more readable. The `genesis_env` field overrides the Genesis environment name passed to `genesis deploy` and is used with the `ocfp` flag for BOSH config naming.
-
-Allowed keys: `url`, `ca_cert`, `username`, `password`, `alias`, `genesis_env`.
-
-## pipeline.slack
-
-Configures Slack notifications for pipeline events. At least one notification provider (slack or email) is required.
-
-```yaml
-slack:
-  webhook: (( vault "secret/ci:slack_webhook" ))   # Required
-  channel: "#deployments"                           # Required
-  username: runwaybot                               # Default: runwaybot
-  icon:    http://cl.ly/image/.../concourse-logo.png  # Bot avatar URL
-```
-
-The webhook and channel are required. The pipeline sends messages on deployment start (for non-auto environments), failure, and success.
-
-Allowed keys: `webhook`, `channel`, `username`, `icon`.
-
-## pipeline.email
-
-Configures email notifications as an alternative or supplement to Slack.
-
-```yaml
-email:
-  to:
-    - ops-team@example.com
-    - oncall@example.com
-  from: concourse@example.com
-  smtp:
-    host:     smtp.example.com
-    port:     587
-    username: smtp-user
-    password: (( vault "secret/ci:smtp_password" ))
-```
-
-The `to` field must be a list with at least one address. The `from` field and `smtp` section are both required. Within `smtp`, the `host`, `username`, and `password` fields are required. The `port` field is optional.
-
-## pipeline.layout and pipeline.layouts
-
-These define the deployment topology. You must specify exactly one of `layout` or `layouts`. Providing both is an error, and providing neither is also an error.
-
-Use `layout` when you have a single pipeline topology:
-
-```yaml
-layout: |
-  auto sandbox
-  sandbox -> staging -> production
-```
-
-Use `layouts` when you need multiple named topologies in one pipeline (for example, separate progression chains for different regions):
-
-```yaml
-layouts:
-  us-east:  |
-    auto us-east-sandbox
-    us-east-sandbox -> us-east-staging -> us-east-prod
-  eu-west:  |
-    auto eu-west-sandbox
-    eu-west-sandbox -> eu-west-staging -> eu-west-prod
-```
-
-When using `layout`, the topology is internally named "default". When using `layouts`, each key becomes the name of a Concourse pipeline layout. You select which layout to deploy with the positional argument to `genesis pipeline-apply`:
-
-```bash
-genesis pipeline-apply us-east
-```
-
-See [Layout DSL](layout-dsl.md) for the full syntax.
-
-## pipeline.task
-
-Configures the Docker image used for pipeline tasks.
-
-```yaml
-task:
-  image:      genesiscommunity/concourse   # Default
-  version:    latest                        # Default
-  privileged:                               # Environments needing privileged mode
-    - proto
-```
-
-All pipeline tasks (deploy, cache generation, errands, show-changes) run in a Docker container. The `image` and `version` fields control which image is used. The `privileged` field is a list of environment aliases that require Concourse privileged task mode (typically create-env deployments that need raw disk access).
-
-Allowed keys: `image`, `version`, `privileged`.
+The AppRole's policy and where its credentials are stored are in the operator's guide, *Pipeline Accounts and Permissions*.
 
 ## pipeline.locker
 
-Configures the Locker service for deployment locking. When configured, the pipeline acquires BOSH director locks and deployment locks before deploying, preventing concurrent deployments to the same director or environment.
+The locker behind the deploy locks. Locks are mandatory: every deploy and redeploy holds its own deployment's pool with `i-need-to-deploy-myself`, and a director's deploy holds that director's pool with `dont-upgrade-bosh-on-me`.
 
 ```yaml
 locker:
-  url:                  https://locker.example.com   # Required
-  username:             locker-user                   # Required
-  password:             (( vault "secret/ci:locker")) # Required
-  ca_cert:              (( vault "secret/locker:ca")) # Optional
-  skip_ssl_validation:  true                          # Optional
+  url:      https://locker.example.com
+  username: locker
+  password: ((locker/api.password))   # written in Concourse's own form
+  ca_cert:  ((locker/api.ca_cert))
+  skip_ssl_validation: false
 ```
 
-When locker is configured, each deployment job acquires two locks: a BOSH director lock (keyed `dont-upgrade-bosh-on-me`) that prevents BOSH upgrades during deployment, and a deployment lock (keyed `i-need-to-deploy-myself`) that prevents concurrent deployments of the same environment. Both locks are released in an `ensure` block so they are freed even if the deployment fails.
+## pipeline.shuttle
 
-Allowed keys: `url`, `username`, `password`, `ca_cert`, `skip_ssl_validation`.
-
-## pipeline.groups
-
-Defines custom Concourse pipeline groups. By default, all jobs are placed in a single group named after the pipeline. Custom groups let you organize jobs in the Concourse UI.
+The object store behind each deployment's events and redeploy queue. `s3` is the one backend.
 
 ```yaml
-groups:
-  sandbox:
-    - sandbox
-  staging:
-    - staging
-  production:
-    - production
+shuttle:
+  backend:  s3
+  bucket:   genesis-pipelines
+  region:   us-east-1
+  endpoint: https://s3.example.com    # a non-AWS endpoint
+  auth:     shuttle                   # access_key_id and secret_access_key, under those names
+  tls_skip_verify: false
 ```
 
-Each key is a group name and each value is a list of environment names or aliases. The validator checks that every listed name corresponds to an actual BOSH environment defined in `boshes`.
-
-## pipeline.errands
-
-A list of BOSH errand names to run after each successful deployment. The errands run in sequence after the deploy task and before cache generation.
-
-```yaml
-errands:
-  - smoke-tests
-  - acceptance-tests
-```
-
-Errands are skipped for create-env deployments since proto-BOSH environments do not support errands.
-
-## pipeline.auto-update
-
-Configures automatic kit and Genesis binary updates. When configured, the pipeline creates an additional job called `update-genesis-assets` that monitors GitHub releases for new kit versions and Genesis CLI versions.
-
-```yaml
-auto-update:
-  file:              base.yml                    # Required - kit version file
-  kit:               bosh                        # Kit name
-  org:               genesis-community           # GitHub org
-  auth_token:        (( vault "secret/ci:gh"))   # GitHub token
-  kit_auth_token:    (( vault "secret/ci:kit"))  # Kit-specific token
-  github_auth_token: (( vault "secret/ci:gh"))   # Deprecated alias
-  api_url:           https://github.example.com/api/v3  # GitHub Enterprise
-  label:             concourse                   # CI label for commits
-  period:            24h                         # Check interval
-```
-
-The `file` field is required and specifies which environment YAML file contains the `kit.version` that should be updated. The job fetches new kit releases, updates the version in the specified file, embeds the latest Genesis binary, and commits the changes back to the repository.
-
-## pipeline.registry
-
-Configures a private Docker registry for pulling task images.
-
-```yaml
-registry:
-  uri:      registry.example.com
-  username: docker-user
-  password: (( vault "secret/ci:docker_pass" ))
-```
-
-When configured, the registry URI is prepended to all image references, and the credentials are added to all image source definitions.
+Each deployment `<env>-<type>` has three paths in the bucket: `<env>-<type>/deployed` and `<env>-<type>/redeployed`, the events its deploy and redeploy write, and `<env>-<type>/redeploy`, the queue its redeploy job takes requests from. A tool outside the pipeline asks for a redeploy by writing to that queue. `image` and `image_tag` choose the resource's image.
 
 ## pipeline.notifications
 
-Controls how notification jobs are organized in the pipeline. Valid values are `inline`, `parallel`, and `grouped`.
+```yaml
+notifications:
+  style: inline                     # inline, parallel or grouped
+  slack:
+    webhook: slack:webhook          # path:key of the webhook URL
+    channel: "#deployments"         # a legacy webhook only
+    username: genesis               # a legacy webhook only
+    icon: https://example.com/genesis.png
+    mentions_on_failure: ["@oncall"]
+```
 
-With `inline` (the default), notification jobs for non-auto environments appear in the same Concourse group as deployment jobs. With `grouped`, notification jobs are moved to a separate group called "notifications". The `parallel` option is also accepted.
+`style` decides where a manual environment's notify job sits:
 
-## Boolean Flags
+- **`inline`**, the default: its deploy offers only versions the notify job has seen.
+- **`parallel`**: they stand side by side.
+- **`grouped`**: the notify jobs move to a `notifications` group.
 
-The following boolean flags default to false when not specified:
+A Slack app's webhook fixes its channel, name and icon, so `channel`, `username` and `icon` are honoured only by a legacy webhook. Every message begins with an emoji naming its kind and links to its build. `email` is accepted and not emitted.
 
-`public` controls whether the Concourse pipeline is publicly visible. When true, the pipeline is exposed via `fly expose-pipeline`. When false, it is hidden.
+## pipeline.registry
 
-`tagged` adds Concourse tags to resources and tasks, using the environment name as the tag value. This is used with Concourse workers that have custom tags for routing work to specific infrastructure.
+The registry every image Genesis names by default is pulled through: each resource type's image, the default task image, and the default shuttle image.
 
-`unredacted` disables manifest redaction during deployment. When true, the pipeline sets `CI_NO_REDACT=1` so that full manifests appear in Concourse task logs. This is a security risk and should only be used for debugging.
+```yaml
+registry:
+  uri: registry.example.com/dockerhub-mirror
+  auth:
+    type: basic
+    path: registry                  # username and password
+```
 
-`ocfp` enables OCF Platform naming conventions. When true, BOSH config resources use the `genesis_env` value (or the environment name) as the config name instead of the default value of `default`.
+An image named in the configuration, `provider.task.image` or `shuttle.image`, is taken as written. It carries the registry's credentials only where it begins with the registry's host.
 
-`debug` enables additional debug output in pipeline tasks by setting the `DEBUG` environment variable.
+## pipeline.redeploy
 
-`require-passed-caches` changes how git resources are fetched in deployment jobs. When true, the deployment job fetches the git resource from the cache resource rather than from the main git resource with a `passed` constraint. This affects the Genesis binary path and source directory used during deployment.
+```yaml
+redeploy:
+  enabled: true       # each environment's redeploy-<env> job, queue and event
+  style:   inline     # beside each deploy, or grouped in one redeploys group
+```
+
+A redeploy runs `genesis <env> deploy --redeploy` against what the environment last deployed, on request: its button, or a request on its queue. With `enabled: false` there are no redeploy jobs, and an environment's `redeploy_cron` is refused.
+
+## Other keys
+
+| Key | What it does |
+|-----|--------------|
+| `exodus_mount` | The vault mount every pipeline record lives under, `/secret/exodus/` by default. Every environment's `genesis.exodus_mount` must resolve to it |
+| `recreate_on_deploy` | `never` (the default), `redeploy-only` or `always`: which runs pass `--recreate` to BOSH. A deploy reads it itself, so it takes effect without an apply |
+| `unredacted` | Print each deploy's manifest diff unredacted, as `CI_NO_REDACT`. A security risk; use it only to debug |

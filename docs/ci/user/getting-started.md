@@ -14,11 +14,11 @@ Two commands do the work. `genesis pipeline-apply` gives the pipeline its shape,
 
 You need a Genesis deployment repository that has been initialized with `genesis init`, on version 3 of the repository configuration. The repository should have at least one environment file, such as `my-env.yml`, and a configured Vault for secrets storage. If you are deploying to Concourse, you also need a running Concourse instance and the `fly` CLI authenticated to a target.
 
-If the repository still carries a `ci.yml` with a top-level `pipeline:` key, every pipeline command refuses to run and tells you to migrate. See the "Migration from v2" section of `workplans/Branch-based-Workflow-Architecture.md` for what the move by hand involves.
+If the repository still carries a `ci.yml` with a top-level `pipeline:` key, every pipeline command refuses to run and tells you to migrate. The operator's guide *Pipeline Migration: v2 to v3* gives the move by hand, step by step.
 
 ## Configuring the Repository
 
-The repository's own pipeline settings live in the `pipeline:` block of `.genesis/config`. Here is a minimal working example for Concourse:
+The repository's own pipeline settings live in the `pipeline:` block of `.genesis/config`. The file is generated, so each key is set with `genesis config --set <key> <value>` rather than by editing it; `pipeline.enabled` goes last, once the rest is in place. Here is what a minimal working block for Concourse comes to:
 
 ```yaml
 pipeline:
@@ -33,41 +33,40 @@ pipeline:
 
   source_control:
     repository: my-org/my-bosh-deployments
-    control_branch: control
     auth:
       type: ssh
-      path: secret/ci/pipeline/git        # holds private_key
+      path: git                 # holds private_key
     identity:
-      name:  Concourse Bot
-      email: concourse@pipeline
+      name:  Genesis CI
+      email: ci@example.com
 
   vault:
     url: https://vault.example.com
     auth:
       type: approle
-      path: secret/ci/pipeline/approle    # holds role_id and secret_id
+      path: vault/approle       # holds role_id and secret_id
 
   locker:
     url: https://locker.example.com
-    username: locker-user
-    password: ((locker-password))
+    username: locker
+    password: ((locker/api.password))
 
   shuttle:
     backend: s3
     bucket: my-pipeline-shuttle
+    auth: shuttle               # holds access_key_id and secret_access_key
 
   notifications:
-    style: default
+    style: inline
     slack:
-      webhook: ((slack-webhook))
-      channel: "#deployments"
+      webhook: slack:webhook
 ```
 
 The schema is the contract. Every key a pipeline command reads is declared, validation runs at configuration load for every command rather than only for the pipeline ones, and a key the schema does not declare is refused by name. There are no compatibility aliases.
 
 The provider decides how much of this block you need. A repository that names no provider type is on the manual provider, which sets no pipeline, so the credential blocks an unattended task would need are not required of it. Name `concourse` and Genesis asks for the source control credential, the identity a task commits under, the vault, the locker, and the shuttle, because a pipeline that runs without you has to have them.
 
-Genesis reads `.genesis/config` through `spruce json`, which evaluates no spruce operator at all, so every value in the block reaches the compiler exactly as you wrote it. Write credential references in the form your provider resolves, such as Concourse's `((credential))`.
+Genesis reads `.genesis/config` through `spruce json`, which evaluates no spruce operator at all, so every value in the block reaches the compiler exactly as you wrote it. A credential is named by its vault reference, such as `path: git` or `webhook: slack:webhook`, and the compiled pipeline reads it from Concourse's own vault as `((git.private_key))` or `((slack.webhook))`. `locker.password` is written in that form directly. Where each secret is published, and who owns it, is in the operator's guide *Pipeline Accounts and Permissions*.
 
 ## Configuring Each Environment
 
@@ -80,14 +79,11 @@ genesis:
     prior_env: sandbox
     manual: true
     require_pr: true
-    redeploy_cron: "0 6 * * *"
-    track_dependencies:
-      - sandbox/bosh
     track_additional_files:
       - ops/shared.yml
 ```
 
-`prior_env` is the topology edge, naming the environment this one follows. An environment with no `prior_env` takes control's commits without waiting on an ancestor. The rest of the keys are covered in the [Configuration Reference](configuration-reference.md), and a key whose ability your provider does not declare is refused at configuration load naming both the key and the capability.
+`prior_env` is the topology edge, naming the environment this one follows. An environment with no `prior_env` takes control's commits without waiting on an ancestor. An environment deploys automatically unless it sets `manual: true`. The rest of the keys are covered in the [Configuration Reference](configuration-reference.md), and a key whose ability your provider does not declare is refused at configuration load naming both the key and the capability.
 
 ## Applying the Pipeline
 
@@ -97,7 +93,15 @@ Once both halves are configured, give the pipeline its shape:
 genesis pipeline-apply
 ```
 
-This cuts a deployment branch for every environment, applies the branch protection each one's `require_pr` asks for, writes the exodus records, and then compiles the pipeline and uploads it to the provider. Genesis asks for confirmation before uploading. To skip the prompt:
+This does five things:
+
+- cuts a deployment branch for every environment;
+- applies the branch protection each one's `require_pr` asks for, where `GITHUB_AUTH_TOKEN` is an admin token;
+- checks that every secret the pipeline references is where Concourse will look for it;
+- writes the exodus records;
+- compiles the pipeline and uploads it to the provider.
+
+Run it from `control`, committed and pushed. Genesis asks for confirmation before uploading. `--paused` sets the pipeline paused, for a first look before anything runs. To skip the prompt:
 
 ```bash
 genesis pipeline-apply --yes
@@ -113,7 +117,7 @@ The `--dry-run` flag prints the full pipeline YAML to stdout, which is useful fo
 
 ## Propagating Your Commits
 
-With the branches cut, deliver control's commits to the environments that are ready for them:
+Under Concourse, the pipeline's `propagate` job delivers control's commits to the environments that are ready for them, each time control moves and each time an environment deploys. A hand run at a terminal is refused without `--force` there, since it takes none of the pipeline's locks. Under the manual provider you run it yourself:
 
 ```bash
 genesis propagate
@@ -152,4 +156,4 @@ genesis pipeline-describe
 
 ## Next Steps
 
-Read the [Configuration Reference](configuration-reference.md) for the per-environment keys and for every option the legacy format took. If you want the whole `pipeline:` block key by key, see [Pipeline Section Configuration](multi-file-configuration.md). The [CLI Commands](cli-commands.md) page covers `genesis propagate` and the rest of the `pipeline-*` family.
+Read the [Configuration Reference](configuration-reference.md) for every per-environment key and every key of the `pipeline:` block. If you want the whole `pipeline:` block key by key, see [Pipeline Section Configuration](multi-file-configuration.md). The [CLI Commands](cli-commands.md) page covers `genesis propagate` and the rest of the `pipeline-*` family.

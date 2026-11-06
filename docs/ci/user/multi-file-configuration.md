@@ -25,7 +25,9 @@ How much of this a repository needs is a question about its provider. A reposito
 
 Where an environment sits in the topology is a fact about that environment rather than about the repository, so it is not in this section at all. It lives in each environment's own file under `genesis.pipeline`, and the [Configuration Reference](configuration-reference.md) is the table for those keys.
 
-Genesis reads `.genesis/config` through `spruce json`, which converts the YAML and evaluates no spruce operator at all, so every value in the `pipeline:` section reaches the compiler exactly as you wrote it. Write credential references in the form your CI provider resolves, such as Concourse's `((credential))`, and keep `(( vault ... ))` and the other spruce operators for a legacy `ci.yml`, which the parser does load through `spruce merge`.
+Genesis reads `.genesis/config` through `spruce json`, which converts the YAML and evaluates no spruce operator at all, so every value in the `pipeline:` section reaches the compiler exactly as you wrote it. A credential is named by its vault reference, `path` or `path:key`, and the compiler writes each as a Concourse variable, `((path.key))`, which Concourse resolves when a build runs. `locker.password` and `locker.ca_cert` are the exception: they are written in Concourse's own `((...))` form and passed through as written. A spruce operator such as `(( vault ... ))` is never evaluated here.
+
+`.genesis/config` is generated, so set each key with `genesis config --set <key> <value>` rather than editing the file.
 
 ## The exodus_mount Key
 
@@ -80,7 +82,7 @@ provider:
 
 Concourse reads a reference `((name.key))` at `<path_prefix>/<team>/<pipeline>/name`, then at `<path_prefix>/<team>/name`. Under Concourse, Genesis's CI paths follow that order whether or not you write the block, which you need only to point elsewhere or change a default; leave it out entirely when Concourse reads the same vault your `secrets_provider` names, under `/concourse`: `ci_mount` is the team scope, `/concourse/<team>/`, for what every pipeline of the team shares; the pipeline scope `/concourse/<team>/<pipeline>/` holds what this repository's pipeline alone uses; and `ci_base` is `/concourse/<team>/<pipeline>/<env>/`. Hooks see the first and last as `GENESIS_CI_MOUNT` and `GENESIS_CI_BASE`, and an environment can still override either with `genesis.ci_mount` or `genesis.ci_base`. Each operator reaches the store through their own `safe` target for its URL. Under the manual provider, or with the pipeline disabled, the CI paths stay where they always were, under the environment's secrets mount.
 
-`pipeline-apply` checks every `((name.key))` the compiled pipeline uses before it sets anything, at the pipeline scope, then the team scope, then `<path_prefix>/<shared_path>/` where `shared_path` is given, and reports each as found, missing, or unverified (when it cannot read the store, or `--skip-vault` is given), never printing a value. A missing one refuses the apply; `--missing-secrets-ok` sets the pipeline anyway, for a first apply whose secrets you set afterwards. The check finds a secret anywhere Concourse would; credentials the Concourse installation shares, such as the locker's, the shuttle's, and the AppRole pipelines reach your vault with, belong at the shared path, set there by whoever runs Concourse, and your repository only references them. The one exception is a BOSH director's credentials. Where an environment sets `genesis.pipeline.track_bosh_configs`, the apply copies them from the director's exodus record to the pipeline scope before the check runs (see [BOSH config tracking](../../workflows/bosh-config-tracking.md#the-directors-credentials)).
+`pipeline-apply` checks every `((name.key))` the compiled pipeline uses before it sets anything, at the pipeline scope, then the team scope, then `<path_prefix>/<shared_path>/` where `shared_path` is given, and reports each as found, missing, or unverified (when it cannot read the store, or `--skip-vault` is given), never printing a value. A missing one refuses the apply; `--missing-secrets-ok` sets the pipeline anyway, for a first apply whose secrets you set afterwards. The check finds a secret anywhere Concourse would. Publish the credentials your pipelines share, such as the locker's, the shuttle's, and the AppRole pipelines reach your vault with, at the team scope, `<path_prefix>/<team>/`; a shared path works too where your Concourse has one. Your repository only references them, and the apply writes none of them. The one exception is a BOSH director's credentials. Where an environment sets `genesis.pipeline.track_bosh_configs`, the apply copies them from the director's exodus record to the pipeline scope before the check runs (see [BOSH config tracking](../../workflows/bosh-config-tracking.md#the-directors-credentials)).
 
 Two limits. `shared_path` must be the value your Concourse server's `--vault-shared-path` is set to: Genesis cannot read the server's settings, so a shared path the server does not use would report a secret found where Concourse never looks. And a Concourse whose `--vault-lookup-templates` changes its lookup order is not modelled; the check assumes the default order above.
 
@@ -108,26 +110,23 @@ This block is what the pipeline needs to know about the repository it is deployi
 
 ```yaml
 source_control:
-  repository: my-org/my-deployments
-  remote: origin
-  uri: git@github.com:my-org/my-deployments.git
-  control_branch: control
+  repository: my-org/my-deployments   # or its URL; optional where the remotes settle it
   pr_prefix: pr/
   control_requires_pr: false
   auth:
     type: ssh
-    path: secret/ci/pipeline/git
-  api_token: secret/ci/pipeline/github:token
+    path: git
+  api_token: github:token
   identity:
-    name:  Concourse Bot
-    email: concourse@pipeline
+    name:  Genesis CI
+    email: ci@example.com
 ```
 
-`remote` and `uri` are derived from the control branch's upstream, and `repository` is the GitHub owner and repository the API targets. Each is a choice with a good default rather than a fact of the checkout, which is why each takes a key. The deployment root takes none, being a fact of the checkout, and neither does the branch a command happens to be run from, that being runtime state.
+`repository` is the repository the pipeline lives in, and the one the GitHub API is called on. The remote is not configured: Genesis uses whichever of the clone's remotes points at the repository, and a clone whose remote cannot be matched, such as a mirror, pins one with `git config genesis.remote <remote>`. The [Configuration Reference](configuration-reference.md#pipelinesource_control) says how the match works. `uri` overrides the URL CI clones from, where it cannot be composed from `repository`. The deployment root takes no key, being a fact of the checkout, and neither does the branch a command happens to be run from, that being runtime state.
 
 `auth` and `identity` are for CI alone, and they are required wherever a pipeline task has to clone and commit on its own. `auth.type` is `ssh` or `https`, and `auth.path` names the vault secret holding the type's components under their own names: `private_key` for `ssh`, `username` and `password` for `https`. A component kept elsewhere is given on its own as `<path>:<key>`, which replaces the default for that component alone, so `{type: https, path: secret/ci/git, password: secret/shared/token:value}` reads the username from `secret/ci/git` and the password from the shared secret. The load refuses a block missing a component, and a component the type does not take. The old `auth.vault` key is refused, naming `path`.
 
-`api_token` is the GitHub token the pipeline's propagate job opens and updates pull requests with, as `<path>:<key>`, and it is read only where an environment sets `genesis.pipeline.require_pr`. Where it is not set, an `https` clone credential's password is used in its place, since that is a GitHub token too; an `ssh` clone credential is not one, so a pipeline with a pull request environment and `ssh` auth is refused at compile until `api_token` is set. The token needs read and write access to the repository's contents and pull requests.
+`api_token` is the GitHub token the pipeline's propagate job opens and updates pull requests with, as `<path>:<key>`, and it is read only where an environment sets `genesis.pipeline.require_pr`. Where it is not set, an `https` clone credential's password is used in its place, since that is a GitHub token too; an `ssh` clone credential is not one, so a pipeline with a pull request environment and `ssh` auth is refused at compile until `api_token` is set. The token needs read and write access to the repository's contents and pull requests. Both the clone credential and this token should belong to an automation account rather than a person: GitHub does not let a pull request's author approve it.
 
 ## The vault, locker, and shuttle Blocks
 
@@ -151,25 +150,23 @@ shuttle:
   bucket: my-pipeline-shuttle
   region: us-east-1
   endpoint: null
-  auth: secret/ci/pipeline:s3
+  auth: shuttle                         # holds access_key_id and secret_access_key
 ```
 
-`vault` is the vault a pipeline task writes exodus through, and `url` is the one key it cannot do without. `locker` is the locker behind the two mandatory deploy locks. `shuttle` is the object store behind every deployment's request queue and `_ran` event, and its `backend` chooses its shape, which is `s3`, the one store the shuttle resource has. The backend is required, so a shuttle block written with no backend, or with another, is refused as an unknown value naming `s3`.
+`vault` is the vault a pipeline task writes exodus through, and `url` is the one key it cannot do without. `locker` is the locker behind the two mandatory deploy locks. `shuttle` is the object store behind every deployment's request queue, `<env>-<type>/redeploy`, and its `_deployed` and `_redeployed` events, at `<env>-<type>/deployed` and `<env>-<type>/redeployed`. Its `backend` chooses its shape, which is `s3`, the one store the shuttle resource has. The backend is required, so a shuttle block written with no backend, or with another, is refused as an unknown value naming `s3`.
 
 ## The notifications Block
 
 ```yaml
 notifications:
-  style: default
+  style: inline                 # inline, parallel or grouped
   slack:
-    webhook: ((slack-webhook))
-    channel: "#deployments"
-  email:
-    recipients:
-      - ops@example.com
+    webhook: slack:webhook      # path:key of the webhook URL
+    channel: "#deployments"     # a legacy webhook only
+    mentions_on_failure: ["@oncall"]
 ```
 
-This is the repository default, and each environment's own `genesis.pipeline.notifications` overrides it.
+Notifications are the repository's settings, for every environment alike. An environment's own `genesis.pipeline.notifications` is accepted at load but not read, so leave it unset. `email` is accepted and not emitted.
 
 With Slack configured, each message begins with an emoji for its kind, so a run of them reads at a glance:
 
@@ -185,6 +182,7 @@ With Slack configured, each message begins with an emoji for its kind, so a run 
 | Changes are staged for a manual deploy | 📥 `:inbox_tray:` |
 | The staged changes could not be offered | ⛔ `:no_entry:` |
 | Propagation opened or updated pull requests | 🔀 `:twisted_rightwards_arrows:` |
+| A director's BOSH config changed | ⚙️ `:gear:` |
 
 A start message never stops a deploy: a Slack outage or a bad webhook fails the message alone, and the deploy goes on.
 
@@ -212,198 +210,6 @@ registry:
 
 Where Concourse cannot pull from public registries, `registry` names the mirror it pulls through. `uri` prefixes every image Genesis names by default: each resource type the pipeline declares, the task image, and the shuttle image. Each of those sources carries the credential as references, `username` and `password` read from `path` or given one by one as `<path>:<key>`. An image you name yourself, `provider.task.image` or `shuttle.image`, is used exactly as you write it, so a mirror that keeps your own images under a different path than the public ones is written in full there; it carries the credential when it begins with the registry's host. Without the block every image is pulled as named.
 
-## The Older Block Shape
-
-The three blocks below, `pipeline`, `targets`, and `integrations`, are the shape the configuration had under the multi-file layout, and the compiler's parser still normalises them. The repository schema does not declare them, so writing one into `.genesis/config` is refused by name at configuration load. They are documented here for reading an older repository and for working on the parser, and not as keys to write.
-
-### The pipeline Block
-
-This block defined the pipeline identity, branch configuration, workflows, and global settings.
-
-```yaml
-metadata:
-  name: my-cf-deployments
-  version: "1.0"
-
-branches:
-  live: main
-  target_prefix: target/
-
-workflows:
-  default:
-    type: deployment
-    triggers:
-      - type: git
-        pattern: "*.yml"
-    stages:
-      - name: deploy-sandbox
-        script: deploy
-        inputs: [deployment-repo]
-        outputs: [manifests]
-      - name: deploy-staging
-        script: deploy
-      - name: approve-prod
-        type: manual-approval
-        approvers: [ops-team]
-      - name: deploy-prod
-        script: deploy
-
-configuration:
-  public: false
-  tagged: false
-  task:
-    image: genesiscommunity/concourse
-    version: latest
-  notifications:
-    style: inline
-```
-
-The `metadata` section names the pipeline and assigns a version. The `branches` section defines which Git branch the pipeline monitors (`live`) and the prefix used for target branches.
-
-The `workflows` section is the heart of the configuration. Each workflow is a named deployment topology. When using the legacy layout DSL (via a fallback from `ci.yml`), the parser converts the layout into a workflow automatically. In the `pipeline:` section, you can define workflows with explicit stages and trigger relationships.
-
-The `configuration` section holds global settings that correspond to the top-level boolean flags and task/registry/notification settings from the legacy format.
-
-### The targets Block
-
-This block defined deployment targets, which are BOSH directors.
-
-```yaml
-targets:
-  sandbox:
-    name: sandbox
-    alias: sandbox
-    type: bosh-director
-    tags: []
-    connection:
-      url: https://bosh.sandbox.example.com
-      auth:
-        type: basic
-        client_id: admin
-        client_secret: ((bosh-sandbox-password))
-      ca_cert: ((bosh-sandbox-ca-cert))
-
-  proto:
-    name: proto
-    alias: proto-bosh
-    type: bosh-create-env
-    tags:
-      - create-env
-```
-
-Each target has a `type` that is either `bosh-director` for standard deployments or `bosh-create-env` for proto-BOSH create-env deployments. The `connection` section mirrors the fields from `pipeline.boshes` in the legacy format but uses a structured `auth` map instead of flat `username`/`password` fields.
-
-The `alias` and `genesis_env` fields work the same way as in the legacy `boshes` section.
-
-### The integrations Block
-
-This block defined the external service integrations, which are Vault, Git source control, notifications, and the optional Locker service.
-
-```yaml
-vault:
-  url: https://vault.example.com
-  namespace: null
-  auth:
-    type: approle
-    role_id: ((vault-role-id))
-    secret_id: ((vault-secret-id))
-  options:
-    tls_verify: true
-    no_strongbox: false
-
-source_control:
-  provider: github
-  repository: my-org/my-deployments
-  uri: null
-  default_branch: main
-  root: .
-  version_depth: 0
-  commit_author:
-    name: Concourse Bot
-    email: concourse@pipeline
-  auth:
-    type: ssh-key
-    private_key: ((git-private-key))
-
-notifications:
-  - type: slack
-    name: slack
-    webhook: ((slack-webhook))
-    channel: "#deployments"
-    username: runwaybot
-    icon: http://cl.ly/image/.../concourse-logo.png
-    events: [started, failed, succeeded]
-
-  - type: email
-    name: email
-    recipients:
-      - ops@example.com
-    from: concourse@example.com
-    smtp:
-      host: smtp.example.com
-      username: smtp-user
-      password: ((smtp-password))
-    events: [failed]
-
-locker:
-  url: https://locker.example.com
-  username: locker-user
-  password: ((locker-password))
-  ca_cert: null
-  skip_ssl_validation: true
-```
-
-The `vault` and `source_control` sections are required. The validator checks for `vault.url` and the presence of `source_control`. Notifications are a list because you can have multiple notification providers active simultaneously.
-
-The `source_control.provider` field accepts `github` or `gitlab` and is used to construct the Git URI automatically from the `repository` field (e.g., `github` + `my-org/my-repo` becomes `git@github.com:my-org/my-repo.git`). If you need a custom URI, set the `uri` field directly.
-
-## Script Metadata
-
-The `scripts/` directory at the root of your deployment repository can contain shell scripts referenced by workflow stages, and script discovery still reads their metadata. Scripts can declare it in two ways.
-
-The first way is a `scripts:` block, which explicitly lists each script and its requirements. Like the three blocks above it, this one belongs to the older shape, so the repository schema does not declare it and the parser reads it only where it comes from an older configuration:
-
-```yaml
-scripts:
-  deploy:
-    description: Execute Genesis deployment
-    path: scripts/deploy.sh
-    executor: bash
-    version: "1.0"
-    requirements:
-      - tool: genesis-cli
-        version: ">=3.1.0"
-    inputs:
-      - name: deployment-repo
-        type: git-repository
-        required: true
-    outputs:
-      - name: manifests
-        type: directory
-        path: .genesis/manifests/
-    environment:
-      required: [CURRENT_ENV, VAULT_ADDR]
-      optional: [GENESIS_TRACE]
-    timeout: 60m
-```
-
-The second way is inline annotations in the script file itself, which is the one that needs no configuration key at all:
-
-```bash
-#!/bin/bash
-# @genesis-script
-# @description: Execute Genesis deployment
-# @version: 1.0
-# @requires: genesis-cli>=3.1.0, bosh-cli>=7.0
-# @input: deployment-repo (git-repository, required)
-# @output: manifests (directory, .genesis/manifests/)
-# @env-required: CURRENT_ENV, VAULT_ADDR
-# @env-optional: GENESIS_TRACE
-# @timeout: 60m
-```
-
-Scripts without either a `scripts:` entry or inline annotations are still discovered. The system infers basic metadata from the filename, assigning a default description based on the path and assuming `bash` as the executor.
-
 ## The Override File
 
 Where the compiled output needs a change the configuration cannot express, one override file sits beside `.genesis/config` and is merged over the emitted output verbatim, after compilation. There is no override directory and no override key in the section.
@@ -412,22 +218,27 @@ The file is named for the provider, as `.genesis/pipeline-overrides-<provider>.y
 
 Which form applies follows the output layout in force rather than the provider's capability, so a provider that can emit several files but is set to `single` takes the single form. An output that is not YAML passes through untouched, and only the files the layout names are read, and only where they are on disk.
 
-## Relationship to Legacy Format
-
-When the compiler pipeline reads a legacy `ci.yml`, the parser normalizes it into the same internal structure the older blocks above describe. The `boshes` section becomes `targets`, the `vault`, `git`, `slack`, and `email` sections become `integrations`, and the `layout` string is parsed into a workflow with a graph of nodes and edges.
-
-This means that both formats flow through the same Validator, ASTBuilder, and provider pipeline. The only difference is where the configuration comes from initially.
-
 ## Migrating from ci.yml
 
-A repository that still carries a pipeline `ci.yml` has not moved to v3, and every pipeline command refuses it by name and tells you what to do. The move is by hand, and the "Migration from v2" section of `workplans/Branch-based-Workflow-Architecture.md` is where it is written out.
+A repository that still carries a pipeline `ci.yml` has not moved to v3, and every pipeline command refuses it by name and tells you what to do. The move is by hand, and the operator's guide *Pipeline Migration: v2 to v3* gives its order and every setting's new home.
 
-In outline, there are three steps. You read the `pipeline:` block of `ci.yml` for the provider, the git URI, the branch, the pipeline name, and the vault URL. You write them into the `pipeline:` block of `.genesis/config`, which declares every one of them. Then you remove `ci.yml` with `git rm ci.yml`, and that restores the pipeline commands. The topology does not come across as a `layout` string at all. Each environment's place in it goes into that environment's own file, under `genesis.pipeline.prior_env`.
+In outline:
+
+1. Pause the v2 pipeline.
+2. Write each `ci.yml` setting into the `pipeline:` section of `.genesis/config` with `genesis config --set`.
+3. Remove `ci.yml` with `git rm ci.yml`, which restores the pipeline commands.
+
+The topology does not come across as a `layout` string at all. Each environment's place in it goes into that environment's own file:
+
+- `genesis.pipeline.prior_env` names the environment before it.
+- `genesis.pipeline.manual: true` marks every environment the layout's `auto` pattern did not match, because a v3 environment deploys automatically unless it says otherwise.
+
+Give the v3 pipeline a different `pipeline.name` where it would take the v2 pipeline's, and apply it with `--paused` beside the paused v2 one.
 
 Anything else `ci.yml` carried outside its `pipeline:` key, which v2 merged over the generated pipeline, moves to the override file, `.genesis/pipeline-overrides-concourse.yml` (see "The Override File" above), which is merged over the compiled pipeline the same way. Review it before the first apply rather than copying it across blind: the v3 pipeline names its jobs and resources differently (`deploy-<env>`, `redeploy-<env>`, `notify-<env>`, `propagate`, `control-branch`, `<env>-branch`), so an entry that patched a v2 job or resource by name now matches nothing and adds a new one beside the generated pipeline instead. `genesis pipeline-apply --dry-run` prints the merged result to check against.
 
-Once migrated, give the pipeline its shape:
+Once migrated, set the pipeline paused, review it, and unpause it in Concourse:
 
 ```bash
-genesis pipeline-apply
+genesis pipeline-apply --paused
 ```
