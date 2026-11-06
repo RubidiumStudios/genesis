@@ -119,22 +119,23 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			control_only => 1,
 			arguments    => [],
 		},
-		# The three deprecated spellings carry the flag that names their
-		# replacement, which their help and their run both read.  repipe runs
-		# the apply, so it takes the apply's options and gates, and no layout.
+		# The v2 commands outside the pipeline- family are retired stubs
+		# (D151): no options and no arguments of their own, and a refusal
+		# naming the 3.2 command that replaced each.
 		'repipe' => {
-			class        => Genesis::Commands::PRE_DEPLOY,
-			options      => [qw/dry-run|n yes|y missing-secrets-ok rotate-webhook-token/],
-			control_only => 1,
-			arguments    => [],
-			deprecated   => 'pipeline-apply',
+			options => [],
+			exactly => 0,
+			retired => 'pipeline-apply',
 		},
 		'describe' => {
-			arguments  => [],
-			deprecated => 'pipeline-describe',
+			options => [],
+			exactly => 0,
+			retired => 'pipeline-describe',
 		},
 		'graph' => {
-			deprecated => 'pipeline-graph',
+			options => [],
+			exactly => 0,
+			retired => 'pipeline-graph',
 		},
 		# The previews take --from, the one way to read the pipeline's shape
 		# at a commit rather than the working tree, and only they take it, so
@@ -227,10 +228,18 @@ subtest 'the flag-carrying pipeline surface' => sub {
 			$surface{$cmd}{option_group},
 			"$cmd takes the option group it declares")
 			if exists $surface{$cmd}{option_group};
-		is(command_properties($cmd)->{deprecated}, $surface{$cmd}{deprecated},
-			"$cmd is deprecated in favour of $surface{$cmd}{deprecated}")
-			if exists $surface{$cmd}{deprecated};
+		if (exists $surface{$cmd}{retired}) {
+			my $retired = command_properties($cmd)->{retired} // '';
+			like($retired, qr/\b\Q$surface{$cmd}{retired}\E\b/,
+				"$cmd is retired, naming $surface{$cmd}{retired}");
+			like($retired, qr/3\.2/, "and the version that retired it");
+			ok(!defined command_properties($cmd)->{deprecated}, 'and is not merely deprecated');
+		}
 	}
+
+	# The old alias still reaches the stub, so `genesis push` explains too.
+	ok(Genesis::Commands::is_equivalent_command('push', 'repipe'),
+		'push is still repipe, retired with it');
 
 	# The seeding command is retired, so it is not part of the surface
 	# this sweep reads.  Green on arrival, and a guard against a step

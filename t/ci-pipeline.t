@@ -167,8 +167,7 @@ subtest 'Commands::Pipelines module loads correctly' => sub {
 	can_ok 'Genesis::Commands::Pipelines', 'status';
 	can_ok 'Genesis::Commands::Pipelines', 'pause';
 	can_ok 'Genesis::Commands::Pipelines', 'resume';
-	can_ok 'Genesis::Commands::Pipelines', 'graph';
-	can_ok 'Genesis::Commands::Pipelines', 'describe';
+	# graph and describe are retired stubs in bin/genesis (D151), with no sub.
 };
 
 subtest 'Commands::Pipelines - _compile_pipeline helper: detects multi-file config' => sub {

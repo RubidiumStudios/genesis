@@ -1836,7 +1836,7 @@ define_command("embed", {
 
 # }}}
 # genesis repipe - Deploy a Concourse CI/CD deployment pipeline. {{{
-# The apply's options, shared with repipe, which runs the apply.
+# The apply's options.
 my @PIPELINE_APPLY_OPTIONS = (
 	'yes|y' =>
 		"Suppress interactive confirmations (for automation).",
@@ -1888,77 +1888,42 @@ my @PIPELINE_APPLY_OPTIONS = (
 		"Write intermediate compiler artifacts to this directory.",
 );
 
+# The v2 pipeline commands outside the pipeline- family, retired in 3.2
+# (D151).  Each stays registered, so dispatch refuses it by name whatever it is
+# given and its help says what replaced it.
+my $V2_COMMAND_RETIRED = sub {
+	my ($replacement, $what) = @_;
+	return "It does not work in Genesis 3.2, whose pipeline comes from the ".
+		"#C{pipeline} section of #C{.genesis/config} rather than #C{ci.yml}.  ".
+		"Use #G{genesis $replacement}, which $what.";
+};
+
+# genesis repipe - retired; pipeline-apply replaced it {{{
 define_command("repipe", {
-	deprecated => 'pipeline-apply',
-	summary => "Apply the pipeline; the deprecated spelling of #g{pipeline-apply}.",
-	usage => 'repipe',
-	description =>
-		"Runs #g{pipeline-apply}, with the same options and the same gates.",
-	alias => "push",
+	retired        => $V2_COMMAND_RETIRED->('pipeline-apply', 'applies the pipeline'),
+	summary        => "Retired: use #g{pipeline-apply}.",
+	usage          => 'repipe',
+	alias          => "push",
 	function_group => Genesis::Commands::PIPELINE,
-	branch_class   => Genesis::Commands::PRE_DEPLOY,
-	control_only   => 1,
-	preview        => 'dry-run',
-	scope => 'repo',
-	arguments => [],
-	option_group => Genesis::Commands::REPO_OPTIONS,
-	options => [@PIPELINE_APPLY_OPTIONS],
-	deprecated_options => [
-		'config|c=s' =>
-			"Kept for compatibility, and nothing reads it any more.  The ".
-			"pipeline comes from the pipeline section of .genesis/config.",
-		'vault=s' =>
-			"The name of a `safe' target (a Vault) where the secret credentials ".
-			"are stored.  Only accepted if the deployment repository does not ".
-			"have a vault specified.",
-	]
+	option_passthrough => 1,
 });
 # }}}
-# genesis graph - Draw a Concourse CI/CD deployment pipeline. {{{
+# genesis graph - retired; pipeline-graph replaced it {{{
 define_command("graph", {
-	deprecated => 'pipeline-graph',
-	summary => "Draw a Concourse pipeline.",
-	usage => "graph [<pipeline-layout>] | #g{dot} #y{-Tpng} > pipe.png",
-	description =>
-		"Generate a directed, acyclic graph (a DAG) for the specified layout in ".
-		"the Graphviz language (http://www.graphviz.org/).\n".
-		"\n".
-		"If you want a picture of the pipeline, you will need to pipe the output ".
-		"through one of the many Graphviz formatters, like `dot -Tpng > out.png`",
+	retired        => $V2_COMMAND_RETIRED->('pipeline-graph', 'draws the pipeline as a Mermaid flowchart'),
+	summary        => "Retired: use #g{pipeline-graph}.",
+	usage          => 'graph',
 	function_group => Genesis::Commands::PIPELINE,
-	scope => 'repo',
-	arguments => [
-		'pipeline-layout?' =>
-			"The name of the layout to push to Concourse.\n".
-			"Defaults to single layout present in config file, or 'default' if there ".
-			"are multiple layouts present.  You must specify this argument if you ".
-			"have multiple layouts without one of them being named 'default'"
-	],
-	option_group => Genesis::Commands::REPO_OPTIONS,
-	options => [
-		'config|c=s' =>
-			"Path to the pipeline configuration file, which specifies Git ".
-			"parameters, notification settings, pipeline layouts, etc.\n".
-			"Defaults to 'ci.yml'",
-	]
+	option_passthrough => 1,
 });
 # }}}
-# genesis describe - Describe a Concourse CI/CD deployment pipeline. {{{
+# genesis describe - retired; pipeline-describe replaced it {{{
 define_command("describe", {
-	deprecated => 'pipeline-describe',
-	summary => "Describe a Concourse pipeline, in words.",
-	usage => "describe",
-	description =>
-		"Runs #g{pipeline-describe}, which describes the pipeline in human terms.",
+	retired        => $V2_COMMAND_RETIRED->('pipeline-describe', 'describes the pipeline in words'),
+	summary        => "Retired: use #g{pipeline-describe}.",
+	usage          => 'describe',
 	function_group => Genesis::Commands::PIPELINE,
-	scope => 'repo',
-	arguments => [],
-	option_group => Genesis::Commands::REPO_OPTIONS,
-	options => [
-		'config|c=s' =>
-			"Kept for compatibility, and nothing reads it any more.  The ".
-			"pipeline comes from the pipeline section of .genesis/config.",
-	]
+	option_passthrough => 1,
 });
 # }}}
 # Shared retirement rationale for the legacy ci-* pipeline commands.

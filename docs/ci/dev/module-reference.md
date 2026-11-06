@@ -693,16 +693,7 @@ Four of the five methods above guard on the `config` key, and `generate_descript
 - `open_control_session($top, $git)`
   begins a session and stands it on the control branch.
 
-**Deprecated Subroutines:**
-
-- `repipe()`
-  warns and delegates to `apply()`. It keeps the `push` alias and a `--config` option that nothing reads any more.
-
-- `graph()`
-  warns, then calls `Genesis::CI::Legacy` directly for DOT source. This is the one route in the module that reaches Legacy without the bridge.
-
-- `describe()`
-  warns and delegates to `pipeline_describe()`.
+**Retired commands:** `repipe` (alias `push`), `graph` and `describe` have no subroutine here. They are retired stubs in `bin/genesis` (D151), refusing at dispatch and naming `pipeline-apply`, `pipeline-graph` and `pipeline-describe`.
 
 **Retired Commands:**
 

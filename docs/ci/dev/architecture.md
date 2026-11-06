@@ -4,7 +4,7 @@ The Genesis CI system has two parallel code paths for generating deployment pipe
 
 ## Two Code Paths
 
-The legacy code path calls directly into `Genesis::CI::Legacy`, a monolithic module that parses `ci.yml`, evaluates spruce operators, and generates Concourse pipeline YAML through string concatenation. It only ever supported Concourse, and it has been in production for years. The Concourse compiling class reaches it through the legacy bridge, and `genesis graph` calls it directly.
+The legacy code path calls directly into `Genesis::CI::Legacy`, a monolithic module that parses `ci.yml`, evaluates spruce operators, and generates Concourse pipeline YAML through string concatenation. It only ever supported Concourse, and it has been in production for years. The Concourse compiling class reaches it through the legacy bridge; nothing calls it directly since `genesis graph` was retired.
 
 The compiler pipeline runs configuration through six stages, which are the Parser, the Validator, ScriptDiscovery, the ASTBuilder, the PipelineDescriptor, and the provider's compiler. It produces a structured AST as its intermediate representation, and every pipeline command that reads a repository's configuration takes this path.
 
@@ -46,8 +46,7 @@ graph TB
         CC[ProviderCompiler::Concourse]
     end
 
-    CMD -->|genesis graph| LEG
-    CMD -->|every other command| COMP
+    CMD -->|every pipeline command| COMP
     COMP --> PARSE
     PARSE --> VAL
     VAL --> SD
@@ -113,9 +112,9 @@ The command handler is at `lib/Genesis/Commands/Pipelines.pm` and the CLI comman
 
 There are two ways code enters the CI system.
 
-The primary entry point is `Genesis::Commands::Pipelines::apply()`, called when an operator runs `genesis pipeline-apply`. It reads the configured provider type, and every command that needs a compiled pipeline goes through the private `_compile_pipeline()` helper beside it, which builds a `Genesis::CI::Compiler` and runs `compile()`. The `pipeline_graph()`, `pipeline_describe()`, `diff()`, `status()`, `pause()`, and `resume()` functions in the same module all take that route. `genesis repipe` is deprecated and delegates to `apply()`.
+The primary entry point is `Genesis::Commands::Pipelines::apply()`, called when an operator runs `genesis pipeline-apply`. It reads the configured provider type, and every command that needs a compiled pipeline goes through the private `_compile_pipeline()` helper beside it, which builds a `Genesis::CI::Compiler` and runs `compile()`. The `pipeline_graph()`, `pipeline_describe()`, `diff()`, `status()`, `pause()`, and `resume()` functions in the same module all take that route. `genesis repipe`, `graph` and `describe`, the v2 commands, are retired stubs in 3.2 with no handler (D151).
 
-The second entry point is `Genesis::CI::Legacy` directly, which the deprecated `graph()` calls to produce DOT source from a `ci.yml` file.
+`Genesis::CI::Legacy` has no direct entry point any more. The retired `graph()` was the last, and the compiler reaches Legacy only through the bridge.
 
 No pipeline command builds a provider object of its own. `Genesis::CI::Compiler::compile` builds it, and the command reads it back out of the result alongside the compiler. The one command that does build its own is `genesis dev-pipeline-compile`, which calls `Genesis::CI::Provider->new` on a type alone and asks that provider for its compiler, because it emits from a stored AST that carries neither a repository nor a configured block.
 

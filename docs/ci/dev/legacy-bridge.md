@@ -20,14 +20,7 @@ The module exposes four public functions:
 
 ## When Legacy is Used Directly
 
-The legacy module is called directly, bypassing the compiler entirely, by the deprecated `genesis graph`. In `Genesis::Commands::Pipelines::graph()` the code reads `ci.yml` and asks Legacy for DOT source:
-
-```perl
-(my $pipeline, $layout) = Genesis::CI::Legacy::parse(get_options->{config}, $top, $layout);
-my $dot = Genesis::CI::Legacy::generate_pipeline_graphviz_source($pipeline);
-```
-
-There is no longer a `--platform` flag to route on, and the other deprecated commands delegate to their successors rather than calling Legacy. `repipe` delegates to `apply`, and `describe` delegates to `pipeline_describe`. Every route but the one above reaches Legacy through the bridge below rather than directly.
+No command calls the legacy module directly any more. The last that did, `genesis graph`, read `ci.yml` and asked Legacy for Graphviz DOT source. It is retired in 3.2 with `repipe` and `describe` (D151), each a registered stub that refuses and names its `pipeline-*` replacement, so none has a handler. There is no longer a `--platform` flag to route on either, and every route reaches Legacy through the bridge below.
 
 ## When the Bridge is Activated
 
@@ -83,13 +76,8 @@ This ensures that legacy configurations produce identical output regardless of w
 
 ```mermaid
 flowchart TD
-    A[ci.yml] --> B{Which path?}
-
-    B -->|"genesis graph"| C[Legacy::parse]
-    C --> D[Legacy::generate_pipeline_concourse_yaml]
-    D --> E[Concourse YAML]
-
-    B -->|"every other<br/>pipeline command"| F[Compiler::Parser]
+    A[ci.yml] -->|"every pipeline command"| F[Compiler::Parser]
+    D[Legacy::generate_pipeline_concourse_yaml] --> E[Concourse YAML]
     F -->|"preserves _legacy_raw"| G[Compiler::Validator]
     G --> H[ScriptDiscovery]
     H --> I[ASTBuilder]

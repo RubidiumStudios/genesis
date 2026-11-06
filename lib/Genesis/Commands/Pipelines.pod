@@ -6,20 +6,23 @@ Genesis::Commands::Pipelines - Command handlers for Genesis CI/CD pipeline manag
 
   # Registered in bin/genesis via define_command:
   genesis embed
-  genesis pipeline-apply [layout] [--target <fly-target>] [--dry-run] [--yes] [--paused] [--output-dir <dir>] [--debug-dir <dir>] [--skip-vault]
-  genesis repipe [layout]   # deprecated; warns and delegates to pipeline-apply
-  genesis graph  [layout] [--config ci.yml]
-  genesis describe [layout]
+  genesis pipeline-apply [--target <fly-target>] [--dry-run] [--yes] [--paused] [--output-dir <dir>] [--debug-dir <dir>] [--skip-vault]
+  genesis pipeline-graph
+  genesis pipeline-describe
 
 =head1 DESCRIPTION
 
 Provides operator-facing command handlers for Genesis CI/CD pipeline
-management.  C<embed>, C<apply>, C<graph>, and C<describe> are run by a
-Genesis operator to embed the Genesis binary, give the pipeline its shape
-on the configured provider, visualize the pipeline dependency graph, or
-display a human-readable pipeline description.
-C<repipe> is the deprecated name for C<apply>, kept so an operator's habit
-still works, and it warns before it delegates.
+management.  C<embed>, C<apply>, C<pipeline_graph>, and C<pipeline_describe>
+are run by a Genesis operator to embed the Genesis binary, give the pipeline
+its shape on the configured provider, draw the pipeline, or describe it in
+words.
+
+The v2 commands outside the C<pipeline-> family, C<repipe> (and its alias
+C<push>), C<graph> and C<describe>, are retired in 3.2 (D151).  They have no
+handler here; their registrations in F<bin/genesis> carry C<retired>, so
+dispatch refuses each by name, and its help says the same, naming
+C<pipeline-apply>, C<pipeline-graph> or C<pipeline-describe>.
 
 The legacy Concourse-facing pipeline task handlers
 (C<ci_pipeline_deploy>, C<ci_show_changes>, C<ci_generate_cache>, and
@@ -107,8 +110,8 @@ pipeline to set. With C<--dry-run> it reports every one of those steps and
 writes nothing to the repository, the remote, or the vault, neither a branch,
 nor a protection setting, nor a record.
 
-C<genesis repipe> is the deprecated name for the same command, and it
-warns and then delegates here.
+C<genesis repipe>, the v2 name for this command, is retired (D151) and
+refuses, naming C<pipeline-apply>.
 
 It refuses before it reads anything else when C<pipeline.enabled> is false
 or absent, because the command applies a configured pipeline and never
@@ -343,102 +346,6 @@ B<Examples:>
   # A repository that has not enabled a pipeline
   genesis pipeline-apply
   # Exits: Genesis::Exit::CONFIG, having written nothing
-
-=head2 repipe()
-
-    genesis repipe
-
-The deprecated name for L</apply()>.  Its registration carries
-C<deprecated =E<gt> 'pipeline-apply'>, so its help says it is deprecated and
-names the replacement, and C<run_command> warns the same before it runs.  It
-declares the apply's options, branch class and control-only gate, and
-delegates to C<apply>, so everything the apply entry says holds here too.  It
-will be removed in a future version.
-
-B<Examples:>
-
-  # The old name still applies the configured pipeline, with a warning
-  genesis repipe
-  # Returns: whatever pipeline-apply returns
-
-=head2 graph([$layout])
-
-    genesis graph
-    genesis graph sandbox
-
-Generates and prints a Graphviz DOT-format representation of the pipeline
-dependency graph.  The DOT output can be piped to C<dot> or rendered with any
-Graphviz tool.  Deprecated in favour of L</pipeline_graph()>, which its
-registration's C<deprecated> flag names in its help and its run.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$layout> (optional)
-
-The pipeline layout to use.  Defaults to the layout inferred from the CI
-config file when omitted.
-
-=back
-
-B<Options (via C<get_options>):>
-
-=over 4
-
-=item C<--config> (default: C<ci.yml>)
-
-Path to the CI config file to parse.
-
-=back
-
-B<Returns:> Prints the Graphviz DOT source to standard output.
-
-B<Examples:>
-
-  # Print DOT graph for the default pipeline
-  genesis graph
-
-  # Render pipeline graph as PNG
-  genesis graph | dot -Tpng -o pipeline.png
-
-=head2 describe()
-
-    genesis describe
-
-The deprecated name for L</pipeline_describe()>, to which it delegates.  Its
-registration's C<deprecated> flag names the replacement in its help and its
-run.  It parses the pipeline configuration and prints a human-readable
-description of the environments and their pass/trigger relationships.
-
-Where the repository configures a pipeline, the report opens with the
-resolved source-control values, each beside the tier it came from, so an
-override that has drifted away from what git says is visible rather than
-silent.
-
-B<Parameters:> none.
-
-B<Options (via C<get_options>):>
-
-=over 4
-
-=item C<--config>
-
-The option is still accepted, and nothing reads it any more.  The
-description is built from the C<pipeline> section of C<.genesis/config>,
-which is the one configuration source.
-
-=back
-
-B<Returns:> Prints the pipeline description to standard output.
-
-B<Examples:>
-
-  # Describe the default pipeline
-  genesis describe
-
-  # Describe a specific pipeline layout
-  genesis describe sandbox
 
 =head2 pipeline_status()
 

@@ -1,6 +1,6 @@
 # CLI Commands
 
-Genesis provides `genesis propagate` and a family of `pipeline-*` commands for working with CI pipelines, along with three deprecated commands that predate them and four retired ones. This document covers all of them.
+Genesis provides `genesis propagate` and a family of `pipeline-*` commands for working with CI pipelines, along with seven retired ones: three v2 commands that predate them, and four that ran inside a legacy Concourse task. This document covers all of them.
 
 Where a command refuses, it exits with a code from `Genesis::Exit` rather than with a bare number, so a pipeline job can tell a refusal from a partial result from a crash. The refusals on this page exit `CONFIG`. A fatal system error exits a bare 1, a usage or option error exits 2, and the prerequisites check exits 86, all three being Genesis precedent that predates the table.
 
@@ -12,7 +12,7 @@ The `pipeline-apply` command gives the pipeline its shape. It compiles a CI pipe
 genesis pipeline-apply [options]
 ```
 
-`genesis repipe` is the deprecated spelling of this command. Its help says so and names `pipeline-apply`, and it warns the same when it runs, then does exactly what `pipeline-apply` does, with the same options and gates. It keeps the `push` alias. Use `pipeline-apply` in anything new. `graph` and `describe` are marked the same way, naming `pipeline-graph` and `pipeline-describe`.
+`genesis repipe`, the v2 name for this command, is retired in 3.2 and refuses, naming `pipeline-apply` (see [The v2 commands retired in 3.2](#the-v2-commands-retired-in-32)).
 
 `pipeline-apply` compiles the pipeline your repository configures and uploads it to the CI system that pipeline names, through `fly set-pipeline` where that system is Concourse. It prompts for confirmation before uploading unless you pass `--yes`. The configuration is the `pipeline:` section of `.genesis/config`, and the provider is read from `pipeline.provider.type` rather than from any flag.
 
@@ -164,7 +164,7 @@ Compiles the pipeline and prints a Mermaid flowchart, or writes it to the file `
 genesis pipeline-graph
 ```
 
-This replaces `genesis graph`, which draws the legacy topology through Graphviz instead. It is a preview, as `pipeline-describe` describes.
+It replaces the retired `genesis graph`, which drew the v2 topology through Graphviz. It is a preview, as `pipeline-describe` describes.
 
 ## genesis pipeline-describe
 
@@ -175,7 +175,7 @@ genesis pipeline-describe
 genesis pipeline-describe --from origin/control
 ```
 
-It resolves the repository's own configuration out of files, so it holds no ref a refresh could make current and it takes no refresh flag. This replaces `genesis describe`.
+It resolves the repository's own configuration out of files, so it holds no ref a refresh could make current and it takes no refresh flag. It replaces the retired `genesis describe`.
 
 Like `pipeline-graph` and `pipeline-apply --dry-run`, it is a preview: it reads the deployment root's working tree, so a change can be checked before it is committed. Where that tree differs from control on the remote, a banner says how, one line per difference: uncommitted changes assumed committed, unpushed commits assumed pushed, commits on the remote the tree lacks, or a branch other than control assumed merged. `--from <ref>` previews any commit instead, such as `origin/control` for what a real apply would set now.
 
@@ -201,45 +201,17 @@ Three commands reach past the compiled pipeline to the jobs the provider is runn
 
 These three are about the provider's jobs and not about propagation. To stop delivering to an environment, use `genesis pipeline-hold`, which is the one that `genesis propagate` and `genesis pipeline-status` both read.
 
-## genesis graph (deprecated)
+## The v2 commands retired in 3.2
 
-The `graph` command generates a Graphviz DOT representation of your pipeline topology. Pipe the output through a Graphviz renderer to produce an image. It warns that it is deprecated, and it is the one command left that calls the legacy generator directly.
+Three v2 commands sat outside the `pipeline-*` family. None of them works in Genesis 3.2, whose pipeline comes from the `pipeline` section of `.genesis/config` rather than `ci.yml`. Each stays registered only to refuse, whatever it is given, and to name its replacement, and its help says the same.
 
-```
-genesis graph [<pipeline-layout>] [options]
-```
+| v2 command | Use instead |
+|---|---|
+| `genesis repipe`, and its alias `genesis push` | `genesis pipeline-apply` |
+| `genesis graph` | `genesis pipeline-graph`, a Mermaid flowchart rather than Graphviz |
+| `genesis describe` | `genesis pipeline-describe` |
 
-`graph` reads `ci.yml` and draws the legacy topology. For the Mermaid flowchart the compiler writes, use `genesis pipeline-graph` instead.
-
-```bash
-# Generate a PNG image
-genesis graph | dot -Tpng > pipeline.png
-
-# Generate SVG
-genesis graph | dot -Tsvg > pipeline.svg
-```
-
-Options: `--config`, which is kept for compatibility.
-
-## genesis describe (deprecated)
-
-The `describe` command prints a human-readable description of your pipeline, listing each environment, whether it deploys automatically or requires manual approval, and what triggers it. It warns, then delegates to `genesis pipeline-describe`, which is the command to use instead.
-
-```
-genesis describe [options]
-```
-
-Example output:
-
-```
-Pipeline: my-cf-deployments
-Workflow: my-cf-deployments
-  sandbox              sandbox-deployment  [auto]
-  staging              staging-deployment  [manual] (triggered by sandbox)
-  production           production-deployment  [manual] (triggered by staging)
-```
-
-Options: `--config`, which is kept for compatibility.
+A script that called one of them stops with that pointer. A layout argument or `--config` has no counterpart, since a deployment root has one pipeline.
 
 ## Retired Pipeline Commands
 

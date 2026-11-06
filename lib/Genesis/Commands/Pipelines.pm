@@ -1464,32 +1464,9 @@ sub open_control_session {
 # }}}
 ### Deprecated Commands {{{
 
-# repipe - deprecated; delegates to apply {{{
-sub repipe {
-	apply(@_);
-}
-
-# }}}
-# graph - deprecated; legacy graphviz, with pipeline-graph as the successor {{{
-sub graph {
-	option_defaults(config => 'ci.yml');
-	my $layout = $_[0];
-	my $top    = Genesis::Top->new('.');
-
-	(my $pipeline, $layout) = Genesis::CI::Legacy::parse(get_options->{config}, $top, $layout);
-	my $dot = Genesis::CI::Legacy::generate_pipeline_graphviz_source($pipeline);
-	output "$dot";
-	exit 0;
-}
-
-# }}}
-# describe - deprecated; delegates to pipeline_describe {{{
-sub describe {
-	pipeline_describe(@_);
-}
-
-
-# ci_pipeline_deploy, ci_show_changes, ci_generate_cache, and
+# repipe, graph and describe, the v2 commands outside the pipeline- family,
+# are retired in 3.2 (D151), and ci_pipeline_deploy, ci_show_changes,
+# ci_generate_cache, and
 # ci_pipeline_run_errand, which were the legacy pipeline task entry points,
 # have been retired.  Their commands remain registered in bin/genesis with
 # `retired => ...` so run_command bails at dispatch time and a legacy pipeline
