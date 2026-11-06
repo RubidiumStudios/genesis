@@ -5735,7 +5735,10 @@ after them, through L</_ocfp_tracks_bosh_configs> (D147).
 
 Each refused key that the environment inherits rather than writes itself is
 followed by C<(set in E<lt>fileE<gt>)>, the file L</_file_setting> answers, as
-is each key L</_validate_capability_gates> refuses (T405).
+is each key L</_validate_capability_gates> refuses (T405). The schema's own
+refusals, a retired or an unknown key among them, end
+C<(in E<lt>envE<gt>, set in E<lt>fileE<gt>)> where the key is inherited, and
+C<(in E<lt>envE<gt>)> where the environment's own file sets it.
 
 Those checks read the block as the operator wrote it, taken before the
 validator runs. Each list key declares C<envsplit>, and C<Genesis::Config>

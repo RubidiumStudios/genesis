@@ -4016,12 +4016,20 @@ sub _validate_env_pipeline_block {
 
 	# Worded as the capability gate words its own, so one refusal reads as one
 	# list; an inherited key is edited where it is set, so its file is named.
+	my $set_in = sub {
+		my $from = $self->_file_setting($env_name, $_[0]);
+		return defined $from && $from ne "$env_name.yml" ? $from : undef;
+	};
 	for (@errors) {
-		my ($head, $key, $rest) = /^(#R\{(genesis\.pipeline\.\w+)[^}]*\})(.*)\z/s
-			or do {$_ .= " (in #C{$env_name})"; next};
-		my $from = $self->_file_setting($env_name, $key);
-		my $set  = defined $from && $from ne "$env_name.yml" ? " (set in #C{$from})" : '';
-		$_ = "$head in #C{$env_name}$set$rest";
+		if (my ($head, $key, $rest) = /^(#R\{(genesis\.pipeline\.\w+)[^}]*\})(.*)\z/s) {
+			my $from = $set_in->($key);
+			$_ = "$head in #C{$env_name}".($from ? " (set in #C{$from})" : '').$rest;
+			next;
+		}
+		# The schema's own refusals, retired and unknown keys among them.
+		my ($key) = /^(genesis\.pipeline\.\w+)/;
+		my $from  = $key ? $set_in->($key) : undef;
+		$_ .= " (in #C{$env_name}".($from ? ", set in #C{$from}" : '').")";
 	}
 	push @errors, $self->_ocfp_tracks_bosh_configs($env_name, $block{track_bosh_configs});
 	$self->_refuse_config(@errors) if @errors;

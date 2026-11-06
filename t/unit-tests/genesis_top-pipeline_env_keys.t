@@ -97,6 +97,28 @@ subtest 'the tracked-files key is renamed and behaves as before' => sub {
 		'a parent-relative path is still refused';
 };
 
+# A key the schema itself refuses, retired or unknown, was refused on the
+# environment but never named the file that set it when that was a shared one,
+# which the custom checks above always did.  Green for an own-file key.
+subtest 'an inherited key the schema refuses names the file that sets it' => sub {
+	plan tests => 2;
+
+	my $g = make_harness(envs => [], pipeline => 1, vault => 0);
+	commit_on_control($g, message => 'a site key', files => {
+		'us.yml'         => "---\ngenesis:\n  pipeline:\n    required_files: [ops/x.yml]\n",
+		'us-east-qa.yml' => "---\ngenesis:\n  env: us-east-qa\n",
+	});
+	my $refusal = '';
+	eval {my $t = Genesis::Top->new($g->a, no_vault => 1); $t->config; 1} or $refusal = $@;
+	$refusal = Genesis::Term::decolorize($refusal) =~ s/\s+/ /gr;
+	like($refusal, qr/genesis\.pipeline\.required_files: is no longer read.*\(in us-east-qa, set in us\.yml\)/,
+		'the retired key names the environment and the shared file');
+
+	throws_ok {load_env_with({required_files => ['ops/x.yml']})}
+		qr/required_files: is no longer read.*\(in qa\)/s,
+		'and its own file still reads as before';
+};
+
 subtest 'the dependency source is a list and has no opt-out' => sub {
 	plan tests => 4;
 
