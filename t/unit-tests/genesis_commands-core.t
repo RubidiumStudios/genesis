@@ -780,6 +780,19 @@ subtest 'command_usage - a deprecated command says so, naming its replacement' =
 	unlike($stderr, qr/Deprecated/, 'a current command says nothing of it');
 };
 
+subtest 'command_usage - a retired command says so, with its reason' => sub {
+	reset_commands_state();
+
+	define_command('gone-for-good', {
+		summary => 'Long gone',
+		retired => 'Use new-way instead.',
+	});
+	prepare_command('gone-for-good');
+	my (undef, $stderr) = output_from {exits_zero {command_usage(0)} 'help exits 0'};
+	like($stderr, qr/Retired:.*no longer runs.*Use new-way instead/s,
+		'the help says it is retired and gives the reason');
+};
+
 subtest 'command_usage - exits nonzero with error' => sub {
 	reset_commands_state();
 

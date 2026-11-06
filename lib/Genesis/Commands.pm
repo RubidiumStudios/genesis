@@ -1401,8 +1401,15 @@ sub command_usage { # {{{
 		terminal_width," #i{Note:} ", 7
 	)."\n" unless $command eq $called;
 
-	# The same flag run_command warns from, so the help and the run agree.
-	if (defined(my $replacement = $PROPS{$command}{deprecated})) {
+	# The same flags run_command reads, so the help and the run agree.
+	if (my $retired = $PROPS{$command}{retired}) {
+		my $reason = ref($retired) ? ($retired->{message} // '') : $retired;
+		$out .= "\n".wrap(
+			"#R{This command has been retired and no longer runs.}".
+			($reason ? "  $reason" : ''),
+			terminal_width, "#Rr{Retired:} ", 9
+		)."\n";
+	} elsif (defined(my $replacement = $PROPS{$command}{deprecated})) {
 		$out .= "\n".wrap(
 			"#Y{This command is deprecated and will be removed in a future version of Genesis.}".
 			($replacement ? "  #Y{It has been replaced by} #G{$replacement}#Y{.}" : ''),
