@@ -114,7 +114,7 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		# layouts needed is gone.
 		'pipeline-apply' => {
 			class        => Genesis::Commands::PRE_DEPLOY,
-			options      => [qw/dry-run|n yes|y missing-secrets-ok rotate-webhook-token/],
+			options      => [qw/dry-run|n yes|y missing-secrets-ok rotate-webhook-token cleanup-orphans/],
 			absent       => [qw/platform|provider|p=s no-fetch/],
 			control_only => 1,
 			arguments    => [],

@@ -1884,6 +1884,14 @@ my @PIPELINE_APPLY_OPTIONS = (
 		"this is for the first apply of a pipeline whose secrets are set ".
 		"afterwards.  The report is printed either way.",
 
+	'cleanup-orphans' =>
+		"Remove what the pipeline left for each environment whose file has left ".
+		"control: its open pull request (closed, with a comment), its deployment ".
+		"and pull request branches, its rulesets and its pipeline records.  Its ".
+		"BOSH deployment and exodus record are left alone.  Asks first unless ".
+		"-y; a dry run says what it would remove.  Without it the apply reports ".
+		"each orphan and removes nothing.",
+
 	'debug-dir=s' =>
 		"Write intermediate compiler artifacts to this directory.",
 );

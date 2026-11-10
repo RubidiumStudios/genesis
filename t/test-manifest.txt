@@ -518,6 +518,7 @@ integration-tests/genesis_ci_propagate-check_requests.t       # propagate asks C
 integration-tests/genesis_commands_pipelines-apply_secrets.t  # the apply checks every reference where Concourse reads it, refusing one found nowhere (D142)
 integration-tests/genesis_commands_pipelines-apply_webhook.t  # the apply owns the webhook token and the GitHub hook (D145)
 integration-tests/genesis_commands_pipelines-apply_director_credentials.t # the apply copies each tracked director's credentials from exodus to the pipeline scope (D149)
+integration-tests/genesis_commands_pipelines-apply_orphans.t   # the apply reports orphaned environments and removes their traces on request (D153)
 integration-tests/genesis_top-no_root.t                         # a command with no deployment root says where the roots are: control's from a rootless branch, this branch's, or the one it sits inside (D120)
 integration-tests/genesis_ci_rehearsal-flow.t                 # a change flows through that pipeline, under a stand-in scheduler with the locks simulated
 integration-tests/genesis_ci_compiler-schema_contract.t       # the compiler reads nothing the schema does not declare

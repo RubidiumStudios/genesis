@@ -175,6 +175,16 @@ sub apply {
 			if $platform eq 'concourse';
 	}
 
+	# What the pipeline left for environments whose files are gone (D153).
+	_apply_orphans($top, $git,
+		($ENV{GITHUB_AUTH_TOKEN}
+			? (gh => $top->github_client, owner_repo => $top->source_control_repository) : ()),
+		dry_run    => $dry_run,
+		cleanup    => $opts->{'cleanup-orphans'},
+		yes        => $opts->{yes},
+		skip_vault => $opts->{'skip-vault'},
+	);
+
 	_apply_records($top,
 		control_commit => $git->sha($top->control_branch),
 		provider       => $platform,
@@ -1665,6 +1675,132 @@ sub _director_record {
 	return (undef, $path, sprintf("the exodus record at #C{%s} lacks %s", $path, join(', ', @lacking)))
 		if @lacking;
 	return ($record, $path);
+}
+
+# }}}
+# _apply_orphans - environments whose files left control, reported, and cleaned up on request (D153) {{{
+sub _apply_orphans {
+	my ($top, $git, %opts) = @_;
+	my @orphans = _find_orphans($top, $git, %opts) or return;
+
+	info("\n#Y{Orphaned environments}, whose files have left control, and what the pipeline made for them");
+	for my $o (@orphans) {
+		info("  #Y{orphan} #C{%s}", $o->{env});
+		info("    branch        #C{%s}", $o->{branch});
+		info("    pull request  #C{%s}%s", $o->{pr_branch},
+			$o->{pr} ? sprintf(", open as #%d", $o->{pr}{number}) : '') if $o->{pr_branch};
+		info("    ruleset       #C{%s}%s", $_->{name}, $_->{why} ? " (unverified: $_->{why})" : '')
+			for @{$o->{rulesets}};
+		info("    record        #C{%s}", $_) for @{$o->{records}};
+		warning("#C{%s} is still deployed, by its exodus record at #C{%s}: removing its file did not ".
+			"tear it down.  Restore the file from #C{%s} and run #C{genesis %s terminate}.",
+			$o->{env}, $o->{exodus}, $o->{branch}, $o->{env}) if $o->{deployed};
+	}
+
+	unless ($opts{cleanup}) {
+		info("  Nothing was removed; #C{--cleanup-orphans} removes these traces.");
+		return;
+	}
+	if ($opts{dry_run}) {
+		info("  #Yi{would remove} every trace above but the deployments themselves");
+		return;
+	}
+	require Genesis::UI;
+	unless ($opts{yes} || Genesis::UI::prompt_for_boolean(
+			"Remove these traces of the orphaned environments? [y|n]", 0)) {
+		info("  Nothing was removed.");
+		return;
+	}
+	_cleanup_orphan($git, $_, %opts) for @orphans;
+	return;
+}
+
+# }}}
+# _find_orphans - each orphaned environment, with its traces (D153) {{{
+sub _find_orphans {
+	my ($top, $git, %opts) = @_;
+	my $type    = $top->type;
+	my $control = $top->control_branch;
+	my %known   = map {($_ => 1)} @{$top->pipeline_topology->{order} || []};
+	my $prefix  = $top->pr_prefix;
+	my @heads   = $git->remote_heads;
+	my %on      = map {($_ => 1)} @heads;
+
+	my $vault;
+	unless ($opts{skip_vault}) {
+		$vault = eval {$top->vault};
+		undef $vault unless $vault && (eval {$vault->status} // '') eq 'ok';
+	}
+	my $mount = $top->_pipeline_exodus_mount;
+
+	my @orphans;
+	for my $branch (@heads) {
+		my ($env) = $branch =~ m{^([^/]+)/\Q$type\E$} or next;
+		next if $known{$env} || $branch eq $control || index($branch, $prefix) == 0;
+		# Its file was on this root's control once, which tells it from a
+		# branch of the same type another root keeps.
+		my ($seen) = run({dir => $top->path, passfail => 0, stderr => 0},
+			'git', 'log', '-1', '--format=%H', $control, '--', "$env.yml");
+		next unless ($seen // '') =~ /\S/;
+
+		my $pr_branch = "$prefix$branch";
+		my %o = (env => $env, branch => $branch, rulesets => [], records => [],
+			exodus => "$mount$branch",
+			($on{$pr_branch} ? (pr_branch => $pr_branch) : ()));
+		if ($opts{gh} && $opts{owner_repo}) {
+			if ($o{pr_branch}) {
+				my $open = eval {$opts{gh}->open_prs($opts{owner_repo}, $branch, $pr_branch)} || [];
+				($o{pr}) = @$open;
+			}
+			my ($set, $why) = $opts{gh}->ruleset_named($opts{owner_repo}, "genesis-$branch");
+			push @{$o{rulesets}}, {name => "genesis-$branch", id => $set->{id}} if $set;
+			push @{$o{rulesets}}, {name => "genesis-$branch", why => $why} if $why;
+		}
+		if ($vault) {
+			push @{$o{records}}, grep {$vault->has($_)} map {"$o{exodus}/$_"} qw/pipeline hold proposed/;
+			$o{deployed} = $vault->has($o{exodus}) ? 1 : 0;
+			$o{vault} = $vault;
+		}
+		push @orphans, \%o;
+	}
+	return @orphans;
+}
+
+# }}}
+# _cleanup_orphan - remove one orphan's traces, reporting what could not go (D153) {{{
+sub _cleanup_orphan {
+	my ($git, $o, %opts) = @_;
+	my ($gh, $repo) = @opts{qw/gh owner_repo/};
+	my $done = sub {
+		my ($what, $why, $did) = @_;
+		$why ? warning("#Y{could not %s} %s: %s", $did ? 'close' : 'remove', $what, $why)
+		     : info("  #G{%s} %s", $did // 'removed', $what);
+	};
+
+	if ($o->{pr} && $gh) {
+		my $number = $o->{pr}{number};
+		my (undef, $why) = $gh->comment_on_pr($repo, $number, sprintf(
+			"Closed by `genesis pipeline-apply --cleanup-orphans`: the environment %s ".
+			"has no file on control any more, so nothing will be delivered here.",
+			$o->{env}));
+		$why //= (eval {$gh->update_pr($repo, $number, state => 'closed'); 1} ? undef
+			: (($@ // '') =~ s/\s+\z//r || 'the close failed'));
+		$done->("pull request #$number", $why, 'closed');
+	}
+	for my $set (@{$o->{rulesets}}) {
+		my $why = $set->{why};
+		(undef, $why) = $gh->delete_ruleset($repo, $set->{id}) unless $why;
+		$done->("ruleset $set->{name}", $why);
+	}
+	for my $branch (grep {defined} $o->{pr_branch}, $o->{branch}) {
+		my ($ok, $why) = $git->delete_remote_branch($branch);
+		$done->("branch $branch", $ok ? undef : $why);
+	}
+	for my $path (@{$o->{records}}) {
+		my $ok = eval {$o->{vault}->clear($path); 1};
+		$done->("record $path", $ok ? undef : (($@ // '') =~ s/\s+\z//r || 'the clear failed'));
+	}
+	return;
 }
 
 # }}}

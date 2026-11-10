@@ -51,6 +51,8 @@ Each write is reported as new, changed, or already in place, so a second run cha
 
 `--rotate-webhook-token` replaces the pipeline's webhook token, and the GitHub hook that carries it, in the same run. It applies only where `pipeline.provider.git.webhooks` is on.
 
+`--cleanup-orphans` removes what the pipeline left for each orphaned environment: one whose file has left control while its branch remains. Every apply reports these environments and what each left behind: its branch, its pull request branch and any open pull request, its protection ruleset and its records under the pipeline's vault mount. An environment that is still deployed is named with a warning; restore its file from its branch and run `genesis <env> terminate`, since the cleanup never touches a deployment. With this flag the apply asks before removing anything, unless `--yes` is given: it comments on and closes the open pull request, deletes the ruleset and both branches, and clears the records. A removal that fails, such as a ruleset the token cannot administer, is reported and the rest proceed. With `--dry-run` it says what it would remove.
+
 `--debug-dir` writes intermediate compiler artifacts to a directory for debugging. The artifacts are numbered by compilation stage:
 
 ```

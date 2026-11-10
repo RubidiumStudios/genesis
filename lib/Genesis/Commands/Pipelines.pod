@@ -113,6 +113,15 @@ nor a protection setting, nor a record.
 C<genesis repipe>, the v2 name for this command, is retired (D151) and
 refuses, naming C<pipeline-apply>.
 
+It reports each orphaned environment (D153): one whose file has left
+control while its branch remains. The report lists what the pipeline left
+behind (the branch, its pull request branch and any open pull request,
+the protection ruleset and the pipeline records) and warns when the
+environment is still deployed. Nothing is removed unless
+C<--cleanup-orphans> is given; then, after a confirmation that C<--yes>
+skips, every trace but the deployment itself is removed. A dry run says
+what would be removed.
+
 It refuses before it reads anything else when C<pipeline.enabled> is false
 or absent, because the command applies a configured pipeline and never
 enables one.  That refusal reads C<.genesis/config> alone, so a repository
@@ -1871,6 +1880,120 @@ B<Examples:>
 
   my ($record, $path, $why) = _director_record($top, 'qa');
   # (undef, '/secret/exodus/mgmt/bosh', 'there is no exodus record at ...')
+
+=head2 _apply_orphans
+
+  _apply_orphans($top, $git, gh => $gh, owner_repo => 'owner/repo',
+    dry_run => 0, cleanup => 0, yes => 0, skip_vault => 0);
+
+Reports each orphaned environment, one whose file has left control, with
+what the pipeline left for it, through L</_find_orphans> (D153):
+
+=over 4
+
+=item * its deployment branch;
+
+=item * its pull request branch, and the number of the pull request open from it;
+
+=item * its C<genesis-E<lt>branchE<gt>> ruleset, marked unverified with the reason
+where the listing could not be read;
+
+=item * its pipeline, hold and proposed records.
+
+=back
+
+It warns, naming the exodus record, where the environment is still recorded
+as deployed: removing a file is not a teardown, and C<terminate> needs the
+file, which the branch still holds.
+
+Without C<cleanup> it removes nothing and says so. With it, a dry run says it
+would remove the traces, and a real run asks first unless C<yes>, then hands
+each orphan to L</_cleanup_orphan>. The Concourse jobs need no report, since
+C<set-pipeline> drops whatever the compiled pipeline no longer holds.
+
+B<Parameters:> the repository handle, its git service, and the options
+above. C<gh> and C<owner_repo> are passed only where C<GITHUB_AUTH_TOKEN> is
+set, so without a token the pull request and the rulesets are neither
+reported nor removed.
+
+B<Returns:> nothing.
+
+B<Errors:> those of L</_find_orphans>; a trace that cannot be removed is
+reported, never raised.
+
+B<Examples:>
+
+  _apply_orphans($top, $git, dry_run => 1);
+  # orphan prod: branch prod/bosh, record /secret/exodus/prod/bosh/pipeline
+
+=head2 _find_orphans
+
+  my @orphans = _find_orphans($top, $git, %opts);
+
+Each orphaned environment, with its traces. A remote branch C<E<lt>envE<gt>/E<lt>typeE<gt>>
+of this root's type is an orphan's when its environment has no file on
+control, its name is not the control branch's or a pull request branch's,
+and C<E<lt>envE<gt>.yml> was once on control in this deployment root. That
+last test tells an orphan from a branch of the same type another root of the
+repository keeps. Its pull request branch is counted where the remote holds
+it; the open pull request and the ruleset are asked of GitHub where a client
+is given; and the records, and whether the environment is still deployed,
+are asked of the repository's vault unless C<skip_vault> or the vault is not
+reachable and authenticated.
+
+B<Parameters:> the repository handle, its git service, and C<gh>,
+C<owner_repo> and C<skip_vault>.
+
+B<Returns:> a list of hashes, each with C<env>, C<branch>, C<exodus> (the
+deployment's exodus path), and, where found, C<pr_branch>, C<pr>,
+C<rulesets> (each a C<name> with an C<id> or a C<why>), C<records>,
+C<deployed>, and the C<vault> they were read from.
+
+B<Errors:> bails where the remote's branches cannot be listed, through
+C<Service::Git::remote_heads>.
+
+B<Limits:> an environment whose records live in a vault of its own, named by
+C<genesis.vault>, has them read from the repository's vault, so they are
+neither reported nor removed.
+
+B<Examples:>
+
+  _find_orphans($top, $git);   # ({env => 'prod', branch => 'prod/bosh', ...})
+
+=head2 _cleanup_orphan
+
+  _cleanup_orphan($git, $orphan, gh => $gh, owner_repo => 'owner/repo');
+
+Removes one orphan's traces, in an order that leaves nothing pointing at
+something already gone:
+
+=over 4
+
+=item 1. comments on its open pull request, saying why, and closes it;
+
+=item 2. deletes its rulesets;
+
+=item 3. deletes its pull request branch, then its deployment branch;
+
+=item 4. clears its records.
+
+=back
+
+Each step is reported as done, or as not done with the reason, and the next
+goes on either way. Nothing is done to the BOSH deployment or to its exodus
+record.
+
+B<Parameters:> the git service, one orphan as L</_find_orphans> answers it,
+and C<gh> and C<owner_repo>.
+
+B<Returns:> nothing.
+
+B<Errors:> none; every failure is reported.
+
+B<Examples:>
+
+  _cleanup_orphan($git, $orphan, %opts);
+  # closed pull request #1, removed ruleset genesis-prod/bosh, ...
 
 =head2 _random_token
 
