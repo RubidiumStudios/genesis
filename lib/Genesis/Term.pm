@@ -452,7 +452,14 @@ sub csprintf {
 	if ($@) {
 		require Carp;
 		$Carp::Verbose=1;
-		Carp::confess($@) if ($@ =~ /^(Missing|Redundant) argument|Use of uninitialized value/);
+		if ($@ =~ /^(Missing|Redundant) argument|Use of uninitialized value/) {
+			# A caller's arguments may be secrets, shown only when traced on purpose.
+			# Taken first, since the reads below run evals of their own.
+			my $err = $@;
+			require Genesis;
+			Carp::confess($err) if Genesis::secrets_traced();
+			die $err._frames_without_args();
+		}
 		Carp::cluck(@_) if ($ENV{GENESIS_DEV_MODE} || $ENV{GENESIS_TESTING});
 
 		$s = sprintf($fmt, @args); # run again because the error didn't set it
@@ -469,6 +476,15 @@ sub csprintf {
 	$s =~ s/#([-IUKRGYBMPCW*]{1,4})\{([^{}]*(?:{[^}]+}[^{}]*)*)\}/_colorize($1, $2)/egism;
 	$s =~ s/#E\{([^\}]*)\}/_emojify($1)/egism;
 	return $s;
+}
+
+# _frames_without_args - the calling frames, as confess lists them, less their arguments
+sub _frames_without_args {
+	my ($i, @frames) = (1);
+	while (my @c = caller($i++)) {
+		push @frames, "\t$c[3] called at $c[1] line $c[2]\n";
+	}
+	return join('', @frames);
 }
 
 sub decolorize {

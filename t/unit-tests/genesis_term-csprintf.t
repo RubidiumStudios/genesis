@@ -119,6 +119,32 @@ subtest 'csprintf fatal sprintf warnings become exceptions' => sub {
 	} qr/uninitialized/, 'undef argument throws exception';
 };
 
+# The exception carries the stack, and a caller handed a secret must not
+# print it there unless secrets are traced on purpose.  The suite's
+# Carp::Always die handler is set aside, since production has none.
+subtest "a format error's stack names its callers, never their arguments" => sub {
+	my $secret = 'FAKE-ghp_0123456789abcdefSECRET';
+	my $holder = sub { csprintf('%s %s', 'only-one') };
+	my $caught = sub {
+		local $SIG{__DIE__};
+		eval { (sub { $holder->(@_) })->("token=$secret") };
+		return $@;
+	};
+
+	local $ENV{GENESIS_TRACE_SECRETS};
+	local $ENV{GENESIS_DEV_MODE};
+	my $err = $caught->();
+	like($err, qr/Missing argument/, 'the error is reported');
+	like($err, qr/\bcalled at\b/, 'with the frames that led to it');
+	unlike($err, qr/\Q$secret\E/, 'and none of their arguments');
+
+	$ENV{GENESIS_TRACE_SECRETS} = 1;
+	like($caught->(), qr/\Q$secret\E/, 'GENESIS_TRACE_SECRETS shows the arguments');
+	$ENV{GENESIS_TRACE_SECRETS} = undef;
+	$ENV{GENESIS_DEV_MODE} = 1;
+	like($caught->(), qr/\Q$secret\E/, 'and GENESIS_DEV_MODE, its superset, does too');
+};
+
 subtest 'csprintf multiple markup types in one string' => sub {
 	local $ENV{NOCOLOR} = 1;
 	local $ENV{GENESIS_NO_UTF8};

@@ -267,7 +267,11 @@ standard variant. C<I> and C<U> add italic and underline formatting respectively
 C<*> cycles through rainbow colors.
 
 Fatal sprintf warnings (missing or redundant arguments, uninitialized values) are
-propagated as exceptions via C<confess> from the C<Carp> module. Non-fatal sprintf
+propagated as exceptions carrying the calling frames. The frames name each sub,
+file and line but not its arguments, which may be secrets, through
+L</_frames_without_args>. Only where C<Genesis::secrets_traced> answers yes
+(C<GENESIS_TRACE_SECRETS> or C<GENESIS_DEV_MODE>) is the exception C<confess>'s,
+arguments and all. Non-fatal sprintf
 warnings are logged via C<Genesis::Log> (subject to configured log level), with
 additional stack traces via C<Carp::cluck> only in dev or testing mode.
 
@@ -1659,6 +1663,30 @@ B<Examples:>
 
   my $unknown = _emojify('nonexistent');
   # Returns: ''
+
+=head2 _frames_without_args
+
+  die $err._frames_without_args();
+
+The calling frames as C<Carp::confess> lists them, one tab-indented
+C<E<lt>subE<gt> called at E<lt>fileE<gt> line E<lt>NE<gt>> line each, but without the
+arguments, which may be secrets. L</csprintf> appends it to a fatal format
+error unless C<Genesis::secrets_traced> answers yes. It uses only core
+C<caller>, so it needs no CPAN module.
+
+B<Parameters:> none.
+
+B<Returns:>
+
+The frames as one string, empty where there is no caller.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  die "Missing argument in sprintf\n"._frames_without_args();
+  # Missing argument in sprintf
+  #     main::write_secret called at bin/genesis line 12
 
 =head2 _align
 
