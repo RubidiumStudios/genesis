@@ -1568,6 +1568,29 @@ sub branch_name_collisions {
 }
 
 # }}}
+# remote_heads - every branch the remote holds (D153) {{{
+sub remote_heads {
+	my ($self, $remote) = @_;
+	$remote = $self->_remote_for($remote, 'remote_heads');
+	my ($out, $rc, $err) = run({dir => $self->{root}, passfail => 0},
+		'git', 'ls-remote', '--heads', $remote);
+	bail("ls-remote against #C{%s} failed: %s",
+		$remote, ($err || $out || "rc=$rc") =~ s/\s+$//r) if $rc;
+	return sort map {m{\srefs/heads/(\S+)\s*$} ? $1 : ()} split /\n/, ($out // '');
+}
+
+# }}}
+# delete_remote_branch - remove a branch from the remote, or say why not (D153) {{{
+sub delete_remote_branch {
+	my ($self, $branch, $remote) = @_;
+	$remote = $self->_remote_for($remote, 'delete_remote_branch');
+	my %env = in_controlling_terminal() ? () : (GIT_TERMINAL_PROMPT => '0');
+	my ($out, $rc, $err) = run({dir => $self->{root}, passfail => 0, (%env ? (env => \%env) : ())},
+		'git', 'push', '-q', $remote, '--delete', "refs/heads/$branch");
+	return $rc ? (0, ($err || $out || "rc=$rc") =~ s/\s+$//r) : (1);
+}
+
+# }}}
 # remote_branch_exists - check whether a branch exists on the remote {{{
 #
 # The remote is asked for the fully qualified ref, and the answer is then

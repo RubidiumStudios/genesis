@@ -199,6 +199,19 @@ if ($kind eq 'other') {
 		$status = 201;
 		$answer = {number => $number, html_url => $html_url};
 	}
+} elsif ($url =~ m{/repos/[^/]+/[^/]+/issues/(\d+)/comments$} && $method eq 'POST') {
+	# A comment on a pull request's conversation, kept by number so a row can
+	# read back what was said (D153).
+	my $number = $1;
+	my $sent = {};
+	eval {$sent = $json->decode($body // '{}'); 1} or $sent = {};
+	push @{$state->{comments}{$number}}, $sent->{body};
+	seek($state_fh, 0, 0);
+	truncate($state_fh, 0);
+	print $state_fh $json->encode($state);
+	close $state_fh;
+	$status = 201;
+	$answer = {id => scalar @{$state->{comments}{$number}}};
 } elsif ($url =~ m{/repos/[^/]+/[^/]+/hooks(?:/(\d+))?$}) {
 	# A repository's webhooks (D145), a setting like the rulesets, so a token
 	# that may not administer the repository is refused here too.  GitHub
@@ -272,6 +285,15 @@ if ($kind eq 'other') {
 			$status = 404;
 			$answer = {message => 'Not Found'};
 		}
+	} elsif ($method eq 'DELETE' && defined $id) {
+		# Removing one, as the orphan cleanup does (D153).
+		$state->{rulesets} = [grep {$_->{id} != $id} @{$state->{rulesets} || []}];
+		seek($state_fh, 0, 0);
+		truncate($state_fh, 0);
+		print $state_fh $json->encode($state);
+		close $state_fh;
+		$status = 204;
+		$answer = {};
 	} elsif ($method eq 'GET' || $method eq 'HEAD') {
 		# The listing is summaries, as GitHub's is: no rules and no
 		# conditions, which only the single ruleset carries.

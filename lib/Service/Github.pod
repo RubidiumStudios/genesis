@@ -1766,6 +1766,65 @@ B<Examples:>
 
   $gh->delete_hook('owner/repo', 7);   # (204, undef)
 
+=head2 ruleset_named
+
+  my ($set, $why) = $gh->ruleset_named($owner_repo, $name);
+
+One ruleset by its name, from the listing, for C<pipeline-apply>'s orphan
+report (D153). Unlike L</list_rulesets>, which answers an empty list for a
+listing it could not read, this one keeps the reason, so a token without the
+repository's administration is told apart from a repository with no such
+ruleset.
+
+B<Parameters:> the repository and the ruleset's name.
+
+B<Returns:> the ruleset's summary (with its C<id>) and undef; undef and undef
+where none has that name; or undef and the reason the listing failed.
+
+B<Errors:> bails without a repository.
+
+B<Examples:>
+
+  $gh->ruleset_named('owner/repo', 'genesis-prod/bosh');   # ({id => 3, ...}, undef)
+
+=head2 delete_ruleset
+
+  my ($code, $why) = $gh->delete_ruleset($owner_repo, $id);
+
+Removes one ruleset, which C<pipeline-apply --cleanup-orphans> does for an
+orphaned environment's C<genesis-E<lt>branchE<gt>> (D153). A token without the
+repository's administration answers 403, which is handed back as the reason.
+
+B<Parameters:> the repository and the ruleset's id.
+
+B<Returns:> the status, and the reason where it failed.
+
+B<Errors:> bails without a repository or an id.
+
+B<Examples:>
+
+  $gh->delete_ruleset('owner/repo', 3);   # (204, undef)
+
+=head2 comment_on_pr
+
+  my ($code, $why) = $gh->comment_on_pr($owner_repo, $number, $text);
+
+Adds a comment to a pull request's conversation, which GitHub keeps as the
+conversation of the issue of the same number. C<pipeline-apply
+--cleanup-orphans> says why it closes an orphan's pull request this way
+(D153).
+
+B<Parameters:> the repository, the pull request's number, and the text.
+
+B<Returns:> the status, and the reason where it failed.
+
+B<Errors:> bails without a repository or a number.
+
+B<Examples:>
+
+  $gh->comment_on_pr('owner/repo', 4, 'Closed: prod was removed from control.');
+  # (201, undef)
+
 =head1 INTERNAL METHODS
 
 =head2 _api

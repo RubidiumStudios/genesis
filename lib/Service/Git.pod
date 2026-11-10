@@ -2379,6 +2379,47 @@ B<Examples:>
   my @hits = $git->branch_name_collisions('qa/bosh', remote => 1);
   # ({name => 'qa', here => 1, remote => 'origin'})
 
+=head2 remote_heads
+
+  my @branches = $git->remote_heads;
+  my @branches = $git->remote_heads('origin');
+
+Every branch the remote holds, by name, from one C<ls-remote --heads>.
+C<pipeline-apply> reads it to find an orphaned environment's branches (D153).
+
+B<Parameters:> the remote by name, optional, defaulting to
+L</pipeline_remote>.
+
+B<Returns:> the branch names, sorted.
+
+B<Errors:> bails where C<ls-remote> fails, naming the remote, rather than
+answering an empty list a caller would read as a remote with no branches.
+
+B<Examples:>
+
+  $git->remote_heads;   # ('control', 'prod/bosh', 'qa/bosh')
+
+=head2 delete_remote_branch
+
+  my ($ok, $why) = $git->delete_remote_branch($branch);
+  my ($ok, $why) = $git->delete_remote_branch($branch, 'origin');
+
+Removes a branch from the remote, with C<git push --delete>, for
+C<pipeline-apply --cleanup-orphans> (D153). Outside a terminal, git is told
+not to prompt for credentials.
+
+B<Parameters:> the branch, and the remote by name, optional, defaulting to
+L</pipeline_remote>.
+
+B<Returns:> 1, or 0 and what git said.
+
+B<Errors:> none of its own; a refused push is answered, not raised, so the
+caller can report it and go on.
+
+B<Examples:>
+
+  $git->delete_remote_branch('prod/bosh');   # (1)
+
 =head2 remote_branch_exists
 
   my $bool = $git->remote_branch_exists($branch, $remote);

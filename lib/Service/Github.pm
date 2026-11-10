@@ -983,6 +983,47 @@ sub delete_hook {
 }
 
 # }}}
+# ruleset_named - one ruleset by its name, or why it could not be read (D153) {{{
+sub ruleset_named {
+	my ($self, $owner_repo, $name) = @_;
+	bail("Missing owner/repo for ruleset_named") unless $owner_repo;
+	my ($code, $msg, $data) = $self->_api(
+		"GET", $self->rulesets_url($owner_repo), undef, undef, 0, $self->{creds}
+	);
+	return (undef, _failure($code, $msg, $data)) unless $code == 200;
+	my $sets = eval {load_json($data)};
+	my ($set) = grep {($_->{name} // '') eq $name} ref($sets) eq 'ARRAY' ? @$sets : ();
+	return ($set, undef);
+}
+
+# }}}
+# delete_ruleset - remove one ruleset (D153) {{{
+sub delete_ruleset {
+	my ($self, $owner_repo, $id) = @_;
+	bail("Missing owner/repo for delete_ruleset") unless $owner_repo;
+	bail("Missing id for delete_ruleset")         unless defined $id;
+	my ($code, $msg, $data) = $self->_api(
+		"DELETE", $self->rulesets_url($owner_repo, $id), undef, undef, 0, $self->{creds}
+	);
+	return ($code, ($code == 204 || $code == 200) ? undef : _failure($code, $msg, $data));
+}
+
+# }}}
+# comment_on_pr - add a comment to a pull request's conversation (D153) {{{
+sub comment_on_pr {
+	my ($self, $owner_repo, $number, $text) = @_;
+	bail("Missing owner/repo for comment_on_pr") unless $owner_repo;
+	bail("Missing number for comment_on_pr")     unless defined $number;
+	# A pull request's conversation is its issue's.
+	my ($code, $msg, $data) = $self->_api(
+		"POST", sprintf("%s/repos/%s/issues/%d/comments", $self->base_url, $owner_repo, $number),
+		{'Content-Type' => 'application/json'}, JSON::PP->new->encode({body => $text}),
+		0, $self->{creds}
+	);
+	return ($code, $code == 201 ? undef : _failure($code, $msg, $data));
+}
+
+# }}}
 # _failure - a refused call in GitHub's own words, from its body {{{
 #
 # The status line carries no words over HTTP/2, so the body's message, and
