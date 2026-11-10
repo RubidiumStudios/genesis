@@ -1902,6 +1902,9 @@ where the listing could not be read;
 
 =back
 
+A dry run without a remote (D118) reports none, having no remote branches
+to find them by.
+
 It warns, naming the exodus record, where the environment is still recorded
 as deployed: removing a file is not a teardown, and C<terminate> needs the
 file, which the branch still holds.

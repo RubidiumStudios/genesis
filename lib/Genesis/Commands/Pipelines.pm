@@ -1681,6 +1681,8 @@ sub _director_record {
 # _apply_orphans - environments whose files left control, reported, and cleaned up on request (D153) {{{
 sub _apply_orphans {
 	my ($top, $git, %opts) = @_;
+	# A dry run without a remote (D118) has no branches to find orphans by.
+	return if $opts{dry_run} && defined $top->source_control_problem;
 	my @orphans = _find_orphans($top, $git, %opts) or return;
 
 	info("\n#Y{Orphaned environments}, whose files have left control, and what the pipeline made for them");
