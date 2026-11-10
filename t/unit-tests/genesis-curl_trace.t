@@ -58,6 +58,14 @@ subtest 'GENESIS_TRACE_SECRETS traces them on purpose, and says so' => sub {
 	like($trace, qr/GENESIS_TRACE_SECRETS.*secrets/is, 'with a warning that secrets are being traced');
 };
 
+subtest 'GENESIS_DEV_MODE, a superset of GENESIS_TRACE_SECRETS, traces them too' => sub {
+	local $ENV{GENESIS_TRACE_SECRETS};
+	local $ENV{GENESIS_DEV_MODE} = 1;
+	my ($code, $trace) = traced('POST', 'https://api.example.test/repos/o/r/hooks', {},
+		undef, 0, "Bearer $SECRET_TOKEN");
+	like($trace, qr/\Q$SECRET_TOKEN\E/, 'the token is traced');
+};
+
 subtest 'user and password credentials are kept out of the trace' => sub {
 	my ($code, $trace, $sent) = traced('GET', 'https://api.example.test/user', {},
 		undef, 0, "someone:$SECRET_PASS");

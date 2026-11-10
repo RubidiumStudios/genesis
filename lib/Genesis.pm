@@ -851,8 +851,10 @@ sub read_json_from {
 # to the trace.
 my $secrets_trace_warned;
 sub secrets_traced {
-	return 0 unless envset('GENESIS_TRACE_SECRETS');
-	warning("#Y{GENESIS_TRACE_SECRETS} is set: secrets are being written to the trace log in the clear")
+	# Development mode is a superset of tracing secrets.
+	my ($why) = grep {envset($_)} qw/GENESIS_TRACE_SECRETS GENESIS_DEV_MODE/;
+	return 0 unless $why;
+	warning("#Y{$why} is set: secrets are being written to the trace log and stack traces in the clear")
 		unless $secrets_trace_warned++;
 	return 1;
 }
