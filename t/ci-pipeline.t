@@ -49,64 +49,9 @@ YAML
 	is_deeply $parsed->{pipeline}, {}, "pipeline is empty hash when no pipeline.yml";
 };
 
-subtest 'ASTBuilder - multi-file without workflows falls back to env-file topology' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
-
-	_write("$tmp/sandbox.yml", <<'YAML');
----
-genesis:
-  env: sandbox
-  pipeline:
-    prior_env:
-YAML
-	_write("$tmp/preprod.yml", <<'YAML');
----
-genesis:
-  env: preprod
-  pipeline:
-    prior_env: sandbox
-YAML
-	_write("$tmp/prod.yml", <<'YAML');
----
-genesis:
-  env: prod
-  pipeline:
-    prior_env: preprod
-    require_pr: true
-YAML
-
-	my $builder = Genesis::CI::Compiler::ASTBuilder->new(env_dir => $tmp);
-	my $parsed = {
-		_source_format => 'multi-file',
-		env_dir        => $tmp,
-		pipeline       => {},   # no pipeline.yml content
-		targets        => {},
-		integrations   => {},
-		scripts        => {},
-		provider_config => {},
-	};
-
-	my $ast = $builder->build($parsed, {});
-	isa_ok $ast, 'Genesis::CI::Compiler::AST', "AST built from env-file topology in multi-file format";
-
-	my @wf_names = $ast->workflow_names;
-	ok @wf_names, "at least one workflow present";
-
-	my $wf = $ast->workflows->{default};
-	ok $wf, "default workflow created";
-
-	my $nodes = $wf->{graph}{nodes};
-	ok exists $nodes->{sandbox}, "sandbox node present";
-	ok exists $nodes->{preprod}, "preprod node present";
-	ok exists $nodes->{prod},    "prod node present";
-
-	my @edges = @{$wf->{graph}{edges} || []};
-	my %edge_map = map { my $e = $_; "$e->{from}->$e->{to}" => 1 } @edges;
-	ok $edge_map{'sandbox->preprod'}, "sandbox -> preprod edge exists";
-	ok $edge_map{'preprod->prod'},    "preprod -> prod edge exists";
-
-	is $nodes->{prod}{require_pr}, 1, "prod require_pr flag set from env file";
-};
+# The multi-file layout's ASTBuilder row went with that layout: the builder
+# now resolves each environment through Genesis::Top, which the contract
+# tests and genesis_top-pipeline_env_keys.t exercise for real.
 
 subtest 'Compiler - env-files format round-trip via env_dir option' => sub {
 	my $tmp = tempdir(CLEANUP => 1);
@@ -170,39 +115,9 @@ subtest 'Commands::Pipelines module loads correctly' => sub {
 	# graph and describe are retired stubs in bin/genesis (D151), with no sub.
 };
 
-subtest 'Commands::Pipelines - _compile_pipeline helper: detects multi-file config' => sub {
-	my $tmp = tempdir(CLEANUP => 1);
-	mkpath("$tmp/.genesis/ci");
-
-	_write("$tmp/.genesis/ci/pipeline.yml", <<'YAML');
-metadata:
-  name: test-pipe
-  version: '1.0'
-branches:
-  live: main
-  target_prefix: 'target/'
-workflows: {}
-YAML
-	_write("$tmp/.genesis/ci/targets.yml",     "targets: {}\n");
-	_write("$tmp/.genesis/ci/integrations.yml", "{}\n");
-
-	my $orig = POSIX::getcwd();
-	chdir($tmp) or skip("Cannot chdir: $!", 1);
-
-	my $top = bless({}, 'Genesis::Top');  # stub
-	my $result = eval {
-		Genesis::Commands::Pipelines::_compile_pipeline($top, 'concourse')
-	};
-	# This will bail due to no vault/spruce in test environment, but we just
-	# check the compiler path was resolved correctly
-	my $err = $@;
-	# Accept any compilation/validation failure — we just want to confirm the
-	# compiler resolved the multi-file config path, not that it fully succeeded
-	ok !$err || $err =~ /spruce|evaluate|vault|provider|invalid|configuration/i,
-		"compiler resolves multi-file config path correctly";
-
-	chdir($orig);
-};
+# The removed .genesis/ci/ layout's _compile_pipeline row went with that
+# layout; it compiled a stub Top and passed on any error whose text named a
+# vault or a configuration, which proved nothing about the path.
 
 subtest 'Commands::Pipelines - _job_status_label returns expected labels' => sub {
 	is Genesis::Commands::Pipelines::_job_status_label({ paused => 1 }),

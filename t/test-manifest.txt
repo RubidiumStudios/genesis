@@ -179,8 +179,7 @@ unit-tests/genesis_ci_pipeline_descriptor-bosh-configs.t  # a director's config 
 unit-tests/genesis_ci_pipeline_descriptor-deploy_task.t   # plain-CLI deploy task + env branch
 unit-tests/genesis_ci_pipeline_descriptor-notifications.t # notifications descriptor
 unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library descriptor
-# Failing - feature implementation incomplete; re-enable once green
-#ci-pipeline.t                                           # an ASTBuilder row over the multi-file topology answers undef, and the rest of the file is green
+ci-pipeline.t                                            # the parser's env-file topology, the env_dir round trip, and the pipeline command helpers
 
 # CI propagation tests
 unit-tests/genesis_ci_marker-build.t                 # the one marker builder
