@@ -112,44 +112,18 @@ no such key (T387).
 
 =head2 Redeploy lane (C<genesis.pipeline.redeploy>)
 
-A separate C<redeploy-E<lt>envE<gt>> job redeploys without change detection or
-cache promotion.  Three trigger modes:
+A separate C<redeploy-E<lt>envE<gt>> job runs C<genesis E<lt>envE<gt> deploy
+--redeploy> against what the environment last deployed, where
+C<pipeline.redeploy.enabled> is true (the default; D136).  It triggers on a
+request on its C<redeploy_E<lt>env>-E<lt>typeE<gt>> shuttle queue, handed back in
+its outcome hooks, or on its button; C<genesis.pipeline.redeploy_cron> is
+accepted but emits no schedule yet (D127, D128).
 
-B<manual>. The operator triggers via Concourse UI or C<fly trigger-job>.
-
-B<cron>. A C<time> resource triggers within a daily window
-(C<redeploy_cron_start> / C<redeploy_cron_stop>, default 04:00 to 05:00 UTC).
-
-B<signal>. It triggers off the environment's C<E<lt>envE<gt>-signal> resource
-(version C<{status: success}>).  Requires C<status_signal> to be configured.
-
-=head2 Deployment status signals (C<configuration.status_signal>)
-
-Every deploy and redeploy job emits C<on_success>, C<on_failure>, C<on_abort>,
-and C<on_error> put steps to a per-environment C<E<lt>envE<gt>-signal> resource
-backed by C<cfcommunity/shuttle-resource>.  Supported backends: C<file>, C<s3>,
-C<gcs>.
-
-  configuration:
-    status_signal:
-      backend: s3
-      bucket:  my-genesis-signals
-      region:  us-east-1
-      access_key_id:     ((aws-access-key))
-      secret_access_key: ((aws-secret-key))
-
-Per-env backend or prefix override in the env YAML:
-
-  genesis:
-    pipeline:
-      status_signal: gcs
-      signal_prefix: my-pipeline/prod
-
-Disable for a specific env:
-
-  genesis:
-    pipeline:
-      status_signal: false
+FWT-948's per-outcome status signals (C<configuration.status_signal>, and the
+environment's C<status_signal> and C<signal_prefix>) are retired by D23: the
+shuttle's C<_deployed> and C<_redeployed> events replace them, and the
+environment keys are refused at load.  Events for non-success outcomes are
+post-MVP Q61.
 
 =head2 Task library (C<configuration.task_library>)
 

@@ -111,14 +111,6 @@ sub describe {
 				}
 			}
 
-			# Signal resource
-			my $signal_cfg = $self->_env_signal_config($ast, $env, $wf_data);
-			if ($signal_cfg) {
-				push @resources, $self->_signal_resource(
-					$ast, $env, $alias, $signal_cfg
-				);
-			}
-
 			my $notif_style_env = $self->notification_style($ast);
 			unless ($is_auto || $notif_style_env eq 'minimal' || $notif_style_env eq 'none') {
 				my $nj = $self->_notify_job(
@@ -373,8 +365,6 @@ sub description {
 		push @lines, sprintf("Workflow: %s",
 			$wf_name eq 'default' ? $name : $wf_name);
 
-		my $signal_global = ($ast->configuration || {})->{status_signal};
-
 		for my $env (@order) {
 			my $alias     = $wf_data->{aliases}{$env} || $env;
 			my $is_auto   = $wf_data->{auto}{$env};
@@ -384,18 +374,10 @@ sub description {
 			my $mode   = $is_auto ? 'auto' : 'manual';
 			my $source = $trigger_a ? " (triggered by $trigger_a)" : '';
 
-			# Annotations: REDEPLOY, SIGNAL
+			# Annotations: REDEPLOY
 			my @annot;
 			my $redeploy_mode = $wf_data->{redeploy}{$env} || '';
 			push @annot, 'REDEPLOY:' . uc($redeploy_mode) if $redeploy_mode;
-			if ($signal_global) {
-				my $ss = $wf_data->{status_signal}{$env} // '';
-				unless ($ss =~ /^(false|no|0)$/i) {
-					my $backend = ($ss =~ /^(file|s3|gcs)$/) ? $ss
-						: ($signal_global->{backend} || 'file');
-					push @annot, "SIGNAL:$backend";
-				}
-			}
 			my $annot_str = @annot ? '  [' . join(', ', @annot) . ']' : '';
 
 			push @lines, sprintf("  %-20s deploy-%s  [%s]%s%s",
@@ -451,15 +433,6 @@ sub _resource_types {
 			type   => 'registry-image',
 			source => $self->_image_source($ast, $shuttle->{image}, 'klaue/shuttle-resource',
 				$shuttle->{image_tag} || 'latest'),
-		};
-	} elsif (my $signal = $config->{status_signal}) {
-		my $img = ref $signal eq 'HASH' ? $signal->{image} : undef;
-		my $tag = (ref $signal eq 'HASH' ? $signal->{image_tag} : undef)
-			|| 'latest';
-		push @types, {
-			name   => 'shuttle',
-			type   => 'registry-image',
-			source => $self->_image_source($ast, $img, 'cfcommunity/shuttle-resource', $tag),
 		};
 	}
 
@@ -1273,85 +1246,10 @@ sub _redeploy_job {
 }
 
 # }}}
-# _env_signal_config - resolve effective signal config for an env {{{
-#
-# Returns a hashref with the merged global+per-env signal config, or undef
-# if signals are not configured or explicitly disabled for this env.
-sub _env_signal_config {
-	my ($self, $ast, $env, $wf_data) = @_;
-
-	my $global = ($ast->configuration || {})->{status_signal};
-	return undef unless $global && ref($global) eq 'HASH';
-
-	my $env_setting = $wf_data->{status_signal}{$env} // '';
-
-	# Explicitly disabled for this env
-	return undef if $env_setting =~ /^(false|no|0)$/i;
-
-	# Effective backend: per-env backend override or global
-	my $backend = $global->{backend} || 'file';
-	$backend = $env_setting if $env_setting =~ /^(file|s3|gcs)$/;
-
-	# Effective prefix: per-env override, or global-base/env, or just env name
-	my $env_prefix    = $wf_data->{signal_prefix}{$env} || '';
-	my $global_prefix = $global->{prefix} || '';
-	my $prefix = $env_prefix
-		|| ($global_prefix ? "$global_prefix/$env" : $env);
-
-	return { %$global, backend => $backend, prefix => $prefix };
-}
-
-# }}}
-# _signal_resource - build per-env signal (shuttle) resource {{{
-sub _signal_resource {
-	my ($self, $ast, $env, $alias, $signal_cfg) = @_;
-
-	my $backend = $signal_cfg->{backend} || 'file';
-	my $prefix  = $signal_cfg->{prefix}  || $env;
-
-	my %source = (backend => $backend, prefix => $prefix);
-
-	if ($backend eq 's3') {
-		$source{bucket}            = $signal_cfg->{bucket} || 'genesis-signals';
-		$source{region}            = $signal_cfg->{region} || 'us-east-1';
-		$source{access_key_id}     = _unwrap_ref($signal_cfg->{access_key_id});
-		$source{secret_access_key} = _unwrap_ref($signal_cfg->{secret_access_key});
-		$source{endpoint}          = $signal_cfg->{endpoint}
-			if $signal_cfg->{endpoint};
-	} elsif ($backend eq 'gcs') {
-		$source{bucket}   = $signal_cfg->{bucket} || 'genesis-signals';
-		$source{json_key} = _unwrap_ref($signal_cfg->{json_key});
-	} elsif ($backend eq 'file') {
-		my $base = $signal_cfg->{path} || '/tmp/genesis-signals';
-		$source{path} = "$base/$prefix";
-	}
-
-	return {
-		name   => "$alias-signal",
-		type   => 'shuttle',
-		icon   => 'broadcast',
-		source => \%source,
-	};
-}
-
-# }}}
-# _signal_put_step - build a put step to emit a deployment status signal {{{
-sub _signal_put_step {
-	my ($self, $alias, $status, $env, $deploy_type) = @_;
-	return {
-		put    => "$alias-signal",
-		params => {
-			status     => $status,
-			deployment => "$env-$deploy_type",
-		},
-	};
-}
-
-# }}}
 # _outcome_hooks - build on_success/on_failure/on_abort/on_error plan hooks {{{
 #
-# Combines notification steps (success/failure) with signal put steps (all four
-# outcomes).  Returns a hash with only the keys that have actual content.
+# Each outcome's notification, and on success the deployment's event.
+# Returns a hash with only the keys that have actual content.
 sub _outcome_hooks {
 	my ($self, $ast, $env, $alias, $deploy_type, $wf_data, $is_redeploy) = @_;
 
@@ -1368,7 +1266,6 @@ sub _outcome_hooks {
 		abort   => ["$name: Concourse $action $env-$deploy_type was aborted$link", 0],
 	);
 
-	my $signal_cfg  = $self->_env_signal_config($ast, $env, $wf_data);
 	my $notif_style = $self->notification_style($ast);
 
 	my %hooks;
@@ -1390,11 +1287,6 @@ sub _outcome_hooks {
 		if ($outcome eq 'success' && $dn && $ast->integrations->{shuttle}) {
 			my $event = $is_redeploy ? "${dn}_redeployed" : "${dn}_deployed";
 			push @steps, { put => $event, get_params => { skip => JSON::PP::true } };
-		}
-
-		# Signal: all four outcomes
-		if ($signal_cfg) {
-			push @steps, $self->_signal_put_step($alias, $outcome, $env, $deploy_type);
 		}
 
 		next unless @steps;
@@ -1921,7 +1813,6 @@ sub _extract_workflow_data {
 	my (%will_trigger, %triggers, %auto, %aliases, %genesis_envs, %branches,
 	    %deployment_name, %director_pool,
 	    %redeploy, %redeploy_cron_start, %redeploy_cron_stop,
-	    %status_signal, %signal_prefix,
 	    %bosh_parent, %bosh_upgrade_lock, %is_bosh_director,
 	    %track_bosh_configs, %worker_tags, %bosh_env);
 
@@ -1940,8 +1831,6 @@ sub _extract_workflow_data {
 		$redeploy{$n}          = $nd->{redeploy}            || '';
 		$redeploy_cron_start{$n} = $nd->{redeploy_cron_start} || '';
 		$redeploy_cron_stop{$n}  = $nd->{redeploy_cron_stop}  || '';
-		$status_signal{$n}       = $nd->{status_signal}       // '';
-		$signal_prefix{$n}       = $nd->{signal_prefix}       || '';
 		$bosh_parent{$n}         = $nd->{bosh_parent}         || '';
 		$bosh_upgrade_lock{$n}   = $nd->{bosh_upgrade_lock}   // 1;
 		$track_bosh_configs{$n}  = $nd->{track_bosh_configs}
@@ -1981,8 +1870,6 @@ sub _extract_workflow_data {
 		redeploy            => \%redeploy,
 		redeploy_cron_start => \%redeploy_cron_start,
 		redeploy_cron_stop  => \%redeploy_cron_stop,
-		status_signal       => \%status_signal,
-		signal_prefix       => \%signal_prefix,
 		bosh_parent         => \%bosh_parent,
 		bosh_upgrade_lock   => \%bosh_upgrade_lock,
 		is_bosh_director    => \%is_bosh_director,

@@ -58,46 +58,32 @@ The redeploy lane lets you force-redeploy an environment without any content cha
 
 ### Configuration
 
-In the environment's YAML file under `genesis.pipeline`:
+Every environment gets a `redeploy-<env>` job, unless `.genesis/config` turns them off:
 
 ```yaml
-genesis:
-  pipeline:
-    redeploy: manual          # or: cron, signal
-    redeploy_cron_start: "04:00"   # only required for cron mode
-    redeploy_cron_stop:  "05:00"   # only required for cron mode
+pipeline:
+  redeploy:
+    enabled: true     # the default; false emits no redeploy jobs
+    style:   inline   # beside each deploy, or grouped in one redeploys group
 ```
 
-### Trigger Modes
+The v2 environment keys `redeploy`, `redeploy_cron_start` and `redeploy_cron_stop` are retired and refused at load. So are the `signal` mode and FWT-948's `status_signal` and `signal_prefix`; the shuttle's events replaced them.
 
-**`manual`** — A `redeploy-<env>` Concourse job is created with no auto-trigger. An operator triggers it via the UI or `fly trigger-job`.
+### What Triggers It
 
-**`signal`** — Identical to `manual` in pipeline terms; the naming convention communicates that the trigger is expected from an external automated system rather than a human.
-
-**`cron`** — A Concourse `time` resource is created for the environment and wired as the job trigger. The job runs automatically whenever Concourse observes the time window.
-
-```yaml
-# Daily redeploy between 04:00–05:00 UTC
-genesis:
-  pipeline:
-    redeploy: cron
-    redeploy_cron_start: "04:00"
-    redeploy_cron_stop:  "05:00"
-```
-
-When no `redeploy_cron_start` / `redeploy_cron_stop` are specified, they default to `04:00` and `05:00` UTC.
+- **Its button**, in the Concourse UI or by `fly trigger-job`.
+- **A request on its queue**, `redeploy_<env>-<type>` on the shuttle, which another pipeline or tool writes to. The job hands each request back in its outcome hooks.
+- **A schedule:** `genesis.pipeline.redeploy_cron` (crontab strings, in UTC) is accepted, but no schedule is emitted yet.
 
 ### What the Redeploy Job Does
 
-- Acquires the same dual locks as a normal deploy (`<env>-bosh-lock` and `<env>-deployment-lock`), ensuring it coordinates with in-flight normal deploys.
-- Gets the current env branch and git resource (no trigger, no change detection).
-- Runs `ci-pipeline-deploy` with `PREVIOUS_ENV=~` (no cache, no propagation from upstream).
-- Does **not** generate or push a cache after deploying — only normal deploys advance the cache.
-- Does **not** trigger downstream environments.
+- Holds the same locks as a deploy: its own deployment's, and its director's.
+- Runs `genesis <env> deploy --redeploy` against the commit the environment last deployed, recorded in exodus, never the branch tip.
+- Writes the `<env>-<type>_redeployed` event on success. Propagation never reads it, so a redeploy delivers nothing to the environments after it.
 
 ### Pipeline Groups
 
-Any pipeline that has at least one env with `redeploy` configured will emit a `redeploy` group in Concourse, separate from the main workflow group. This keeps the redeploy jobs visible but out of the main deployment flow.
+Under `style: inline` each redeploy job sits beside its deploy. Under `style: grouped` they are all listed in one `redeploys` group, after the deployments' groups and before `propagation`.
 
 ### Mermaid Diagram Annotation
 

@@ -191,8 +191,6 @@ sub _build_legacy_workflows {
 				$nodes{$env}{redeploy}            = $ef->{redeploy};
 				$nodes{$env}{redeploy_cron_start} = $ef->{redeploy_cron_start};
 				$nodes{$env}{redeploy_cron_stop}  = $ef->{redeploy_cron_stop};
-				$nodes{$env}{status_signal}       = $ef->{status_signal};
-				$nodes{$env}{signal_prefix}       = $ef->{signal_prefix};
 				# bosh_parent only valid if the director is also in this pipeline
 				my $bp    = $ef->{bosh_parent} // '';
 				$nodes{$env}{bosh_parent}       = (exists $nodes{$bp}) ? $bp : '';
@@ -453,14 +451,8 @@ sub build_from_env_files {
 	for my $env (sort keys %envs_to_include) {
 		my $data = $pipeline_data{$env} || {};
 		my $rd = $data->{redeploy} || '';
-		if ($rd && $rd !~ /^(manual|cron|signal)$/) {
+		if ($rd && $rd !~ /^(manual|cron)$/) {
 			$rd = _truthy($rd) ? 'manual' : '';
-		}
-		my $ss = $data->{status_signal} || '';
-		if ($ss && $ss !~ /^(false|no|0|file|s3|gcs)$/i && _truthy($ss)) {
-			$ss = '1';  # truthy shorthand → "enabled, use global config"
-		} elsif ($ss && $ss =~ /^(false|no|0)$/i) {
-			$ss = '0';  # normalized disabled
 		}
 		$nodes{$env} = {
 			stage_name          => $env,
@@ -475,8 +467,6 @@ sub build_from_env_files {
 			redeploy            => $rd,
 			redeploy_cron_start => $data->{redeploy_cron_start} || '',
 			redeploy_cron_stop  => $data->{redeploy_cron_stop}  || '',
-			status_signal       => $ss,
-			signal_prefix       => $data->{signal_prefix} || '',
 			bosh_parent         => '',  # resolved in second pass below
 			bosh_upgrade_lock   => 1,   # default: enabled
 			track_bosh_configs  => $data->{track_bosh_configs},
