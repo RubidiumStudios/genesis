@@ -90,6 +90,8 @@ subtest 'a dry run reports the same and removes nothing' => sub {
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '--dry-run');
 	is($exit, 0, 'the dry run succeeds') or return diag("$out\n$err");
 	like("$out\n$err", qr/orphan\w*\b.*\bprod\b/i, 'naming prod as an orphan');
+	like($err, qr/already recorded qa\b/, 'applying the pipeline');
+	unlike($err, qr/\b(?:standing|protect\w*|record\w*|create)\s+prod\b/, 'without the orphan in it');
 	ok(on_remote($h, $h->slug('prod')), 'leaving its branch');
 };
 
@@ -120,7 +122,7 @@ subtest '--cleanup-orphans asks first, and a dry run removes nothing' => sub {
 	ok(on_remote($h, $h->slug('prod')), 'declining removes nothing');
 
 	($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '--dry-run', '--cleanup-orphans');
-	is($exit, 0, 'the dry run succeeds') or return diag("$out\n$err");
+	is($exit, 0, 'the dry run succeeds'); diag $err;
 	like("$out\n$err", qr/would remove/i, 'saying what it would remove');
 	ok(on_remote($h, $h->slug('prod')), 'and removing nothing');
 };
