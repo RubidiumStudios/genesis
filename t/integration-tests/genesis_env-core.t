@@ -11,6 +11,7 @@ use Test::Deep;
 use Test::More;
 use Test::Output;
 use Test::Differences;
+use Test::TCP qw(empty_port);
 use Cwd qw/cwd abs_path/;
 use File::Path qw/rmtree/;
 
@@ -212,7 +213,7 @@ subtest 'environment metadata' => sub {
 	my $vault_target = vault_ok;
 	Service::Vault->clear_all();
 	my $top = Genesis::Top->create(workdir, 'thing', vault=>$VAULT_URL);
-	quietly { $top->download_kit('bosh/0.2.0'); };
+	mk_test_kit('bosh', '0.2.0', $top->local_kits_path);
 	put_file $top->path("standalone.yml"), <<EOF;
 ---
 kit:
@@ -271,7 +272,7 @@ subtest 'parameter lookup' => sub {
 	my $vault_target = vault_ok;
 	Service::Vault->clear_all();
 	my $top = Genesis::Top->create(workdir, 'thing', vault=>$VAULT_URL);
-	quietly { $top->download_kit('bosh/0.2.0'); };
+	mk_test_kit('bosh', '0.2.0', $top->local_kits_path);
 	put_file $top->path("standalone.yml"), <<EOF;
 ---
 kit:
@@ -396,7 +397,8 @@ EOF
 subtest 'manifest generation' => sub {
 	my $vault_target = vault_ok;
 	Service::Vault->clear_all();
-	write_bosh_config 'standalone';
+	# Nothing may listen on this director's port: with no cloud-config the merge must fail
+	write_bosh_config {alias => 'standalone', port => empty_port()};
 	my $top = Genesis::Top->create(workdir, 'thing', vault=>$VAULT_URL);
 	$top->link_dev_kit('t/src/fancy');
 	put_file $top->path('standalone.yml'), <<EOF;
@@ -938,7 +940,7 @@ subtest 'cloud_config_and_deployment' => sub{
 
 	local $ENV{GENESIS_BOSH_COMMAND};
 	my ($director1) = fake_bosh_directors(
-		{alias => 'standalone'},
+		{alias => 'standalone', port => empty_port()},
 	);
 	fake_bosh;
 	my $vault_target = vault_ok;
@@ -1106,7 +1108,7 @@ subtest 'bosh variables' => sub {
 	fake_bosh;
 
 	my ($director1) = fake_bosh_directors(
-		{alias => 'standalone'},
+		{alias => 'standalone', port => empty_port()},
 	);
 	my $vault_target = vault_ok;
 	Service::Vault->clear_all();
@@ -1196,7 +1198,7 @@ subtest 'new env and check' => sub{
 	Service::Vault->clear_all();
 
 	my $name = "far-fetched";
-	write_bosh_config $name;
+	write_bosh_config {alias => $name, port => empty_port()};
 	my $top = Genesis::Top->create(workdir, 'sample', vault=>$VAULT_URL);
 	my $kit = $top->link_dev_kit('t/src/creator')->local_kit_version('dev');
   pushd $top->path;
@@ -1210,7 +1212,7 @@ subtest 'new env and check' => sub{
 	my $env;
 	local $ENV{NOCOLOR} = "yes";
 	my ($director1) = fake_bosh_directors(
-		{alias => $name},
+		{alias => $name, port => empty_port()},
 	);
 	fake_bosh;
 	Service::BOSH->set_command($ENV{GENESIS_BOSH_COMMAND});
@@ -1338,7 +1340,7 @@ subtest 'env_kit_overrides' => sub {
 	fake_bosh;
 
 	my ($director1) = fake_bosh_directors(
-		{alias => 'standalone'},
+		{alias => 'standalone', port => empty_port()},
 	);
 	my $vault_target = vault_ok;
 	Service::Vault->clear_all();
@@ -1733,7 +1735,7 @@ subtest 'load environment from env vars' => sub {
 	fake_bosh;
 
 	my ($director1) = fake_bosh_directors(
-		{alias => 'standalone'},
+		{alias => 'standalone', port => empty_port()},
 	);
 	my $vault_target = vault_ok;
 	Service::Vault->clear_all();

@@ -73,15 +73,18 @@ sub reader_over {
 	};
 }
 
-# One env entry has three views, and the hook depends on their being
+# One env entry has four views, and the hook depends on their being
 # different: unevaluated shows the operator as written, merged shows the
-# resolved value, entombed shows the credhub reference.
+# resolved value, entombed shows the reference in the parent's credhub, and
+# self shows the reference in the director's own credhub (the same one
+# unless the test names another).
 sub vaulted {
 	my (%o) = @_;
 	return bless {
 		raw      => sprintf('(( vault "%s" ))', $o{path}),
 		resolved => $o{secret},
 		entombed => sprintf('((%s))', $o{ref}),
+		self     => sprintf('((%s))', $o{self_ref} // $o{ref}),
 	}, 'Test::Vaulted';
 }
 
@@ -100,7 +103,8 @@ sub operator_lookups {
 	my $unevaled = project($cpi, 'raw');
 	return (
 		lookup               => reader_over(project($cpi, 'resolved'), 'bosh-configs.cpi'),
-		lookup_entombed_self => reader_over(project($cpi, 'entombed'), 'bosh-configs.cpi'),
+		lookup_entombed      => reader_over(project($cpi, 'entombed'), 'bosh-configs.cpi'),
+		lookup_entombed_self => reader_over(project($cpi, 'self'), 'bosh-configs.cpi'),
 		lookup_unevaled      => sub {
 			my ($self, $key) = @_;
 			my ($rest) = ($key // '') =~ /^bosh-configs\.cpi\.?(.*)$/;
@@ -713,6 +717,37 @@ subtest 'an explicit null clears the OCFP value, leaving the kit default' => sub
 
 	is($config->{connection_options}{read_timeout}, 100,
 		'a null operator value discards OCFP and takes the kit default');
+};
+
+# A parent's CPI config and a director's own are entombed into different
+# CredHubs, so every operator value, declared or passed through, has to come
+# from the build for the CredHub the config goes to.
+subtest 'a declared property and an extra one read from the same destination' => sub {
+	my %cpi = (
+		pve_host => vaulted(
+			path     => 'secret/pve:host',
+			secret   => '10.0.0.1',
+			ref      => '/parent/genesis-entombed/pve--host--abc12345',
+			self_ref => '/genesis-entombed/pve--host--abc12345',
+		),
+		pve => {custom => vaulted(
+			path     => 'secret/pve:custom',
+			secret   => 'do-not-leak',
+			ref      => '/parent/genesis-entombed/pve--custom--def67890',
+			self_ref => '/genesis-entombed/pve--custom--def67890',
+		)},
+	);
+	for my $case ([undef, "the parent's", '/parent/'], [1, "the director's own", '/']) {
+		my ($self_upload, $label, $base) = @$case;
+		my $hook = Genesis::Hook::CpiConfig::gp_kit->init(
+			env => mock_env(cpi => \%cpi), self_upload => $self_upload,
+		);
+		my $config = $hook->gather_properties('!pve_host>pve.host');
+		is($config->{pve}{host}, "((${base}genesis-entombed/pve--host--abc12345))",
+			"for $label config, the declared property comes from its build");
+		is($config->{pve}{custom}, "((${base}genesis-entombed/pve--custom--def67890))",
+			'and so does the extra one');
+	}
 };
 
 done_testing;

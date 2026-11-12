@@ -272,8 +272,10 @@ define_command("create", {
 
 		"vault=s" =>
 			"The name of a `safe' target (a Vault) to store newly generated ".
-			"credentials in.  Overrides the vault specified in the deployment ".
-			"repository for the environment.",
+			"credentials in, or a vault descriptor such as ".
+			"`https://<host>[:<port>] as <alias>'.  Overrides the vault ".
+			"specified in the deployment repository for the environment.  ".
+			"It becomes the repository's vault only if none is set yet.",
 
 		"force|f" =>
 			"Create a new environment file even if it already exists.",
@@ -766,7 +768,27 @@ define_command("bosh-configs", {
 		"compare them with the copies the BOSH director holds.  On the director, ".
 		"cloud configs are named #C{<env>.<deployment-type>}, runtime configs add ".
 		"a #C{.<build>} suffix to that name, and cpi configs use the environment's ".
-		"cpi name.".
+		"cpi name.  A BOSH director environment also has its own cloud config, ".
+		"named #C{<env>.<deployment-type>.director}, which lives on the director ".
+		"itself and holds its compilation network.  Uploading it takes that ".
+		"director's network claims lock and writes the director's network claims ".
+		"record in exodus whenever the claims differ from what the record holds, ".
+		"even when the config itself is identical and is not uploaded again.  ".
+		"The delete action refuses it.  This ".
+		"includes a create-env director, which has no parent-side cloud config.".
+		"\n\n".
+		"#Y{Note:} an upload on a BOSH director environment with neither ".
+		"#y{--type} nor #y{--name} also uploads the director's own cloud config ".
+		"and may write its network claims record, with no prompt under #y{--yes}.  ".
+		"Save the director's #C{network} exodus record first, and use #y{--type} ".
+		"or #y{--name} when you mean something narrower, such as only the ".
+		"runtime configs.".
+		"\n\n".
+		"Building the director's own cloud config stops when its network claims ".
+		"record is absent but the director has deployments, because a failed ".
+		"claims write usually leaves it that way.  Set ".
+		"#y{GENESIS_ALLOW_EMPTY_CLAIMS=1} for a new director, or once you have ".
+		"confirmed that the record should be empty.".
 		"\n\n".
 		"The actions are:\n".
 		"\n".

@@ -383,11 +383,17 @@ sub compare_configs {
 	if ($self->bosh->has_config('runtime',$config_name)) {
 		local $ENV{BOSH_NON_INTERACTIVE} = 1; # We do interactive outside of bosh commands
 		my $current_config = $self->bosh->get_config('runtime',$config_name);
-		my ($diff, $is_diff) = spruce_diff(
+		my ($diff, $rc) = spruce_diff(
 			{content => $current_config, label => 'existing'},
 			{content => $config_data,    label => 'generated'}
 		);
-		if ($is_diff) {
+		# spruce exits 2 or more when it cannot compare the two, and its
+		# output is then the reason rather than a diff.
+		bail(
+			"Could not compare the existing and generated #m{%s} runtime config:\n\n%s",
+			$description, $diff || "spruce diff exited $rc with no output"
+		) if $rc > 1;
+		if ($rc) {
 			info("  - found the following changes between existing and generated #m{%s} runtime config:\n\n%s", $description, $diff);
 		} else {
 			info("  - existing #m{%s} runtime config is already up to date", $description);

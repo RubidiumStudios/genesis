@@ -56,7 +56,10 @@ Both PIDs are tracked on the vault object so that C<shutdown> can
 terminate them in order.
 
 A process-level cache (C<%$local_vaults>) ensures that calling C<create>
-twice with the same name returns the same object. The C<DESTROY> method
+twice with the same name returns the same object while that vault is
+running. The cache holds running vaults only: C<shutdown> evicts the vault
+it stops, so a later C<create> of the same name starts a new vault under
+the same alias rather than handing back the stopped one. The C<DESTROY> method
 ensures the vault is shut down when the object goes out of scope, provided
 it is owned by the current process.
 
@@ -70,8 +73,11 @@ See L<Service::Vault> for the full vault interface that all subclasses implement
 
 Creates and returns a C<Service::Vault::Local> object backed by a running
 in-memory Vault process. If a local vault with the same derived alias is
-already cached in the current process, the cached object is returned
-immediately without starting a new process.
+already running and cached in the current process, the cached object is
+returned immediately without starting a new process. A vault that was shut
+down is no longer cached, so creating its name again starts a new vault
+with the same alias. A deploy depends on this when it entombs a second
+manifest after the first build has shut its local vault down.
 
 If no matching vault process is found running, a new C<safe local -m>
 process is launched in the background on an explicitly chosen free port.
@@ -147,6 +153,11 @@ B<Examples:>
   my $same = Service::Vault::Local->create('test-env');
   # Returns: the same $vault object
 
+  # Once it is shut down, the same name starts a new vault
+  $vault->shutdown;
+  my $fresh = Service::Vault::Local->create('test-env');
+  # Returns: a new running object named 'local_vault_test-env_12345'
+
 =head2 rebind
 
   my $vault = Service::Vault::Local->rebind($name);
@@ -157,7 +168,8 @@ if no safe target for it exists in C<~/.saferc>, or if the backing safe
 process is no longer running.
 
 If the alias is already cached in the current process, the cached object
-is returned immediately.
+is returned immediately. A vault that was shut down is not cached, so
+rebind never returns a stopped vault from the cache.
 
 B<Parameters:>
 
@@ -283,7 +295,14 @@ safe has not exited after 10 iterations (0.2 seconds each), the escalation
 fallback sends C<SIGTERM>; after 20 iterations, C<SIGKILL>.
 
 After both processes exit, the C<safe_pid> and C<vault_pid> fields are set
-to C<undef>.
+to C<undef>, and the vault is evicted from the process-level cache. Without
+the eviction, the next C<create> or C<rebind> of the same name would return
+this stopped vault, and every write to it would fail. The cache entry is
+removed only when it is this same object, so shutting down a stale handle
+late cannot evict a newer vault that took over the alias. When safe exits
+cleanly it removes its C<~/.saferc> target, so the vault a later C<create>
+starts registers the same alias without leaving a second target behind.
+The two skip cases above leave the cache unchanged.
 
 B<Note:> This method does not raise errors. If a process cannot be killed
 (for example, because it has already exited by the time the signal is sent),

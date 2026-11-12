@@ -426,6 +426,90 @@ subtest 'get_path keeps a good read despite a stderr warning' => sub {
 	isnt(scalar(keys %$result), 0, 'the exported data is kept');
 };
 
+subtest 'get_path_strict - tells a failed read from a path with nothing stored' => sub {
+	my $v = make_vault();
+	my $json = '{"secret/myapp":{"password":"hunter2"}}';
+	my %cases = (
+		'permission denied' => {
+			stderr => "!! permission denied reading secret/myapp\n",
+			error  => qr{Could not read secret/myapp from vault at https://vault\.example\.com:8200: .*permission denied.*token has no read access.*sealed.*cannot be reached.*safe export secret/myapp}s,
+		},
+		'a 403 from the vault' => {
+			stderr => "Error making API request.\nCode: 403. Errors:\n* 1 error occurred:\n\t* permission denied\n",
+			error  => qr/Could not read secret\/myapp.*403/s,
+		},
+		'a sealed vault' => {
+			stderr => "!! Vault is sealed\n",
+			error  => qr/Could not read secret\/myapp.*Vault is sealed.*safe vault status/s,
+		},
+		'a connection refused' => {
+			stderr => "!! dial tcp 10.0.0.1:8200: connect: connection refused\n",
+			error  => qr/Could not read secret\/myapp.*connection refused/s,
+		},
+		'no stderr at all' => {
+			stderr => '',
+			error  => qr/Could not read secret\/myapp.*safe exited with code 1/s,
+		},
+		'a refusal followed by the absent-secret line' => {
+			# A token that can list the path but not read it
+			stderr => "!! permission denied reading secret/myapp\n!! no secret exists at path `secret/myapp`\n",
+			error  => qr/Could not read secret\/myapp.*permission denied.*no secret exists/s,
+		},
+	);
+	plan tests => 3 + keys %cases;
+
+	for my $case (sort keys %cases) {
+		no warnings 'redefine';
+		local *Service::Vault::query = sub { return ('', 1, $cases{$case}{stderr}) };
+		use warnings 'redefine';
+		throws_ok { $v->get_path_strict('/secret/myapp') } $cases{$case}{error}, "$case dies with the path, the reason, and what to check";
+	}
+
+	{
+		no warnings 'redefine';
+		local *Service::Vault::query = sub { return ('', 1, "!! no secret exists at path `secret/myapp`\n") };
+		use warnings 'redefine';
+		is($v->get_path_strict('/secret/myapp'), undef, 'a path with nothing stored comes back undef');
+	}
+	{
+		no warnings 'redefine';
+		local *Service::Vault::query = sub { return ($json, 0, '') };
+		use warnings 'redefine';
+		is_deeply($v->get_path_strict('/secret/myapp'), {password => 'hunter2'}, 'a good read is returned');
+	}
+	{
+		no warnings 'redefine';
+		local *Service::Vault::query = sub { return ('not json', 0, '') };
+		use warnings 'redefine';
+		throws_ok { $v->get_path_strict('/secret/myapp') } qr/Could not read secret\/myapp from vault/,
+			'an export that cannot be parsed dies';
+	}
+};
+
+subtest 'get_path_strict - an env name that holds 403 is not a refusal' => sub {
+	plan tests => 4;
+	my $v = make_vault();
+	my $path = 'secret/exodus/lab-403/bosh/network';
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub { return ('', 1, "!! no secret exists at path `$path`\n") };
+	use warnings 'redefine';
+	is($v->get_path_strict("/$path"), undef, 'a path with 403 in it and nothing stored comes back undef');
+
+	local *Service::Vault::query = sub { return ('', 1, "!! no secret exists at path `secret/exodus/403/bosh/network`\n") };
+	is($v->get_path_strict('/secret/exodus/403/bosh/network'), undef, 'so does a path segment that is only 403');
+
+	local *Service::Vault::query = sub {
+		return ('', 1, "Error making API request.\nCode: 403. Errors:\n* permission denied\n!! no secret exists at path `$path`\n");
+	};
+	throws_ok { $v->get_path_strict("/$path") } qr/Could not read \Q$path\E.*Code: 403/s,
+		'a real 403 on a path with 403 in it still dies';
+
+	local *Service::Vault::query = sub { return ('', 1, "!! Forbidden reading `$path`\n!! no secret exists at path `$path`\n") };
+	throws_ok { $v->get_path_strict("/$path") } qr/Could not read \Q$path\E.*Forbidden/s,
+		'and so does a forbidden refusal ahead of the absent-secret line';
+};
+
 subtest 'a real error on stderr still fails, even when safe exits 0' => sub {
 	plan tests => 2;
 
@@ -483,6 +567,57 @@ subtest 'get() splits combined path:key from single arg' => sub {
 		'path:key form passed through correctly');
 	# The first arg should be an opts hash (redact_output)
 	is(ref($query_args[0]), 'HASH', 'first arg is options hash');
+};
+
+# -------------------------------------------------------------------------
+# get_path_strict()
+# -------------------------------------------------------------------------
+subtest 'get_path_strict() reads the same tree get_path() does' => sub {
+	plan tests => 2;
+	my $v = make_vault();
+	my $export = '{"secret/x":{"__flattened__":"1","a.b":"c"},"secret/x/y":{"k":"v"}}';
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub { return ($export, 0, '') };
+	use warnings 'redefine';
+
+	is_deeply($v->get_path_strict('/secret/x'), {a => {b => 'c'}, y => {k => 'v'}},
+		'the export is nested under the path, and flattened keys are unflattened');
+	is_deeply($v->get_path_strict('/secret/x'), $v->get_path('/secret/x'),
+		'and matches what get_path() returns for the same export');
+};
+
+subtest 'get_path_strict() answers undef for a path with nothing stored' => sub {
+	plan tests => 2;
+	my $v = make_vault();
+
+	no warnings 'redefine';
+	local *Service::Vault::query = sub { return ('', 1, "!! no secret exists at path `secret/x`\n") };
+	use warnings 'redefine';
+
+	my $result = 'unset';
+	lives_ok { $result = $v->get_path_strict('secret/x') } 'a cleanly absent path does not die';
+	is($result, undef, 'and reads as undef');
+};
+
+subtest 'get_path_strict() dies when the read fails, naming the path and the error' => sub {
+	plan tests => 6;
+	my $v = make_vault();
+	my %cases = (
+		'an unreachable vault' => [['', 1, "!! Transport Error: dial tcp 10.0.0.1:8200: connect: connection refused\n"],
+			qr/Could not read secret\/x from vault at https:\/\/vault\.example\.com:8200: !! Transport Error: dial tcp 10\.0\.0\.1:8200/],
+		'a failure that says nothing' => [['', 2, ''], qr/Could not read secret\/x from vault.*safe exited with code 2/],
+		'an unparseable export' => [['not json', 0, ''], qr/Could not read secret\/x from vault/],
+	);
+	for my $case (sort keys %cases) {
+		my ($answer, $error) = @{$cases{$case}};
+		no warnings 'redefine';
+		local *Service::Vault::query = sub { return @$answer };
+		use warnings 'redefine';
+		my $result = 'unset';
+		throws_ok { $result = $v->get_path_strict('secret/x') } $error, "$case dies with the path and the reason";
+		is($result, 'unset', "$case returns nothing");
+	}
 };
 
 # -------------------------------------------------------------------------

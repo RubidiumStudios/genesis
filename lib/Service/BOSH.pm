@@ -158,7 +158,7 @@ sub execute {
 				unshift(@cmd, "script", "-q", "$file");
 			} elsif ($OS eq 'linux') {
 				# `script -c` re-parses with a shell; shell_quote keeps args whole
-				@cmd = ('script', '-q', $file, '-c', shell_quote(@cmd));
+				@cmd = ('script', '-qe', $file, '-c', shell_quote(@cmd));
 			}
 		}
 	}

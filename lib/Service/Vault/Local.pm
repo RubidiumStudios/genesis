@@ -269,6 +269,15 @@ sub shutdown {
 		$self->{name}, slurp($self->{logfile})
 	);
 	$self->{safe_pid} = $self->{vault_pid} = undef;
+
+	# The cache holds running vaults only.  Left in it, this stopped one is
+	# what the next create or rebind of the same name hands back, and every
+	# write to it fails -- as when a deploy entombs a second manifest after
+	# the first build shut its vault down.  Evicted, the next create starts a
+	# new vault under the same alias.  Only this instance is evicted, so a
+	# stale handle shut down late cannot drop a newer vault of its name.
+	my $cached = $local_vaults->{$self->{name}};
+	delete $local_vaults->{$self->{name}} if $cached && $cached == $self;
 	return;
 }
 

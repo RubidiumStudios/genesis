@@ -1,8 +1,9 @@
 # Mixin to provide entombment functionality - require to use;
 
-use Genesis qw/info bail read_json_from lines/;
+use Genesis qw/info debug bail lines uniq/;
 use Genesis::Term qw/terminal_width wrap csprintf/;
 
+use Service::Vault;
 use Service::Vault::Local;
 use Service::Credhub;
 use Genesis::Env::Secrets::Entombment qw(
@@ -53,23 +54,57 @@ sub _entomb_secrets {
 			{pending => 1},
 			"[[  - >>retrieving secrets from used vault paths...",
 		);
+		my %canonical;
 		for (keys %$secret_paths) {
 			my ($s,$k) = split ":", $_, 2;
 			$s =~ s#^/?#/#; # make sure the secret path starts with a /
-			push(@{$secret_keys{$s}}, $k)
+			push(@{$secret_keys{$s}}, $k);
+			# safe trims one trailing and one leading slash from a path and then
+			# collapses repeated slashes, so this is the secret safe reads for
+			# the spelling.  The spelling still names the CredHub variable.
+			$canonical{$s} = $s =~ s#/$##r =~ s#^/##r =~ s#/{2,}#/#gr;
 		}
-		# A read-only render stands in for a deploy that has not yet created
-		# every secret, so only the paths the vault holds are read (D129).
-		my @held = $writes ? keys %secret_keys : grep {$src_vault->has($_)} keys %secret_keys;
-		my %secret_values = @held ? %{
-			scalar(read_json_from(
-				$src_vault->query({redact_output => 1},"export", @held)
-			))
-		} : ();
-		# BUG FIX for safe export on similar names
-		for (map {substr($_,1)} @held) {
-			$secret_values{$_} = $src_vault->get("/$_")
-				unless (defined($secret_values{$_}));
+
+		# One export reads every referenced path, decoded from its raw text so
+		# that a value that is not a string is seen as one.  A failed export
+		# leaves each path to be read on its own below, where the read says
+		# why it failed or finds nothing stored.
+		my ($text, $rc, $err) = $src_vault->query(
+			{stderr => 0, redact_output => 1, exact => 1}, "export", keys %secret_keys
+		);
+		debug(
+			"safe export of the referenced paths failed, so each is read on its own: %s",
+			$err || "exit code $rc"
+		) if $rc;
+		my ($export, $typed) = $rc ? ({}, {}) : Service::Vault::decode_export_text($text);
+
+		# safe get gives every value of a typed path as the text a flat export
+		# gives, so a referenced typed path is read again whole and all its
+		# fields come from that one read.  A path the export left out is read
+		# the same way, since older safe exports dropped one of two paths when
+		# one name begins with the other.  Only referenced paths are read, so a
+		# typed value nobody references, such as the numeric pid an older
+		# Genesis writes into its network lock, cannot stop entombment.
+		my %secret_values;
+		for my $path (uniq(sort values %canonical)) {
+			$secret_values{$path} = (defined($export->{$path}) && !$typed->{$path})
+				? $export->{$path}
+				: $src_vault->read_flattened_secret($path);
+		}
+
+		# Every reference resolves before the local vault starts or anything
+		# is written, so a missing value leaves nothing half entombed.  A
+		# read-only render stands in for a deploy that has not yet created
+		# every secret, so it names what is missing below instead (D129).
+		for my $secret ($writes ? sort keys %secret_keys : ()) {
+			for my $key (sort @{$secret_keys{$secret}}) {
+				my $value = $secret_values{$canonical{$secret}}{$key};
+				bail(
+					"Manifest references vault path #C{%s:%s} which has no value in ".
+					"the vault -- populate it (or fix the reference) and redeploy.",
+					$secret, $key
+				) unless defined($value) && length($value);
+			}
 		}
 		$say->("#g{done!}");
 
@@ -100,7 +135,7 @@ sub _entomb_secrets {
 			$cred_path =~ s/^$base_path//;
 			$cred_path =~ s#^/#_/#;
 			for my $key (sort @{$secret_keys{$secret}}) {
-				my $value = $secret_values{substr($secret,1)}{$key};
+				my $value = $secret_values{$canonical{$secret}}{$key};
 				# What the deploy would generate or must be given stands in
 				# the read-only render as a placeholder its reader names.
 				if (!$writes && !(defined($value) && length($value))) {
@@ -110,11 +145,6 @@ sub _entomb_secrets {
 					++$idx;
 					next;
 				}
-				bail(
-					"Manifest references vault path #C{%s:%s} which has no value in ".
-					"the vault -- populate it (or fix the reference) and redeploy.",
-					$secret, $key
-				) unless defined($value) && length($value);
 				my ($credhub_var, $secret_sha, $action, $action_color, $existing) = $self->_entomb_secret_for_vault(
 					$local_vault, $secret, $key, $value, $credhub, $cred_path, $entombment_prefix
 				);

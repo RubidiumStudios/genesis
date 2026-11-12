@@ -21,6 +21,7 @@ use Genesis::Exit qw/CONFIG TEMPFAIL/;
 
 use Cwd ();
 use File::Spec ();
+use Scalar::Util qw/blessed/;
 use File::Path qw/rmtree/;
 use Time::Piece;
 
@@ -934,13 +935,21 @@ sub set_vault {
 		$new_vault = $candidates[0];
 	} elsif ($opts{clear}) {
 		$new_vault = undef;
-	} elsif (Scalar::Util::blessed($opts{vault})
-	         && $opts{vault}->isa('Service::Vault')) {
-		# Any vault of the family, because a local vault serves a read as a
-		# remote one does and the two are siblings rather than one being a
-		# kind of the other.  Service::Vault::None is not one of them, and
-		# it falls through to the refusal below, which is what it is for.
-		$new_vault = $opts{vault}
+	} elsif (exists($opts{vault})) {
+		my $vault = $opts{vault};
+		my $in_family = blessed($vault) && $vault->isa('Service::Vault');
+		# A local vault serves a read as a remote one does, so any vault of
+		# the family may be lent for the session, but only a remote safe
+		# target can be recorded.  Service::Vault::None is not of the family.
+		bail(
+			"Cannot use %s as the secrets provider for this repository, because ".
+			"only a remote safe target can be one.",
+			$in_family
+				? sprintf("vault #C{%s} at #M{%s}", $vault->name, $vault->url)
+				: "an unresolved vault"
+		) unless $in_family
+		      && ($opts{session_only} || $vault->isa('Service::Vault::Remote'));
+		$new_vault = $vault;
 	} else {
 		bug "Invalid call to Genesis::Top->set_vault"
 	}
@@ -4099,9 +4108,9 @@ sub _first_errors {
 sub _is_legacy_ci_file {
 	my ($path) = @_;
 	open my $fh, '<', $path or return 0;
-	while (<$fh>) {
-		return 1 if /^pipeline:/;
-		return 0 if /^kit:/ || /^genesis:/;
+	while (defined(my $line = <$fh>)) {
+		return 1 if $line =~ /^pipeline:/;
+		return 0 if $line =~ /^kit:/ || $line =~ /^genesis:/;
 	}
 	close $fh;
 	return 0;

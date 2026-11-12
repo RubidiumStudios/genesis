@@ -7,6 +7,7 @@ use parent qw(Genesis::Hook);
 use Genesis;
 use Genesis::Term qw/in_controlling_terminal/;
 use Genesis::UI qw/prompt_for_boolean/;
+use Genesis::Env::NetworkClaims;
 use Service::Credhub;
 use Time::HiRes qw/gettimeofday/;
 use JSON::PP;
@@ -31,35 +32,265 @@ sub data {
 	return $_[0]->{data} ||= {};
 }
 
+# How often update_director_network_config checks a network claims lock that
+# another process holds.  A package variable so tests can shorten it.
+our $NETWORK_LOCK_POLL_SECONDS = 5;
+
 sub update_director_network_config {
 	my $self = shift;
 	my $env = $self->env;
 
 	return unless $env->can_build_cloud_configs;
 
-	# Run the director-cloud-config hook to generate and apply the cloud-config
 	$env->notify("generating the Network space for the BOSH Director");
-	info({pending => 1}, "[[  - >>building director cloud-config...");
-	my $tstart = gettimeofday;
-	my ($config, $network) = $env->run_hook('cloud-config', purpose => 'director');
-	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
-
-	# FIXME: Do a check and compare, and ask if different (or just do it if $BOSH_NON_INTERACTIVE is set)
-	# or at least show the diff (maybe too late to ask if bosh is already deployed)
-	#
-	info({pending => 1}, "[[  - >>uploading #c{%s.%s.director} cloud-config...", $env->name, $env->type);
 	my $bosh = $env->get_target_bosh({self => !$env->use_create_env});
-	my $config_name = join('.',$env->name, $env->type, 'director');
-	$tstart = gettimeofday;
-	$bosh->upload_config($config, 'cloud', $config_name);
-	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
+	my $config_name = join('.', $env->name, $env->type, 'director');
 
-	# Check if network has changes, and if so, show them and store them in exodus
+	# The director's own cloud config is built from the claims every deployment
+	# on this director has recorded, and the network record is rewritten from
+	# it, so both happen under the director's network claims lock.  A signal
+	# while the lock is held unwinds through the release below instead of
+	# leaving the lock on the director.  The first signal unwinds the step;
+	# any that follows, including one in the gap before the release starts or
+	# while it runs, is held until the release has finished, because dying
+	# there would skip it or cut it short.
+	my $unwinding = 1;
+	my $held_signal;
+	my $on_signal = sub {
+		my ($message) = @_;
+		# $unwinding stays set until the work has been left, below, and not
+		# until this first die: code inside the work can catch that die, and
+		# the next signal then still has to unwind it.
+		die $message if $unwinding;
+		$held_signal //= $message;
+	};
+	local $SIG{INT}  = sub { $on_signal->("Interrupted by user\n") };
+	local $SIG{TERM} = sub { $on_signal->("Terminated\n") };
+	local $SIG{HUP}  = sub { $on_signal->("Hung up\n") };
+	local $SIG{QUIT} = sub { $on_signal->("Quit\n") };
 
-	info({pending => 1}, "[[  - >>storing director network details in exodus...");
-	$tstart = gettimeofday;
-	$env->vault->set_path($env->exodus_base.'/network', $network, flatten => 1, clear => 1);
-	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 1, 3));
+	my $acquired = 0;
+	my $step = 'taking the network claims lock';
+	my ($ok, $err);
+	eval {
+		$ok = eval {
+			$acquired = $self->_acquire_director_network_lock($bosh, $config_name);
+			if ($acquired) {
+				$step = 'building the director cloud config';
+				info({pending => 1}, "[[  - >>building director cloud-config...");
+				my $tstart = gettimeofday;
+				my ($config, $network) = $env->run_hook('cloud-config', purpose => 'director');
+				info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
+
+				$step = 'uploading the director cloud config';
+				info({pending => 1}, "[[  - >>uploading #c{%s} cloud-config...", $config_name);
+				$tstart = gettimeofday;
+				$bosh->upload_config($config, 'cloud', $config_name);
+				info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
+
+				# Strict, because a failed read would look like a record with no
+				# claims, and the summary would then show every claim as new
+				$step = 'storing the director network details in exodus';
+				my $network_path = $env->exodus_base.'/network';
+				my $stored = $env->vault->get_path_strict($network_path) // {};
+				Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $network);
+				info({pending => 1}, "[[  - >>storing director network details in exodus...");
+				$tstart = gettimeofday;
+				$env->vault->set_path($network_path, $network, flatten => 1, clear => 1);
+				info("#G{done}" . pretty_duration(gettimeofday - $tstart, 1, 3));
+			}
+			1;
+		};
+		$err = $@;
+		# Inside the outer eval, so that a signal between the two lands in it
+		$unwinding = 0;
+		1;
+	} or ($ok, $err) = (0, $@);
+
+	# Released whenever this process holds it, which covers a signal that
+	# lands between taking the lock and recording that it was taken.  The
+	# release logs a failure rather than dying, so it never replaces the error
+	# that stopped the step; a failed release is reported below, once that
+	# error and any held signal have had their turn.
+	my $released = $bosh->release_network_lock;
+
+	unless ($ok) {
+		# A signal passes through as it came, and the lock waiter has already
+		# said what it found; anything else failed after the director deployed
+		die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
+		my $network_path = $env->exodus_base.'/network';
+		my $finish = sprintf(
+			"#C{%s bosh-configs upload --type cloud --name %s -y}",
+			scalar($env->get_call_path_with_env), $config_name
+		);
+		my ($reason, $has_causes) = _plain_error($err);
+
+		# An error Genesis raised that already gives its likely causes or what
+		# to check says them once; any other, such as a die from a library or
+		# an error with neither, gets the causes and checks for this step
+		bail(
+			"The #M{%s} BOSH director deployed and is working, but its own cloud config ".
+			"#C{%s} and its network record in exodus were not updated.  The step failed ".
+			"while %s:\n\n%s\n\n%s",
+			$bosh->alias, $config_name, $step, $reason,
+			$has_causes
+				? "Once that is fixed, run $finish to finish this step without a redeploy."
+				: sprintf(
+					"This usually means the vault is sealed or unreachable, the token has ".
+					"expired or has no read or write access to #C{%s}, or the director ".
+					"refused the cloud config.  Check the vault and the token with ".
+					"#C{safe vault status} and #C{safe export %s}, then run %s to finish ".
+					"this step without a redeploy.",
+					$network_path, $network_path, $finish
+				)
+		);
+	}
+	die $held_signal if defined($held_signal);
+
+	# The deploy itself worked, but a lock that may still be held leaves the
+	# next deploy on this director waiting on it, so the step fails and says
+	# so, rather than letting the deploy look clean.
+	bail(
+		"The #M{%s} BOSH director deployed and is working%s, but the network claims ".
+		"lock at #C{%s} could not be released, so it may still be held.\n\n".
+		"The error above says why the release failed and how to clear the lock.  ".
+		"Other deploys on this director will wait for it until it goes stale, and ".
+		"#C{safe get %s} shows who holds it.",
+		$bosh->alias,
+		$acquired ? ", and its own cloud config #C{$config_name} and its network record in exodus were updated" : '',
+		$bosh->network_lock_path, $bosh->network_lock_path
+	) unless defined($released);
+
+	# 0 means the lock was never taken; it tells the step runner that this
+	# step failed and the rest can go on
+	return $acquired ? 1 : 0;
+}
+
+# _plain_error - the text of a caught error without the [FATAL] prefix and the wrapping a nested bail adds, and whether it gives its own causes {{{
+sub _plain_error {
+	my ($err) = @_;
+	$err =~ s/^\s+|\s+$//g;
+	my $wrapped = $err =~ s/^(?:\e\[[0-9;]*m)*\[FATAL\](?:\e\[[0-9;]*m)*[ \t]*//;
+	if ($wrapped) {
+		# Lines the earlier bail wrapped to the terminal join back into
+		# paragraphs, and the indent it gave them goes, so the outer bail
+		# wraps the text once and indents every paragraph the same
+		$err = join("\n\n", map {
+			my $paragraph = s/^\s+|\s+$//gr;
+			$paragraph =~ s/\s*\n\s*/ /gr
+		} split(/\n[ \t]*\n/, $err));
+	}
+	# Only an error Genesis raised words its own causes and checks; the
+	# wording is the one every such error uses
+	return ($err, scalar($wrapped && $err =~ /\b(?:likely causes?|usually means|check)\b/i));
+}
+
+# }}}
+sub _acquire_director_network_lock {
+	my ($self, $bosh, $config_name) = @_;
+	my $env = $self->env;
+
+	my $limit = $ENV{GENESIS_NETWORK_LOCK_WAIT} // 300;
+	unless ($limit =~ /^\d+$/) {
+		warning(
+			"GENESIS_NETWORK_LOCK_WAIT is set to '%s', which is not a whole number of ".
+			"seconds, so the step waits the default 300 seconds for the network ".
+			"claims lock instead.  Set it to a number such as #C{600}, or unset it.",
+			$limit
+		);
+		$limit = 300;
+	}
+	my $interval = $NETWORK_LOCK_POLL_SECONDS > 0 ? $NETWORK_LOCK_POLL_SECONDS : 5;
+
+	my ($waited, $announced, $lock, $acquire_error) = (0, '');
+	while (1) {
+		$acquire_error = undef;
+		$lock = $bosh->check_network_lock;
+		if ($lock->{status} eq 'unlocked') {
+			# Another process can take it between the check and here, and then
+			# acquire_network_lock refuses; go round again and wait for it.  A
+			# refusal that leaves the lock free is a vault failure instead, and
+			# waits and counts the same as a held lock does.
+			return 1 if eval { $bosh->acquire_network_lock; 1 };
+			my $failure = $@;
+			# A signal is not a vault failure to wait out and retry
+			die $failure if $failure =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
+			$acquire_error = ($failure =~ s/\s+$//r) || 'unknown error';
+			$lock = $bosh->check_network_lock;
+			undef $acquire_error unless $lock->{status} eq 'unlocked';
+		}
+		last if $lock->{status} eq 'stale' || $waited >= $limit;
+
+		# Said again whenever the reason for waiting changes, so a vault
+		# error that clears into a lock held by another process (or the
+		# reverse) is not left under the wrong message
+		my $reason = defined($acquire_error) ? 'error' : 'held';
+		if ($announced ne $reason) {
+			$announced = $reason;
+			if (defined $acquire_error) {
+				info(
+					"[[  - >>the network claims lock on #M{%s} BOSH director could not be ".
+					"taken (%s); retrying for up to %s...",
+					$bosh->alias, $acquire_error, count_nouns($limit, "second")
+				);
+			} else {
+				info(
+					"[[  - >>the network claims lock on #M{%s} BOSH director is held %s; ".
+					"waiting up to %s for it...",
+					$bosh->alias, $lock->{description} // 'by another process',
+					count_nouns($limit, "second")
+				);
+			}
+		}
+		my $step = $interval < $limit - $waited ? $interval : $limit - $waited;
+		sleep($step);
+		$waited += $step;
+	}
+
+	my $finish = sprintf(
+		"%s bosh-configs upload --type cloud --name %s -y",
+		scalar($env->get_call_path_with_env), $config_name
+	);
+	if ($lock->{status} eq 'stale') {
+		error(
+			"The #M{%s} BOSH director deployed and is working, but its own cloud config ".
+			"#C{%s} and its network record in exodus were not updated.  The network ".
+			"claims lock on the director is stale: it was taken %s, and that process ".
+			"is gone or has held it for more than 30 minutes.  Post-deploy does not ".
+			"clear a stale lock unattended, because it cannot tell whether the holder ".
+			"left its claims half written.  This usually means an earlier deploy or ".
+			"#C{bosh-configs upload} on this director was interrupted.  Check that no ".
+			"deploy is running against this director, then run #C{%s}, which clears ".
+			"the stale lock and finishes this step without a redeploy.",
+			$bosh->alias, $config_name, $lock->{description} // 'by an unknown process', $finish
+		);
+	} elsif (defined $acquire_error) {
+		error(
+			"The #M{%s} BOSH director deployed and is working, but its own cloud config ".
+			"#C{%s} and its network record in exodus were not updated.  The network ".
+			"claims lock on the director is free, but it could not be taken, and it ".
+			"still could not be taken after %s.  The last error was: %s.  This usually ".
+			"means the vault is sealed or unreachable, the token has expired, or the ".
+			"token has no write access to the director's network claims lock in ".
+			"exodus.  Check the vault and the token, then run #C{%s} to finish this ".
+			"step without a redeploy.",
+			$bosh->alias, $config_name, count_nouns($waited, "second"), $acquire_error, $finish
+		);
+	} else {
+		error(
+			"The #M{%s} BOSH director deployed and is working, but its own cloud config ".
+			"#C{%s} and its network record in exodus were not updated.  The network ".
+			"claims lock on the director was held %s, and it was still held after ".
+			"waiting %s.  This usually means another deploy on this director held the ".
+			"lock, for example while it waited at a confirmation prompt.  Once that ".
+			"deploy has finished, run #C{%s} to finish this step without a redeploy.  ".
+			"Set #C{GENESIS_NETWORK_LOCK_WAIT} to a number of seconds to wait longer ".
+			"next time.",
+			$bosh->alias, $config_name, $lock->{description} // 'by another process',
+			count_nouns($waited, "second"), $finish
+		);
+	}
+	return 0;
 }
 
 sub command {

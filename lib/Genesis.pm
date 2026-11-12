@@ -746,11 +746,18 @@ sub run {
 			open my $pipe, "-|", @cmd
 				or bail("Could not open pipe to run #C{%s}", join(' ',@cmd));
 			$out = do { local $/; <$pipe> };
-			$out =~ s/\s+$// if $opts{trim} // 1;
+			# exact keeps the output as printed: trimming drops the newline
+			# that ends a YAML literal block when that block ends the output.
+			$out =~ s/\s+$// if ($opts{trim} // 1) && !$opts{exact};
 			close $pipe;
 		}
 	};
 	my $eval_err = $@;
+
+	# Take the exit status before anything else runs.  The trace calls below
+	# run code of their own, and under GENESIS_TRACE that resets $?, which
+	# made every failed command look like it had exited 0.
+	my $exit_status = $?;
 
 	# Always reset STDIN if it was redirected
 	reset_stdin() if ($opts{stdin});
@@ -770,7 +777,13 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 	# for the next reader rather than for a defect it fixes.
 	my $err;
 	$err = slurp($err_file) if ($err_file && -f $err_file);
-	my $rc = $? >>8;
+	my $rc = $exit_status >> 8;
+	if ($opts{exact} && (my $signal = $exit_status & 127)) {
+		# A process killed by a signal has no exit code, so >> 8 reads it as
+		# 0 and whatever it printed before it died as a finished run.
+		$rc = 128 + $signal;
+		$err = join("\n", grep {defined && length} ($err // '') =~ s/\s+$//r, "killed by signal $signal");
+	}
 	if (defined($out)) {
 		if ($out =~ m/[\x00-\x08\x0b-\x0c\x0e\x1f\x7f-\xff]/) {
 			qtrace "[%sb of binary data omitted from debug]", length($out);
@@ -780,14 +793,20 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 			dump_var -1, run_output => $out;
 		}
 	}
-	dump_var -1, run_stderr => $err if (defined($err));
+	if (defined($err)) {
+		if ($opts{redact_stderr}) {
+			qtrace "[%sb of redacted stderr omitted from debug]", length($err);
+		} else {
+			dump_var -1, run_stderr => $err;
+		}
+	}
 	if ($rc) {
 		bail({raw => 1}, "#R{%s} (run failed)%s%s",
 		     $opts{onfailure},
-		     defined($err) ? "\n\nSTDERR:\n$err" : '',
+		     defined($err) ? "\n\nSTDERR:\n".($opts{redact_stderr}?"<redacted>":$err) : '',
 		     defined($out) ? "\n\nSTDOUT:\n".($opts{redact_output}?"<redacted>":$out) : ''
 		) if ($opts{onfailure});
-		trace("command exited with status %x (rc %d)", $?, $rc);
+		trace("command exited with status %x (rc %d)", $exit_status, $rc);
 	} else {
 		trace("command exited #G{0}");
 	}
@@ -821,7 +840,7 @@ sub fake_tty {
 		# list must be flattened with shell_quote: naive joining lets values
 		# containing shell metacharacters split into separate arguments or
 		# execute as injected commands.
-		@cmd = ('script', '-qf', $file, '-c', shell_quote(@cmd));
+		@cmd = ('script', '-qef', $file, '-c', shell_quote(@cmd));
 	}
 	return @cmd
 }
@@ -832,11 +851,12 @@ sub lines {
 }
 
 sub read_json_from {
+	my $opts = ref($_[0]) eq 'HASH' ? shift : undef; # load_json's options, such as allow_bignum
 	my ($out, $rc, $err) = @_;
 	local $@;
 	my $json;
 	unless ($rc) {
-		eval {$json = load_json($out)};
+		eval {$json = load_json($out, $opts)};
 		$err = $@; # previous error was non-fatal, so override
 	}
 	return ($json,$rc,$err) if (wantarray);
@@ -953,7 +973,12 @@ sub curl {
 	return $status, $status_line, $file ? $file : join($/, @data), join($/, @header_data), join($/, @err_data);
 }
 
-# spruce_diff - diff two yaml files, and return the diff as a colored string.
+# spruce_diff - diff two yaml files, and return the diff as a colored string,
+# along with spruce's own exit code: 0 for no differences, 1 for differences,
+# and 2 or more when spruce could not compare the files, in which case the
+# output holds spruce's error.  Always use this instead of running
+# `spruce diff` under fake_tty directly, because it strips script(1)'s
+# header and trailer and reads the exit code the trailer records.
 sub spruce_diff {
 	my ($first, $second) = @_;
 	bug("spruce diff requires two files") unless @_ == 2;
@@ -1012,12 +1037,25 @@ sub spruce_diff {
 	my $out_file = "$scratchdir/out.diff";
 	my (undef,$rc,$err) = run({redact => 1}, fake_tty($out_file, "spruce", "diff", $first, $second));
 	my $out = slurp($out_file);
-	if ($out =~ s/\nScript done.*\[COMMAND_EXIT_CODE="(.*)"]$//m) {
-		$rc = $1;  # Linux stores command exit code in the script output
-	}
-	$out =~ s/^Script [^\n]+\n//m; # remove script header (linux)
 
-	# FIXME: diff between failed diff vs diff with differences
+	# util-linux script(1) records the command's exit code in a "Script done"
+	# trailer as well as returning it under -e.  When the trailer carries a
+	# reason in place of a code, the command did not exit on its own
+	# (`[<terminated by signal 15>]`, for example); that is a failure, and the
+	# reason is kept in the output so the caller can report it.  Releases older
+	# than 2.35 write a bare date, which is removed and leaves the exit code as
+	# script(1) gave it.
+	if ($out =~ s/\n?^Script done on ([^\n]*)\n?\z//m) {
+		my $trailer = $1;
+		if ($trailer =~ /\[COMMAND_EXIT_CODE="(\d+)"\]/) {
+			$rc = $1;
+		} elsif ($trailer =~ /\[<(.*)>\]/) {
+			$out .= "\n$1";
+			$rc = 2 unless $rc && $rc > 1;
+		}
+	}
+	$out =~ s/\A\s*Script started on [^\n]*\n//; # remove script header (linux)
+
 	$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/smr;
 	return ($out, $rc, $err);
 }
@@ -1219,8 +1257,10 @@ sub time_exec {
 # Data handling
 
 sub load_json {
-	my ($json) = @_;
-	return JSON::PP->new->allow_nonref->decode($json);
+	my ($json, $opts) = @_;
+	my $decoder = JSON::PP->new->allow_nonref;
+	$decoder->allow_bignum if ($opts // {})->{allow_bignum};
+	return $decoder->decode($json);
 }
 
 sub load_json_file {
@@ -1320,10 +1360,11 @@ sub tcp_listening {
 		local $SIG{ALRM} = sub {die "timeout\n"; };
 		alarm $timeout;
 		my $socket = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp');
+		alarm 0;
 		die "failed\n" unless $socket;
 		$socket->close();
-		alarm 0;
 	};
+	alarm 0;
 	return ($@ eq "timeout\n" ? "timeout" : "failed") if ($@);
 	return 'ok';
 }

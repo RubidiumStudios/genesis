@@ -1395,6 +1395,12 @@ the last object's own trailing whitespace is part of its content.
 
 If true, suppresses output from trace/debug logs.
 
+=item C<redact_stderr>
+
+If true, keeps the command's captured stderr out of trace and debug logs, and
+out of the C<onfailure> message, in the same way C<redact_output> does for its
+output. The caller still receives the stderr unchanged.
+
 =item C<redact_env>
 
 If true, redacts environment variable values in trace/debug logs.
@@ -1414,6 +1420,27 @@ templates, as the kit hook runners do for addon and reaction arguments.
 
     # $HOME is expanded and arrives as $1; $$ is left for the shell itself
     run({eval_var_args => 1}, 'echo "Home: $1, process: $$"', '$HOME');
+
+=item C<exact>
+
+If true, returns the output exactly as the command printed it, and reports a
+command killed by a signal as a failure. Off by default, so every other
+caller keeps the trimmed output and the exit code it has always had.
+
+Without it, C<run> strips trailing whitespace from the output. That is
+harmless for most commands, but when the output is YAML that ends in a
+literal block, the newline it removes belongs to the last value, so a
+certificate read through C<safe get> would lose its final newline.
+
+Without it, the exit code is taken as C<<< $? >> 8 >>>, which is C<0> for a
+process killed by a signal, since such a process has no exit code. Whatever
+it printed before it died then reads as a finished, successful run. With
+C<exact>, a signal C<N> gives an exit code of C<128 + N>, the code a shell
+reports for it, and when stderr is captured, C<killed by signal N> is added
+to it.
+
+    # A safe get read whole, keeping the newline of a final literal block
+    my ($yaml, $rc, $err) = run({stderr => 0, exact => 1}, 'safe', 'get', $path);
 
 =back
 
@@ -1442,6 +1469,9 @@ When C<onfailure> is set and the command succeeds: the bare C<$out> scalar
 (not a three-element list).
 
 When C<interactive> is set: C<(undef, $rc)> in list context, C<$rc> in scalar.
+
+When C<exact> is set, C<$out> keeps its trailing whitespace, and C<$rc> is
+C<128 + N> for a command killed by signal C<N>.
 
 Returns C<undef> in void context.
 
@@ -1531,11 +1561,18 @@ containing shell metacharacters (pipes, semicolons, quotes) survive the
 inner shell's re-parsing intact instead of being split or executed as
 injected commands.
 
+Both forms pass C<-e>, so C<script> exits with the wrapped command's exit
+code.  macOS C<script> always does that and accepts C<-e> for compatibility.
+util-linux C<script> exits 0 without it, whatever the command did, so
+dropping C<-e> on Linux makes C<run()> report every wrapped command as a
+success.  C<spruce_diff> depends on it with util-linux releases older than
+2.35, which write no exit code trailer.
+
 B<Examples:>
 
     my @cmd = fake_tty('/tmp/out.log', 'spruce', 'diff', $a, $b);
     # Returns (macOS): ('script', '-qeF', '/tmp/out.log', 'spruce', 'diff', $a, $b)
-    # Returns (Linux): ('script', '-qf', '/tmp/out.log', '-c', "'spruce' 'diff' '$a' '$b'")
+    # Returns (Linux): ('script', '-qef', '/tmp/out.log', '-c', "'spruce' 'diff' '$a' '$b'")
     run(@cmd);
 
 =head2 lines
@@ -1577,11 +1614,18 @@ B<Examples:>
 
     my $data = read_json_from($out, $rc, $err);
     my ($data, $rc, $err) = read_json_from($out, $rc, $err);
+    my $data = read_json_from(\%opts, $out, $rc, $err);
 
 Parses C<$out> as JSON and returns the decoded structure. Designed to wrap
 C<run()>:
 
     my $data = read_json_from(run('kubectl get pods -o json'));
+
+A hash reference given first holds options passed on to C<load_json>, such
+as C<allow_bignum>. The vault readers pass C<{allow_bignum =E<gt> 1}> when they
+decode a C<safe export>, so an integer too large for Perl is kept as a
+number rather than read as its digits, and its path is read again with
+C<safe get>. Without the hash, the output is decoded as before.
 
 In scalar context, calls C<bail> with the JSON parse error if C<$out> is not valid JSON
 (and C<$rc> is zero). In list context, returns the data (possibly C<undef>),
@@ -1590,6 +1634,11 @@ the original C<$rc>, and any error message encountered during parsing.
 B<Parameters:>
 
 =over 4
+
+=item C<\%opts>
+
+Optional. When the first argument is a hash reference, it is taken as the
+options for C<load_json>, and the rest of the arguments shift along.
 
 =item C<$out>
 
@@ -1621,6 +1670,12 @@ B<Examples:>
     # List context -- caller handles errors
     my ($data, $rc, $err) = read_json_from(run({ stderr => 0 }, 'safe get secret/foo'));
     # Returns: (hashref, 0, '') on success; (undef, $rc, $err) on failure
+
+    # With options for load_json
+    my ($export, $rc, $err) = read_json_from({allow_bignum => 1},
+      run({ stderr => 0 }, 'safe export secret/foo'));
+    # Returns: (hashref, 0, '') on success, with any number too large for
+    # Perl as a Math::BigInt
 
 =head2 secrets_traced
 
@@ -1752,6 +1807,20 @@ B<Examples:>
 Runs C<spruce diff> against two YAML sources and returns the coloured diff
 output, exit code, and any stderr.
 
+The exit code is spruce's own on both platforms: 0 when the sources match, 1
+when they differ, and 2 or higher when spruce could not compare them, in
+which case the output holds spruce's error.  C<fake_tty> runs spruce under
+C<script -e>, which passes the code through on both platforms.  On Linux the
+C<[COMMAND_EXIT_CODE="N"]> trailer of the typescript records the code as
+well, and the trailer's code is the one returned.  A trailer that carries a
+reason instead of a code, such as C<< [<terminated by signal 15>] >>, is
+reported as rc 2 or higher with the reason appended to the output.  The
+typescript's header and trailer never appear in the returned output.
+
+Call this rather than running C<spruce diff> under C<fake_tty> directly,
+which leaves the typescript's header and trailer in the output and the
+trailer's reason unread.
+
 Each argument can be:
 
 =over 4
@@ -1817,7 +1886,9 @@ ref type.
 B<Examples:>
 
     my ($diff, $rc) = spruce_diff($before_file, $after_file);
-    # Returns: (diff string, 0) on success; (diff string, 1) on differences found
+    # Returns: ('', 0) when the files match; (diff string, 1) when they differ;
+    #          (spruce's error, 2) when spruce cannot compare them
+    bail("Cannot compare: %s", $diff) if $rc > 1;
     print $diff if $rc;
 
 =head2 slurp
@@ -2272,9 +2343,17 @@ B<Examples:>
 =head2 load_json
 
     my $data = load_json($json_string);
+    my $data = load_json($json_string, {allow_bignum => 1});
 
 Decodes a JSON string (including bare scalars) and returns the resulting Perl
 data structure.
+
+With C<allow_bignum>, it decodes with C<JSON::PP>'s option of that name, so
+an integer too large for any native Perl type comes back as a
+C<Math::BigInt> and a number with a fraction or an exponent as a
+C<Math::BigFloat>. Without it, such an integer comes back as a plain string
+of its digits, which can't be told from a JSON string. The safe export
+decoder in C<Service::Vault> asks for it so that it sees every number.
 
 B<Parameters:>
 
@@ -2284,9 +2363,16 @@ B<Parameters:>
 
 A valid JSON string.
 
+=item C<$opts>
+
+Optional. A hash reference whose C<allow_bignum> key, when true, decodes
+large and fractional numbers as C<Math::BigInt> and C<Math::BigFloat>
+objects.
+
 =back
 
 B<Returns:> The decoded Perl value (hash ref, array ref, scalar, etc.).
+It dies with C<JSON::PP>'s error when the text does not decode.
 
 B<Examples:>
 
@@ -2586,6 +2672,15 @@ B<Errors:>
 The internal C<eval> block uses C<die "timeout\n"> and C<die "failed\n"> as
 control-flow signals. These are caught and converted to the string return
 values described above. They are not propagated to the caller.
+
+The connect timeout is an C<alarm>, and it must be cancelled on every path
+out of the C<eval>.  The C<eval>'s C<local> SIGALRM handler goes with it,
+so an alarm still armed when this returns fires under the default action
+and kills Genesis C<GENESIS_NETWORK_TIMEOUT> seconds later.  The alarm is
+cancelled straight after the connect, before a refused connection dies out
+of the C<eval>, and again after the C<eval>.  C<Service::Vault::status> and
+C<Service::BOSH::Director::status> call this on every vault and director
+check.
 
 B<Examples:>
 

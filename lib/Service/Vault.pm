@@ -7,7 +7,10 @@ use Genesis::State;
 use Genesis::Term qw/csprintf/;
 
 use Genesis::UI;
-use JSON::PP qw/decode_json/;
+use JSON::PP qw/decode_json encode_json/;
+use B ();
+use List::Util qw/min max/;
+use POSIX ();
 use Time::HiRes qw/gettimeofday/;
 use UUID::Tiny ();
 
@@ -244,49 +247,62 @@ sub rebind {
 }
 
 # }}}
+# bare_target_name - the safe target name an input names, if it is one {{{
+sub bare_target_name {
+	my ($class, $input) = @_;
+	# A single token with no URL scheme can never be a working descriptor,
+	# because a descriptor needs its URL, so taking it as a target name
+	# shadows no descriptor.  Clause keywords, colons and slashes are all
+	# legal in a target name.
+	my $name = $input // '';
+	$name =~ s/^\s+|\s+$//g;
+	return undef unless $name =~ /^\S+$/ && $name !~ m{^[a-z][a-z0-9+.-]*://}i;
+	return $name;
+}
+
+# }}}
 # get_vault_from_descriptor - find unique vault from vault descriptor, or bail {{{
 sub get_vault_from_descriptor {
+	my ($class, $descriptor, $source, %opts) = @_;
+	require Service::Vault::Remote;
 
-	my ($class, $descriptor, $source) = @_;
-	my $filter = $class->parse_vault_descriptor($descriptor, $source);
-	my ($alias,$url) = delete(@{$filter}{qw/alias url domain port tls/});
-
-	bail(
-		"No url specified by vault descriptor"
-	) unless $url;
-	my @matches =  $class->find(url => $url, %$filter);
-
-	# TODO: If none found, try by alias name?  Potential for mismatch though...
-
-	if (@matches > 1) {
-		my @named_matches = grep {$_->name eq $alias} @matches;
-		@matches = @named_matches if @named_matches == 1;
+	my $name = $opts{target_name} ? $class->bare_target_name($descriptor) : undef;
+	if (defined($name)) {
+		my ($target) = Service::Vault->find(name => $name);
+		bail(
+			"Safe target '#M{%s}' given by the #G{%s} was not found.\n".
+			"Run #G{safe targets} to list the known targets, or give a vault descriptor:\n".
+			"  http#Cu{s}://<domain-or-ip>#Cu{:<port>}#Cu{/<namespace>} #Cu{as <alias>} #Cu{[no-]verify} #Cu{[no-]strongbox}%s",
+			$name, $source || 'genesis.vault',
+			$name =~ /^(no-)?(verify|strongbox)$/
+				? "\n'$name' is also a descriptor clause, but a descriptor needs a URL."
+				: ''
+		) unless $target;
+		# Genesis hands a vault to safe, and to hooks, by URL, and safe will
+		# not pick between targets that share one.
+		my @shared = grep {$_->name ne $target->name} Service::Vault->find(url => $target->url);
+		bail(
+			"Safe target '#M{%s}' shares its URL #M{%s} with %s.\n".
+			"Genesis needs one safe target per URL, because it hands the vault to ".
+			"safe by URL.  Remove the other targets for that URL from ~/.saferc, ".
+			"or point them elsewhere, before re-attempting this command.",
+			$target->name, $target->url, join(', ', map {$_->name} @shared)
+		) if @shared;
+		# The name already picked exactly one target, so it is used as is.
+		# attach would only look it up again, by fields it reads a leading
+		# '$' in as an environment variable, which a target name may start
+		# with.
+		return $target->connect_and_validate();
 	}
 
-	return $matches[0] if @matches <= 1;
-
-	# Error processing
-	my ($alias_clause, $alias_msg) = ('','');
-	if ($alias) {
-		$alias_clause = ", (and none match the provided vault alias of '$alias').";
-		$alias_msg = ", or add/modify the alias of the desired target to '$alias'"
-	}
-
-	my $default = $class->default->name;
-	my $current = $ENV{GENESIS_TARGET_VAULT};
-
-	bail(
-		"\nMore than one target is specified for URL '%s'%s\n\n".
-		"        Please edit your ~/.saferc, and remove all but one of these:\n".
-		"        - %s\n".
-		"        (or alter the URLs to be unique%s)",
-		$url,$alias_clause, join("\n        - ", map {
-			$_->name eq ($current||'')
-				? "#G{".$_->name." (current)}"
-				: $_->name eq ($default||'')
-					? "#g{".$_->name." (default)}"
-					: "#y{".$_->name."}"
-		} @matches), $alias_msg
+	my $details = $class->parse_vault_descriptor($descriptor, $source);
+	return Service::Vault::Remote->attach(
+		url       => $details->{url},
+		alias     => $details->{alias},
+		tls       => $details->{tls},
+		verify    => $details->{verify},
+		namespace => $details->{namespace} // '',
+		strongbox => $details->{strongbox},
 	);
 }
 
@@ -309,9 +325,9 @@ sub parse_vault_descriptor {
 			$strongbox = $1 ? 0 : 1;
 		} elsif ($clause =~ /^(no-)?verify/) {
 			$verify = $1 ? 0 : 1;
-		} elsif ($clause =~ /^(http(s)?:\/\/([^:]*)(?::([0-9]+))?)(?:\/(.*))?$/) {
+		} elsif ($clause =~ /^(http(s)?:\/\/([^:\/]*)(?::([0-9]+))?)(?:\/(.*))?$/) {
 			$url = $1;
-			$tls = ($2||'' eq 's');
+			$tls = ($2 // '') eq 's' ? 1 : 0;
 			$domain = $3;
 			$port = $4;
 			$namespace = $5;
@@ -452,41 +468,140 @@ sub get {
 		);
 		return undef;
 	}
+	# One whole-secret read serves every caller.  These callers have always
+	# addressed a version with a trailing ^N, and taken a read that safe did
+	# not finish as an empty secret, so both stay theirs; a reader that has
+	# to tell a failure from a missing secret calls read_flattened_secret
+	# itself.
+	return $self->read_flattened_secret($path, versioned => 1, lenient => 1) // {};
+}
+
+# }}}
+# get_path - get all the keys under a given path, including subpaths; a failed read dies and nothing stored is an empty tree {{{
+sub get_path {
+	my ($self, $path) = @_;
+	# An outage read as an empty tree looks like a path with nothing in it,
+	# which once let a pipeline pull control HEAD for a predecessor whose
+	# history it could not read.  Only safe saying nothing is stored there
+	# reads as empty.
+	return $self->get_path_strict($path) // {};
+}
+# }}}
+# get_path_strict - get_path, except a path with nothing stored comes back undef {{{
+sub get_path_strict {
+	my ($self, $path) = @_;
+	$path =~ s{(^/*|/*$)}{}; # Trim preceeding and trailing / as safe doesn't honour it
+	# Decoded with bignums, as decode_export_text decodes, so an integer too
+	# large for Perl is seen as a number rather than as its digits.  When safe
+	# exited cleanly, only an unparseable payload is an error.
+	my ($data,$rc,$err) = read_json_from(
+		{allow_bignum => 1},
+		$self->query({stderr => 0, redact_output => 1, exact => 1}, 'export', $path)
+	);
+	if ($rc || $err) {
+		my ($reason) = read_failure($rc, $err);
+		return undef unless defined($reason);
+		bail_read_failure($self->{url}, $path, $reason, "export $path");
+	}
+	return $self->_unpack_path_export($path, $data);
+}
+# }}}
+# read_failure - why a safe read did not finish, or the paths safe said hold nothing {{{
+sub read_failure {
+	my ($rc, $err) = @_;
+
+	# safe names a path with nothing stored on stderr, and exits the same way
+	# for it as for an unreachable or sealed vault.  A secret whose newest
+	# version was deleted or destroyed has nothing to read either, and safe get
+	# says which version that was.  A token that can list a path but not read
+	# it gets the absent-secret line after a refusal, so a refusal anywhere in
+	# the output means the path was not read.  The paths quoted in the absent
+	# lines are left out of that scan, since an environment name can hold 403
+	# or forbidden and is not a refusal.  safe exits 1 for every error it
+	# reports, absence included (internal/cli/cli.go in safe), so any other
+	# status means safe did not finish: a safe killed by a signal leaves 128
+	# plus the signal, whether run notes the signal or the shell running safe
+	# exits with it, and whatever it said about absent paths settles nothing.
+	my $reason = ($err // '') =~ s/\s+$//r;
+	my @absent;
+	my $others = $reason =~ s{
+		no\s+secret\s+exists\s+at\s+path\s+`([^`]*)`
+		| version\s+\d+\s+of\s+secret\s+`([^`]*)`\s+has\s+been\s+(?:deleted|destroyed)
+	}{push(@absent, $1 // $2); ''}gerx;
+	my $refused = $others =~ /\b403\b|permission denied|forbidden/i;
+	return (undef, @absent) if ($rc // 0) == 1 && @absent && !$refused;
+	return (length($reason) ? $reason : "safe exited with code ".($rc // 0));
+}
+# }}}
+# bail_read_failure - stop on a read that safe did not finish, saying how to see why {{{
+sub bail_read_failure {
+	my ($url, $what, $reason, $command) = @_;
+	bail(
+		"Could not read #C{%s} from vault at #M{%s}: %s\n\n".
+		"Likely causes are that the token has no read access on that path, ".
+		"that the vault is sealed, or that the vault cannot be reached.  ".
+		"Run #C{safe %s} with the same token to see which, and ".
+		"#C{safe vault status} to check whether the vault is sealed.",
+		$what, $url, $reason, $command
+	);
+}
+# }}}
+# read_flattened_secret - read one secret whole with safe get, as the strings safe prints {{{
+sub read_flattened_secret {
+	my ($self, $path, %opts) = @_;
+
+	# safe splits a path at its last unescaped colon and reads a trailing ^N
+	# as a version, so a path holding either is escaped, backslash first,
+	# unless the caller addresses versions that way, as get always has.  An
+	# ordinary path is passed as it is, so every safe version, including
+	# those that predate the escapes, gets the same bytes it always did.
+	my $arg = !$opts{versioned} && $path =~ /[\\:^]/ ? $path =~ s/([\\:^])/\\$1/gr : $path;
+
+	# exact keeps the output as safe printed it, since trimming it drops the
+	# newline of a literal block that ends the output, and it reports a safe
+	# killed by a signal rather than reading what it printed as finished.
 	my $start = gettimeofday();
-	my ($yaml,$rc,$err) = $self->query({stderr => 0, redact_output => 1}, 'get', $path);
+	my ($yaml,$rc,$err) = $self->query({stderr => 0, redact_output => 1, exact => 1}, 'get', $arg);
 	my $values;
 	unless ($rc) {
-		# safe exited cleanly, so let the payload decide rather than stderr:
-		# a noverify target draws a TLS warning on every call, and treating
-		# that as failure discards a perfectly good read.  stderr is still
-		# the signal when safe fails without saying so in its exit code --
-		# an unparseable payload keeps the error below.  Same reasoning as
-		# read_json_from, which overrides $err for the JSON paths.
-		trace(
-			"safe wrote to stderr but exited 0; deferring to the payload: %s", $err
-		) if $err;
-		local $@;
-		eval {$values = load_yaml($yaml)};
-		$err = $@;
+		if (defined($yaml) && length($yaml)) {
+			my ($json, $yrc, $yerr) = eval {load_yaml($yaml)};
+			if (my $parse_error = $@) {
+				$err = $parse_error =~ s/\s+$//r;
+			} elsif ($yrc) {
+				$err = ($yerr // '') =~ s/\s+$//r || "its output could not be parsed as YAML";
+			} elsif (ref($json) ne 'HASH') {
+				$err = sprintf("it printed a %s rather than a map of keys", ref($json) ? lc(ref($json)) : defined($json) ? 'string' : 'empty document');
+			} else {
+				($values, $err) = ($json, undef);
+			}
+		} else {
+			$err = "safe printed nothing";
+		}
 	}
-	if ($rc || $err) {
+	# A lenient caller takes a read that safe did not finish as nothing
+	# stored, and that includes a safe that printed nothing at all, since
+	# safe has exited 0 on failures that it reported only on stderr.  Output
+	# safe did print is still checked, so a list or a string never passes
+	# for an empty secret.
+	if ($opts{lenient} && ($rc || !(defined($yaml) && length($yaml)))) {
 		debug(
-			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}:%s\nexit code: %s",
-			$path,$self->{url},$err || '',$rc
+			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}: %s\nexit code: %s",
+			$path, $self->{url}, $err // '', $rc
 		);
-		return {};
+		return undef;
 	}
-	bail(
-		"Expected #C{%s} to return a hash of key/value pairs, but got a %s",
-		$path, ref($values)
-	) unless ref($values) eq 'HASH';
+	if ($rc || defined($err)) {
+		my ($reason) = $rc ? read_failure($rc, $err) : ($err);
+		return undef unless defined($reason);
+		bail_read_failure($self->{url}, $path, $reason, "get $arg");
+	}
 	trace(
-		"Exported %s key/value pairs from #C{%s} in vault at #M{%s} in %.3f seconds",
+		"Read %s key/value pairs from #C{%s} in vault at #M{%s} in %.3f seconds",
 		scalar(CORE::keys %$values), $path, $self->{url}, gettimeofday() - $start
 	);
 	return $values;
 }
-
 # }}}
 # get_if_present - the key/value pairs at a path, undef where there are none {{{
 #
@@ -517,19 +632,10 @@ sub get_if_present {
 }
 
 # }}}
-# get_path - get all the keys under a given path, including subpaths {{{
-sub get_path {
-	my ($self, $path) = @_;
-	$path =~ s{(^/*|/*$)}{}; # Trim preceeding and trailing / as safe doesn't honour it
-	my ($data,$rc,$err) = read_json_from($self->query({stderr => 0, redact_output => 1}, 'export', $path));
-	if ($rc || $err) {
-		debug(
-			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}:%s\nexit code: %s",
-			$path,$self->{url},$err || '',$rc
-		);
-		return {};
-	}
-
+# _unpack_path_export - nest the paths in a safe export under the path it was made for {{{
+sub _unpack_path_export {
+	my ($self, $path, $data) = @_;
+	$data = flatten_export($data, $self) // {};
 	my $results = {};
 	for my $subpath (sort keys %$data) {
 		if ($subpath eq $path) {
@@ -547,6 +653,169 @@ sub get_path {
 	}
 	return $results;
 }
+# }}}
+# decode_export_text - decode safe's export text to {path => {key => value}}, keeping each value's type {{{
+sub decode_export_text {
+	my ($text) = @_;
+
+	# Without bignums, JSON::PP keeps an integer too large for Perl as its
+	# digits, which then pass for a string, so the raw text is the one place
+	# every typed value can still be told from a string.
+	my $data = do {
+		local $@;
+		my $decoded = eval {load_json($text, {allow_bignum => 1})};
+		bail(
+			"Cannot use the safe export: it is not JSON: %s",
+			($@ =~ s/\s+$//r) || 'it is empty'
+		) if $@ || !defined($text);
+		$decoded;
+	};
+	my ($export, $typed) = _unwrap_export($data);
+	return wantarray ? ($export // {}, $typed) : $export // {};
+}
+
+# }}}
+# flatten_export - reduce a decoded safe export to {path => {key => string}}, reading each typed path again whole {{{
+sub flatten_export {
+	my ($data, $vault) = @_;
+	my ($export, $typed) = _unwrap_export($data);
+
+	# Genesis never turns a typed value into text itself, since the text Perl
+	# makes of a number or a boolean is not always the text safe shows.  safe
+	# get prints every value as safe 1.25.1 and 1.26.1 export it, so a path
+	# holding one is read again whole, and every field comes from that one read
+	# so the secret is never a mix of two moments.
+	for my $path (sort CORE::keys %$typed) {
+		my $secret = $vault->read_flattened_secret($path);
+		bail(
+			"Could not read #C{%s} from vault at #M{%s}: the export showed it holding ".
+			"a value that is not a string, but it held nothing when read again with ".
+			"#C{safe get}, so it changed while Genesis was reading it.  Run the ".
+			"command again.",
+			$path, $vault->{url} // 'the vault'
+		) unless defined($secret);
+		$export->{$path} = $secret;
+	}
+	return $export;
+}
+
+# }}}
+# normalize_export - reduce a decoded safe export of any version to {path => {key => string}} {{{
+sub normalize_export {
+	my ($data) = @_;
+	my ($export, $typed) = _unwrap_export($data);
+
+	# Genesis reads every secret as a string, and the text a typed value would
+	# turn into here is not the text safe shows for it, so it is refused rather
+	# than converted.
+	for my $path (sort CORE::keys %$typed) {
+		my $key = $typed->{$path}[0];
+		bail(
+			"Cannot use the safe export of #C{%s}: its #C{%s} key holds a typed ".
+			"value, a JSON %s, not a string.  Genesis reads every secret as a ".
+			"string and cannot use it; store it as a string, or move it out of ".
+			"the path Genesis reads.",
+			$path, $key, _export_value_type($export->{$path}{$key})
+		);
+	}
+	return $export;
+}
+
+# }}}
+# _unwrap_export - reduce a decoded safe export to {path => {key => value}}, and name its typed keys {{{
+sub _unwrap_export {
+	my ($data) = @_;
+	return (undef, {}) unless defined($data);
+
+	# v1 is the bare object of path to key/value pairs that safe writes when
+	# every secret has one version of strings.
+	my ($export, %typed);
+	if (ref($data) eq 'HASH') {
+		$export = {};
+		for my $path (sort CORE::keys %$data) {
+			next unless defined($data->{$path}); # a path with no value has nothing to read
+			($export->{$path}, my $keys) = _export_pairs($path, $data->{$path});
+			$typed{$path} = $keys if @$keys;
+		}
+		return ($export, \%typed);
+	}
+
+	bail(
+		"Cannot use the safe export: it is not an object or an array, but a JSON %s.",
+		_export_value_type($data) // "string"
+	) unless ref($data) eq 'ARRAY';
+	bail(
+		"Cannot use the safe export: a versioned export is an array holding one ".
+		"export object, but this one holds %d %s.",
+		scalar(@$data), (@$data == 1 ? 'value that is not an object' : 'values')
+	) unless @$data == 1 && ref($data->[0]) eq 'HASH';
+
+	# v2 and v3 keep each secret's versions oldest first, so the last is the
+	# current one.  v3 differs only in that its values keep their JSON type.
+	my $version = $data->[0]{export_version};
+	bail(
+		"Cannot use the safe export: it is export_version %s, and Genesis reads ".
+		"only versions 1, 2, and 3.  If a newer #C{safe} wrote it, read it with ".
+		"a Genesis that knows that version.",
+		$version // '(none)'
+	) unless defined($version) && !ref($version) && $version =~ /^[23]$/;
+
+	my $secrets = $data->[0]{data} // {};
+	bail("Cannot use the safe export: its #C{data} is not an object of paths.")
+		unless ref($secrets) eq 'HASH';
+
+	$export = {};
+	for my $path (sort CORE::keys %$secrets) {
+		my $versions = ref($secrets->{$path}) eq 'HASH' ? $secrets->{$path}{versions} : undef;
+		bail(
+			"Cannot use the safe export of #C{%s}: its versions are not a list.",
+			$path
+		) unless ref($versions) eq 'ARRAY';
+
+		# A current version that is deleted or destroyed leaves the path with
+		# nothing a read returns, as safe leaves it after an import, so an older
+		# version is not read in its place.
+		my $current = $versions->[-1];
+		next unless ref($current) eq 'HASH' && !$current->{deleted} && !$current->{destroyed};
+		($export->{$path}, my $keys) = _export_pairs($path, $current->{value} // {});
+		$typed{$path} = $keys if @$keys;
+	}
+	return ($export, \%typed);
+}
+
+# }}}
+# _export_pairs - copy the key/value pairs of one exported path, and name the keys that are not strings {{{
+sub _export_pairs {
+	my ($path, $pairs) = @_;
+	bail(
+		"Cannot use the safe export of #C{%s}: it is not an object of keys, but a JSON %s.",
+		$path, _export_value_type($pairs) // 'string'
+	) unless ref($pairs) eq 'HASH';
+	return ({%$pairs}, [grep {defined(_export_value_type($pairs->{$_}))} sort CORE::keys %$pairs]);
+}
+
+# }}}
+# _export_value_type - the JSON type of a decoded value that is not a string {{{
+sub _export_value_type {
+	my ($value) = @_;
+	return 'null' unless defined($value);
+	if (my $type = ref($value)) {
+		return 'object'  if $type eq 'HASH';
+		return 'list'    if $type eq 'ARRAY';
+		return 'boolean' if JSON::PP::is_bool($value);
+		# allow_bignum decodes an integer too large for Perl, and every number
+		# with a fraction or an exponent, to one of these.
+		return 'number'  if $type eq 'Math::BigInt' || $type eq 'Math::BigFloat';
+		return lc($type);
+	}
+
+	# JSON::PP decodes a number to a scalar with no string value, which is how
+	# it tells a number from a string when it encodes one too.
+	my $flags = B::svref_2object(\$value)->FLAGS;
+	return 'number' if ($flags & (B::SVp_IOK() | B::SVp_NOK())) && !($flags & B::SVp_POK());
+	return undef;
+}
+
 # }}}
 # set - write a secret to the vault (prompts for value if not given) {{{
 sub set {
@@ -957,6 +1226,275 @@ sub needs_write_confirmation {
 }
 
 # }}}
+# kv_mount - the kv secrets engine a path is on, and which version of it {{{
+sub kv_mount {
+	my ($self, $path) = @_;
+	$path = _kv_clean_path($path);
+
+	my $known = $self->{__kv_mounts} //= {};
+	for my $mount (sort {length($b) <=> length($a)} CORE::keys %$known) {
+		return $known->{$mount} if index("$path/", $mount) == 0;
+	}
+
+	# The endpoint the vault CLI itself asks: any token with any access to
+	# the path may read it, and Vault and OpenBao both answer it.
+	my ($status, $reply, $reason) = $self->_kv_curl('GET', "sys/internal/ui/mounts/$path");
+	my $data = ref($reply) eq 'HASH' && ref($reply->{data}) eq 'HASH' ? $reply->{data} : undef;
+	if ($status >= 200 && $status < 300 && $data && defined($data->{path})) {
+		my $type = $data->{type} // '';
+		bail(
+			"#C{%s} is on a #C{%s} secrets engine in the vault at #M{%s}, mounted at ".
+			"#C{%s}, but only a kv secrets engine can hold it.\n\n".
+			"This usually means the path was mistyped, or that a mount configured for ".
+			"Genesis (an exodus or secrets mount) names the wrong engine.  Run ".
+			"#C{safe vault secrets list} to see what is mounted where.",
+			$path, $type || 'unknown', $self->{url}, $data->{path}
+		) unless $type eq 'kv' || $type eq 'generic';
+		my $options = ref($data->{options}) eq 'HASH' ? $data->{options} : {};
+		my $mount = $data->{path} =~ s{^/+}{}r;
+		$mount .= '/' unless $mount =~ m{/$};
+		return $known->{$mount} = {
+			path    => $mount,
+			type    => $type,
+			version => ($options->{version} // '1') eq '2' ? 2 : 1,
+		};
+	}
+
+	# A vault from before kv v2 does not have the endpoint, and every kv
+	# mount it has is a v1 one.
+	return {path => undef, type => 'kv', version => 1} if $status == 404;
+
+	bail(
+		"Could not tell which kv mount #C{%s} is on in the vault at #M{%s}: %s\n\n".
+		"Likely causes are that the vault is sealed or cannot be reached, or that ".
+		"the token has no access at all to that path.  Run #C{safe curl GET ".
+		"/sys/internal/ui/mounts/%s} with the same token to see the vault's answer, ".
+		"and #C{safe vault status} to check whether the vault is sealed.",
+		$path, $self->{url}, $reason, $path
+	);
+}
+
+# }}}
+# kv_read - read a whole secret, with the version a check-and-set write has to name {{{
+sub kv_read {
+	my ($self, $path) = @_;
+	$path = _kv_clean_path($path);
+	my $mount = $self->kv_mount($path);
+
+	my ($status, $reply, $reason) = $self->_kv_curl('GET', _kv_data_uri($mount, $path));
+	my $data = ref($reply) eq 'HASH' && ref($reply->{data}) eq 'HASH' ? $reply->{data} : undef;
+	if ($mount->{version} == 2) {
+		# A deleted or destroyed latest version still has a number, and still
+		# answers 404, with that number in its metadata.  A secret that was
+		# never written answers 404 with no metadata, and is version 0.
+		my $meta = $data && ref($data->{metadata}) eq 'HASH' ? $data->{metadata} : undef;
+		return {
+			data       => ref($data->{data}) eq 'HASH' ? $data->{data} : undef,
+			version    => $meta->{version} + 0,
+			kv_version => 2,
+		} if $status >= 200 && $status < 300 && $meta && defined($meta->{version});
+		return {
+			data       => undef,
+			version    => $meta && defined($meta->{version}) ? $meta->{version} + 0 : 0,
+			kv_version => 2,
+		} if $status == 404;
+	} else {
+		return {data => $data // {}, version => undef, kv_version => 1} if $status >= 200 && $status < 300;
+		return {data => undef, version => undef, kv_version => 1} if $status == 404;
+	}
+
+	bail(
+		"Could not read #C{%s} from the vault at #M{%s}: %s\n\n".
+		"Likely causes are that the vault is sealed or cannot be reached, or that ".
+		"the token has no read access on that path.  Run #C{safe get %s} with the ".
+		"same token to see which, and #C{safe vault status} to check whether the ".
+		"vault is sealed.",
+		$path, $self->{url}, $reason, $path
+	);
+}
+
+# }}}
+# kv_write - replace a whole secret, optionally only if it is still the version that was read {{{
+sub kv_write {
+	my ($self, $path, $data, %opts) = @_;
+	$path = _kv_clean_path($path);
+	my $mount = $self->kv_mount($path);
+	my $v2 = $mount->{version} == 2;
+	my $cas = $opts{cas};
+
+	bug(
+		"kv_write() was asked for a check-and-set write to #C{%s}, which is on a ".
+		"kv v1 mount, and kv v1 has no check-and-set",
+		$path
+	) if defined($cas) && !$v2;
+	bug("kv_write() was given a check-and-set version that is not a whole number: %s", $cas)
+		if defined($cas) && $cas !~ /^\d+$/;
+
+	my $payload = $v2
+		? {data => $data, (defined($cas) ? (options => {cas => $cas + 0}) : ())}
+		: $data;
+	my ($status, $reply, $reason) = $self->_kv_curl('POST', _kv_data_uri($mount, $path), $payload);
+	unless ($status >= 200 && $status < 300) {
+		return 0 if defined($cas) && $status == 400
+			&& $reason =~ /check-and-set parameter did not match/i;
+		bail(
+			"Could not write #C{%s} to the vault at #M{%s}: %s\n\n".
+			"Likely causes are that the vault is sealed or cannot be reached, or that ".
+			"the token has no create or update access on that path%s.  Run ".
+			"#C{safe vault status} to check whether the vault is sealed, and check the ".
+			"token's policies with #C{safe vault token lookup}.",
+			$path, $self->{url}, $reason,
+			$v2 ? sprintf(" (on a kv v2 mount the policy has to grant it on #C{%s})", _kv_data_uri($mount, $path)) : ''
+		);
+	}
+	return 1 unless $v2;
+
+	my $version = ref($reply) eq 'HASH' && ref($reply->{data}) eq 'HASH'
+		? $reply->{data}{version} : undef;
+	bail(
+		"Wrote #C{%s} to the vault at #M{%s}, but the vault did not say which version ".
+		"the write made, so it cannot be confirmed.\n\n".
+		"A kv v2 mount always reports the version it wrote, so this usually means ".
+		"something between Genesis and the vault (a proxy, or a different engine at ".
+		"that mount) answered instead.  Check the secret with #C{safe get %s}.",
+		$path, $self->{url}, $path
+	) unless defined($version) && $version =~ /^\d+$/;
+
+	$self->_confirm_kv_version($path, $version);
+	return $version + 0;
+}
+
+# }}}
+# kv_delete - delete a whole secret, or the latest version of one on kv v2 {{{
+sub kv_delete {
+	my ($self, $path) = @_;
+	$path = _kv_clean_path($path);
+	my $mount = $self->kv_mount($path);
+
+	my ($status, undef, $reason) = $self->_kv_curl('DELETE', _kv_data_uri($mount, $path));
+	return 1 if $status >= 200 && $status < 300;
+	bail(
+		"Could not delete #C{%s} from the vault at #M{%s}: %s\n\n".
+		"Likely causes are that the vault is sealed or cannot be reached, or that ".
+		"the token has no delete access on that path%s.  Run #C{safe vault status} ".
+		"to check whether the vault is sealed, and check the token's policies with ".
+		"#C{safe vault token lookup}.",
+		$path, $self->{url}, $reason,
+		$mount->{version} == 2 ? sprintf(" (on a kv v2 mount the policy has to grant it on #C{%s})", _kv_data_uri($mount, $path)) : ''
+	);
+}
+
+# }}}
+# _kv_curl - one kv API call through safe curl, with the status and reason it came back with {{{
+sub _kv_curl {
+	my ($self, $method, $uri, $payload) = @_;
+
+	# safe curl takes a body only as an argument, which puts it on the
+	# command line, so nothing secret goes through here.
+	#
+	# Without --data-only, every safe Genesis accepts prints the whole
+	# response, status line first.  The status line is read rather than the
+	# exit code, because safe before 1.20 exits 0 whatever the vault
+	# answered, so a refusal there looks like success to anything else.
+	my ($out, $rc, $err) = $self->query(
+		{redact_output => 1, stderr => 0},
+		'curl', $method, "/$uri",
+		defined($payload) ? (encode_json($payload)) : ()
+	);
+	my ($status, $status_text, $body) = _kv_http_response($out);
+
+	unless (defined($status)) {
+		# Nothing came back from the vault, so the request never reached it
+		# or never got an answer; safe says why on stderr.
+		$err = ($err // '') =~ s/\e\[[0-9;]*m//gr;
+		my $reason = $err =~ /\S/ ? ($err =~ s/^\s*!!\s*//r =~ s/\s+$//r =~ s/\s+/ /gr)
+			: $rc ? "safe exited with code $rc and printed no response"
+			: "safe printed no response";
+		return (0, undef, $reason);
+	}
+
+	my $reply = $body =~ /\S/ ? eval {decode_json($body)} : undef;
+	$reply = undef unless ref($reply) eq 'HASH';
+	return ($status, $reply, '') if $status >= 200 && $status < 300;
+
+	my @errors = $reply && ref($reply->{errors}) eq 'ARRAY'
+		? grep {defined($_) && /\S/} @{$reply->{errors}} : ();
+	my $reason = @errors
+		? join('; ', map {s/\s+/ /gr =~ s/^ | $//gr} @errors)
+		: "$method /$uri: $status $status_text" =~ s/\s+$//r;
+	return ($status, $reply, $reason);
+}
+
+# }}}
+# _kv_http_response - the status and body of a response as safe curl prints it {{{
+sub _kv_http_response {
+	my ($out) = @_;
+	$out = ($out // '') =~ s/^\s+//r;
+	my ($status, $text) = $out =~ m{\AHTTP/\d+(?:\.\d+)?[ \t]+(\d{3})(?:[ \t]+([^\r\n]*))?}
+		or return;
+
+	my ($head, $body) = split(/\r?\n\r?\n/, $out, 2);
+	$body //= '';
+	# Go prints a response that came chunked with its chunks, so they are
+	# joined back into the body.
+	if ($head =~ /^Transfer-Encoding:[ \t]*chunked[ \t]*\r?$/mi) {
+		my $joined = '';
+		while ($body =~ s/\A([0-9a-fA-F]+)[^\r\n]*\r?\n//) {
+			my $size = hex($1);
+			last unless $size;
+			$joined .= substr($body, 0, $size, '');
+			$body =~ s/\A\r?\n//;
+		}
+		$body = $joined;
+	}
+	return ($status + 0, $text // '', $body);
+}
+
+# }}}
+# _kv_clean_path - a secret path as the kv API wants it {{{
+sub _kv_clean_path {
+	my ($path) = @_;
+	bug("A kv secret path was not given") unless defined($path) && $path =~ /\S/;
+	bug("A kv secret path names a whole secret, not a key: %s", $path) if $path =~ /:/;
+	$path =~ s{/{2,}}{/}g;
+	$path =~ s{^/+|/+$}{}g;
+	return $path;
+}
+
+# }}}
+# _kv_data_uri - where the kv API reads and writes a secret's data {{{
+sub _kv_data_uri {
+	my ($mount, $path) = @_;
+	return $path unless $mount->{version} == 2;
+	return $mount->{path}.'data/'.substr($path, length($mount->{path}));
+}
+
+# }}}
+# _confirm_kv_version - wait until reads return a version at least as new as the one written {{{
+sub _confirm_kv_version {
+	my ($self, $path, $version) = @_;
+	return unless $self->needs_write_confirmation;
+
+	my $timeout = _confirm_timeout();
+	my $deadline = gettimeofday() + $timeout;
+	my $seen;
+	while (1) {
+		$seen = $self->kv_read($path)->{version} // 0;
+		return if $seen >= $version;
+		last if gettimeofday() >= $deadline;
+		select(undef, undef, undef, 0.25);
+	}
+	bail(
+		"Wrote version %s of #C{%s} to the vault at #M{%s}, but reads still ".
+		"returned version %s after %ss.\n\n".
+		"Whatever reads next would act on the older version.  This usually means ".
+		"the vault target is a standby node whose reads lag the leader; pointing it ".
+		"at the cluster leader avoids it.",
+		$version, $path, $self->{url}, $seen, $timeout
+	);
+}
+
+# }}}
 # token_info - return the token information for the active user token {{{
 sub token_info {
 	my $self = shift;
@@ -1022,7 +1560,13 @@ sub build_descriptor {
 	my ($self) = @_;
 	my $descriptor = $self->url;
 	$descriptor .= ("/".$self->namespace) if $self->namespace;
-	$descriptor .= " as ".$self->name;
+	# The alias is one whitespace-delimited word, and attach reads a leading
+	# '$' in it as an environment variable, so a name that would not read
+	# back as itself is left out rather than written as some other alias.
+	# It only breaks ties between targets at one URL, which Genesis cannot
+	# use anyway, since it hands vaults to safe by URL.
+	my $name = $self->name // '';
+	$descriptor .= " as $name" if $name =~ /^[^\s\$]\S*$/;
 	$descriptor .= " no-verify" if $self->tls && !$self->verify;
 	# Only a stated setting earns a clause, in either direction.  A target
 	# that never stated the flag emits nothing, so the descriptor carries
@@ -1049,7 +1593,17 @@ sub fetch_unseal_keys {
 	# Clear any previously stored keys
 	my $secrets_mount = $env->secrets_mount;
 	my $keys_path = "${secrets_mount}vault/seal/keys";
-	$self->{unseal_keys} = [values(($self->get($keys_path)//{})->%*)];
+	# key1..keyN in numeric order, then anything else by name, so every run
+	# offers the keys in the same order.
+	my $stored = $self->get($keys_path) // {};
+	my @names = sort {
+		my ($x) = $a =~ /^key([0-9]+)$/;
+		my ($y) = $b =~ /^key([0-9]+)$/;
+		(defined($x) ? 0 : 1) <=> (defined($y) ? 0 : 1)
+			|| ($x // 0) <=> ($y // 0)
+			|| $a cmp $b
+	} CORE::keys(%$stored);
+	$self->{unseal_keys} = [map {$stored->{$_}} @names];
 	my $key_count = scalar(@{$self->{unseal_keys}});
 
 	# Check if the keys path exists
@@ -1083,12 +1637,13 @@ sub unseal {
 	my $keys_input = join("\n", @keys_to_use) . "\n";
 
 	# Use the stdin option with query to pass keys to safe unseal.  safe's
-	# stderr is kept: it is where safe reports that Strongbox was off and
-	# only the targeted address was reached.
+	# stderr is kept, because it is where safe reports that Strongbox was off
+	# and only the targeted address was reached.  Its output and stderr stay
+	# out of the trace, in case safe ever echoes a key.
 	my ($out, $rc, $err);
 	my ($tries, $max_tries) = (0, 3);
 	while ($tries++ < $max_tries) {
-		($out, $rc, $err) = $self->query({stdin => $keys_input, redact_stdin => 1}, 'unseal');
+		($out, $rc, $err) = $self->query({stdin => $keys_input, redact_output => 1, redact_stderr => 1}, 'unseal');
 		if (($rc == 0) || ($out =~ /Vault is already unsealed/)) {
 			# A success here may only cover one node.  The caller checks
 			# status next, which also sees only that node, so nothing
@@ -1096,25 +1651,231 @@ sub unseal {
 			# member of a sealed one.
 			my @caveat = $self->_strongbox_unseal_caveat;
 			warning(@caveat) if @caveat;
-			return ($out, 0, '');
+			return ($self->_redact_unseal_keys($out), 0, '');
 		}
 
-		# RISK: If the unseal fails, we log all available keys for recovery purposes
-		# This is a security risk, as it exposes the unseal keys in logs, but is
-		# necessary to prevent irrevocable sealing of the vault.
+		# Seal material never goes to a trace or a log.  Anyone who has to
+		# finish by hand still has the keys at <secrets_mount>vault/seal/keys.
 		trace(
-			"[Attempt %s] Failed to unseal vault cluster at #M{%s} - all available keys (first three used):\n%s",
-			$tries, $self->{url}, join("\n", map {sprintf("#C{%s}", $_)} @{$self->{unseal_keys}})
+			"[Attempt %s] Failed to unseal vault cluster at #M{%s}",
+			$tries, $self->{url}
 		);
-		sleep(2) if $tries < $max_tries; # nothing to wait for before giving up
+		$self->_pause(2) if $tries < $max_tries; # nothing to wait for before giving up
 	}
 
-	# If we reach here, all attempts failed
-	my @reason = ($out || "Failed to unseal vault cluster");
-	unshift(@reason, $err) if $err;
+	# If we reach here, all attempts failed.  safe's own words go back to the
+	# caller, who prints them, so any key it echoed is struck out first.
+	my @reason = ($self->_redact_unseal_keys($out) || "Failed to unseal vault cluster");
+	unshift(@reason, $self->_redact_unseal_keys($err)) if $err;
 	my @caveat = $self->_strongbox_unseal_caveat;
 	push(@reason, csprintf(@caveat)) if @caveat;
 	return ('', $rc // 1, join("\n\n", @reason));
+}
+
+# }}}
+# unseal_nodes - unseal each listed node through its own sys/unseal {{{
+#
+# A Raft cluster's safe target reaches only one node, which cannot elect a
+# leader on its own, and with standby reads disabled nothing authenticated
+# works until a quorum is open.  Each node is given the fetched keys a
+# threshold's worth at a time.  A well-formed but wrong key, such as one left
+# over from a rekey, is only found out once the threshold is reached, when
+# the node throws the whole round away, so the next combination of keys is
+# tried after a failed one.  Keys go to curl on stdin and never appear in an
+# argument, a trace, or a result.
+#
+# An optional leading hashref carries a deadline, past which no request
+# starts and against which every request is capped, and a record of the
+# rounds that already failed on each node, so a later pass never repeats
+# them.  Returns one {address, unsealed, message} hashref per node.
+sub unseal_nodes {
+	my $self = shift;
+	my $opts = CORE::ref($_[0]) eq 'HASH' ? shift : {};
+	my @nodes = @_;
+	my @keys = @{$self->{unseal_keys} // []};
+	my $failed = $opts->{failed_rounds} // {};
+
+	# One request to a node, capped at the time left before the deadline.
+	# Under a tenth of a second counts as no time at all, because curl reads
+	# a limit that rounds to zero as no limit.
+	my $ask = sub {
+		my ($node, $method, $path, $payload) = @_;
+		my $time = 10;
+		if (defined($opts->{deadline})) {
+			$time = min($time, $opts->{deadline} - $self->_now);
+			return (undef, 'not reached before the time allowed ran out') if $time < 0.1;
+		}
+		return $self->_node_request($node, $method, $path, $payload, $time);
+	};
+
+	my @results;
+	for my $node (@nodes) {
+		my $result = {address => $node, unsealed => 0};
+		push @results, $result;
+
+		my ($state, $problem) = $ask->($node, 'GET', 'sys/seal-status');
+		unless ($state && exists($state->{sealed})) {
+			$result->{message} = $problem // 'unreachable';
+			next;
+		}
+		unless ($state->{sealed}) {
+			@$result{qw/unsealed message/} = (1, 'already unsealed');
+			next;
+		}
+		unless (@keys) {
+			$result->{message} = 'sealed, and no unseal keys were fetched';
+			next;
+		}
+		my $threshold = ($state->{t} // '') =~ /^[1-9][0-9]*$/ ? $state->{t} : 3;
+		if ($threshold > @keys) {
+			$result->{message} = sprintf(
+				'sealed, and it needs %d unseal keys where only %d were fetched',
+				$threshold, scalar(@keys)
+			);
+			next;
+		}
+
+		my $progress = $state->{progress};
+		my ($opened, $failure, $cut_short);
+		for my $round (_combinations($threshold, 0 .. $#keys)) {
+			my $id = join(',', @$round);
+			next if $failed->{$node}{$id};
+
+			# Progress this round did not make belongs to someone else, such as
+			# an operator unsealing by hand, or to an earlier round of ours that
+			# a malformed key cut short.  Mixing it into this round would spoil
+			# the round, so it is cleared, but only now that a round is about to
+			# be submitted.
+			if (!defined($progress) || $progress > 0) {
+				my ($reset, $why) = $ask->($node, 'PUT', 'sys/unseal', {reset => JSON::PP::true});
+				unless ($reset && exists($reset->{sealed}) && !($reset->{progress} // 0)) {
+					$failure = $why // 'would not reset its unseal progress, so no keys were sent to it';
+					last;
+				}
+				$progress = 0;
+			}
+
+			my ($reply, $why);
+			my $sent = 0;
+			for my $index (@$round) {
+				($reply, $why) = $ask->($node, 'PUT', 'sys/unseal', {key => $keys[$index]});
+				$sent++;
+				last unless $reply && exists($reply->{sealed}) && $reply->{sealed};
+			}
+			unless ($reply) {
+				$failure = $why // 'stopped answering while it was being unsealed';
+				last;
+			}
+			if (exists($reply->{sealed}) && !$reply->{sealed}) {
+				$opened = 1;
+				last;
+			}
+
+			# Only a round the node judged in full is known to be wrong.  One cut
+			# short by an error, such as a new Raft node that is not ready yet,
+			# says nothing about its keys, so a later pass may send it again.
+			if ($sent == @$round) {
+				$failed->{$node}{$id} = 1;
+			} else {
+				$cut_short++;
+			}
+			$progress = $reply->{progress};
+		}
+		unless ($opened || $failure) {
+			($state, $problem) = $ask->($node, 'GET', 'sys/seal-status');
+			$opened = $state && exists($state->{sealed}) && !$state->{sealed};
+			$failure = $problem unless $state;
+		}
+		@$result{qw/unsealed message/} = $opened
+			? (1, 'unsealed')
+			: (0, $failure // ($cut_short
+				? 'still sealed, and it refused keys before a round was complete, so it will be tried again'
+				: 'still sealed after every combination of unseal keys was tried'));
+	}
+	return @results;
+}
+
+# }}}
+# unseal_cluster - unseal a Raft cluster and wait for it to elect a leader {{{
+#
+# Everything here happens within $timeout seconds of wall-clock time.  No
+# request starts after the deadline, and each one is capped at the time left.
+# Nodes that are still starting when first asked are asked again every few
+# seconds until a quorum is open, and a round of keys that failed on a node
+# is never sent to it again.  With a quorum, this waits for an active node
+# and then, if time remains, gives any node that is still closed one more
+# try.  Without a quorum no leader can be elected, so it does not wait for
+# one.  Returns a hashref with the per-node results, the active node's
+# address (undef when none emerged), the number of open nodes, and the
+# quorum size.
+sub unseal_cluster {
+	my ($self, $timeout, @nodes) = @_;
+	my $pass = {deadline => $self->_now + $timeout, failed_rounds => {}};
+	my $quorum = int(scalar(@nodes) / 2) + 1;
+	my $left = sub {$pass->{deadline} - $self->_now};
+
+	# A bound of zero still makes one full pass, with each request allowed its
+	# usual time, so that setting it to zero means "do not wait" rather than
+	# "do nothing".
+	my %result = map {$_->{address} => $_}
+		$self->unseal_nodes($timeout > 0 ? $pass : {failed_rounds => $pass->{failed_rounds}}, @nodes);
+	my $open = sub {scalar(grep {$result{$_}{unsealed}} @nodes)};
+	my $closed = sub {grep {!$result{$_}{unsealed}} @nodes};
+
+	while ($open->() < $quorum && $left->() > 0) {
+		my $wait = max(0, min(3, $left->()));
+		$self->_pause($wait) if $wait > 0;
+		last if $left->() <= 0;
+		$result{$_->{address}} = $_ for $self->unseal_nodes($pass, $closed->());
+	}
+
+	my $active;
+	if ($open->() >= $quorum) {
+		$active = $self->wait_for_active_node(max(0, $left->()), @nodes);
+		my @late = $closed->();
+		$result{$_->{address}} = $_ for (@late && $left->() > 0 ? $self->unseal_nodes($pass, @late) : ());
+	}
+
+	return {
+		nodes  => [map {$result{$_}} @nodes],
+		active => $active,
+		open   => $open->(),
+		quorum => $quorum,
+	};
+}
+
+# }}}
+# wait_for_active_node - wait, within a bound, for a cluster to elect a leader {{{
+#
+# Unsealing a quorum is not the end of it, because a Raft cluster then has to
+# elect an active node before an authenticated request can succeed.  Asks
+# each node's unauthenticated sys/health every few seconds until $timeout
+# seconds of wall-clock time have passed.  Each request is capped at the time
+# that remains, so a node that never answers cannot stretch the wait.  Every
+# node is asked at least once, even when $timeout is zero.  Returns the active
+# node's address, or undef when none emerged.
+sub wait_for_active_node {
+	my ($self, $timeout, @nodes) = @_;
+	my $deadline = $self->_now + $timeout;
+	my $interval = 3;
+	my $first_round = 1;
+	while (1) {
+		for my $node (@nodes) {
+			my $left = $deadline - $self->_now;
+			return undef if $left <= 0 && !$first_round;
+			my $health = $self->_node_request(
+				$node, 'GET', 'sys/health', undef, max(1, min(10, $left))
+			);
+			return $node
+				if $health && exists($health->{standby})
+				&& !$health->{sealed} && !$health->{standby};
+		}
+		$first_round = 0;
+		my $left = $deadline - $self->_now;
+		last if $left <= 0;
+		$self->_pause(min($interval, $left));
+	}
+	return undef;
 }
 
 # }}}
@@ -1139,10 +1900,143 @@ sub _strongbox_unseal_caveat {
 }
 
 # }}}
+# _node_request - one unseal-related API call to a single node {{{
+#
+# $node is an address with an optional port, as in 10.0.0.5:8200 or
+# [fd00::5]:8200, and a missing port means the target's.  The request goes to
+# the target's own URL, and --connect-to sends the connection to the node, so
+# TLS is verified against the name safe verifies, and -k is passed only when
+# the target skips verification.  The rule leaves its first host empty, which
+# matches whatever curl makes of the URL's host, so a target written in a
+# non-canonical form still reaches the node rather than itself.  -q comes
+# first so that no curlrc can add a trace or a key log, and CURL_HOME and
+# SSLKEYLOGFILE are cleared for the same reason.  A $payload goes to curl as
+# a JSON body on stdin, and the reply is kept out of the trace.  $max_time
+# caps the whole request in seconds.  Returns the decoded reply, or undef
+# when the node did not answer with JSON; in list context, a second value
+# says why not, naming the node when its certificate fails verification.
+sub _node_request {
+	my ($self, $node, $method, $path, $payload, $max_time) = @_;
+	my $give = sub {wantarray ? @_ : $_[0]};
+
+	my ($scheme, $host, $port) = _split_url($self->url);
+	return $give->(undef, 'the target is not an http or https URL') unless $scheme;
+	my ($address, $node_port) = $node =~ /^\[([^\]]+)\](?::([0-9]+))?$/
+		? ($1, $2)
+		: $node =~ /^([^:]+)(?::([0-9]+))?$/ ? ($1, $2) : ($node, undef);
+	$node_port ||= $port;
+	my $bracket = sub {$_[0] =~ /:/ ? "[$_[0]]" : $_[0]};
+
+	# curl takes a limit that rounds to zero as no limit at all, so every
+	# limit is rounded up to the next tenth of a second, and never below one.
+	$max_time = 10 unless defined($max_time) && $max_time > 0;
+	my $tenths = sub {sprintf('%.1f', max(1, POSIX::ceil($_[0] * 10 - 1e-9)) / 10)};
+	my @args = (
+		'-q', '-s',
+		'--connect-timeout', $tenths->(min(5, $max_time)),
+		'-m', $tenths->($max_time),
+		'-X', $method,
+		'--connect-to', join(':', '', $port, $bracket->($address), $node_port),
+	);
+	push @args, '-k' unless $self->verify;
+
+	my $opts = {
+		stderr => 0,
+		redact_output => 1,
+		env => {CURL_HOME => undef, SSLKEYLOGFILE => undef},
+	};
+	if (defined($payload)) {
+		$opts->{stdin} = encode_json($payload);
+		push @args, '-H', 'Content-Type: application/json', '--data-binary', '@-';
+	}
+
+	my ($out, $rc) = run($opts, 'curl', @args, sprintf(
+		'%s://%s:%s/v1/%s', $scheme, $bracket->($host), $port, $path
+	));
+	if ($rc) {
+		# Verification stays on, and fails closed.  Exit 35 is any failed
+		# handshake, which includes a node still starting that resets the
+		# connection, so it is worded more loosely than the exits that can
+		# only mean the certificate did not check out.
+		return $give->(undef, sprintf(
+			'the TLS handshake with %s failed, which can mean its certificate does '.
+			'not match the target name %s or that the node is still starting (curl exit %d)',
+			$node, $host, $rc
+		)) if $rc == 35;
+		return $give->(undef, sprintf(
+			'TLS verification failed: the certificate that %s presented does not '.
+			'verify against the target name %s (curl exit %d)',
+			$node, $host, $rc
+		)) if grep {$rc == $_} (51, 58, 60);
+		return $give->(undef, $rc == 28
+			? 'unreachable (timed out)'
+			: sprintf('unreachable (curl exit %d)', $rc));
+	}
+	return $give->(undef, 'unreachable (no answer)') unless $out;
+	my $reply = eval {decode_json($out)};
+	return $give->(undef, 'answered, but not with JSON') unless CORE::ref($reply) eq 'HASH';
+	return $give->($reply, undef);
+}
+
+# }}}
+# _redact_unseal_keys - strike any fetched unseal key out of a message {{{
+sub _redact_unseal_keys {
+	my ($self, $text) = @_;
+	return $text unless defined($text);
+	for my $key (grep {defined($_) && length($_)} @{$self->{unseal_keys} // []}) {
+		$text =~ s/\Q$key\E/<redacted>/g;
+	}
+	return $text;
+}
+
+# }}}
+# _now - the current time in seconds; a seam for tests {{{
+sub _now {
+	return scalar(gettimeofday());
+}
+
+# }}}
+# _pause - sleep between attempts; a seam for tests {{{
+sub _pause {
+	Time::HiRes::sleep($_[1]);
+}
+
 # }}}
 
 ### Private helper functions {{{
 
+# _split_url - scheme, bare host, and port of a vault URL {{{
+# The port defaults by scheme, and an IPv6 host loses its brackets.  Returns
+# the empty list for anything that is not an http or https URL.
+sub _split_url {
+	my ($url) = @_;
+	return () unless ($url // '') =~ m{^(https?)://(?:\[([^\]]+)\]|([^:/\[\]]+))(?::([0-9]+))?(?:/|$)};
+	return ($1, $2 // $3, $4 || ($1 eq 'https' ? 443 : 80));
+}
+
+# }}}
+# _combinations - every way to choose $size items from a list, in order {{{
+# Lexicographic by position, so the first combination is the first $size
+# items.  Stops at 64 combinations, which covers every choice of 3 from 8.
+sub _combinations {
+	my ($size, @items) = @_;
+	my @found;
+	my $walk;
+	$walk = sub {
+		my ($from, @picked) = @_;
+		return if @found >= 64;
+		return push(@found, [@picked]) if @picked == $size;
+		for my $i ($from .. $#items) {
+			last if @items - $i < $size - @picked;
+			$walk->($i + 1, @picked, $items[$i]);
+		}
+	};
+	$walk->(0);
+	undef $walk;
+	return @found;
+}
+
+# }}}
 # _target_is_url - determine if target is in valid URL form {{{
 sub _target_is_url {
 	my $target = lc(shift);

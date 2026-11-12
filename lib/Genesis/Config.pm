@@ -2,7 +2,7 @@ package Genesis::Config;
 use strict;
 use warnings;
 
-use Genesis qw/bail bug debug info struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff priority_merge flatten unflatten without_backtrace/;
+use Genesis qw/bail bug debug info warning struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff priority_merge flatten unflatten without_backtrace/;
 use Genesis::Term qw/bullet decolorize/;
 use Genesis::Exit qw/CONFIG/;
 
@@ -993,13 +993,20 @@ sub show_diff {
 	my ($self, $other) = @_;
 	$other ||= Genesis::Config->new($self->{path});
 
-	# Use Genesis::spruce_diff to compare configurations
-	my ($diff) = spruce_diff( # a list: the diff, then its code and errors
+	# spruce_diff returns a list, and the exit code is what says whether the
+	# two differ.  spruce exits 2 or more when it cannot compare them; this
+	# comparison is only informational, so that is a warning, not a failure.
+	my ($diff, $rc) = spruce_diff(
 		{object => $other->_contents, label => 'saved'},
 		{object => $self->_contents, label => 'current'}
 	);
 
-	if ($diff) {
+	if ($rc > 1) {
+		warning(
+			"Could not compare the existing and updated configuration:\n%s",
+			$diff || "spruce diff exited $rc with no output"
+		);
+	} elsif ($rc) {
 		info("Differences between existing and updated configuration:\n%s", $diff);
 	} else {
 		info("No differences found between existing and updated configuration");

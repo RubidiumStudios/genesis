@@ -130,6 +130,48 @@ subtest 'Phase 1: Pure methods' => sub {
 		is($ch->_full_path('myvar'), '/test-bosh/myvar', 'simple relative name');
 	};
 
+	subtest '_full_path() — one slash between the base and the name' => sub {
+		# from_bosh sets a root base when the exodus names none
+		my $ch = make_credhub(base => '/');
+		is($ch->_full_path('genesis-entombed/x'), '/genesis-entombed/x', 'a root base joins with one slash');
+		is($ch->_full_path('/abs/name'), '/abs/name', 'an absolute name is unchanged under a root base');
+		is($ch->_full_path(''), '/', 'an empty name returns the raw root base');
+
+		is(make_credhub(base => '/a/b')->_full_path('genesis-entombed/x'), '/a/b/genesis-entombed/x',
+			'a nested base joins with one slash');
+		is(make_credhub(base => '/a/b/')->_full_path('genesis-entombed/x'), '/a/b/genesis-entombed/x',
+			'and so does a nested base with a trailing slash');
+		is(make_credhub(base => '/a/b/')->_full_path(''), '/a/b/', 'an empty name returns the raw base as written');
+	};
+
+	subtest '_full_path() — every caller sends the joined name' => sub {
+		my $ch = make_credhub(base => '/');
+		my @names;
+
+		no warnings 'redefine';
+		local *Service::Credhub::run = sub {
+			shift;
+			my @cmd = @_;
+			for my $i (0 .. $#cmd - 1) {
+				push @names, $cmd[$i+1] if !ref($cmd[$i]) && $cmd[$i] =~ /^(?:-n|--name|--path)$/;
+			}
+			return ($cmd[1] eq 'find'
+				? encode_json({credentials => []})
+				: encode_json({id => 'cred-id', value => 'v'}), 0, '');
+		};
+		use warnings 'redefine';
+
+		$ch->data('genesis-entombed/x');
+		$ch->set('genesis-entombed/x', 'v');
+		$ch->delete('genesis-entombed/x');
+		$ch->delete_all('genesis-entombed/');
+		$ch->paths('genesis-entombed/');
+		is_deeply(\@names, [
+			'/genesis-entombed/x', '/genesis-entombed/x', '/genesis-entombed/x',
+			'/genesis-entombed/', '/genesis-entombed/',
+		], 'data, set, delete, delete_all, and paths each send one slash');
+	};
+
 	subtest 'keys() stub' => sub {
 		my $ch = make_credhub();
 

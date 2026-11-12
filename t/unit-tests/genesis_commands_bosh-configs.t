@@ -18,6 +18,7 @@ use JSON::PP;
 
 use Genesis;
 use Genesis::Commands::Bosh;
+use Service::BOSH::Director;
 
 $ENV{NOCOLOR} = 1;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
@@ -29,13 +30,31 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 my @director_calls; # what the actions asked the director (and its vault) to do
 my @hook_calls;     # what the actions asked the kit hooks to do
 
-my $vault = mock "Mock::BoshConfigs::Vault" => {
-	set_path => sub {
-		my ($self, @args) = @_;
-		push @director_calls, ['set_path', @args];
-		return 1;
-	},
-};
+my $stored_claims = {}; # what the network record in exodus holds, as the vault reads it; undef when none was written
+my $claims_read_error;  # when set, the vault fails every read of the network record with this
+
+# make_vault - a vault mock that reads and writes the shared network record.
+# Every call is recorded with the vault's tag as its last element, so a test
+# can tell the environment's vault from each director's own.
+my $vault_seq = 0;
+sub make_vault {
+	my ($tag) = @_;
+	$vault_seq++;
+	return mock "Mock::BoshConfigs::Vault$vault_seq" => {
+		get_path_strict => sub {
+			my ($self, $path) = @_;
+			push @director_calls, ['get_path_strict', $path, $tag];
+			die $claims_read_error if $claims_read_error;
+			return $stored_claims;
+		},
+		set_path => sub {
+			my ($self, @args) = @_;
+			push @director_calls, ['set_path', @args, $tag];
+			return 1;
+		},
+	};
+}
+my $vault = make_vault('env');
 
 # make_director - a director mock over a `bosh configs` style listing
 # ($configs is type => name => {current, entries}) and a map of
@@ -45,6 +64,7 @@ sub make_director {
 	my ($alias, $configs, %overrides) = @_;
 	my $contents = delete($overrides{contents}) // {};
 	my $locked = 0; # the network claims lock, held by this process once acquired
+	my $own_vault = make_vault("director:$alias"); # a director's vault is its own, not the environment's
 	$director_seq++;
 	return mock "Mock::BoshConfigs::Director$director_seq" => {
 		alias   => $alias,
@@ -71,8 +91,13 @@ sub make_director {
 		acquire_network_lock => sub { push @director_calls, ['acquire_network_lock', $alias]; $locked = 1 },
 		network_locked_by_me => sub { $locked },
 		clear_network_lock   => sub { push @director_calls, ['clear_network_lock', $alias]; $locked = 0; 1 },
+		# The real ones, which work through the calls above
+		ensure_network_lock_held => \&Service::BOSH::Director::ensure_network_lock_held,
+		_refuse_legacy_network_lock => sub { 1 },
+		release_network_lock     => \&Service::BOSH::Director::release_network_lock,
+		network_lock_path    => "secret/exodus/$alias/bosh/network-claim-lock",
 		exodus_path          => "secret/exodus/$alias/bosh",
-		vault                => sub { $vault },
+		vault                => sub { $own_vault },
 		%overrides,
 	};
 }
@@ -105,6 +130,7 @@ sub make_env {
 		can_build_cloud_configs => 1,
 		kit                     => $kit,
 		notify                  => sub { 1 },
+		get_call_path_with_env  => sub { 'genesis '.$_[0]->name },
 		has_hook => sub {
 			my ($self, $hook) = @_;
 			return $hooks->{$hook} ? 1 : 0;
@@ -144,6 +170,16 @@ sub plain_diff {
 	my ($first, $second) = @_;
 	return ('', 0, '') if $first->{content} eq $second->{content};
 	return ("--- $first->{label}\n+++ $second->{label}\n", 1, '');
+}
+
+# broken_diff - plain_diff, except that synthesized content holding BROKEN
+# makes spruce fail the way it does on YAML it cannot parse, with rc 2 and
+# its error as the output.
+sub broken_diff {
+	my ($first, $second) = @_;
+	return ("unable to parse data from $second->{label}: yaml: line 1: did not find expected node content", 2, undef)
+		if $second->{content} =~ /BROKEN/;
+	return plain_diff(@_);
 }
 
 # ---------------------------------------------------------------------------
@@ -228,6 +264,26 @@ subtest '_bosh_configs_status - identical, different, missing, unsynthesized' =>
 		'undefined content is unsynthesized');
 };
 
+subtest '_bosh_configs_status - a spruce failure is an error, not a difference' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&broken_diff;
+	my $director = make_director('parent',
+		{cloud => {'test-env.cf' => entry(3)}},
+		contents => {'cloud|test-env.cf' => "azs:\n- name: z1\n"},
+	);
+
+	my $broken = {type => 'cloud', name => 'test-env.cf', bosh => $director, content => "azs: [BROKEN\n"};
+	is(Genesis::Commands::Bosh::_bosh_configs_status($broken), 'error',
+		'a config spruce cannot compare has the error status');
+	like($broken->{diff}, qr/unable to parse data from synthesized/,
+		'spruce\'s output is kept as the diff');
+	is(Genesis::Commands::Bosh::_bosh_configs_status_label($broken), '#R{could not compare}',
+		'the summary label says the comparison failed');
+	isnt(Genesis::Commands::Bosh::_bosh_configs_status_label($broken), '#R{unknown}',
+		'the error status has a label of its own');
+};
+
 # ---------------------------------------------------------------------------
 # summary
 # ---------------------------------------------------------------------------
@@ -268,6 +324,24 @@ subtest 'bosh_configs_summary - one row per provided config with its director st
 	my ($collect) = grep {$_->[0] eq 'runtime-config'} @hook_calls;
 	ok($collect && $collect->[1]{collect},
 		'runtime configs were synthesized through the hook in collect mode');
+};
+
+subtest 'bosh_configs_summary - a config spruce cannot compare is not reported different' => sub {
+	plan tests => 3;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&broken_diff;
+	my $director = make_director('parent',
+		{cloud => {'test-env.cf' => entry(3)}},
+		contents => {'cloud|test-env.cf' => "azs: []\n"},
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: [BROKEN\n");
+
+	my ($out, $err) = output_from { Genesis::Commands::Bosh::bosh_configs_summary($env, $director) };
+	my $all = $out.$err;
+	like($all, qr/^.*cloud.*test-env\.cf\b.*parent.*could not compare/m,
+		'the row says the comparison failed');
+	unlike($all, qr/\b(different|identical)\b/, 'the row says neither different nor identical');
+	unlike($all, qr/unknown/, 'the row does not fall back to unknown');
 };
 
 subtest 'bosh_configs_summary - nothing provided' => sub {
@@ -359,6 +433,24 @@ subtest 'bosh_configs_compare - reports identical, different, and missing' => su
 	like($all, qr/cloud config test-env\.cf on parent is identical/, 'identical config reported');
 	like($all, qr/runtime config test-env\.cf\.dns on parent is different/, 'different config reported with a diff');
 	like($all, qr/runtime config test-env\.cf\.ops on parent is missing.*addons: \[\]/s, 'missing config reported with its content');
+};
+
+subtest 'bosh_configs_compare - a spruce failure is reported as an error with its output' => sub {
+	plan tests => 3;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&broken_diff;
+	my $director = make_director('parent',
+		{cloud => {'test-env.cf' => entry(3)}},
+		contents => {'cloud|test-env.cf' => "azs: []\n"},
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: [BROKEN\n");
+
+	my ($out, $err) = output_from { Genesis::Commands::Bosh::bosh_configs_compare($env, $director) };
+	my $all = $out.$err;
+	like($all, qr/cloud config test-env\.cf on parent could not be compared with the director's copy/,
+		'the config is reported as not compared');
+	like($all, qr/unable to parse data from synthesized/, 'spruce\'s output is shown');
+	unlike($all, qr/\b(different|identical)\b/, 'it is not reported as different or identical');
 };
 
 # ---------------------------------------------------------------------------
@@ -494,6 +586,48 @@ subtest 'bosh_configs_upload - cloud under the network lock, runtime through the
 		'only the changed build is requested; the identical one is excluded');
 };
 
+subtest 'bosh_configs_upload - a config spruce cannot compare is never uploaded' => sub {
+	plan tests => 6;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&broken_diff;
+	my $director = make_director('parent',
+		{
+			cloud   => {'test-env.cf' => entry(3)},
+			runtime => {'test-env.cf.dns' => entry(7), 'test-env.cf.ops' => entry(8)},
+		},
+		contents => {
+			'cloud|test-env.cf'       => "azs: []\n",
+			'runtime|test-env.cf.dns' => "releases: []\n",
+			'runtime|test-env.cf.ops' => "addons: []\n",
+		},
+	);
+	my $env = make_env(
+		hooks       => {'cloud-config' => 1, 'runtime-config' => 1},
+		cloud       => "azs: [BROKEN\n",
+		network_map => {subnets => {'ocfp-0' => {claims => {}}}},
+		runtime     => [
+			{build => 'dns', name => 'test-env.cf.dns', description => 'Dns', content => "releases: [BROKEN\n"},
+			{build => 'ops', name => 'test-env.cf.ops', description => 'Ops', content => "addons:\n- name: ops\n"},
+		],
+		lookups     => {'bosh-configs.runtime' => {dns => {}, ops => {}}},
+	);
+
+	@director_calls = ();
+	@hook_calls = ();
+	my ($out, $err);
+	throws_ok {
+		($out, $err) = output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1) }
+	} qr/2 bosh configs could not be compared with the director's copies, so they were not uploaded/,
+		'the upload fails and counts the configs it could not compare';
+	ok(!grep({$_->[0] eq 'upload_config'} @director_calls), 'the cloud config spruce could not compare is not uploaded');
+	ok(!grep({$_->[0] eq 'set_path'} @director_calls), 'and no network map is submitted for it');
+	my ($runtime_upload) = grep {$_->[0] eq 'runtime-config' && !$_->[1]{collect}} @hook_calls;
+	ok($runtime_upload, 'the runtime config that compared cleanly is still uploaded');
+	is_deeply($runtime_upload->[1]{args}, {dns => JSON::PP::false, ops => {}},
+		'the runtime config spruce could not compare is excluded from the upload');
+	ok(grep({$_->[0] eq 'clear_network_lock'} @director_calls), 'the network claims lock is released');
+};
+
 subtest 'bosh_configs_upload - --name on a runtime config leaves the network lock alone' => sub {
 	plan tests => 3;
 	no warnings 'redefine';
@@ -613,6 +747,761 @@ subtest 'bosh_configs_upload - the network claims lock is released on a signal' 
 		ok(grep({$_ eq 'clear_network_lock'} @seen), "$signal: and released on the way out");
 		ok(!$director->network_locked_by_me, "$signal: so no lock of ours is left behind");
 	}
+};
+
+# ---------------------------------------------------------------------------
+# a director's own cloud config
+# ---------------------------------------------------------------------------
+# A director environment owns a second cloud config, <env>.<type>.director,
+# which the kit builds with the director-purpose cloud-config hook and which
+# lives on the director itself.  Its network map is the director's own claims
+# record in exodus, so the upload holds that director's network claims lock
+# while the hook reads the claims and until the record is written back.
+
+# make_director_env - a director environment whose kit honours the hook
+# purpose the way Genesis::Kit::has_hook does.  The hook and every director
+# call land in @director_calls as well, so a subtest can check their order.
+sub make_director_env {
+	my (%o) = @_;
+	my $self_bosh = $o{self_bosh};
+	my $parent    = $o{parent};
+	my $hooks     = {'cloud-config' => 1, 'cloud-config-director' => 1, %{$o{hooks} // {}}};
+	my $run_hook  = $o{run_hook} // sub {
+		my ($s, $h, %p) = @_;
+		return [] if $h eq 'runtime-config';
+		return ($p{purpose} ? "director: yes\n" : "parent: yes\n", {subnets => {}});
+	};
+	return make_env(
+		name => 'lab-ocf', type => 'bosh', bosh_config_name => 'lab-ocf.bosh',
+		is_bosh_director => 1, use_create_env => $o{create_env} ? 1 : 0,
+		exodus_base => 'secret/exodus/lab-ocf/bosh', vault => $o{vault} // $vault,
+		has_hook => sub {
+			my ($s, $h, %p) = @_;
+			$h = "cloud-config-$p{purpose}" if $h eq 'cloud-config' && $p{purpose};
+			return $hooks->{$h} ? 1 : 0;
+		},
+		run_hook => sub {
+			my ($s, $h, %p) = @_;
+			push @hook_calls, [$h, \%p];
+			push @director_calls, ['run_hook', $h, $p{purpose} // ''];
+			return $run_hook->(@_);
+		},
+		get_target_bosh => sub {
+			my $s = shift;
+			my $t = ref($_[0]) eq 'HASH' ? $_[0] : {@_};
+			return ($t->{self} || $s->use_create_env) ? $self_bosh : $parent;
+		},
+		%{$o{overrides} // {}},
+	);
+}
+
+# call_index - the position of the first recorded director call matching
+# the given leading fields, or undef
+sub call_index {
+	my (@want) = @_;
+	CALL: for my $i (0..$#director_calls) {
+		for my $j (0..$#want) {
+			next CALL unless defined($director_calls[$i][$j]) && $director_calls[$i][$j] eq $want[$j];
+		}
+		return $i;
+	}
+	return undef;
+}
+
+subtest 'director config - a director environment provides its own director cloud config' => sub {
+	plan tests => 5;
+	@hook_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $parent    = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	my ($configs) = Genesis::Commands::Bosh::_bosh_configs_provided($env, $parent, type => 'cloud');
+	my ($dir) = grep { $_->{name} eq 'lab-ocf.bosh.director' } @$configs;
+	ok($dir, 'the director config is in the list');
+	is($dir && $dir->{bosh}->alias, 'lab-ocf', 'it targets the director itself');
+	ok(grep({ $_->[0] eq 'cloud-config' && ($_->[1]{purpose} // '') eq 'director' } @hook_calls), 'it ran the director-purpose hook');
+	is($dir && $dir->{exodus_path}, 'secret/exodus/lab-ocf/bosh/network',
+		'its network map belongs in the director\'s own exodus network record');
+	my ($parent_config) = grep { $_->{name} eq 'lab-ocf.bosh' } @$configs;
+	is($parent_config && $parent_config->{bosh}->alias, 'lab-mgmt',
+		'the parent-side cloud config is still provided, on the deploying director');
+};
+
+subtest 'director config - none for a non-director, and a note when the kit has no director hook' => sub {
+	plan tests => 5;
+	my $parent = make_director('lab-mgmt', {});
+
+	@hook_calls = ();
+	my $plain = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: []\n");
+	my ($configs) = Genesis::Commands::Bosh::_bosh_configs_provided($plain, $parent, type => 'cloud');
+	ok(!grep({ $_->{name} =~ /\.director$/ } @$configs), 'an environment that is not a director gets no director config');
+	ok(!grep({ ($_->[1]{purpose} // '') eq 'director' } @hook_calls), 'and no director-purpose hook runs for it');
+
+	@hook_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent, hooks => {'cloud-config-director' => 0});
+	my ($dconfigs, $notes) = Genesis::Commands::Bosh::_bosh_configs_provided($env, $parent, type => 'cloud');
+	ok(!grep({ $_->{name} eq 'lab-ocf.bosh.director' } @$dconfigs), 'a director whose kit has no director hook gets no director config');
+	ok(grep({ /lab-ocf\.bosh\.director/ && /cloud-config-director/ } @$notes), 'and a note says the kit has no director hook')
+		or diag explain $notes;
+	ok(!grep({ ($_->[1]{purpose} // '') eq 'director' } @hook_calls), 'and no director-purpose hook runs');
+};
+
+subtest 'director config - --name selects only the director config' => sub {
+	plan tests => 4;
+	@hook_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $parent    = make_director('lab-mgmt', {});
+	my $env = make_director_env(
+		self_bosh => $self_bosh, parent => $parent,
+		hooks => {'runtime-config' => 1},
+	);
+	my ($configs) = Genesis::Commands::Bosh::_bosh_configs_provided($env, $parent, name => 'lab-ocf.bosh.director');
+	is(scalar(@$configs), 1, 'one config is selected');
+	is($configs->[0]{name}, 'lab-ocf.bosh.director', 'and it is the director config');
+	is(scalar(@hook_calls), 1, 'only one hook runs');
+	is_deeply([$hook_calls[0][0], $hook_calls[0][1]{purpose}], ['cloud-config', 'director'],
+		'and it is the director-purpose cloud-config hook');
+};
+
+subtest 'director config - upload locks the director, writes its own exodus record, and releases the lock' => sub {
+	plan tests => 10;
+	@director_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $parent    = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	output_from {
+		Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+	};
+
+	my $acquire = call_index('acquire_network_lock', 'lab-ocf');
+	my $hook    = call_index('run_hook', 'cloud-config', 'director');
+	my $upload  = call_index('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director');
+	my $claims  = call_index('set_path');
+	my $release = call_index('clear_network_lock', 'lab-ocf');
+	ok(defined $acquire && defined $hook && $acquire < $hook,
+		'the director\'s lock is taken before the director-purpose hook reads the claims')
+		or diag explain \@director_calls;
+	ok(defined $upload && $upload > $hook, 'the director config is uploaded to the director itself');
+	is_deeply(defined $claims && [@{$director_calls[$claims]}[1..2]], ['secret/exodus/lab-ocf/bosh/network', {subnets => {}}],
+		'the network map is written to the director\'s own exodus network record');
+	is_deeply(defined $claims && {@{$director_calls[$claims]}[3..6]}, {flatten => 1, clear => 1},
+		'with flatten and clear, as post-deploy writes it');
+	ok(defined $claims && $claims > $upload, 'after the upload');
+	is(defined $claims && $director_calls[$claims][-1], 'env',
+		'through the environment\'s vault, not the parent director\'s');
+	ok(defined $release && $release > $claims, 'and the lock is released at the end');
+	ok(!$self_bosh->network_locked_by_me, 'so no lock of ours is left on the director');
+	ok(!defined(call_index('acquire_network_lock', 'lab-mgmt')), 'the parent director\'s lock is not taken for the director config alone');
+	ok(!defined(call_index('run_hook', 'cloud-config', '')), 'the parent-side cloud-config hook does not run');
+};
+
+subtest 'director config - upload releases the director\'s lock on every failure' => sub {
+	plan tests => 9;
+	my %cases = (
+		'a failed upload' => {
+			self_overrides => {upload_config => sub { push @director_calls, ['upload_config', 'lab-ocf']; return ('', 1, 'director refused the cloud config') }},
+			error => qr/Failed to upload cloud config lab-ocf\.bosh\.director/,
+		},
+		'a failed exodus write' => {
+			vault => mock("Mock::BoshConfigs::FailingVault" => {
+				get_path_strict => sub { return {} },
+				set_path => sub { push @director_calls, ['set_path']; die "vault sealed\n" },
+			}),
+			error => qr/was uploaded, but the network map could not be updated.*vault sealed/s,
+		},
+		'a failed hook' => {
+			run_hook => sub { die "the director cloud-config hook failed\n" },
+			error => qr/the director cloud-config hook failed/,
+		},
+	);
+	for my $case (sort keys %cases) {
+		my $c = $cases{$case};
+		@director_calls = ();
+		my $self_bosh = make_director('lab-ocf', {}, %{$c->{self_overrides} // {}});
+		my $parent    = make_director('lab-mgmt', {});
+		my $env = make_director_env(
+			self_bosh => $self_bosh, parent => $parent,
+			($c->{vault} ? (vault => $c->{vault}) : ()),
+			($c->{run_hook} ? (run_hook => $c->{run_hook}) : ()),
+		);
+		throws_ok {
+			output_from {
+				Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, name => 'lab-ocf.bosh.director')
+			}
+		} $c->{error}, "$case stops the upload with its own error";
+		ok(defined(call_index('clear_network_lock', 'lab-ocf')), "$case: the director's lock is released");
+		ok(!$self_bosh->network_locked_by_me, "$case: so no lock of ours is left behind");
+	}
+};
+
+subtest 'director config - upload refuses when another process holds the director\'s lock' => sub {
+	plan tests => 4;
+	@director_calls = ();
+	my $held = {status => 'locked', description => 'about 2 minutes ago by ubuntu@bastion (env: ocfp-cf1-lab-ocf, pid: 4242)'};
+	my $self_bosh = make_director('lab-ocf', {},
+		check_network_lock   => sub { return $held },
+		network_locked_by_me => sub { 0 },
+	);
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	my ($out, $err);
+	throws_ok {
+		($out, $err) = output_from {
+			Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, name => 'lab-ocf.bosh.director')
+		}
+	} qr/Network claims are currently locked/, 'the upload is refused with the lock message';
+	ok(!defined(call_index('run_hook')), 'no hook runs');
+	ok(!defined(call_index('upload_config')), 'nothing is uploaded');
+	ok(!defined(call_index('clear_network_lock')), 'the other process\'s lock is left alone');
+};
+
+subtest 'bosh_configs_upload - a lock written by an acquire that then fails is still released' => sub {
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	my $mine = 0;
+	my $director = make_director('parent', {},
+		acquire_network_lock => sub { push @director_calls, ['acquire_network_lock', 'parent']; $mine = 1; die "Hung up\n" },
+		network_locked_by_me => sub { $mine },
+		clear_network_lock   => sub { push @director_calls, ['clear_network_lock', 'parent']; $mine = 0; 1 },
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: []\n", network_map => {subnets => {}});
+	@director_calls = ();
+	throws_ok {
+		output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1) }
+	} qr/^Hung up\b/, 'the failure is passed on as it came';
+	ok(defined(call_index('clear_network_lock', 'parent')), 'the lock the acquire wrote is released')
+		or diag explain \@director_calls;
+	ok(!$mine, 'so none of ours is left on the director');
+};
+
+subtest 'bosh_configs_upload - a release that fails keeps the original error and still releases the other director' => sub {
+	@director_calls = ();
+	my $self_bosh = make_director('lab-ocf', {},
+		clear_network_lock => sub { push @director_calls, ['clear_network_lock', 'lab-ocf']; die "Could not write the lock: Vault is sealed\n" },
+	);
+	my $parent = make_director('lab-mgmt', {},
+		upload_config => sub {
+			my ($self, @args) = @_;
+			push @director_calls, ['upload_config', 'lab-mgmt', @args[1,2]];
+			return ('', 1, 'director refused the cloud config');
+		},
+	);
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	my $err;
+	my ($out, $stderr) = output_from {
+		eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud'); 1 } or $err = $@;
+	};
+	like($err // '', qr/director refused the cloud config/, 'the upload\'s own error is the one passed on');
+	like($out.$stderr, qr/lab-ocf.*could not be released.*Vault is sealed/s, 'the failed release is logged, with why');
+	ok(defined(call_index('clear_network_lock', 'lab-mgmt')), 'and the parent director\'s lock is still released')
+		or diag explain \@director_calls;
+	ok(!$parent->network_locked_by_me, 'so no lock of ours is left on the parent');
+};
+
+subtest 'bosh-configs releases its locks when there are no configs to upload' => sub {
+	no warnings 'redefine';
+	# Nothing provided, though the run wants a cloud config and so took the lock
+	local *Genesis::Commands::Bosh::_bosh_configs_provided = sub { return ([], []) };
+	my $director = make_director('parent', {});
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: []\n", network_map => {subnets => {}});
+	@director_calls = ();
+	my ($ret, $err);
+	my ($out, $stderr) = output_from {
+		$ret = eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1) };
+		$err = $@;
+	};
+	is($err, '', 'nothing is raised') or diag $err;
+	is($ret, 1, 'the command reports success');
+	like($out.$stderr, qr/nothing to upload/, 'it says there is nothing to upload');
+	ok(defined(call_index('acquire_network_lock', 'parent')), 'the lock was taken')
+		or diag explain \@director_calls;
+	ok(defined(call_index('clear_network_lock', 'parent')), 'and released before the command returned');
+	ok(!$director->network_locked_by_me, 'so no lock of ours is left on the director');
+};
+
+subtest 'bosh-configs attempts every release before failing on one' => sub {
+	@director_calls = ();
+	# Released in reverse order of taking, so the director's own lock is the
+	# first release, and that is the one that fails
+	my $self_bosh = make_director('lab-ocf', {},
+		clear_network_lock => sub { push @director_calls, ['clear_network_lock', 'lab-ocf']; die "Could not write the lock: Vault is sealed\n" },
+	);
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	my $err;
+	my ($out, $stderr) = output_from {
+		eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud'); 1 } or $err = $@;
+	};
+	my $first  = call_index('clear_network_lock', 'lab-ocf');
+	my $second = call_index('clear_network_lock', 'lab-mgmt');
+	ok(defined $first && defined $second && $first < $second, 'both releases were attempted, the failing one first')
+		or diag explain \@director_calls;
+	ok(!$parent->network_locked_by_me, 'so the parent is left unlocked');
+	ok(defined($err), 'the command fails');
+	my $text = ($err // '') =~ s/\s+/ /gr;
+	like($text, qr{secret/exodus/lab-ocf/bosh/network-claim-lock}, 'naming the lock that may still be held');
+	unlike($text, qr{secret/exodus/lab-mgmt/bosh/network-claim-lock}, 'and not the lock that was released');
+	like($text, qr/may still be held/, 'saying it may still be held');
+	like($text, qr/lab-ocf\.bosh\.director/, 'and what had already been uploaded');
+};
+
+subtest 'bosh-configs reports an upload error before a release failure' => sub {
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	my $director = make_director('parent', {},
+		upload_config => sub {
+			my ($self, @args) = @_;
+			push @director_calls, ['upload_config', 'parent', @args[1,2]];
+			die "director refused the cloud config\n";
+		},
+		clear_network_lock => sub { push @director_calls, ['clear_network_lock', 'parent']; die "Could not write the lock: Vault is sealed\n" },
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: []\n", network_map => {subnets => {}});
+	@director_calls = ();
+	my $err;
+	my ($out, $stderr) = output_from {
+		eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1); 1 } or $err = $@;
+	};
+	like($err // '', qr/director refused the cloud config/, 'the upload error is the one raised');
+	unlike($err // '', qr/may still be held/, 'not the release failure');
+	ok(defined(call_index('clear_network_lock', 'parent')), 'the release was still attempted');
+	like($out.$stderr, qr/could not be released.*Vault is sealed/s, 'and its failure was logged');
+};
+
+subtest '_bosh_configs_upload_cloud - an upload that lost its lock while it waited is stopped' => sub {
+	my $director = make_director('parent', {},
+		network_locked_by_me => sub { 0 },
+		check_network_lock   => sub { return {status => 'locked', description => 'about 2 minutes ago by ops@jumpbox (env: other, pid: 99)'} },
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1});
+	@director_calls = ();
+	throws_ok {
+		output_from {
+			Genesis::Commands::Bosh::_bosh_configs_upload_cloud($env, {
+				bosh => $director, name => 'test-env.cf', content => "azs: []\n", network_map => {subnets => {}},
+			})
+		}
+	} qr/Cannot upload the cloud config.*parent.*no longer holds.*ops\@jumpbox/s,
+		'the upload is refused, naming who holds the lock now';
+	ok(!defined(call_index('upload_config')), 'nothing is uploaded');
+	ok(!defined(call_index('set_path')), 'and no claims are written');
+};
+
+subtest 'director config - compare shows the diff without a lock or an exodus write' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	my $self_bosh = make_director('lab-ocf',
+		{cloud => {'lab-ocf.bosh.director' => entry(5)}},
+		contents => {'cloud|lab-ocf.bosh.director' => "director: no\n"},
+	);
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	my ($out, $err) = output_from {
+		Genesis::Commands::Bosh::bosh_configs_compare($env, $parent, name => 'lab-ocf.bosh.director')
+	};
+	like($out.$err, qr/cloud config lab-ocf\.bosh\.director on lab-ocf is different.*--- uploaded/s,
+		'the director config\'s diff is shown');
+	ok(defined(call_index('run_hook', 'cloud-config', 'director')), 'the director-purpose hook built the config');
+	ok(!grep({ $_->[0] =~ /network_lock/ } @director_calls), 'no lock is checked, taken, or released')
+		or diag explain \@director_calls;
+	ok(!defined(call_index('set_path')), 'and no exodus record is written');
+};
+
+subtest 'bosh_configs_upload - a signal during the first release still releases the other director\'s lock' => sub {
+	# The director's own lock comes off first, and a terminal signal that
+	# arrives while it does is held back until the release has finished, so
+	# it must not stop the loop before the parent's lock comes off.
+	plan tests => 4 * 4;
+	for my $case ([INT => qr/Interrupted by user/], [TERM => qr/Terminated/], [HUP => qr/Hung up/], [QUIT => qr/Quit/]) {
+		my ($signal, $message) = @$case;
+		@director_calls = ();
+		my $self_bosh = make_director('lab-ocf', {},
+			clear_network_lock => sub { push @director_calls, ['clear_network_lock', 'lab-ocf']; kill $signal => $$; return 1 },
+		);
+		my $parent = make_director('lab-mgmt', {});
+		my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+		my $err;
+		output_from {
+			eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud'); 1 } or $err = $@;
+		};
+		like($err // '', $message, "$signal: the signal is raised once the locks are released");
+		ok(defined(call_index('clear_network_lock', 'lab-ocf')), "$signal: the director's lock is released");
+		ok(defined(call_index('clear_network_lock', 'lab-mgmt')), "$signal: and the parent's too")
+			or diag explain \@director_calls;
+		ok(!$parent->network_locked_by_me, "$signal: so no lock of ours is left on the parent");
+	}
+};
+
+subtest 'bosh_configs_upload - a signal that follows one the work caught still stops the work' => sub {
+	plan tests => 4;
+	@director_calls = ();
+	my $reached = 0;
+	my $held = 0;
+	my $parent = make_director('lab-mgmt', {},
+		# The first signal is raised inside code that catches it, as a vault
+		# call that wraps its work in an eval would
+		acquire_network_lock => sub {
+			push @director_calls, ['acquire_network_lock', 'lab-mgmt'];
+			$held = 1;
+			eval { kill INT => $$; my $x = 0; $x++ for 1 .. 10; 1 };
+			return 1;
+		},
+		network_locked_by_me => sub { $held },
+		clear_network_lock   => sub { push @director_calls, ['clear_network_lock', 'lab-mgmt']; $held = 0; 1 },
+		upload_config => sub {
+			push @director_calls, ['upload_config', 'lab-mgmt'];
+			kill TERM => $$;
+			my $x = 0; $x++ for 1 .. 10;
+			$reached = 1;
+			return ('', 0, '');
+		},
+	);
+	my $env = make_env(
+		hooks       => {'cloud-config' => 1},
+		cloud       => "azs: []\n",
+		network_map => {subnets => {'ocfp-0' => {claims => {}}}},
+	);
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	my $err;
+	output_from {
+		eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud'); 1 } or $err = $@;
+	};
+	like($err // '', qr/^Terminated\b/, 'the second signal is raised');
+	ok(!$reached, 'and it stopped the work where it landed, instead of being held until the work ended');
+	ok(defined(call_index('clear_network_lock', 'lab-mgmt')), 'the lock is released');
+	ok(!$parent->network_locked_by_me, 'so none is left on the director');
+};
+
+subtest 'director config - an upload of both cloud configs takes the parent lock first, then the director\'s' => sub {
+	plan tests => 14;
+
+	# Both configs go up and both locks come off
+	@director_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $parent    = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud') };
+	my $parent_lock = call_index('acquire_network_lock', 'lab-mgmt');
+	my $self_lock   = call_index('acquire_network_lock', 'lab-ocf');
+	ok(defined $parent_lock && defined $self_lock && $parent_lock < $self_lock,
+		'the parent lock is taken before the director\'s')
+		or diag explain \@director_calls;
+	ok(defined($self_lock) && defined(call_index('run_hook')) && $self_lock < call_index('run_hook'), 'both locks are held before any hook runs');
+	ok(defined(call_index('upload_config', 'lab-mgmt', 'cloud', 'lab-ocf.bosh')), 'the parent-side cloud config is uploaded to the parent');
+	ok(defined(call_index('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director')), 'the director config is uploaded to the director');
+	ok(defined(call_index('clear_network_lock', 'lab-mgmt')) && defined(call_index('clear_network_lock', 'lab-ocf')),
+		'both locks are released');
+	ok(!$parent->network_locked_by_me && !$self_bosh->network_locked_by_me, 'and neither director is left locked');
+	my $parent_write = call_index('set_path', 'secret/exodus/lab-mgmt/bosh/network');
+	is(defined $parent_write && $director_calls[$parent_write][-1], 'director:lab-mgmt',
+		'the parent-side network map is written through the parent director\'s vault');
+	my $self_write = call_index('set_path', 'secret/exodus/lab-ocf/bosh/network');
+	is(defined $self_write && $director_calls[$self_write][-1], 'env',
+		'and the director\'s own network map through the environment\'s');
+
+	# The director config fails to upload, and both locks still come off
+	@director_calls = ();
+	$self_bosh = make_director('lab-ocf', {},
+		upload_config => sub { push @director_calls, ['upload_config', 'lab-ocf']; return ('', 1, 'refused') },
+	);
+	$parent = make_director('lab-mgmt', {});
+	$env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	throws_ok {
+		output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud') }
+	} qr/Failed to upload cloud config lab-ocf\.bosh\.director/, 'a failed director upload stops the run';
+	ok(!$parent->network_locked_by_me && !$self_bosh->network_locked_by_me,
+		'and both locks are released after the failure');
+
+	# The director's lock is held elsewhere, so the parent lock comes off again
+	@director_calls = ();
+	$self_bosh = make_director('lab-ocf', {},
+		check_network_lock   => sub { return {status => 'locked', description => 'by someone else'} },
+		network_locked_by_me => sub { 0 },
+	);
+	$parent = make_director('lab-mgmt', {});
+	$env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	throws_ok {
+		output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud') }
+	} qr/Network claims are currently locked/, 'a held director lock stops the run';
+	ok(defined(call_index('clear_network_lock', 'lab-mgmt')), 'the parent lock that was taken is released');
+	ok(!$parent->network_locked_by_me, 'so the parent is left unlocked');
+	ok(!defined(call_index('run_hook')), 'and no hook ran');
+};
+
+subtest 'director config - a create-env director builds and uploads its own cloud config' => sub {
+	plan tests => 8;
+	@director_calls = ();
+	@hook_calls = ();
+	my $self_bosh = make_director('lab-ocf', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => undef, create_env => 1);
+
+	# bosh_configs hands a create-env director's actions an undefined
+	# deploying director
+	my ($configs, $notes) = Genesis::Commands::Bosh::_bosh_configs_provided($env, undef, type => 'cloud');
+	my ($dir) = grep { $_->{name} eq 'lab-ocf.bosh.director' } @$configs;
+	ok($dir, 'the director config is provided');
+	is($dir && $dir->{bosh}->alias, 'lab-ocf', 'on the director itself');
+	ok(!grep({ $_->{name} eq 'lab-ocf.bosh' } @$configs), 'the parent-side cloud config is still skipped');
+	ok(grep({ /create-env/ } @$notes), 'with the create-env note') or diag explain $notes;
+	ok(!grep({ !($_->[1]{purpose}) } @hook_calls), 'and the parent-side hook never runs');
+
+	@director_calls = ();
+	lives_ok {
+		output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, undef, yes => 1) }
+	} 'an unfiltered upload runs with no deploying director';
+	ok(defined(call_index('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director')),
+		'the director config is uploaded to the director');
+	my $claims = call_index('set_path');
+	is(defined $claims && $director_calls[$claims][1], 'secret/exodus/lab-ocf/bosh/network',
+		'and the director\'s own exodus network record is written');
+};
+
+# ---------------------------------------------------------------------------
+# claims that drifted from an up-to-date cloud config
+# ---------------------------------------------------------------------------
+# The cloud config is uploaded before the network record is written, so a
+# failed write leaves the director holding the new config.  Running the upload
+# again finds that config identical, and has to write the record all the same.
+
+my $fresh_claims = {subnets => {'ocfp-2' => {claims => {
+	compilation => '10.61.148.228,10.61.148.230-10.61.148.231,10.61.148.248',
+	cf          => '10.61.148.232-10.61.148.245',
+}}}};
+my $stale_claims = {subnets => {'ocfp-2' => {claims => {
+	compilation => '10.61.148.228-10.61.148.231',
+	cf          => '10.61.148.232-10.61.148.245',
+}}}};
+
+# claims_env - a director environment whose cloud config the director already
+# holds, built with the given network map
+sub claims_env {
+	my (%o) = @_;
+	my $self_bosh = make_director('lab-ocf', {cloud => {'lab-ocf.bosh.director' => entry(5)}},
+		contents => {'cloud|lab-ocf.bosh.director' => "director: yes\n"});
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(
+		self_bosh => $self_bosh, parent => $parent,
+		run_hook => sub {
+			my ($s, $h, %p) = @_;
+			return [] if $h eq 'runtime-config';
+			return ("director: yes\n", $o{network_map});
+		},
+	);
+	return ($env, $parent, $self_bosh);
+}
+
+subtest 'claims drift - an identical cloud config still gets its claims written when the record is stale' => sub {
+	plan tests => 8;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	$stored_claims = $stale_claims;
+	my ($env, $parent, $self_bosh) = claims_env(network_map => $fresh_claims);
+	my ($out, $err) = output_from {
+		Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+	};
+	my $all = $out.$err;
+	like($all, qr/already up to date/, 'the cloud config is reported as up to date');
+	ok(!defined(call_index('upload_config')), 'and is not uploaded');
+	my $write = call_index('set_path');
+	ok(defined $write, 'the claims are written all the same') or diag explain \@director_calls;
+	is_deeply($write && [@{$director_calls[$write]}[1..2]], ['secret/exodus/lab-ocf/bosh/network', $fresh_claims],
+		'to the director\'s own record, from the built network map');
+	is_deeply($write && {@{$director_calls[$write]}[3..6]}, {flatten => 1, clear => 1}, 'with flatten and clear');
+	my $read = call_index('get_path_strict', 'secret/exodus/lab-ocf/bosh/network');
+	ok(defined $read && defined $write && $read < $write, 'after the stored record is read');
+	ok(defined(call_index('clear_network_lock', 'lab-ocf')), 'and the lock is released');
+	like($all, qr/network claims.*differ/s, 'and the output says the claims were out of date');
+};
+
+subtest 'claims drift - nothing is written when the config and the claims both match' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	# the empty claims of ocfp-0 are not stored, so they must not read as drift
+	$stored_claims = {subnets => {'ocfp-2' => $fresh_claims->{subnets}{'ocfp-2'}}};
+	my ($env, $parent) = claims_env(network_map => {subnets => {%{$fresh_claims->{subnets}}, 'ocfp-0' => {claims => {}}}});
+	my ($out, $err) = output_from {
+		Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+	};
+	like($out.$err, qr/already up to date/, 'the cloud config is reported as up to date');
+	ok(!defined(call_index('upload_config')), 'nothing is uploaded');
+	ok(!defined(call_index('set_path')), 'and no claims are written');
+	ok(defined(call_index('get_path_strict', 'secret/exodus/lab-ocf/bosh/network')), 'though the stored record was compared');
+};
+
+subtest 'claims drift - a cloud config that is not the director\'s own is checked the same way' => sub {
+	plan tests => 3;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	$stored_claims = $stale_claims;
+	my $director = make_director('parent', {cloud => {'test-env.cf' => entry(3)}}, contents => {'cloud|test-env.cf' => "azs: []\n"});
+	my $env = make_env(hooks => {'cloud-config' => 1}, cloud => "azs: []\n", network_map => $fresh_claims);
+	output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $director, yes => 1, type => 'cloud') };
+	ok(!defined(call_index('upload_config')), 'the identical config is not uploaded');
+	my $write = call_index('set_path');
+	ok(defined $write, 'its claims are written');
+	is(defined $write && $director_calls[$write][1], 'secret/exodus/parent/bosh/network', 'under the director that holds it');
+};
+
+subtest 'claims drift - a failed claims write tells the operator how to repair it' => sub {
+	plan tests => 4;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	my $failing = mock "Mock::BoshConfigs::DriftVault" => {
+		get_path_strict => sub { return $stale_claims },
+		set_path => sub { die "vault sealed\n" },
+	};
+	my $self_bosh = make_director('lab-ocf', {cloud => {'lab-ocf.bosh.director' => entry(5)}},
+		contents => {'cloud|lab-ocf.bosh.director' => "director: yes\n"});
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(
+		self_bosh => $self_bosh, parent => $parent, vault => $failing,
+		run_hook => sub { my ($s, $h) = @_; return $h eq 'runtime-config' ? [] : ("director: yes\n", $fresh_claims) },
+	);
+	@director_calls = ();
+	my $message;
+	eval { output_from { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director') }; 1 }
+		or $message = $@ =~ s/\s+/ /gr;
+	like($message, qr/network map could not be updated.*vault sealed/s, 'the write failure is reported with its cause');
+	like($message, qr/genesis lab-ocf bosh-configs upload --type cloud --name lab-ocf\.bosh\.director -y/,
+		'with the command that repairs it');
+	like($message, qr/already up to date on the director and writes the claims/, 'and what that command does');
+	ok(!$self_bosh->network_locked_by_me, 'and the lock is released');
+};
+
+# ---------------------------------------------------------------------------
+# reading the stored claims before they are rewritten
+# ---------------------------------------------------------------------------
+# The write clears the network record before it fills it, so a record that
+# could not be read must stop the upload rather than read as empty, and an
+# operator is shown what a write changes before it happens.
+
+# missing_claims_env - a director environment whose cloud config the director
+# does not hold yet, so an upload runs
+sub missing_claims_env {
+	my (%o) = @_;
+	my $self_bosh = make_director('lab-ocf', {});
+	my $parent = make_director('lab-mgmt', {});
+	my $env = make_director_env(
+		self_bosh => $self_bosh, parent => $parent, ($o{vault} ? (vault => $o{vault}) : ()),
+		run_hook => sub { my ($s, $h) = @_; return $h eq 'runtime-config' ? [] : ("director: yes\n", $fresh_claims) },
+	);
+	return ($env, $parent, $self_bosh);
+}
+
+subtest 'claims read - a failed read of the stored claims stops the upload before anything is written' => sub {
+	plan tests => 12;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	$claims_read_error = "Could not read secret/exodus/lab-ocf/bosh/network from vault at https://vault.example.com:8200: connection refused\n";
+	$stored_claims = $stale_claims;
+
+	for my $case ('a cloud config to upload', 'a cloud config that is already up to date') {
+		@director_calls = ();
+		my ($env, $parent, $self_bosh) = $case =~ /already/ ? claims_env(network_map => $fresh_claims) : missing_claims_env();
+		my $message;
+		eval {
+			output_from {
+				Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+			};
+			1;
+		} or $message = $@ =~ s/\s+/ /gr;
+		like($message, qr/Could not read secret\/exodus\/lab-ocf\/bosh\/network from vault.*connection refused/,
+			"$case: the failure names the path and the error");
+		ok(!defined(call_index('set_path')), "$case: no claims are written");
+		ok(!defined(call_index('upload_config')), "$case: nothing is uploaded");
+		ok(defined(call_index('clear_network_lock', 'lab-ocf')), "$case: the lock is released");
+		ok(!$self_bosh->network_locked_by_me, "$case: so no lock of ours is left");
+		ok(!defined(call_index('delete_config')), "$case: and nothing is deleted");
+	}
+	$claims_read_error = undef;
+	$stored_claims = {};
+};
+
+subtest 'claims read - a record that was never written builds from empty and every claim is shown as added' => sub {
+	plan tests => 5;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	$stored_claims = undef;
+	my ($env, $parent) = missing_claims_env();
+	my ($out, $err) = output_from {
+		Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+	};
+	my $all = $out.$err;
+	ok(defined(call_index('upload_config', 'lab-ocf', 'cloud', 'lab-ocf.bosh.director')), 'the upload goes ahead');
+	my $write = call_index('set_path');
+	is_deeply(defined $write && $director_calls[$write][2], $fresh_claims, 'and the network map is written');
+	like($all, qr/cf \(ocfp-2\): adds 10\.61\.148\.232-10\.61\.148\.245/, 'the summary shows a claim with no record as added');
+	unlike($all, qr/removes/, 'and removes nothing');
+	like($all, qr/compilation \(ocfp-2\): adds 10\.61\.148\.228,10\.61\.148\.230-10\.61\.148\.231,10\.61\.148\.248/,
+		'with every address of the network');
+	$stored_claims = {};
+};
+
+subtest 'claims read - the summary of the change prints before the claims are written' => sub {
+	plan tests => 7;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	$stored_claims = $stale_claims;
+	my $sealed = mock "Mock::BoshConfigs::SummaryVault" => {
+		get_path_strict => sub { return $stale_claims },
+		set_path => sub { push @director_calls, ['set_path']; die "vault sealed\n" },
+	};
+	my ($env, $parent) = missing_claims_env(vault => $sealed);
+	my ($out, $err, $message);
+	eval {
+		($out, $err) = output_from {
+			eval {
+				Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+			} or print STDOUT "[died] ".($@ =~ s/\s+/ /gr);
+		};
+		1;
+	};
+	my $all = $out.$err;
+	my $summary = index($all, 'compilation (ocfp-2)');
+	my $submit  = index($all, 'submitting network claims');
+	ok($summary >= 0, 'a summary is printed') or diag $all;
+	ok($submit > $summary, 'before the claims are submitted');
+	like($all, qr/compilation \(ocfp-2\): adds 10\.61\.148\.248, removes 10\.61\.148\.229/, 'it shows the addresses a network gains and loses');
+	unlike($all, qr/cf \(ocfp-2\)/, 'and says nothing of a network whose claim is unchanged');
+	like($all, qr/vault sealed/, 'and the write still fails on a sealed vault');
+	ok(defined(call_index('set_path')), 'the write was attempted');
+	unlike($all, qr/\[y\|n\].*\[y\|n\]/s, 'with no confirmation prompt added');
+};
+
+subtest 'claims read - an upload that changes nothing says the claims keep the same addresses' => sub {
+	plan tests => 2;
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = \&plain_diff;
+	@director_calls = ();
+	$stored_claims = $fresh_claims;
+	my ($env, $parent) = missing_claims_env();
+	my ($out, $err) = output_from {
+		Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud', name => 'lab-ocf.bosh.director')
+	};
+	like(($out.$err) =~ s/\s+/ /gr, qr/the network claims at \S+ keep the same addresses/, 'the upload says so, since it was run to write them');
+	ok(defined(call_index('set_path')), 'and the record is still written');
+	$stored_claims = {};
+};
+
+subtest 'director config - delete refuses the director config' => sub {
+	plan tests => 2;
+	@director_calls = ();
+	my $self_bosh = make_director('lab-ocf', {cloud => {'lab-ocf.bosh.director' => entry(5)}});
+	my $parent    = make_director('lab-mgmt', {});
+	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	throws_ok {
+		Genesis::Commands::Bosh::bosh_configs_delete($env, $parent, yes => 1, name => 'lab-ocf.bosh.director')
+	} qr/lab-ocf\.bosh\.director.*compilation network/s, 'delete refuses, saying the compilation network depends on it';
+	ok(!defined(call_index('delete_config')), 'and nothing is deleted');
 };
 
 done_testing;

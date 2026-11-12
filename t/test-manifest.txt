@@ -39,11 +39,21 @@ unit-tests/service_github-host.t         # a host's answers say whether it is Gi
 unit-tests/service_bosh-base.t
 unit-tests/service_bosh-create_env_proxy.t
 unit-tests/service_bosh-director.t
+unit-tests/service_bosh-director-network_lock.t  # network claims lock: check-and-set on kv v2, read-back on kv v1
+unit-tests/service_bosh-director-proxy_timeout.t  # status() reports a director that hangs behind BOSH_ALL_PROXY as unreachable
 unit-tests/service_bosh-stemcell.t
+unit-tests/genesis-run_exit_status_under_trace.t  # run() keeps the exit code when tracing is on
+unit-tests/genesis-spruce_diff_exit_codes.t   # spruce diff's exit code survives script(1) on macOS and Linux
+unit-tests/service_bosh-interactive_exit_codes.t  # interactive bosh and fake_tty keep the exit code under script(1)
+unit-tests/genesis-tcp_listening_alarm.t      # tcp_listening leaves no alarm armed
 unit-tests/service_vault-core.t          # Service::Vault base class + None with MockWrapper
 unit-tests/service_vault-set_redacted.t  # a write's values stay out of the trace and its refusal
 unit-tests/service_vault-strongbox_intent.t  # tri-state strongbox read from ~/.saferc
+unit-tests/service_vault-descriptor_lookup.t # descriptors resolve as genesis.vault does
+unit-tests/service_vault-descriptor_target_name.t # --vault takes a bare safe target name
 unit-tests/service_vault-unseal_strongbox.t  # unseal keeps safe's stderr, flags partial unseal
+unit-tests/service_vault-unseal_nodes.t     # per-node Raft unseal and leader wait, keys kept out of traces
+unit-tests/service_vault-export_formats.t   # every safe export version read as v1; typed values refused
 unit-tests/service_vault_remote-core.t   # Service::Vault::Remote with mocks
 unit-tests/service_vault_remote-exit_status.t  # reaping the token renewer leaves the process's exit status alone
 unit-tests/service_vault_remote-strongbox_attach.t  # strongbox never gates resolution
@@ -51,6 +61,8 @@ unit-tests/service_vault_remote-create_strongbox.t  # create can enable strongbo
 unit-tests/service_vault_admin-core.t    # Service::Vault::Admin + AppRole with mocks
 unit-tests/genesis_top-core.t
 unit-tests/genesis_top-secrets_provider_strongbox.t  # re-point must not disarm strongbox
+unit-tests/genesis_top-set_vault_object.t   # set_vault refuses a non-remote vault readably
+unit-tests/genesis_commands_env-create_vault.t # genesis new picks and records its vault
 # Kit module tests (POD-driven)
 unit-tests/genesis_kit-core.t            # Genesis::Kit base class
 unit-tests/genesis_kit_compiled-core.t   # Genesis::Kit::Compiled
@@ -59,7 +71,7 @@ unit-tests/genesis_kit_compiler-core.t   # Genesis::Kit::Compiler (POD-driven)
 # Temporarily disabled - see test analysis for details
 #unit-tests/kit-compilation.t
 #unit-tests/hooks.t
-#unit-tests/hooks-cloudconfig.t
+unit-tests/hooks-cloudconfig.t
 unit-tests/genesis_env-name_validation.t  # Genesis::Env name validation (_env_name_errors)
 unit-tests/genesis_env-file_loading_and_inheritance.t  # Genesis::Env file loading, hierarchy, and inheritance
 unit-tests/genesis_env-accessors.t  # Genesis::Env basic accessors and identity
@@ -72,6 +84,7 @@ unit-tests/genesis_env-deployment_cache.t
 unit-tests/genesis_env-deployment.t
 unit-tests/genesis_env-deploy_to_bosh.t  # bosh deploy flags; a dry run adds -n
 unit-tests/genesis_env-create_env_state_recovery.t  # create-env state recovered from a failed deploy
+unit-tests/genesis_env-last_manifest_integrity.t  # create-env manifest checked against the exodus sha1
 unit-tests/genesis_env-manifest_helpers.t
 # Genesis::Env method coverage
 unit-tests/genesis_env-lookups.t         # lookup() and lookup_unevaled() variants
@@ -88,6 +101,7 @@ unit-tests/genesis_env-propagation_set.t # the set's eighth kind and the trigger
 unit-tests/genesis_env-propagation_files_at.t # the set as it stood at a control commit
 unit-tests/genesis_env-proposed_record.t # no proposed record answers undef rather than an empty hash
 unit-tests/genesis_env-vault_ops.t       # get_ancestral_vault(), exodus_lookup(), vault_paths()
+unit-tests/genesis_env-vault_descriptor_yaml.t # genesis.vault survives the YAML it is written to
 unit-tests/genesis_env-get_target_bosh.t # director lookup: which of the three failures is reported
 unit-tests/genesis_env-fix_secrets_conflicts.t  # _fix_secrets manifest/credhub conflict detection
 unit-tests/genesis_env_secrets_parser_fromkit-core.t  # FromKit parser defect regression tests
@@ -232,8 +246,10 @@ unit-tests/harness_propagation-git_env.t            # a fixture build never reac
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi
 unit-tests/genesis_env-cpis.t                             # multi-cpi accessors
+unit-tests/genesis_env-stemcells.t                        # stemcell check: name matching, unknown sources
 unit-tests/genesis_env-stop_renewer_for_self_deploy.t     # vault token-renewer pause during self-deploy
 unit-tests/genesis_env-cpi_az_map_exodus_fallback.t       # cpi_az_map falling back to exodus data
+unit-tests/genesis_env-deployment_may_affect_secrets_vault.t  # self-hosted vault gate matches names, IPv6, and ranges
 unit-tests/genesis_env-ensure_vault_ready_for_exodus.t    # vault unseal before an exodus write
 unit-tests/genesis_env_deployment-artifact_chunking.t     # exodus artifact chunking
 unit-tests/genesis_env_deployment-core.t                  # Deployment core
@@ -245,8 +261,10 @@ unit-tests/genesis_env_manifest-core.t                    # Env::Manifest core
 unit-tests/genesis_env_manifest-signature.t               # each manifest type signs what its merge reads
 unit-tests/genesis_env_manifest-vaultless_environment.t   # the shape's merge resolves the environment's operators and leaves vault as text
 unit-tests/genesis_env_manifestprovider-core.t            # Env::ManifestProvider core
+unit-tests/genesis_env_networkclaims-core.t               # Env::NetworkClaims core
 unit-tests/genesis_env_required_files-core.t              # required-files propagation
 unit-tests/genesis_env_secrets_entombment-core.t          # secrets entombment
+unit-tests/genesis_env_manifest-entombment_export.t       # entombment reads, including paths the export left out
 
 # Genesis::Log per-target tests
 unit-tests/genesis_log-active_log_env.t
@@ -269,6 +287,7 @@ unit-tests/genesis_commands_env-new_clean_tree.t  # `genesis new` refuses a dirt
 unit-tests/genesis_commands_env-redeploy_wanted.t  # the three arms of the one reader of "is this run a redeploy"
 unit-tests/genesis_commands_env-deploy_redacts.t   # off a terminal the deploy redacts, unless CI_NO_REDACT says not
 unit-tests/genesis_commands_env-child_stdin.t  # what the /dev/null redirect does to the publish confirmation
+unit-tests/genesis_commands_env-check_stemcells.t  # deploy stemcell gate: fix, advise, or stop
 unit-tests/genesis_commands_repo-init.t        # repo-init CLI (registration + option parsing; validate + execute in integration-tests/)
 unit-tests/genesis_commands_check-embedded-genesis_version.t  # embedded version read from packed $VERSION line; legacy form still accepted
 unit-tests/genesis_commands_repo-init_no_commit_identity.t  # --no-commit needs no git identity; committing still does
@@ -314,11 +333,13 @@ unit-tests/service_github-pr.t                             # Github PR helpers
 unit-tests/service_vault-max_json_string_value_length.t    # JSON value length guard
 unit-tests/service_vault-write_confirmation.t              # HA read-back confirmation
 unit-tests/service_vault-get_if_present.t                  # an absent path told from a vault that answered an error
+unit-tests/service_vault-kv_versioned.t                    # whole-secret kv reads and check-and-set writes via safe curl
 unit-tests/service_vault_remote-reauth.t                   # Remote vault re-auth
 unit-tests/service_vault_remote-token_renewer.t            # Background token renewer
 unit-tests/service_vault_local-port_selection.t            # Local vault free-port scan
 unit-tests/service_vault_local-process_matching.t          # Local vault safe/vault process matching
 unit-tests/service_vault_local-process_table.t             # the process table read from /proc, no ps needed
+unit-tests/service_vault_local-recreate.t                  # Local vault started again after a shutdown
 
 # Other unit tests not yet in any thematic block
 unit-tests/genesis-init_forked_child.t       # forked-child defensive init
@@ -532,6 +553,7 @@ integration-tests/genesis_new-refresh.t                       # genesis new refr
 integration-tests/genesis_new-index_check.t                   # genesis new refuses a staged index, ignores an unstaged edit, and skips both under --no-commit
 integration-tests/branch_class-feature_branch.t               # a feature branch is permitted only when it descends from control and is named for no environment
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
+integration-tests/service_bosh-director-network_lock.t  # network claims lock on real kv v1 and kv v2 mounts
 integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc
 # Genesis::Env integration tests - require vault/BOSH mocks
 integration-tests/genesis_env-core.t         # Comprehensive env operations (loading, manifest, deployment)

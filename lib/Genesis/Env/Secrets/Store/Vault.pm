@@ -4,6 +4,7 @@ use warnings;
 
 use Genesis;
 use Genesis::Term;
+use Service::Vault;
 
 use vars qw($AUTOLOAD);
 sub AUTOLOAD {
@@ -110,18 +111,44 @@ sub store_data {
 		%opts = (%opts, %{shift @_});
 	}
 	unless (exists $self->{__data}) {
-		# stderr is captured rather than merged: safe writes its skip-verify
-		# warning there, and merging puts it at the head of the JSON.  Called
-		# in list context so a missing path (the normal case for a new env)
-		# returns undef instead of bailing on the captured stderr.
-		my ($data, $rc, $err) = read_json_from(
-			$self->service->query(
-				{stderr => 0, redact_output => 1},
-				'export',
-				grep {$_} ($self->base, $self->root_ca_path)
-			)
-		);
-		$self->{__data} = $data if defined $data;
+		# The store feeds the secrets Genesis writes, so a read that failed
+		# must not look like an env with nothing stored: that would hide every
+		# missing secret.  Only safe saying a path holds nothing reads as empty.
+		#
+		# safe exports its paths in turn and stops at the first one that holds
+		# nothing, naming only that path, so it is dropped and the rest are
+		# exported again.  An absent root CA path then never hides the env's
+		# own secrets.
+		my @paths = grep {$_} ($self->base, $self->root_ca_path);
+		my $canonical = sub {($_[0] // '') =~ s{/+}{/}gr =~ s{^/|/$}{}gr}; # as safe names a path
+		my $data;
+		while (@paths) {
+			# Decoded with bignums, so every typed path is seen, and each one is
+			# read again whole with safe get, as the vault readers do.
+			my ($json, $rc, $err) = read_json_from({allow_bignum => 1}, $self->service->query(
+				{stderr => 0, redact_output => 1, exact => 1},
+				'export', @paths
+			));
+			unless ($rc || $err) {
+				$data = Service::Vault::flatten_export($json, $self->service);
+				last;
+			}
+			my ($reason, @absent) = $rc ? Service::Vault::read_failure($rc, $err) : ($err);
+			my %absent = map {($canonical->($_) => 1)} @absent;
+			my @rest = grep {!$absent{$canonical->($_)}} @paths;
+			if (defined($reason) || @rest == @paths) {
+				Service::Vault::bail_read_failure(
+					eval {$self->service->{url}} // 'the vault',
+					join(' and ', map {$canonical->($_)} @paths),
+					$reason // "safe said #C{".join(', ', @absent)."} held nothing, which it was not asked to read",
+					join(' ', 'export', map {$canonical->($_)} @paths)
+				);
+			}
+			@paths = @rest;
+		}
+		# An empty store is not cached, so secrets added after this read are
+		# seen by the next one.
+		$self->{__data} = $data if defined($data) && CORE::keys %$data;
 
 		# Nothing under the base is the same case however it arrives: KV v1
 		# fails the export of a path whose secrets were deleted, and KV v2
@@ -129,20 +156,10 @@ sub store_data {
 		# path.  Root CA data found beside it is kept, but is not the
 		# environment's own.
 		my $base = $self->base =~ s{^/}{}r;
-		unless (defined $data && grep {index(s{^/}{}r, $base) == 0} keys %$data) {
-			# Default behaviour: warn when an existing env's vault
-			# unexpectedly returns nothing.  Callers that already
-			# know the store should be empty (fresh env's purge or
-			# initial add_secrets) opt out via quiet_if_empty.
-			# The warning text is user-facing and asserted by the e2e
-			# goldens, so the exit code and stderr go to the debug log
-			# rather than being discarded.
-			debug(
-				"safe export of %s exited %s%s", $self->base, $rc // 0,
-				defined($err) && $err =~ /\S/
-					? sprintf(": %s", $err =~ s/^\s+|\s+$//gr)
-					: ' with no error output'
-			);
+		unless (defined($data) && grep {index(s{^/}{}r, $base) == 0} CORE::keys %$data) {
+			# A fresh env is expected to be empty, and callers that already
+			# know the store should be empty (fresh env's purge or initial
+			# add_secrets) opt out via quiet_if_empty.
 			warning("Vault export returned no data for %s", $self->base)
 				if $self->env->exists && !$opts{quiet_if_empty};
 		}

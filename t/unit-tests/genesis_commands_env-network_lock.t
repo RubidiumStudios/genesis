@@ -18,6 +18,7 @@ use Test::Output;
 
 use Genesis;
 use_ok 'Genesis::Commands::Env';
+use Service::BOSH::Director;
 
 $ENV{NOCOLOR} = 1;
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
@@ -25,19 +26,35 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 my @calls;   # what the helpers asked the director to do
 my $status;  # what check_network_lock reports
 my $held;    # whether this process holds the lock
+my @writes;  # what was written to the director's vault
 
 sub make_env {
+	my (%overrides) = @_;
 	@calls = ();
+	@writes = ();
 	$held = 0;
+	my $vault = mock "Mock::NetworkLock::Vault" => {
+		get_path_strict => sub { return {} },
+		set_path        => sub { my ($self, @args) = @_; push @calls, 'set_path'; push @writes, [@args]; 1 },
+	};
 	my $director = mock "Mock::NetworkLock::Director" => {
 		alias => 'parent',
+		exodus_path       => 'secret/exodus/parent/bosh',
+		network_lock_path => 'secret/exodus/parent/bosh/network-claim-lock',
+		vault             => sub { $vault },
 		check_network_lock => sub {
 			push @calls, 'check';
 			return {status => $status, description => 'about 11 minutes ago by ubuntu@bastion (env: ocf, pid: 229665)'};
 		},
 		acquire_network_lock => sub { push @calls, 'acquire'; $held = 1; 1 },
-		clear_network_lock   => sub { push @calls, 'clear';   $held = 0; 1 },
+		clear_network_lock   => sub { push @calls, 'clear';   my $was = $held; $held = 0; $was },
 		network_locked_by_me => sub { push @calls, 'mine';    $held },
+		# The real ones, which work through the calls above
+		ensure_network_lock_held => \&Service::BOSH::Director::ensure_network_lock_held,
+		# The check for an older Genesis's lock is tested with the director
+		_refuse_legacy_network_lock => sub { push @calls, 'legacy'; 1 },
+		release_network_lock     => \&Service::BOSH::Director::release_network_lock,
+		%overrides,
 	};
 	return mock "Mock::NetworkLock::Env" => {
 		name   => 'test-env',
@@ -140,14 +157,315 @@ subtest 'release clears only a lock this process holds' => sub {
 	my $env = make_env();
 	$held = 1;
 	my $result;
+	my $path = 'secret/exodus/parent/bosh/network-claim-lock';
 	output_from { $result = Genesis::Commands::Env::_deploy_release_network_claims_lock($env) };
-	is($result, 1, 'a held lock is released');
+	is_deeply($result, {cleared => [$path], not_held => [], failed => []}, 'a held lock is reported as cleared');
 	is_deeply(\@calls, ['mine', 'clear'], 'the lock is cleared after confirming it is ours');
 
 	$env = make_env();
 	output_from { $result = Genesis::Commands::Env::_deploy_release_network_claims_lock($env) };
-	is($result, 0, 'nothing is released when the lock is not ours');
+	is_deeply($result, {cleared => [], not_held => [$path], failed => []}, 'a lock that is not ours is reported as not held');
 	is_deeply(\@calls, ['mine'], 'the director is only asked whose lock it is');
+};
+
+subtest 'release reports a lock it could not read or clear' => sub {
+	$status = 'unlocked';
+	my $env = make_env(clear_network_lock => sub { push @calls, 'clear'; die "Could not write the lock: Vault is sealed\n" });
+	$held = 1;
+	my $result;
+	output_from { $result = Genesis::Commands::Env::_deploy_release_network_claims_lock($env) };
+	is_deeply($result, {cleared => [], not_held => [], failed => ['secret/exodus/parent/bosh/network-claim-lock']},
+		'a release that failed is reported as failed, naming the lock');
+};
+
+# ---------------------------------------------------------------------------
+# the deploy's hold on the lock
+# ---------------------------------------------------------------------------
+
+sub under_lock {
+	my ($env, $code, %opts) = @_;
+	my ($out, $err) = output_from {
+		Genesis::Commands::Env::_deploy_under_network_claims_lock($env, $code, dryrun => 0, yes => 0, %opts)
+	};
+	return $out.$err;
+}
+
+subtest 'a lock written by an acquire that then fails is still released' => sub {
+	$status = 'unlocked';
+	my $env = make_env(acquire_network_lock => sub { push @calls, 'acquire'; $held = 1; die "Hung up\n" });
+	my $ran = 0;
+	throws_ok { under_lock($env, sub { $ran = 1 }) } qr/^Hung up\b/, 'the failure is passed on as it came';
+	ok(!$ran, 'the work under the lock never ran');
+	ok(grep({$_ eq 'clear'} @calls), 'the lock the acquire wrote is released') or diag explain \@calls;
+	ok(!$held, 'so none of ours is left on the director');
+};
+
+subtest 'a signal that lands while the lock is being taken still releases it' => sub {
+	$status = 'unlocked';
+	for my $signal (qw/INT TERM HUP QUIT/) {
+		my $env = make_env(acquire_network_lock => sub { push @calls, 'acquire'; $held = 1; kill $signal => $$; 1 });
+		my $ran = 0;
+		throws_ok { under_lock($env, sub { $ran = 1 }) } qr/^(?:Interrupted by user|Terminated|Hung up|Quit)\b/,
+			"$signal stops the deploy";
+		ok(!$ran, "$signal: the work under the lock never ran");
+		ok(!$held, "$signal: and the lock is released");
+	}
+};
+
+subtest 'a dry run takes no lock and so releases none' => sub {
+	$status = 'unlocked';
+	my $env = make_env();
+	my $ran = 0;
+	under_lock($env, sub { $ran = 1 }, dryrun => 1);
+	ok($ran, 'the work runs');
+	ok(!grep({$_ eq 'acquire' || $_ eq 'clear' || $_ eq 'mine'} @calls), 'with no lock taken, asked about, or released')
+		or diag explain \@calls;
+};
+
+subtest 'a release that fails does not hide the error that stopped the deploy' => sub {
+	$status = 'unlocked';
+	my $env = make_env(clear_network_lock => sub { push @calls, 'clear'; die "Could not write the lock: Vault is sealed\n" });
+	my $err;
+	my ($out, $stderr) = output_from {
+		eval {
+			Genesis::Commands::Env::_deploy_under_network_claims_lock(
+				$env, sub { die "the cloud config upload failed\n" }, dryrun => 0, yes => 0
+			);
+			1;
+		} or $err = $@;
+	};
+	like($err // '', qr/^the cloud config upload failed\b/, 'the error that stopped the deploy is the one passed on');
+	like($out.$stderr, qr/could not be released.*Vault is sealed/s, 'and the failed release is logged, with why');
+	like($out.$stderr, qr/network-claim-lock/, 'naming where the lock is stored');
+};
+
+# deploy_after_lock - run the locked step, then the deploy that follows it
+# in the deploy command, the way the command does: the deploy runs only when
+# the locked step returned.
+sub deploy_after_lock {
+	my ($env, $code, %opts) = @_;
+	my ($err, $deployed) = (undef, 0);
+	my ($out, $stderr) = output_from {
+		eval {
+			Genesis::Commands::Env::_deploy_under_network_claims_lock(
+				$env, $code, dryrun => 0, yes => 0, %opts
+			);
+			$deployed = 1; # where the command calls $env->deploy, which entombs
+			1;
+		} or $err = $@;
+	};
+	return ($err, $deployed, $out.$stderr);
+}
+
+subtest 'a release that fails after a successful locked step stops the deploy' => sub {
+	$status = 'unlocked';
+	my $env = make_env(release_network_lock => sub { push @calls, 'release'; return undef });
+	my $ran = 0;
+	my ($err, $deployed) = deploy_after_lock($env, sub { $ran = 1 },
+		completed => 'the cloud config was uploaded');
+	ok($ran, 'the locked step ran');
+	ok(grep({$_ eq 'release'} @calls), 'the release was attempted') or diag explain \@calls;
+	ok(!$deployed, 'the deploy does not go on to deploy and entomb');
+	my $text = ($err // '') =~ s/\s+/ /gr;
+	like($text, qr{secret/exodus/parent/bosh/network-claim-lock}, 'the error names the lock path');
+	like($text, qr/may still be held/, 'and says the lock may still be held');
+	like($text, qr/the cloud config was uploaded/, 'and says what had already completed');
+};
+
+subtest 'a held signal outranks a release failure' => sub {
+	$status = 'unlocked';
+	for my $signal (qw/INT TERM HUP QUIT/) {
+		my $env = make_env(release_network_lock => sub { push @calls, 'release'; kill $signal => $$; return undef });
+		my ($err, $deployed) = deploy_after_lock($env, sub { 1 });
+		like($err // '', qr/^(?:Interrupted by user|Terminated|Hung up|Quit)\b/,
+			"$signal: the held signal is the error raised");
+		unlike($err // '', qr/may still be held/, "$signal: not the release failure");
+		ok(!$deployed, "$signal: and the deploy does not go on");
+	}
+};
+
+subtest 'a release that finds the lock already gone lets the deploy continue' => sub {
+	$status = 'unlocked';
+	my $env = make_env(release_network_lock => sub { push @calls, 'release'; return 0 });
+	my ($err, $deployed) = deploy_after_lock($env, sub { 1 });
+	ok(!defined($err), 'nothing is raised') or diag $err;
+	ok($deployed, 'and the deploy goes on');
+	ok(grep({$_ eq 'release'} @calls), 'after the release was attempted');
+};
+
+# A signal that arrives once the work under the lock has ended, and before
+# the release has finished, cannot be aimed at the gap between the two, so it
+# is sent from inside the release itself: the handlers are the same ones the
+# gap runs under, since they stay installed until the function returns.
+subtest 'a signal that lands during the release is held back until the release has finished' => sub {
+	$status = 'unlocked';
+	for my $signal (qw/INT TERM HUP QUIT/) {
+		my $finished = 0;
+		my $env = make_env(clear_network_lock => sub {
+			push @calls, 'clear';
+			kill $signal => $$;
+			# Work that follows the signal, as the vault calls in a real release do
+			$held = 0;
+			$finished = 1;
+			return 1;
+		});
+		my $ran = 0;
+		throws_ok { under_lock($env, sub { $ran = 1 }) } qr/^(?:Interrupted by user|Terminated|Hung up|Quit)\b/,
+			"$signal: the deploy still stops with the signal once the release is done";
+		ok($ran, "$signal: the work under the lock ran");
+		ok($finished, "$signal: the release ran to its end");
+		ok(!$held, "$signal: and the lock is not left on the director");
+	}
+};
+
+subtest 'a signal that lands during the release does not replace the error that stopped the deploy' => sub {
+	$status = 'unlocked';
+	my $finished = 0;
+	my $env = make_env(clear_network_lock => sub {
+		push @calls, 'clear';
+		kill TERM => $$;
+		$held = 0;
+		$finished = 1;
+		return 1;
+	});
+	my $err;
+	output_from {
+		eval { Genesis::Commands::Env::_deploy_under_network_claims_lock(
+			$env, sub { $held = 1; die "the cloud config upload failed\n" }, dryrun => 0, yes => 0
+		); 1 } or $err = $@;
+	};
+	like($err // '', qr/^the cloud config upload failed\b/, 'the error that stopped the deploy is the one passed on');
+	ok($finished, 'the release ran to its end');
+	ok(!$held, 'and the lock is not left on the director');
+};
+
+# A terminal sends Ctrl-C (INT) or Ctrl-\\ (QUIT) to every process in the
+# foreground group, and a release runs safe as a child in that group, so the
+# signal reaches the child as well as Genesis.  The tests above send to this
+# process alone, which cannot show that.  Here a forked helper sends to the
+# whole group while the release's own child process is running, as a terminal
+# does, and the child has to survive it for the release to read the lock and
+# clear it.
+subtest 'a terminal signal during the release does not kill the release\'s own child processes' => sub {
+	$status = 'unlocked';
+	# This process leads a group of its own, so the signal below reaches it
+	# and what it forks, and not prove or the shell that started the tests.
+	setpgrp(0, 0) or plan skip_all => "cannot make a process group: $!";
+	for my $signal (qw/INT QUIT HUP TERM/) {
+		my $child_ok;
+		my $cleared = 0;
+		my $env = make_env(
+			network_locked_by_me => sub {
+				push @calls, 'mine';
+				# A real child, as the vault calls are, in this group, running
+				# while the helper signals the group.
+				my $helper = fork();
+				die "fork failed: $!" unless defined $helper;
+				if (!$helper) {
+					select(undef, undef, undef, 0.3);
+					kill $signal => -getpgrp();
+					exit 0;
+				}
+				my $out = Genesis::run({stderr => 0}, 'sleep 1; echo survived');
+				$child_ok = defined($out) && $out eq 'survived';
+				waitpid($helper, 0);
+				die "the vault call was killed by the signal\n" unless $child_ok;
+				return $held;
+			},
+			clear_network_lock => sub { push @calls, 'clear'; $cleared = 1; $held = 0; 1 },
+		);
+		$held = 1;
+		my $ran = 0;
+		throws_ok { under_lock($env, sub { $ran = 1 }) }
+			qr/^(?:Interrupted by user|Terminated|Hung up|Quit)\b/,
+			"$signal: the signal is raised once the release has finished";
+		ok($child_ok, "$signal: the release\'s child process survived it");
+		ok($cleared && !$held, "$signal: and the lock was cleared");
+	}
+};
+
+subtest 'a signal that follows one the work caught still stops the work' => sub {
+	$status = 'unlocked';
+	my $reached = 0;
+	# The first signal is raised inside code that catches it
+	my $env = make_env(acquire_network_lock => sub {
+		push @calls, 'acquire'; $held = 1;
+		eval { kill INT => $$; my $x = 0; $x++ for 1 .. 10; 1 };
+		return 1;
+	});
+	throws_ok {
+		under_lock($env, sub { kill TERM => $$; my $x = 0; $x++ for 1 .. 10; $reached = 1 })
+	} qr/^Terminated\b/, 'the second signal is raised';
+	ok(!$reached, 'and it stopped the work where it landed, instead of being held until the work ended');
+	ok(!$held, 'and the lock is released');
+};
+
+subtest 'the signal handlers are put back when the deploy returns' => sub {
+	$status = 'unlocked';
+	my %before = map { $_ => $SIG{$_} } qw/INT TERM HUP QUIT/;
+	my $env = make_env();
+	under_lock($env, sub { 1 });
+	is($SIG{$_}, $before{$_}, "\$SIG{$_} is as it was") for qw/INT TERM HUP QUIT/;
+};
+
+subtest 'the claims are written only after the older Genesis lock key was checked while this process holds its own lock' => sub {
+	$status = 'locked';
+	my $env = make_env();
+	$held = 1;
+	output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}) };
+	my ($legacy, $write) = (0, 0);
+	for my $i (0 .. $#calls) {
+		$legacy = $i if $calls[$i] eq 'legacy' && !$legacy;
+		$write  = $i if $calls[$i] eq 'set_path' && !$write;
+	}
+	ok($legacy && $write && $legacy < $write, 'the older key is checked before the claims are written')
+		or diag explain \@calls;
+};
+
+subtest 'a deploy that lost its lock while it waited writes no claims' => sub {
+	$status = 'locked';
+	my $env = make_env();   # holds no lock: another process took it over
+	throws_ok {
+		output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}) }
+	} qr/Cannot write the network claims.*parent.*no longer holds.*ubuntu\@bastion/s,
+		'the write is refused, naming who holds the lock now';
+	ok(!grep({$_ eq 'set_path'} @calls), 'and nothing is written') or diag explain \@calls;
+	ok(!grep({$_ eq 'clear'} @calls), 'and the other process\'s lock is left alone');
+};
+
+subtest 'the release after the claims are written reports what it did' => sub {
+	$status = 'locked';
+	my $env = make_env();
+	$held = 1;
+	my ($out, $err) = output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}) };
+	is(scalar(@writes), 1, 'the claims are written while the lock is held');
+	like($out.$err, qr/\(lock removed\)/, 'and the release that removed the lock says so');
+
+	$env = make_env(clear_network_lock => sub { push @calls, 'clear'; 0 });
+	$held = 1;
+	($out, $err) = output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}) };
+	unlike($out.$err, qr/\(lock removed\)/, 'a release that removed nothing does not claim it did');
+	like($out.$err, qr/lock was not removed/, 'and says the lock was not removed');
+};
+
+subtest 'the claims write says what changed, and says nothing when nothing did' => sub {
+	$status = 'locked';
+	my $map = {subnets => {'ocfp-2' => {claims => {cf => '10.0.0.1-10.0.0.4'}}}};
+	my $env = make_env(); # the stored record is empty, so every claim is new
+	$held = 1;
+	my ($out, $err) = output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, $map) };
+	like(($out.$err) =~ s/\s+/ /gr, qr/the network claims at secret\/exodus\/parent\/bosh\/network change: cf \(ocfp-2\): adds 10\.0\.0\.1-10\.0\.0\.4/,
+		'a write that changes the record lists what it adds');
+
+	my $same = mock "Mock::NetworkLock::SameVault" => {
+		get_path_strict => sub { return $map },
+		set_path        => sub { my ($self, @args) = @_; push @calls, 'set_path'; 1 },
+	};
+	$env = make_env(vault => sub { $same });
+	$held = 1;
+	($out, $err) = output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, $map) };
+	unlike(($out.$err), qr/the network claims at|keep the same addresses/, 'a write that changes nothing prints no summary');
+	ok(grep({$_ eq 'set_path'} @calls), 'and still writes the record');
 };
 
 # ---------------------------------------------------------------------------

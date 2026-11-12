@@ -226,7 +226,8 @@ sub run_hook {
 
 	} elsif ($hook eq 'cpi-config') {
 		%module_options = (
-			credhub_prefix => $opts{credhub_prefix}
+			credhub_prefix => $opts{credhub_prefix},
+			self_upload    => $opts{self_upload}, # the config goes to the director being deployed
 		);
 		# TODO: do we need anything other than env and kit?
 

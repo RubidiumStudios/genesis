@@ -9,7 +9,9 @@ use Genesis::Term;
 use Genesis::Commands;
 use Genesis::Top;
 use Genesis::UI;
+use Genesis::Env::NetworkClaims;
 use JSON::PP;
+use IPv4;
 
 # bosh - provide a wrapper around the bosh command {{{
 #
@@ -226,8 +228,10 @@ sub bosh_configs {
 	) if $env->use_create_env && !$env->is_bosh_director;
 
 	# The director that deploys this environment holds its cloud and cpi
-	# configs.  A create-env director has no such director; its runtime
-	# configs live on the director itself and are targeted per config.
+	# configs.  A create-env director has no such director, so $bosh stays
+	# undefined for it; its runtime configs and its own cloud config live on
+	# the director itself, and every config record carries the director that
+	# holds it, so no action reaches for $bosh to handle them.
 	my $bosh = $env->use_create_env ? undef : $env->with_bosh->bosh;
 
 	my $subcommand = "bosh_configs_$action";
@@ -271,113 +275,190 @@ sub bosh_configs_upload {
 
 	# Cloud configs record network claims on the director, so their synthesis
 	# and upload happen under the same network claims lock the deploy path
-	# uses.  The lock is released on every exit path below.
-	my $lock_held = 0;
+	# uses.  The lock is released on every exit path below.  A director
+	# environment's own cloud config records the claims on the director
+	# itself, so it takes that director's lock as well: the parent's first,
+	# then the director's, the same order on every run.
+	my @locked = ();
 	my $wants_cloud = (!$options{type} || $options{type} eq 'cloud')
 		&& (!$options{name} || $options{name} eq $env->bosh_config_name)
 		&& !$env->use_create_env
 		&& $env->has_hook('cloud-config')
 		&& $env->can_build_cloud_configs;
+	my $wants_director = _bosh_configs_director_buildable($env, %options);
 
 	# A signal while the lock is held has to unwind through the release below
 	# instead of killing the process with the lock still on the director.  HUP
 	# is in the list because this runs over ssh from a bastion, and a dropped
 	# session hangs up every process in it -- which is how a lock outlives the
 	# process that took it.
-	local $SIG{INT}  = sub { die "Interrupted by user\n" };
-	local $SIG{TERM} = sub { die "Terminated\n" };
-	local $SIG{HUP}  = sub { die "Hung up\n" };
-	local $SIG{QUIT} = sub { die "Quit\n" };
-
-	eval {
-		if ($wants_cloud) {
-			_bosh_configs_acquire_network_lock($env, $bosh, $yes);
-			$lock_held = 1;
-		}
-
-		my ($configs, $notes) = _bosh_configs_provided($env, $bosh, %options);
-		unless (@$configs) {
-			info(
-				"\nNo bosh configs are provided for #C{%s}%s, so there is nothing to upload.",
-				$env->name, _bosh_configs_filter_description(%options)
-			);
-			_bosh_configs_notes($notes);
-			return 1;
-		}
-
-		my @runtime_builds = ();
-		my @runtime_skipped = ();
-		my $failures = 0;
-		for my $config (@$configs) {
-			_bosh_configs_status($config);
-			my $label = _bosh_configs_label($config);
-
-			if ($config->{status} eq 'unsynthesized') {
-				error("[[  - >>%s could not be synthesized; see the errors above.", $label);
-				$failures++;
-				next;
-			}
-			if ($config->{status} eq 'identical') {
-				info("[[  - >>%s is #G{already up to date}.", $label);
-				push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
-				next;
-			}
-
-			if ($config->{status} eq 'missing') {
-				info(
-					"[[  - >>%s is #R{missing} from the director; it would be created with:\n\n%s",
-					$label, $config->{content}
-				);
-			} else {
-				info(
-					"[[  - >>%s is #Y{different} from the director's copy:\n\n%s\n",
-					$label, $config->{diff}
-				);
-			}
-
-			unless (_bosh_configs_confirm(sprintf(
-				"Upload %s config #C{%s} to #M{%s} BOSH director? [y|n]",
-				$config->{type}, $config->{name}, $config->{bosh}->alias
-			), $yes, 1)) {
-				info("[[  - >>#y{skipped} %s\n", $label);
-				push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
-				next;
-			}
-
-			if ($config->{type} eq 'cloud') {
-				_bosh_configs_upload_cloud($env, $config);
-			} elsif ($config->{type} eq 'cpi') {
-				_bosh_configs_upload_cpi($env, $config);
-			} else {
-				# Runtime configs are uploaded by the kit's runtime-config hook,
-				# which also stores any secrets the build generated.
-				push @runtime_builds, $config->{build};
-			}
-		}
-
-		if (@runtime_builds) {
-			my $requests = _bosh_configs_runtime_requests($env, $options{name});
-			$env->run_hook(
-				'runtime-config',
-				args => {%$requests, map {($_ => JSON::PP::false)} @runtime_skipped},
-				interactive => 0,
-			);
-		}
-
-		_bosh_configs_notes($notes);
-		bail(
-			"%d bosh config%s could not be synthesized, so %s not uploaded.",
-			$failures, $failures == 1 ? '' : 's', $failures == 1 ? 'it was' : 'they were'
-		) if $failures;
-		1;
+	#
+	# The first signal unwinds the work.  Any that follows, including one that
+	# was held back while a release ran, is held until every lock has been
+	# released and is then raised, because dying between two releases would
+	# leave the second lock on its director.
+	my $unwinding = 1;
+	my $held_signal;
+	my $on_signal = sub {
+		my ($message) = @_;
+		# $unwinding stays set until the work has been left, below, and not
+		# until this first die: code inside the work can catch that die, and
+		# the next signal then still has to unwind it.
+		die $message if $unwinding;
+		$held_signal //= $message;
 	};
-	my $err = $@;
-	if ($lock_held && $bosh->network_locked_by_me) {
-		info({pending => 1}, "[[  - >>releasing network claims lock on #M{%s} BOSH director...", $bosh->alias);
-		$bosh->clear_network_lock();
-		info "#G{done}";
+	local $SIG{INT}  = sub { $on_signal->("Interrupted by user\n") };
+	local $SIG{TERM} = sub { $on_signal->("Terminated\n") };
+	local $SIG{HUP}  = sub { $on_signal->("Hung up\n") };
+	local $SIG{QUIT} = sub { $on_signal->("Quit\n") };
+
+	my $err;
+	my @uploaded = (); # what reached a director, for a release failure to report
+	eval {
+		eval {
+			# Each director goes on the list before its lock is taken, so that an
+			# acquire that wrote the lock and then failed is released below too.
+			if ($wants_cloud) {
+				push @locked, $bosh;
+				_bosh_configs_acquire_network_lock($env, $bosh, $yes);
+			}
+			if ($wants_director) {
+				my $director = _bosh_configs_director_bosh($env);
+				push @locked, $director;
+				_bosh_configs_acquire_network_lock($env, $director, $yes);
+			}
+
+			my ($configs, $notes) = _bosh_configs_provided($env, $bosh, %options);
+			unless (@$configs) {
+				info(
+					"\nNo bosh configs are provided for #C{%s}%s, so there is nothing to upload.",
+					$env->name, _bosh_configs_filter_description(%options)
+				);
+				_bosh_configs_notes($notes);
+				# This return leaves only the eval, not the sub, so the locks
+				# taken above are still released below.
+				return 1;
+			}
+
+			my @runtime_builds = ();
+			my @runtime_skipped = ();
+			my $failures = 0;
+			my $compare_failures = 0;
+			for my $config (@$configs) {
+				_bosh_configs_status($config);
+				my $label = _bosh_configs_label($config);
+
+				if ($config->{status} eq 'unsynthesized') {
+					error("[[  - >>%s could not be synthesized; see the errors above.", $label);
+					$failures++;
+					next;
+				}
+				if ($config->{status} eq 'error') {
+					# Excluded from the runtime-config hook's upload as well, which
+					# would otherwise upload every enabled build.
+					error("[[  - >>%s could not be compared with the director's copy:\n\n%s\n", $label, $config->{diff});
+					push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
+					$compare_failures++;
+					next;
+				}
+				if ($config->{status} eq 'identical') {
+					info("[[  - >>%s is #G{already up to date}.", $label);
+					push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
+					# The upload that would have recorded the claims is skipped, so a
+					# record left behind by an earlier failed write is repaired here.
+					_bosh_configs_sync_claims($env, $config)
+						if $config->{type} eq 'cloud' && ref($config->{network_map}) eq 'HASH';
+					next;
+				}
+
+				if ($config->{status} eq 'missing') {
+					info(
+						"[[  - >>%s is #R{missing} from the director; it would be created with:\n\n%s",
+						$label, $config->{content}
+					);
+				} else {
+					info(
+						"[[  - >>%s is #Y{different} from the director's copy:\n\n%s\n",
+						$label, $config->{diff}
+					);
+				}
+
+				unless (_bosh_configs_confirm(sprintf(
+					"Upload %s config #C{%s} to #M{%s} BOSH director? [y|n]",
+					$config->{type}, $config->{name}, $config->{bosh}->alias
+				), $yes, 1)) {
+					info("[[  - >>#y{skipped} %s\n", $label);
+					push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
+					next;
+				}
+
+				if ($config->{type} eq 'cloud') {
+					_bosh_configs_upload_cloud($env, $config);
+					push @uploaded, $label;
+				} elsif ($config->{type} eq 'cpi') {
+					_bosh_configs_upload_cpi($env, $config);
+					push @uploaded, $label;
+				} else {
+					# Runtime configs are uploaded by the kit's runtime-config hook,
+					# which also stores any secrets the build generated.
+					push @runtime_builds, $config->{build};
+				}
+			}
+
+			if (@runtime_builds) {
+				my $requests = _bosh_configs_runtime_requests($env, $options{name});
+				$env->run_hook(
+					'runtime-config',
+					args => {%$requests, map {($_ => JSON::PP::false)} @runtime_skipped},
+					interactive => 0,
+				);
+				push @uploaded, sprintf("the runtime configs for build%s #C{%s}",
+					@runtime_builds == 1 ? '' : 's', join(', ', @runtime_builds));
+			}
+
+			_bosh_configs_notes($notes);
+			bail(
+				"%d bosh config%s could not be synthesized, so %s not uploaded.",
+				$failures, $failures == 1 ? '' : 's', $failures == 1 ? 'it was' : 'they were'
+			) if $failures;
+			bail(
+				"%d bosh config%s could not be compared with the director's cop%s, so %s not uploaded.",
+				$compare_failures, $compare_failures == 1 ? '' : 's',
+				$compare_failures == 1 ? 'y' : 'ies', $compare_failures == 1 ? 'it was' : 'they were'
+			) if $compare_failures;
+			1;
+		};
+		$err = $@;
+		# Inside the outer eval, so that a signal between the two lands in it
+		$unwinding = 0;
+		1;
+	} or $err = $@;
+	# Each release logs its own failure rather than dying, so one that fails
+	# neither replaces the error above nor leaves the other director locked.
+	my @failed = ();
+	for my $director (reverse @locked) {
+		push @failed, $director unless defined($director->release_network_lock);
 	}
 	die $err if $err;
+	die $held_signal if defined($held_signal);
+
+	# A pipeline acts on the exit status, so a lock that may still be held
+	# fails the command, after every release it owes has been attempted.
+	bail(
+		"The network claims lock could not be released on %s, so it may still be ".
+		"held at %s.  %s before the release failed.\n\n".
+		"The error above says why the release failed.  Other deploys and ".
+		"#C{bosh-configs upload} runs on %s will wait for the lock until it goes ".
+		"stale.  Check it with #C{safe get %s}, and run this command again once the ".
+		"cause is fixed.",
+		join(' and ', map {"the #M{".$_->alias."} BOSH director"} @failed),
+		join(' and ', map {"#C{".$_->network_lock_path."}"} @failed),
+		@uploaded
+			? "The upload had already finished, and ".join(" and ", @uploaded)." had been uploaded"
+			: "The upload had already finished, and nothing was uploaded",
+		@failed == 1 ? 'that director' : 'those directors',
+		$failed[0]->network_lock_path
+	) if @failed;
 	return 1;
 }
 
@@ -489,6 +570,8 @@ sub bosh_configs_compare {
 		my $label = _bosh_configs_label($config);
 		if ($config->{status} eq 'unsynthesized') {
 			error("[[  - >>%s could not be synthesized; see the errors above.", $label);
+		} elsif ($config->{status} eq 'error') {
+			error("[[  - >>%s could not be compared with the director's copy:\n\n%s\n", $label, $config->{diff});
 		} elsif ($config->{status} eq 'missing') {
 			info(
 				"[[  - >>%s is #R{missing} from the director; the synthesized config is:\n\n%s",
@@ -516,6 +599,20 @@ sub bosh_configs_delete {
 		"The delete action needs the name of the config to remove; give it with ".
 		"#y{--name} (the #C{list} action shows the names the director holds)."
 	) unless defined $options{name};
+
+	if ($env->is_bosh_director
+		&& $options{name} eq _bosh_configs_director_name($env)
+		&& (!$options{type} || $options{type} eq 'cloud')) {
+		bail(
+			"Cloud config #C{%s} is the BOSH director's own cloud config, so ".
+			"bosh-configs will not delete it.  The director's compilation network ".
+			"is defined there, and the network claims in the director's exodus ".
+			"record describe it, so without it the director cannot compile ".
+			"packages for any deployment.  If the config is wrong, rebuild it with ".
+			"#C{genesis %s bosh-configs upload --type cloud --name %s} instead.",
+			$options{name}, $env->name, $options{name}
+		);
+	}
 
 	my @rows = _bosh_configs_uploaded($env, $bosh, %options);
 	bail(
@@ -562,9 +659,18 @@ sub _bosh_configs_provided {
 	my %wanted = map {$_ => 1} ($options{type} ? ($options{type}) : @BOSH_CONFIG_TYPES);
 	my $name = $options{name};
 
+	# A director environment's cloud configs come in two parts.  The
+	# parent-side one, <env>.<type>, lives on the director that deploys this
+	# one; the director's own, <env>.<type>.director, lives on the director
+	# itself.  A create-env director has no deploying director, so only the
+	# second applies to it.
 	if ($wanted{cloud}) {
 		if ($env->use_create_env) {
-			push @notes, "cloud configs do not apply to a create-env director.";
+			push @notes, sprintf(
+				"a create-env director has no deploying director, so the parent-side ".
+				"cloud config #C{%s} does not apply to it.",
+				$env->bosh_config_name
+			) if !defined($name) || $name eq $env->bosh_config_name;
 		} elsif (!$env->has_hook('cloud-config')) {
 			push @notes, sprintf(
 				"kit #C{%s} provides no cloud-config hook, so no cloud config is synthesized.",
@@ -582,6 +688,12 @@ sub _bosh_configs_provided {
 				network_map => $network_map,
 			};
 		}
+	}
+
+	if ($wanted{cloud}) {
+		my ($director_config, $director_notes) = _bosh_configs_director_config($env, %options);
+		push @configs, $director_config if $director_config;
+		push @notes, @$director_notes;
 	}
 
 	if ($wanted{cpi}) {
@@ -653,6 +765,69 @@ sub _bosh_configs_provided {
 }
 
 # }}}
+# _bosh_configs_director_name - the name of a director environment's own cloud config {{{
+sub _bosh_configs_director_name {
+	my ($env) = @_;
+	return join('.', $env->name, $env->type, 'director');
+}
+
+# }}}
+# _bosh_configs_director_bosh - the director that holds a director environment's own cloud config {{{
+sub _bosh_configs_director_bosh {
+	my ($env) = @_;
+	# The same director the post-deploy hook uploads the config to: the
+	# director itself, which get_target_bosh picks unasked for create-env.
+	return scalar($env->get_target_bosh({self => !$env->use_create_env}));
+}
+
+# }}}
+# _bosh_configs_director_selected - whether --type and --name select a director environment's own cloud config {{{
+sub _bosh_configs_director_selected {
+	my ($env, %options) = @_;
+	return 0 unless $env->is_bosh_director;
+	return 0 if $options{type} && $options{type} ne 'cloud';
+	return 0 if defined($options{name}) && $options{name} ne _bosh_configs_director_name($env);
+	return 1;
+}
+
+# }}}
+# _bosh_configs_director_buildable - whether a director environment's own cloud config is selected and can be built {{{
+sub _bosh_configs_director_buildable {
+	my ($env, %options) = @_;
+	return 0 unless _bosh_configs_director_selected($env, %options);
+	return 0 unless $env->can_build_cloud_configs;
+	return $env->has_hook('cloud-config', purpose => 'director') ? 1 : 0;
+}
+
+# }}}
+# _bosh_configs_director_config - synthesize a director environment's own cloud config, or say why not {{{
+sub _bosh_configs_director_config {
+	my ($env, %options) = @_;
+	return (undef, []) unless _bosh_configs_director_selected($env, %options);
+
+	my $name = _bosh_configs_director_name($env);
+	return (undef, [sprintf(
+		"the director's own cloud config #C{%s} is not managed by genesis for this environment.",
+		$name
+	)]) unless $env->can_build_cloud_configs;
+	return (undef, [sprintf(
+		"kit #C{%s} provides no cloud-config-director hook, so the director's own ".
+		"cloud config #C{%s} is not synthesized.",
+		$env->kit->id, $name
+	)]) unless $env->has_hook('cloud-config', purpose => 'director');
+
+	my ($content, $network_map) = $env->run_hook('cloud-config', purpose => 'director');
+	return ({
+		type        => 'cloud',
+		name        => $name,
+		bosh        => _bosh_configs_director_bosh($env),
+		content     => $content,
+		network_map => $network_map,
+		exodus_path => $env->exodus_base.'/network',
+	}, []);
+}
+
+# }}}
 # _bosh_configs_runtime_requests - the runtime-config hook requests for the enabled builds, or for one named config {{{
 sub _bosh_configs_runtime_requests {
 	my ($env, $name) = @_;
@@ -662,6 +837,8 @@ sub _bosh_configs_runtime_requests {
 	if (defined $name) {
 		my $prefix = $env->bosh_config_name.'.';
 		return undef unless index($name, $prefix) == 0 && length($name) > length($prefix);
+		# A director's own cloud config shares the prefix but is no runtime build
+		return undef if $env->is_bosh_director && $name eq _bosh_configs_director_name($env);
 		my $build = substr($name, length($prefix));
 		my $opts = ref($enabled->{$build}) eq 'HASH' ? $enabled->{$build} : {};
 		return {$build => $opts};
@@ -685,13 +862,20 @@ sub _bosh_configs_status {
 	}
 
 	my $uploaded = $bosh->get_config($config->{type}, $config->{name});
-	my ($diff, $is_diff) = spruce_diff(
+	my ($diff, $rc) = spruce_diff(
 		{content => $uploaded,          label => 'uploaded'},
 		{content => $config->{content}, label => 'synthesized'}
 	);
 	$config->{uploaded} = $uploaded;
+	# spruce exits 2 or more when it cannot compare the two, and its output
+	# is then the reason, not a diff.
+	if ($rc > 1) {
+		$config->{diff}   = $diff || "spruce diff exited $rc with no output";
+		$config->{status} = 'error';
+		return $config->{status};
+	}
 	$config->{diff}     = $diff;
-	$config->{status}   = $is_diff ? 'different' : 'identical';
+	$config->{status}   = $rc ? 'different' : 'identical';
 	return $config->{status};
 }
 
@@ -704,6 +888,7 @@ sub _bosh_configs_status_label {
 		different     => '#Y{different}',
 		missing       => '#R{missing}',
 		unsynthesized => '#R{not synthesized}',
+		error         => '#R{could not compare}',
 	);
 	return $labels{$config->{status} // ''} // '#R{unknown}';
 }
@@ -823,7 +1008,14 @@ sub _bosh_configs_acquire_network_lock {
 	} elsif ($current_lock->{status} eq 'locked') {
 		info "#r{locked} %s", $current_lock->{description};
 		bail(
-			"Network claims are currently locked -- cannot upload a cloud config now!"
+			"Network claims are currently locked -- cannot upload a cloud config now!\n\n".
+			"The network claims lock on the #M{%s} BOSH director is held %s%s.  This ".
+			"usually means a deploy, or another #C{bosh-configs upload}, against this ".
+			"director is running now or is waiting at a prompt.  Wait for it to finish, ".
+			"then upload again.  If no such process is running, the lock goes stale 30 ".
+			"minutes after it was taken, and the next upload offers to clear it.",
+			$bosh->alias, $current_lock->{description} // 'by another process',
+			defined($current_lock->{path}) ? sprintf(", and is stored at #C{%s}", $current_lock->{path}) : ''
 		);
 	} elsif ($current_lock->{status} eq 'stale') {
 		info "#y{locked (stale)} %s", $current_lock->{description};
@@ -839,8 +1031,11 @@ sub _bosh_configs_acquire_network_lock {
 				"to clear it.", $current_lock->{description}
 			);
 		}
-		$bosh->clear_network_lock;
-		info "[[  - >>stale network claims lock cleared.";
+		# Only the stale lock shown above is cleared; one that another process
+		# has taken since is left for the acquire below to refuse.
+		info($bosh->clear_network_lock(stale => $current_lock)
+			? "[[  - >>stale network claims lock cleared."
+			: "[[  - >>stale network claims lock was already cleared or taken by another process.");
 	}
 
 	info({pending => 1},
@@ -857,11 +1052,14 @@ sub _bosh_configs_upload_cloud {
 	my ($env, $config) = @_;
 	my $bosh = $config->{bosh};
 
-	my $last_check = $bosh->check_network_lock;
-	bail(
-		"Network claims lock was lost since it was acquired (it may have become ".
-		"stale and been removed) -- cannot upload the cloud config!"
-	) if ($last_check->{status} eq 'unlocked');
+	# A prompt since the lock was taken can wait past its stale timeout, and
+	# another process may have cleared and taken it in the meantime.
+	$bosh->ensure_network_lock_held('upload the cloud config');
+
+	# Read before the director is changed, so a record that cannot be read
+	# stops the upload instead of leaving it half done.
+	my $stored = ref($config->{network_map}) eq 'HASH'
+		? _bosh_configs_claims_stored($env, $config) : undef;
 
 	info({pending => 1},
 		"[[  - >>uploading cloud config #C{%s} to #M{%s} BOSH director...",
@@ -877,25 +1075,97 @@ sub _bosh_configs_upload_cloud {
 	}
 	info "#G{done}";
 
-	if (ref($config->{network_map}) eq 'HASH') {
-		info({pending => 1},
-			"[[  - >>submitting network claims for #C{%s} to #M{%s} BOSH director...",
-			$env->name, $bosh->alias
+	_bosh_configs_write_claims($env, $config, $stored, uploaded => 1)
+		if ref($config->{network_map}) eq 'HASH';
+	return 1;
+}
+
+# }}}
+# _bosh_configs_claims_target - the vault and path of the network record a cloud config's claims are written to {{{
+sub _bosh_configs_claims_target {
+	my ($env, $config) = @_;
+	# A director's own cloud config names the director's own exodus record,
+	# the one post-deploy writes; any other cloud config's claims belong
+	# under the director that holds it.
+	return $config->{exodus_path}
+		? ($env->vault, $config->{exodus_path})
+		: ($config->{bosh}->vault, $config->{bosh}->exodus_path.'/network');
+}
+
+# }}}
+# _bosh_configs_claims_differ - whether the stored network record holds other claims than a cloud config's network map {{{
+sub _bosh_configs_claims_differ {
+	my ($stored, $map) = @_;
+	my $json = JSON::PP->new->canonical;
+	return $json->encode(Genesis::Env::NetworkClaims::claims_flat($stored))
+		ne $json->encode(Genesis::Env::NetworkClaims::claims_flat($map));
+}
+
+# }}}
+# _bosh_configs_claims_stored - the network record stored in exodus for a cloud config's claims, empty when none was written {{{
+sub _bosh_configs_claims_stored {
+	my ($env, $config) = @_;
+	my ($vault, $path) = _bosh_configs_claims_target($env, $config);
+	# Strict, because a read that failed would look like a record with no
+	# claims in it, and the write that follows clears the record.  Only a
+	# record that was never written is empty.
+	return $vault->get_path_strict($path) // {};
+}
+
+# }}}
+# _bosh_configs_sync_claims - write the claims of an up-to-date cloud config when the stored record differs from them {{{
+sub _bosh_configs_sync_claims {
+	my ($env, $config) = @_;
+	my $stored = _bosh_configs_claims_stored($env, $config);
+	return 0 unless _bosh_configs_claims_differ($stored, $config->{network_map});
+
+	my (undef, $path) = _bosh_configs_claims_target($env, $config);
+	info(
+		"[[  - >>the network claims recorded at #C{%s} #Y{differ} from the ones %s builds, ".
+		"so they will be written.", $path, _bosh_configs_label($config)
+	);
+	_bosh_configs_write_claims($env, $config, $stored, uploaded => 0);
+	return 1;
+}
+
+# }}}
+# _bosh_configs_write_claims - record a cloud config's network map in the exodus network record, after saying what it changes {{{
+sub _bosh_configs_write_claims {
+	my ($env, $config, $stored, %opts) = @_;
+	my $bosh = $config->{bosh};
+	my ($network_vault, $network_path) = _bosh_configs_claims_target($env, $config);
+
+	Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $config->{network_map}, say_unchanged => 1);
+
+	info({pending => 1},
+		"[[  - >>submitting network claims for #C{%s} to #M{%s} BOSH director...",
+		$env->name, $bosh->alias
+	);
+	eval {
+		$network_vault->set_path(
+			$network_path, $config->{network_map}, flatten => 1, clear => 1
 		);
-		eval {
-			$bosh->vault->set_path(
-				$bosh->exodus_path.'/network', $config->{network_map}, flatten => 1, clear => 1
-			);
-			1;
-		} or do {
-			info "#R{failed}";
-			bail(
-				"Cloud config #C{%s} was uploaded, but the network map could not be ".
-				"updated:\n\n%s", $config->{name}, $@
-			);
-		};
-		info "#G{done}";
-	}
+		1;
+	} or do {
+		# Kept before info runs, which can reset $@
+		my $err = $@ || 'no error was reported';
+		info "#R{failed}";
+		bail(
+			"Cloud config #C{%s} %s, but the network map could not be ".
+			"updated at #C{%s}:\n\n%s\n\nThe director now holds the new cloud ".
+			"config while that record may be empty or out of date, because the ".
+			"write clears the record before filling it.  This usually means the ".
+			"vault is sealed or unreachable, or the token has expired or cannot ".
+			"write that path.  Check #C{safe target} and #C{safe get %s}, restore ".
+			"the record from a saved copy if it is empty, and then run #C{%s ".
+			"bosh-configs upload --type cloud --name %s -y}, which finds the ".
+			"cloud config already up to date on the director and writes the claims.",
+			$config->{name}, $opts{uploaded} ? 'was uploaded' : 'is on the director',
+			$network_path, $err, $network_path,
+			scalar($env->get_call_path_with_env), $config->{name}
+		);
+	};
+	info "#G{done}";
 	return 1;
 }
 

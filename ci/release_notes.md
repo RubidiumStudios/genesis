@@ -1,5 +1,7 @@
 # New Features
 
+* Fixed cloud-config hooks and repository config loading dying with "Modification of a read-only value attempted" (or clobbering the caller's `$_`) when `network_definition` or `config` was called from inside `map` or `for` over a constant list.
+
 * Per-AZ CPI extension point in cloud-config hooks.
 
   `Genesis::Hook::CloudConfig` now exposes `cpi_name_for_az($az_key,
@@ -241,11 +243,129 @@
   implemented.  This commit completes that implementation, so that if
   `hooks/prereqs` exists in a kit, it will be run prior to usage.
 
+* Network claims no longer hand out another target's reserved address.
+
+  A network's free pool now leaves out every other target's reserved-ips
+  records, and a saved claim that holds one of those addresses stops the
+  build instead of keeping it.  Set `GENESIS_ALLOW_CLAIM_PRUNE` to a
+  comma-separated list of network names to drop the address for one run.  A
+  director's compilation network drops it with a warning, because its VMs
+  exist only during a deploy.
+
+  A network's own in-band reserved-ips records now take away a claim's top
+  address on the first build.  Before this fix the same address went on the
+  second build, so a claim that was saved by an earlier Genesis may change
+  by one address the first time it is built.
+
+* Stemcells with no download source now stop with a clear message.
+
+  When a required stemcell was missing from the director and Genesis could
+  not find a download for it, `deploy` and `check` stopped with "Cannot fix
+  stemcells without a valid fix_data" and never said which stemcell was the
+  problem.  They now stop with "requires manual upload" and list each such
+  stemcell, and `deploy --fix-stemcells --dry-run` no longer claims it would
+  fix them.
+
+* A director that hangs behind `BOSH_ALL_PROXY` is now unreachable.
+
+  The proxied director check lost its own timeout, so a director that never
+  answered was marked as validated.  Genesis now stops with an error that
+  names the director and the proxy.
+
+* Stemcells named by `name` in the manifest are now matched by name.
+
+  As BOSH does, a manifest stemcell that gives a `name` now matches the
+  director's stemcells by name and version, including `latest`, and its `os`
+  is ignored.  Before this fix Genesis checked only `os`, so a name-only
+  stemcell was never found, and one with both a name and an os was checked
+  against the wrong image.  A named stemcell that is missing is reported for
+  manual upload instead of being offered a bosh.io stemcell of another name.
+
+* `genesis new --vault` resolves a descriptor the way `genesis.vault` does.
+
+  The command matched every field of the descriptor exactly against the
+  safe targets, so a `strongbox` or `no-strongbox` clause that the target's
+  `~/.saferc` entry did not repeat, an https URL with no `verify` clause, a
+  trailing `/`, or a namespace without a port found nothing, and the command
+  died with "Invalid call to Genesis::Top->set_vault".  `genesis new` for a
+  child environment failed the same way when an ancestor's `genesis.vault`
+  had one of those shapes.  Both now use one resolver, in which strongbox
+  only breaks ties, verify is compared only for https, and a descriptor with
+  no matching target names the URL and the `safe target` command to run.
+
+* `genesis new --vault` accepts the name of a safe target, as its help says.
+
+  A bare name such as `--vault prod-vault` died with "Unknown clause", because only vault descriptors were understood. A single word with no URL scheme is now looked up as a safe target name, even when it contains `:` or `/` or matches a descriptor keyword such as `verify`, and an unknown name is reported by name along with how to list the targets. The new environment's `genesis.vault` records the descriptor of the target the name resolved to, leaving out an alias that would not read back as that name, such as one starting with `$` or containing a space. A name whose URL another safe target shares is refused with both target names, because Genesis hands the vault to safe by URL and safe cannot choose between them. When a descriptor holds characters YAML would misread, such as an alias of `#ops` or `ops:`, the env file now writes it quoted, so the environment reads it back intact. Anything else is still parsed as a descriptor and recorded as given, exactly as before. An ancestor's `genesis.vault` still has to be a descriptor, because a target name only means something in one operator's `~/.saferc`.
+
+* `genesis new --vault` no longer repoints the whole repository.
+
+  The vault given to `genesis new` was always written to `.genesis/config` as the repository's secrets provider, which every environment without its own `genesis.vault` relies on, so creating one environment on another vault silently moved all of those. The vault is now recorded only when the repository has no secrets provider yet. When one is recorded, the given vault is used for that command alone, and if it differs, a note says that `.genesis/config` was left alone and where it still points. A vault picked interactively with `--vault ?` or inherited from an ancestor's `genesis.vault` is handled the same way, and a picked vault is now recorded in the new environment as its descriptor, where the literal `?` used to fail the command.
+
 * Fix bug where default config type was lost when fetching configs from BOSH
   director, resulting in bad messages and error reports.
 
 * Export `GENESIS_EXODUS_MOUNT` to hooks environment.  This was missing from the
   set of vault path environment variables available to hook scripts.
+
+* Interactive BOSH commands report their exit code on Linux.
+
+  Genesis runs interactive bosh commands under `script` so that bosh keeps a
+  terminal.  util-linux `script` exits 0 whatever bosh did unless it is given
+  `-e`, so on Linux a failed command never raised its failure message, and a
+  bosh killed by a signal was reported as a success.  Genesis now passes `-e`
+  there, and to the `script` that runs `spruce diff`.  macOS `script` already
+  returned bosh's exit code.
+
+* `run_errand` fails when the errand fails.
+
+  Kit addons that run an errand through `run_errand` printed success after a
+  failed errand on Linux, because `run_errand` returned 1 whatever happened
+  and relied on a failure message that never fired there.  It now checks the
+  exit code bosh returns and stops with an error when the errand fails.
+
+* A refused connection no longer kills Genesis with SIGALRM.
+
+  Checking a vault or BOSH director whose port refused the connection left
+  the connection timeout armed, so Genesis was killed by SIGALRM
+  `GENESIS_NETWORK_TIMEOUT` seconds later (10 by default) if it was still
+  running.  The timeout is now cancelled however the check ends.
+
+* Redeploying a `create-env` environment no longer reports a false manifest
+  mismatch.
+
+  Before a `create-env` deploy, Genesis checks that the manifest kept in the
+  repository is the one that was last deployed.  Since create-env started
+  writing its state to `-state.json`, that check hashed the state file
+  instead of the manifest, so every redeploy reported that "Manifest in the
+  deployment archive does not match the manifest in the local repository".
+  At a terminal you were asked whether to proceed, and without one Genesis
+  refused to deploy.  The check now compares the manifest in the repository,
+  even when the last manifest was downloaded from exodus, and the warning
+  appears once instead of twice when that manifest really is stale.  A state
+  file in the repository with no manifest beside it is now reported, because
+  nothing shows which deployment it belongs to.  An environment with no
+  recorded state file now stops with "Cannot find state file for previous
+  deployment" instead of "failed to open ''".
+
+* Genesis reads every `safe export` format. Safe writes a versioned export (format 2) when a secret has more than one version, and safe 1.26.0 writes format 3 when a value isn't a string, such as the boolean `path_style` in an ocfp blobstore config or a number written by another tool. Genesis read only format 1, so deploys, secret checks, entombment, and exodus lookups died with "Not a HASH reference". They now read the current version of each secret in any format and leave out a secret whose current version is deleted or destroyed. A secret holding a value that isn't a string is read again with `safe get`, and its values come back as the same text safe 1.25.1 and 1.26.1 give, so ocfp envs load again. An export format Genesis doesn't know still stops with a clear error. Using safe 1.25.1 or 1.26.1 also avoids the export problem, but it doesn't fix the network lock race between Genesis versions, which goes away only when everyone deploying to a director runs a Genesis that writes the lock's `pid` as a string.
+
+* The network claims lock now stores its pid as a string.  An earlier build stored it as a JSON number, and while such a lock was held or left behind, a deploy that exported the director's exodus data with safe 1.26.0 could stop with "Cannot use the safe export".  A lock released since, whose history alone holds the number, does not stop the export.
+
+* Commands that hold the network claims lock now fail when they can't release it. `genesis deploy`, `genesis bosh-configs` uploads, and the post-deploy network update attempt every release they owe, and then exit nonzero naming each lock that may still be held and what had already completed.
+
+* Vault reads that safe can't finish now stop the command. A refused read, an unreachable vault, or a killed `safe` process used to read as empty data, so exodus lookups returned their defaults, the deployment history looked empty, a pipeline `--pull` could fall back to control HEAD and deploy content its predecessor never shipped, and a successful terminate could leave the old exodus data in place, where it still read as a deployed director. A secret that doesn't exist still reads as empty, and commands such as `genesis info` now stop during a vault outage instead of showing empty data.
+
+* Entombment no longer treats a refused or failed read of a referenced secret as an empty secret, and the error names the path.
+
+* A typed value that a manifest doesn't reference, such as the numeric `pid` an older Genesis writes into its network lock, no longer stops entombment. Every referenced value now resolves before anything is written to CredHub, so a missing value no longer leaves earlier values written.
+
+* CredHub names under a root base now join with one slash. When a director's exodus data names no `credhub_base`, Genesis used to read and write names such as `//genesis-entombed/...` in that director's CredHub, and BOSH refuses a placeholder name with a doubled slash, so no config could resolve one. Genesis now uses `/genesis-entombed/...`. If a development build ran against such a director, check its CredHub with `credhub find -n //genesis-entombed` and delete anything it finds, since nothing can have used those names.
+
+* `lookup_entombed_self` reports failures instead of quietly returning unevaluated `(( vault ))` values. An environment that isn't a director reads its values as they are written. For a director, every lookup reads its entombed manifest, so a literal value, such as an inline `bosh-configs.director-cpi.cpis` list, and a key the manifest doesn't set both need the director's own CredHub whenever any part of the manifest reads the vault, and a build that fails stops the command. Before that build, Genesis downloads any config the kit's blueprint reads, so a blueprint that reads the cloud config works during deploy's CPI step and outside deploy, and deploy reuses that download.
+
+* A director's self-uploaded CPI config now names its entombed secrets with absolute names in the director's own CredHub, such as `((/genesis-entombed/...))`, or names under its `credhub_base` when its exodus data sets one. Development builds sent the relative names the entombment writes, and BOSH refuses a relative name in a CPI config, so that config could never resolve. Names inside a longer value, such as `https://((genesis-entombed/...)):8006`, are qualified too, and BOSH variables and literal values are sent unchanged.
+
+* A CPI config that Genesis uploads to a parent director now names its entombed secrets with absolute names in the parent's CredHub, and a director's self-uploaded CPI config names them in its own CredHub. Development builds entombed the parent's CPI values into the child director's CredHub and sent relative names, which BOSH can't resolve in a CPI config, and released builds sent vault-derived CPI values to the parent as plaintext. The next deploy, or `genesis <env> bosh-configs upload --type cpi`, replaces such a value with a reference, and shows that change before it uploads. Because a CPI config can be read back by anyone with access to the director, we recommend rotating any vault-derived CPI value, such as a CPI password or token, that a released build sent as plaintext. Run the `credhub find -n //genesis-entombed` check described above against each child director's CredHub too.
 
 # Internal Changes/Improvements
 

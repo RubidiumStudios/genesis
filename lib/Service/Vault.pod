@@ -541,14 +541,78 @@ B<Examples:>
   );
   # Returns: the matching Service::Vault object
 
+=head2 bare_target_name
+
+  my $name = Service::Vault->bare_target_name($input);
+
+Says whether C<$input> names a safe target rather than describing a vault,
+and returns the name if so.  Input that, once trimmed, is a single token
+with no URL scheme (nothing like C<https://> at its start) is a name.  A
+name never shadows a descriptor that could work, because a descriptor needs
+a URL.  A name may still be a clause keyword such as C<verify> or
+C<no-strongbox>, contain C<:> or C</>, start with C<$>, or be C<0>, since
+all of those are legal in a target name.
+
+L</get_vault_from_descriptor> uses it to decide how to resolve its input,
+and C<genesis new> uses it to decide whether to record the resolved
+target's descriptor in place of what was typed.
+
+B<Parameters:>
+
+=over 4
+
+=item $input
+
+The text given for a vault, such as the value of C<--vault>.
+
+=back
+
+B<Returns:> The trimmed name, or C<undef> when C<$input> is a descriptor or
+blank.  It never consults F<~/.saferc>, so a name it returns may still match
+no target.
+
+B<Examples:>
+
+  Service::Vault->bare_target_name('  prod-vault ');   # 'prod-vault'
+  Service::Vault->bare_target_name('lab:ops');          # 'lab:ops'
+  Service::Vault->bare_target_name('https://vault.example.com');  # undef
+  Service::Vault->bare_target_name('ops as ops');       # undef
+
 =head2 get_vault_from_descriptor
 
   my $vault = Service::Vault->get_vault_from_descriptor($descriptor, $source);
+  my $vault = Service::Vault->get_vault_from_descriptor($input, $source, target_name => 1);
 
-Parses a vault descriptor string (as used in C<genesis.vault>) and returns
-the single matching C<Service::Vault> object. When multiple vaults match the
-URL, the method attempts to disambiguate using the descriptor's alias. If
-still ambiguous, it dies with a detailed error.
+Parses a vault descriptor string (as used in C<genesis.vault> or given to
+C<genesis new --vault>) and resolves it to a connected vault through
+L<Service::Vault::Remote/attach>.
+
+With C<target_name>, the input may instead be the name of a safe target,
+as decided by L</bare_target_name>; everything else is parsed as a
+descriptor.  The named target is used as found, connected and validated,
+without a second lookup through C<attach>.  The name has already picked
+exactly one target, and C<attach> would read a leading C<$> in the name as
+an environment variable.  The named target must be the only one at its URL,
+because Genesis hands a vault to safe, and to hooks, by URL, and safe will
+not choose between targets that share one.
+
+Only C<genesis new --vault> passes C<target_name>.  A target name lives in
+one operator's F<~/.saferc>, so an environment file, which is committed and
+read on other machines, keeps to descriptors.
+
+This is the only descriptor resolver.  C<Genesis::Env::vault> and the
+C<create> command both call it, so a descriptor that resolves in an
+environment file resolves the same way on the command line.  It must keep
+delegating to C<attach> rather than building its own C<find> filter: an
+exact match on every parsed field excluded targets over strongbox (which
+only selects a seal-state sidecar), over the C<verify> default of an http
+URL, and over a namespace the descriptor never stated, and then returned
+C<undef> instead of saying why.
+
+The filter therefore compares C<url>, C<namespace> (an absent namespace is
+the root namespace, C<''>), and C<verify> only for an https URL.  Strongbox
+breaks ties between otherwise identical targets and is reconciled against
+the target, but never excludes one.  The alias likewise only breaks ties.
 
 B<Parameters:>
 
@@ -563,27 +627,46 @@ A vault descriptor string in the format accepted by C<parse_vault_descriptor>.
 Optional. A label identifying the source of the descriptor used in error
 messages. Defaults to C<'genesis.vault'>.
 
+=item target_name
+
+Optional. When true, a bare safe target name is accepted as described
+above.  Defaults to false, which accepts descriptors only.
+
 =back
 
-B<Returns:> The matching C<Service::Vault> object, or C<undef> if none found
-and no ambiguity error was raised.
+B<Returns:> The matching vault, connected and validated.  It never returns
+C<undef> for a descriptor whose target is missing; that case bails.
 
 B<Errors:>
 
-Dies with C<"No url specified by vault descriptor"> if the descriptor
-contains no URL clause.
+C<"Safe target '...' given by the ... was not found."> when a target name is
+accepted and no safe target has it.  The message says how to list targets
+and what a descriptor looks like, and, for a name that is also a clause
+keyword, that a descriptor needs a URL.
 
-Dies with a multi-line message beginning with
-C<"\nMore than one target is specified for URL '%s'%s\n\n"> when the URL
-matches multiple vaults and disambiguation fails. C<%s> placeholders are the
-URL and an optional alias-mismatch clause.
+C<"Safe target '...' shares its URL ... with ...">, naming the other
+targets, when a target name is accepted and another target has the same URL,
+whatever its namespace.
+
+Everything C<parse_vault_descriptor> raises for a malformed descriptor.
+
+Everything C<attach> raises: a list of similar targets when one at the URL
+differs in namespace or verify, "Safe target for ... not found" with the
+C<safe target> command to run when none is at the URL and no vault
+credentials are in the environment, and a list of duplicates when several
+targets match and the alias does not pick one.
 
 B<Examples:>
 
   my $vault = Service::Vault->get_vault_from_descriptor(
     'https://vault.example.com:8200 as prod-vault no-verify'
   );
-  # Returns: the matching Service::Vault object
+  # Returns: the matching Service::Vault::Remote object
+
+  my $vault = Service::Vault->get_vault_from_descriptor(
+    'prod-vault', '--vault option', target_name => 1
+  );
+  # Returns: the vault of the safe target named prod-vault
 
 =head2 parse_vault_descriptor
 
@@ -613,6 +696,12 @@ drew a warning against targets that had simply said nothing.
 
 The alias may be the last element of the descriptor; it is not required to
 be followed by another clause.
+
+The host stops at the first C<:> or C</>, so a path after the host is the
+namespace whether or not a port precedes it, and a trailing C</> names no
+namespace.  Letting the host run to the next C<:> folded the path into the
+URL, which then matched no safe target.  C<tls> is C<1> or C<0>, and
+C<verify> defaults to it.
 
 B<Parameters:>
 
@@ -855,24 +944,31 @@ When C<$key> is provided (either as a second argument or embedded in
 C<$path> as C<path:key>), returns the value of that specific key as a
 string, or C<undef> if not found.
 
-When no key is given, fetches the entire path and returns a hash reference
-of all key/value pairs at that path. Returns an empty hash reference C<{}>
-on error.
+When no key is given, it reads the whole secret through
+L</read_flattened_secret> with its C<versioned> and C<lenient> options, so
+there is one whole-secret read in Genesis, and returns its keys and values
+as a hash reference. The values are the strings C<safe get> prints, kept
+exactly as printed, so a certificate under the last key keeps its final
+newline.
 
-B<What counts as an error.> A non-zero exit from C<safe> is a failure. A
-zero exit is not automatically a success: C<safe> has not reliably set a
-non-zero exit code on failure, so the payload is the deciding evidence --
-if it parses as a hash the read succeeded, and if it does not the read is
-treated as failed and the C<safe> output is reported.
+The path goes to C<safe> as it is given, as it always has, so a trailing
+C<^N> reads version N of the secret, and a caller that means a literal caret
+escapes it as C<\^>. A read that C<safe> did not finish, meaning a nonzero
+exit, a refusal, a C<safe> killed by a signal, or a C<safe> that printed
+nothing, returns an empty hash reference C<{}> and is logged at debug level,
+and so does a path with nothing stored. Its callers have always read those
+as an empty secret, and they keep that contract. A reader that has to tell a
+missing secret from a failed read, such as the exodus lookups and the exodus
+check in C<update_deployment_exodus>, calls L</read_flattened_secret>
+directly.
 
-Anything C<safe> writes to standard error while exiting zero is
-B<not> treated as failure. Some builds emit a TLS notice on every call
-against a C<noverify> target, and treating that as an error discarded
-otherwise complete reads and reported them as missing permissions. What
-was written is recorded at trace level rather than dropped. The same
-reasoning is applied to the JSON paths by
-C<Genesis::read_json_from>, which overrides its error on a zero exit for
-exactly this reason.
+Output that C<safe> printed on a clean exit is still checked, and anything
+other than a YAML map of keys, such as a list or a string, dies as it always
+has. Taking it as C<{}> would let L</clear>'s read-back take a malformed
+answer for a path with no keys left, and write over keys that are still
+there. Anything C<safe> writes to standard error while exiting zero is
+B<not> treated as failure, because some builds emit a TLS notice on every
+call against a C<noverify> target, and the payload decides instead.
 
 B<Parameters:>
 
@@ -893,9 +989,16 @@ when only a path is given.
 
 B<Errors:>
 
-Dies with C<"Expected #C{%s} to return a hash of key/value pairs, but got a %s">
-when the path returns something other than a hash. The first C<%s> is the
-path, the second is the Perl ref type returned.
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised (via C<bail()>) for a whole-secret read when C<safe> exits zero and
+prints something that is not a YAML map of keys. Every other failure of a
+whole-secret read returns C<{}>, and a single-key read returns C<undef> when
+it fails.
+
+=back
 
 B<Examples:>
 
@@ -910,6 +1013,10 @@ B<Examples:>
   # Fetch all keys at a path
   my $data = $vault->get('secret/myapp');
   # Returns: { password => 'hunter2', user => 'admin' }
+
+  # Fetch all keys of version 2
+  my $old = $vault->get('secret/myapp^2');
+  # Runs: safe get secret/myapp^2
 
 =head2 get_if_present
 
@@ -971,9 +1078,36 @@ B<Examples:>
 
 Reads all secrets under C<$path> and all subpaths, returning a nested hash
 structure. Uses C<safe export> to retrieve the entire tree in a single JSON
-call. Automatically unflattens paths stored with the C<__flattened__> marker.
+call, and reads every export version through L</flatten_export>.
+Automatically unflattens paths stored with the C<__flattened__> marker.
 
-Returns an empty hash reference C<{}> on error.
+It is L</get_path_strict> with an empty tree in place of C<undef>, so the two
+tell a read that worked, a path with nothing stored, and a read that failed
+apart in the same way. It returns the tree it read, and it returns C<{}> when
+C<safe> reports that nothing is stored at the path. Any other way the export
+can end dies naming the path. That covers a nonzero exit, a refusal, an
+unreachable or sealed vault, a C<safe> killed by a signal, and output that
+does not decode.
+
+Every value in the tree is a string. A path that holds only strings keeps
+the strings the export gave it. A path holding any value that is not a
+string, such as the boolean C<path_style> in an ocfp blobstore config or a
+numeric C<pid> in a network lock, is read again whole with
+L</read_flattened_secret>, and every field of that path comes from that one
+read, so its values arrive as the text C<safe> 1.25.1 and 1.26.1 give for
+them. A typed secret that holds nothing when it is read again changed while
+Genesis was reading it, and that dies too. L</flatten_export> explains why
+Genesis never turns a typed value into text itself, and why one read is
+used for the whole secret. The export is decoded with C<allow_bignum>, as
+L</decode_export_text> decodes it, so an integer too large for Perl counts
+as a number and its path is read again, where it used to pass as its
+digits. With C<safe> 1.25.x and 1.26.1 the export is already flat, so there
+is nothing to read again and no extra C<safe get>.
+
+It used to return C<{}> for a failed read as well. An outage then looked
+like a path with nothing in it, so a pipeline C<--pull> whose predecessor's
+deployment history could not be read fell back to control HEAD and deployed
+content the predecessor never shipped.
 
 B<Parameters:>
 
@@ -986,12 +1120,672 @@ The root vault path to export from. Leading and trailing slashes are stripped.
 =back
 
 B<Returns:> A nested hash reference. Keys at each level correspond to path
-segments; leaf values are hash references of key/value pairs.
+segments; leaf values are hash references of key/value pairs. It is C<{}>
+when nothing is stored at the path.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised by L</get_path_strict> when the export fails for any reason other
+than the path having nothing stored, or when its output cannot be parsed.
+Raised by L</read_flattened_secret>, naming the typed path, when reading a
+typed path again fails, and by L</flatten_export> when that read finds
+nothing stored.
+
+=item C<"Cannot use the safe export ...">
+
+Raised by L</flatten_export> when the export is in a format it does not
+read.
+
+=back
 
 B<Examples:>
 
   my $tree = $vault->get_path('secret/myapp');
   # Returns: { password => 'hunter2', db => { host => 'localhost' } }
+
+  my $tree = $vault->get_path('secret/config/ocfp-lab/mgmt');
+  # A blobstore stored with "path_style": true and "port": 9000 comes back
+  # as { bosh => { blobstores => { bosh => { path_style => 'true', port => '9000', ... } } }, ... }
+
+  my $none = $vault->get_path('secret/never-written');
+  # Returns: {}
+
+  # With the vault unreachable
+  $vault->get_path('secret/myapp');
+  # Dies: Could not read secret/myapp from vault at https://...: <safe's error>
+
+=head2 get_path_strict
+
+  my $data = $vault->get_path_strict($path);
+
+Reads the tree under C<$path> as C<get_path> does, but returns C<undef>
+rather than C<{}> when nothing is stored there. It and C<get_path> share one
+classification of how a read ended, which L</read_failure> makes. A read that
+worked returns its tree. A read where C<safe> says nothing is stored returns
+C<undef>. Any other failure dies with the path, the vault URL, the error, the
+likely causes, and what to check. That covers an unreachable or sealed
+vault, an expired token, a refusal, a C<safe> killed by a signal, and an
+export that cannot be parsed.
+
+These C<safe> messages count as nothing stored:
+
+=over 4
+
+=item * C<no secret exists at path `PATH`>, which C<safe> has written for a
+missing secret since 2016.
+
+=item * C<version N of secret `PATH` has been deleted> and C<version N of
+secret `PATH` has been destroyed>, which C<safe> writes when the newest
+version of a secret was deleted or destroyed, so nothing is left to read.
+
+=back
+
+A token that can list a path but cannot read it makes C<safe> report that no
+secret exists, after a refusal. When the output holds C<403>, C<permission
+denied>, or C<forbidden> as well, the read is treated as failed and dies,
+since the path was never read.  The path that C<safe> quotes in its "no secret
+exists" line is not searched, so an environment name that holds C<403> or
+C<forbidden> reads as absent when nothing is stored.
+
+The export runs with C<run>'s C<exact> option, so a C<safe> killed by a
+signal is a failed read rather than an exit of 0 with whatever it printed.
+It is decoded through C<read_json_from> with C<allow_bignum>, as
+L</decode_export_text> decodes, so an integer too large for Perl is seen as
+a number.
+
+Every value it returns is a string, as with L</get_path>. A path holding
+only strings keeps what the export gave it, and a path holding any value
+that is not a string is read again whole with L</read_flattened_secret>,
+which supplies every field of that path from its one read. Genesis never
+turns a typed value into text itself, so the text matches what C<safe>
+1.25.1 and 1.26.1 give on every C<safe> version, and the one read can't mix
+fields from two moments of a secret written again during the read. A typed
+secret that holds nothing when it is read again dies, since it changed
+while Genesis was reading it. With C<safe> 1.25.x and 1.26.1 the export is
+already flat, so they cost no extra read.
+
+Use it where a read that failed must not pass for an empty record, and where
+nothing stored must be told from a record with nothing in it.
+
+B<Parameters:>
+
+=over 4
+
+=item $path
+
+The root vault path to export from. Leading and trailing slashes are
+stripped.
+
+=back
+
+B<Returns:> A nested hash reference as C<get_path> returns, or C<undef> when
+nothing is stored at the path.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised (via C<bail()>) when C<safe export> fails for any reason other than
+the path having nothing stored, or when its output cannot be parsed as JSON.
+The placeholders are the path, the vault URL, and the reason, which is the
+text C<safe> wrote to stderr, or C<safe exited with code N> when it wrote
+none, with C<killed by signal N> added when a signal stopped it. The message
+comes from L</bail_read_failure>, which goes on to name the likely causes (a
+token without read on the path, a sealed vault, or an unreachable vault) and
+to say to run C<safe export> on the path and C<safe vault status>. The text
+here is the start of it.
+
+The same message names a typed path when L</read_flattened_secret> cannot
+read it again, and when L</flatten_export> finds it holding nothing on that
+second read, in which case the reason says it changed while Genesis was
+reading it.
+
+=item C<"Cannot use the safe export ...">
+
+Raised by L</flatten_export> when the export is in a format it does not
+read.
+
+=back
+
+B<Examples:>
+
+  my $tree = $vault->get_path_strict('secret/myapp');
+  # Returns: { password => 'hunter2', db => { host => 'localhost' } }
+
+  my $none = $vault->get_path_strict('secret/never-written');
+  # Returns: undef
+
+  # With the vault sealed or the token expired
+  $vault->get_path_strict('secret/myapp');
+  # Dies: Could not read secret/myapp from vault at https://...: <safe's error>
+
+=head2 read_failure
+
+  my ($reason, @absent) = Service::Vault::read_failure($rc, $err);
+
+Tells how a C<safe> read that did not finish ended. It is the one
+classification that L</get_path_strict>, L</get_path>,
+L</read_flattened_secret>, and the secrets store's C<store_data> share, so
+each of them reads a missing secret as nothing stored and every other
+failure as a failure. It is a function, not a method.
+
+When the read ended because C<safe> said the paths it read hold nothing, the
+reason is C<undef> and the paths C<safe> named follow it, as C<safe> wrote
+them. The messages that count are C<no secret exists at path `PATH`> and
+C<version N of secret `PATH` has been deleted> or C<destroyed>. Anything
+else is a failure, and the reason is the text C<safe> wrote to stderr with
+trailing whitespace removed, or C<safe exited with code N> when it wrote
+none.
+
+A refusal anywhere in the output, meaning C<403>, C<permission denied>, or
+C<forbidden> outside the quoted paths, makes the read a failure even with an
+absent-secret line beside it. A token that can list a path but not read it
+gets both, and that path was never read. The quoted paths are left out of
+the scan, since an environment name can hold C<403> or C<forbidden>.
+
+Absence is accepted only with exit status 1, which is the status C<safe>
+exits with for every error it reports, a missing secret included. C<safe>
+prints the error and calls C<os.Exit(1)> in C<internal/cli/cli.go> at line
+1829 of C<safe> 1.26.1, and that exit has been C<1> since 2017. Any other
+status means C<safe> did not finish, so what it said about absent paths
+settles nothing and the read is a failure. A C<safe> killed by a signal
+leaves C<128> plus the signal either way it can reach Genesis. C<run> with
+its C<exact> option gives that status, and adds C<killed by signal N> after
+whatever C<safe> wrote, when the shell running C<safe> is itself killed.
+When C<safe> alone is killed, that shell exits with the same status and
+prints C<Killed>, and C<run> has no signal to note.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$rc>
+
+The exit code C<safe> returned. Nothing is read as absent unless it is
+C<1>.
+
+=item C<$err>
+
+What C<safe> wrote to stderr. It may be C<undef>.
+
+=back
+
+B<Returns:> A list of the reason, which is C<undef> when nothing is stored,
+followed by the paths C<safe> named as holding nothing in that case.
+
+B<Examples:>
+
+  my ($reason, @absent) = Service::Vault::read_failure(1, "!! no secret exists at path `secret/x`\n");
+  # Returns: (undef, 'secret/x')
+
+  my ($reason) = Service::Vault::read_failure(1, "Code: 403. Errors:\n* permission denied\n");
+  # Returns: ("Code: 403. Errors:\n* permission denied")
+
+  my ($reason) = Service::Vault::read_failure(137, "!! no secret exists at path `secret/x`\nkilled by signal 9");
+  # Returns: ("!! no secret exists at path `secret/x`\nkilled by signal 9")
+
+  my ($reason) = Service::Vault::read_failure(137, "!! no secret exists at path `secret/x`\nKilled");
+  # Returns: ("!! no secret exists at path `secret/x`\nKilled")
+
+=head2 bail_read_failure
+
+  Service::Vault::bail_read_failure($url, $what, $reason, $command);
+
+Stops Genesis on a vault read that C<safe> did not finish, with the one
+message that L</get_path_strict>, L</read_flattened_secret>, and the
+secrets store's C<store_data> give for it. Each of them decides for itself
+what counts as absent and whether to read again, through L</read_failure>,
+and calls this only once the read has failed. It is a function, not a
+method.
+
+The message names what was read, the vault, and the reason, then the likely
+causes, which are a token without read access on the path, a sealed vault,
+or an unreachable vault. It ends by telling the operator to run the same
+C<safe> command with the same token to see which, and C<safe vault status>
+to check for a sealed vault.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$url>
+
+The vault's URL, or a description such as C<the vault> when it is not known.
+
+=item C<$what>
+
+The path or paths that were read, as the operator should see them.
+
+=item C<$reason>
+
+Why the read failed, usually the reason L</read_failure> gave.
+
+=item C<$command>
+
+The C<safe> command to run again, without the leading C<safe>, such as
+C<get secret/a\:b> or C<export secret/a secret/b>.
+
+=back
+
+B<Returns:> Nothing. It always dies.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Always raised (via C<bail()>). The placeholders are C<$what>, C<$url>, and
+C<$reason>, and the text that follows names the likely causes and the
+C<safe> command to run.
+
+=back
+
+B<Examples:>
+
+  Service::Vault::bail_read_failure($vault->{url}, 'secret/myapp', 'Code: 403', 'get secret/myapp');
+  # Dies: Could not read secret/myapp from vault at https://...: Code: 403
+  #       ...Run safe get secret/myapp with the same token to see which...
+
+=head2 read_flattened_secret
+
+  my $secret = $vault->read_flattened_secret($path);
+  my $secret = $vault->read_flattened_secret($path, versioned => 1, lenient => 1);
+
+Reads one secret whole with C<safe get> on C<$path> and no key, and returns
+its keys and values as the strings C<safe> prints. It is the strict
+whole-secret read. It returns the secret when the read worked, C<undef> when
+C<safe> says nothing is stored there (including a newest version that was
+deleted or destroyed), and dies naming the path on any other failure, in the
+same way L</get_path_strict> does. It is also the read behind a whole-secret
+L</get>, which passes both options below, so Genesis has one implementation
+of a whole-secret read. A successful read is logged at trace level with its
+key count and how long it took.
+
+It is the one read that gives C<safe>'s flattened text for a value on every
+C<safe> version, since C<safe get> prints every value as a string. Three
+details keep that text exact.
+
+=over 4
+
+=item * It escapes C<\>, C<:>, and C<^> in the path, backslash first, because
+C<safe> splits a path at its last unescaped colon to find a key and reads a
+trailing C<^N> as a version. A path without any of them is passed as it is,
+so a C<safe> that predates the escapes (they arrived in 1.20.0) gets the
+same bytes it always did. The C<versioned> option turns the escaping off.
+
+=item * It reads the output untrimmed, through C<run>'s C<exact> option. C<run>
+otherwise strips trailing whitespace, and when the last value is a YAML
+literal block, that removes the newline that belongs to it, so a certificate
+would come back without its final newline.
+
+=item * It treats a C<safe> killed by a signal as a failed read, rather than
+reading whatever it printed before it died as the whole secret, or reading
+an absent-secret line it printed first as nothing stored. The same option
+gives the status of a killed shell, and L</read_failure> takes only C<safe>'s
+own error status as nothing stored.
+
+=back
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The path of the secret, without a key. It is read as a path even when it
+holds a colon or a caret, unless C<versioned> is given.
+
+=item C<versioned =E<gt> 1>
+
+Optional. The path goes to C<safe> as it is given, so a trailing C<^N>
+reads version N, as L</get> has always addressed a secret. The readers of
+paths that came out of an export leave it off, since such a path names one
+secret literally.
+
+=item C<lenient =E<gt> 1>
+
+Optional. A read that C<safe> did not finish returns C<undef> after a debug
+log, as nothing stored does, rather than dying. That covers a nonzero exit,
+a refusal, a signal, and a C<safe> that exited zero having printed nothing,
+which C<safe> has done for failures it reported only on stderr. Output that
+C<safe> did print on a clean exit is still checked, so a list or a string
+dies either way. L</get> uses this to keep its callers' contract.
+
+=back
+
+B<Returns:> A hash reference of key to string, or C<undef> when nothing is
+stored at the path, or, with C<lenient>, when the read did not finish.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised (via C<bail()>) when C<safe get> fails for any reason other than
+nothing being stored, when it is killed by a signal, when it prints nothing,
+or when what it prints is not a YAML map of keys. With C<lenient>, only the
+last of those is raised. The placeholders are the path, the vault URL, and
+the reason. The message comes from L</bail_read_failure>, which goes on to
+name the likely causes and to say to run C<safe get> on the path and C<safe
+vault status>.
+
+=back
+
+B<Examples:>
+
+  my $exodus = $vault->read_flattened_secret('secret/exodus/lab-mgmt/bosh');
+  # Returns: { url => 'https://10.108.16.4:25555', ca_cert => "-----BEGIN ...\n" }
+
+  my $none = $vault->read_flattened_secret('secret/exodus/never-deployed/bosh');
+  # Returns: undef
+
+  $vault->read_flattened_secret('secret/odd:name');
+  # Runs: safe get 'secret/odd\:name'
+
+=head2 decode_export_text
+
+  my ($export, $typed) = Service::Vault::decode_export_text($text);
+  my $export           = Service::Vault::decode_export_text($text);
+
+Decodes C<safe export> output, given exactly as C<safe> printed it, and
+reduces it to the flat shape of version 1, a hash of full vault path to the
+key/value pairs stored there. Unlike L</normalize_export>, it keeps the
+JSON type of every value and refuses none of them. It marks every path whose
+current version holds a value that is not a string, so a reader knows which
+paths are typed and can read those another way. It is a function, not a
+method.
+
+It decodes the text with C<JSON::PP>'s C<allow_bignum>, through
+C<load_json>, and then unwraps export version 1, 2, or 3 with the same code
+and the same checks and messages as L</normalize_export>. So the current
+version of each path is the one returned, a path whose current version is
+deleted or destroyed is left out, and a current version with no C<value>
+gives an empty hash. A string stays a Perl string, a JSON boolean stays a
+C<JSON::PP::Boolean>, C<null> stays C<undef>, an object or a list stays a
+hash or an array, and a number stays a number. With C<allow_bignum>, an
+integer too large for any native Perl type comes back as a C<Math::BigInt>,
+and a number with a fraction or an exponent comes back as a
+C<Math::BigFloat>, both of which L</_export_value_type> counts as numbers.
+A JSON C<-0> decodes as the number zero and still marks its path.
+
+The raw text is the only place every typed path can still be seen. Without
+C<allow_bignum>, C<JSON::PP> keeps an integer too large for Perl as a plain
+string of its digits, which then passes for a string, so a reader that
+decodes the text first and asks about types afterwards misses that path.
+Genesis never turns a decoded number into text, so the decoder doesn't keep
+C<-0> or the exact digits a number was written with. A reader that needs
+the text of a typed value reads the path again with
+L</read_flattened_secret>, as L</flatten_export> does.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$text>
+
+The output of C<safe export>, in any export version, as C<safe> printed it.
+
+=back
+
+B<Returns:> In list context, the export and the marks. The export is a new
+hash reference of full vault path to a hash of key/value pairs, each value
+as it was decoded, and it is C<{}> when the export holds no paths. The marks
+are a hash reference of each typed path to an array of its keys that hold a
+value that is not a string, in sorted order, and they are C<{}> when every
+current value is a string. In scalar context, it returns only the export.
+
+B<Errors:>
+
+Every message starts with C<Cannot use the safe export>.
+
+=over 4
+
+=item C<"Cannot use the safe export: it is not JSON: %s">
+
+Raised (via C<bail()>) when the text does not decode as JSON, or is
+undefined. The placeholder is C<JSON::PP>'s error.
+
+=item Every format error that L</normalize_export> lists
+
+Raised when the export is in a format it does not know, such as an
+unknown C<export_version>, or when a path or its value is not the shape an
+export gives it. A typed value is not an error here.
+
+=back
+
+B<Examples:>
+
+  my ($export, $typed) = Service::Vault::decode_export_text(
+    '[{"export_version":3,"data":{'.
+    '"secret/config/blobstore":{"versions":[{"value":{"bucket":"bosh","path_style":true}}]},'.
+    '"secret/config/policies":{"versions":[{"value":{"creds":"allow"}}]}'.
+    '},"requires_versioning":{}}]'
+  );
+  # $export: { 'secret/config/blobstore' => { bucket => 'bosh', path_style => JSON::PP::true },
+  #            'secret/config/policies'  => { creds => 'allow' } }
+  # $typed:  { 'secret/config/blobstore' => ['path_style'] }
+
+  Service::Vault::decode_export_text('{"secret/a":');
+  # Dies: Cannot use the safe export: it is not JSON: ...
+
+=head2 flatten_export
+
+  my $export = Service::Vault::flatten_export($data, $vault);
+
+Reduces a decoded C<safe export> of any export version to the flat shape of
+version 1, a hash of full vault path to the key/value pairs stored there,
+with every value a string. It is how L</get_path>, L</get_path_strict>, and
+the secrets store's C<store_data> read an export. It is a function, not a
+method, so the store can pass it the vault it reads through.
+
+It unwraps the export with L</_unwrap_export>, the same code and checks and
+messages as L</decode_export_text> and L</normalize_export>. A path whose
+current version holds only strings keeps the strings the export gave it. A
+path holding any value that is not a string, which C<safe> 1.26.0 exports
+with its JSON type in export format 3, is read again whole with
+L</read_flattened_secret>, and the pairs that one read returns replace the
+export's copy of the path entirely. A typed path is read only once, however
+many of its keys are typed, and paths holding only strings are never read
+again.
+
+Genesis never turns a typed value into text itself. The text Perl makes of
+a number or a boolean is not always the text C<safe> shows for it, and
+C<safe get> prints every value as C<safe> 1.25.1 and 1.26.1 export it,
+booleans as C<true> or C<false>, C<null> as C<null>, numbers as Go prints a
+float64, and objects and lists as compact JSON with sorted keys and C<E<lt>>,
+C<E<gt>>, and C<&> escaped. Reading through C<safe get> gives the same text
+on every C<safe> version, which is why a typed value comes back as the same
+string whichever C<safe> is installed.
+
+Every field of a typed path comes from the one read, and nothing from the
+export's copy is kept. A secret written again between the export and the
+read therefore comes back wholly as it was at the read, never as a mix of
+fields from two moments. When that read finds nothing stored, the secret
+was deleted while Genesis was reading it, and this dies rather than read it
+as empty or fall back on the export's typed copy.
+
+With C<safe> 1.25.x and 1.26.1 the export is already flat, so no path is
+typed and no extra C<safe get> runs. With C<safe> 1.26.0, each typed path
+costs one C<safe get>.
+
+The data must be decoded with C<allow_bignum>, as C<read_json_from> decodes
+it when given that option, so an integer too large for Perl is seen as a
+number and its path is read again rather than passed on as its digits.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The decoded export, of any export version. It is not modified.
+
+=item C<$vault>
+
+The vault to read typed paths from, which is the one the export came from.
+Only its C<read_flattened_secret> method and its C<url> are used.
+
+=back
+
+B<Returns:> A new hash reference of full vault path to a hash of key to
+string, or C<undef> when C<$data> is C<undef>.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: the export showed it holding a value that is not a string, but it held nothing when read again ...">
+
+Raised (via C<bail()>) when a typed path holds nothing when it is read
+again, because it was deleted, or its newest version deleted or destroyed,
+since the export. The placeholders are the path and the vault URL. The
+message goes on to say to run the command again.
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised by L</read_flattened_secret> when reading a typed path again fails
+for any other reason, such as a refusal or an unreachable vault.
+
+=item Every format error that L</normalize_export> lists, except the typed value
+
+Raised when the export is in a format it does not know, or when a path or
+its value is not the shape an export gives it.
+
+=back
+
+B<Examples:>
+
+  my $export = Service::Vault::flatten_export(
+    load_json($safe_1_26_0_export, {allow_bignum => 1}), $vault
+  );
+  # A lock stored as {"pid": 3834038, "user": "ubuntu"} runs
+  # safe get secret/exodus/lab-mgmt/bosh/network-claim-lock, and comes back as
+  # { 'secret/exodus/lab-mgmt/bosh/network-claim-lock' => { pid => '3834038', user => 'ubuntu' } }
+
+  Service::Vault::flatten_export({'secret/a' => {k => 'v'}}, $vault);
+  # Returns: { 'secret/a' => { k => 'v' } }, and reads nothing more
+
+=head2 normalize_export
+
+  my $export = Service::Vault::normalize_export($data);
+
+Reduces a decoded C<safe export> of any export version to the flat shape of
+version 1, a hash of full vault path to the key/value pairs stored there,
+with every value a string. It is the strict wrapper over
+L</decode_export_text>, kept for callers that already hold decoded data and
+must refuse a typed value rather than read it again. The vault readers use
+L</flatten_export> instead. It unwraps the export with the same code and the
+same checks and messages, and then refuses the first typed path that the
+decoder marks. It is a function, not a method.
+
+C<safe> writes version 1, a bare object of path to key/value pairs, when
+every secret has one version and every value is a string. It writes version
+2, an array holding one object with C<export_version> 2 and a C<data> object
+of paths, when some secret has more than one version. Each path there holds
+a C<versions> list, oldest first, and each version has a C<value> object and
+C<deleted> and C<destroyed> flags. Version 3 is the same shape with
+C<export_version> 3, written when some value is not a string, and its values
+keep the JSON type they were stored with.
+
+The last version of each path is its current one, and its C<value> is what
+is returned. When that version is deleted or destroyed, the path has nothing
+a read returns, so the path is left out, and an older version is not used in
+its place. A path with no versions is left out too, and so is a version 1
+path whose value is C<null>. A current version with no C<value> gives an
+empty hash.
+
+A value that is not a string makes it die rather than turn the value into
+one. That covers JSON objects, lists, numbers, booleans, and C<null>.
+Genesis reads every secret as a string, and the text Perl would make of a
+number or a boolean is not always the text C<safe> shows for it, so a
+converted value could differ from the secret without anything saying so. A
+string in version 3 is a JSON string, so a string that spells a number, such
+as C<"42">, is a string and is kept.
+
+It can judge only the data it is given. C<load_json> and C<read_json_from>
+decode without C<allow_bignum>, and they keep an integer too large for any
+native Perl type, such as 999999999999999999999999999999999999999999, as a
+plain string of its digits, so data decoded by them lets such an integer
+through as a string. An integer that still fits a native unsigned type,
+such as 12345678901234567890, decodes as a number and is refused. Data
+decoded with C<allow_bignum>, as L</decode_export_text> and
+L</get_path_strict> decode it, holds the large integer as a
+C<Math::BigInt>, which is refused as a number.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The decoded export, as C<load_json> or C<read_json_from> returns it, of any
+export version. It is not modified. A huge integer is judged a number only
+when the data was decoded with C<allow_bignum>.
+
+=back
+
+B<Returns:> A new hash reference of full vault path to a hash of key/value
+pairs, or C<undef> when C<$data> is C<undef>.
+
+B<Errors:>
+
+Every message starts with C<Cannot use the safe export>.
+
+=over 4
+
+=item C<"Cannot use the safe export of #C{%s}: its #C{%s} key holds a typed value, a JSON %s, not a string. ...">
+
+Raised (via C<bail()>) when the current value of a key is not a string. The
+placeholders are the path, the key, and the JSON type, one of C<object>,
+C<list>, C<number>, C<boolean>, or C<null>.
+
+=item C<"Cannot use the safe export: it is export_version %s, and Genesis reads only versions 1, 2, and 3. ...">
+
+Raised when a versioned export has an C<export_version> other than 2 or 3,
+or none, which shows as C<(none)>.
+
+=item C<"Cannot use the safe export: it is not an object or an array, but a JSON %s.">
+
+Raised when the export is neither a version 1 object nor a versioned array.
+
+=item C<"Cannot use the safe export: a versioned export is an array holding one export object, but this one holds %d %s.">
+
+Raised when the array of a versioned export does not hold exactly one
+object.
+
+=item C<"Cannot use the safe export: its #C{data} is not an object of paths.">
+
+Raised when the C<data> of a versioned export is not an object.
+
+=item C<"Cannot use the safe export of #C{%s}: its versions are not a list.">
+
+Raised when a path of a versioned export has no C<versions> list.
+
+=item C<"Cannot use the safe export of #C{%s}: it is not an object of keys, but a JSON %s.">
+
+Raised when the value at a path is not an object of key/value pairs.
+
+=back
+
+B<Examples:>
+
+  my $export = Service::Vault::normalize_export(load_json(
+    '[{"export_version":3,"data":{"secret/myapp":{"versions":['.
+    '{"value":{"password":"old"}},{"value":{"password":"hunter2"}}]}}}]'
+  ));
+  # Returns: { 'secret/myapp' => { password => 'hunter2' } }
+
+  Service::Vault::normalize_export({'secret/myapp' => {port => 8443}});
+  # Dies: Cannot use the safe export of secret/myapp: its port key holds
+  #       a typed value, a JSON number, not a string. ...
 
 =head2 set
 
@@ -1218,6 +2012,15 @@ Optional. If provided, checks for the existence of C<$path:$key>.
 =back
 
 B<Returns:> True if the path (or path:key) exists, false otherwise.
+
+B<Limitations:>
+
+It reads any failure of C<safe exists> as false, through C<run>'s
+C<passfail> option, so a refused read, an expired token, or an unreachable
+vault all look like a path that does not exist. A reader that must tell
+nothing stored from a read that failed must not gate on it, and should read
+with L</get_path_strict> or L</read_flattened_secret> instead, which make
+that distinction themselves.
 
 B<Examples:>
 
@@ -1469,6 +2272,222 @@ the window rather than closing it. OpenBao exposes no C<X-Vault-Index>
 equivalent for a client to detect staleness directly (openbao/openbao#3877,
 RFC openbao/openbao#1528), so polling is the only available mechanism.
 
+=head2 kv_mount
+
+  my $mount = $vault->kv_mount($path);
+
+Finds the kv secrets engine that C<$path> is on, and which version of kv it
+is, by asking the vault's C<sys/internal/ui/mounts> endpoint.  That is the
+endpoint the C<vault> CLI asks, and any token with any access to the path
+may read it.  Answers are remembered per mount, so each mount is asked
+about once.
+
+A vault that answers the endpoint with 404 predates kv v2, so every mount
+it has is a kv v1 one.  A C<generic> engine is kv v1 under its old name.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+A whole secret path, such as C<secret/exodus/lab/bosh/network-claim-lock>.
+Leading and trailing slashes are ignored.
+
+=back
+
+B<Returns:> A hashref with C<path> (the mount, with a trailing slash, or
+C<undef> for a vault that predates kv v2), C<type> (C<kv> or C<generic>),
+and C<version> (C<1> or C<2>).
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dies when C<$path> is on an engine other than kv, naming the engine and
+its mount.
+
+=item *
+
+Dies when the vault refuses the request or cannot be reached, naming the
+reason, the likely causes, and the C<safe curl> command that shows the
+vault's answer.
+
+=item *
+
+Raises a bug when C<$path> is empty or contains a C<:key>.
+
+=back
+
+B<Examples:>
+
+  my $mount = $vault->kv_mount('secret/exodus/lab/bosh/network-claim-lock');
+  # Returns: { path => 'secret/', type => 'kv', version => 2 }
+
+=head2 kv_read
+
+  my $record = $vault->kv_read($path);
+
+Reads a whole secret with the kv API, through C<safe curl>.  On a kv v2
+mount it also returns the version that was read, which a check-and-set
+write with L</kv_write> must name.
+
+On kv v2, a secret that was never written is version C<0>, and a secret
+whose latest version was deleted has no data but keeps that version, so
+that the next check-and-set write can name it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+A whole secret path, as for L</kv_mount>.
+
+=back
+
+B<Returns:> A hashref with C<data> (the secret's fields as a hashref, or
+C<undef> when there is no secret), C<version> (the kv v2 version, or
+C<undef> on kv v1), and C<kv_version> (C<1> or C<2>).
+
+B<Errors:>
+
+Dies when the vault refuses the read for any reason other than the secret
+not existing, or cannot be reached, so that a sealed vault is never
+mistaken for an absent secret.  The message names the path, the reason,
+the likely causes, and what to run to check.  Errors from L</kv_mount>
+propagate.
+
+B<Examples:>
+
+  my $record = $vault->kv_read('secret/exodus/lab/bosh/network-claim-lock');
+  # Returns: { data => { at => '...', user => 'ops', ... }, version => 4, kv_version => 2 }
+  #       or { data => undef, version => 0, kv_version => 2 } when never written
+
+=head2 kv_write
+
+  my $result = $vault->kv_write($path, \%data, %opts);
+
+Replaces a whole secret with C<\%data> through the kv API, using
+C<safe curl>.  Unlike C<safe set>, it does not merge into what is there,
+and on a kv v2 mount it can make a check-and-set write, which the vault
+refuses unless the secret is still at the version named.  Of any number of
+processes that read the same version and write with check-and-set, only
+the first succeeds.
+
+When L</needs_write_confirmation> is true, a kv v2 write waits until reads
+return the version it made (see L</_confirm_kv_version>).
+
+The body goes on the C<safe curl> command line, so this must not be used to
+write anything secret.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+A whole secret path, as for L</kv_mount>.
+
+=item C<\%data>
+
+The secret's new fields.  kv v2 accepts an empty hash; kv v1 refuses one.
+
+=item C<%opts>
+
+=over 4
+
+=item cas
+
+The version the secret must still be at for the write to happen, with C<0>
+meaning that it must not exist yet.  kv v2 only.
+
+=back
+
+=back
+
+B<Returns:> On kv v2, the version the write made, or C<0> when a
+check-and-set write was refused because the secret had changed.  On kv v1,
+C<1>.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dies when the vault refuses the write for any other reason, or cannot be
+reached.  The message names the path, the reason, and the likely causes,
+including the kv v2 data path that a policy has to grant.
+
+=item *
+
+Dies when a kv v2 write succeeds but the vault does not say which version
+it made, and when reads never catch up with that version.
+
+=item *
+
+Raises a bug when C<cas> is given for a kv v1 mount, or is not a whole
+number.
+
+=back
+
+B<Examples:>
+
+  my $version = $vault->kv_write($path, { at => $now, user => 'ops' }, cas => 3);
+  # Returns: 4, or 0 when another write got there first
+
+  $vault->kv_write('secret/handshake', { knock => 'knock' });
+  # Returns: 1 on kv v1, or the new version on kv v2
+
+=head2 kv_delete
+
+  my $ok = $vault->kv_delete($path);
+
+Deletes a secret through the kv API, using C<safe curl>.  On a kv v1 mount
+the secret is gone afterwards.  On a kv v2 mount the latest version is
+deleted, which reads as missing from then on, while the metadata keeps its
+version number, so a later check-and-set write still has to name it.
+
+Unlike C<safe rm>, which reports success whatever the vault answered, this
+says when the vault refused the delete.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+A whole secret path, as for L</kv_mount>.
+
+=back
+
+B<Returns:> C<1> when the vault accepted the delete, including when there
+was nothing at the path.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dies when the vault refuses the delete or cannot be reached.  The message
+names the path, the reason, and the likely causes, including the kv v2 data
+path that a policy has to grant.
+
+=item *
+
+Dies as L</kv_mount> does when the mount cannot be worked out.
+
+=back
+
+B<Examples:>
+
+  $vault->kv_delete('secret/exodus/lab/bosh/network_lock');
+  # Returns: 1
+
 =head2 token_info
 
   my $info = $vault->token_info();
@@ -1580,6 +2599,12 @@ format accepted by C<parse_vault_descriptor>. Includes the URL, namespace
 (if set), alias name, and the C<no-verify> and C<no-strongbox> flags if
 applicable.
 
+The alias is left out when the name would not read back as itself: a name
+containing whitespace would end the alias early, and C<attach> reads a
+leading C<$> as an environment variable.  The alias only breaks ties
+between targets at one URL, which Genesis does not support, so the
+descriptor without it still resolves to the same target.
+
 A strongbox clause is emitted only for a B<stated> setting, in either
 direction: C<strongbox> when enabled, C<no-strongbox> when disabled, and
 nothing at all when unstated. The descriptor therefore carries all three
@@ -1648,7 +2673,9 @@ B<Examples:>
 
 Fetches vault unseal keys from C<E<lt>secrets_mountE<gt>vault/seal/keys>
 and stores them at C<$self-E<gt>{unseal_keys}> for use by C<unseal>.
-At least 3 keys must be present.
+At least 3 keys must be present. The keys are stored in a fixed order, with
+C<key1> to C<keyN> in numeric order first and any other fields after them by
+name, so that every run offers them in the same order.
 
 B<Parameters:>
 
@@ -1719,11 +2746,155 @@ B<Examples:>
   }
   # Returns: ($output, 0, '') on success
 
-B<Security note:> when every retry has failed, the unseal keys are written to
-the trace log so the vault can still be recovered by hand.  This deliberately
-exposes them in logs.  The alternative -- failing quietly -- risks sealing a
-vault irrecoverably, so the trade is made in favour of recoverability.  Treat
-trace logs from a failed unseal as sensitive material.
+B<Security note:> The keys reach C<safe> on stdin, and never as an argument.
+C<safe>'s output and stderr are kept out of the trace, a failed attempt is
+traced by address only, and any key that C<safe> echoes is replaced with
+C<E<lt>redactedE<gt>> in both C<$output> and C<$error> before either is
+returned. The keys stay at C<E<lt>secrets_mountE<gt>vault/seal/keys> for anyone
+who has to finish the unseal by hand.
+
+=head2 unseal_nodes
+
+  my @results = $vault->unseal_nodes(@addresses);
+  my @results = $vault->unseal_nodes(\%pass, @addresses);
+
+Unseals each node in C<@addresses> through that node's own C<sys/unseal>
+endpoint, using the keys previously fetched by C<fetch_unseal_keys>. This is
+the way to open a Raft cluster whose safe target reaches only one node,
+because that node cannot elect a leader on its own.
+
+Each node's seal status is read first. A node that is already open is left
+alone, and one that does not answer is reported as unreachable. A sealed node
+is given the keys a threshold's worth at a time, where the threshold is what
+the node reports. OpenBao counts a well-formed but wrong key, such as one left
+over from a rekey, like any other, and only throws the round away once the
+threshold is reached. So after a failed round the next combination of keys is
+tried, up to 64 combinations. A round that the node judged in full, with every
+key sent, is recorded so that it is never sent to that node again. A round
+that an error cut short, such as a new Raft node answering that it is not
+initialized yet, says nothing about its keys, so it is not recorded and a
+later pass may send it again. A node is reset only just before a round is
+submitted to it, and only when it shows progress that the round did not make,
+whether that is an operator unsealing it by hand or an earlier round of ours
+that a malformed key cut short. A node that refuses the reset gets no keys,
+and is reported as refusing. A node that stays sealed through every
+combination, or stops answering, is reported as such.
+
+Every request goes through L</_node_request>, so the keys travel on curl's
+stdin, never in its arguments, and no key appears in a trace, a log line, a
+curl configuration file's output, or a result.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\%pass>
+
+Optional. A hashref that ties this call to a larger pass, as
+L</unseal_cluster> uses it. Its C<deadline> is a time from L</_now>, against
+which every request is capped. No request starts once less than a tenth of a
+second remains, because curl would read a smaller limit as no limit at all. Its
+C<failed_rounds> is a hashref in which the rounds that failed on each node are
+recorded, so that a later call with the same hashref skips them.
+
+=item C<@addresses>
+
+The cluster's nodes, each an address with an optional port, as in
+C<10.0.0.5:8200> or C<[fd00::5]:8200>. A node without a port is reached on
+the target's port.
+
+=back
+
+B<Returns:> One hashref per node, in the order given, with C<address>,
+C<unsealed> (C<1> or C<0>), and C<message>, which says whether the node was
+already unsealed, was unsealed, was unreachable, presented a certificate that
+failed verification, refused to reset, stopped answering, was not reached
+before the deadline, stayed sealed through every combination of keys, needed
+more keys than were fetched, or had no keys fetched at all.
+
+B<Examples:>
+
+  $vault->fetch_unseal_keys($env);
+  my @results = $vault->unseal_nodes(qw/10.0.0.5 10.0.0.6 10.0.0.7/);
+  # Returns: ({address => '10.0.0.5', unsealed => 1, message => 'unsealed'}, ...)
+
+=head2 wait_for_active_node
+
+  my $active = $vault->wait_for_active_node($timeout, @addresses);
+
+Waits for a Raft cluster to elect an active node. Opening a quorum is not the
+last step, because the cluster then has to elect a leader before any
+authenticated request can succeed. This asks each node's unauthenticated
+C<sys/health> endpoint every three seconds, and gives up once C<$timeout>
+seconds of wall-clock time have passed. Each request is capped at the time
+that remains, so a node that never answers cannot stretch the wait. Every
+node is asked at least once, even when C<$timeout> is zero.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$timeout>
+
+The longest time to wait, in seconds of wall-clock time.
+
+=item C<@addresses>
+
+The cluster's nodes, written as for L</unseal_nodes>.
+
+=back
+
+B<Returns:> The address of the active node, or C<undef> when none became
+active within C<$timeout> seconds.
+
+B<Examples:>
+
+  my $active = $vault->wait_for_active_node(90, qw/10.0.0.5 10.0.0.6 10.0.0.7/);
+  # Returns: '10.0.0.6' once that node leads, or undef after 90 seconds
+
+=head2 unseal_cluster
+
+  my $outcome = $vault->unseal_cluster($timeout, @addresses);
+
+Unseals a Raft cluster and waits for it to elect a leader, all within
+C<$timeout> seconds of wall-clock time. No request starts after the deadline,
+and each one is capped at the time that remains. It runs L</unseal_nodes> over
+every node, and while fewer than a quorum are open it pauses a few seconds and
+asks the closed nodes again, since a node may still be starting. A round of
+keys that failed on a node is never sent to it again. Once a quorum is open it
+waits for an active node with L</wait_for_active_node> and then, if time
+remains, gives any node that is still closed one more try, so the cluster ends
+fully unsealed whenever every node can be reached in time. Without a quorum
+no leader can be elected, so it does not wait for one.
+
+A C<$timeout> of zero means "do not wait" rather than "do nothing". It still
+makes one full pass over every node, with each request allowed its usual ten
+seconds, and asks each node once for a leader, but it does not retry, pause,
+or give late nodes another try.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$timeout>
+
+The longest time to spend, in seconds of wall-clock time.
+
+=item C<@addresses>
+
+The cluster's nodes, written as for L</unseal_nodes>.
+
+=back
+
+B<Returns:> A hashref with C<nodes>, the per-node results from
+L</unseal_nodes> in the order given, C<active>, the active node's address or
+C<undef> when none emerged, C<open>, the number of unsealed nodes, and
+C<quorum>, the number a majority needs.
+
+B<Examples:>
+
+  my $outcome = $vault->unseal_cluster(90, qw/10.0.0.5:443 10.0.0.6:443 10.0.0.7:443/);
+  # Returns: {nodes => [...], active => '10.0.0.6:443', open => 3, quorum => 2}
 
 =head1 INTERNAL METHODS
 
@@ -1758,6 +2929,186 @@ B<Examples:>
   # Strongbox enabled
   my @none = $vault->_strongbox_unseal_caveat();
   # Returns: ()
+
+=head2 _node_request
+
+  my $reply = $vault->_node_request($node, $method, $path, $payload, $max_time);
+
+Makes one API call to a single node of the cluster, for L</unseal_nodes> and
+L</wait_for_active_node>. The request goes to the target's own URL, and
+curl's C<--connect-to> sends the connection to the node's address and port.
+TLS is therefore verified against the same name or address that C<safe>
+verifies, whether the target is an IP address or a hostname, and C<-k> is
+passed only when the target itself skips verification. Every time limit
+handed to curl is rounded up to the next tenth of a second and is never below
+one tenth, because curl reads a limit that rounds to zero as no limit, and a
+node that accepts the connection but never replies would then hang the
+deploy. The rule's first host
+is left empty, as in C<:443:10.0.0.6:8200>, because curl compares it with the
+URL's host only after normalising the URL, and an empty host matches whatever
+that comes to. A target written in a non-canonical form therefore still
+reaches the node rather than itself.
+
+C<-q> comes first, so curl reads no configuration file that could add a trace
+or a key log, and C<CURL_HOME> and C<SSLKEYLOGFILE> are cleared for the same
+reason. A C<$payload> is encoded as JSON and handed to curl on stdin. It never
+appears among curl's arguments, and the reply is kept out of the trace.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$node>
+
+The node's address with an optional port, as in C<10.0.0.5:8200> or
+C<[fd00::5]:8200>. Without a port, the target's port is used.
+
+=item C<$method>
+
+The HTTP method, such as C<GET> or C<PUT>.
+
+=item C<$path>
+
+The API path below C</v1/>, such as C<sys/seal-status>.
+
+=item C<$payload>
+
+Optional. A hashref sent as the JSON request body.
+
+=item C<$max_time>
+
+Optional. The most seconds the whole request may take, 10 by default.
+
+=back
+
+B<Returns:> The decoded reply as a hashref, or C<undef> when the node did not
+answer with a JSON object. In list context a second value says why there is
+no reply. A certificate that fails verification (curl exits 51, 58, or 60) is
+reported as not verifying against the target name, naming the node, rather
+than as the node being unreachable. A failed handshake (curl exit 35) is
+reported as either a certificate mismatch or a node that is still starting,
+since a node that resets the connection while it starts looks the same to
+curl. Verification itself stays on, so such a node is never unsealed.
+
+B<Examples:>
+
+  my $state = $vault->_node_request('10.0.0.6', 'GET', 'sys/seal-status');
+  # Returns: {sealed => 1, t => 3, progress => 0, ...}
+
+=head2 _redact_unseal_keys
+
+  my $safe_text = $vault->_redact_unseal_keys($text);
+
+Replaces every occurrence of a fetched unseal key in C<$text> with
+C<E<lt>redactedE<gt>>, so a message from C<safe> can be passed on without
+carrying seal material.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$text>
+
+The message to clean. C<undef> is returned unchanged.
+
+=back
+
+B<Returns:> The cleaned text.
+
+B<Examples:>
+
+  my $clean = $vault->_redact_unseal_keys("bad key $key");
+  # Returns: 'bad key <redacted>'
+
+=head2 _now
+
+  my $seconds = $vault->_now;
+
+Returns the current time in seconds, with a fractional part. The wall-clock
+bounds in L</wait_for_active_node> and L</unseal_cluster> are measured with it,
+and tests replace it with a clock they control.
+
+B<Returns:> The current time as a number of seconds.
+
+=head2 _split_url
+
+  my ($scheme, $host, $port) = Service::Vault::_split_url($url);
+
+Splits a vault URL into its scheme, its host with any IPv6 brackets removed,
+and its port, which defaults to 443 for C<https> and 80 for C<http>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$url>
+
+The URL to split.
+
+=back
+
+B<Returns:> The three parts, or the empty list when C<$url> is not an http or
+https URL.
+
+B<Examples:>
+
+  my @parts = Service::Vault::_split_url('https://[fd00::5]:8200');
+  # Returns: ('https', 'fd00::5', 8200)
+
+=head2 _combinations
+
+  my @rounds = Service::Vault::_combinations($size, @items);
+
+Lists every way to choose C<$size> items from C<@items>, keeping their order,
+so the first combination is the first C<$size> items. It stops at 64
+combinations, which covers every choice of three keys from eight.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$size>
+
+How many items each combination holds.
+
+=item C<@items>
+
+The items to choose from.
+
+=back
+
+B<Returns:> A list of array references.
+
+B<Examples:>
+
+  my @rounds = Service::Vault::_combinations(2, qw/a b c/);
+  # Returns: (['a','b'], ['a','c'], ['b','c'])
+
+=head2 _pause
+
+  $vault->_pause($seconds);
+
+Sleeps between unseal attempts and leadership polls, using
+C<Time::HiRes::sleep> so that a fraction of a second, such as the time left
+before a deadline, is honoured rather than truncated. It exists so that tests
+can replace it and run without waiting.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$seconds>
+
+How long to sleep, in seconds, fractions included.
+
+=back
+
+B<Returns:> What C<Time::HiRes::sleep> returns.
+
+B<Examples:>
+
+  $vault->_pause(3);
+  # Returns: 3, after three seconds
 
 =head2 _target_is_url
 
@@ -2026,6 +3377,361 @@ B<Limitations:>
 
 Checks C<$path>'s own keys only. A recursive clear also removes subpaths,
 and those are not read back.
+
+=head2 _unpack_path_export
+
+  my $tree = $vault->_unpack_path_export($path, $data);
+
+Nests the paths of a C<safe export> under the path the export was made for,
+for L</get_path> and L</get_path_strict>. The export is first reduced to a
+flat hash of full vault paths to the key/value pairs stored at each by
+L</flatten_export>, whatever its export version, so a path holding a value
+that is not a string is read again whole with C<safe get> and every value
+is a string. The pairs stored at C<$path> itself become the top level of the result, and the pairs at each
+subpath are placed under the keys named by the rest of its path. A path
+stored with the C<__flattened__> marker has the marker removed and is
+unflattened with C<Genesis::unflatten>.
+
+C<$data> itself is not modified, since the marker is deleted from the copies
+C<flatten_export> makes.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The path the export was made for, without leading or trailing slashes.
+
+=item C<$data>
+
+The decoded export, of any export version.
+
+=back
+
+B<Returns:> A nested hash reference, empty when C<$data> holds no paths.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Cannot use the safe export ...">
+
+Raised (via C<bail()>) by L</flatten_export> when the export is in a format
+it does not read.
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: ...">
+
+Raised by L</flatten_export> when a path holding a value that is not a
+string cannot be read again, or holds nothing when it is.
+
+=back
+
+B<Examples:>
+
+  my $tree = $vault->_unpack_path_export('secret/myapp', {
+    'secret/myapp'    => {user => 'admin'},
+    'secret/myapp/db' => {host => 'localhost'},
+  });
+  # Returns: { user => 'admin', db => { host => 'localhost' } }
+
+=head2 _unwrap_export
+
+  my ($export, $typed) = _unwrap_export($data);
+
+Unwraps a decoded C<safe export> of version 1, 2, or 3 into a hash of full
+vault path to the key/value pairs of its current version, and names the
+keys in each path that hold a value that is not a string. It is the one
+copy of the format checks, shared by L</decode_export_text>, which returns
+its result, L</flatten_export>, which reads each typed path it names again
+with C<safe get>, and L</normalize_export>, which refuses any typed path it
+names.
+It reads the formats as L</normalize_export> describes, keeps every value
+as it was decoded, and dies with the format errors listed there. It refuses
+no typed value itself.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The decoded export, of any export version. It is not modified.
+
+=back
+
+B<Returns:> The export, which is C<undef> when C<$data> is C<undef>, and a
+hash reference of each typed path to an array of its typed keys in sorted
+order, which is C<{}> when every current value is a string.
+
+B<Errors:>
+
+=over 4
+
+=item Every format error that L</normalize_export> lists
+
+Raised (via C<bail()>) when the export is in a format it does not read, or
+a path or its value is not the shape an export gives it.
+
+=back
+
+B<Examples:>
+
+  my ($export, $typed) = _unwrap_export({'secret/a' => {port => 8443, host => 'db'}});
+  # Returns: ({ 'secret/a' => { port => 8443, host => 'db' } }, { 'secret/a' => ['port'] })
+
+=head2 _export_pairs
+
+  my ($pairs, $typed_keys) = _export_pairs($path, $value);
+
+Checks that the value exported for one path is an object of key/value
+pairs, for L</_unwrap_export>, and returns a copy of the pairs with the keys
+whose values are not strings, as C<_export_value_type> judges them. It dies
+only when C<$value> is not a hash. A typed value is named, not refused.
+L</flatten_export> reads its path again, and L</normalize_export> refuses
+it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The vault path the pairs were exported from, named in any error.
+
+=item C<$value>
+
+The decoded value exported for the path.
+
+=back
+
+B<Returns:> A new hash reference holding the same key/value pairs, and an
+array reference of the keys whose values are not strings, in sorted order,
+which is empty when every value is a string.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Cannot use the safe export of #C{%s}: it is not an object of keys, but a JSON %s.">
+
+Raised (via C<bail()>) when C<$value> is not a hash reference.
+
+=back
+
+B<Examples:>
+
+  my ($pairs, $typed) = _export_pairs('secret/myapp', {password => 'hunter2'});
+  # Returns: ({ password => 'hunter2' }, [])
+
+  ($pairs, $typed) = _export_pairs('secret/myapp', {enabled => JSON::PP::true, user => 'admin'});
+  # Returns: ({ enabled => JSON::PP::true, user => 'admin' }, ['enabled'])
+
+=head2 _export_value_type
+
+  my $type = _export_value_type($value);
+
+Names the JSON type of a decoded value that is not a string, for
+L</decode_export_text> to mark its path, for L</flatten_export> to read the
+path again, and for L</normalize_export> to refuse it. A hash is an C<object>, an array is a C<list>, a
+C<JSON::PP::Boolean> is a C<boolean>, and C<undef> is C<null>. A
+C<Math::BigInt> or a C<Math::BigFloat> is a C<number>, because that is how
+C<allow_bignum> decodes an integer too large for Perl and every number with
+a fraction or an exponent. Without that rule, a decoder using
+C<allow_bignum> would report such a number by its class name rather than as
+a number.
+A plain scalar is a C<number> when it has a numeric value and no string
+value, which is how C<JSON::PP> decodes a JSON number and how it tells one
+from a string when it encodes. The check is only sound on a value that has
+not been used as a string since it was decoded, since that gives it a
+string value.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+A value from a decoded export.
+
+=back
+
+B<Returns:> The JSON type as a string, or C<undef> when the value is a
+string.
+
+B<Examples:>
+
+  _export_value_type(load_json('{"n":42}')->{n});   # Returns: 'number'
+  _export_value_type(load_json('{"n":"42"}')->{n}); # Returns: undef
+  _export_value_type([]);                           # Returns: 'list'
+  _export_value_type(load_json('[1e400]', {allow_bignum => 1})->[0]);
+                                                    # Returns: 'number'
+
+=head2 _kv_curl
+
+  my ($status, $reply, $reason) = $self->_kv_curl($method, $uri, $payload);
+
+Makes one kv API call with C<safe curl>, and works out the HTTP status it
+came back with from the status line of the response that safe prints.
+Every safe that Genesis accepts prints the whole response, status line
+first, when it is not given C<--data-only>.  The status line is read rather
+than the exit code, because safe before 1.20 exits 0 whatever the vault
+answered, which would make a refusal look like success.
+
+C<safe curl> takes a body only as an argument, so C<$payload> ends up on
+the command line, where other users of the host can see it.  Nothing
+secret may be passed through here.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$method>
+
+The HTTP method, such as C<GET> or C<POST>.
+
+=item C<$uri>
+
+The API path below C</v1/>, with no leading slash.
+
+=item C<$payload>
+
+Optional.  A hashref, sent as the JSON body.
+
+=back
+
+B<Returns:> A three-element list of the status (the vault's status, or
+C<0> when no response came back), the decoded JSON reply or C<undef>, and
+a one-line reason.  The reason is empty for a 2xx status.  Otherwise it is
+taken from the reply's C<errors>, or from the status line, or, when no
+response came back, from safe's stderr or exit code.
+
+B<Examples:>
+
+  my ($status, $reply, $reason) = $self->_kv_curl('GET', 'secret/data/x');
+  # Returns: (404, { errors => [] }, 'GET /secret/data/x: 404 Not Found')
+
+=head2 _kv_http_response
+
+  my ($status, $text, $body) = _kv_http_response($out);
+
+Splits a response, as C<safe curl> prints it, into its status, status text,
+and body.  A body that came chunked is joined back together, because Go
+prints it with its chunk sizes.  A function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$out>
+
+What C<safe curl> printed on stdout, starting with a status line such as
+C<HTTP/1.1 404 Not Found> or C<HTTP/2.0 200 OK>.
+
+=back
+
+B<Returns:> A three-element list of the numeric status, the status text,
+and the body, or an empty list when C<$out> does not start with a status
+line.
+
+B<Examples:>
+
+  _kv_http_response("HTTP/1.1 404 Not Found\r\nContent-Length: 13\r\n\r\n{\"errors\":[]}");
+  # Returns: (404, 'Not Found', '{"errors":[]}')
+
+=head2 _kv_clean_path
+
+  my $path = _kv_clean_path($path);
+
+Puts a secret path into the form the kv API wants, with no leading,
+trailing, or doubled slashes.  A function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+A whole secret path.
+
+=back
+
+B<Returns:> The cleaned path.
+
+B<Errors:>
+
+Raises a bug when C<$path> is empty, or contains a C<:key>, since the kv
+API reads and writes whole secrets.
+
+B<Examples:>
+
+  _kv_clean_path('/secret//exodus/lab/');
+  # Returns: 'secret/exodus/lab'
+
+=head2 _kv_data_uri
+
+  my $uri = _kv_data_uri($mount, $path);
+
+Returns the API path that reads and writes a secret's data.  On kv v1 that
+is the secret path itself; on kv v2 it is the mount, then C<data/>, then the
+rest of the path.  A function, not a method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$mount>
+
+The hashref from L</kv_mount>.
+
+=item C<$path>
+
+A cleaned secret path on that mount.
+
+=back
+
+B<Returns:> The data API path, with no leading slash.
+
+B<Examples:>
+
+  _kv_data_uri({path => 'secret/', version => 2}, 'secret/exodus/lab');
+  # Returns: 'secret/data/exodus/lab'
+
+=head2 _confirm_kv_version
+
+  $self->_confirm_kv_version($path, $version);
+
+Waits until reads of C<$path> return C<$version> or newer, so that whatever
+reads next does not act on an older version.  It does nothing unless
+L</needs_write_confirmation> is true, and otherwise reads every quarter of
+a second for up to C<GENESIS_VAULT_CONFIRM_TIMEOUT> seconds.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The secret that was written.
+
+=item C<$version>
+
+The kv v2 version the write made.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Errors:>
+
+Dies when reads still return an older version at the timeout, naming both
+versions and the likely cause, which is a vault target on a standby node
+whose reads lag the leader.
+
+B<Examples:>
+
+  $self->_confirm_kv_version('secret/exodus/lab/bosh/network-claim-lock', 4);
+  # Returns: nothing, once a read shows version 4 or newer
 
 =head1 AUTHOR
 

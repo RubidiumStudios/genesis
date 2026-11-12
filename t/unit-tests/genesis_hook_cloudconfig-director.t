@@ -8,6 +8,7 @@ use Test::More;
 use Test::Exception;
 use Test::Deep;
 use Test::Differences;
+use Test::Output;
 use Carp qw/croak/;
 use Genesis qw(logger struct_lookup bail);
 use Cwd qw(abs_path);
@@ -90,7 +91,9 @@ sub mock_env {
 		lookup => sub { my ($self, $key, $default) = @_; return struct_lookup($self->config, $key, $default); },
 		cpi_enabled => 0,
 		cpi_name => undef,
-		exodus_lookup => sub { return undef },
+		exodus_lookup_strict => sub { return undef },
+		exodus_base => "secret/exodus/test-env-dir-$test_seq/bosh",
+		get_target_bosh => sub { return mock "Genesis::BOSH" => {alias => 'mock-bosh', deployments => {}} },
 		director_exodus_lookup => sub { die 'Create-env environments do not have directors' },
 		ocfp_config_lookup => sub { my ($self, $key) = @_; return struct_lookup($self->ocfp_config, $key); },
 		config => { params => { cloud_config_prefix => 'test-env.test' } },
@@ -672,6 +675,315 @@ subtest 'full cloud config - network results structure' => sub {
 			}
 		}
 	}, 'network results structure matches expected exodus data');
+};
+
+# ---------------------------------------------------------------------------
+# Lab claims: a long-lived director's compilation network
+#
+# Three bands of one /24, each with the 3-compact reserved-ips records, and the
+# claims a director accumulated when its compilation network was carved before
+# CF's haproxy record was taken into account: compilation holds 10.61.148.229,
+# which is the haproxy record CF's network holds as well.
+# ---------------------------------------------------------------------------
+{
+	package Genesis::Hook::CloudConfig::LabDirector;
+	use parent -norequire, 'Genesis::Hook::CloudConfig::Director';
+	sub lab_network {
+		my ($self, $target) = @_;
+		return $self->network_definition($target, strategy => 'ocfp',
+			dynamic_subnets => {
+				subnets                   => ['ocfp-2'],
+				allocation                => {size => 4, statics => 0},
+				cloud_properties_for_iaas => {pve => {bridge => 'vlan54'}},
+			},
+		);
+	}
+}
+
+sub lab_band {
+	my ($base, $az) = @_;
+	my $a = sub { '10.61.148.' . ($base + $_[0]) };
+	return {
+		az => $az, cidr_block => '10.61.148.0/24', gateway => '10.61.148.1',
+		dns => ['10.97.160.160', '10.97.160.161'],
+		'reserved-ips' => {
+			reserved_0  => $a->(0),  reserved_1  => $a->(35),
+			available_0 => $a->(36), available_1 => $a->(62),
+			bosh_a       => $a->(22), bosh_ip       => $a->(23), bosh_b       => $a->(24),
+			director_ip  => $a->(23), ip            => $a->(23),
+			jumpbox_a    => $a->(24), jumpbox_ip    => $a->(25), jumpbox_b    => $a->(26),
+			blacksmith_a => $a->(25), blacksmith_ip => $a->(26), blacksmith_b => $a->(27),
+			haproxy_a    => $a->(36), haproxy_ip    => $a->(37), haproxy_b    => $a->(38),
+			scheme_version => '3-compact',
+		},
+	};
+}
+
+# lab_director - a director environment over the given ocfp-2 claims, keyed by
+# short network name ('compilation' is the director's own); returns the env and
+# a state hash whose claims the env's network exodus reads, so a second build
+# sees what the first one saved
+my $lab_seq = 0;
+sub lab_director {
+	my (%o) = @_;
+	my $name = 'lab-director-'.(++$lab_seq);
+	my $key = sub { $_[0] eq 'cf' ? "$name.cf.net-ocf" : $_[0] eq 'scheduler' ? "$name.scheduler.net-scheduler" : "$name.bosh.net-$_[0]" };
+	my $state = {name => $name, key => $key, deployment_lists => 0, targets => [], claims => {
+		'ocfp-0' => {}, 'ocfp-1' => {},
+		'ocfp-2' => {map {($key->($_) => $o{claims}{$_})} keys %{$o{claims}}},
+	}};
+	my $ocfp = {net => {
+		topology => 'v2',
+		subnets  => {'ocfp-0' => lab_band(64, 'pvupvecf101'), 'ocfp-1' => lab_band(128, 'pvupvecf102'), 'ocfp-2' => lab_band(192, 'pvupvecf103')},
+		azs      => {pvupvecf101 => {index => 1}, pvupvecf102 => {index => 2}, pvupvecf103 => {index => 3}},
+	}};
+	# the director's own BOSH, which the hook asks for its deployments
+	my $lab_bosh = mock "Genesis::BOSH" => {
+		alias       => $name,
+		deployments => sub {
+			$state->{deployment_lists}++;
+			return ref($o{deployments}) eq 'CODE' ? $o{deployments}->() : ($o{deployments} // {});
+		},
+	};
+	my $env = mock "Genesis::Env" => {
+		name           => $name,
+		type           => 'bosh',
+		kit            => $kit,
+		bosh           => $bosh,
+		use_create_env => $o{create_env} ? 1 : 0,
+		features       => Mock::ReferencedValue->new(['ocfp']),
+		iaas           => 'pve',
+		scale          => 'dev',
+		is_ocfp        => 1,
+		config         => {params => {}},
+		env_config_overrides      => {},
+		director_config_overrides => {},
+		ocfp_subnet_prefix        => 'ocfp',
+		ocfp_config               => $ocfp,
+		lookup => sub { my ($self, $k, $default) = @_; return scalar struct_lookup($self->config, $k, $default); },
+		ocfp_config_lookup => sub { my ($self, $k, $default) = @_; return scalar struct_lookup($ocfp, $k, $default); },
+		exodus_base => "secret/exodus/$name/bosh",
+		get_target_bosh => sub {
+			my ($self, $opts) = @_;
+			push @{$state->{targets}}, $opts;
+			return $lab_bosh;
+		},
+		exodus_lookup_strict => $o{exodus_lookup_strict} // sub {
+			my ($self, $k) = @_;
+			return undef unless $k eq '/network:.';
+			return {subnets => {map {
+				($_ => {range => '10.61.148.0-10.61.148.255', claims => {%{$state->{claims}{$_}}}})
+			} keys %{$state->{claims}}}};
+		},
+		director_exodus_lookup => sub { die 'a director builds its own cloud config from its own exodus' },
+		cpi_enabled => 0,
+		cpi_name    => undef,
+	};
+	return ($env, $state);
+}
+
+# lab_build - build one network on the director, save its claims to the state,
+# and return the network definition and what the build printed on stderr
+sub lab_build {
+	my ($env, $state, $target) = @_;
+	my ($hook, $net);
+	my $err = Test::Output::stderr_from(sub {
+		$hook = Genesis::Hook::CloudConfig::LabDirector->init(env => $env, purpose => 'director');
+		$net = $hook->lab_network($target);
+	});
+	$state->{claims} = {map {($_ => {%{$hook->network->{subnets}{$_}{claims} // {}}})} keys %{$state->{claims}}};
+	return ($net, $err);
+}
+
+my %lab_claims_today = (
+	compilation => '10.61.148.228-10.61.148.231',
+	cf          => '10.61.148.229,10.61.148.232-10.61.148.245',
+	scheduler   => '10.61.148.246-10.61.148.247',
+);
+
+subtest 'lab claims - the compilation network gives up an address another target has a record for' => sub {
+	plan tests => 6;
+	my ($env, $state) = lab_director(claims => {%lab_claims_today});
+	my ($net, $err) = lab_build($env, $state, 'compilation');
+	my $k = $state->{key};
+	is($state->{claims}{'ocfp-2'}{$k->('compilation')}, '10.61.148.228,10.61.148.230-10.61.148.231,10.61.148.248',
+		'compilation drops .229 and takes .248, the first free address');
+	is($state->{claims}{'ocfp-2'}{$k->('cf')}, $lab_claims_today{cf}, 'CF\'s claim is untouched');
+	is($state->{claims}{'ocfp-2'}{$k->('scheduler')}, $lab_claims_today{scheduler}, 'the scheduler\'s claim is untouched');
+	like($err, qr/net-compilation.*ocfp-2.*10\.61\.148\.229.*haproxy.*compilation VMs exist only during a deploy/s,
+		'a warning names the network, the subnet, the address, its owner, and why it was dropped without stopping');
+
+	my $after = {%{$state->{claims}{'ocfp-2'}}};
+	my (undef, $again) = lab_build($env, $state, 'compilation');
+	is_deeply($state->{claims}{'ocfp-2'}, $after, 'a second build changes nothing');
+	unlike($again, qr/reserved-ips record/, 'and has nothing to warn about');
+};
+
+subtest 'lab claims - only the compilation network of a director is exempt from the reserved-address stop' => sub {
+	plan tests => 2;
+	my ($env, $state) = lab_director(claims => {
+		workers => '10.61.148.228-10.61.148.231',
+		cf      => $lab_claims_today{cf},
+	});
+	my $before = {%{$state->{claims}{'ocfp-2'}}};
+	throws_ok { lab_build($env, $state, 'workers') }
+		qr/net-workers.*ocfp-2.*10\.61\.148\.229.*haproxy.*bosh vms.*GENESIS_ALLOW_CLAIM_PRUNE=\S*net-workers/s,
+		'another network on the director hook stops at a reserved address in its claim';
+	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and saves nothing');
+};
+
+subtest 'lab claims - GENESIS_ALLOW_CLAIM_PRUNE takes a comma-separated list of networks' => sub {
+	plan tests => 3;
+	my ($env, $state) = lab_director(claims => {
+		workers => '10.61.148.228-10.61.148.231',
+		cf      => $lab_claims_today{cf},
+	});
+	local $ENV{GENESIS_ALLOW_CLAIM_PRUNE} = join(', ', 'net-other', $state->{key}->('workers').' ', 'net-more');
+	my ($net, $err) = lab_build($env, $state, 'workers');
+	unlike($state->{claims}{'ocfp-2'}{$state->{key}->('workers')}, qr/229/, 'the claim drops the reserved address');
+	like($err, qr/net-workers.*10\.61\.148\.229.*haproxy.*GENESIS_ALLOW_CLAIM_PRUNE/s,
+		'the network is allowed when it is any item of the list');
+
+	$ENV{GENESIS_ALLOW_CLAIM_PRUNE} = 'net-other,net-more';
+	my ($env2, $state2) = lab_director(claims => {
+		workers => '10.61.148.228-10.61.148.231',
+		cf      => $lab_claims_today{cf},
+	});
+	throws_ok { lab_build($env2, $state2, 'workers') } qr/GENESIS_ALLOW_CLAIM_PRUNE=\S*net-workers/,
+		'a list that does not name the network still stops';
+};
+
+subtest 'lab claims - a create-env director repairs its compilation network the same way' => sub {
+	plan tests => 2;
+	my ($env, $state) = lab_director(create_env => 1, claims => {%lab_claims_today});
+	my (undef, $err) = lab_build($env, $state, 'compilation');
+	is($state->{claims}{'ocfp-2'}{$state->{key}->('compilation')}, '10.61.148.228,10.61.148.230-10.61.148.231,10.61.148.248',
+		'compilation drops .229 and takes .248');
+	like($err, qr/net-compilation.*10\.61\.148\.229.*haproxy/s, 'with the same warning');
+};
+
+subtest 'lab claims - a failed claims read stops the build' => sub {
+	plan tests => 4;
+	my $reads = 0;
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub {
+		$reads++;
+		die "Could not get lab-director/bosh exodus data from the Vault: Could not read secret/exodus/lab-director/bosh/network ".
+		    "from vault at https://vault.example.com:8200: connection refused\n";
+	});
+	my $before = {%{$state->{claims}{'ocfp-2'}}};
+	throws_ok { lab_build($env, $state, 'compilation') }
+		qr/Could not read secret\/exodus\/lab-director\/bosh\/network from vault.*connection refused/s,
+		'a claims read that fails dies with the path and the error';
+	is($reads, 1, 'after the one read');
+	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and the claims are left as they were');
+	is($state->{deployment_lists}, 0, 'without asking the director for its deployments');
+};
+
+my %lab_deployed = (cf => {releases => [], stemcells => [], teams => []}, scheduler => {releases => [], stemcells => [], teams => []});
+
+subtest 'lab claims - an absent record on a director with deployments stops the build' => sub {
+	plan tests => 9;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS};
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef }, deployments => {%lab_deployed});
+	my $before = {%{$state->{claims}{'ocfp-2'}}};
+	my $err;
+	throws_ok { lab_build($env, $state, 'compilation') } qr/network claims record/i, 'the build stops';
+	$err = $@;
+	like($err, qr{secret/exodus/lab-director-\d+/bosh/network}, 'the message names the claims record path');
+	like($err, qr/2\s+deployments.*cf.*scheduler/s, 'it says how many deployments the director has, and names them');
+	like($err, qr/failed\s+or\s+partial\s+claims\s+write/, 'it says an empty record on a director with deployments usually means a failed or partial claims write');
+	like($err, qr{safe\s+export\s+secret/exodus/lab-director-\d+/bosh/network}, 'it says how to check the record');
+	like($err, qr/GENESIS_ALLOW_EMPTY_CLAIMS=1/, 'it names the override');
+	is($state->{deployment_lists}, 1, 'the director was asked for its deployments once');
+	is_deeply($state->{targets}, [{self => 1}], 'and it was the director\'s own BOSH, not its parent');
+	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and no claims are written');
+};
+
+subtest 'lab claims - a create-env director asks its own BOSH for the deployments' => sub {
+	plan tests => 2;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS};
+	my ($env, $state) = lab_director(create_env => 1, claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef }, deployments => {%lab_deployed});
+	throws_ok { lab_build($env, $state, 'compilation') } qr/GENESIS_ALLOW_EMPTY_CLAIMS=1/, 'the build stops';
+	is_deeply($state->{targets}, [{self => ''}], 'after asking for the BOSH a create-env director already targets');
+};
+
+subtest 'lab claims - the override builds an absent record from empty' => sub {
+	plan tests => 4;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS} = 1;
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef }, deployments => {%lab_deployed});
+	my ($net, $err) = lab_build($env, $state, 'compilation');
+	ok($net, 'the network is built');
+	is($state->{claims}{'ocfp-2'}{$state->{key}->('compilation')}, '10.61.148.228,10.61.148.230-10.61.148.232',
+		'from empty claims, so with no record of CF\'s claim compilation takes .232');
+	like($err, qr/GENESIS_ALLOW_EMPTY_CLAIMS.*empty.*record/s, 'and the build says it was allowed to');
+	is($state->{deployment_lists}, 0, 'without asking the director for its deployments');
+};
+
+subtest 'lab claims - an absent record on a director with no deployments builds from empty' => sub {
+	plan tests => 3;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS};
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef }, deployments => {});
+	my ($net, $err) = lab_build($env, $state, 'compilation');
+	ok($net, 'the network is built without the override');
+	is($state->{claims}{'ocfp-2'}{$state->{key}->('compilation')}, '10.61.148.228,10.61.148.230-10.61.148.232',
+		'from empty claims');
+	unlike($err, qr/GENESIS_ALLOW_EMPTY_CLAIMS/, 'with nothing to warn about');
+};
+
+subtest 'lab claims - a record that holds claims is not checked against the deployments' => sub {
+	plan tests => 2;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS};
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, deployments => sub { die "the director was asked\n" });
+	lives_ok { lab_build($env, $state, 'compilation') } 'the build goes ahead';
+	is($state->{deployment_lists}, 0, 'without asking the director for its deployments');
+};
+
+subtest 'lab claims - a failed deployment listing stops the build' => sub {
+	plan tests => 4;
+	local $ENV{GENESIS_ALLOW_EMPTY_CLAIMS};
+	my ($env, $state) = lab_director(claims => {%lab_claims_today}, exodus_lookup_strict => sub { return undef },
+		deployments => sub { die "Failed to run bosh deployments: Post https://10.0.0.6:25555/oauth/token: connection refused\n" });
+	my $before = {%{$state->{claims}{'ocfp-2'}}};
+	throws_ok { lab_build($env, $state, 'compilation') }
+		qr/deployments.*?connection\s+refused/s, 'the build stops with the error of the listing';
+	like($@, qr{secret/exodus/lab-director-\d+/bosh/network}, 'and names the claims record it could not check');
+	unlike($@, qr/failed\s+or\s+partial\s+claims\s+write/, 'without saying the record looks emptied');
+	is_deeply($state->{claims}{'ocfp-2'}, $before, 'and no claims are written');
+};
+
+# ---------------------------------------------------------------------------
+# the stored network record is read once per init
+# ---------------------------------------------------------------------------
+subtest 'init - reads the stored network record once' => sub {
+	plan tests => 5;
+
+	my $stored = {
+		azs     => {az1 => {for_cpi => 'cpi-one'}},
+		subnets => {'ocfp-0' => {claims => {cf => '10.0.0.10-10.0.0.20'}}},
+	};
+	for my $case (
+		['a stored record', $stored],
+		['an empty record on a director with no deployments', undef],
+	) {
+		my ($label, $record) = @$case;
+		my @reads;
+		my $env = mock_env(exodus_lookup_strict => sub {
+			my ($self, $key, @rest) = @_;
+			push @reads, $key;
+			return $record;
+		});
+		local $ENV{GENESIS_ENVIRONMENT} = "test-env-dir-$test_seq";
+		my $hook = Genesis::Hook::CloudConfig::Bosh::Director->init(
+			env => $env, purpose => 'director'
+		);
+		is_deeply(\@reads, ['/network:.'], "$label is read strictly, once");
+		if ($record) {
+			is($hook->{network}{azs}{az1}{for_cpi}, 'cpi-one', "$label still supplies the for_cpi data");
+			is($hook->{network}{subnets}{'ocfp-0'}{claims}{cf}, '10.0.0.10-10.0.0.20', "$label still supplies the claims");
+		} else {
+			ok(!exists $hook->{network}{subnets}{'ocfp-0'}{claims}, "$label leaves the claims absent");
+		}
+	}
 };
 
 done_testing;

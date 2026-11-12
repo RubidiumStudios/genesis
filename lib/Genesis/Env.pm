@@ -23,6 +23,7 @@ use Service::Vault::Remote;
 use Service::Vault::Local;
 use Service::Vault::None;
 use IPv4;
+use Socket ();
 
 use Archive::Tar;
 use Data::Dumper;
@@ -370,7 +371,7 @@ sub create {
 	}
 
 	# Sanitize the vault descriptor, if present
-	if ($opts{vault}) {
+	if (defined($opts{vault}) && $opts{vault} ne '') {
 		unless (grep {$_ =~ /^https?:\/\/[^\/]+/} (split(' ',$opts{vault}))) {
 			my $vault = (Service::Vault->find(name => $opts{vault}))[0];
 			bail(
@@ -515,10 +516,17 @@ sub genesis_config_block {
 	push @out, "  bosh_env:<pad>$bosh_env_desc"
 		if !$self->use_create_env && $bosh_env_desc ne '' && $bosh_env_desc ne $self->name;
 
-	# vault: prefer env-configured value; omit if unset
+	# vault: prefer env-configured value; omit if unset.  The alias is a safe
+	# target name, which may hold characters YAML reads as a comment or a
+	# mapping, so anything but a plain URL and plain words is quoted.
 	my $vault_desc = $self->lookup('genesis.vault', undef);
-	push @out, "  vault:<pad>$vault_desc"
-		if defined($vault_desc) && $vault_desc ne '';
+	if (defined($vault_desc) && $vault_desc ne '') {
+		(my $quoted = $vault_desc) =~ s/'/''/g;
+		push @out, "  vault:<pad>".(
+			$vault_desc =~ m{^https?://[A-Za-z0-9._/:+!@=%~-]*[A-Za-z0-9._/+!@=%~-](?: [A-Za-z0-9._/+!@=%~-]+)*$}
+				? $vault_desc : "'$quoted'"
+		);
+	}
 
 	# min_version: prefer env value, else use current runtime (except development)
 	my $min_version = $self->lookup(['genesis.min_version','genesis.minimum_version'], undef);
@@ -2282,14 +2290,53 @@ sub lookup {
 }
 
 # }}}
-# lookup_entombed_self - lookup against the env's own-credhub-entombed manifest, falling back to lookup_unevaled when it cannot be built {{{
+# lookup_entombed - lookup against the manifest entombed into the parent's credhub, or with self => 1 the env's own; an env that isn't a director reads lookup_unevaled for self {{{
+sub lookup_entombed {
+	my ($self, $key, $default, %opts) = @_;
+	$key //= '.';
+
+	# Only a director has a CredHub of its own to entomb into, so any other
+	# env asked for its own build reads its values as they are written.
+	return $self->lookup_unevaled($key, $default)
+		if $opts{self} && !$self->is_bosh_director;
+
+	# Every other value, and whether the key is there at all, comes from the
+	# entombed build, since only evaluating the whole merge shows what its
+	# operators make of a value.  A build that fails is raised.  Its blueprint
+	# runs before the build downloads the configs it reads, and the CPI step
+	# comes before deploy downloads them, so they are fetched here first.  The
+	# merge's own are fetched with them, since a blueprint that declares none
+	# may still read the cloud config the merge is about to download.
+	$self->download_required_configs('blueprint', 'manifest')
+		if $self->missing_required_configs('blueprint', 'manifest');
+	my $manifest = $opts{self} ? $self->manifest_provider->entombed_self : $self->manifest_provider->entombed;
+	my ($value, @found) = struct_lookup($manifest->data, $key, $default);
+
+	# BOSH accepts only absolute names in a CPI config, so each entombed name
+	# is qualified with the CredHub it was written to.  That CredHub is only
+	# looked up for a value that holds such a name.
+	my $credhub;
+	$value = $self->_qualify_entombed_refs(sub {$credhub //= $manifest->credhub_target}, $value);
+	return wantarray ? ($value, @found) : $value;
+}
+
+# }}}
+# lookup_entombed_self - lookup_entombed against the env's own credhub, for configs a director uploads to itself {{{
 sub lookup_entombed_self {
 	my ($self, $key, $default) = @_;
-	$key //= '.';
-	my $data = eval { $self->manifest_provider->entombed_self->data };
-	return struct_lookup($data, $key, $default)
-		if !$@ && ref($data) eq 'HASH';
-	return $self->lookup_unevaled($key, $default);
+	return $self->lookup_entombed($key, $default, self => 1);
+}
+
+# }}}
+# _qualify_entombed_refs - a copy of a looked-up value with each ((genesis-entombed/...)) name made absolute in the CredHub it was entombed into {{{
+sub _qualify_entombed_refs {
+	my ($self, $credhub, $value) = @_;
+	return [map {$self->_qualify_entombed_refs($credhub, $_)} @$value]
+		if ref($value) eq 'ARRAY';
+	return {map {($_ => $self->_qualify_entombed_refs($credhub, $value->{$_}))} keys %$value}
+		if ref($value) eq 'HASH';
+	return $value if ref($value) || !defined($value);
+	return $value =~ s/\(\((genesis-entombed\/[^()\s]+)\)\)/'(('.$credhub->()->_full_path($1).'))'/ger;
 }
 
 # }}}
@@ -2343,9 +2390,6 @@ sub exodus_lookup {
 	# environment's own record is not a dependency, so it is not counted.
 	$self->note_dependency_read($for) unless $for eq $self->exodus_slug;
 	my $path =  $self->exodus_mount().$for;
-	debug "Checking if $path path exists...";
-	return $default unless $self->vault->has($path);
-	debug "Exodus data exists, retrieving it and converting to json";
 
 	my $extended = 0;
 	if ($key =~ m#^(/[^:]*)(?::(.*))?#) {
@@ -2354,17 +2398,38 @@ sub exodus_lookup {
 		$extended = 1;
 	}
 
+	# No safe exists check first: has() reads any failure as false, so a
+	# refused or unreachable vault would come back as the default.  The read
+	# itself tells nothing stored, which is the default, from a read that
+	# failed, which bails.
+	debug "Retrieving exodus data from $path";
 	my $out;
-	if ($extended) {
-		eval {$out = $self->vault->get_path($path);};
-		bail "Could not get $for exodus data from the Vault: $@" if $@;
-		return struct_lookup($out, $key, $default);
-	} else {
-		eval {$out = $self->vault->get($path);};
-		bail "Could not get $for exodus data from the Vault: $@" if $@;
-		my $exodus = unflatten($out);
-		return struct_lookup($exodus, $key, $default);
-	}
+	eval {
+		$out = $extended
+			? $self->vault->get_path_strict($path)
+			: $self->vault->read_flattened_secret($path);
+	};
+	bail "Could not get $for exodus data from the Vault: $@" if $@;
+	return $default unless defined($out);
+	return struct_lookup($extended ? $out : unflatten($out), $key, $default);
+}
+
+# }}}
+# exodus_lookup_strict - exodus_lookup of a /path:key, but a failed Vault read dies instead of reading as the default {{{
+sub exodus_lookup_strict {
+	my ($self, $key, $default, $for) = @_;
+	$for ||= $self->exodus_slug;
+	my ($subpath, $inner) = ($key // '') =~ m#^(/[^:]*)(?::(.*))?#
+		or bug("exodus_lookup_strict only reads extended #C{/path:key} keys, not #C{%s}", $key // '');
+	my $path = $self->exodus_mount().$for.$subpath;
+	debug "Retrieving $path from the Vault";
+	# Nothing stored there is the one answer that is the default; a read
+	# that fails dies, since reading it as the default would look to the
+	# caller like an exodus record with nothing in it.
+	my $out = eval {$self->vault->get_path_strict($path)};
+	bail "Could not get $for exodus data from the Vault: $@" if $@;
+	return $default unless defined($out);
+	return struct_lookup($out, $inner // '', $default);
 }
 
 # }}}
@@ -2395,13 +2460,15 @@ sub director_exodus_lookup {
 			eval {$out = $self->bosh->vault->get_path("$path$ext_path");}; # changed from $bosh_vault to $self->bosh->vault
 			bail "Could not get director exodus data from the Vault: $@" if $@;
 		} else {
-			eval {$out = $self->bosh->vault->get($path);}; # changed from $bosh_vault to $self->bosh->vault
+			# Nothing stored gives the default below; a read that failed bails.
+			eval {$out = $self->bosh->vault->read_flattened_secret($path);};
 			bail "Could not get director exodus data from the Vault: $@" if $@;
-			$out = unflatten($out);
+			$out = unflatten($out) if defined($out);
 		}
 		$bosh_exodus = $self->{__director_exodus_cache}{$ext_path//''} = $out;
 	}
 	return $bosh_exodus unless defined($key);
+	return (wantarray ? ($default, undef) : $default) unless defined($bosh_exodus);
 	return struct_lookup($bosh_exodus, $key, $default);
 }
 # }}}
@@ -2835,6 +2902,10 @@ sub _resolve_director_cpi_config {
 	# the uploaded cpis carry ((credhub-var)) references that the new
 	# director can resolve, not plaintext and not parent-credhub refs
 	# (which the new director can't resolve).
+	# The lookup is strict, so a value that can't be entombed is raised
+	# rather than sent to the director as unevaluated text, and a literal or
+	# absent list needs the director's CredHub too whenever the manifest
+	# reads the vault.
 	if (defined(my $inline = $self->lookup_entombed_self('bosh-configs.director-cpi.cpis', undef))) {
 		bail(
 			"#C{bosh-configs.director-cpi.cpis} must be a non-empty array of ".
@@ -2865,7 +2936,7 @@ sub _resolve_director_cpi_config {
 
 	if ($self->has_hook('cpi-config')) {
 		my ($config, $secrets, $errors) = $self->run_hook(
-			'cpi-config', credhub_prefix => $credhub_prefix
+			'cpi-config', credhub_prefix => $credhub_prefix, self_upload => 1
 		);
 		return (undef, undef, 'cpi-config hook', undef, $errors) if $errors;
 		return (
@@ -3353,16 +3424,7 @@ sub vault {
 				$ENV{GENESIS_TARGET_VAULT} eq $details->{url}
 			);
 
-		my %filter = ();
-		$filter{verify} = ($details->{verify} && $details->{tls} ? 1 : 0 ) if $details->{tls};
-		$filter{namespace} = $details->{namespace} || '';
-		$filter{strongbox} = $details->{strongbox};
-
-		return Service::Vault::Remote->attach(
-			url => $details->{url},
-			alias => $details->{alias},
-			%filter
-		);
+		return Service::Vault->get_vault_from_descriptor($vault_info);
 	});
 	return $ref;
 
@@ -5194,24 +5256,20 @@ sub _deployment_may_affect_secrets_vault {
 	if ($self->kit->provides_service('vault')) {
 		debug("Vault service kit detected - deployment may affect secrets vault");
 
-		# Check for static IPs in the vault kit
+		# Check for static IPs in the vault kit.  Addresses are compared in
+		# canonical form, ranges are expanded, and a hostname or IPv6 target
+		# is matched as readily as an IPv4 one.
 		my @kit_ips =
-			map {IPv4->address($_)}
-			grep {$_} map { ($_->{static_ips}//[])->@* }
-			grep {$_} map { ($_->{networks}//[])->@* }
-			@{scalar $self->manifest_lookup('instance_groups')};
+			map {_expand_static_ips($_)}
+			map {@{$_->{static_ips} // []}}
+			grep {CORE::ref($_) eq 'HASH'} map {@{$_->{networks} // []}}
+			grep {CORE::ref($_) eq 'HASH'} @{scalar($self->manifest_lookup('instance_groups', [])) // []};
 		debug("Vault kit has static IPs: ".join(", ", @kit_ips)) if (@kit_ips);
 
-		# Get ips from `safe status`
-		my @vault_ips =
-			map {IPv4->address($_)}
-			grep {$_} map {$_ =~ m{https?://([^: ]*)} && $1}
-			grep {$_ =~ /^http/}
-			lines($self->vault->query('status'));
-		debug("Active vault using IPs: ".join(", ", @vault_ips)) if (@vault_ips);
+		my %vault_port = $self->_secrets_vault_addresses;
+		debug("Active vault using IPs: ".join(", ", sort CORE::keys(%vault_port))) if (%vault_port);
 
-		my (undef, $shared_ips) = compare_arrays(\@kit_ips, \@vault_ips);
-		return scalar(@$shared_ips) ? 1 : 0;
+		return (grep {exists($vault_port{$_})} @kit_ips) ? 1 : 0;
 	}
 
 	# Check if vault domain matches any external domain in the deployment
@@ -5344,6 +5402,11 @@ sub _pre_deploy {
 		} else {
 			info('[[  #g@{+}>>%s', $message);
 		}
+
+		# Find the vault's nodes now, while it still answers.  After the deploy
+		# they may all be sealed, and _ensure_vault_ready_for_exodus needs every
+		# one of them to bring a Raft cluster back.
+		$self->{deployment_state}{secrets_vault_nodes} = [$self->_secrets_vault_cluster_nodes];
 	} else {
 		debug("Skipping unseal key check - deployment does not appear to affect secrets vault");
 	}
@@ -5352,6 +5415,50 @@ sub _pre_deploy {
 
 	$self->notify("all systems #G{ok}, initiating BOSH deploy...");
 	return 1;
+}
+
+# }}}
+# _last_manifest_integrity_issue - report a stale locally-stored manifest {{{
+sub _last_manifest_integrity_issue {
+	my ($self, $last_manifest) = @_;
+
+	# Deployment archives carry their own manifest, so there is no local copy
+	# that could have drifted from what was deployed.
+	return undef unless ref($last_manifest) eq 'HASH'
+		&& ($last_manifest->{source}||'') ne 'exodus-deployments'
+		&& ref($last_manifest->{manifest}) eq 'HASH'
+		&& $last_manifest->{manifest}{path};
+
+	my $expected_sha1 = $last_manifest->{manifest_sha1};
+	return
+		"Cannot confirm local cached deployment manifest pertains to ".
+		"the current deployment (sha1 sum missing from exodus data)."
+		unless defined($expected_sha1) && $expected_sha1 ne '';
+
+	# The state file is committed beside the manifest it was made with, so it is
+	# the repository copy that has to match what exodus says was deployed.  A
+	# manifest downloaded from exodus matches its own sha1 by construction, and
+	# says nothing about the state file.
+	my $repo_sha1 = $last_manifest->{manifest}{sha1};
+	if (($last_manifest->{source}||'') ne 'repository') {
+		my $repo_manifest = $self->path(".genesis/manifests/".$self->name.".yml");
+		if (-f $repo_manifest) {
+			$repo_sha1 = digest_file_hex($repo_manifest, 'SHA-1');
+		} else {
+			return undef unless ($last_manifest->{state}{source}||'') eq 'repository';
+			return
+				"Cannot confirm the state file in the local repository pertains to the ".
+				"current deployment (no deployed manifest beside it to check against exodus).";
+		}
+	}
+
+	return
+		"Manifest in the deployment archive does not match the manifest in the ".
+		"local repository; perhaps you need to perform a #C{git pull}.  #y{Differences ".
+		"will not be accurate for this deployment compared to what was last deployed.}"
+		unless ($repo_sha1||'') eq $expected_sha1;
+
+	return undef;
 }
 
 # }}}
@@ -5364,7 +5471,7 @@ sub _deploy_create_env {
 	debug("deploying this environment via `bosh create-env`, locally");
 	my $last_manifest = $self->last_deployed_manifest(files => 1, contents => 0);
 
-	my ($last_manifest_path, $last_manifest_sha1);
+	my $last_manifest_path;
 	unless ($last_manifest->{not_found}) {
 		if ($last_manifest->{errors}) {
 			$self->_cleanup_and_bail("Errors encountered while retrieving last deployed manifest: %s",
@@ -5372,7 +5479,6 @@ sub _deploy_create_env {
 			);
 		}
 		$last_manifest_path = ($last_manifest->{manifest}{path});
-		$last_manifest_sha1 = $last_manifest->{manifest_sha1};
 	}
 
 	my $alternative_state_file = $opts{'STATE-FILE-PATH'};
@@ -5387,36 +5493,20 @@ sub _deploy_create_env {
 	my $recovered = $self->_recovered_create_env_state();
 
 	# Validate manifest consistency
-	if ($last_manifest_path && ($last_manifest->{source}||'') ne 'exodus-deployments') {
-		# Legacy method of storing state files, and possibly manifests
-		my $last_state_path = $last_manifest->{state}{path};
-		my $last_manifest_repo_path = $last_state_path =~ s/-state\.yml$/.yml/r;
-		my $last_repo_sha1 = sha1_hex(slurp($last_manifest_repo_path));
-		my $issue = '';
-
-		if (!defined($last_manifest_sha1) || $last_manifest_sha1 eq '') {
-			$issue = "Cannot confirm local cached deployment manifest pertains to ".
-			         "the current deployment (sha1 sum missing from exodus data).";
-		} elsif ($last_repo_sha1 ne $last_manifest_sha1) {
-			$issue = "Manifest in the deployment archive does not match the manifest in the ".
-			         "local repository; perhaps you need to perform a #C{git pull}.  #y{Differences ".
-			         "will not be accurate for this deployment compared to what was last deployed.}";
-		}
-		if ($issue) {
-			$issue .= "  #R{This may mean your state file is also out of date!}";
-			if (in_controlling_terminal) {
-				warning("\n".$issue);
-				prompt_for_boolean(
-					"Proceed with BOSH create-env for the #C{${\($self->name)}} anyways? [y|n] ",
-					0
-				) or $self->_cleanup_and_bail("Aborted!\n");
-				$self->notify("\nchecking for the currently deployed manifest...");
-			} else {
-				bail(
-					"$issue\n\nRefusing to deploy to protect integrity of the environment.  ".
-					"Run this command in a terminal to be asked whether to proceed anyway."
-				);
-			}
+	if (my $issue = $self->_last_manifest_integrity_issue($last_manifest)) {
+		$issue .= "  #R{This may mean your state file is also out of date!}";
+		if (in_controlling_terminal) {
+			warning("\n".$issue);
+			prompt_for_boolean(
+				"Proceed with BOSH create-env for the #C{${\($self->name)}} anyways? [y|n] ",
+				0
+			) or $self->_cleanup_and_bail("Aborted!\n");
+			$self->notify("\nchecking for the currently deployed manifest...");
+		} else {
+			bail(
+				"$issue\n\nRefusing to deploy to protect integrity of the environment.  ".
+				"Run this command in a terminal to be asked whether to proceed anyway."
+			);
 		}
 	}
 
@@ -5427,19 +5517,6 @@ sub _deploy_create_env {
 		) unless $last_manifest->{state}{path}
 		      || $recovered->{state}
 		      || $alternative_state_file;
-
-		if ($last_manifest->{manifest}{source} eq 'repository' && !defined($last_manifest->{manifest_sha1})) {
-			warning(
-				"Cannot confirm local cached deployment manifest pertains to the ".
-				"current deployment."
-			);
-		} elsif ($last_manifest_sha1 && $last_manifest_sha1 ne sha1_hex(slurp($last_manifest_path))) {
-			warning(
-				"Manifest in the deployment archive does not match the manifest in the ".
-				"local repository; perhaps you need to perform a #C{git pull}.  #y{Differences ".
-				"will not be accurate for this deployment compared to what was last deployed.}"
-			);
-		}
 
 		info("\n[[  - >>comparing against the last deployed manifest...");
 		my ($out, $rc, $err) = spruce_diff(
@@ -5878,8 +5955,17 @@ sub _post_deploy {
 sub _ensure_vault_ready_for_exodus {
 	my ($self, $noprompt) = @_;
 
+	# Nodes of the secrets vault that this deployment runs, recorded by
+	# _pre_deploy.  More than one means a Raft cluster, where a single-target
+	# unseal opens one node that cannot elect a leader alone.
+	my @nodes = @{($self->{deployment_state} // {})->{secrets_vault_nodes} // []};
+	my $cluster = @nodes > 1;
+
+	# With Strongbox on, safe unseal walks every node itself, so it stays the
+	# first resort there.  The cluster pass below still finishes the job if
+	# the vault is not ready afterwards, for instance while no leader exists.
 	my $status = $self->vault->status;
-	if ($status eq 'sealed') {
+	if ($status eq 'sealed' && (!$cluster || $self->vault->strongbox)) {
 		$self->notify("vault is sealed - attempting to unseal...");
 		my ($out, $rc, $err) = $self->vault->unseal;
 		if ($rc) {
@@ -5892,6 +5978,8 @@ sub _ensure_vault_ready_for_exodus {
 		}
 		$status = $self->vault->status;
 	}
+	$status = $self->_unseal_secrets_vault_cluster(@nodes)
+		if $cluster && $status ne 'ok';
 	return 1 if $status eq 'ok';
 
 	bail(
@@ -5904,6 +5992,175 @@ sub _ensure_vault_ready_for_exodus {
 	) if $noprompt || !in_controlling_terminal;
 
 	return 0;
+}
+
+# }}}
+# _unseal_secrets_vault_cluster - unseal every node, then wait for a leader {{{
+#
+# Service::Vault::unseal_cluster does the work within GENESIS_VAULT_LEADER_WAIT
+# seconds (90 by default) of wall-clock time: it unseals each node through its
+# own address, retries nodes that are still starting, and waits for an active
+# node once a quorum is open.  This reports the outcome node by node.  Returns
+# the vault's status afterwards.
+sub _unseal_secrets_vault_cluster {
+	my ($self, @nodes) = @_;
+	my $vault = $self->vault;
+
+	my $limit = $ENV{GENESIS_VAULT_LEADER_WAIT} // '';
+	$limit = 90 unless $limit =~ /^[0-9]+$/;
+	$self->notify(
+		"vault is not ready - unsealing each of the %d nodes in its cluster, ".
+		"and allowing up to %ds for them to elect a leader...",
+		scalar(@nodes), $limit
+	);
+	my $outcome = $vault->unseal_cluster($limit, @nodes);
+	info(
+		'[[  %s >>%s: %s',
+		$_->{unsealed} ? '#g@{+}' : '#r@{x}', $_->{address}, $_->{message}
+	) for @{$outcome->{nodes}};
+
+	if ($outcome->{active}) {
+		info('[[  #g@{+} >>%s is the active node', $outcome->{active});
+	} elsif ($outcome->{open} < $outcome->{quorum}) {
+		error(
+			"Only %d of %d vault nodes are unsealed, short of the %d that a quorum ".
+			"needs, so the cluster cannot elect an active node.",
+			$outcome->{open}, scalar(@nodes), $outcome->{quorum}
+		);
+	} else {
+		error(
+			"No active node emerged within %ds, although %d of %d nodes are unsealed.",
+			$limit, $outcome->{open}, scalar(@nodes)
+		);
+	}
+	return $vault->status;
+}
+
+# }}}
+# _secrets_vault_cluster_nodes - the addresses of the secrets vault's own nodes {{{
+#
+# When this deployment runs the vault used for secrets, its nodes are the
+# static IPs on the network that carries one of that vault's addresses, one
+# node per instance.  The vault's addresses come from `safe status`, which
+# lists every node with its port when Strongbox is on, and from the target
+# URL, whose host is resolved when it is a name.  Static IPs may be written
+# as ranges.  This must run before the deploy, while the vault still answers.
+# Each node comes back as address:port, with an IPv6 address in brackets.
+# When the manifest clearly holds a cluster but its nodes cannot all be
+# found, this says so loudly, because the deploy will then end with only the
+# targeted node unsealed.
+sub _secrets_vault_cluster_nodes {
+	my $self = shift;
+	return () unless $self->kit->provides_service('vault');
+	my %vault_port = $self->_secrets_vault_addresses;
+
+	my (@nodes, %seen);
+	my @groups = grep {ref($_) eq 'HASH'} @{scalar($self->manifest_lookup('instance_groups', [])) // []};
+	for my $group (@groups) {
+		for my $network (grep {ref($_) eq 'HASH'} @{$group->{networks} // []}) {
+			my @ips = map {_expand_static_ips($_)} @{$network->{static_ips} // []};
+			my ($match) = grep {exists($vault_port{$_})} @ips;
+			next unless defined($match);
+
+			# The network holding a vault address carries the API.  The same
+			# instances on any other network would count each of them twice.
+			push @nodes, grep {!$seen{$_}++} map {
+				sprintf('%s:%s', /:/ ? "[$_]" : $_, $vault_port{$_} // $vault_port{$match})
+			} @ips;
+			my $instances = $group->{instances} // '';
+			warning(
+				"Instance group #C{%s} runs %d instances of the vault that holds this ".
+				"deployment's secrets, but only %d of them have static IPs on its ".
+				"network.  After the deploy Genesis can unseal only those nodes.",
+				$group->{name} // '?', $instances, scalar(@ips)
+			) if $instances =~ /^[0-9]+$/ && $instances > @ips;
+			last;
+		}
+	}
+
+	warning(
+		"This deployment runs the vault that holds its own secrets, but none of ".
+		"that vault's addresses (%s) matches a static IP in the manifest, so ".
+		"Genesis cannot find the other nodes of the cluster.  After the deploy it ".
+		"can unseal only the targeted node, and one node of a Raft cluster cannot ".
+		"elect a leader alone, so the deploy may stop with the vault unusable.  ".
+		"Target the vault by one of its nodes' static IPs, or turn Strongbox on ".
+		"for the target, so that every node can be found.",
+		join(', ', sort CORE::keys(%vault_port)) || 'none could be resolved'
+	) if !@nodes && grep {($_->{instances} // '') =~ /^[0-9]+$/ && $_->{instances} > 1} @groups;
+
+	return @nodes;
+}
+
+# }}}
+# _secrets_vault_addresses - every address the secrets vault answers on {{{
+#
+# Maps each address to the port the vault answers on there.  safe status
+# lists every node with its port when Strongbox is on, and only the target
+# otherwise, so the target URL always counts too.  Ports that safe status
+# reports for a node win over the target's.  Hostnames are resolved, and
+# every address is in canonical form.
+sub _secrets_vault_addresses {
+	my $self = shift;
+	my $vault = $self->vault;
+	my %vault_port;
+	my @urls = map {decolorize($_) =~ m{(https?://\S+)} ? $1 : ()} lines($vault->query('status'));
+	for my $url (@urls, $vault->url) {
+		my ($scheme, $v6, $name, $port) =
+			$url =~ m{^(https?)://(?:\[([^\]]+)\]|([^:/\[\]]+))(?::([0-9]+))?} or next;
+		$port ||= $scheme eq 'https' ? 443 : 80;
+		$vault_port{$_} //= $port for $self->_resolve_host_addresses($v6 // $name);
+	}
+	return %vault_port;
+}
+
+# }}}
+# _resolve_host_addresses - the IP addresses a vault host stands for {{{
+#
+# An IP address comes back in its canonical form, and a name is resolved to
+# every address it has.  Returns the empty list when nothing resolves.
+sub _resolve_host_addresses {
+	my ($self, $host) = @_;
+	my $ip = _canonical_ip($host);
+	return ($ip) if defined($ip);
+
+	my ($err, @found) = Socket::getaddrinfo($host, undef, {socktype => Socket::SOCK_STREAM()});
+	return () if $err;
+	my %seen;
+	return grep {defined($_) && !$seen{$_}++} map {
+		my ($name_err, $address) = Socket::getnameinfo($_->{addr}, Socket::NI_NUMERICHOST());
+		$name_err ? undef : _canonical_ip($address);
+	} @found;
+}
+
+# }}}
+# _canonical_ip - an IPv4 or IPv6 address in canonical form, or undef {{{
+sub _canonical_ip {
+	my ($ip) = @_;
+	return undef unless defined($ip);
+	$ip =~ s/^\s+|\s+$//g;
+	for my $family (Socket::AF_INET(), Socket::AF_INET6()) {
+		my $packed = Socket::inet_pton($family, $ip);
+		return Socket::inet_ntop($family, $packed) if defined($packed);
+	}
+	return undef;
+}
+
+# }}}
+# _expand_static_ips - the addresses in one static_ips entry {{{
+#
+# BOSH accepts a single address or an IPv4 range such as
+# "10.0.0.5 - 10.0.0.7".  Anything unparsable yields nothing.
+sub _expand_static_ips {
+	my ($entry) = @_;
+	return () unless defined($entry) && !CORE::ref($entry);
+	if ($entry =~ /^\s*([0-9.]+)\s*-\s*([0-9.]+)\s*$/) {
+		my ($from, $to) = (_canonical_ip($1), _canonical_ip($2));
+		return () unless defined($from) && defined($to);
+		return map {"$_"} eval {IPv4->span("$from-$to")->addresses};
+	}
+	my $ip = _canonical_ip($entry);
+	return defined($ip) ? ($ip) : ();
 }
 
 # }}}
@@ -5974,8 +6231,12 @@ sub update_deployment_exodus {
 	my $notify = !delete($deployment_details{quiet});
 	my $started = gettimeofday;
 
+	# The read is strict.  A failed read taken as no exodus data would leave
+	# the old data in place after a successful terminate, where it later
+	# reads as a director that still exists, so nothing is written unless
+	# safe said what is stored there.
 	my @rm_exodus_cmds = ();
-	if (keys $self->vault->get($self->exodus_base)->%*) {
+	if (keys(($self->vault->read_flattened_secret($self->exodus_base) // {})->%*)) {
 		# If the exodus data already exists, we need to remove it first
 		push @rm_exodus_cmds, ('rm', $self->exodus_base, "-f");
 	}
@@ -7082,12 +7343,26 @@ sub _check_cpi_config {
 	);
 	info("[[  - >>CPI config synthesized.");
 
-	my ($diff,$is_diff) = spruce_diff(
+	my ($diff,$rc) = spruce_diff(
 		{content => $current_config,        label => 'current'},
 		{content => $cpi_config->{content}, label => 'new'}
 	);
 
-	if ($is_diff) {
+	# spruce exits 2 or more when it cannot compare the two configs, and its
+	# output is then the reason rather than a diff, so nothing is uploaded.
+	if ($rc > 1) {
+		info("[[  - >>CPI config comparison #R{failed}");
+		return {
+			state => 'error',
+			fatal => 1,
+			msg   => sprintf(
+				"CPI config #m{%s} could not be compared with the one on the BOSH director:\n\n%s",
+				$cpi_name, $diff || "spruce diff exited $rc with no output"
+			),
+		};
+	}
+
+	if ($rc) {
 		info(
 			"[[  - >>required CPI config #m{%s} is different from the one currently on the BOSH director:\n\n%s",
 			$cpi_name, $diff
@@ -7707,7 +7982,7 @@ sub _check_stemcells {
 		info(
 			"[[%s>>Stemcell #C{%s} (%s/%s) %s#R{ for CPI }#ri{%s}#R{!}",
 			bullet('bad', '', box => 1),
-			$stemcell_info->{alias}, $stemcell_info->{os},
+			$stemcell_info->{alias}, $stemcell_info->{name} // $stemcell_info->{os},
 			$stemcell_info->{search_term},
 			$stemcell_info->{latest} ? "#R{- no matching stemcells available}" : '#R{missing}',
 			$stemcell_info->{cpi},
@@ -7719,9 +7994,13 @@ sub _check_stemcells {
 		# Some stemcells are missing, while others have preferred alternatives
 		my @unknown = grep {!defined($_->{alt})} @missing;
 		return {
-			state => 'error',
-			fatal => 1,
-			msg   => "required stemcells source unknown - requires manual upload:\n- #R{".join("\n- ", map {$_->{os}."@".$_->{search_term}} @unknown)."}",
+			state    => 'error',
+			fatal    => 1,
+			msg      => "required stemcells source unknown - requires manual upload:\n- #R{".join("\n- ", map {($_->{name} // $_->{os})."@".$_->{search_term}} @unknown)."}",
+			fix_data => {
+				missing => \@missing,
+				alt     => \@alt,
+			},
 		} if @unknown;
 
 		return {
@@ -7764,7 +8043,7 @@ sub _fix_stemcells {
 	my @unknown = grep {!defined($_->{alt})} (@$missing, @$alt);
 	bail (
 		"Required stemcells source unknown - requires manual upload:\n- #R{%s}",
-		join("\n- ", map {$_->{os}."@".$_->{search_term}} @unknown)
+		join("\n- ", map {($_->{name} // $_->{os})."@".$_->{search_term}} @unknown)
 	) if @unknown;
 
 	my @downloadable = grep {$_->{alt}} (@$missing, @$alt);
@@ -7894,6 +8173,7 @@ sub _advise_stemcell_updates {
 			!$seen{$id}++;
 		} @downloadable;
 	}
+	return unless @downloadable;
 
 	my $msg = "\n#Y{The following stemcells are available for download:}";
 	my @stemcell_ids = ();
@@ -8302,10 +8582,11 @@ sub _get_stemcell_status {
 
 	my $stemcells_to_check = $self->partial_manifest_lookup('stemcells');
 	my %available = $self->bosh->stemcells;
-	my %newest_by_os = ();
+	my (%newest_by_os, %newest_by_name) = ();
 	for my $key (reverse sort {by_semver($available{$a}{version}, $available{$b}{version})} keys %available) {
 		my ($os, $version) = split('@', $key, 2);
 		push @{$newest_by_os{$os}}, $key;
+		push @{$newest_by_name{$_}}, $key for keys %{$available{$key}{names}};
 	}
 
 	# Multi-CPI fan-out: validate each requested stemcell against every
@@ -8321,10 +8602,16 @@ sub _get_stemcell_status {
 
 	for my $stemcell_info (@$stemcells_to_check) {
 		for my $cpi (@cpis) {
-			my ($alias, $os, $version) = @$stemcell_info{qw/alias os version/};
-			$alias //= "stemcell-$os-$version";
-			my $newest = $newest_by_os{$os}->[0];
-			my $result = {alias => $alias, os => $os, search_term => $version, cpi => $cpi};
+			my ($alias, $name, $os, $version) = @$stemcell_info{qw/alias name os version/};
+			$alias //= "stemcell-".($name // $os)."-$version";
+			# BOSH matches a named stemcell by name alone, ignoring any os given
+			my @candidates = defined($name)
+				? @{$newest_by_name{$name} // []}
+				: @{$newest_by_os{$os} // []};
+			my $cpis_for = sub {
+				defined($name) ? $available{$_[0]}{names}{$name} : $available{$_[0]}{cpis}
+			};
+			my $result = {alias => $alias, name => $name, os => $os, search_term => $version, cpi => $cpi};
 			my ($wants_latest,$major_version) = $version =~ /^((?:(\d+)\.)?latest)$/;
 
 			# Finding "latest" stemcells is a bit tricky, because we need to
@@ -8336,7 +8623,7 @@ sub _get_stemcell_status {
 			if ($wants_latest) {
 				$result->{latest} = 1;
 				$result->{search_type} = 'latest';
-				my @targets = exists($newest_by_os{$os}) ? ($newest_by_os{$os}->@*) : ();
+				my @targets = @candidates;
 				my $latest_major_version = @targets ? int($available{$targets[0]}{version}) : 0;
 				if (defined($major_version) && $major_version != $latest_major_version) {
 					$result->{search_type} = 'latest-minor';
@@ -8349,7 +8636,7 @@ sub _get_stemcell_status {
 				if (@targets) {
 					# Check if the latest version is available for the desired CPI
 					my @cpi_targets = grep {
-						in_array($cpi, $available{$_}{cpis}->@*)
+						in_array($cpi, $cpis_for->($_)->@*)
 					} @targets;
 					if (@cpi_targets) {
 						$result->{found} = $available{$cpi_targets[0]};
@@ -8358,38 +8645,35 @@ sub _get_stemcell_status {
 						$result->{alt} = Service::BOSH::Stemcell->find(
 							$self->iaas, $available{$targets[0]}->@{qw/os version/},
 							scalar($self->lookup('bosh-configs.stemcells.type',undef))
-						);
-						$result->{alt_existing_cpis} = $available{$targets[0]}->{cpis};
+						) unless defined($name);
+						$result->{alt_existing_cpis} = $cpis_for->($targets[0]);
 					}
 				} else {
-					# No stemcells available for the desired os.  $newest is
-					# undef (no entry in %newest_by_os for this OS), so there
-					# are no existing-CPI stemcells to report.
+					# No stemcells available for the desired version; report the
+					# cpis of the newest one for this os or name, if any.
 					$result->{alt} = Service::BOSH::Stemcell->find(
 						$self->iaas,
 						$os,
 						$version
-					);
-					$result->{alt_existing_cpis} = defined($newest)
-						? $available{$newest}{cpis}
-						: [];
+					) unless defined($name);
+					$result->{alt_existing_cpis} = @candidates ? $cpis_for->($candidates[0]) : [];
 				}
 
 			} else {
 				$result->{search_type} = 'exact';
-				my $key = "$os\@$version";
-				my $match = $available{$key};
-				if (in_array($cpi, $match->{cpis}->@*)) {
-					$result->{found} = $match;
+				my ($key) = grep {(split('@', $_, 2))[1] eq $version} @candidates;
+				if ($key && in_array($cpi, $cpis_for->($key)->@*)) {
+					$result->{found} = $available{$key};
 				} else {
 					$result->{alt} = Service::BOSH::Stemcell->find(
 						$self->iaas,
 						$os,
 						$version
-					);
-					$result->{alt_existing_cpis} = ($available{$key}//{})->{cpis};
+					) unless defined($name);
+					$result->{alt_existing_cpis} = $key ? $cpis_for->($key) : undef;
 				}
 			}
+			$result->{os} = $result->{found}{os} if $result->{found};
 			push @results, $result;
 		}
 	}

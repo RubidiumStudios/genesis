@@ -627,11 +627,15 @@ C<< config->save() >>, so the change is not persisted to disk.
 
 =item C<vault>
 
-B<(optional)> A vault object to set directly.  Any C<Service::Vault>, which
-is a C<Service::Vault::Remote> or a C<Service::Vault::Local>, since a local
-vault serves a read as a remote one does.  A C<Service::Vault::None> is not
-one of them and is refused, because it is the absence of a vault rather than
-a vault.
+B<(optional)> A vault object to set directly.  To be recorded it must be a
+C<Service::Vault::Remote>, since only a remote safe target can be the
+repository's secrets provider.  With C<session_only>, any C<Service::Vault>
+is taken, which is a C<Service::Vault::Remote> or a C<Service::Vault::Local>,
+since a local vault serves a read as a remote one does.  Anything else passed
+here, including C<undef> and a C<Service::Vault::None>, which is the absence
+of a vault rather than a vault, bails with a message naming what was given,
+because it reaches this option from a lookup the operator controls
+(C<genesis new --vault>) rather than from a Genesis bug.
 
 =item C<session_only>
 
@@ -649,9 +653,15 @@ B<Errors:>
 
 =item *
 
+C<"Cannot use ... as the secrets provider for this repository"> - bails
+when the C<vault> option is given but is not a C<Service::Vault::Remote>,
+such as a local vault or C<undef>.  With C<session_only> a local vault is
+taken, and only what is not a C<Service::Vault> bails.
+
+=item *
+
 C<"Invalid call to Genesis::Top->set_vault"> - raised via C<bug()> when none
-of C<interactive>, C<target>, C<clear>, or a C<vault> that is a
-C<Service::Vault> is provided.
+of C<interactive>, C<target>, C<clear>, or C<vault> is provided.
 
 =item *
 
@@ -3798,7 +3808,8 @@ C<pipeline:> key means yes, while C<kit:> or C<genesis:> mean this is an
 environment file that merely happens to be named C<ci.yml> and the answer is
 no. An unreadable file is treated as not legacy rather than as an error --
 the caller is deciding whether to show a migration message, not validating
-the repository.
+the repository. The function leaves the caller's C<$_> untouched, so it is
+safe to reach from inside C<map> or C<for> over a list of constants.
 
 B<Parameters:>
 

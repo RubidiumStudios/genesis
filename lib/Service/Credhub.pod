@@ -244,6 +244,8 @@ B<Examples:>
 
 Returns the base credential path, always with a trailing slash. The raw
 stored value may or may not include a trailing slash; C<base> normalises it.
+L</_full_path> joins relative names through this accessor, so a name always
+sits one slash below the base.
 
 B<Returns:> A string such as C<'/prod-bosh/'>.
 
@@ -835,8 +837,12 @@ notice and should not be called directly.
 
 Returns the fully qualified CredHub credential path. If C<$path> is
 undefined or empty, returns the raw base path (C<$self-E<gt>{base}>). If
-C<$path> begins with C</>, it is returned as-is. Otherwise, the base path
-and C<$path> are joined with C</>.
+C<$path> begins with C</>, it is returned as-is. Otherwise C<$path> is appended
+to L</base>, which ends in exactly one slash, so the result has exactly one
+slash between the base and the name, whether or not the stored base ends in
+one. A root base, which C<from_bosh> sets when the exodus data names no
+C<credhub_base>, gives C</name> and never C<//name>, a name that BOSH refuses
+as a placeholder and that no config could resolve.
 
 B<Parameters:>
 
@@ -859,6 +865,10 @@ B<Examples:>
   # Absolute path is returned unchanged
   $ch->_full_path('/other/path');
   # Returns: '/other/path'
+
+  # A root base joins with one slash
+  $root->_full_path('genesis-entombed/x');
+  # Returns: '/genesis-entombed/x'
 
 =head1 SEE ALSO
 

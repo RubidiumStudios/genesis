@@ -12,7 +12,9 @@ use Genesis::Top;
 use Genesis::UI;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
+use Genesis::Env::NetworkClaims;
 use Genesis::Exit qw/ABORTED DATAERR/;
+use Service::Vault;
 use Encode qw(decode_utf8);
 
 # The one name this module offers another.  Everything else here is a command
@@ -36,15 +38,30 @@ sub create {
 	$name =~ s/\.yml$//;
 
 	my $top = Genesis::Top->new('.');
-	my $vault_desc = get_options->{vault} || $top->get_ancestral_vault($name) || '';
-	if ($vault_desc) {
+	# Presence, not truth: a safe target can be named '0'.
+	my $vault_opt = get_options->{vault};
+	my $has_vault_opt = defined($vault_opt) && $vault_opt ne '';
+	my $vault_desc = $has_vault_opt ? $vault_opt : $top->get_ancestral_vault($name);
+	if (defined($vault_desc) && $vault_desc ne '') {
+		my $vault;
 		if ( $vault_desc eq "?") {
-			$top->set_vault(interactive => 1);
+			# Picked for this command only; whether the pick is also recorded
+			# for the repository is _use_vault_for_new's call, as for any other.
+			$top->set_vault(interactive => 1, session_only => 1);
+			$vault = $top->vault;
+		} elsif ($has_vault_opt) {
+			# Only --vault takes a target name; an ancestor's genesis.vault is
+			# committed to the repository, so it must stay a portable descriptor.
+			$vault = Service::Vault->get_vault_from_descriptor($vault_desc, '--vault option', target_name => 1);
 		} else {
-			my $vault = Service::Vault->get_vault_from_descriptor($vault_desc, get_options->{vault} ? '--vault option' : '');
-			$top->set_vault(vault => $vault);
+			$vault = Service::Vault->get_vault_from_descriptor($vault_desc);
 		}
-		$vault_desc = $top->vault->build_descriptor()
+		_use_vault_for_new($top, $vault);
+		# The new environment records a descriptor.  A name, or the ? that
+		# asked for a pick, only means something here, so it is recorded as the
+		# target it resolved to rather than read again downstream.
+		get_options->{vault} = $vault->build_descriptor()
+			if $has_vault_opt && defined(Service::Vault->bare_target_name($vault_desc));
 	}
 
 	# determine the kit to use (dev or compiled)
@@ -290,6 +307,41 @@ sub _assert_clean_index {
 		"#C{--no-commit} to stage the environment file and stop there.\n",
 		join('', map {"    $_\n"} @staged)
 	);
+}
+
+# }}}
+# _use_vault_for_new - use a vault for new, recording it only if none is {{{
+#
+# The repository's secrets provider is shared by every environment in it,
+# so a vault picked for one new environment is recorded in .genesis/config
+# only when the repository has none.  Otherwise it is used for this command
+# alone, and the operator is told if the recorded provider differs.
+sub _use_vault_for_new {
+	my ($top, $vault) = @_;
+
+	unless ($top->has_vault) {
+		$top->set_vault(vault => $vault);
+		return;
+	}
+
+	$top->set_vault(vault => $vault, session_only => 1);
+	my $recorded = $top->config->get('secrets_provider');
+	my $where = sub {
+		my ($url, $namespace) = @_;
+		($url = $url // '') =~ s{/+$}{};
+		($namespace = $namespace // '') =~ s{^/+|/+$}{}g;
+		return $namespace eq '' ? $url : "$url/$namespace";
+	};
+	my $recorded_at = $where->($recorded->{url}, $recorded->{namespace});
+	my $vault_at    = $where->($vault->url, $vault->namespace);
+	return if $recorded_at eq $vault_at;
+
+	info(
+		"\n#Y{Note:} #C{.genesis/config} was left alone, so the repository's ".
+		"secrets provider is still #M{%s} (#C{%s}).  This command uses #M{%s} (#C{%s}).",
+		$recorded_at, $recorded->{alias} // 'no alias', $vault_at, $vault->name
+	);
+	return;
 }
 
 # }}}
@@ -1747,22 +1799,7 @@ sub deploy {
 				# director and a real deploy rewrites them, so the deploy holds
 				# the network claims lock from here until the claims are
 				# submitted.  A dry run only reads, so it takes no lock.
-				my $lock_held = _deploy_network_claims_lock(
-					$env, dryrun => $dryrun, yes => $options{yes}
-				);
-
-				# While the lock is held, a signal has to unwind through the
-				# release below instead of killing the process with the lock
-				# still recorded on the director.  HUP is in the list because
-				# these deploys are run over ssh from a bastion, and a dropped
-				# session hangs up every process in it -- which is how a lock
-				# outlives the process that took it.
-				local $SIG{INT}  = $lock_held ? sub { die "Interrupted by user\n" } : $SIG{INT};
-				local $SIG{TERM} = $lock_held ? sub { die "Terminated\n" }         : $SIG{TERM};
-				local $SIG{HUP}  = $lock_held ? sub { die "Hung up\n" }            : $SIG{HUP};
-				local $SIG{QUIT} = $lock_held ? sub { die "Quit\n" }               : $SIG{QUIT};
-
-				eval {
+				_deploy_under_network_claims_lock($env, sub {
 					($cloud_config, $network_map) = $env->run_hook('cloud-config');
 
 					# TODO: Support multiple cloud configs
@@ -1771,6 +1808,7 @@ sub deploy {
 					my $diff_dir = $env->workpath('cloud-config-diffs');
 					my $new_path = "$cloud_config_dir/${cloud_config_name}.yml";
 					my $new_path_diff = "$diff_dir/${cloud_config_name}.yml";
+					my $uploaded;
 					info "[[  - >>cloud config synthesized.";
 
 					# Wrap this in an eval block to ensure the lock is cleared on error
@@ -1784,14 +1822,8 @@ sub deploy {
 						my $old_path = "$cloud_config_dir/current-${cloud_config_name}.yml";
 						info "[[  - >>comparing generated cloud config with existing cloud config...";
 						$env->bosh->download_configs($old_path,'cloud',$cloud_config_name);
-						my ($out, $rc, $err) = run(
-							fake_tty("$cloud_config_dir/spruce-out.txt",'spruce','diff',$old_path, $new_path_diff)
-						);
-						bail "Error comparing cloud configs: %s", $err if $rc;
-
-						$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/mrs;
+						my $out = _deploy_cloud_config_diff($old_path, $new_path_diff);
 						if ($out) {
-							$out =~ s/\(root level\)/<root>/m;
 							info "[[  - >>#yui{found the following differences:}\n\n%s", $out;
 							if ($dryrun) {
 								_deploy_dryrun_cloud_config_warning($env, $cloud_config_name, 'outdated');
@@ -1804,10 +1836,9 @@ sub deploy {
 									"Upload the new cloud config to the BOSH director ('no' will cancel deploy)? [y|n]",
 									yes => $options{yes}, default => 1
 								) or bail "Aborted by user!";
-								my $last_check = $env->bosh->check_network_lock;
-								bail(
-									"Network claims lock was lost since last checked (may have become stale and removed) -- cannot proceed with deployment!"
-								) if ($last_check->{status} eq 'unlocked');
+								# The prompt above can wait past the lock's stale timeout,
+								# and another deploy may have cleared and taken it since.
+								$env->bosh->ensure_network_lock_held('upload the cloud config');
 								info(
 									"Uploading new cloud config to #M{%s} BOSH director...",
 									$env->bosh->{alias}
@@ -1821,6 +1852,7 @@ sub deploy {
 									fix_wrap($@),
 									slurp($new_path)
 								);
+								$uploaded = 1;
 								info "[[  - >>cloud config for #C{%s} deployment has been updated.\n", $env->name;
 							}
 						} else {
@@ -1845,7 +1877,29 @@ sub deploy {
 							fix_wrap($@),
 							slurp($new_path)
 						);
+						$uploaded = 1;
 						info "[[  - >>cloud config for #C{%s} deployment has been created.\n", $env->name;
+					}
+
+					# The CPI step may already have downloaded the cloud configs, all
+					# of them or a named one the kit requires, and built the manifest
+					# against them.  The download below skips a config that is already
+					# registered, so read each again and drop any manifest built from
+					# the old ones.  A named config registered by the download of them
+					# all shares its file and is read again with it, and a name with
+					# no file, like the cloud-config hook's SUBTYPE, isn't a config.
+					if ($uploaded) {
+						my $all = $env->config_file('cloud');
+						my @cloud = grep {
+							my (undef, $name) = split('@', $_, 2);
+							!(defined($name) && $name eq 'SUBTYPE')
+							&& $env->has_config('cloud', $name)
+								&& !($name && $env->config_file('cloud', $name) eq $all);
+						} grep {/^cloud(\@|$)/} $env->configs;
+						if (@cloud) {
+							$env->download_configs(@cloud, {refresh => 1});
+							$env->manifest_provider->reset;
+						}
 					}
 
 					if (ref($network_map) eq 'HASH') {
@@ -1854,29 +1908,12 @@ sub deploy {
 								"Network map would be updated on the BOSH director if not in dry-run mode."
 							);
 						} else {
-							# Update the network map on the director's exodus network data
-							$env->notify(
-								"submitting network claims for this deployment to #M{%s} BOSH director...",
-								$env->bosh->{alias}
-							);
-							eval {$env->bosh->vault->set_path(
-								$env->bosh->exodus_path.'/network', $network_map, flatten => 1, clear => 1
-							);};
-							if ($@) {
-								info("  - #R{failed to update network map}\n");
-								bail("\nCannot continue without a valid network map:\n\n%s", $@);
-							}
-							$env->bosh->clear_network_lock();
-							info("  - #G{network map successfully updated }#Gi{(lock removed)}\n");
+							_deploy_submit_network_claims($env, $network_map);
 						}
 					}
-				}; # end eval
-
-				# Release the lock on every exit path.  A successful deploy already
-				# released it when the network claims were submitted.
-				my $err = $@;
-				_deploy_release_network_claims_lock($env) if $lock_held;
-				die $err if $err;
+				}, dryrun => $dryrun, yes => $options{yes}, completed =>
+					'the cloud config was checked and uploaded where it had changed, '.
+					'and any network claims it records were written');
 			} else {
 				warning(
 					"Kit #C{%s} does not provide a cloud-config hook, so cloud configs ".
@@ -1992,37 +2029,12 @@ sub deploy {
 
 	# Check for and potentially fix stemcell availability
 	# FIXME: This won't be accurate if there is a missing CPI config for this env
-	if (!$env->use_create_env) {
-		my $stemcell_check_result = $env->_check_stemcells();
-		if ($stemcell_check_result->{state} ne 'ok') {
-			if ($options{'fix-stemcells'}) {
-				if ($dryrun) {
-					dryrun(
-						"\nStemcell check failed: %s\n\nThis would be fixed if not in dry-run mode.",
-						$stemcell_check_result->{msg}
-					);
-				} else {
-					my $stemcell_fix = $env->_fix_stemcells(
-						$stemcell_check_result->{fix_data},
-						noprompt => $noprompt,
-					);
-					bail(
-						"Failed to fix stemcells: %s",
-						$stemcell_fix->{msg}
-					) if $stemcell_fix->{fatal};
-					$env->notify("%s", $stemcell_fix->{msg}); # Check if this makes sense or is reduntant
-				}
-			} else {
-				$env->_advise_stemcell_updates(
-					$stemcell_check_result->{fix_data},
-				);
-				bail(
-					"Stemcell check failed: %s",
-					$stemcell_check_result->{msg}
-				);
-			}
-		}
-	}
+	_deploy_check_stemcells(
+		$env,
+		fix      => $options{'fix-stemcells'},
+		dryrun   => $dryrun,
+		noprompt => $noprompt,
+	) if !$env->use_create_env;
 
 	bail(
 		"Preflight checks failed; deployment operation halted."
@@ -2627,6 +2639,25 @@ sub _format_deploy_feature_opt_in {
 	);
 }
 
+# _deploy_cloud_config_diff - the differences between the director's cloud config and the generated one {{{
+#
+# Returns '' when they match, and the diff when they differ.  A spruce
+# failure aborts the deploy with spruce's own message.  This goes through
+# spruce_diff, which reads spruce's own exit code on every platform.  When
+# this ran spruce under fake_tty directly, any change aborted a deploy on
+# macOS with an empty message, and on Linux a spruce failure read as a
+# difference.
+sub _deploy_cloud_config_diff {
+	my ($old_path, $new_path) = @_;
+	my ($out, $rc) = spruce_diff($old_path, $new_path);
+	bail("Error comparing cloud configs: %s", $out || "spruce diff exited $rc with no output")
+		if $rc > 1;
+	return '' unless $rc;
+	$out =~ s/\(root level\)/<root>/m;
+	return $out;
+}
+
+# }}}
 # _deploy_dryrun_cloud_config_warning - say that a dry run validates against the director's copy of the cloud config {{{
 sub _deploy_dryrun_cloud_config_warning {
 	my ($env, $cloud_config_name, $state) = @_;
@@ -2686,7 +2717,14 @@ sub _deploy_network_claims_lock {
 			);
 		} else {
 			bail(
-				"Network claims are currently locked -- cannot proceed with deployment!"
+				"Network claims are currently locked -- cannot proceed with deployment!\n\n".
+				"The network claims lock on the #M{%s} BOSH director is held %s%s.  This ".
+				"usually means another deploy, or a #C{bosh-configs upload}, against this ".
+				"director is running now or is waiting at a prompt.  Wait for it to finish, ".
+				"then deploy again.  If no such process is running, the lock goes stale 30 ".
+				"minutes after it was taken, and the next deploy offers to clear it.",
+				$bosh->alias, $current_lock->{description} // 'by another process',
+				defined($current_lock->{path}) ? sprintf(", and is stored at #C{%s}", $current_lock->{path}) : ''
 			);
 		}
 	} elsif ($current_lock->{status} eq 'stale') {
@@ -2711,9 +2749,13 @@ sub _deploy_network_claims_lock {
 			);
 		}
 		unless ($opts{dryrun}) {
-			$bosh->clear_network_lock;
+			# Only the stale lock shown above is cleared; one that another
+			# process has taken since is left for the acquire below to refuse.
+			my $cleared = $bosh->clear_network_lock(stale => $current_lock);
 			$env->notify("checking cloud configs for #C{%s} deployment (continued)...", $env->name);
-			info "[[  - >>stale network claims lock cleared.";
+			info($cleared
+				? "[[  - >>stale network claims lock cleared."
+				: "[[  - >>stale network claims lock was already cleared or taken by another process.");
 		}
 	}
 
@@ -2745,19 +2787,165 @@ sub _deploy_confirm {
 }
 
 # }}}
-# _deploy_release_network_claims_lock - release the network claims lock if this process still holds it {{{
+# _deploy_release_network_claims_lock - release every network claims lock the deploy owes, and report how each went {{{
 sub _deploy_release_network_claims_lock {
 	my ($env) = @_;
-	my $bosh = $env->bosh;
-	return 0 unless $bosh->network_locked_by_me;
+	my %report = (cleared => [], not_held => [], failed => []);
+	# The deploy owes one release, on the director that deploys it.  Each
+	# release logs its own failure rather than dying, so it never replaces
+	# the error that stopped the deploy; the report lets the caller fail the
+	# deploy on it once that error has had its turn.
+	for my $bosh ($env->bosh) {
+		my $released = $bosh->release_network_lock;
+		my $outcome = !defined($released) ? 'failed' : $released ? 'cleared' : 'not_held';
+		push @{$report{$outcome}}, $bosh->network_lock_path;
+	}
+	return \%report;
+}
 
-	$env->notify("cleaning up...");
-	info({pending => 1},
-		"[[  - >>releasing network claims lock on #M{%s} BOSH director...", $bosh->alias
-	);
-	$bosh->clear_network_lock();
-	info "#G{done}";
+# }}}
+# _deploy_under_network_claims_lock - run the cloud config step under the network claims lock, releasing it on every exit {{{
+sub _deploy_under_network_claims_lock {
+	my ($env, $code, %opts) = @_;
+	my $takes_lock = !$opts{dryrun};
+
+	# A signal has to unwind through the release below instead of killing the
+	# process with the lock still recorded on the director, and that holds
+	# from before the lock is written: a signal during the write, or during
+	# the wait that confirms it, would otherwise leave it there.  HUP is in
+	# the list because these deploys are run over ssh from a bastion, and a
+	# dropped session hangs up every process in it -- which is how a lock
+	# outlives the process that took it.
+	#
+	# The first signal unwinds the work.  Any that follows, including one in
+	# the gap before the release starts or while it runs, is held until the
+	# release has finished, because dying there would skip it or cut it short.
+	my $unwinding = $takes_lock;
+	my $held_signal;
+	my $on_signal = sub {
+		my ($message) = @_;
+		# $unwinding stays set until the work has been left, below, and not
+		# until this first die: code inside the work can catch that die, and
+		# the next signal then still has to unwind it.
+		die $message if $unwinding;
+		$held_signal //= $message;
+	};
+	local $SIG{INT}  = $takes_lock ? sub { $on_signal->("Interrupted by user\n") } : $SIG{INT};
+	local $SIG{TERM} = $takes_lock ? sub { $on_signal->("Terminated\n") }         : $SIG{TERM};
+	local $SIG{HUP}  = $takes_lock ? sub { $on_signal->("Hung up\n") }            : $SIG{HUP};
+	local $SIG{QUIT} = $takes_lock ? sub { $on_signal->("Quit\n") }               : $SIG{QUIT};
+
+	my ($ok, $err);
+	eval {
+		$ok = eval {
+			_deploy_network_claims_lock($env, dryrun => $opts{dryrun}, yes => $opts{yes});
+			$code->();
+			1;
+		};
+		$err = $@;
+		# Inside the outer eval, so that a signal between the two lands in it
+		$unwinding = 0;
+		1;
+	} or ($ok, $err) = (0, $@);
+
+	# Released whenever this process holds it, which covers an acquire that
+	# wrote the lock and then failed.  A successful deploy already released
+	# it when the network claims were submitted, so this is then a recheck.
+	my $release = $takes_lock ? _deploy_release_network_claims_lock($env) : undef;
+	die $err unless $ok;
+	die $held_signal if defined($held_signal);
+
+	# The deploy that follows entombs secrets and then deploys, and a pipeline
+	# acts on the exit status, so a lock that may still be held stops the
+	# deploy here rather than letting it go on, or exit zero, with the next
+	# deploy on this director left waiting on it.
+	my @failed = $release ? @{$release->{failed}} : ();
+	bail(
+		"The network claims lock could not be released, so it may still be held ".
+		"at %s.  %s before the release failed.  The deploy stopped there, ".
+		"before deploying, so nothing was entombed or deployed while ".
+		"the lock may be held.\n\n".
+		"The error above says why the release failed.  Other deploys on this ".
+		"director will wait for the lock until it goes stale.  Check it with ".
+		"#C{safe get %s}, and run the deploy again once the cause is fixed.",
+		join(' and ', map {"#C{$_}"} @failed),
+		ucfirst($opts{completed} // q{the work under the lock had finished}),
+		$failed[0]
+	) if @failed;
 	return 1;
+}
+
+# }}}
+# _deploy_submit_network_claims - write this deployment's network claims to the director, then release the lock {{{
+sub _deploy_submit_network_claims {
+	my ($env, $network_map) = @_;
+	my $bosh = $env->bosh;
+	$env->notify(
+		"submitting network claims for this deployment to #M{%s} BOSH director...",
+		$bosh->alias
+	);
+
+	# The claims replace the director's whole network record, so a deploy
+	# that lost the lock while it waited would overwrite the claims of the
+	# deploy that took it over.
+	$bosh->ensure_network_lock_held('write the network claims');
+
+	my $network_path = $bosh->exodus_path.'/network';
+	eval {
+		# Strict, because a read that failed would look like a record
+		# with no claims, and the summary would show every claim as new
+		my $stored = $bosh->vault->get_path_strict($network_path) // {};
+		Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $network_map);
+		$bosh->vault->set_path($network_path, $network_map, flatten => 1, clear => 1);
+		1;
+	} or do {
+		my $err = $@;
+		info("  - #R{failed to update network map}\n");
+		bail("\nCannot continue without a valid network map:\n\n%s", $err);
+	};
+
+	my $released = $bosh->clear_network_lock();
+	info($released
+		? "  - #G{network map successfully updated }#Gi{(lock removed)}\n"
+		: "  - #G{network map successfully updated}, #y{but the network claims lock was not removed, because it was no longer this deploy's to remove}\n"
+	);
+	return 1;
+}
+
+# }}}
+# _deploy_check_stemcells - check the env's stemcells on the director and fix or advise on any that are missing {{{
+sub _deploy_check_stemcells {
+	my ($env, %opts) = @_;
+	my $stemcell_check_result = $env->_check_stemcells();
+	return 1 if $stemcell_check_result->{state} eq 'ok';
+
+	if ($opts{fix} && !$stemcell_check_result->{fatal}) {
+		if ($opts{dryrun}) {
+			dryrun(
+				"\nStemcell check failed: %s\n\nThis would be fixed if not in dry-run mode.",
+				$stemcell_check_result->{msg}
+			);
+		} else {
+			my $stemcell_fix = $env->_fix_stemcells(
+				$stemcell_check_result->{fix_data},
+				noprompt => $opts{noprompt},
+			);
+			bail(
+				"Failed to fix stemcells: %s",
+				$stemcell_fix->{msg}
+			) if $stemcell_fix->{fatal};
+			$env->notify("%s", $stemcell_fix->{msg}); # Check if this makes sense or is reduntant
+		}
+		return 1;
+	}
+
+	$env->_advise_stemcell_updates(
+		$stemcell_check_result->{fix_data},
+	);
+	bail(
+		"Stemcell check failed: %s",
+		$stemcell_check_result->{msg}
+	);
 }
 
 # }}}

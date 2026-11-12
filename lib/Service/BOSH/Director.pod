@@ -78,9 +78,12 @@ L</stemcells> and L</upload_stemcell> list and upload stemcells.
 
 =item Network locking
 
-L</check_network_lock>, L</acquire_network_lock>,
+L</network_lock_path>, L</check_network_lock>, L</acquire_network_lock>,
 L</network_locked_by_me>, and L</clear_network_lock> implement a
-Vault-backed mutex used to serialise network claim updates.
+Vault-backed mutex used to serialise network claim updates.  On a kv v2
+mount the lock is taken with a check-and-set write, so exactly one of any
+number of competing processes gets it; on a kv v1 mount it falls back to a
+write and read-back, which is not atomic.
 
 =item Instance operations
 
@@ -770,6 +773,15 @@ proxy and applies a timeout from C<$ENV{GENESIS_NETWORK_TIMEOUT}> (default
 10 seconds). Otherwise, TCP reachability to the director's host and port
 is checked first with a plain socket test.
 
+A proxied probe that times out reports C<unreachable> and never marks the
+director validated, and the alarm is cancelled on every way out of the
+probe. The timeout decides the outcome but does not stop C<bosh>: the
+call still returns only once the C<bosh> process exits. The timeout is
+recognised by matching C<"timeout\n"> at the start of C<$@> rather than
+by string equality, because Carp::Always (loaded by the test helper and
+by Genesis's own debug mode) appends a backtrace to the die message, and
+an equality test there lets a hung director through as C<ok>.
+
 On success, the authenticated user is extracted from the C<bosh env>
 output and stored in C<$self-E<gt>{user}>, C<$self-E<gt>{validated}> is
 set to C<1>, and C<$ENV{GENESIS_BOSH_VERIFIED}> is set to
@@ -791,10 +803,14 @@ A human-readable message describing the status.
 
 B<Errors:>
 
-When C<BOSH_ALL_PROXY> is set and the proxy timeout fires, the ALRM
-signal handler raises C<"timeout\n"> internally. This is caught and
-results in a C<< { status => 'unreachable', msg => "timeout after N seconds" } >>
-return value rather than propagating as an exception.
+None raised. When C<BOSH_ALL_PROXY> is set and the proxy timeout fires,
+the result is
+C<< { status => 'unreachable', msg => "timed out after N seconds waiting for URL through proxy PROXY" } >>,
+where C<URL> is the director's L</url> and C<PROXY> is C<BOSH_ALL_PROXY>
+with its query string (such as C<private-key>) removed. L</connect_and_validate>
+turns that result into its C<unreachable> error. When C<bosh env> fails
+or dies, through the proxy or not, the result is C<error>, and the
+message carries C<bosh>'s stderr or the exception text.
 
 B<Examples:>
 
@@ -1343,8 +1359,12 @@ B<Examples:>
 Runs the named BOSH errand against the director's current deployment.
 Runs interactively and streams output to the terminal.
 
-Always returns C<1> regardless of the errand's actual exit code, because
-the execute result is discarded. See C<errand-discards-exit-code> in L</KNOWN ISSUES>.
+Bails when bosh exits nonzero, so a caller can report success once this
+returns.  The check reads the exit code that C<execute> returns, rather
+than relying on an C<onfailure> message from C<run()>, so it holds even
+where C<script> hides the code and C<execute> recovers it from the
+typescript.  Kit addons that run a smoke-test errand and then print
+success depend on it.
 
 B<Note:> The C<bug()> message for a missing errand name incorrectly reads
 C<"Missing errand name in call to deploy()"> instead of
@@ -1360,9 +1380,12 @@ The name of the BOSH errand to run.
 
 =back
 
-B<Returns:> C<1>.
+B<Returns:> C<1> when the errand succeeds.
 
 B<Errors:>
+
+Bails with C<"Failed to run errand '$errand' (... BOSH director): bosh exited N">
+when bosh exits nonzero.
 
 Dies with C<"No deployment name provided for BOSH Director in call to run_errand()">
 when C<$self-E<gt>deployment()> is not set.
@@ -1616,6 +1639,13 @@ The OS name (e.g. C<'ubuntu-jammy'>).
 An arrayref of CPI names that have this stemcell. C<'E<lt>defaultE<gt>'> is
 used when no CPI is specified.
 
+=item names
+
+A hashref from each stemcell name uploaded with this OS and version to an
+arrayref of the CPIs that have it.  Images with different names can share
+an C<os@version> key, and C<name> holds only the first one seen, so
+matching by name must use this map.
+
 =back
 
 B<Returns:> In list context, a hash. In scalar context, a hashref.
@@ -1663,18 +1693,35 @@ B<Examples:>
   $director->upload_stemcell($stemcell);
   # Returns: result of $stemcell->upload($director, %opts)
 
+=head2 network_lock_path
+
+  my $path = $director->network_lock_path();
+
+Returns the vault path of the network claims lock for this director, which
+is C<< $self->exodus_path . '/network-claim-lock' >>.
+
+The lock is a secret of its own rather than a key inside the director's
+exodus secret.  That way a check-and-set write covers the lock and nothing
+else, and the exodus rewrite that every director deploy performs leaves the
+lock alone.
+
+B<Returns:> The lock's vault path, as a string.
+
 =head2 check_network_lock
 
   my $result = $director->check_network_lock(%opts);
 
-Reads the network claim lock from the Vault path
-C<$self-E<gt>exodus_path . ':network-claim-lock'> and returns a status
-hashref.
+Reads the network claims lock at L</network_lock_path> with
+C<Service::Vault::kv_read> and returns a status hashref.
 
-When no lock exists, returns C<< { status => 'unlocked' } >>.
+The lock is C<'unlocked'> when no record exists, or when the record has no
+C<at> field, which is what a released lock on a kv v2 mount looks like.  A
+held lock is C<'stale'> once its age exceeds C<max_lock_age>, or as soon as
+its process has exited when that process ran on this same host.  Otherwise
+it is C<'locked'>.
 
-When a lock is found and its age exceeds C<max_lock_age> (default 1800
-seconds), the status is C<'stale'>; otherwise it is C<'locked'>.
+A vault that cannot be read is an error, not an unlocked director, so that
+a sealed or unreachable vault never lets a second deploy through.
 
 B<Parameters:>
 
@@ -1695,7 +1742,8 @@ C<1800> (30 minutes).
 
 =back
 
-B<Returns:> A hashref with keys:
+B<Returns:> A hashref with these keys, of which C<status>, C<path>,
+C<version>, and C<kv_version> are always present:
 
 =over 4
 
@@ -1703,21 +1751,45 @@ B<Returns:> A hashref with keys:
 
 C<'unlocked'>, C<'locked'>, or C<'stale'>.
 
+=item path
+
+The lock's vault path, from L</network_lock_path>.
+
+=item version
+
+On a kv v2 mount, the version of the lock secret that was read, which is
+C<0> when it has never been written.  A check-and-set write must name it.
+C<undef> on a kv v1 mount.
+
+=item kv_version
+
+C<1> or C<2>, the version of the kv mount the lock is on.
+
 =item lock
 
-The decoded lock data hashref (absent when status is C<'unlocked'>).
-Contains C<at>, C<user>, C<hostname>, C<pid>, and C<env>.
+The lock record (absent when unlocked).  Contains C<at>, C<user>,
+C<hostname>, C<pid>, C<env>, and C<token>.
 
 =item age
 
-The age of the lock in seconds (absent when status is C<'unlocked'>).
+The age of the lock in seconds (absent when unlocked).
+
+=item max_age
+
+The C<max_lock_age> the status was judged against (absent when unlocked).
 
 =item description
 
-A human-readable string describing when and by whom the lock was acquired
-(absent when status is C<'unlocked'>).
+A human-readable string describing when and by whom the lock was taken
+(absent when unlocked).
 
 =back
+
+B<Errors:>
+
+Dies through C<Service::Vault::kv_read> or C<Service::Vault::kv_mount>
+when the vault refuses the read or cannot be reached, naming the path and
+the likely causes.
 
 B<Examples:>
 
@@ -1727,50 +1799,132 @@ B<Examples:>
   } elsif ($result->{status} eq 'stale') {
     warn "Stale lock detected: $result->{description}\n";
   }
-  # Returns: { status => 'unlocked' }
-  #       or { status => 'locked', lock => {...}, age => 42, description => '...' }
+  # Returns: { status => 'unlocked', path => '...', version => 3, kv_version => 2 }
+  #       or { status => 'locked', lock => {...}, age => 42, description => '...', ... }
 
 =head2 acquire_network_lock
 
-  $director->acquire_network_lock();
+  my $lock = $director->acquire_network_lock(%opts);
 
-Acquires the network claim lock by writing a JSON lock record to the Vault
-at C<$self-E<gt>exodus_path . ':network-claim-lock'> via
-C<$self-E<gt>vault-E<gt>set(...)>. The lock record contains the timestamp,
-hostname, username, PID, and environment name.
+Takes the network claims lock by writing a lock record to
+L</network_lock_path>, after checking that an older Genesis does not hold
+the older form of the lock (see L</_refuse_legacy_network_lock>).  The
+record holds the time, hostname, user, PID, environment name, and a token
+that marks it as this process's own (see L</_network_lock_token>).  The time is written in UTC with a C<+0000>
+offset, so that a reader on any host works out the same age for it.
+Every value, the PID included, is written as a string.  The record
+sits under the director's exodus path, so a C<safe export> of that path takes
+it along, and an older Genesis on safe 1.26.0 refuses an export holding a
+value that is not a string, such as a numeric PID.  Writing strings keeps
+those clients working.  This Genesis can still read a lock that an older
+client wrote with a numeric PID.  L<Service::Vault/decode_export_text> marks
+the lock as holding a typed value, the ordinary readers read it again whole with
+L<Service::Vault/read_flattened_secret> and take the PID as the text safe
+prints for it, and entombment never reads a lock that no manifest
+references, so such a lock no longer stops a deploy.  A stale lock is taken
+over, with a note saying whose it was.
 
-If C<check_network_lock> reports the lock is stale (exceeded C<max_lock_age>),
-the stale lock is logged via C<info()>, cleared via C<clear_network_lock()>,
-and then the new lock is acquired. If the lock is actively held, the method
-dies.
+How the write is made depends on the kv mount the lock is on:
 
-B<Returns:> Nothing (Vault write is the only externally observable effect).
+=over 4
+
+=item kv v2
+
+The write is a check-and-set write that names the version
+L</check_network_lock> just read.  However many processes read the same
+version, the vault lets only the first write through.  Every other writer
+is refused, reads the lock again, and stops with a message naming the
+holder and saying that it lost the race.  This is atomic.
+
+=item kv v1
+
+kv v1 has no check-and-set write, so this is not atomic.  The method
+writes the lock, waits C<$Service::BOSH::Director::NETWORK_LOCK_SETTLE_SECONDS>
+seconds (2 by default), and reads it back.  If another process's lock is
+there instead, that process's write landed last and this one stops.  A
+competing write slower than the wait can still go unnoticed, so the method
+warns once per lock path that the lock is best-effort.
+
+=back
+
+B<Parameters:>
+
+=over 4
+
+=item %opts
+
+Passed to L</check_network_lock>, so C<max_lock_age> applies.
+
+=back
+
+B<Returns:> The lock record that was written.
 
 B<Errors:>
 
-Dies with C<"Cannot acquire network claim lock: it was locked %s.\n">
-when the lock is actively held. C<%s> is the human-readable lock
-description from L</check_network_lock>.
+=over 4
+
+=item *
+
+Dies when another process holds a lock that is not stale.  The message
+names the director, the holder's user, host, environment, and PID, when
+the lock was taken, the vault path and URL, the likely cause, and how
+long until the lock goes stale.  When this process lost a race for the
+lock, the message says so.
+
+=item *
+
+Dies when an older Genesis holds the older form of the lock, or when the
+vault will not say whether one does, through
+L</_refuse_legacy_network_lock>.  Nothing is written in either case.
+
+=item *
+
+On kv v1, dies when the read-back finds no lock at all, which means
+another process released it in that moment or the vault target is a
+standby node whose reads lag the leader.
+
+=item *
+
+Dies when the lock record changes between every read and write in five
+attempts.
+
+=item *
+
+Dies when the write of the lock fails, through L</_write_network_lock>.
+The vault may have accepted the write before the failure, so the message
+says that this process may now hold the lock, that it is released as the
+command exits, and how to check for it and clear it by hand.  A signal
+that arrives during the write passes through unchanged.
+
+=item *
+
+Vault failures from C<Service::Vault::kv_read> propagate.
+
+=back
 
 B<Examples:>
 
-  $director->acquire_network_lock();
-  # Returns: nothing (or dies if actively locked)
-  # Lock is now held; clear it when done:
+  my $lock = $director->acquire_network_lock();
+  # Returns: { at => '2026-10-05 15:03:41 +0000', user => 'ops', token => '...', ... }
+  # Lock is now held; release it when done:
   $director->clear_network_lock();
-  # Returns: nothing
+  # Returns: 1
 
 =head2 network_locked_by_me
 
   my $bool = $director->network_locked_by_me();
 
-Returns true when the current process holds the network claim lock. This
-is determined by comparing the lock's PID, hostname, username, and
-environment name against the current process's values.
+Returns true when the current process holds the network claims lock, which
+it tells by comparing the lock's C<token> with L</_network_lock_token>.  A
+lock this process holds still counts as its own once it is stale.
 
-Returns false (C<0>) immediately when no lock is held.
+Returns false (C<0>) when no lock is held.
 
-B<Returns:> True when the current process holds the lock, false otherwise.
+B<Returns:> C<1> when the current process holds the lock, C<0> otherwise.
+
+B<Errors:>
+
+Vault failures from L</check_network_lock> propagate.
 
 B<Examples:>
 
@@ -1782,17 +1936,157 @@ B<Examples:>
 
 =head2 clear_network_lock
 
-  $director->clear_network_lock();
+  my $cleared = $director->clear_network_lock(%opts);
 
-Removes the network claim lock from the Vault by calling
-C<$self-E<gt>vault-E<gt>clear(...)>. Does not check whether the current
-process holds the lock before clearing.
+Releases the network claims lock, but only the lock that was asked about.
+With no options, that is this process's own lock.  With C<stale>, it is
+the very record that L</check_network_lock> reported as stale; a lock that
+has changed hands since then is someone else's and is left alone.
 
-B<Returns:> Nothing.
+On a kv v2 mount the lock is released by a check-and-set write of a record
+with no holder in it, because kv v2 has no check-and-set delete and a plain
+delete could remove a lock that another process wrote after the read.  On a
+kv v1 mount, which refuses a record with no fields, the lock secret is
+deleted with C<Service::Vault::kv_delete>, so that a delete the vault
+refuses is an error rather than a quiet no-op.
+
+B<Parameters:>
+
+=over 4
+
+=item %opts
+
+A hash of options:
+
+=over 4
+
+=item stale
+
+The status hashref from L</check_network_lock> that reported the lock as
+stale.  The lock is cleared only while it is still that record: the same
+version on kv v2, or the same lock fields on kv v1.
+
+=back
+
+=back
+
+B<Returns:> C<1> when the lock was cleared, C<0> when there was nothing to
+clear or the lock was not the one asked about.
+
+B<Errors:>
+
+Dies when the lock record changes between every read and write in five
+attempts, naming the director, the path, and the vault.  Vault failures
+from L</check_network_lock>, C<Service::Vault::kv_write>, and
+C<Service::Vault::kv_delete> propagate, so a release the vault refuses is
+never counted as done.
 
 B<Examples:>
 
   $director->clear_network_lock();
+  # Returns: 1 if this process's lock was released, 0 otherwise
+
+  my $current = $director->check_network_lock();
+  $director->clear_network_lock(stale => $current) if $current->{status} eq 'stale';
+  # Returns: 1, or 0 if another process took the lock in the meantime
+
+=head2 ensure_network_lock_held
+
+  $director->ensure_network_lock_held($action);
+
+Stops unless this process still holds the network claims lock.  Call it
+just before a step that the lock protects, such as uploading the cloud
+config or writing the network claims.  This process can lose the lock
+while it waits, most often at a prompt, for longer than the lock's stale
+timeout, because another deploy or C<bosh-configs upload> then clears the
+lock as stale and may take it.
+
+While this process does hold its lock, it also reads the older form of the
+lock again, with L</_refuse_legacy_network_lock>.  An older Genesis that
+started after this process took its lock never looks at that lock, so this
+is the last point before the write at which the two can be told apart.  It
+narrows the window in which both write claims, and cannot close it, because
+an older Genesis can still take its own lock just after the check.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$action>
+
+What this process was about to do, as a phrase that follows "Cannot", such
+as C<'upload the cloud config'>.  The message uses it twice.
+
+=back
+
+B<Returns:> C<1> when this process holds the lock.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dies when this process holds its lock but an older Genesis holds the older
+form of it, or the vault will not say whether one does.  The messages are
+those of L</_refuse_legacy_network_lock>, with C<$action> in place of taking
+the lock.  Nothing is written.
+
+=item *
+
+Dies when this process no longer holds the lock.  The message names the
+action, the director, and whether the lock is now free or held by another
+process, and if so whose it is and when it was taken.  It also gives the
+likely cause, says to run the command again once the other process has
+finished, and names the lock's path and the C<safe get> command that shows
+it.
+
+=item *
+
+Vault failures from L</check_network_lock> propagate.
+
+=back
+
+B<Examples:>
+
+  $director->ensure_network_lock_held('upload the cloud config');
+  # Returns: 1, or dies when another process has taken the lock
+
+=head2 release_network_lock
+
+  my $released = $director->release_network_lock();
+
+Releases the network claims lock if this process holds it, for the cleanup
+that runs as a command finishes, fails, or is interrupted.  It never dies,
+so a failed release cannot replace the error that stopped the caller, nor
+stop the caller releasing its locks on other directors.  A release that
+fails is logged with the director, the reason, when other deploys can take
+the lock, the likely causes, and what to check.
+
+While it runs, C<INT>, C<TERM>, C<HUP>, and C<QUIT> are blocked, and the
+processes it starts inherit that.  A terminal sends Ctrl-C to every process
+in its foreground group, and a dropped ssh session sends C<HUP> to every
+process in it, so the C<safe> child of a vault call would otherwise be
+killed, the release would fail, and the lock would stay on the director.
+A signal that arrives meanwhile stays pending in this process, and reaches
+the handler the caller installed once the release is over.
+
+The log says which step failed.  When the lock could not be read, nothing
+was released and it is not known whether this process holds a lock, so the
+message says that, and gives the C<safe get> command that shows the lock,
+the host and PID that make it this process's, and the C<safe rm> command
+that clears it.  Only a failure of the clear itself is logged as a lock
+that could not be released.
+
+B<Returns:> C<1> when the lock was released.  C<0> when this process did
+not hold it, including when another process took it between the check and
+the clear, which is reported on the output.  C<undef> when the release
+failed and was logged.
+
+B<Examples:>
+
+  $director->release_network_lock();
+  # Returns: 1, 0 when there was nothing of ours to release, or undef on a logged failure
 
 =head2 run_on_instance
 
@@ -2109,6 +2403,236 @@ B<Examples:>
   my ($p, $v) = $class->_derive_exodus_pointers('x', undef, exodus_path => 'a/b');
   # Returns: ('a/b', undef)
 
+=head2 _write_network_lock
+
+  my $written = $self->_write_network_lock($path, $lock, $max_age, %opts);
+
+Writes the network claims lock record with C<Service::Vault::kv_write>.  A
+write can fail after the vault has accepted it, for instance when reads on
+an HA vault never catch up with the new version, and then this process may
+hold the lock without knowing it.  So a failure here stops with the
+original error and a note on how to find and clear the lock.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The lock's vault path, from L</network_lock_path>.
+
+=item C<$lock>
+
+The lock record to write.  Its C<hostname> and C<pid> are named in the
+note.
+
+=item C<$max_age>
+
+The stale timeout in seconds, which the note gives in minutes.  Defaults
+to C<1800>.
+
+=item C<%opts>
+
+Passed to C<Service::Vault::kv_write>, so C<cas> applies on kv v2.
+
+=back
+
+B<Returns:> What C<Service::Vault::kv_write> returned, which is C<0> for a
+refused check-and-set write.
+
+B<Errors:>
+
+Dies when the write fails, with the original error followed by a note
+that this process may now hold the lock.  The note says that the lock is
+released as the command exits, when it goes stale if that release fails,
+and the C<safe get> and C<safe rm> commands that check and clear it.  A
+signal (C<Interrupted by user>, C<Terminated>, C<Hung up>, or C<Quit>)
+passes through unchanged, for the caller's release to handle.
+
+B<Examples:>
+
+  my $version = $self->_write_network_lock($path, $lock, 1800, cas => 3);
+  # Returns: 4, or 0 when another process wrote first
+
+=head2 _network_lock_freshness
+
+  my ($status, $age) = $self->_network_lock_freshness($lock, $max_age);
+
+Works out whether a network claims lock record is still held or has gone
+stale.  A lock is stale when it is older than C<$max_age> seconds, or when
+it was taken on this host by a process that is no longer running, since
+that process can never release it.  A lock from another host is judged by
+its age alone.  It is shared by L</check_network_lock>, which judges the
+current lock with it, and L</_refuse_legacy_network_lock>, which judges the
+older form of the lock with the same rule.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$lock>
+
+The lock record, with an C<at> time in C<%Y-%m-%d %H:%M:%S %z> form, and
+optionally C<hostname> and C<pid>.
+
+=item C<$max_age>
+
+The stale timeout in seconds.
+
+=back
+
+B<Returns:> The status, which is C<'stale'> or C<'locked'>, and the age of
+the lock in seconds.
+
+B<Errors:>
+
+Dies when C<at> is missing or is not in the expected form.
+
+B<Examples:>
+
+  my ($status, $age) = $self->_network_lock_freshness($lock, 1800);
+  # Returns: ('locked', 42)
+
+=head2 _refuse_legacy_network_lock
+
+  $self->_refuse_legacy_network_lock($max_age, $action);
+
+Stops the acquire of the network claims lock while an older Genesis holds
+the older form of it.  This guards against older Genesis versions during a
+rollout.  They keep the lock as a JSON string in the C<network-claim-lock>
+key of the director's exodus secret, and never read the secret that
+L</network_lock_path> names, so without this check the older and the newer
+Genesis could each take their own lock and both write claims.
+
+The key is read once, with C<Service::Vault::kv_read>, and is never
+written or deleted.  A lock there that is still fresh by the older code's
+own rule, as L</_network_lock_freshness> applies it, refuses the acquire.
+A lock that is stale, a key or field that is absent, and an exodus secret
+that does not exist all let the acquire go on.  A value that is not JSON,
+or has no C<at> time, is not a lock record that any older Genesis wrote, so
+it is ignored with a warning that says how to remove it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$max_age>
+
+The stale timeout in seconds.  Defaults to C<1800>, the older code's own.
+
+=item C<$action>
+
+Given by L</ensure_network_lock_held>, which checks again once this process
+already holds its own lock: what this process was about to do, as a phrase
+that follows "Cannot".  The refusal then says that an older Genesis appears
+to have started deploying since this process took its lock.  Without it,
+the refusal is about taking the lock.
+
+=back
+
+B<Returns:> Nothing, when the older lock is absent or stale.
+
+B<Errors:>
+
+=over 4
+
+=item *
+
+Dies when a fresh older lock is found.  The message names the director,
+the holder's user, host, environment, and PID, when the lock was taken, the
+vault path and URL, the likely cause, how long until the lock goes stale,
+and the C<safe get> and C<safe rm -f> commands that check and clear the
+key.
+
+=item *
+
+Dies when the exodus secret cannot be read, because a vault that refuses or
+fails cannot be taken to mean that no older Genesis is deploying.  The
+message gives the vault's reason, the likely causes, and the C<safe get>
+and C<safe vault status> commands that check them.  A signal passes
+through unchanged, for the caller's release to handle.
+
+=back
+
+B<Examples:>
+
+  $self->_refuse_legacy_network_lock(1800);
+  # Dies: Cannot take the network claims lock on the lab BOSH director: an older Genesis appears to be deploying against it. ...
+
+=head2 _network_lock_token
+
+  my $token = $self->_network_lock_token();
+
+Returns the token that marks a network claims lock as this process's own.
+It joins the hostname, PID, start time, and a random number, and is made
+once per process and kept in C<%Service::BOSH::Director::NETWORK_LOCK_TOKENS>,
+keyed by PID so that a forked child never passes for its parent.
+
+B<Returns:> The token, as a string.
+
+=head2 _refuse_network_lock
+
+  $self->_refuse_network_lock($current, $lost_race);
+
+Stops with a message saying that the network claims lock is held, and by
+whom.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$current>
+
+The status hashref from L</check_network_lock> for the held lock.
+
+=item C<$lost_race>
+
+False when the lock was simply found held.  C<'cas'> when a kv v2
+check-and-set write was refused, and C<'readback'> when a kv v1 read-back
+found another process's lock, each of which adds a sentence saying that
+this process lost a race for the lock.
+
+=back
+
+B<Returns:> Never returns.
+
+B<Errors:>
+
+Always dies.  The message names the director, the holder's user, host,
+environment, and PID, when the lock was taken, the vault path and URL,
+the likely cause, how long until the lock goes stale, and the
+C<safe get> command that shows it.
+
+B<Examples:>
+
+  $self->_refuse_network_lock($current, 'cas') if $current->{status} eq 'locked';
+  # Dies: Cannot take the network claims lock on the lab BOSH director: it is held by ...
+
+=head2 _warn_network_lock_not_atomic
+
+  $self->_warn_network_lock_not_atomic($current);
+
+Warns that the network claims lock is on a kv v1 mount, so taking it is a
+write, a wait, and a read-back rather than an atomic check-and-set.  The
+warning is given once per lock path per process.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$current>
+
+The status hashref from L</check_network_lock>; its C<path> names the lock.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+  $self->_warn_network_lock_not_atomic($current);
+  # Warns once: The network claims lock for the lab BOSH director is stored at ...
+
 =head1 KNOWN ISSUES
 
 Defects that are still present. They are recorded so callers do not build
@@ -2120,14 +2644,6 @@ on the current, incorrect behaviour.
 
 C<run_errand()>: the error message says C<"Missing errand name in call to
 deploy()"> but should say C<run_errand()>.
-
-=item errand-discards-return-value (low)
-
-C<run_errand()> discards the result of C<< $self->execute(...) >> and
-always returns C<1>. In practice a failing errand does not slip past --
-the call sets C<onfailure>, so a non-zero exit bails rather than
-returning. The defect is that the return value carries no information, so
-it cannot be used to distinguish outcomes that do not bail.
 
 =item upload-config-asymmetric-bail (medium)
 
