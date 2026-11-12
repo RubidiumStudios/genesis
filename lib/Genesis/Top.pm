@@ -939,16 +939,20 @@ sub set_vault {
 		my $vault = $opts{vault};
 		my $in_family = blessed($vault) && $vault->isa('Service::Vault');
 		# A local vault serves a read as a remote one does, so any vault of
-		# the family may be lent for the session, but only a remote safe
-		# target can be recorded.  Service::Vault::None is not of the family.
+		# the family may be lent for the session.  Only Genesis lends one, so
+		# a lend of anything else, Service::Vault::None included, is a bug.
+		bug "Invalid call to Genesis::Top->set_vault"
+			if $opts{session_only} && !$in_family;
+		# Only a remote safe target can be recorded, and what is recorded
+		# comes from a lookup the operator controls, so it is worded for them.
 		bail(
 			"Cannot use %s as the secrets provider for this repository, because ".
 			"only a remote safe target can be one.",
 			$in_family
 				? sprintf("vault #C{%s} at #M{%s}", $vault->name, $vault->url)
 				: "an unresolved vault"
-		) unless $in_family
-		      && ($opts{session_only} || $vault->isa('Service::Vault::Remote'));
+		) unless $opts{session_only}
+		      || ($in_family && $vault->isa('Service::Vault::Remote'));
 		$new_vault = $vault;
 	} else {
 		bug "Invalid call to Genesis::Top->set_vault"

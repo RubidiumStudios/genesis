@@ -631,11 +631,14 @@ B<(optional)> A vault object to set directly.  To be recorded it must be a
 C<Service::Vault::Remote>, since only a remote safe target can be the
 repository's secrets provider.  With C<session_only>, any C<Service::Vault>
 is taken, which is a C<Service::Vault::Remote> or a C<Service::Vault::Local>,
-since a local vault serves a read as a remote one does.  Anything else passed
-here, including C<undef> and a C<Service::Vault::None>, which is the absence
-of a vault rather than a vault, bails with a message naming what was given,
-because it reaches this option from a lookup the operator controls
-(C<genesis new --vault>) rather than from a Genesis bug.
+since a local vault serves a read as a remote one does.
+
+Anything else passed to be recorded, including C<undef>, bails with a message
+naming what was given, because it reaches this option from a lookup the
+operator controls (C<genesis new --vault>) rather than from a Genesis bug.
+Anything else lent with C<session_only>, including a C<Service::Vault::None>,
+which is the absence of a vault rather than a vault, is raised via C<bug()>,
+because only Genesis lends a vault.
 
 =item C<session_only>
 
@@ -655,13 +658,13 @@ B<Errors:>
 
 C<"Cannot use ... as the secrets provider for this repository"> - bails
 when the C<vault> option is given but is not a C<Service::Vault::Remote>,
-such as a local vault or C<undef>.  With C<session_only> a local vault is
-taken, and only what is not a C<Service::Vault> bails.
+such as a local vault or C<undef>, and C<session_only> is not set.
 
 =item *
 
 C<"Invalid call to Genesis::Top->set_vault"> - raised via C<bug()> when none
-of C<interactive>, C<target>, C<clear>, or C<vault> is provided.
+of C<interactive>, C<target>, C<clear>, or C<vault> is provided, and when
+C<session_only> lends a C<vault> that is not a C<Service::Vault>.
 
 =item *
 

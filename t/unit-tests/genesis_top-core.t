@@ -1046,6 +1046,9 @@ subtest 'set_vault takes any vault of the family' => sub {
 	ok(!defined(eval {
 			$top->set_vault(vault => Service::Vault::None->new, session_only => 1)
 		}), "and the absence of a vault is refused");
+	# Only Genesis lends a vault, so a lend of something else is a bug of
+	# its own and not an operator's mistake to be worded for them.
+	is(scalar(@raised), 1, "as a Genesis bug, since only Genesis lends one");
 	is($top->vault, $local, "which leaves the one it had standing");
 };
 
