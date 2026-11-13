@@ -348,6 +348,60 @@ sub control_problems {
 }
 
 # }}}
+# control_absent_text - the refusal for a control that exists nowhere, and how to make one {{{
+#
+# No command creates control (D65), so the refusal says how.  The branch the
+# operator stands on carries the repository, since a command got far enough
+# to ask, so control is made from it.  Every caller words the state through
+# here, so the one state has one refusal.
+sub control_absent_text {
+	my ($top, $git, %opts) = @_;
+	my $control = $top->control_branch;
+	my $remote  = $top->source_control_remote;
+
+	# Where the operator ran the command from.  A deploy's session has left
+	# that branch by the time it asks, so it says where it began.
+	my $here = exists $opts{stood_on} ? $opts{stood_on} : $git->checked_out_branch;
+	undef $here if defined($here) && $here eq 'HEAD';
+
+	# An environment's own branch carries that environment's files alone.
+	my $type = eval {$top->type};
+	my $deployment = defined($here) && defined($type) && $here =~ m{/\Q$type\E$};
+
+	my $name_it = sprintf(
+		"  #G{git branch %s <branch>}\n".
+		"  #G{git push -u %s %s}",
+		$control, $remote, $control);
+	my $make = $deployment
+		? sprintf(
+			"#C{%s} is a deployment branch, which carries one environment's ".
+			"files.  Make control from the branch that carries every ".
+			"environment's, and publish it:\n\n%s",
+			$here, $name_it)
+		: defined($here)
+		? sprintf(
+			"This branch, #C{%s}, carries the repository, so make control ".
+			"from it and publish it:\n\n".
+			"  #G{git checkout -b %s}\n".
+			"  #G{git push -u %s %s}",
+			$here, $control, $remote, $control)
+		: sprintf(
+			"Make it from the branch that carries every environment's ".
+			"files, and publish it:\n\n%s",
+			$name_it);
+
+	return sprintf(
+		"The control branch #C{%s} exists neither on #C{%s} nor locally, and ".
+		"the environment files live on it, so nothing can read the topology.  ".
+		"No command creates it, because it holds the repository itself.\n\n".
+		"%s\n\n".
+		"The pipeline is read from control, so commit any change to ".
+		"#C{.genesis/config} or to an environment file before the push, ".
+		"then run the command again.",
+		$control, $remote, $make);
+}
+
+# }}}
 # _control_standing - control's divergence, and the problems it makes {{{
 sub _control_standing {
 	my ($top, $git, %opts) = @_;
@@ -358,13 +412,9 @@ sub _control_standing {
 		unverifiable => ($opts{unverifiable} ? 1 : 0),
 		(defined $opts{tracking} ? (tracking => $opts{tracking}) : ()));
 
-	return (undef, problem(CONFIG, sprintf(
-		"The control branch #C{%s} exists neither on #C{%s} ".
-		"nor locally, and the environment files live on it, so nothing can ".
-		"read the topology.  Create it by hand, with the repository scaffold ".
-		"for a new repository or as the migration describes for a move to v3, ".
-		"push it, then run the command again.",
-		$control, $remote))) unless defined $div;
+	return (undef, problem(CONFIG, control_absent_text($top, $git,
+		(exists $opts{stood_on} ? (stood_on => $opts{stood_on}) : ()))))
+		unless defined $div;
 
 	return ($div) if $div->{state} eq 'in-sync';
 

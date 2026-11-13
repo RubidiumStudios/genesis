@@ -33,7 +33,7 @@ subtest 'control existing nowhere refuses the deploy' => sub {
 	# Green on arrival.  It catches a deploy that stops calling
 	# require_control, or one that asks the same question in words of its
 	# own, which would leave one state with two refusals.
-	plan tests => 6;
+	plan tests => 8;
 
 	my $h = seeded_harness(applied => 0);
 	# Control has to be gone from R, from the local ref, and from the
@@ -57,6 +57,12 @@ subtest 'control existing nowhere refuses the deploy' => sub {
 	# that never named the branch at all.
 	like($said, qr/control branch \Q@{[$h->control]}\E exists/,
 		'it names the configured branch');
+	# No command creates control (D65), so the refusal says how: from the
+	# branch the operator stands on, which unset_control parked this copy on.
+	like($said, qr/This branch, parked-a, carries the repository/,
+		'it names the branch the operator stands on');
+	like($said, qr/git checkout -b \Q@{[$h->control]}\E.*git push -u origin \Q@{[$h->control]}\E/s,
+		'and gives the commands that make control from it and publish it');
 	like($said, qr/Nothing was deployed\./, 'it says nothing was deployed');
 };
 

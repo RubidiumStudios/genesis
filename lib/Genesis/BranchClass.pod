@@ -300,10 +300,12 @@ B<Errors:>
 =item Refuses a repository that has no control branch anywhere.
 
 I<The control branch control exists neither on origin nor locally, and the
-environment files live on it, so nothing can read the topology.> The exit is
-C<Genesis::Exit::CONFIG>, which is where the pre-flight refuses the same
-state, and the twin of this sentence is in
-C<Genesis::CI::Preflight::require_control>.
+environment files live on it, so nothing can read the topology.> It goes on
+to say that no command creates control, and how the operator does, from the
+branch they stand on. The exit is C<Genesis::Exit::CONFIG>, which is where
+the pre-flight refuses the same state. Both word it through
+C<Genesis::CI::Preflight::control_absent_text>, so the one state has one
+refusal.
 
 =back
 

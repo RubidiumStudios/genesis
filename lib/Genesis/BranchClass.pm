@@ -183,14 +183,11 @@ sub permitted_feature_branch {
 			? $git->remote_branch_exists($top->control_branch)
 			: 1;
 
-		bail({exitcode => CONFIG},
-			"The control branch #C{%s} exists neither on #C{%s} nor ".
-			"locally, and the environment files live on it, so nothing can ".
-			"read the topology.\n\n".
-			"Create it by hand, with the repository scaffold for a new ".
-			"repository or as the migration describes for a move to v3, ".
-			"push it, then run the command again.",
-			$top->control_branch, $remote
+		# Through a '%s', since bail reads its argument as a format and a
+		# branch name can carry a percent sign.
+		require Genesis::CI::Preflight;
+		bail({exitcode => CONFIG}, '%s',
+			Genesis::CI::Preflight::control_absent_text($top, $git)
 		) unless $elsewhere;
 
 		# Control is here or on the remote, so the remedy is a fetch.

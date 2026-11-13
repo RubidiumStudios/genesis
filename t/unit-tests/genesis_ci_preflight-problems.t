@@ -144,6 +144,7 @@ my $SNAP = 'refs/genesis/preflight/origin';
 	package Stub::Top;
 	sub new { my ($c, %o) = @_; bless {control => 'control', %o}, $c }
 	sub control_branch { $_[0]{control} }
+	sub type { $_[0]{type} }
 	sub source_control_remote { 'origin' }
 	sub branch_for { "$_[1]/bosh" }
 }
@@ -231,7 +232,7 @@ subtest 'a commit R has and T has not seen is no hand commit' => sub {
 };
 
 subtest "control's standing is read against the snapshot" => sub {
-	plan tests => 10;
+	plan tests => 16;
 	my $w   = moved_world();
 	my $top = Stub::Top->new;
 	my $problems = sub {[Genesis::CI::Preflight::control_problems($top, $w->{git},
@@ -267,6 +268,26 @@ subtest "control's standing is read against the snapshot" => sub {
 	my $nowhere = [Genesis::CI::Preflight::control_problems(
 		Stub::Top->new(control => 'nothing'), $w->{git}, tracking => $SNAP)];
 	is($nowhere->[0]{code}, CONFIG, 'a control nowhere at all is CONFIG');
+
+	# No command creates control (D65), so the refusal has to say how.  The
+	# branch the operator stands on carries the repository, since a command
+	# got far enough to ask, and the tree here stands on control, unborn.
+	my $said = $nowhere->[0]{text};
+	like($said, qr/No command creates it/, 'which says no command creates it');
+	like($said, qr/This branch, #C\{control\}, carries the repository/,
+		'names the branch the operator stands on');
+	like($said, qr/#G\{git checkout -b nothing\}/, 'gives the command that makes control from it');
+	like($said, qr/#G\{git push -u origin nothing\}/, 'and the one that publishes it');
+
+	# A deploy has switched to its environment's branch by the time it asks,
+	# and that branch carries one environment's files, so it is never the
+	# branch control is made from.
+	$said = Genesis::CI::Preflight::control_absent_text(
+		Stub::Top->new(control => 'nothing', type => 'bosh'), $w->{git},
+		stood_on => 'qa/bosh');
+	unlike($said, qr/This branch/, 'a deployment branch is not offered as the source');
+	like($said, qr/#C\{qa\/bosh\} is a deployment branch.*#G\{git branch nothing <branch>\}/s,
+		'and the operator is told to name the branch that carries every environment');
 };
 
 subtest 'a preview reads control on T where the clone has none' => sub {

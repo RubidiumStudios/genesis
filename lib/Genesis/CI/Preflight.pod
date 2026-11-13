@@ -564,6 +564,13 @@ The refusal's closing sentence, which says what did not happen.  It is
 Passed through to C<resolve_branch> for a caller that read without refreshing,
 so the divergence it gets back says so.
 
+=item C<stood_on>
+
+The branch the operator ran the command from, for a caller whose session has
+since switched away from it.  It is what the refusal for a control that
+exists nowhere names as the branch to make control from.  Left out, the
+checked-out branch is used.
+
 =item C<on_divergence>
 
 C<refuse> by default, and C<report> for the two commands that read without
@@ -591,8 +598,11 @@ where the refresh created the local ref, which reads "created control from
 origin/control", and is empty otherwise.
 
 B<Errors:> Bails at C<CONFIG> when the control branch exists neither on the
-remote nor locally, naming the branch and both places and telling the operator
-to create and push it.  Bails at C<DATAERR> for every one of the five states
+remote nor locally, in the words of L</control_absent_text($top, $git, %opts)>,
+which name the branch and both places and give the commands that create and
+publish it.  A caller whose session has left the branch the operator ran the
+command from passes that branch as C<stood_on>, so the refusal names it and
+not the branch the session switched to.  Bails at C<DATAERR> for every one of the five states
 the design calls illegal, which are ahead, behind, diverged, local only, and
 remote only, naming what is true of the branch and the one command that fixes
 it.  The remote-only refusal is the one that says the refresh should have
@@ -625,6 +635,85 @@ B<Examples:>
       permit_ahead => 1);
   # returns where control is ahead, for the preview to warn about, and
   # refuses behind and diverged as it does for a run that writes
+
+=head2 control_absent_text($top, $git, %opts)
+
+  my $text = Genesis::CI::Preflight::control_absent_text($top, $git,
+      stood_on => 'main');
+
+The refusal for a control branch that exists nowhere, with how to make one.
+No command creates control (D65), because it holds the repository itself,
+so the refusal has to say how the operator does. Every caller words the
+state through here, so it has one refusal.
+
+It says which branch to make control from by where the operator stands:
+
+=over 4
+
+=item *
+
+On an ordinary branch, that branch carries the repository, since a command
+got far enough to ask. The text names it and gives C<git checkout -b> and
+C<git push -u> for control.
+
+=item *
+
+On a deployment branch, one ending in C</E<lt>typeE<gt>>, the text says that
+branch carries one environment's files, and tells the operator to name the
+branch that carries every environment's.
+
+=item *
+
+On a detached commit, it tells the operator to name that branch too.
+
+=back
+
+It closes by saying the pipeline is read from control, so a change to
+F<.genesis/config> or to an environment file has to be committed before the
+push.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The deployment repository, for the control branch's name, the remote, and
+the deployment type.
+
+=item C<$git>
+
+The git handle, asked for the checked-out branch where C<stood_on> is not
+given.
+
+=item C<stood_on>
+
+B<(optional)> The branch the operator ran the command from. A deploy's
+session has switched to the environment's own branch by the time it asks
+about control, so it passes the branch its session began on. C<undef>, or
+C<HEAD>, means a detached commit.
+
+=back
+
+B<Returns:> The refusal's text, with its colour markup, as paragraphs
+separated by a blank line.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  # Standing on main, in a repository of type bosh
+  control_absent_text($top, $git);
+  # "... This branch, #C{main}, carries the repository, so make control
+  #  from it and publish it: git checkout -b control / git push -u origin control ..."
+
+  # Asked by a deploy whose session moved to qa/bosh from main
+  control_absent_text($top, $git, stood_on => 'main');
+  # names main, not qa/bosh
+
+  # Standing on a deployment branch
+  control_absent_text($top, $git, stood_on => 'qa/bosh');
+  # "... #C{qa/bosh} is a deployment branch ... git branch control <branch> ..."
 
 =head2 control_problems($top, $git, %opts)
 

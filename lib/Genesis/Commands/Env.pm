@@ -1204,12 +1204,16 @@ sub _deploy_preflight {
 		action  => 'deploy',
 		outcome => 'Nothing was deployed.');
 
-	# 2.  Control, refused only where it leaves nothing to read.
+	# 2.  Control, refused only where it leaves nothing to read.  The gate's
+	# session has already left the branch the operator ran this from, which
+	# is the one a refusal for a missing control has to name.
+	my $began = Genesis::Commands::branch_session();
 	my $control_state = Genesis::CI::Preflight::require_control($top, $git,
 		refreshed     => $refreshed,
 		action        => 'deploy',
 		outcome       => 'Nothing was deployed.',
-		on_divergence => 'report');
+		on_divergence => 'report',
+		($began ? (stood_on => $began->origin->{branch}) : ()));
 	info("  #Gi{%s}", $_) for @{$control_state->{events}};
 	_warn_control_position($top, $control_state->{divergence}, $branch);
 
