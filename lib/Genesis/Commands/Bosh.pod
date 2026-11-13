@@ -1640,7 +1640,13 @@ B<Examples:>
   _bosh_configs_write_claims($env, $config, $stored, uploaded => 1);
 
 Records a cloud config's network map in the exodus network record, after
-saying what the write changes.  It prints the summary from
+saying what the write changes.  It first checks, with
+C<Service::BOSH::Director::ensure_network_lock_held>, that this process
+still holds the network claims lock on the config's director: the write
+clears the whole record before filling it, so a process that had lost the
+lock would wipe the claims of the one that holds it.  Both ways here are
+covered by that check, the write that follows an upload and the repair of
+a stale record with no upload.  It then prints the summary from
 C<Genesis::Env::NetworkClaims::claims_summary>, then replaces the record at the path
 C<_bosh_configs_claims_target> names with the map, flattened, using
 C<set_path> with C<clear>.
@@ -1684,6 +1690,14 @@ probably sealed, unreachable, or refusing the token, and that the operator
 should check the vault, restore the record from a saved copy if it is empty,
 and run the C<bosh-configs upload> command again, which finds the config up
 to date and writes the claims.
+
+=item C<"Cannot write the network claims on the %s BOSH director: this process no longer holds the network claims lock, ...">
+
+Raised through C<Service::BOSH::Director::ensure_network_lock_held> when
+this process no longer holds the lock.  Nothing is written.  A config
+uploaded just before stays on the director, and running the
+C<bosh-configs upload> command again, once the lock's holder has finished,
+finds it up to date and writes the claims.
 
 =back
 

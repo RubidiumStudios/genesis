@@ -1135,6 +1135,10 @@ sub _bosh_configs_write_claims {
 	my $bosh = $config->{bosh};
 	my ($network_vault, $network_path) = _bosh_configs_claims_target($env, $config);
 
+	# The write clears the director's whole network record, so a process
+	# that lost the lock would wipe the claims of the one that holds it.
+	$bosh->ensure_network_lock_held('write the network claims');
+
 	Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $config->{network_map}, say_unchanged => 1);
 
 	info({pending => 1},

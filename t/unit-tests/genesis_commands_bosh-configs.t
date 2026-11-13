@@ -1087,6 +1087,52 @@ subtest '_bosh_configs_upload_cloud - an upload that lost its lock while it wait
 	ok(!defined(call_index('set_path')), 'and no claims are written');
 };
 
+# The claims write clears the director's whole network record and refills
+# it, so it has its own check that this process still holds the lock, on
+# both of the ways to it: after an upload, which is a round trip to the
+# director since the upload's own check, and when a record is repaired with
+# no upload at all.
+subtest '_bosh_configs_upload_cloud - a lock lost during the upload stops the claims write' => sub {
+	my @answers = (1, 0);   # held when the upload is checked, lost by the claims write
+	my $director = make_director('parent', {},
+		network_locked_by_me => sub { @answers ? shift(@answers) : 0 },
+		check_network_lock   => sub { return {status => 'locked', description => 'about 2 minutes ago by ops@jumpbox (env: other, pid: 99)'} },
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1});
+	@director_calls = ();
+	$stored_claims = {};
+	throws_ok {
+		output_from {
+			Genesis::Commands::Bosh::_bosh_configs_upload_cloud($env, {
+				bosh => $director, type => 'cloud', name => 'test-env.cf', content => "azs: []\n", network_map => {subnets => {}},
+			})
+		}
+	} qr/Cannot write the network claims.*parent.*no longer holds.*ops\@jumpbox/s,
+		'the claims write is refused, naming who holds the lock now';
+	ok(defined(call_index('upload_config')), 'the cloud config had been uploaded');
+	ok(!defined(call_index('set_path')), 'and no claims are written over the other process\'s');
+};
+
+subtest '_bosh_configs_sync_claims - a stale record is not repaired without the lock' => sub {
+	my $director = make_director('parent', {},
+		network_locked_by_me => sub { 0 },
+		check_network_lock   => sub { return {status => 'locked', description => 'about 2 minutes ago by ops@jumpbox (env: other, pid: 99)'} },
+	);
+	my $env = make_env(hooks => {'cloud-config' => 1});
+	@director_calls = ();
+	$stored_claims = {subnets => {'ocfp-2' => {claims => {'10.0.0.5' => 'someone-else'}}}};
+	throws_ok {
+		output_from {
+			Genesis::Commands::Bosh::_bosh_configs_sync_claims($env, {
+				bosh => $director, type => 'cloud', name => 'test-env.cf', network_map => {subnets => {}},
+			})
+		}
+	} qr/Cannot write the network claims.*parent.*no longer holds.*ops\@jumpbox/s,
+		'the repair is refused, naming who holds the lock now';
+	ok(!defined(call_index('set_path')), 'and no claims are written');
+	$stored_claims = {};
+};
+
 subtest 'director config - compare shows the diff without a lock or an exodus write' => sub {
 	plan tests => 4;
 	no warnings 'redefine';
