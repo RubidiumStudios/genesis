@@ -132,6 +132,28 @@ subtest 'the gate tells a version 2 repository how to reach version 3' => sub {
 		'and a version 3 repository is not told to migrate again');
 };
 
+subtest 'the gate names the command as the operator called it' => sub {
+	plan tests => 4;
+
+	# An operator who ran a build under another name is told to run that
+	# name, since `genesis` on their PATH may be a different build or none.
+	local $ENV{GENESIS_CALL_BIN} = 'gdev';
+
+	my $tmp = make_repo(name => 'gate-v2-call-bin', version => 2,
+		ci_yml => $legacy_pipeline_yml);
+	my $err = run_gate_in($tmp) // '';
+	like($err, qr/gdev\s+config\s+--set\s+version\s+3/,
+		'a version 2 repository is shown the migration under the name called');
+	unlike($err, qr/genesis\s+config/, 'and not under genesis');
+
+	$tmp = make_repo(name => 'gate-v3-call-bin', version => 3,
+		ci_yml => $legacy_pipeline_yml);
+	$err = run_gate_in($tmp) // '';
+	like($err, qr/gdev\s+config\s+--set\s+pipeline\./,
+		'a version 3 repository is shown the write under the name called');
+	unlike($err, qr/genesis\s+config/, 'and not under genesis');
+};
+
 subtest 'PIPELINE command in a v3 repo with no ci.yml -> passes cleanly' => sub {
 	my $tmp = make_repo(name => 'gate-v3-clean', version => 3);
 	my $err = run_gate_in($tmp);

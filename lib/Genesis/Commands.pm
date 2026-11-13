@@ -543,10 +543,13 @@ sub _gate_pipeline_on_legacy_ci_yml {
 	return unless $top;                 # if Top load itself failed
 	return unless $top->has_legacy_ci_yml;
 
+	# The name the operator ran, since genesis on their PATH may be another
+	# build, or none.
+	my $bin = $ENV{GENESIS_CALL_BIN} || Genesis::humanize_bin() || 'genesis';
 	my $migrate = ($top->config->get('version') // '') eq '2'
 		? "     Set #g{version 3} in the same run if the file is still version 2:\n".
-		  "     #g{genesis config --set version 3 --set pipeline.<key> <value> ...}\n"
-		: "     #g{genesis config --set pipeline.<key> <value> ...} writes them.\n";
+		  "     #g{$bin config --set version 3 --set pipeline.<key> <value> ...}\n"
+		: "     #g{$bin config --set pipeline.<key> <value> ...} writes them.\n";
 	Genesis::bail({exitcode => CONFIG},
 		"This repository still has a legacy CI configuration at #C{ci.yml}.\n".
 		"Pipeline commands are unavailable until it is migrated to the v3\n".
