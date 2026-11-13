@@ -234,6 +234,55 @@ subtest 'kv v2: a lock released by writing an empty record holds nothing' => sub
 	is($vault->read_flattened_secret("kv2/$rest"), undef, 'leaving nothing to read');
 };
 
+subtest 'a release the vault refuses is a failed release, and the lock stays' => sub {
+	# safe reads its token from the test's own home on every call, so the
+	# token there is swapped for one that may read and write but not delete,
+	# and put back afterwards.
+	my $saferc = "$ENV{HOME}/.saferc";
+	plan skip_all => 'the test home has no safe config to swap a token in'
+		unless $ENV{HOME} =~ m{/t/tmp/} && -f $saferc;
+
+	my @held = map { director("kv$_/exodus/refused/bosh") } (1, 2);
+	is(try_acquire($_), 'won', 'a lock is taken on '.$_->network_lock_path) for @held;
+
+	my $policy = JSON::PP::encode_json({policy => join(' ', map {
+		qq{path "$_/*" { capabilities = ["create", "read", "update", "list"] }}
+	} qw(kv1 kv2)).' path "sys/*" { capabilities = ["read"] }'});
+	system('sh', '-c', 'SAFE_TARGET="$1" safe curl PUT /sys/policies/acl/no-delete "$2" >/dev/null 2>&1', 'sh', $target, $policy);
+	is($? >> 8, 0, 'a policy with no delete is written');
+	my $made = `SAFE_TARGET=$target safe curl --data-only POST /auth/token/create '{"policies":["no-delete"]}' 2>/dev/null`;
+	my $token = eval { JSON::PP::decode_json($made)->{auth}{client_token} };
+	ok($token, 'and a token is made with it') or return;
+
+	my $original = do { open my $fh, '<', $saferc or die "$saferc: $!\n"; local $/; <$fh> };
+	my $swapped = $original =~ s/^(\s*token:\s*).*$/$1$token/mgr;
+	isnt($swapped, $original, 'the token is swapped into the safe config') or return;
+	my $write = sub { open my $fh, '>', $saferc or die "$saferc: $!\n"; print $fh $_[0]; close $fh };
+
+	$write->($swapped);
+	my $ran = eval {
+		for my $bosh (@held) {
+			my $path = $bosh->network_lock_path;
+			throws_ok { $bosh->clear_network_lock } qr/Could not clear .*\Q$path\E.*(?:403|permission denied)/s,
+				"$path: a clear the vault refuses raises, with the vault's reason";
+			ok($bosh->network_locked_by_me, "$path: and the lock is still this process's");
+
+			my ($released, $out);
+			lives_ok { $out = join('', output_from(sub { $released = $bosh->release_network_lock })) }
+				"$path: a release does not die";
+			ok(!defined($released), "$path: and reports that it could not release");
+			like($out =~ s/\s+/ /gr, qr/could not be released.*(?:403|permission denied)/,
+				"$path: saying that the lock could not be released, and why");
+		}
+		1;
+	};
+	my $failure = $@;
+	$write->($original);
+	die $failure unless $ran;
+
+	ok($_->clear_network_lock, 'with the first token back, '.$_->network_lock_path.' is released') for @held;
+};
+
 # Last, because nothing can be read once the vault is sealed.
 subtest 'a sealed vault: the lock is never read as free' => sub {
 	my $exodus = 'kv2/exodus/sealed/bosh';
