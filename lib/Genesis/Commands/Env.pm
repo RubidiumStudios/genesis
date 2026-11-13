@@ -1840,23 +1840,7 @@ sub deploy {
 									"Upload the new cloud config to the BOSH director ('no' will cancel deploy)? [y|n]",
 									yes => $options{yes}, default => 1
 								) or bail "Aborted by user!";
-								# The prompt above can wait past the lock's stale timeout,
-								# and another deploy may have cleared and taken it since.
-								$env->bosh->ensure_network_lock_held('upload the cloud config');
-								info(
-									"Uploading new cloud config to #M{%s} BOSH director...",
-									$env->bosh->{alias}
-								);
-								eval {
-									# Upload the new cloud config
-									$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
-								} or bail(
-									"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
-									$cloud_config_name,
-									fix_wrap($@),
-									slurp($new_path)
-								);
-								$uploaded = 1;
+								$uploaded = _deploy_upload_cloud_config($env, $new_path, $cloud_config_name);
 								info "[[  - >>cloud config for #C{%s} deployment has been updated.\n", $env->name;
 							}
 						} else {
@@ -1869,19 +1853,7 @@ sub deploy {
 							$cloud_config_name, slurp($new_path_diff)
 						);
 					} else {
-						info(
-							"[[  - >>uploading new cloud config to #M{%s} BOSH director...",
-							$env->bosh->{alias}
-						);
-						eval {
-							$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
-						} or bail(
-							"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
-							$cloud_config_name,
-							fix_wrap($@),
-							slurp($new_path)
-						);
-						$uploaded = 1;
+						$uploaded = _deploy_upload_cloud_config($env, $new_path, $cloud_config_name);
 						info "[[  - >>cloud config for #C{%s} deployment has been created.\n", $env->name;
 					}
 
@@ -2876,6 +2848,26 @@ sub _deploy_under_network_claims_lock {
 		ucfirst($opts{completed} // q{the work under the lock had finished}),
 		$failed[0]
 	) if @failed;
+	return 1;
+}
+
+# }}}
+# _deploy_upload_cloud_config - upload the deployment's cloud config, once this deploy is seen to still hold the lock {{{
+sub _deploy_upload_cloud_config {
+	my ($env, $path, $name) = @_;
+	my $bosh = $env->bosh;
+
+	# The synthesis and any prompt since the lock was taken can outlast its
+	# stale timeout, and another deploy can have taken it in the same moment.
+	$bosh->ensure_network_lock_held('upload the cloud config');
+
+	info("[[  - >>uploading new cloud config to #M{%s} BOSH director...", $bosh->alias);
+	eval {
+		$bosh->upload_config_from_file($path, 'cloud', $name);
+	} or bail(
+		"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
+		$name, fix_wrap($@), slurp($path)
+	);
 	return 1;
 }
 

@@ -477,6 +477,67 @@ subtest 'the claims write says what changed, and says nothing when nothing did' 
 # only as good as the next lock site that gets written, so this reads the
 # tree rather than one function: a file that takes the lock and does not
 # localize all four signals is the defect this catches.
+
+# The deploy uploads the cloud config in two places: over one that is on the
+# director and differs, and when the director has none.  Either follows the
+# whole synthesis, and the first follows a prompt too, so each has to see
+# that this deploy still holds the lock.
+sub upload_env {
+	my ($uploads, %overrides) = @_;
+	return make_env(
+		upload_config_from_file => sub { my ($self, @args) = @_; push @calls, 'upload'; push @$uploads, [@args]; 1 },
+		%overrides,
+	);
+}
+
+subtest 'the cloud config is uploaded only after this deploy is seen to still hold the lock' => sub {
+	$status = 'locked';
+	my @uploads;
+	my $env = upload_env(\@uploads);
+	$held = 1;
+	my $result;
+	output_from { $result = Genesis::Commands::Env::_deploy_upload_cloud_config($env, '/work/test-env.bosh.yml', 'test-env.bosh') };
+	is($result, 1, 'the upload reports that it was made');
+	is_deeply(\@uploads, [['/work/test-env.bosh.yml', 'cloud', 'test-env.bosh']], 'with the file, as a cloud config of that name');
+	my ($mine) = grep { $calls[$_] eq 'mine' } 0 .. $#calls;
+	my ($upload) = grep { $calls[$_] eq 'upload' } 0 .. $#calls;
+	ok(defined($mine) && $mine < $upload, 'after the lock was checked') or diag explain \@calls;
+};
+
+subtest 'a deploy that lost its lock uploads no cloud config' => sub {
+	$status = 'locked';
+	my @uploads;
+	my $env = upload_env(\@uploads);   # holds no lock: another process has it
+	throws_ok {
+		output_from { Genesis::Commands::Env::_deploy_upload_cloud_config($env, '/work/test-env.bosh.yml', 'test-env.bosh') }
+	} qr/Cannot upload the cloud config.*parent.*no longer holds.*ubuntu\@bastion/s,
+		'the upload is refused, naming who holds the lock now';
+	is(scalar(@uploads), 0, 'and nothing is uploaded');
+};
+
+subtest 'an upload the director refuses names the config and shows what was sent' => sub {
+	$status = 'locked';
+	my $file = workdir().'/test-env.bosh.yml';
+	put_file($file, "networks: []\n");
+	my $env = upload_env([], upload_config_from_file => sub { die "director said no\n" });
+	$held = 1;
+	throws_ok {
+		output_from { Genesis::Commands::Env::_deploy_upload_cloud_config($env, $file, 'test-env.bosh') }
+	} qr/Failed to upload cloud config test-env\.bosh to BOSH director: director said no.*Content:\s+networks: \[\]/s,
+		'the failure carries the director\'s reason and the config';
+};
+
+subtest 'every cloud config upload in the deploy goes through that check' => sub {
+	open my $fh, '<', 'lib/Genesis/Commands/Env.pm' or die "cannot read lib/Genesis/Commands/Env.pm: $!";
+	my $src = do {local $/; <$fh>};
+	close $fh;
+	my ($helper) = $src =~ /^(sub _deploy_upload_cloud_config \{.*?^\})/ms;
+	ok($helper, 'the deploy has one sub that uploads its cloud config') or return;
+	like($helper, qr/ensure_network_lock_held\(.*?\).*upload_config_from_file\(/s, 'which checks the lock before it uploads');
+	my $rest = $src =~ s/\Q$helper\E//r;
+	unlike($rest, qr/->upload_config(?:_from_file)?\(/, 'and nothing else in the deploy uploads a config to the director');
+};
+
 #
 # HUP and QUIT are in the list for the bastion.  Genesis deploys are run over
 # ssh, a dropped session hangs up every process in it, and a lock left on the
