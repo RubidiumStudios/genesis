@@ -26,8 +26,6 @@ use Errno ();
 
 # One network claims lock owner token per process, keyed by pid
 our %NETWORK_LOCK_TOKENS;
-# How long a network claims lock write on a kv v1 mount waits before reading itself back
-our $NETWORK_LOCK_SETTLE_SECONDS = 2;
 
 # }}}
 
@@ -937,9 +935,8 @@ sub cleanup {
 # network_lock_path - where the network claims lock for this director is stored {{{
 sub network_lock_path {
 	my ($self) = @_;
-	# A secret of its own, so that a check-and-set write covers the lock and
-	# nothing else, and so that rewriting the director's exodus data leaves
-	# it alone.
+	# A secret of its own, so that rewriting the director's exodus data
+	# leaves it alone.
 	return $self->exodus_path.'/network-claim-lock';
 }
 
@@ -949,27 +946,32 @@ sub check_network_lock {
 	my ($self, %opts) = @_;
 	my $max_age = $opts{max_lock_age} // 1800; # 30 minutes default
 
+	# A read that did not finish raises here, and never passes for unlocked.
 	my $path = $self->network_lock_path;
-	my $record = $self->vault->kv_read($path);
-	my %found = (
-		path       => $path,
-		version    => $record->{version},
-		kv_version => $record->{kv_version},
-	);
+	my $lock = $self->vault->read_flattened_secret($path);
 
-	# A released lock leaves a record with no holder in it.
-	my $lock = $record->{data};
-	return { status => 'unlocked', %found }
+	# A secret with no time in it holds nothing, which is what a build that
+	# released the lock by writing an empty record left behind.
+	return { status => 'unlocked', path => $path }
 		unless ref($lock) eq 'HASH' && defined($lock->{at});
 
 	my ($status, $lock_age) = $self->_network_lock_freshness($lock, $max_age);
+	bail(
+		"Cannot tell whether the network claims lock on the #M{%s} BOSH director is ".
+		"held: the record at #C{%s} in the vault at #M{%s} gives the time it was ".
+		"taken as '%s', which is not a time Genesis writes.\n\n".
+		"Nothing was changed.  #C{safe get %s} shows the record.  Once you have ".
+		"checked that no deploy or #C{bosh-configs upload} is running against this ".
+		"director, #C{safe rm %s} removes it.",
+		$self->alias, $path, $self->vault->url, $lock->{at}, $path, $path
+	) unless defined($status);
 
 	return {
 		status => $status,
 		lock => $lock,
 		age => $lock_age,
 		max_age => $max_age,
-		%found,
+		path => $path,
 		description => sprintf(
 			"%s by %s@%s (env: %s, pid: %d)",
 			strfuzzytime($lock->{at}),
@@ -987,76 +989,29 @@ sub acquire_network_lock {
 
 	$self->_refuse_legacy_network_lock($opts{max_lock_age});
 
-	my $lost_race = 0;
-	for (1 .. 5) {
-		my $current = $self->check_network_lock(%opts);
-		$self->_refuse_network_lock($current, $lost_race) if $current->{status} eq 'locked';
-		info(
-			"Taking over the stale network claims lock on #M{%s} BOSH director (held %s).",
-			$self->alias, $current->{description}
-		) if $current->{status} eq 'stale';
+	my $current = $self->check_network_lock(%opts);
+	$self->_refuse_network_lock($current) if $current->{status} eq 'locked';
+	info(
+		"Taking over the stale network claims lock on #M{%s} BOSH director (held %s).",
+		$self->alias, $current->{description}
+	) if $current->{status} eq 'stale';
 
-		my $lock = {
-			# UTC, labelled as UTC: POSIX's %z gives the local offset even
-			# for a gmtime() value, which made a lock taken west of UTC look
-			# hours old, and one taken east of it look hours away.
-			at       => strftime('%Y-%m-%d %H:%M:%S +0000', gmtime()),
-			hostname => Sys::Hostname::hostname(),
-			user     => $ENV{USER} // 'unknown',
-			# Every value is written as a string.  The record sits under the
-			# director's exodus path, so exporting that path takes it along,
-			# and Genesis refuses an export whose current version of a secret
-			# holds anything but strings, as safe 1.26.0 exports a JSON
-			# number here.
-			pid      => "$$",
-			env      => $self->env ? $self->env->name : 'unknown',
-			token    => $self->_network_lock_token,
-		};
-
-		# kv v2: the write names the version that was just read, so of any
-		# number of processes that read the same version, only the first to
-		# write gets the lock.  Any other is refused by the vault, and reads
-		# again to find out who has it.
-		if (($current->{kv_version} // 1) == 2) {
-			return $lock if $self->_write_network_lock($path, $lock, $opts{max_lock_age}, cas => $current->{version});
-			$lost_race = 'cas';
-			next;
-		}
-
-		# kv v1 has no check-and-set.  A process that read the lock as free
-		# before this write landed writes its own just after it, so wait long
-		# enough for that write to land too, and then read back: whichever
-		# write landed last holds the lock, and every other writer sees that
-		# it lost.  It narrows the race rather than closing it, since a writer
-		# slower than the wait can still land after the read-back.
-		$self->_warn_network_lock_not_atomic($current);
-		$self->_write_network_lock($path, $lock, $opts{max_lock_age});
-		select(undef, undef, undef, $NETWORK_LOCK_SETTLE_SECONDS)
-			if $NETWORK_LOCK_SETTLE_SECONDS > 0;
-		my $now = $self->check_network_lock(%opts);
-		return $lock if ($now->{lock}{token} // '') eq $lock->{token};
-		$self->_refuse_network_lock($now, 'readback') if $now->{status} ne 'unlocked';
-		bail(
-			"Wrote the network claims lock for the #M{%s} BOSH director to #C{%s} in ".
-			"the vault at #M{%s}, but reading it back a moment later found no lock at all.\n\n".
-			"Either another process released the lock in that moment, or the vault ".
-			"target is a standby node whose reads lag the leader.  Nothing holds the ".
-			"lock now, so running the command again is safe; if this keeps happening, ".
-			"point the vault target at the cluster leader.",
-			$self->alias, $path, $self->vault->url
-		);
-	}
-
-	bail(
-		"Could not take the network claims lock on the #M{%s} BOSH director: the lock ".
-		"record at #C{%s} in the vault at #M{%s} changed between every read and write ".
-		"in five attempts.\n\n".
-		"This usually means several deploys or #C{bosh-configs upload} runs against ".
-		"this director are taking and releasing the lock in quick succession.  Wait ".
-		"for them to finish and try again, and check #C{safe get %s} to see who holds ".
-		"it now.",
-		$self->alias, $path, $self->vault->url, $path
-	);
+	# Two processes that both read the lock as free both write it, and the
+	# later write stays.  The other finds out at ensure_network_lock_held,
+	# which every write the lock is for calls first.
+	my $lock = {
+		# UTC, labelled as UTC: POSIX's %z gives the local offset even for a
+		# gmtime() value, which made a lock taken west of UTC look hours old,
+		# and one taken east of it look hours away.
+		at       => strftime('%Y-%m-%d %H:%M:%S +0000', gmtime()),
+		hostname => Sys::Hostname::hostname(),
+		user     => $ENV{USER} // 'unknown',
+		pid      => "$$",
+		env      => $self->env ? $self->env->name : 'unknown',
+		token    => $self->_network_lock_token,
+	};
+	$self->_write_network_lock($path, $lock, $opts{max_lock_age});
+	return $lock;
 }
 # }}}
 
@@ -1075,44 +1030,18 @@ sub clear_network_lock {
 	my $path = $self->network_lock_path;
 	my $expected = $opts{stale};
 
-	for (1 .. 5) {
-		my $current = $self->check_network_lock;
-		return 0 if $current->{status} eq 'unlocked';
+	my $current = $self->check_network_lock;
+	return 0 if $current->{status} eq 'unlocked';
 
-		# Only the lock that was asked about is removed: with no stale lock
-		# named, this process's own; with one, that very record.  A lock that
-		# has changed hands since is someone else's, and is left alone.
-		if ($expected) {
-			my $same = defined($current->{version}) && defined($expected->{version})
-				? $current->{version} == $expected->{version}
-				: JSON::PP->new->canonical->encode($current->{lock})
-				  eq JSON::PP->new->canonical->encode($expected->{lock} // {});
-			return 0 unless $same;
-		} else {
-			return 0 unless ($current->{lock}{token} // '') eq $self->_network_lock_token;
-		}
-
-		# Released on kv v2 by writing a record with no holder: kv v2 has no
-		# check-and-set delete, and a delete would also remove a lock that
-		# another process wrote after the read above.
-		if (($current->{kv_version} // 1) == 2) {
-			return 1 if $self->vault->kv_write($path, {}, cas => $current->{version});
-			next;
-		}
-		# kv v1 refuses a record with no fields, so the lock is deleted instead,
-		# with a delete whose refusal is an error rather than a quiet no-op.
-		return $self->vault->kv_delete($path) ? 1 : 0;
+	# Only the lock that was asked about is removed: with no stale lock
+	# named, this process's own; with one, that very record.  A lock that
+	# has changed hands since is someone else's, and is left alone.
+	if ($expected) {
+		return 0 unless _same_network_lock($current->{lock}, $expected->{lock});
+	} else {
+		return 0 unless ($current->{lock}{token} // '') eq $self->_network_lock_token;
 	}
-
-	bail(
-		"Could not clear the network claims lock on the #M{%s} BOSH director: the lock ".
-		"record at #C{%s} in the vault at #M{%s} changed between every read and write ".
-		"in five attempts.\n\n".
-		"This usually means several deploys or #C{bosh-configs upload} runs against ".
-		"this director are taking and releasing the lock in quick succession.  Check ".
-		"#C{safe get %s} to see who holds it now.",
-		$self->alias, $path, $self->vault->url, $path
-	);
+	return $self->vault->clear($path) ? 1 : 0;
 }
 # }}}
 
@@ -1139,7 +1068,9 @@ sub ensure_network_lock_held {
 		"network claims lock, %s.\n\n".
 		"This usually means this process waited, most often at a prompt, for longer ".
 		"than the lock's stale timeout, and another deploy or #C{bosh-configs upload} ".
-		"cleared the lock as stale.  Genesis stopped before it could %s, so that it ".
+		"cleared the lock as stale.  It also happens when another process took the ".
+		"lock in the same moment as this one, and its write was the one that stayed.  ".
+		"Genesis stopped before it could %s, so that it ".
 		"would not overwrite what the other process is doing.  Run the command again ".
 		"once the other process has finished.  The lock is stored at #C{%s}, and ".
 		"#C{safe get %s} shows who holds it.",
@@ -1216,9 +1147,8 @@ sub release_network_lock {
 
 # _write_network_lock - write the lock, saying so when a failure may have left it held {{{
 sub _write_network_lock {
-	my ($self, $path, $lock, $max_age, %opts) = @_;
-	my $written = eval { $self->vault->kv_write($path, $lock, %opts) };
-	return $written unless $@;
+	my ($self, $path, $lock, $max_age) = @_;
+	return 1 if eval { $self->vault->set($path, %$lock); 1 };
 
 	my $err = $@;
 	# A signal passes through as it came, for the caller's release to handle.
@@ -1240,7 +1170,10 @@ sub _write_network_lock {
 # _network_lock_freshness - whether a lock record is still held or has gone stale {{{
 sub _network_lock_freshness {
 	my ($self, $lock, $max_age) = @_;
-	my $lock_time = Time::Piece->strptime($lock->{at}, '%Y-%m-%d %H:%M:%S %z');
+	# Nothing comes back for a time that cannot be read, for the caller to
+	# say what that means for the record it holds.
+	my $lock_time = eval { Time::Piece->strptime($lock->{at}, '%Y-%m-%d %H:%M:%S %z') }
+		or return;
 	my $lock_age = time - $lock_time->epoch;
 
 	my $status = $lock_age > $max_age ? 'stale' : 'locked';
@@ -1264,10 +1197,10 @@ sub _network_lock_freshness {
 # _refuse_legacy_network_lock - stop while an older Genesis holds the network claims lock {{{
 sub _refuse_legacy_network_lock {
 	my ($self, $max_age, $action) = @_;
-	# Guards against older Genesis versions during a rollout: they keep the
-	# lock as JSON in the network-claim-lock key of the exodus secret, and
-	# never read the lock's own secret, so each would take its lock without
-	# seeing the other's.  This only reads that key, and never changes it.
+	# Guards against released Genesis versions: they keep the lock as JSON in
+	# the network-claim-lock key of the exodus secret, and never read the
+	# lock's own secret, so each would take its lock without seeing the
+	# other's.  This only reads that key, and never changes it.
 	my $path = $self->exodus_path;
 	my $key = 'network-claim-lock';
 	$max_age //= 1800;
@@ -1278,27 +1211,24 @@ sub _refuse_legacy_network_lock {
 	my $appears = $action ? 'appears to have started deploying against it since this process took its lock'
 	                      : 'appears to be deploying against it';
 
-	my $record = eval { $self->vault->kv_read($path) };
-	if ($@) {
+	my $record;
+	unless (eval { $record = $self->vault->read_flattened_secret($path); 1 }) {
 		my $err = $@;
 		# A signal passes through as it came, for the caller's release to handle.
 		die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
 		$err = $err =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/\s+$//r;
+		# The reader's own message says what was read, why it failed, and
+		# how to see which, so it closes this one.
 		bail(
 			"Cannot %s on the #M{%s} BOSH director, because the ".
 			"older lock key could not be checked.  An older Genesis, from before the lock ".
 			"moved to a secret of its own, keeps it in the #C{%s} key of #C{%s}, and one ".
-			"may be deploying against this director now.\n\n".
-			"The vault said: %s\n\n".
-			"Likely causes are that the vault is sealed or cannot be reached, or that the ".
-			"token has no read access on #C{%s}.  Nothing was written.  Run #C{safe get %s:%s} ".
-			"with the same token to see which, and #C{safe vault status} to check whether ".
-			"the vault is sealed.",
-			$what, $self->alias, $key, $path, $err, $path, $path, $key
+			"may be deploying against this director now.  Nothing was written.\n\n%s",
+			$what, $self->alias, $key, $path, $err
 		);
 	}
 
-	my $json = ref($record->{data}) eq 'HASH' ? $record->{data}{$key} : undef;
+	my $json = ref($record) eq 'HASH' ? $record->{$key} : undef;
 	return unless defined($json) && $json =~ /\S/;
 
 	my ($lock, $status);
@@ -1306,6 +1236,7 @@ sub _refuse_legacy_network_lock {
 		$lock = JSON::PP->new->decode($json);
 		die "not a lock\n" unless ref($lock) eq 'HASH' && defined($lock->{at});
 		($status) = $self->_network_lock_freshness($lock, $max_age);
+		die "not a lock\n" unless defined($status);
 		1;
 	};
 	my $parse_error = $@;
@@ -1357,21 +1288,13 @@ sub _network_lock_token {
 
 # _refuse_network_lock - stop, naming who holds the network claims lock {{{
 sub _refuse_network_lock {
-	my ($self, $current, $lost_race) = @_;
+	my ($self, $current) = @_;
 	my $lock = $current->{lock};
 	my $max_minutes = int(($current->{max_age} // 1800) / 60);
 
-	my $race = !$lost_race ? ''
-		: $lost_race eq 'cas'
-			? "  Another process took it between this process's check of the lock and ".
-			  "its write; the vault's check-and-set write let only one of them have it."
-			: "  Another process wrote the lock at about the same moment as this one, ".
-			  "and its write is the one that stayed.  The lock is on a kv v1 mount, ".
-			  "which has no check-and-set write, so this process found out by reading ".
-			  "the lock back.";
 	bail(
 		"Cannot take the network claims lock on the #M{%s} BOSH director: it is held ".
-		"by %s@%s (env: %s, pid: %s), who took it %s, at %s.%s\n\n".
+		"by %s@%s (env: %s, pid: %s), who took it %s, at %s.\n\n".
 		"The lock is stored at #C{%s} in the vault at #M{%s}.  This usually means ".
 		"another deploy, or a #C{bosh-configs upload}, against this director is ".
 		"running now or is waiting at a prompt.  Wait for it to finish, then try ".
@@ -1381,26 +1304,18 @@ sub _refuse_network_lock {
 		"lock as it is stored.",
 		$self->alias, $lock->{user} // 'unknown', $lock->{hostname} // 'unknown',
 		$lock->{env} // 'unknown', $lock->{pid} // 'unknown',
-		strfuzzytime($lock->{at}), $lock->{at}, $race,
+		strfuzzytime($lock->{at}), $lock->{at},
 		$current->{path}, $self->vault->url, $max_minutes, $current->{path}
 	);
 }
 # }}}
 
-# _warn_network_lock_not_atomic - say once that a kv v1 mount makes the lock best-effort {{{
-my %_warned_not_atomic;
-sub _warn_network_lock_not_atomic {
-	my ($self, $current) = @_;
-	return if $_warned_not_atomic{$current->{path}}++;
-	warning(
-		"The network claims lock for the #M{%s} BOSH director is stored at #C{%s}, on ".
-		"a kv v1 mount, which has no check-and-set write.  Taking it is therefore not ".
-		"atomic: this process writes the lock, waits %s seconds, and reads it back to ".
-		"confirm that it still holds it.  That catches a competing deploy that wrote in ".
-		"the meantime, but not one slower than the wait.  Keeping exodus on a kv v2 ".
-		"mount makes the lock atomic.",
-		$self->alias, $current->{path}, $NETWORK_LOCK_SETTLE_SECONDS
-	);
+# _same_network_lock - whether two lock records hold the same fields and values {{{
+sub _same_network_lock {
+	my ($have, $want) = @_;
+	return 0 unless ref($have) eq 'HASH' && ref($want) eq 'HASH';
+	return 0 unless join("\0", sort keys %$have) eq join("\0", sort keys %$want);
+	return (grep { ($have->{$_} // '') ne ($want->{$_} // '') } keys %$have) ? 0 : 1;
 }
 # }}}
 

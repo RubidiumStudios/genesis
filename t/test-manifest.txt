@@ -39,7 +39,7 @@ unit-tests/service_github-host.t         # a host's answers say whether it is Gi
 unit-tests/service_bosh-base.t
 unit-tests/service_bosh-create_env_proxy.t
 unit-tests/service_bosh-director.t
-unit-tests/service_bosh-director-network_lock.t  # network claims lock: check-and-set on kv v2, read-back on kv v1
+unit-tests/service_bosh-director-network_lock.t  # network claims lock: strict read, plain write, ownership check before each write
 unit-tests/service_bosh-director-proxy_timeout.t  # status() reports a director that hangs behind BOSH_ALL_PROXY as unreachable
 unit-tests/service_bosh-stemcell.t
 unit-tests/genesis-run_exit_status_under_trace.t  # run() keeps the exit code when tracing is on

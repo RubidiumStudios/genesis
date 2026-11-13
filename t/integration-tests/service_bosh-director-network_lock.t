@@ -7,6 +7,9 @@ use lib 'lib';
 use helper;
 use Test::More;
 use Test::Exception;
+use Test::Output;
+use POSIX qw(strftime);
+use JSON::PP ();
 
 use_ok 'Service::Vault';
 use_ok 'Service::Vault::Remote';
@@ -19,8 +22,8 @@ use Genesis;
 # kv v1 is what Vault mounted before 1.1 and what many long-lived Genesis
 # vaults still have.  Which version the test vault mounts secret/ as is the
 # harness's business, so a mount of each version is added beside it and
-# every test names the one it means.  On kv v2 the vault's own check-and-set
-# decides the race; on kv v1 the lock falls back to reading itself back.
+# every test names the one it means.  The lock is read, written, and
+# removed through safe, the same way on both.
 # ===========================================================================
 
 my $target = vault_ok('genesis-ci-network-lock');
@@ -42,12 +45,13 @@ package HookedVault {
 	sub new { my ($class, $vault) = @_; bless {vault => $vault}, $class }
 	sub before_next_write { $_[0]{hook} = $_[1] }
 	sub url { $_[0]{vault}->url }
-	sub kv_read { my $self = shift; $self->{vault}->kv_read(@_) }
-	sub kv_write {
+	sub read_flattened_secret { my $self = shift; $self->{vault}->read_flattened_secret(@_) }
+	sub clear { my $self = shift; $self->{vault}->clear(@_) }
+	sub set {
 		my $self = shift;
 		my $hook = delete $self->{hook};
 		$hook->() if $hook;
-		$self->{vault}->kv_write(@_);
+		$self->{vault}->set(@_);
 	}
 }
 
@@ -60,7 +64,7 @@ sub director {
 		client       => 'admin',
 		secret       => 'password',
 		exodus_path  => $exodus,
-		exodus_vault => $v,
+		exodus_vault => $v // $vault,
 	);
 }
 
@@ -75,6 +79,30 @@ sub as_other_process {
 sub try_acquire {
 	my ($bosh) = @_;
 	return eval { quietly { $bosh->acquire_network_lock() }; 1 } ? 'won' : "refused: $@";
+}
+
+sub at { strftime('%Y-%m-%d %H:%M:%S +0000', gmtime(time - $_[0])) }
+
+# What the vault itself holds for a secret, as the JSON it stores, or undef
+# where it holds nothing.
+sub stored_json {
+	my ($mount, $kv_version, $rest) = @_;
+	my $uri = $kv_version == 2 ? "/$mount/data/$rest" : "/$mount/$rest";
+	my $out = `SAFE_TARGET=$target safe curl --data-only GET $uri 2>/dev/null`;
+	my $body = eval { JSON::PP::decode_json($out) } or return undef;
+	my $data = $kv_version == 2 ? $body->{data}{data} : $body->{data};
+	return ref($data) eq 'HASH' ? $data : undef;
+}
+
+# Writes a secret straight to the vault's API, as a writer that does not go
+# through safe's string-only set does.
+sub store_json {
+	my ($mount, $kv_version, $rest, $record) = @_;
+	my ($uri, $body) = $kv_version == 2
+		? ("/$mount/data/$rest", JSON::PP::encode_json({data => $record}))
+		: ("/$mount/$rest", JSON::PP::encode_json($record));
+	system('sh', '-c', 'SAFE_TARGET="$1" safe curl POST "$2" "$3" >/dev/null 2>&1', 'sh', $target, $uri, $body);
+	return $? >> 8;
 }
 
 subtest 'kv_mount tells the two mounts apart' => sub {
@@ -111,43 +139,148 @@ subtest 'kv_read and kv_write against kv v1' => sub {
 	is($vault->kv_read($path)->{data}, undef, 'and the secret is gone');
 };
 
-subtest 'kv v2: two acquirers that both read a free lock before either writes' => sub {
-	my $exodus = 'kv2/exodus/lock-it/bosh';
-	my $hooked = HookedVault->new($vault);
-	my ($first, $second) = (director($exodus, $hooked), director($exodus, $vault));
+for my $kv_version (1, 2) {
+	my $mount = "kv$kv_version";
+	my $name = "kv v$kv_version";
 
-	my $second_result;
-	$hooked->before_next_write(sub {
-		$second_result = as_other_process(sub { try_acquire($second) });
-	});
-	my $first_result = try_acquire($first);
+	subtest "$name: the lock is taken, read, refused to a second taker, and released" => sub {
+		my $exodus = "$mount/exodus/lock-it/bosh";
+		my $bosh = director($exodus);
+		is($bosh->check_network_lock->{status}, 'unlocked', 'a director with no lock is unlocked');
+		is(try_acquire($bosh), 'won', 'the lock is taken');
 
-	is(scalar(grep { $_ eq 'won' } $first_result, $second_result), 1,
-		'exactly one takes the lock')
-		or diag "first: $first_result\nsecond: $second_result";
-	is($second_result, 'won', 'the one whose write reached the vault first');
-	like($first_result, qr/^refused: .*between this process's check/s,
-		'the other is refused, and told it lost the race')
-		or diag $first_result;
-	ok(as_other_process(sub { $second->network_locked_by_me }), 'the winner holds the lock');
-	ok(!$first->network_locked_by_me, 'the loser does not');
+		my $stored = stored_json($mount, $kv_version, 'exodus/lock-it/bosh/network-claim-lock');
+		is_deeply([sort keys %{$stored // {}}], [qw(at env hostname pid token user)],
+			'the vault holds every field of the lock');
+		is_deeply([grep { ref($stored->{$_}) || Service::Vault::_export_value_type($stored->{$_}) } sort keys %$stored], [],
+			'each as a JSON string');
+		is($stored->{pid}, "$$", 'with this process\'s pid');
+		like($stored->{at}, qr/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \+0000$/, 'and the time in UTC, spaces and all');
 
-	ok(as_other_process(sub { $second->clear_network_lock }), 'the winner releases it');
-	is($first->check_network_lock->{status}, 'unlocked', 'and the director is unlocked');
-	is(try_acquire($first), 'won', 'so the other can take it now');
-	ok($first->clear_network_lock, 'and release it');
+		my $status = $bosh->check_network_lock;
+		is($status->{status}, 'locked', 'the director reads as locked');
+		is_deeply($status->{lock}, $stored, 'by the record the vault holds');
+		ok($bosh->network_locked_by_me, 'which is this process\'s own');
+		ok($bosh->ensure_network_lock_held('write the network claims'), 'so it may write its claims');
+		like(as_other_process(sub { try_acquire(director($exodus)) }), qr/^refused: .*held by.*pid: $$/s,
+			'a second take is refused, naming the holder');
+
+		ok($bosh->clear_network_lock, 'the holder releases it');
+		is($vault->read_flattened_secret("$exodus/network-claim-lock"), undef, 'which leaves nothing to read at the lock path');
+		is($bosh->check_network_lock->{status}, 'unlocked', 'and the director is unlocked');
+		ok(!$bosh->clear_network_lock, 'a second release removes nothing');
+		is(try_acquire($bosh), 'won', 'and the lock can be taken again');
+		ok($bosh->clear_network_lock, 'and released again');
+	};
+
+	subtest "$name: two acquirers that both read a free lock" => sub {
+		my $exodus = "$mount/exodus/race/bosh";
+		my $hooked = HookedVault->new($vault);
+		my ($later, $earlier) = (director($exodus, $hooked), director($exodus));
+
+		# The earlier process reads and writes between the later one's read
+		# and the later one's write.
+		my $earlier_result;
+		$hooked->before_next_write(sub {
+			$earlier_result = as_other_process(sub { try_acquire($earlier) });
+		});
+		is(try_acquire($later), 'won', 'the later writer takes the lock');
+		is($earlier_result, 'won', 'as the earlier one did, a moment before');
+
+		ok($later->network_locked_by_me, 'the later write is the one the vault holds');
+		ok(!as_other_process(sub { $earlier->network_locked_by_me }), 'so the earlier writer does not hold the lock');
+		throws_ok { as_other_process(sub { $earlier->ensure_network_lock_held('write the network claims') }) }
+			qr/Cannot write the network claims.*no longer holds/s,
+			'and is stopped before it writes its claims';
+		is(as_other_process(sub { quietly { $earlier->release_network_lock } }), 0, 'its release removes nothing');
+		ok($later->network_locked_by_me, 'so the holder still holds the lock');
+		is(quietly { $later->release_network_lock }, 1, 'until it releases it');
+		is($earlier->check_network_lock->{status}, 'unlocked', 'and the director is unlocked');
+	};
+
+	subtest "$name: a stale lock is cleared only while it is the lock that was shown" => sub {
+		my $exodus = "$mount/exodus/stale/bosh";
+		my $path = "$exodus/network-claim-lock";
+		my %crashed = (at => at(7200), hostname => 'crashed-host', user => 'crashed-user', pid => '4242', env => 'lab', token => 'crashed');
+		my $bosh = director($exodus);
+
+		$vault->set($path, %crashed);
+		my $seen = $bosh->check_network_lock;
+		is($seen->{status}, 'stale', 'a lock two hours old is stale');
+		like($seen->{description}, qr/crashed-user\@crashed-host \(env: lab, pid: 4242\)/, 'and names who left it');
+
+		# Another process takes it over before this one clears it.
+		$vault->set($path, %crashed, at => at(10), token => 'taken-since');
+		ok(!$bosh->clear_network_lock(stale => $seen), 'a lock that has changed since is not cleared');
+		is($bosh->check_network_lock->{lock}{token}, 'taken-since', 'and is still there');
+
+		$vault->set($path, %crashed);
+		$seen = $bosh->check_network_lock;
+		ok($bosh->clear_network_lock(stale => $seen), 'the lock that was shown is cleared');
+		is($bosh->check_network_lock->{status}, 'unlocked', 'and the director is unlocked');
+
+		$vault->set($path, %crashed);
+		is(try_acquire($bosh), 'won', 'an acquire takes a stale lock over');
+		ok($bosh->network_locked_by_me, 'and holds it');
+		ok($bosh->clear_network_lock, 'and releases it');
+	};
+
+	subtest "$name: a lock whose pid a writer stored as a number is read like any other" => sub {
+		my $rest = 'exodus/typed/bosh/network-claim-lock';
+		my $bosh = director("$mount/exodus/typed/bosh");
+		is(store_json($mount, $kv_version, $rest, {
+			at => at(60), hostname => 'other-host', user => 'jdoe', pid => 4242, env => 'lab', token => 'typed',
+		}), 0, 'the record is stored with a JSON number for its pid');
+		my $status = $bosh->check_network_lock;
+		is($status->{status}, 'locked', 'the lock reads as held');
+		is($status->{lock}{pid}, '4242', 'with its pid');
+		like(try_acquire($bosh), qr/^refused: .*jdoe\@other-host.*pid: 4242/s, 'and a take is refused, naming the holder');
+
+		is(store_json($mount, $kv_version, $rest, {
+			at => at(7200), hostname => 'other-host', user => 'jdoe', pid => 4242, env => 'lab', token => 'typed',
+		}), 0, 'once it is two hours old');
+		is(try_acquire($bosh), 'won', 'it is taken over');
+		my $stored = stored_json($mount, $kv_version, $rest);
+		is(Service::Vault::_export_value_type($stored->{pid}), undef, 'and the pid the vault now holds is a JSON string');
+		ok($bosh->clear_network_lock, 'and the lock is released');
+	};
+}
+
+subtest 'kv v2: a lock released by writing an empty record holds nothing' => sub {
+	# A build that released the lock with a check-and-set write of a record
+	# with no fields left a secret there with no keys.
+	my $rest = 'exodus/emptied/bosh/network-claim-lock';
+	my $bosh = director('kv2/exodus/emptied/bosh');
+	is(store_json('kv2', 2, $rest, {}), 0, 'an empty record is stored');
+	is_deeply($vault->read_flattened_secret("kv2/$rest"), {}, 'which reads as a secret with no keys');
+	is($bosh->check_network_lock->{status}, 'unlocked', 'so the director is unlocked');
+	is(try_acquire($bosh), 'won', 'and the lock is taken');
+	ok($bosh->network_locked_by_me, 'and held');
+	ok($bosh->clear_network_lock, 'and released');
+	is($vault->read_flattened_secret("kv2/$rest"), undef, 'leaving nothing to read');
 };
 
-subtest 'kv v1: the lock is taken, confirmed, and released' => sub {
-	no warnings 'once';
-	local $Service::BOSH::Director::NETWORK_LOCK_SETTLE_SECONDS = 0;
-	my $bosh = director('kv1/exodus/lock-it/bosh', $vault);
+# Last, because nothing can be read once the vault is sealed.
+subtest 'a sealed vault: the lock is never read as free' => sub {
+	my $exodus = 'kv2/exodus/sealed/bosh';
+	my $bosh = director($exodus);
 	is(try_acquire($bosh), 'won', 'the lock is taken');
-	ok($bosh->network_locked_by_me, 'and read back as this process\'s own');
-	like(try_acquire(director('kv1/exodus/lock-it/bosh', $vault)), qr/^refused: .*held by/s,
-		'a second take is refused');
-	ok($bosh->clear_network_lock, 'the holder releases it');
-	is($bosh->check_network_lock->{status}, 'unlocked', 'and the director is unlocked');
+	system("SAFE_TARGET=$target safe curl PUT /sys/seal >/dev/null 2>&1");
+	is($? >> 8, 0, 'the vault is sealed');
+
+	throws_ok { $bosh->check_network_lock } qr/Could not read .*\Q$exodus\E\/network-claim-lock/s,
+		'the check raises, naming what it could not read';
+	throws_ok { $bosh->ensure_network_lock_held('write the network claims') } qr/Could not read/,
+		'so does the check made before a write';
+	like(as_other_process(sub { try_acquire(director($exodus)) }), qr/^refused: .*could not be checked.*Could not read/s,
+		'and an acquire stops at its first read');
+
+	my ($released, $out);
+	lives_ok { $out = join('', output_from(sub { $released = $bosh->release_network_lock })) }
+		'a release does not die';
+	ok(!defined($released), 'and reports that it could not release');
+	like($out =~ s/\s+/ /gr, qr/could not be read, so it is not known whether this process holds it/,
+		'saying that the lock could not be read');
 };
 
 END { teardown_vault() }

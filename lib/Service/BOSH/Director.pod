@@ -80,10 +80,10 @@ L</stemcells> and L</upload_stemcell> list and upload stemcells.
 
 L</network_lock_path>, L</check_network_lock>, L</acquire_network_lock>,
 L</network_locked_by_me>, and L</clear_network_lock> implement a
-Vault-backed mutex used to serialise network claim updates.  On a kv v2
-mount the lock is taken with a check-and-set write, so exactly one of any
-number of competing processes gets it; on a kv v1 mount it falls back to a
-write and read-back, which is not atomic.
+Vault-backed lock used to serialise network claim updates.  Taking it is a
+read and then a write, which is not atomic, so L</ensure_network_lock_held>
+checks that this process still holds it right before each write the lock is
+for.  L</release_network_lock> releases it on the way out of a command.
 
 =item Instance operations
 
@@ -1701,9 +1701,9 @@ Returns the vault path of the network claims lock for this director, which
 is C<< $self->exodus_path . '/network-claim-lock' >>.
 
 The lock is a secret of its own rather than a key inside the director's
-exodus secret.  That way a check-and-set write covers the lock and nothing
-else, and the exodus rewrite that every director deploy performs leaves the
-lock alone.
+exodus secret.  That way the exodus rewrite that every director deploy
+performs leaves the lock alone, and taking or releasing the lock never
+rewrites the director's exodus data.
 
 B<Returns:> The lock's vault path, as a string.
 
@@ -1712,16 +1712,18 @@ B<Returns:> The lock's vault path, as a string.
   my $result = $director->check_network_lock(%opts);
 
 Reads the network claims lock at L</network_lock_path> with
-C<Service::Vault::kv_read> and returns a status hashref.
+L<Service::Vault/read_flattened_secret> and returns a status hashref.
 
-The lock is C<'unlocked'> when no record exists, or when the record has no
-C<at> field, which is what a released lock on a kv v2 mount looks like.  A
-held lock is C<'stale'> once its age exceeds C<max_lock_age>, or as soon as
-its process has exited when that process ran on this same host.  Otherwise
-it is C<'locked'>.
+The lock is C<'unlocked'> when nothing is stored at the path, or when the
+secret there has no C<at> key.  A build that released the lock by writing
+an empty record left such a secret behind, and it holds nothing.  A held
+lock is C<'stale'> once its age exceeds C<max_lock_age>, or as soon as its
+process has exited when that process ran on this same host.  Otherwise it
+is C<'locked'>.
 
 A vault that cannot be read is an error, not an unlocked director, so that
-a sealed or unreachable vault never lets a second deploy through.
+a sealed or unreachable vault, or a token the vault refuses, never lets a
+second deploy through.  Every method that calls this one raises with it.
 
 B<Parameters:>
 
@@ -1742,8 +1744,8 @@ C<1800> (30 minutes).
 
 =back
 
-B<Returns:> A hashref with these keys, of which C<status>, C<path>,
-C<version>, and C<kv_version> are always present:
+B<Returns:> A hashref with these keys, of which C<status> and C<path> are
+always present:
 
 =over 4
 
@@ -1755,20 +1757,11 @@ C<'unlocked'>, C<'locked'>, or C<'stale'>.
 
 The lock's vault path, from L</network_lock_path>.
 
-=item version
-
-On a kv v2 mount, the version of the lock secret that was read, which is
-C<0> when it has never been written.  A check-and-set write must name it.
-C<undef> on a kv v1 mount.
-
-=item kv_version
-
-C<1> or C<2>, the version of the kv mount the lock is on.
-
 =item lock
 
 The lock record (absent when unlocked).  Contains C<at>, C<user>,
-C<hostname>, C<pid>, C<env>, and C<token>.
+C<hostname>, C<pid>, C<env>, and C<token>, each as the string safe prints
+for it.
 
 =item age
 
@@ -1787,9 +1780,22 @@ A human-readable string describing when and by whom the lock was taken
 
 B<Errors:>
 
-Dies through C<Service::Vault::kv_read> or C<Service::Vault::kv_mount>
-when the vault refuses the read or cannot be reached, naming the path and
-the likely causes.
+=over 4
+
+=item *
+
+Dies through L<Service::Vault/read_flattened_secret> when the vault refuses
+the read, is sealed, or cannot be reached, naming the path, the likely
+causes, and the commands that tell them apart.
+
+=item *
+
+Dies when the record holds an C<at> that is not a time Genesis writes,
+since such a record cannot be judged held or stale.  The message names the
+director, the path, the vault, and the value, and gives the C<safe get>
+command that shows the record and the C<safe rm> command that removes it.
+
+=back
 
 B<Examples:>
 
@@ -1799,7 +1805,7 @@ B<Examples:>
   } elsif ($result->{status} eq 'stale') {
     warn "Stale lock detected: $result->{description}\n";
   }
-  # Returns: { status => 'unlocked', path => '...', version => 3, kv_version => 2 }
+  # Returns: { status => 'unlocked', path => '...' }
   #       or { status => 'locked', lock => {...}, age => 42, description => '...', ... }
 
 =head2 acquire_network_lock
@@ -1807,45 +1813,26 @@ B<Examples:>
   my $lock = $director->acquire_network_lock(%opts);
 
 Takes the network claims lock by writing a lock record to
-L</network_lock_path>, after checking that an older Genesis does not hold
-the older form of the lock (see L</_refuse_legacy_network_lock>).  The
-record holds the time, hostname, user, PID, environment name, and a token
-that marks it as this process's own (see L</_network_lock_token>).  The time is written in UTC with a C<+0000>
-offset, so that a reader on any host works out the same age for it.
-Every value, the PID included, is written as a string.  The record
-sits under the director's exodus path, so a C<safe export> of that path takes
-it along, and an older Genesis on safe 1.26.0 refuses an export holding a
-value that is not a string, such as a numeric PID.  Writing strings keeps
-those clients working.  This Genesis can still read a lock that an older
-client wrote with a numeric PID.  L<Service::Vault/decode_export_text> marks
-the lock as holding a typed value, the ordinary readers read it again whole with
-L<Service::Vault/read_flattened_secret> and take the PID as the text safe
-prints for it, and entombment never reads a lock that no manifest
-references, so such a lock no longer stops a deploy.  A stale lock is taken
-over, with a note saying whose it was.
+L</network_lock_path> with L<Service::Vault/set>, after checking that an
+older Genesis does not hold the older form of the lock (see
+L</_refuse_legacy_network_lock>) and that no other process holds this one.
+The record holds the time, hostname, user, PID, environment name, and a
+token that marks it as this process's own (see L</_network_lock_token>).
+The time is written in UTC with a C<+0000> offset, so that a reader on any
+host works out the same age for it.  Every value is a string, as safe
+writes them.  A stale lock is taken over, with a note saying whose it was.
 
-How the write is made depends on the kv mount the lock is on:
-
-=over 4
-
-=item kv v2
-
-The write is a check-and-set write that names the version
-L</check_network_lock> just read.  However many processes read the same
-version, the vault lets only the first write through.  Every other writer
-is refused, reads the lock again, and stops with a message naming the
-holder and saying that it lost the race.  This is atomic.
-
-=item kv v1
-
-kv v1 has no check-and-set write, so this is not atomic.  The method
-writes the lock, waits C<$Service::BOSH::Director::NETWORK_LOCK_SETTLE_SECONDS>
-seconds (2 by default), and reads it back.  If another process's lock is
-there instead, that process's write landed last and this one stops.  A
-competing write slower than the wait can still go unnoticed, so the method
-warns once per lock path that the lock is best-effort.
-
-=back
+B<Limitations:> taking the lock is not atomic.  Two processes that both
+read the lock as free both write it, and the later write is the one that
+stays; the earlier writer returns from this method believing it holds the
+lock.  It finds out at L</ensure_network_lock_held>, which every write the
+lock is for must call first, and stops there.  For both to get past that
+check, the second would have to read the lock before the first wrote it and
+write its own after the first's check, which comes after the whole cloud
+config step.  On a vault that confirms its writes by reading them back
+(see L<Service::Vault/needs_write_confirmation>), the earlier writer can
+instead fail here, when its read-back finds the later writer's values; the
+message is then that of a write that may have landed.
 
 B<Parameters:>
 
@@ -1868,8 +1855,7 @@ B<Errors:>
 Dies when another process holds a lock that is not stale.  The message
 names the director, the holder's user, host, environment, and PID, when
 the lock was taken, the vault path and URL, the likely cause, and how
-long until the lock goes stale.  When this process lost a race for the
-lock, the message says so.
+long until the lock goes stale.  Nothing is written.
 
 =item *
 
@@ -1879,14 +1865,8 @@ L</_refuse_legacy_network_lock>.  Nothing is written in either case.
 
 =item *
 
-On kv v1, dies when the read-back finds no lock at all, which means
-another process released it in that moment or the vault target is a
-standby node whose reads lag the leader.
-
-=item *
-
-Dies when the lock record changes between every read and write in five
-attempts.
+Dies when the lock cannot be read, or holds a time that cannot be read,
+through L</check_network_lock>.  Nothing is written.
 
 =item *
 
@@ -1895,10 +1875,6 @@ The vault may have accepted the write before the failure, so the message
 says that this process may now hold the lock, that it is released as the
 command exits, and how to check for it and clear it by hand.  A signal
 that arrives during the write passes through unchanged.
-
-=item *
-
-Vault failures from C<Service::Vault::kv_read> propagate.
 
 =back
 
@@ -1943,12 +1919,13 @@ With no options, that is this process's own lock.  With C<stale>, it is
 the very record that L</check_network_lock> reported as stale; a lock that
 has changed hands since then is someone else's and is left alone.
 
-On a kv v2 mount the lock is released by a check-and-set write of a record
-with no holder in it, because kv v2 has no check-and-set delete and a plain
-delete could remove a lock that another process wrote after the read.  On a
-kv v1 mount, which refuses a record with no fields, the lock secret is
-deleted with C<Service::Vault::kv_delete>, so that a delete the vault
-refuses is an error rather than a quiet no-op.
+The lock is read once, and when it is the one asked about, the secret is
+removed with L<Service::Vault/clear>, which raises when the vault refuses.
+
+B<Limitations:> the read and the removal are two calls, so a lock that
+another process writes between them is removed with the one that was read.
+That process then finds at L</ensure_network_lock_held> that it holds
+nothing, and stops before it writes.
 
 B<Parameters:>
 
@@ -1963,8 +1940,8 @@ A hash of options:
 =item stale
 
 The status hashref from L</check_network_lock> that reported the lock as
-stale.  The lock is cleared only while it is still that record: the same
-version on kv v2, or the same lock fields on kv v1.
+stale.  The lock is cleared only while it is still that record, which
+L</_same_network_lock> decides by its fields and their values.
 
 =back
 
@@ -1975,11 +1952,9 @@ clear or the lock was not the one asked about.
 
 B<Errors:>
 
-Dies when the lock record changes between every read and write in five
-attempts, naming the director, the path, and the vault.  Vault failures
-from L</check_network_lock>, C<Service::Vault::kv_write>, and
-C<Service::Vault::kv_delete> propagate, so a release the vault refuses is
-never counted as done.
+Failures from L</check_network_lock> and L<Service::Vault/clear> propagate,
+so a lock that could not be read is never reported as nothing to clear, and
+a release the vault refuses is never counted as done.
 
 B<Examples:>
 
@@ -1999,7 +1974,10 @@ just before a step that the lock protects, such as uploading the cloud
 config or writing the network claims.  This process can lose the lock
 while it waits, most often at a prompt, for longer than the lock's stale
 timeout, because another deploy or C<bosh-configs upload> then clears the
-lock as stale and may take it.
+lock as stale and may take it.  It can also have lost it from the start:
+taking the lock is not atomic (see L</acquire_network_lock>), and of two
+processes that took it in the same moment, this check is what stops the
+one whose write did not stay.
 
 While this process does hold its lock, it also reads the older form of the
 lock again, with L</_refuse_legacy_network_lock>.  An older Genesis that
@@ -2405,13 +2383,13 @@ B<Examples:>
 
 =head2 _write_network_lock
 
-  my $written = $self->_write_network_lock($path, $lock, $max_age, %opts);
+  $self->_write_network_lock($path, $lock, $max_age);
 
-Writes the network claims lock record with C<Service::Vault::kv_write>.  A
-write can fail after the vault has accepted it, for instance when reads on
-an HA vault never catch up with the new version, and then this process may
-hold the lock without knowing it.  So a failure here stops with the
-original error and a note on how to find and clear the lock.
+Writes the network claims lock record with L<Service::Vault/set>.  A write
+can fail after the vault has accepted it, for instance when the read-back
+that confirms it on an HA vault never shows the values sent, and then this
+process may hold the lock without knowing it.  So a failure here stops
+with the original error and a note on how to find and clear the lock.
 
 B<Parameters:>
 
@@ -2431,14 +2409,9 @@ note.
 The stale timeout in seconds, which the note gives in minutes.  Defaults
 to C<1800>.
 
-=item C<%opts>
-
-Passed to C<Service::Vault::kv_write>, so C<cas> applies on kv v2.
-
 =back
 
-B<Returns:> What C<Service::Vault::kv_write> returned, which is C<0> for a
-refused check-and-set write.
+B<Returns:> C<1> once the write is made.
 
 B<Errors:>
 
@@ -2451,8 +2424,9 @@ passes through unchanged, for the caller's release to handle.
 
 B<Examples:>
 
-  my $version = $self->_write_network_lock($path, $lock, 1800, cas => 3);
-  # Returns: 4, or 0 when another process wrote first
+  $self->_write_network_lock($path, $lock, 1800);
+  # Returns: 1
+  # Dies: ... If the vault accepted the write first, this process may now hold the network claims lock. ...
 
 =head2 _network_lock_freshness
 
@@ -2482,30 +2456,35 @@ The stale timeout in seconds.
 =back
 
 B<Returns:> The status, which is C<'stale'> or C<'locked'>, and the age of
-the lock in seconds.
+the lock in seconds.  An empty list when C<at> is missing or is not in the
+expected form, which each caller reads its own way: a lock secret with such
+a time stops L</check_network_lock>, and an older lock key with one is not
+a lock record.
 
 B<Errors:>
 
-Dies when C<at> is missing or is not in the expected form.
+None.  A time that cannot be read is returned as an empty list.
 
 B<Examples:>
 
   my ($status, $age) = $self->_network_lock_freshness($lock, 1800);
   # Returns: ('locked', 42)
+  #      or: () when $lock->{at} is 'yesterday'
 
 =head2 _refuse_legacy_network_lock
 
   $self->_refuse_legacy_network_lock($max_age, $action);
 
 Stops the acquire of the network claims lock while an older Genesis holds
-the older form of it.  This guards against older Genesis versions during a
-rollout.  They keep the lock as a JSON string in the C<network-claim-lock>
-key of the director's exodus secret, and never read the secret that
-L</network_lock_path> names, so without this check the older and the newer
-Genesis could each take their own lock and both write claims.
+the older form of it.  This guards against released Genesis versions that
+are still in use.  They keep the lock as a JSON string in the
+C<network-claim-lock> key of the director's exodus secret, and never read
+the secret that L</network_lock_path> names, so without this check the
+older and the newer Genesis could each take their own lock and both write
+claims.
 
-The key is read once, with C<Service::Vault::kv_read>, and is never
-written or deleted.  A lock there that is still fresh by the older code's
+The exodus secret is read once, with L<Service::Vault/read_flattened_secret>,
+and is never written or deleted.  A lock there that is still fresh by the older code's
 own rule, as L</_network_lock_freshness> applies it, refuses the acquire.
 A lock that is stale, a key or field that is absent, and an exodus secret
 that does not exist all let the acquire go on.  A value that is not JSON,
@@ -2548,9 +2527,11 @@ key.
 
 Dies when the exodus secret cannot be read, because a vault that refuses or
 fails cannot be taken to mean that no older Genesis is deploying.  The
-message gives the vault's reason, the likely causes, and the C<safe get>
-and C<safe vault status> commands that check them.  A signal passes
-through unchanged, for the caller's release to handle.
+message says why the older key matters and that nothing was written, and
+closes with the reader's own message, which gives the vault's reason, the
+likely causes, and the C<safe get> and C<safe vault status> commands that
+check them.  A signal passes through unchanged, for the caller's release
+to handle.
 
 =back
 
@@ -2572,7 +2553,7 @@ B<Returns:> The token, as a string.
 
 =head2 _refuse_network_lock
 
-  $self->_refuse_network_lock($current, $lost_race);
+  $self->_refuse_network_lock($current);
 
 Stops with a message saying that the network claims lock is held, and by
 whom.
@@ -2584,13 +2565,6 @@ B<Parameters:>
 =item C<$current>
 
 The status hashref from L</check_network_lock> for the held lock.
-
-=item C<$lost_race>
-
-False when the lock was simply found held.  C<'cas'> when a kv v2
-check-and-set write was refused, and C<'readback'> when a kv v1 read-back
-found another process's lock, each of which adds a sentence saying that
-this process lost a race for the lock.
 
 =back
 
@@ -2605,33 +2579,45 @@ C<safe get> command that shows it.
 
 B<Examples:>
 
-  $self->_refuse_network_lock($current, 'cas') if $current->{status} eq 'locked';
+  $self->_refuse_network_lock($current) if $current->{status} eq 'locked';
   # Dies: Cannot take the network claims lock on the lab BOSH director: it is held by ...
 
-=head2 _warn_network_lock_not_atomic
+=head2 _same_network_lock
 
-  $self->_warn_network_lock_not_atomic($current);
+  my $same = Service::BOSH::Director::_same_network_lock($have, $want);
 
-Warns that the network claims lock is on a kv v1 mount, so taking it is a
-write, a wait, and a read-back rather than an atomic check-and-set.  The
-warning is given once per lock path per process.
+Says whether two lock records are the same record: the same keys, each
+with the same value, compared as strings.  L</clear_network_lock> uses it
+to tell whether the stale lock an operator was shown is still the one in
+the vault.
 
 B<Parameters:>
 
 =over 4
 
-=item C<$current>
+=item C<$have>
 
-The status hashref from L</check_network_lock>; its C<path> names the lock.
+The lock record as it was just read.
+
+=item C<$want>
+
+The lock record it is expected to be.
 
 =back
 
-B<Returns:> Nothing.
+B<Returns:> C<1> when both are hashrefs with the same keys and values,
+C<0> otherwise, including when either is not a hashref.
+
+B<Errors:>
+
+None.
 
 B<Examples:>
 
-  $self->_warn_network_lock_not_atomic($current);
-  # Warns once: The network claims lock for the lab BOSH director is stored at ...
+  _same_network_lock({at => $at, token => 'a'}, {at => $at, token => 'a'});
+  # Returns: 1
+  _same_network_lock({at => $at, token => 'a'}, {at => $at, token => 'b'});
+  # Returns: 0
 
 =head1 KNOWN ISSUES
 
