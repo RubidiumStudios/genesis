@@ -386,6 +386,11 @@ word, because the breach is read entirely off the remote-tracking refs and
 unrefreshed a commit propagated an hour ago and never fetched reads exactly
 like one the remote has dropped.
 
+A record with no environments says why, beneath the header and above the
+column heads, through C<_no_environments_lines>: control at the commit read
+carries no environment file, and the pipeline is read from control.  An
+operator standing on another branch is also told that branch was not read.
+
 B<Parameters:>
 
 =over 4
@@ -397,6 +402,12 @@ The record C<status_records> answered with.
 =item C<stale>
 
 True where nobody refreshed, which marks the cells that rest on a refresh.
+
+=item C<standing_on>
+
+The branch the operator ran the command from, which an empty report names
+where it is not control.  Left out, or undefined on a detached commit, the
+report says nothing about it.
 
 =back
 
@@ -973,6 +984,49 @@ B<Examples:>
 
   my $short = Genesis::CI::Status::_short('6084166abc123');
   # '6084166'
+
+=head2 _no_environments_lines($record, $standing_on)
+
+  push @out, _no_environments_lines($record, 'main');
+
+The lines a report with no environments carries beneath its header, saying
+why its table has no rows.  The pipeline's environments are read from
+control, so a control that carries no environment file gives none, and an
+operator who can see environment files on the branch they stand on is told
+that branch was not read.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The record being rendered, for control's branch and the commit it was read
+at.
+
+=item C<$standing_on>
+
+The branch the operator ran the command from, or undefined.
+
+=back
+
+B<Returns:> one line saying control at that commit carries no environment
+file and that the pipeline is read from control, and a second, where
+C<$standing_on> is defined and is not control, naming that branch as not
+read and saying to commit its environment files to control and push it.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  _no_environments_lines($record, 'control');
+  # ("  no environments: control@766a596 carries no environment file, and
+  #    the pipeline is read from control")
+
+  _no_environments_lines($record, 'main');
+  # the same line, then
+  # "  this branch, main, is not read; commit its environment files to
+  #    control and push it"
 
 =head2 _local_control_line($record)
 

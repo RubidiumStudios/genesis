@@ -531,6 +531,10 @@ sub render_tree {
 	# stale before they read a row of it.
 	push @out, csprintf("  #R{the report is stale, because no refresh ran; every cell marked %s rests on one}",
 		UNVERIFIABLE) if $opts{stale};
+	# Under the header that names the commit, since that commit is why the
+	# table beneath it has no rows.
+	push @out, _no_environments_lines($record, $opts{standing_on})
+		unless @{$record->{environments} || []};
 	push @out, '';
 
 	my $width = 0;
@@ -935,6 +939,27 @@ sub worst_class {
 # control commit, in hold_reason and in held_qualifier alike, so the run's
 # report and this one print one sha at one width.
 sub _short { my ($sha) = @_; return defined($sha) ? substr($sha, 0, 7) : undef }
+
+# }}}
+# _no_environments_lines - why a report has no rows {{{
+sub _no_environments_lines {
+	my ($record, $standing_on) = @_;
+	my $control = $record->{control}{branch};
+
+	my @lines = csprintf(
+		"  #Y{no environments: %s\@%s carries no environment file, and the ".
+		"pipeline is read from %s}",
+		$control,
+		_short($record->{control}{shape_commit} // $record->{control}{commit}),
+		$control);
+	# An operator on another branch can see environment files the report
+	# did not read.
+	push @lines, csprintf(
+		"  #Y{this branch, %s, is not read; commit its environment files to ".
+		"%s and push it}", $standing_on, $control)
+		if defined($standing_on) && $standing_on ne $control;
+	return @lines;
+}
 
 # }}}
 # _local_control_line - where the local control branch stands against the shape's commit {{{

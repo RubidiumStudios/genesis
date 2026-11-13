@@ -307,7 +307,8 @@ sub pipeline_status {
 	# carry a percent sign.
 	output({raw => 1}, '%s', get_options->{json}
 		? Genesis::CI::Status::render_json($record)
-		: Genesis::CI::Status::render_tree($record, stale => !$refresh));
+		: Genesis::CI::Status::render_tree($record, stale => !$refresh,
+			standing_on => $git->checked_out_branch));
 
 	exit 0;
 }
