@@ -166,8 +166,7 @@ begins with the other, such as C<secret/a> and C<secret/ab>. The C<safe> fix
 for that is in current tags, but nothing tells Genesis which installed binary
 carries it. The read is C<safe get> rather than one C<safe export> per path,
 because an export needs LIST access and walks every path beneath the one
-named. It is not C<kv_read> either, because C<kv_read> returns the raw JSON of
-a typed value, which is not the text the export route gives.
+named.
 
 B<Limitations:> Entombment still isn't transactional. Resolving every value
 first means a missing or unreadable value stops it before anything is

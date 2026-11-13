@@ -105,38 +105,12 @@ sub store_json {
 	return $? >> 8;
 }
 
-subtest 'kv_mount tells the two mounts apart' => sub {
-	is($vault->kv_mount('kv1/exodus/lock-it/bosh/network-claim-lock')->{version}, 1, 'kv1/ is kv v1');
-	is($vault->kv_mount('kv2/exodus/lock-it/bosh/network-claim-lock')->{version}, 2, 'kv2/ is kv v2');
-};
-
-subtest 'kv_read and kv_write against kv v2' => sub {
-	my $path = 'kv2/test/versioned';
-	is_deeply($vault->kv_read($path), {data => undef, version => 0, kv_version => 2},
-		'a secret never written is version 0');
-	is($vault->kv_write($path, {a => 1}, cas => 0), 1, 'a create-only write makes version 1');
-	is($vault->kv_write($path, {a => 2}, cas => 0), 0, 'a second create-only write is refused by the vault');
-	is_deeply($vault->kv_read($path), {data => {a => 1}, version => 1, kv_version => 2},
-		'and the first write is what is stored');
-	is($vault->kv_write($path, {}, cas => 1), 2, 'an empty record can be written at the version read');
-	is_deeply($vault->kv_read($path), {data => {}, version => 2, kv_version => 2}, 'and reads back empty');
-	system("SAFE_TARGET=$target safe curl DELETE /kv2/data/test/versioned >/dev/null 2>&1");
-	is_deeply($vault->kv_read($path), {data => undef, version => 2, kv_version => 2},
-		'a deleted latest version reads as no data, keeping its version');
-	is($vault->kv_write($path, {a => 3}, cas => 2), 3, 'so the next check-and-set write names it and succeeds');
-};
-
-subtest 'kv_read and kv_write against kv v1' => sub {
-	my $path = 'kv1/test/unversioned';
-	is_deeply($vault->kv_read($path), {data => undef, version => undef, kv_version => 1}, 'a missing secret has no data');
-	is($vault->kv_write($path, {a => 1}), 1, 'a plain write succeeds');
-	is_deeply($vault->kv_read($path)->{data}, {a => 1}, 'and reads back');
-	throws_ok { $vault->kv_write($path, {}) } qr/Could not write.*missing data fields/s,
-		'kv v1 refuses a record with no fields, which is why a released lock is deleted there';
-	throws_ok { $vault->kv_write($path, {a => 2}, cas => 0) } qr/kv v1 has no check-and-set/,
-		'a check-and-set write is refused before anything is sent';
-	is($vault->kv_delete($path), 1, 'a delete succeeds');
-	is($vault->kv_read($path)->{data}, undef, 'and the secret is gone');
+subtest 'the two mounts are the kv versions their names say' => sub {
+	for my $kv_version (1, 2) {
+		my $out = `SAFE_TARGET=$target safe curl --data-only GET /sys/internal/ui/mounts/kv$kv_version/x 2>/dev/null`;
+		my $mount = eval { JSON::PP::decode_json($out)->{data} } // {};
+		is($mount->{options}{version}, "$kv_version", "kv$kv_version/ is kv v$kv_version");
+	}
 };
 
 for my $kv_version (1, 2) {
