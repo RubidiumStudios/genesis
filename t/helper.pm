@@ -1146,10 +1146,13 @@ sub mock {
 		die "Mock class \$mock_class already exists" if \$mock_class->isa('Mock');
 	);
 	unless ($@) {
-		# If the mock class exists, clean it out to not interfere with the new mock
+		# If the mock class exists, clean it out to not interfere with the new
+		# mock.  Its nested packages are left alone: each is another module's
+		# symbol table, and freeing one while that module's compiled subs
+		# live on leaves them reading freed memory.
 		no strict 'refs';
 		my $symtab = \%{$mock_class."::"};
-		delete $symtab->{$_} for keys %$symtab;
+		delete $symtab->{$_} for grep {!/::$/} keys %$symtab;
 	}
 	eval qq(
 		package $mock_class;
