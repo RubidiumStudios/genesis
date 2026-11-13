@@ -195,10 +195,13 @@ sub install_lagging_vault {
 			$state->{leader} = {};
 			return ('', 0, '');
 		}
-		if ($cmd eq 'exists') {
-			my $answer = scalar(CORE::keys %{$state->{standby}}) ? 1 : 0;
+		if ($cmd eq 'get') {
+			# has reads the secret itself, and through the standby's view as
+			# every read does, which catches up once it has answered.
+			my %answer = %{$state->{standby}};
 			$state->{standby} = {%{$state->{leader}}};
-			return $answer;
+			return ('', 1, "!! no secret exists at path `$args[0]`\n") unless %answer;
+			return (join('', map {"$_: \"$answer{$_}\"\n"} sort CORE::keys %answer), 0, '');
 		}
 		return ('', 0, '');
 	};

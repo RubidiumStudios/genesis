@@ -888,7 +888,12 @@ Returns true if the vault has been initialized for Genesis use, detected by
 a C<handshake> key at the configured secrets mount (or C</secret/handshake>
 as a fallback when the mount differs from C</secret/>).
 
-B<Returns:> True if the handshake key exists, false otherwise.
+It is a probe and not a read: the question is whether this vault answers for
+a handshake at all, so it runs C<safe exists> and takes any failure as no,
+where L</has> would raise on one.
+
+B<Returns:> True if the handshake key exists, false otherwise, including
+when the vault could not be asked.
 
 B<Examples:>
 
@@ -1994,8 +1999,16 @@ B<Examples:>
 
   my $bool = $vault->has($path, $key);
 
-Returns true if the vault contains the given path (and optionally the given
-key). Equivalent to C<safe exists $path> or C<safe exists $path:$key>.
+Answers whether the vault holds a secret at the given path, and optionally
+the given key in it. It has three outcomes: yes, no, or it raises. It reads
+the secret through L</read_flattened_secret>, so "no" is only ever what
+C<safe> says in words (C<no secret exists at path>, or a newest version
+deleted or destroyed), and a check that did not finish is raised.
+
+It does not run C<safe exists>. That command exits 1 alike for a path that
+is not there, printing nothing, and for a read that failed, and C<safe>
+prints some errors with no prefix, so its silence cannot be taken for
+absence.
 
 B<Parameters:>
 
@@ -2011,16 +2024,24 @@ Optional. If provided, checks for the existence of C<$path:$key>.
 
 =back
 
-B<Returns:> True if the path (or path:key) exists, false otherwise.
+B<Returns:> C<1> if the path, or the key at it, is there, and C<0> if
+C<safe> says it is not.
+
+B<Errors:>
+
+Raises through L</bail_read_failure>, naming the path, when the read is
+refused, the vault cannot be reached, C<safe> is killed, or C<safe> exits
+without saying the path holds nothing.
 
 B<Limitations:>
 
-It reads any failure of C<safe exists> as false, through C<run>'s
-C<passfail> option, so a refused read, an expired token, or an unreachable
-vault all look like a path that does not exist. A reader that must tell
-nothing stored from a read that failed must not gate on it, and should read
-with L</get_path_strict> or L</read_flattened_secret> instead, which make
-that distinction themselves.
+A caller that goes on to read the value should read it once with
+L</read_flattened_secret> instead, which answers the same three ways in one
+round trip. Checking and then reading costs two, and the secret can change
+between them.
+
+It reads the whole secret to answer for one key, so the secret's values pass
+through this process, redacted from the trace.
 
 B<Examples:>
 

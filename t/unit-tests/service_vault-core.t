@@ -739,16 +739,16 @@ subtest 'has() returns true when path exists' => sub {
 	local *Service::Vault::query = sub {
 		my ($self, @args) = @_;
 		@query_args = @args;
-		# has() uses passfail=>1 so query() returns a single boolean;
-		# simulate rc=0 (path exists) by returning 1
-		return 1;
+		# has() reads the secret through the strict reader (D155), so
+		# query() answers as safe get does for a path that holds one.
+		return ("password: hunter2\n", 0, '');
 	};
 	use warnings 'redefine';
 
 	my $result = $v->has('/secret/myapp');
-	ok($result, 'has() returns true when path exists (query returns 1)');
-	like(join(' ', grep { !ref($_) } @query_args), qr/exists/,
-		'has() uses "exists" subcommand');
+	ok($result, 'has() returns true when path exists (safe get prints the secret)');
+	like(join(' ', grep { !ref($_) } @query_args), qr/^get\b/,
+		'has() reads with "get", since the silence of "exists" is not absence');
 };
 
 subtest 'has() returns false when path absent' => sub {
@@ -757,17 +757,18 @@ subtest 'has() returns false when path absent' => sub {
 	my $v = make_vault();
 
 	no warnings 'redefine';
-	# has() uses passfail=>1 so query() returns a single boolean;
-	# simulate rc=1 (path absent) by returning 0
-	local *Service::Vault::query = sub { return 0 };
+	# Absent is what safe says in words, with its exit of 1.
+	local *Service::Vault::query = sub {
+		return ('', 1, "!! no secret exists at path `secret/missing`\n");
+	};
 	use warnings 'redefine';
 
 	my $result = $v->has('/secret/missing');
-	ok(!$result, 'has() returns false when path absent (query returns 0)');
+	ok(!$result, 'has() returns false when safe says the path holds nothing');
 };
 
-subtest 'has($path, $key) appends key to path' => sub {
-	plan tests => 1;
+subtest 'has($path, $key) answers for the key in the secret' => sub {
+	plan tests => 3;
 
 	my $v = make_vault();
 	my @query_args;
@@ -776,13 +777,14 @@ subtest 'has($path, $key) appends key to path' => sub {
 	local *Service::Vault::query = sub {
 		my ($self, @args) = @_;
 		@query_args = @args;
-		return 1;  # passfail mode returns a single boolean
+		return ("password: hunter2\n", 0, '');
 	};
 	use warnings 'redefine';
 
-	$v->has('/secret/myapp', 'password');
-	like(join(' ', grep { !ref($_) } @query_args), qr{/secret/myapp:password},
-		'has() appends :key when key arg given');
+	ok($v->has('/secret/myapp', 'password'), 'has() is true for a key the secret holds');
+	ok(!$v->has('/secret/myapp', 'token'), 'and false for one it does not');
+	unlike(join(' ', grep { !ref($_) } @query_args), qr{:(?:password|token)},
+		'the whole secret is read, and the key is looked for in it');
 };
 
 # -------------------------------------------------------------------------
@@ -964,9 +966,11 @@ subtest 'initialized() checks for handshake at secrets mount' => sub {
 	my @checked;
 
 	no warnings 'redefine';
-	local *Service::Vault::has = sub {
-		my ($self, $path) = @_;
-		push @checked, $path;
+	# initialized() is a probe: it asks safe exists and takes any failure
+	# as no, where has() would raise on one, so query() is what answers.
+	local *Service::Vault::query = sub {
+		my ($self, $opts, $cmd, $path) = @_;
+		push @checked, $path if $cmd eq 'exists' && $opts->{passfail};
 		return $path =~ /handshake/ ? 1 : 0;
 	};
 	use warnings 'redefine';
@@ -982,7 +986,8 @@ subtest 'initialized() returns false when no handshake found' => sub {
 	my $v = make_vault();
 
 	no warnings 'redefine';
-	local *Service::Vault::has = sub { 0 };
+	# A probe that fails for any reason is the answer no.
+	local *Service::Vault::query = sub { 0 };
 	use warnings 'redefine';
 
 	my $result = $v->initialized();

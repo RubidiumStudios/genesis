@@ -434,7 +434,11 @@ sub authenticated {
 sub initialized {
 	my $self = shift;
 	my $secrets_mount = $ENV{GENESIS_SECRETS_MOUNT} || $self->{mount};
-	$self->has($secrets_mount.'handshake') || ($secrets_mount ne '/secret/' && $self->has('/secret/handshake'))
+	# A probe, not a read: whether this vault answers for a handshake at all
+	# is the question, so a check that fails is the answer no, and has, which
+	# raises on one, is not what is asked.
+	my $probe = sub {$self->query({passfail => 1}, 'exists', $_[0] =~ s/\/{2,}/\//gr)};
+	$probe->($secrets_mount.'handshake') || ($secrets_mount ne '/secret/' && $probe->('/secret/handshake'))
 }
 
 # }}}
@@ -1078,7 +1082,12 @@ sub set_path {
 sub has {
 	my ($self, $path, $key) = @_;
 	$path =~ s/\/{2,}/\//g; # Clean up any double slashes from joins
-	return $self->query({ passfail => 1 }, 'exists', defined($key) ? "$path:$key" : $path);
+	# Absence is what safe says in words, never its silence, so this reads
+	# through the strict reader and a check that did not finish raises.
+	my $secret = $self->read_flattened_secret($path);
+	return 0 unless defined($secret);
+	return 1 unless defined($key);
+	return exists($secret->{$key}) ? 1 : 0;
 }
 
 # }}}
