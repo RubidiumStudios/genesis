@@ -3980,6 +3980,11 @@ already failed, a check that dies over the shape it refused is set aside, the
 schema's refusal standing for it. An environment file that does not parse is
 still refused on the spot, because every check after it reads that file.
 
+A legacy F<ci.yml> beside a version 3 configuration whose pipeline is enabled
+is warned about once per file and otherwise ignored, the version 3
+configuration winning. The warning names the file through
+C<humanize_path>, as the operator would type it from where they stand.
+
 A version 2 configuration is first refused if it carries a C<pipeline>
 section of its own, through L</_refuse_v2_pipeline>. That comes B<before
 the schema>, so the operator hears where the section belongs and how to

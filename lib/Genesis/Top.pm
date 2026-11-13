@@ -2714,7 +2714,7 @@ sub _validate_config {
 				warning(
 					"Legacy #C{%s} present alongside a v3 CI configuration; ".
 					"the v3 config wins.  Remove #C{%s} to clear this warning.",
-					$ci_yml, $ci_yml
+					(humanize_path($ci_yml)) x 2
 				) unless $stale_ci_yml_warned{$ci_yml}++;
 			} else {
 				$self->{__has_legacy_ci_yml} = 1;

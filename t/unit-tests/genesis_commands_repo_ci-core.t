@@ -152,6 +152,10 @@ subtest 'v3 config with ci.yml and CI configured warns' => sub {
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
 
+	# The operator stands in the repository, which is where the file is
+	# named from.
+	local $ENV{GENESIS_CALLER_DIR} = $dir;
+
 	# Capture it: this is the one path that actually emits the warning, so
 	# letting it print both leaks into the TAP stream and leaves the
 	# behaviour this subtest is named for unasserted.  Assertions stay
@@ -162,6 +166,15 @@ subtest 'v3 config with ci.yml and CI configured warns' => sub {
 	is $err, '', "v3 + ci.yml + configured CI loads without bailing";
 	like $out, qr/Legacy .*ci\.yml.* present alongside a v3 CI configuration/,
 		"and warns that the stale ci.yml is being ignored";
+	# The file is named as the operator would type it from where they
+	# stand, as other messages name a path, and not by its full path.
+	# The repository's own spelling of the path, which on macOS resolves a
+	# symlink the fixture's does not.
+	my $full  = $top->path('ci.yml');
+	my $shown = Genesis::humanize_path($full);
+	isnt $shown, $full, "the fixture's path does shorten from here";
+	like $out, qr/Remove\s+\Q$shown\E\s+to\s+clear/, "the warning names the file by its short path";
+	unlike $out, qr/\Q$full\E/, "and never by its full one";
 	ok $top->pipeline_enabled, "v3 CI config still wins";
 	ok !$top->has_legacy_ci_yml, "legacy flag not set when v3 CI is configured";
 };
