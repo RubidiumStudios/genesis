@@ -334,31 +334,37 @@ subtest 'get_path and get_path_strict read a plain export, and refuse any other'
 	sub exists { 0 }
 }
 
-subtest 'store_data reads every export version' => sub {
-	for my $case (['v1', $V1, \%WANT], ['v2', $V2, {%WANT, 'secret/myapp/empty' => {}}], ['v3', $V3, \%WANT]) {
-		my ($label, $json, $want) = @$case;
-		my $store = Genesis::Env::Secrets::Store::Vault->new(
+subtest 'store_data reads a plain export, and refuses any other' => sub {
+	my $store_for = sub {
+		my ($json, $commands) = @_;
+		return Genesis::Env::Secrets::Store::Vault->new(
 			ExportMockEnv->new,
-			service => Mock->new(query => sub { ($json, 0, '') }),
+			service => Mock->new(
+				query => sub { my (undef, undef, @cmd) = @_; push @$commands, $cmd[0]; ($json, 0, '') },
+				url   => sub { 'https://vault.example.com:8200' },
+			),
 			mount_override => '/secret/',
 			slug_override  => 'myapp',
 		);
-		is_deeply($store->store_data, $want, "store_data reads $label");
-		is_deeply([sort $store->store_paths], [sort keys %$want], "and store_paths lists its live paths");
-	}
+	};
 
-	my $typed = versioned(3, '{"secret/myapp":{"versions":[{"value":{"ca":{"pem":"x"}}}]}}');
-	my $store = Genesis::Env::Secrets::Store::Vault->new(
-		ExportMockEnv->new,
-		service => Mock->new(
-			query                => sub { ($typed, 0, '') },
-			read_flattened_secret => sub { {ca => '{"pem":"x"}'} },
-		),
-		mount_override => '/secret/',
-		slug_override  => 'myapp',
+	my $store = $store_for->($V1, []);
+	is_deeply($store->store_data, \%WANT, 'store_data reads the plain export');
+	is_deeply([sort $store->store_paths], [sort keys %WANT], 'and store_paths lists its paths');
+
+	my %other = (
+		'a versioned export'               => $V2,
+		'a typed export'                   => $V3,
+		'a plain export holding an object' => '{"secret/myapp":{"ca":{"pem":"x"}}}',
 	);
-	is_deeply($store->store_data, {'secret/myapp' => {ca => '{"pem":"x"}'}},
-		'store_data reads a typed value as the text safe get prints, rather than dying');
+	for my $case (sort keys %other) {
+		my @commands;
+		$store = $store_for->($other{$case}, \@commands);
+		throws_ok { $store->store_data } qr{Cannot\s+use\s+the\s+safe\s+export\s+of\s+secret/myapp.*$REFUSAL}s,
+			"store_data refuses $case, naming the path and the cause";
+		is_deeply(\@commands, ['export'], "$case: after the one export, and no other read");
+		ok(!exists $store->{__data}, "$case: and it caches nothing");
+	}
 };
 
 # ---------------------------------------------------------------------------
@@ -690,82 +696,37 @@ subtest 'get reads a trailing ^N as a version, and the strict read takes it as p
 };
 
 # ---------------------------------------------------------------------------
-# Typed secrets, read again whole with safe get
+# What the store does with a value it read
 # ---------------------------------------------------------------------------
-
-# The same exodus as $EXODUS_KV2 on a kv v1 mount, where no secret has a
-# first field.
-my $EXODUS_KV1 = $EXODUS_KV2 =~ s/"first":\d+,//gr;
-my $EXODUS = 'secret/exodus/lab-mgmt/bosh';
-my %EXODUS_STRINGS = (
-	ca_cert => "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----",
-	url     => 'https://10.108.16.4:25555',
-);
-
-# What safe 1.26.0 prints for a safe get of each typed secret below, made by
-# safe's own read path and encoder from the v1.26.0 tag, as the files under
-# t/src/safe are.
-my $LOCK_GET = qq{--- # $LOCK\nat: "2026-10-24 12:09:14 +0000"\nenv: lab-mgmt\nhostname: bastion\npid: "3834038"\ntoken: 6f1c2a9e\nuser: ubuntu\n\n};
-my %LOCK_STRINGS = (
-	at => '2026-10-24 12:09:14 +0000', env => 'lab-mgmt', hostname => 'bastion',
-	pid => '3834038', token => '6f1c2a9e', user => 'ubuntu',
-);
-
-# A query that answers safe export with $export and safe get of a path with
-# what %gets holds for it, which is safe's output, or [out, rc, stderr] for
-# a get that fails.  A path it holds nothing for is absent.  Every command it
-# is given is logged to the list it returns.
-sub typed_safe {
-	my ($export, %gets) = @_;
-	my @calls;
-	my $query = sub {
-		my (undef, $opts, @cmd) = @_;
-		push @calls, [@cmd];
-		return safe_answers($export, 0, '')->(undef, $opts) if $cmd[0] eq 'export';
-		my $got = $gets{$cmd[1]};
-		return safe_answers(@$got)->(undef, $opts) if ref($got) eq 'ARRAY';
-		return safe_answers($got, 0, '')->(undef, $opts) if defined($got);
-		return safe_answers('', 1, absent($cmd[1]))->(undef, $opts);
-	};
-	return ($query, \@calls);
-}
-
-subtest 'store_data takes a typed secret whole from safe get' => sub {
-	plan tests => 3;
-	my ($query, $calls) = typed_safe($EXODUS_KV2, $LOCK => $LOCK_GET);
-	no warnings 'redefine';
-	local *Service::Vault::query = $query;
-	use warnings 'redefine';
-	my $store = Genesis::Env::Secrets::Store::Vault->new(
-		ExportMockEnv->new, service => test_vault(), mount_override => '/secret/', slug_override => 'exodus/lab-mgmt/bosh',
-	);
-	is_deeply($store->store_data, {$EXODUS => \%EXODUS_STRINGS, $LOCK => \%LOCK_STRINGS},
-		'the lock is stored with its pid as the string safe get prints');
-	is_deeply($calls, [['export', "/$EXODUS/"], ['get', $LOCK]], 'after one safe get, of the lock');
-	ok(exists $store->{__data}, 'and the store is cached');
-};
 
 subtest 'store_data never writes back a value it only read' => sub {
 	# store_data feeds fill, and a secret fill gives a value counts as present,
 	# so nothing adds, imports, or saves it.  Only store->write persists a
 	# value, and only a secret's save calls it, after a command set the value
-	# itself.  So a typed value read as text is never written back as text.
+	# itself.  So a value stored as a number, which safe exports as its text,
+	# is never written back as that text.
 	plan tests => 4;
 	local $ENV{GENESIS_SKIP_SECRET_DEFINITION_VALIDATION} = 1;
 	require Genesis::Secret::UserProvided;
-	my ($query, $calls) = typed_safe($EXODUS_KV2, $LOCK => $LOCK_GET);
+	my $exodus = 'secret/exodus/lab-mgmt/bosh';
+	my $export = qq({"$exodus":{"url":"https://10.108.16.4:25555"},"$exodus/network-claim-lock":{"pid":"3834038","user":"ubuntu"}});
+	my @commands;
 	no warnings 'redefine';
-	local *Service::Vault::query = $query;
+	local *Service::Vault::query = sub {
+		my (undef, $opts, @cmd) = @_;
+		push @commands, $cmd[0];
+		return safe_answers($export, 0, '')->(undef, $opts);
+	};
 	use warnings 'redefine';
 	my $store = Genesis::Env::Secrets::Store::Vault->new(
 		ExportMockEnv->new, service => test_vault(), mount_override => '/secret/', slug_override => 'exodus/lab-mgmt/bosh',
 	);
 	my $pid = Genesis::Secret::UserProvided->new('network-claim-lock:pid', prompt => 'pid');
 	$store->fill($pid);
-	ok($pid->has_value, 'a typed value read whole fills its secret');
-	is($pid->value, '3834038', 'with the text safe get prints');
+	ok($pid->has_value, 'a value the export gave as text fills its secret');
+	is($pid->value, '3834038', 'with that text');
 	is(($store->check($pid))[0], 'ok', 'and checking it reads nothing more');
-	is_deeply([map {$_->[0]} @$calls], ['export', 'get'], 'so the only commands run were the export and the safe get');
+	is_deeply(\@commands, ['export'], 'so the only command run was the export');
 };
 
 subtest 'read_flattened_secret keeps the escaping safe gives a value that is not a string' => sub {
@@ -787,19 +748,6 @@ subtest 'read_flattened_secret keeps the escaping safe gives a value that is not
 		count => '12345678901234567000', enabled => 'false', list => '["p",{"q":1}]',
 		nothing => 'null', password => 'old', ratio => '0.5',
 	}, 'and every other value is the text safe prints');
-};
-
-subtest 'a typed secret that disappears before the second read is an error' => sub {
-	plan tests => 1;
-	my ($query) = typed_safe($EXODUS_KV2);
-	no warnings 'redefine';
-	local *Service::Vault::query = $query;
-	use warnings 'redefine';
-	my $gone = qr{Could not read \Q$LOCK\E from vault.*held\s+nothing\s+when\s+read\s+again.*changed\s+while\s+Genesis\s+was\s+reading\s+it}s;
-	my $store = Genesis::Env::Secrets::Store::Vault->new(
-		ExportMockEnv->new, service => test_vault(), mount_override => '/secret/', slug_override => 'exodus/lab-mgmt/bosh',
-	);
-	throws_ok { $store->store_data } $gone, 'and so does store_data';
 };
 
 done_testing;
