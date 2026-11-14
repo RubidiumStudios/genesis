@@ -52,9 +52,9 @@ use Cwd qw/getcwd abs_path/;
 
 use Genesis;
 use Genesis::State;
-use Genesis::Term qw/wrap terminal_width csprintf decolorize csize/;
+use Genesis::Term qw/wrap terminal_width csprintf decolorize csize plain_error/;
 use Genesis::Log;
-use Genesis::Exit qw/CONFIG/;
+use Genesis::Exit qw/CONFIG UNAVAILABLE/;
 
 our ($COMMAND, $CALLED, %RUN, %PROPS, %GENESIS_COMMANDS, @COMMANDS, @COMMAND_ARGS);
 our $COMMAND_OPTIONS = {};
@@ -653,9 +653,20 @@ sub deployed_target {
 
 	# A flagged run stands only on a recorded commit on the deployment
 	# branch (D128); a default run takes the tip, since it deploys nothing.
-	my $record = $env->deployed_record;
 	my $branch = $top->branch_for($name);
 	my $where  = $env->exodus_base . '/deployments';
+
+	# A history the vault would not give is not a history with no deploy in
+	# it.  The tip is not stood on in its place, flag or no flag, because
+	# the run asked for the deployed commit and nobody could look.
+	my $record;
+	eval {$record = $env->deployed_record; 1} or bail(
+		{exitcode => UNAVAILABLE},
+		"Refusing to target the deployed commit for #C{%s}.\n\n%s\n\n".
+		"The deployed commit is named by that record, and the tip of #C{%s} ".
+		"is not taken in its place.  Nothing was changed.",
+		$name, scalar plain_error($@ =~ s/\e\[[0-9;]*m//gr), $branch
+	);
 	unless ($record && $record->{git} && $record->{git}{commit}) {
 		return undef unless $flagged;
 		bail(

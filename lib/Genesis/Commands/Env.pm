@@ -677,14 +677,38 @@ sub list_secrets {
 # anything in a repository, and it answers undef before it reads even that
 # to every run that named neither of the two deployed-commit flags.
 sub _warn_about_the_version_served {
+	my ($env, $read) = @_;
+	return 0 unless $read;
+	return $env->warn_uncertified_secrets_target(@$read);
+}
+
+# }}}
+# _version_served - read what the secrets family's warning will say, before the command's work {{{
+#
+# The warning is said after the work, where it is true of what the run
+# served, and it rests on the deployment history.  The history is read here,
+# ahead of the work, so a vault that will not give it stops the command
+# while nothing has been changed.
+sub _version_served {
 	my ($env) = @_;
 
 	require Service::Git;
-	my $git = eval { Service::Git->new('.') } or return 0;
+	my $git = eval { Service::Git->new('.') } or return undef;
 
-	return $env->warn_uncertified_secrets_target(
-		scalar Genesis::Commands::deployed_target($env->name, $env->top),
-		$git
+	my $served = scalar Genesis::Commands::deployed_target($env->name, $env->top);
+	my $gap;
+	return [$served, $git, $gap]
+		if eval {$gap = $env->uncertified_secrets_target($served, $git); 1};
+
+	# Only a read the vault did not finish is worded here.
+	my $err = $@;
+	die $err unless $err =~ /Could\s+not\s+read\s+\S.*?\s+from\s+vault\s+at\s/s;
+	bail({exitcode => UNAVAILABLE},
+		"%s\n\n".
+		"The deployment history says which version #C{%s} is running, and ".
+		"the secrets commands read it to say whether the secrets they serve ".
+		"are for that version.  Nothing was changed.",
+		_deploy_unread_reason($err), $env->name
 	);
 }
 
@@ -702,6 +726,7 @@ sub check_secrets {
 		->new(".")
 		->load_env($name)
 		->with_vault();
+	my $served = _version_served($env);
 
 	my ($results, $msg) = $env->check_secrets(
 		paths=>\@paths,
@@ -709,7 +734,7 @@ sub check_secrets {
 		, validate => $validation_level
 	);
 
-	_warn_about_the_version_served($env);
+	_warn_about_the_version_served($env, $served);
 
 	if ($results->{empty}) {
 		if ($msg) {
@@ -742,10 +767,11 @@ sub add_secrets {
 		->new(".")
 		->load_env($name)
 		->with_vault();
+	my $served = _version_served($env);
 
 	my ($results) = $env->add_secrets(paths=>\@paths,%{get_options()});
 
-	_warn_about_the_version_served($env);
+	_warn_about_the_version_served($env, $served);
 
 	if ($results->{error}) {
 		$env->notify(fatal => "- errors encountered while adding secrets");
@@ -789,12 +815,13 @@ sub rotate_secrets {
 		->new(".")
 		->load_env($name)
 		->with_vault();
+	my $served = _version_served($env);
 
 	my ($results, $msg) = $env->rotate_secrets(paths => \@paths,%{get_options()});
 
 	bail($msg||"User aborted secrets rotation") if $results->{abort};
 
-	_warn_about_the_version_served($env);
+	_warn_about_the_version_served($env, $served);
 
 	if ($results->{empty}) {
 		$env->notify($msg);
@@ -846,6 +873,7 @@ sub remove_secrets {
 		->new(".")
 		->load_env($name)
 		->with_vault();
+	my $served = _version_served($env);
 
 	my ($results, $msg) = $env->remove_secrets(paths => \@paths,%options);
 	if ($results->{abort}) {
@@ -856,7 +884,7 @@ sub remove_secrets {
 		}
 	}
 
-	_warn_about_the_version_served($env);
+	_warn_about_the_version_served($env, $served);
 
 	if ($results->{empty} && keys %$results == 1) {
 		$env->notify($msg||"No secrets were found to remove");

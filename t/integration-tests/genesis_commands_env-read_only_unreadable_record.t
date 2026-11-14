@@ -60,4 +60,46 @@ subtest 'pending-changes: the deployment history cannot be read' => sub {
 		'and the summary file says why there is no summary');
 };
 
+# The commands that already stopped, pinned, and the two that did not: a run
+# that asks for the deployed commit and a check of the secrets, both of which
+# read the deployment history through a reader that took a refusal for no
+# record.
+my @ROWS = (
+	# name, path under qa, arguments, what a record that is not there would have printed
+	['info: the deployment history',
+		'/deployments', [qw/info/], qr/never been deployed|has not been deployed/],
+	['info --as-deployed: the deployment history',
+		'/deployments', [qw/info --as-deployed/], qr/No successful deploy recorded/],
+	['check-secrets --as-deployed: the deployment history',
+		'/deployments', [qw/check-secrets --as-deployed/], qr/No successful deploy recorded/],
+	['check-secrets: the deployment history',
+		'/deployments', [qw/check-secrets/], qr/validated secrets successfully/],
+	['lookup --exodus: the exodus record',
+		'', [qw/lookup --exodus dated never-deployed/], qr/never-deployed/],
+	['manifest: the exodus record',
+		'', [qw/manifest/], qr/^name:/m],
+);
+
+for my $row (@ROWS) {
+	my ($name, $under, $args, $default) = @$row;
+	subtest "$name cannot be read" => sub {
+		# Five rows, and one for the run's own restoration assertion.
+		plan tests => 6;
+
+		my $h = two_stage();
+		my $path = $h->env_path('qa').$under;
+		break_vault_reads($h, $path);
+
+		my ($out, $err, $exit) = run_genesis($h, 'qa', @$args);
+		my $said = unfolded($out.$err);
+
+		isnt($exit, 0, 'the command fails') or diag("what it said:\n$out$err");
+		like($said, qr/Could not read \/?\Q@{[$path =~ s{^\/}{}r]}\E/, 'naming the path it could not read');
+		like($said, qr/permission denied/, 'and what the vault answered');
+		unlike($out.$err, $default, 'it prints nothing it would have for a record that is not there');
+		is(scalar(() = ($out.$err) =~ /\[FATAL\]/g), 1, 'and says so once, under one prefix')
+			or diag("what it said:\n$out$err");
+	};
+}
+
 done_testing;

@@ -1137,7 +1137,14 @@ branch, and the control branch, because those are the two branches the file
 travels on. A run that resolved its target from its registration's default
 meets no refusal here and takes the tip instead.
 
-Raised a third time, at the same code, when either flag is given for an
+Raised at C<Genesis::Exit::UNAVAILABLE> when the deployment history cannot
+be read, with the reader's own message, which names the path and what the
+vault answered, and a sentence saying that the tip is not taken in the
+record's place and nothing was changed. A default-target run is refused
+here as a flagged one is, because both asked for the deployed commit and a
+history nobody could read is not one with no deploy in it.
+
+Raised a third time at C<CONFIG> when either flag is given for an
 environment with no successful deploy recorded, or whose record names no
 commit, naming the record path and the deployment branch. A default-target
 run meets no refusal here and takes the tip.

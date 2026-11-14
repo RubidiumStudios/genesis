@@ -3874,16 +3874,14 @@ sub dependencies_read {
 # and the environment is running.  So this is a name for the four fields the
 # README's table fixes and not a second read of the set.
 #
-# An environment with no record at all, and one whose vault cannot be reached,
-# both answer undef here rather than raising, because neither of the two
-# callers wants a raise.  One is the branch-class gate, and a gate that bailed
-# would refuse a command over a question the command itself is about to answer
-# better.  The other is warn_uncertified_secrets_target below, which has
-# nothing to say about an environment it cannot read a record for and says
-# nothing rather than taking a command down at the end of its work.
+# An environment with no record at all answers undef.  One whose history the
+# vault would not give raises, because the two callers do different things
+# with undef and neither is right for a record nobody read: the branch-class
+# gate takes the branch tip or says no deploy is recorded, and the secrets
+# warning says nothing.
 sub deployed_record {
 	my ($self) = @_;
-	my $deployment = eval { $self->with_vault->deployments->latest_successful }
+	my $deployment = $self->with_vault->deployments->latest_successful
 		or return undef;
 
 	# The two timestamps are the record's own, read through the deployment's
@@ -3904,6 +3902,30 @@ sub deployed_record {
 }
 
 # }}}
+# uncertified_secrets_target - the control commit a secrets run serves and the one certified, where they differ {{{
+#
+# The read half of warn_uncertified_secrets_target, apart from the saying
+# so that a command can make the read before its work and stop there on a
+# history the vault will not give.
+sub uncertified_secrets_target {
+	my ($self, $served, $git) = @_;
+	my $record = $self->deployed_record or return undef;
+	my $certified = $record->{git}{control_commit} or return undef;
+
+	require Genesis::CI::Marker;
+	my $ref = $served // $self->top->branch_for($self->name);
+
+	# A clone need not hold the deployment branch at all, and the walk
+	# bails where git cannot resolve what it is handed, so the branch is
+	# asked for before it is walked.
+	return undef unless $git->branch_exists($ref);
+
+	my $served_control = Genesis::CI::Marker::newest($git, $ref) or return undef;
+	return undef if $served_control eq $certified;
+	return {served => $served_control, certified => $certified};
+}
+
+# }}}
 # warn_uncertified_secrets_target - say which version the secrets served {{{
 #
 # H36: one vault holds the secrets for both the version running and the
@@ -3917,21 +3939,10 @@ sub deployed_record {
 # deployment-branch commit, and the control commit it carries is the one its
 # own marker names.
 sub warn_uncertified_secrets_target {
-	my ($self, $served, $git) = @_;
-	my $record = $self->deployed_record or return 0;
-	my $certified = $record->{git}{control_commit} or return 0;
-
-	require Genesis::CI::Marker;
-	my $ref = $served // $self->top->branch_for($self->name);
-
-	# A clone need not hold the deployment branch at all, and the walk
-	# bails where git cannot resolve what it is handed, so the branch is
-	# asked for before it is walked.  This is a warning and nothing more,
-	# and the returns above say a run that cannot answer says nothing.
-	return 0 unless $git->branch_exists($ref);
-
-	my $served_control = Genesis::CI::Marker::newest($git, $ref) or return 0;
-	return 0 if $served_control eq $certified;
+	my ($self, $served, $git, @read) = @_;
+	my $gap = @read ? $read[0] : $self->uncertified_secrets_target($served, $git);
+	return 0 unless $gap;
+	my ($served_control, $certified) = @{$gap}{qw/served certified/};
 
 	$self->notify(warning =>
 		"The secrets this run served are for control@#C{%s}, which is not the ".

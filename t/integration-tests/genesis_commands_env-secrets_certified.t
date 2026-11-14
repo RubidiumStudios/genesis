@@ -108,6 +108,52 @@ subtest 'rotating against the tip says which version it served' => sub {
 		or diag("what the check said:\n$check_out$check_err");
 };
 
+# The warning rests on the deployment history, and a command that changes
+# secrets stops on a read it cannot make, the ones that only feed a warning
+# included (D156).  The history is read before the rotation and not after
+# it, so the stop comes while nothing has been changed and can say so.
+#
+# What the rows catch: a reader that takes the refusal for no record, which
+# rotates and says nothing about the version it served; and one that reads
+# after the work, which rotates and then fails.
+subtest 'a rotation stops before it changes anything when the history cannot be read' => sub {
+	# Five rows, and one for the run's own restoration assertion.
+	plan tests => 6;
+
+	my $h = make_harness(envs => ['qa'], kit => 'omega-v2.7.0');
+	my $control = commit_on_control($h,
+		files   => {'ops/base.yml' => "---\nversion: one\n"},
+		message => 'the certified content',
+		push    => 1,
+	);
+	init_branch($h, 'qa');
+	my $deployed = deliver($h, 'qa', control => $control);
+	certify($h, 'qa', commit => $deployed, control_commit => $control);
+	refresh($h, 'a');
+	fixture_bosh($h, kit => 0);
+	stand_on($h, $h->control);
+
+	# Everything the vault holds, read on the row's own path so the read is
+	# not one of the run's.
+	my $held = sub {
+		my ($out) = Genesis::run({env => {SAFE_TARGET => $h->{vault_target}}, stderr => 0},
+			Harness::Propagation::_real_safe(), 'export', 'secret');
+		return $out;
+	};
+	my $before = $held->();
+
+	my $path = $h->env_path('qa').'/deployments';
+	break_vault_reads($h, $path);
+	my ($out, $err, $exit) = run_genesis($h, 'qa', 'rotate-secrets', '-y');
+	my $said = ($out.$err) =~ s/\s+/ /gr;
+
+	isnt($exit, 0, 'the rotation stops') or diag("what it said:\n$out$err");
+	like($said, qr/Could not read \/?\Q@{[$path =~ s{^\/}{}r]}\E/, 'naming the path it could not read');
+	like($said, qr/permission denied/, 'and what the vault answered');
+	like($said, qr/Nothing was changed/, 'it says nothing was changed');
+	is($held->(), $before, 'and the vault holds what it held before');
+};
+
 # Proves that the warning keeps out of the way where there is no repository to
 # read a control commit from.  The four secrets commands ran in a plain
 # deployments directory long before the warning existed, and that is what an
