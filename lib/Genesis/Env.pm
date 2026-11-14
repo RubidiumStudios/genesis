@@ -3648,24 +3648,20 @@ sub pipeline_record {
 #
 # The read goes through this environment's own vault, for the reason
 # pipeline_record reads through it, since the hold addresses under
-# exodus_base like every other record this module keeps there.  The
-# existence question is asked first, because a vault answers an absent path
-# and an empty one alike and a hold with every field blank is still a hold.
+# exodus_base like every other record this module keeps there.  It is one
+# strict read, which answers nothing stored apart from a secret with no keys,
+# because a hold with every field blank is still a hold.
 #
 # The vault is asked for outright, the way pipeline_record next door asks
 # for it, and not behind a guard that answers no hold where there is none.
 # The walk delivers on this answer, so an environment whose vault could not
-# be reached has to end that environment rather than read as unheld, which
-# is the one mistake the record exists to stop.
+# be read has to end that environment rather than read as unheld, which is
+# the one mistake the record exists to stop.
 sub hold_record {
 	my ($self) = @_;
 
-	my $path  = $self->hold_record_path;
-	my $vault = $self->vault;
-	return undef unless $vault->has($path);
-
-	my $data = $vault->get($path);
-	return undef unless ref($data) eq 'HASH';
+	my $data = $self->vault->read_flattened_secret($self->hold_record_path);
+	return undef unless defined($data);
 	return {
 		reason   => $data->{reason},
 		user     => $data->{user},
@@ -3715,11 +3711,9 @@ sub set_hold {
 # and 0 where none did, so `pipeline-release` can say which it did rather than
 # claiming to have released a hold nobody set.
 #
-# The question is whether the path stands, and not whether hold_record can make
-# sense of what is at it.  hold_record answers undef both for an absent path
-# and for one whose contents it cannot read, and guarding on that would leave
-# an unreadable record in place while telling the operator there was nothing to
-# release, which is the one state a release most has to be able to clear.
+# The question is whether the path stands, and not whether what is at it is a
+# hold anyone can make sense of, so a record that is not a valid one can still
+# be released.  A check the vault did not answer raises, and removes nothing.
 sub clear_hold {
 	my ($self) = @_;
 

@@ -109,4 +109,71 @@ subtest 'an unreachable vault is not read as no hold' => sub {
 	isnt($record, undef, 'and the environment is never answered as unheld');
 };
 
+# A stand-in safe that logs each call it is given, one per line, and then
+# answers with the body.
+sub logging_safe {
+	my ($body) = @_;
+	my $dir = workdir('fake-safe-'.++$FAKE_SAFE);
+	put_file("$dir/safe", "#!/bin/bash\necho \"\$*\" >> '$dir/calls'\n$body\n");
+	chmod(0755, "$dir/safe");
+	return ("$dir:$ENV{PATH}", sub { -f "$dir/calls" ? [split /\n/, get_file("$dir/calls")] : [] });
+}
+
+subtest 'a hold with every field blank is still a hold, read once' => sub {
+	plan tests => 2;
+	my $env = held_env();
+	my ($path, $calls) = logging_safe(q{printf -- '--- # x\n{}\n\n'});
+	local $ENV{PATH} = $path;
+	is_deeply($env->hold_record, {reason => undef, user => undef, hostname => undef, at => undef},
+		'a record with no fields is a hold with nothing in it, not no hold');
+	is(scalar(@{$calls->()}), 1, 'after a single read of the record');
+};
+
+# Releasing a hold removes a record, so it has to know the record is there.
+subtest 'a release stops on a check it cannot make, and removes nothing' => sub {
+	plan tests => 4;
+	for my $case (
+		['a refusal', q{printf 'Error making API request.\n\nCode: 403. Errors:\n\n* 1 error occurred:\n\t* permission denied\n' >&2; exit 1}, qr/Code: 403/],
+		['an outage', q{printf '!! dial tcp 10.0.0.1:8200: connect: connection refused\n' >&2; exit 1}, qr/connection\s+refused/],
+	) {
+		my ($what, $body, $reason) = @$case;
+		my $env = held_env();
+		my ($path, $calls) = logging_safe($body);
+		local $ENV{PATH} = $path;
+		no warnings qw/redefine once/;
+		local *Service::Vault::authenticated = sub { 1 };
+		use warnings qw/redefine once/;
+		throws_ok { $env->clear_hold } $reason, "$what: the release raises what the vault said";
+		is_deeply([grep {/^rm\b/} @{$calls->()}], [], "$what: and no removal is sent");
+	}
+};
+
+subtest 'a release says whether there was a hold to remove' => sub {
+	plan tests => 4;
+	no warnings qw/redefine once/;
+	local *Service::Vault::authenticated = sub { 1 };
+	local *Service::Vault::needs_write_confirmation = sub { 0 };
+	use warnings qw/redefine once/;
+
+	my $env = held_env();
+	my ($path, $calls) = logging_safe(join("\n",
+		'p="${@: -1}"; p="${p#/}"',
+		'printf "!! no secret exists at path \`%s\`\n" "$p" >&2',
+		'exit 1',
+	));
+	{
+		local $ENV{PATH} = $path;
+		is($env->clear_hold, 0, 'with nothing stored, it answers that there was nothing to remove');
+		is_deeply([grep {/^rm\b/} @{$calls->()}], [], 'and sends no removal');
+	}
+
+	($path, $calls) = logging_safe(join("\n",
+		'[ "$1" = rm ] && exit 0',
+		q{printf -- '--- # x\nreason: change freeze\n\n'},
+	));
+	local $ENV{PATH} = $path;
+	is($env->clear_hold, 1, 'with a hold stored, it answers that it removed one');
+	is(scalar(grep {/^rm\b/} @{$calls->()}), 1, 'with one removal');
+};
+
 done_testing;
