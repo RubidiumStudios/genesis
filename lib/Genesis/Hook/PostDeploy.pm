@@ -5,7 +5,7 @@ use warnings;
 use parent qw(Genesis::Hook);
 
 use Genesis;
-use Genesis::Term qw/in_controlling_terminal/;
+use Genesis::Term qw/in_controlling_terminal plain_error/;
 use Genesis::UI qw/prompt_for_boolean/;
 use Genesis::Env::NetworkClaims;
 use Service::Credhub;
@@ -175,21 +175,10 @@ sub update_director_network_config {
 
 # _plain_error - the text of a caught error without the [FATAL] prefix and the wrapping a nested bail adds, and whether it gives its own causes {{{
 sub _plain_error {
-	my ($err) = @_;
-	$err =~ s/^\s+|\s+$//g;
-	my $wrapped = $err =~ s/^(?:\e\[[0-9;]*m)*\[FATAL\](?:\e\[[0-9;]*m)*[ \t]*//;
-	if ($wrapped) {
-		# Lines the earlier bail wrapped to the terminal join back into
-		# paragraphs, and the indent it gave them goes, so the outer bail
-		# wraps the text once and indents every paragraph the same
-		$err = join("\n\n", map {
-			my $paragraph = s/^\s+|\s+$//gr;
-			$paragraph =~ s/\s*\n\s*/ /gr
-		} split(/\n[ \t]*\n/, $err));
-	}
+	my ($text, $raised) = plain_error($_[0]);
 	# Only an error Genesis raised words its own causes and checks; the
 	# wording is the one every such error uses
-	return ($err, scalar($wrapped && $err =~ /\b(?:likely causes?|usually means|check)\b/i));
+	return ($text, scalar($raised && $text =~ /\b(?:likely causes?|usually means|check)\b/i));
 }
 
 # }}}

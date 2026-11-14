@@ -620,12 +620,11 @@ B<Examples:>
     my ($text, $has_causes) = _plain_error($err);
 
 Turns an error caught from a nested C<bail> into text that can sit inside
-another message.  It trims the surrounding whitespace, drops the leading
-C<[FATAL]> prefix, and, when it found that prefix, joins the lines the first
-C<bail> wrapped to the terminal back into paragraphs and removes the indent
-that wrap gave each one, so the outer C<bail> wraps the text once and indents
-every paragraph the same.  An error without the prefix is returned trimmed and
-otherwise as it is.
+another message, and says whether that text already gives its causes.  The
+text comes from C<Genesis::Term::plain_error>, which trims it, drops the
+C<[FATAL]> prefix, and joins the lines the first C<bail> wrapped back into
+paragraphs.  An error without the prefix is returned trimmed and otherwise
+as it is.
 
 B<Parameters:>
 

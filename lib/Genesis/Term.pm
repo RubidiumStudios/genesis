@@ -20,6 +20,7 @@ our @EXPORT = qw/
 	terminal_height
 	terminal_colors
 	wrap fix_wrap
+	plain_error
 	colored_block
 	in_controlling_terminal
 	get_io_target
@@ -485,6 +486,24 @@ sub _frames_without_args {
 		push @frames, "\t$c[3] called at $c[1] line $c[2]\n";
 	}
 	return join('', @frames);
+}
+
+sub plain_error {
+	my ($err) = @_;
+	$err //= '';
+	$err =~ s/^\s+|\s+$//g;
+	my $prefix = qr/(?:\e\[[0-9;]*m)*\[FATAL\](?:\e\[[0-9;]*m)*[ \t]*/;
+	my $raised = ($err =~ s/^$prefix//) ? 1 : 0;
+	if ($raised) {
+		# Lines the earlier bail wrapped to the terminal join back into
+		# paragraphs, and the indent it gave them goes, so the next message
+		# wraps the text once and indents every paragraph the same
+		$err = join("\n\n", map {
+			my $paragraph = s/^\s+|\s+$//gr =~ s/^$prefix//r;
+			$paragraph =~ s/\s*\n\s*/ /gr
+		} split(/\n[ \t]*\n/, $err));
+	}
+	return wantarray ? ($err, $raised) : $err;
 }
 
 sub decolorize {

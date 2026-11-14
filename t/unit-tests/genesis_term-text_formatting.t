@@ -286,6 +286,39 @@ subtest 'checkbox - has zero indent' => sub {
 	unlike $result, qr/^  /, 'checkbox has no leading indent';
 };
 
+# ---------------------------------------------------------------------------
+# plain_error
+# ---------------------------------------------------------------------------
+# A bail caught by a caller arrives with its [FATAL] prefix and wrapped to
+# the terminal.  Put inside another message as it is, it is wrapped a second
+# time, which breaks its lines mid-sentence and indents them twice.
+subtest 'plain_error - a caught bail becomes paragraphs the next message can wrap' => sub {
+	my $caught = "\n[FATAL] Could not read secret/a from vault at\n".
+		"        https://v:8200: sealed\n".
+		"\n".
+		"        The vault gave no usable answer.  Check it with\n".
+		"        safe vault status.\n\n";
+	my ($text, $raised) = plain_error($caught);
+	is $text, "Could not read secret/a from vault at https://v:8200: sealed\n\n".
+		"The vault gave no usable answer.  Check it with safe vault status.",
+		'the prefix and the wrap are gone, and the paragraphs are kept';
+	ok $raised, 'and it is known to have come from a bail';
+	is scalar(plain_error($caught)), $text, 'in scalar context it is the text alone';
+};
+
+subtest 'plain_error - a bail raised inside a bail loses every prefix' => sub {
+	my $caught = "[FATAL] Outer said so.\n\n        [FATAL] Inner said why.\n";
+	is scalar(plain_error($caught)), "Outer said so.\n\nInner said why.",
+		'the nested prefix goes with the first';
+};
+
+subtest 'plain_error - an error that is not a bail is trimmed and otherwise kept' => sub {
+	my ($text, $raised) = plain_error("  a library died\n  at line 3\n");
+	is $text, "a library died\n  at line 3", 'its own line breaks stay';
+	ok !$raised, 'and it is not taken for a bail';
+	is scalar(plain_error(undef)), '', 'nothing at all reads as empty';
+};
+
 done_testing;
 
 # vim: ts=4 sw=4 sts=4 noet fdm=marker foldlevel=1 nu

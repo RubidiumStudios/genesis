@@ -467,6 +467,55 @@ B<Examples:>
   my $msg2 = fix_wrap("#W{[NOTE]} Some\n             long text");
   # Returns: 'Some long text'
 
+=head2 plain_error
+
+  my $text = plain_error($err);
+  my ($text, $raised) = plain_error($err);
+
+Turns an error caught from a C<bail> into text that can sit inside another
+message. A C<bail> that is caught arrives with its C<[FATAL]> prefix and
+already wrapped to the terminal. Put into a second C<bail> as it is, it is
+wrapped again, which breaks its lines in mid-sentence, indents them twice,
+and shows two prefixes.
+
+The surrounding whitespace is trimmed and the leading C<[FATAL]> prefix is
+dropped, with any colour codes around it. When that prefix was there, the
+lines the first C<bail> wrapped are joined back into paragraphs, the indent
+that wrap gave them is removed, and a C<[FATAL]> prefix at the start of a
+later paragraph, left by a C<bail> inside a C<bail>, is dropped too. Blank
+lines still separate the paragraphs. An error without the prefix, such as a
+die from a library, is trimmed and otherwise returned as it is, since its
+line breaks are its own.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$err>
+
+The error text, usually C<$@>. C<undef> reads as the empty string.
+
+=back
+
+B<Returns:> The cleaned text. In list context, the text and then C<1> when
+the error carried the C<[FATAL]> prefix and C<0> when it did not.
+
+B<Errors:> None.
+
+B<Limitations:> Colour codes inside the text are kept, so a caller that
+wants none removes them first. Line breaks that the first message wrote on
+purpose inside a paragraph, such as a list with one item to a line and no
+blank line between, are joined like the wrapped ones, because the two
+cannot be told apart once the text is wrapped.
+
+B<Examples:>
+
+  my $text = plain_error("\n[FATAL] Could not read the record at\n        secret/a.\n\n        Check the vault.\n");
+  # Returns: "Could not read the record at secret/a.\n\nCheck the vault."
+
+  my ($text, $raised) = plain_error("a library died\n");
+  # Returns: ('a library died', 0)
+
 =head2 colored_block
 
   my $block = colored_block($text, $fg, $bg);
