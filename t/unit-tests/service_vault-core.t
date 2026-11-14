@@ -325,8 +325,12 @@ subtest 'query() prepends "safe" to command' => sub {
 # Monkey-patch query() at the package level so internal $self->query() calls
 # are intercepted (MockWrapper only intercepts calls FROM OUTSIDE the object)
 # -------------------------------------------------------------------------
-subtest 'get($path, $key) returns value on success' => sub {
-	plan tests => 2;
+# What safe says for a path with nothing stored, and for a refused read.
+my $ABSENT  = "!! no secret exists at path `secret/myapp`\n";
+my $REFUSED = "Error making API request.\nCode: 403. Errors:\n* 1 error occurred:\n\t* permission denied\n";
+
+subtest 'get($path, $key) returns that key of the secret, read whole' => sub {
+	plan tests => 4;
 
 	my $v = make_vault();
 	my @query_args;
@@ -335,26 +339,37 @@ subtest 'get($path, $key) returns value on success' => sub {
 	local *Service::Vault::query = sub {
 		my ($self, @args) = @_;
 		@query_args = @args;
-		return ('secret-value', 0, '');
+		return ("--- # secret/myapp\ncert: |\n  line one\n  line two\npassword: hunter2\n\n", 0, '');
 	};
 	use warnings 'redefine';
 
-	my $result = $v->get('/secret/myapp', 'password');
-	is($result, 'secret-value', 'get() returns output from query on success');
-	like($query_args[-1], qr{/secret/myapp:password}, 'get() constructs path:key arg');
+	is($v->get('/secret/myapp', 'password'), 'hunter2', 'get() returns the value of the key');
+	is_deeply([@query_args[-2, -1]], ['get', '/secret/myapp'], 'from one read of the whole secret');
+	is($v->get('/secret/myapp', 'cert'), "line one\nline two\n", 'a value that ends in a newline keeps it');
+	is($v->get('/secret/myapp', 'nope'), undef, 'a key the secret does not hold is undef');
 };
 
-subtest 'get($path, $key) returns undef on failure' => sub {
-	plan tests => 1;
+subtest 'get($path, $key) is undef for nothing stored, and raises on a read that failed' => sub {
+	plan tests => 4;
 
 	my $v = make_vault();
 
 	no warnings 'redefine';
-	local *Service::Vault::query = sub { return ('error output', 1, 'err') };
-	use warnings 'redefine';
+	local *Service::Vault::query = sub { return ('', 1, $ABSENT) };
+	is($v->get('/secret/myapp', 'password'), undef, 'a path with nothing stored is undef');
 
-	my $result = $v->get('/secret/myapp', 'password');
-	ok(!defined($result), 'get() returns undef on non-zero rc');
+	local *Service::Vault::query = sub { return ('', 1, $REFUSED) };
+	throws_ok { $v->get('/secret/myapp', 'password') } qr{Could not read /?secret/myapp from vault.*Code: 403}s,
+		'a refused read raises, naming the path and the reason';
+
+	local *Service::Vault::query = sub { return ('error output', 1, 'err') };
+	throws_ok { $v->get('/secret/myapp', 'password') } qr{Could not read /?secret/myapp from vault}s,
+		'so does any other failed read';
+
+	local *Service::Vault::query = sub { return ('', 0, '') };
+	throws_ok { $v->get('/secret/myapp', 'password') } qr{Could not read /?secret/myapp from vault.*printed nothing}s,
+		'and a safe that exits 0 having printed nothing';
+	use warnings 'redefine';
 };
 
 subtest 'get($path) without key returns hash ref' => sub {
@@ -372,18 +387,23 @@ subtest 'get($path) without key returns hash ref' => sub {
 	is($result->{password}, 'hunter2', 'get() hash contains parsed YAML value');
 };
 
-subtest 'get($path) without key returns empty hash on error' => sub {
-	plan tests => 2;
+subtest 'get($path) without key is empty for nothing stored, and raises on a read that failed' => sub {
+	plan tests => 3;
 
 	my $v = make_vault();
 
 	no warnings 'redefine';
-	local *Service::Vault::query = sub { return ('', 1, 'error') };
-	use warnings 'redefine';
+	local *Service::Vault::query = sub { return ('', 1, $ABSENT) };
+	is_deeply($v->get('/secret/myapp'), {}, 'a path with nothing stored is an empty hash');
 
-	my $result = $v->get('/secret/myapp');
-	is(ref($result), 'HASH', 'get() returns hash ref even on error');
-	is(scalar(keys %$result), 0, 'get() returns empty hash on error');
+	local *Service::Vault::query = sub { return ('', 1, $REFUSED) };
+	throws_ok { $v->get('/secret/myapp') } qr{Could not read /?secret/myapp from vault.*Code: 403}s,
+		'a refused read raises, and is never an empty hash';
+
+	local *Service::Vault::query = sub { return ('', 1, 'error') };
+	throws_ok { $v->get('/secret/myapp') } qr{Could not read /?secret/myapp from vault}s,
+		'so does any other failed read';
+	use warnings 'redefine';
 };
 
 # safe writes a TLS warning to stderr for every noverify target.  The read
@@ -525,9 +545,10 @@ subtest 'a real error on stderr still fails, even when safe exits 0' => sub {
 	};
 	use warnings 'redefine';
 
-	my $result = $v->get('/secret/myapp');
-	is(ref($result), 'HASH', 'get() still returns a hash ref');
-	is(scalar(keys %$result), 0, 'a genuine exit-0 failure is still caught');
+	throws_ok { $v->get('/secret/myapp') } qr{Could not read /?secret/myapp from vault}s,
+		'a genuine exit-0 failure raises';
+	throws_ok { $v->get('/secret/myapp') } qr{permission denied}s,
+		'and keeps what safe said on stderr';
 };
 
 subtest 'a warning alongside a real error still fails' => sub {
@@ -542,12 +563,12 @@ subtest 'a warning alongside a real error still fails' => sub {
 	};
 	use warnings 'redefine';
 
-	is(scalar(keys %{$v->get('/secret/myapp')}), 0,
-		'the unrecognised line keeps the read fatal');
+	throws_ok { $v->get('/secret/myapp') } qr{Could not read /?secret/myapp from vault.*could not reach vault}s,
+		'the unrecognised line keeps the read fatal';
 };
 
 subtest 'get() splits combined path:key from single arg' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	my $v = make_vault();
 	my @query_args;
@@ -556,15 +577,13 @@ subtest 'get() splits combined path:key from single arg' => sub {
 	local *Service::Vault::query = sub {
 		my ($self, @args) = @_;
 		@query_args = @args;
-		return ('value', 0, '');
+		return ("--- # secret/myapp\npassword: hunter2\n\n", 0, '');
 	};
 	use warnings 'redefine';
 
 	# When path contains a colon, get() splits into path and key
-	$v->get('/secret/myapp:password');
-	# The last arg should be path:key
-	like($query_args[-1], qr{/secret/myapp:password},
-		'path:key form passed through correctly');
+	is($v->get('/secret/myapp:password'), 'hunter2', 'the key after the colon is the one returned');
+	is($query_args[-1], '/secret/myapp', 'from a read of the secret before the colon');
 	# The first arg should be an opts hash (redact_output)
 	is(ref($query_args[0]), 'HASH', 'first arg is options hash');
 };

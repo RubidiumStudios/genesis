@@ -943,37 +943,39 @@ B<Examples:>
   my $value  = $vault->get("$path:$key");
   my $values = $vault->get($path);
 
-Reads a secret value or all key/value pairs from the vault.
+Reads a secret value or all key/value pairs from the vault. Either way it
+has three outcomes: the value, absent, or it raises.
+
+Both call forms read the whole secret once through
+L</read_flattened_secret> with its C<versioned> option, so there is one
+whole-secret read in Genesis. The values are the strings C<safe get>
+prints, kept exactly as printed, so a certificate keeps its final newline
+whether it is read by its key or with the rest of its secret.
 
 When C<$key> is provided (either as a second argument or embedded in
-C<$path> as C<path:key>), returns the value of that specific key as a
-string, or C<undef> if not found.
+C<$path> as C<path:key>), it returns the value of that key as a string. It
+returns C<undef> when the secret does not hold that key, and when nothing
+is stored at the path. When no key is given, it returns the secret's keys
+and values as a hash reference, which is C<{}> when nothing is stored at
+the path.
 
-When no key is given, it reads the whole secret through
-L</read_flattened_secret> with its C<versioned> and C<lenient> options, so
-there is one whole-secret read in Genesis, and returns its keys and values
-as a hash reference. The values are the strings C<safe get> prints, kept
-exactly as printed, so a certificate under the last key keeps its final
-newline.
+A read that C<safe> did not finish raises: a nonzero exit, a refusal, an
+unreachable or sealed vault, a C<safe> killed by a signal, or a C<safe>
+that printed nothing. It never returns what an absent path returns. Only
+C<safe> saying that nothing is stored, or on KV v2 that the newest version
+was deleted or destroyed, answers as absent. It used to return C<undef> or
+C<{}> for a failed read as well, which let a caller act on an outage as
+though nothing had ever been stored.
 
 The path goes to C<safe> as it is given, as it always has, so a trailing
 C<^N> reads version N of the secret, and a caller that means a literal caret
-escapes it as C<\^>. A read that C<safe> did not finish, meaning a nonzero
-exit, a refusal, a C<safe> killed by a signal, or a C<safe> that printed
-nothing, returns an empty hash reference C<{}> and is logged at debug level,
-and so does a path with nothing stored. Its callers have always read those
-as an empty secret, and they keep that contract. A reader that has to tell a
-missing secret from a failed read, such as the exodus lookups and the exodus
-check in C<update_deployment_exodus>, calls L</read_flattened_secret>
-directly.
+escapes it as C<\^>.
 
-Output that C<safe> printed on a clean exit is still checked, and anything
-other than a YAML map of keys, such as a list or a string, dies as it always
-has. Taking it as C<{}> would let L</clear>'s read-back take a malformed
-answer for a path with no keys left, and write over keys that are still
-there. Anything C<safe> writes to standard error while exiting zero is
-B<not> treated as failure, because some builds emit a TLS notice on every
-call against a C<noverify> target, and the payload decides instead.
+Output that C<safe> printed on a clean exit is checked, and anything other
+than a YAML map of keys, such as a list or a string, raises. Anything
+C<safe> writes to standard error while exiting zero and printing a payload
+is B<not> treated as failure, because some builds emit a TLS notice on
+every call against a C<noverify> target, and the payload decides instead.
 
 B<Parameters:>
 
@@ -989,8 +991,9 @@ Optional. The key name within the path.
 
 =back
 
-B<Returns:> A string value when a key is requested, or a hash reference
-when only a path is given.
+B<Returns:> A string value when a key is requested, or C<undef> when that
+key or the secret is absent. A hash reference when only a path is given,
+empty when the secret is absent.
 
 B<Errors:>
 
@@ -998,10 +1001,11 @@ B<Errors:>
 
 =item C<"Could not read #C{%s} from vault at #M{%s}: %s">
 
-Raised (via C<bail()>) for a whole-secret read when C<safe> exits zero and
-prints something that is not a YAML map of keys. Every other failure of a
-whole-secret read returns C<{}>, and a single-key read returns C<undef> when
-it fails.
+Raised (via C<bail()>) by L</read_flattened_secret>, in either call form,
+when the read does not finish, or when C<safe> exits zero and prints
+nothing or something that is not a YAML map of keys. The message names the
+path, the vault, and the reason, and goes on to the likely causes and what
+to run to tell them apart.
 
 =back
 
@@ -1022,6 +1026,14 @@ B<Examples:>
   # Fetch all keys of version 2
   my $old = $vault->get('secret/myapp^2');
   # Runs: safe get secret/myapp^2
+
+  # Nothing stored at the path
+  my $none = $vault->get('secret/never-written');            # Returns: {}
+  my $key  = $vault->get('secret/never-written', 'password'); # Returns: undef
+
+  # With the vault sealed or the token refused
+  $vault->get('secret/myapp', 'password');
+  # Dies: Could not read secret/myapp from vault at https://...: <safe's error>
 
 =head2 get_if_present
 
@@ -1374,8 +1386,8 @@ its keys and values as the strings C<safe> prints. It is the strict
 whole-secret read. It returns the secret when the read worked, C<undef> when
 C<safe> says nothing is stored there (including a newest version that was
 deleted or destroyed), and dies naming the path on any other failure, in the
-same way L</get_path_strict> does. It is also the read behind a whole-secret
-L</get>, which passes both options below, so Genesis has one implementation
+same way L</get_path_strict> does. It is also the read behind L</get> in
+both its call forms and behind L</has>, so Genesis has one implementation
 of a whole-secret read. A successful read is logged at trace level with its
 key count and how long it took.
 
@@ -1427,7 +1439,9 @@ log, as nothing stored does, rather than dying. That covers a nonzero exit,
 a refusal, a signal, and a C<safe> that exited zero having printed nothing,
 which C<safe> has done for failures it reported only on stderr. Output that
 C<safe> did print on a clean exit is still checked, so a list or a string
-dies either way. L</get> uses this to keep its callers' contract.
+dies either way. Only L</_read_for_confirmation> uses it, for the loops
+that read a path again until a write or a clear has settled. No reader of
+a value does, since that would answer a failed read as absent.
 
 =back
 
@@ -1444,7 +1458,8 @@ Raised (via C<bail()>) when C<safe get> fails for any reason other than
 nothing being stored, when it is killed by a signal, when it prints nothing,
 or when what it prints is not a YAML map of keys. With C<lenient>, only the
 last of those is raised. The placeholders are the path, the vault URL, and
-the reason. The message comes from L</bail_read_failure>, which goes on to
+the reason. For a C<safe> that exited zero and printed nothing, the reason
+is C<safe printed nothing>, followed by whatever it wrote to standard error. The message comes from L</bail_read_failure>, which goes on to
 name the likely causes and to say to run C<safe get> on the path and C<safe
 vault status>.
 
@@ -2822,6 +2837,47 @@ B<Examples:>
 
   $vault->_confirm_written('secret/myapp', {user => 'admin'});
   # Returns normally once the value is readable
+
+=head2 _read_for_confirmation
+
+  my $have = $vault->_read_for_confirmation($path);
+
+Reads what a path holds now, for L</_confirm_written> and
+L</_confirm_cleared>, which read a path again and again until it shows what
+was written or nothing at all. A read that did not finish counts as nothing
+there yet, since a node that is catching up can fail a read on the way and
+the loop reads again until its deadline. It is the one caller of
+L</read_flattened_secret>'s C<lenient> option.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$path>
+
+The path that was written or cleared.
+
+=back
+
+B<Returns:> A hash reference of key to string, empty when nothing is stored
+at the path or the read did not finish.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not read #C{%s} from vault at #M{%s}: %s">
+
+Raised (via C<bail()>) by L</read_flattened_secret> when C<safe> exits zero
+and prints something that is not a YAML map of keys. Such an answer must
+never pass for a path with no keys left.
+
+=back
+
+B<Examples:>
+
+  my $have = $vault->_read_for_confirmation('secret/myapp');
+  # Returns: { password => 'hunter2' }, or {} while the write has not shown up
 
 =head2 _readback_value
 

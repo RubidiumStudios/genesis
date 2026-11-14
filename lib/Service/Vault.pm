@@ -462,21 +462,13 @@ sub get {
 	if (!defined($key) && $path =~ /:/) {
 		($path, $key) = $path =~ m/^(.*?)(?::([^:]*))?$/;
 	}
-	if (defined($key)) {
-		my ($out,$rc) = $self->query({redact_output => 1}, 'get', "$path:$key");
-		return $out if $rc == 0;
-		debug(
-			"#R{[ERROR]} Could not read #C{%s:%s} from vault at #M{%s}",
-			$path, $key,$self->{url}
-		);
-		return undef;
-	}
-	# One whole-secret read serves every caller.  These callers have always
-	# addressed a version with a trailing ^N, and taken a read that safe did
-	# not finish as an empty secret, so both stay theirs; a reader that has
-	# to tell a failure from a missing secret calls read_flattened_secret
-	# itself.
-	return $self->read_flattened_secret($path, versioned => 1, lenient => 1) // {};
+	# One strict whole-secret read serves both call forms, so a read that
+	# did not finish raises, and only safe saying nothing is stored answers
+	# as absent: undef for a key, an empty secret without one.  These callers
+	# have always addressed a version with a trailing ^N, which stays theirs.
+	my $secret = $self->read_flattened_secret($path, versioned => 1);
+	return defined($secret) ? $secret->{$key} : undef if defined($key);
+	return $secret // {};
 }
 
 # }}}
@@ -576,7 +568,9 @@ sub read_flattened_secret {
 				($values, $err) = ($json, undef);
 			}
 		} else {
-			$err = "safe printed nothing";
+			# safe has exited 0 on failures it reported only on stderr.
+			my $said = ($err // '') =~ s/\s+$//r;
+			$err = "safe printed nothing".(length($said) ? ", and said: $said" : '');
 		}
 	}
 	# A lenient caller takes a read that safe did not finish as nothing
@@ -827,8 +821,7 @@ sub _confirm_written {
 	my $deadline = gettimeofday() + $timeout;
 	my @wrong;
 	while (1) {
-		my $have = $self->get($path);
-		$have = {} unless ref($have) eq 'HASH';
+		my $have = $self->_read_for_confirmation($path);
 		@wrong = grep {
 			!defined($have->{$_})
 			|| _readback_value($have->{$_}) ne _readback_value($written->{$_})
@@ -848,6 +841,16 @@ sub _confirm_written {
 		scalar(CORE::keys %$written), $timeout
 	) if @wrong;
 	return;
+}
+
+# }}}
+# _read_for_confirmation - what a path holds now, for a confirm loop that reads until it settles {{{
+sub _read_for_confirmation {
+	my ($self, $path) = @_;
+	# A read that did not finish counts as not there yet, since the loop
+	# reads again until its deadline and a node that is catching up can fail
+	# a read on the way.  Output that is not a map of keys still raises.
+	return $self->read_flattened_secret($path, versioned => 1, lenient => 1) // {};
 }
 
 # }}}
@@ -876,8 +879,8 @@ sub _confirm_cleared {
 	my $deadline = gettimeofday() + $timeout;
 	my @left;
 	while (1) {
-		my $have = $self->get($path);
-		@left = ref($have) eq 'HASH' ? CORE::keys %$have : ();
+		my $have = $self->_read_for_confirmation($path);
+		@left = CORE::keys %$have;
 		last unless @left;
 		last if gettimeofday() >= $deadline;
 		select(undef, undef, undef, 0.25);

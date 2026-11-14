@@ -457,8 +457,8 @@ subtest 'read_flattened_secret keeps a value ending in two newlines' => sub {
 		'as they always have through get');
 };
 
-subtest 'get reads a whole secret through read_flattened_secret, and still reads a failure as empty' => sub {
-	plan tests => 3;
+subtest 'get reads a whole secret through read_flattened_secret, in both call forms, and raises on a read that failed' => sub {
+	plan tests => 8;
 	my $v = test_vault();
 	{
 		local $ENV{PATH} = fake_safe("cat '".Cwd::abs_path($FIDELITY)."'").":$ENV{PATH}";
@@ -466,9 +466,20 @@ subtest 'get reads a whole secret through read_flattened_secret, and still reads
 			'get gives the same keys and values');
 		is($v->get('secret/fixture/fidelity')->{z_cert}, $CERT,
 			'so the certificate that ends the output keeps its final newline');
+		is($v->get('secret/fixture/fidelity', 'z_cert'), $CERT, 'as it does when asked for by its key');
+		is($v->get('secret/fixture/fidelity:two_newlines'), "ends with two newlines\n\n",
+			'and a value ending in two newlines keeps both, by key');
+	}
+	{
+		local $ENV{PATH} = fake_safe("printf '%s' '".absent('secret/myapp')."' >&2; exit 1").":$ENV{PATH}";
+		is_deeply($v->get('secret/myapp'), {}, 'a secret safe says does not exist is an empty hash');
+		is($v->get('secret/myapp', 'password'), undef, 'and undef by key');
 	}
 	local $ENV{PATH} = fake_safe("printf '%s' '$REFUSED' >&2; exit 1").":$ENV{PATH}";
-	is_deeply($v->get('secret/myapp'), {}, 'a refused read still comes back empty to the callers that take it so');
+	throws_ok { $v->get('secret/myapp') } qr{Could not read secret/myapp from vault.*Code: 403}s,
+		'a refused read raises, and is never an empty hash';
+	throws_ok { $v->get('secret/myapp', 'password') } qr{Could not read secret/myapp from vault.*Code: 403}s,
+		'nor undef by key';
 };
 
 subtest 'get still stops on a successful read that prints something other than a map of keys' => sub {

@@ -206,7 +206,7 @@ sub install_lagging_vault {
 		return ('', 0, '');
 	};
 
-	# Confirmation compares values, so it reads through get() rather than
+	# Confirmation compares values, so it reads the whole secret rather than
 	# a key listing -- no path prefix is involved at any point.
 	$v->{__get} = sub {
 		$state->{reads}++;
@@ -217,12 +217,12 @@ sub install_lagging_vault {
 	return $state;
 }
 
+# The read the confirm loops make, answered by the vault's own stand-in.
 {
 	no warnings 'redefine', 'once';
-	*Service::Vault::get = sub {
-		my ($self, $path, $key) = @_;
-		return $self->{__get}->($path) if $self->{__get} && !defined($key);
-		return {};
+	*Service::Vault::_read_for_confirmation = sub {
+		my ($self, $path) = @_;
+		return $self->{__get} ? $self->{__get}->($path) : {};
 	};
 }
 
