@@ -363,10 +363,13 @@ B<Examples:>
 
 The newest successful deployment record, read once.
 
-B<Returns:> the C<Genesis::Env::Deployment>, or undef.
+B<Returns:> the C<Genesis::Env::Deployment>, or undef when the environment
+has no successful deployment on record.
 
-B<Errors:> none; a vault that cannot be read answers undef here and fails loud
-in the render.
+B<Errors:> raises what the deployment history's read raises, C<"Could not
+read ... from vault at ...">, when the vault refuses the read or does not
+answer.  It never answers undef for a failed read, because the report words
+undef as an environment that has never been deployed.
 
 B<Examples:>
 

@@ -495,10 +495,12 @@ sub _say {
 }
 
 # }}}
-# _record - the newest successful deployment record, or undef {{{
+# _record - the newest successful deployment record, or undef when there is none {{{
 sub _record {
 	my ($self) = @_;
-	$self->{record} = eval {$self->{env}->with_vault->deployments->latest_successful}
+	# A history that cannot be read raises.  Taken as no record, it would
+	# report an environment nobody could look at as never deployed.
+	$self->{record} = $self->{env}->with_vault->deployments->latest_successful
 		unless exists $self->{record};
 	return $self->{record};
 }
