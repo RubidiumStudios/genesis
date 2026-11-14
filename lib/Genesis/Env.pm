@@ -11,7 +11,7 @@ use Genesis::State qw/envset under_test in_callback/;
 use Genesis::Term qw/csprintf wrap fix_wrap decolorize in_controlling_terminal bullet/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_line prompt_for_choice new_prompt_for_choice/;
 use Genesis::Commands qw/current_command known_commands/;
-use Genesis::Exit qw/CONFIG UNAVAILABLE/;
+use Genesis::Exit qw/CONFIG DATAERR UNAVAILABLE/;
 use Genesis::Env::ManifestProvider;
 use Genesis::Env::Secrets::Plan;
 
@@ -3761,9 +3761,28 @@ sub proposed_record_path {
 # costs no API call and works with no token at all.
 sub proposed_record {
 	my ($self) = @_;
-	my $record = eval { $self->vault->get_path($self->proposed_record_path) };
-	# get_path answers {} for a path holding nothing, which is no record.
+	my $path = $self->proposed_record_path;
+	# A read that did not finish raises, since a deploy and a propagate run
+	# both act on whether a proposal stands.  get_path answers {} for a path
+	# holding nothing, which is no record.
+	my $record = $self->vault->get_path($path);
 	return undef unless $record && ref($record) eq 'HASH' && %$record;
+
+	# What set_proposed writes always carries both, each as a value.
+	my ($subtree) = grep {ref($record->{$_})} qw/control_commit number url at/;
+	my $found = $subtree ? "its #C{$subtree} is not a value but a path with more beneath it"
+		: !(defined $record->{control_commit} && length $record->{control_commit}) ? "it holds no control commit"
+		: !(defined $record->{number} && length $record->{number}) ? "it holds no pull request number"
+		: undef;
+	bail({exitcode => DATAERR},
+		"The proposed record for #C{%s}, at #C{%s}, is not one Genesis writes: %s.  ".
+		"A proposal carries the control commit a pull request proposes and that ".
+		"pull request's number.\n\n".
+		"#C{safe get %s} shows what is stored there.  Removing it with ".
+		"#C{safe rm -rf %s} leaves the environment with no proposal on record.",
+		$self->name, $path, $found, $path, $path
+	) if $found;
+
 	return {map {($_ => $record->{$_})} qw/control_commit number url at/};
 }
 
