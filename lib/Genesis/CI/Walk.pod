@@ -468,20 +468,23 @@ B<Examples:>
 
     my $durable = Genesis::CI::Walk::env_state(env => $env);
 
-One environment's durable state, which is its certified commit and the hold
-standing over it, or the reason there is none.
+One environment's durable state, which is its certified commit, the hold
+standing over it, the proposal it has open and its pipeline record, or the
+reason there is none.
 
-The two are read together because they are the two durable facts an
-environment carries, and a caller that read one of them where it happened to
-need it would read the other somewhere else.  Reading the hold here is also
-what lets an environment the pipeline was never applied to report the hold
+The four are read together because they are the durable facts an environment
+carries, and a caller that read one of them where it happened to need it
+would read the others somewhere else.  Reading the hold here is also what
+lets an environment the pipeline was never applied to report the hold
 standing over it, which a reader placed at the end of the walk never reached.
 
 This is a per-environment read, so it reaches exactly one environment.  A
-hold the vault cannot answer for raises a plain message naming the environment
-and the path, every caller runs inside L</walk_one>, and C<walk_one> records
-that environment C<failed> with the message beneath it and lets the run walk
-on to the next.  Nothing here ends the run.
+record the vault will not let the run read is answered as the C<unreadable>
+state, carrying what the vault said, and is not raised.  The environment's
+own turn ends it as C<failed> on that state, and an environment below it is
+held behind an ancestor that could not be read.  A raise would end the one
+below as failed too, with an error that is not its own.  Nothing here ends
+the run.
 
 B<Parameters:>
 
@@ -495,16 +498,18 @@ Required.  The environment whose durable state is read.
 
 B<Returns:> Everything L</certified_for> answers, which is C<state> with
 C<control_commit>, C<commit>, and C<at> beside it where the state is
-C<certified> and C<error> where it is C<unreadable>, with C<hold> beside them
-carrying that environment's hold record or null where none stands.  An
-unreadable certified commit is answered as it stands, with no C<hold> read at
-all, because the environment has already ended.
+C<certified> and C<error> where it is C<unreadable>, with C<hold>,
+C<proposed>, and C<pipeline> beside them carrying that environment's hold,
+proposed and pipeline records, each null where none stands.  An unreadable
+certified commit is answered as it stands, with none of the three read at
+all, because the environment has already ended.  Where one of the three
+cannot be read the answer is C<state> as C<unreadable> and C<error> as the
+first paragraph of what the reader raised, which names the path and what the
+vault said, and nothing else.
 
-B<Errors:> Raises a plain message where the hold record cannot be read, naming
-the environment and the path, because the run delivers on that answer and will
-not guess that there is no hold.  It is not a refusal.  L</walk_one> catches
-it, records that environment C<failed>, and the run continues, which is what
-a read that fails for one environment gets.
+B<Errors:> None of its own.  A record that cannot be read is answered as the
+C<unreadable> state, because the run delivers on these answers and will not
+guess that there is no hold, no proposal, or no pipeline record.
 
 B<Examples:>
 
@@ -907,7 +912,11 @@ deployed, or the reason there is none.
 
 Three states have no certified commit and they are kept apart, because each
 means something different to the environments below.  An environment whose
-C<with_vault> fails is broken and the walk records it as failed.  One with a
+C<with_vault> fails is broken, and one whose deployment history the vault
+will not let the run read is unreadable; the walk records either as failed.
+A history that could not be read used to be answered as an environment that
+had never deployed, which let the run act on a refusal or an outage as
+though nothing had ever been deployed there.  One with a
 readable deployment record carrying no C<git.control_commit> is one the
 pipeline was never applied to.  And one with no successful deployment at all
 has certified nothing.  Nothing here ever falls back to control's tip,

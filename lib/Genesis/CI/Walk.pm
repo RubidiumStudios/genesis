@@ -139,18 +139,18 @@ sub read_durable_state {
 #
 # Under I11 the run names the input it could not read and never guesses a
 # value in its place.  This is a per-environment read, so the failure reaches
-# exactly one environment.  The raise is a plain die rather than a refusal,
-# because every caller runs inside walk_one, which records that environment
-# failed with this message beneath it and walks on to the next.  A refusal
-# spelled here could never fire, and one that read as though it might would
-# have a reader believe an unreadable hold ends the run.
+# exactly one environment, and it comes back as the unreadable state and not
+# as a raise: the environment's own turn ends it as failed on that state, and
+# an environment below it is held behind an ancestor that could not be read.
+# A raise would end the one below as failed too, carrying an error that is
+# not its own.
 #
-# The certified commit and the hold are read together, because they are the
-# two durable facts an environment carries and a caller that read one of them
-# where it happened to need it would read the other somewhere else.  Reading
-# the hold here is also what lets an environment the pipeline was never
-# applied to report the hold standing over it, which a reader placed at the
-# end of the walk never reached.
+# The certified commit, the hold, the proposal and the pipeline record are
+# read together, because they are the durable facts an environment carries
+# and a caller that read one of them where it happened to need it would read
+# the others somewhere else.  Reading the hold here is also what lets an
+# environment the pipeline was never applied to report the hold standing
+# over it, which a reader placed at the end of the walk never reached.
 sub env_state {
 	my (%args) = @_;
 
@@ -159,24 +159,23 @@ sub env_state {
 	my $certified = certified_for($env);
 	return $certified if $certified->{error};
 
-	# certified_for reads the same vault a line above and hands its own
-	# error back, so a vault that cannot be reached at all never arrives
-	# here.  What is left for this guard is a vault that answered for the
-	# certified commit and not for the hold, which no row on the tree
-	# builds today, and it stands rather than letting such a read pass as
-	# an environment holding nothing.
-	my $hold = eval {$env->hold_record};
-	# Read off before hold_record_path runs, for the reason
-	# read_durable_state's own guard gives, which is that the reader traces,
-	# tracing evals, and a $@ read inside the argument list is the tracing's
-	# rather than the failure's.
-	my $failure = $@;
-	die sprintf(
-		"Could not read the hold record for %s at %s: %s\n",
-		$env->name, $env->hold_record_path, $failure =~ s/\s+$//r
-	) if $failure;
+	# Each is its own read, so a vault that answered for the certified commit
+	# can still refuse one of these, and none of them may pass as nothing
+	# stored.  The reason is taken off $@ before anything else runs, since
+	# the readers trace and tracing evals.
+	my %record;
+	for my $read (qw/hold_record proposed_record pipeline_record/) {
+		next if eval {$record{$read} = $env->$read; 1};
+		my $failure = $@;
+		return {state => 'unreadable', error => _load_error($failure)};
+	}
 
-	return {%$certified, hold => $hold};
+	return {
+		%$certified,
+		hold     => $record{hold_record},
+		proposed => $record{proposed_record},
+		pipeline => $record{pipeline_record},
+	};
 }
 
 # }}}
@@ -447,13 +446,14 @@ sub certified_from_record {
 # }}}
 # certified_for - one environment's certified commit, or why there is none {{{
 #
-# There are three ways to fail to read a certified commit and none of them is
-# an outage, because an unreachable vault dies at connect_and_validate before
-# any walk.  A with_vault failure is a broken environment and the walk records
-# it as failed.  A readable record with no git.control_commit is an
-# environment the pipeline was never applied to, which is held rather than
-# deployed.  And an environment with no successful deployment at all has
-# certified nothing, which is the state that holds everything below it.
+# There are four ways to have no certified commit to read.  A with_vault
+# failure is a broken environment, and a deployment history the vault will
+# not let the run read is an unreadable one; the walk records either as
+# failed, and never as an environment that has not deployed.  A readable
+# record with no git.control_commit is an environment the pipeline was never
+# applied to, which is held rather than deployed.  And an environment with no
+# successful deployment at all has certified nothing, which is the state that
+# holds everything below it.
 #
 # Nothing here ever falls back to control's tip, because that asserts a deploy
 # that did not happen and empties the set that holds the descendants, which is
@@ -465,7 +465,9 @@ sub certified_for {
 	return {state => 'unreadable', error => _load_error($@)}
 		unless $with_vault;
 
-	my $deployment = eval {$with_vault->deployments->latest_successful};
+	my $deployment;
+	return {state => 'unreadable', error => _load_error($@)}
+		unless eval {$deployment = $with_vault->deployments->latest_successful; 1};
 	return {state => 'never-certified'} unless $deployment;
 
 	my $certified = $deployment->lookup('git.control_commit');
@@ -1296,24 +1298,6 @@ sub plan {
 				return;
 			}
 
-			# The apply's mark, which says where the apply could not
-			# render a manifest for this environment.  It belongs to an
-			# environment the applied pipeline knows, and an environment
-			# it does not know has no pipeline subpath at all and carries
-			# null rather than a mark, because the reading is about
-			# discovery and not about membership.
-			#
-			# It is read here, off the environment already in hand, for the
-			# reason the marker below is: a reader that asked later would
-			# load every environment a second time and take a second exodus
-			# reading for each of them.  A vault this run cannot reach is
-			# the certified commit's refusal to raise a few lines down,
-			# where the environment ends as failed, so the mark is asked for
-			# without a guard of its own.
-			my $pipeline_record = eval {$env->pipeline_record};
-			$env_record->{discovery} = $pipeline_record
-				? $pipeline_record->{discovery} : undef;
-
 			# Whether a person rather than a trigger starts this
 			# environment's deploy, the topology node's flag, read with every
 			# other shape key (D117).  It stays null for an environment this
@@ -1339,26 +1323,32 @@ sub plan {
 			# the pipeline was never applied to.
 			#
 			# This environment's durable state comes through the one reader,
-			# so the hold arrives beside the certified commit rather than
-			# being fetched again lower down.
+			# so the hold, the proposal and the pipeline record arrive beside
+			# the certified commit rather than being fetched again lower
+			# down, and one of them the vault would not answer for ends this
+			# environment as it holds the ones below it.
 			my $certified = $durable_for_env->($name);
 			my $hold      = $certified->{hold};
-			$env_record->{certified} = $certified;
+			# The record's certified field keeps the keys it has always had;
+			# the proposal and the discovery mark have fields of their own.
+			$env_record->{certified} = {map {($_ => $certified->{$_})}
+				grep {$_ ne 'proposed' && $_ ne 'pipeline'} keys %$certified};
 
-			# The pull request this environment is already waiting on, which
-			# is durable state like the certified commit beside it and is
-			# read in the same place for that reason.  The field already
-			# stood on the record and already read null.  Nothing the walk
-			# decides turns on it; it is what a reader of the record is told
-			# about the proposal the environment has open, and it is the
-			# second of the two facts client_for_run reads when it is asked
-			# whether the run needs the API at all.  Asking for it anywhere
-			# else would mean loading every environment again.
-			#
-			# It costs one vault read per environment in the walk, because the
-			# record lives at its own path and nothing above has already
-			# fetched it.
-			$env_record->{proposed} = $env->proposed_record;
+			# The pull request this environment is already waiting on.
+			# Nothing the walk decides turns on it; it is what a reader of
+			# the record is told about the proposal the environment has open,
+			# and it is the second of the two facts client_for_run reads when
+			# it is asked whether the run needs the API at all.
+			$env_record->{proposed} = $certified->{proposed};
+
+			# The apply's mark, which says where the apply could not render a
+			# manifest for this environment.  It belongs to an environment
+			# the applied pipeline knows, and an environment it does not know
+			# has no pipeline subpath at all and carries null rather than a
+			# mark, because the reading is about discovery and not about
+			# membership.
+			$env_record->{discovery} = $certified->{pipeline}
+				? $certified->{pipeline}{discovery} : undef;
 
 			if ($certified->{state} eq 'unreadable') {
 				$env_record->{error}   = $certified->{error};
