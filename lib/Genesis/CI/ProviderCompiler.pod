@@ -430,6 +430,21 @@ colon form being kept for a deployment-vault path a worker reads. Concourse
 looks a path up relative to C</concourse/E<lt>teamE<gt>/E<lt>pipelineE<gt>/> and
 then C</concourse/E<lt>teamE<gt>/>.
 
+A reference that already starts with C<((> is returned as it was given.
+That is the form a value passed straight to Concourse takes, so an operator
+may write either form wherever C<E<lt>pathE<gt>:E<lt>keyE<gt>> is taken: a
+credential block's component keys, C<pipeline.source_control.api_token>,
+and C<pipeline.notifications.slack.webhook>. Nothing in it is checked or
+changed, so it can also name another var source or quote a path that holds
+a dot.
+
+B<Limitations:> A C<E<lt>pathE<gt>:E<lt>keyE<gt>> reference is written
+unquoted, so a path that holds a dot does not resolve in that form. A
+credential block's C<path>, and C<pipeline.shuttle.auth>, are bare paths
+the compiler appends each key to, and are not passed through. The
+C<pipeline.locker> keys never come here: they are written into the
+pipeline as given, with no translation from C<E<lt>pathE<gt>:E<lt>keyE<gt>>.
+
 B<Parameters:>
 
 =over 4
@@ -448,6 +463,8 @@ B<Examples:>
     $compiler->secret_ref({secret_ref => 'tok'});  # '((tok))'
     $compiler->secret_ref('secret/ci/git:private_key');
     # '((secret/ci/git.private_key))'
+    $compiler->secret_ref('((ci/git.private_key))');
+    # '((ci/git.private_key))', as given
 
 =head2 topological_sort($graph)
 

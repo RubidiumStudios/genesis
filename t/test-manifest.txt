@@ -186,6 +186,7 @@ unit-tests/genesis_hook_cloudconfig-resources.t # Resource (vm/disk type) handli
 unit-tests/genesis_ci_provider_registry-core.t            # the one provider registry and its enum
 unit-tests/genesis_ci_provider-package_paths.t            # every package derives its path, and the registry derives one too
 unit-tests/genesis_ci_provider-compiler_accessor.t        # a provider hands out its compiler, which holds the provider
+unit-tests/genesis_ci_provider_compiler-secret_ref.t      # T497: <path>:<key> becomes ((path.key)); a ((...)) value passes through (D167)
 unit-tests/genesis_ci_provider-yaml_serializer.t          # the hand-written YAML reads back as the structure it was written from
 unit-tests/genesis_ci_compiler-refusal_codes.t            # every refusal over an operator's own configuration exits at the configuration code
 unit-tests/genesis_ci_pipeline_descriptor-auto-update.t   # auto-update pipeline descriptor

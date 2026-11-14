@@ -3071,7 +3071,7 @@ sub _pipeline_config_schema {
 					},
 					# The token propagate opens pull requests with, where the
 					# clone's own credential is not one (contract f8).
-					api_token => {type => 'string', description => 'Vault reference, as path:key, to the GitHub token propagate opens pull requests with'},
+					api_token => {type => 'string', description => 'Vault reference, as <path>:<key> or ((path.key)), to the GitHub token propagate opens pull requests with'},
 					identity => {
 						type        => 'hash',
 						required    => \&_automated_provider_configured,
@@ -3136,7 +3136,7 @@ sub _pipeline_config_schema {
 				schema => {
 					url                  => {type => 'string',  required => 1, description => 'Locker URL'},
 					username             => {type => 'string',  description => 'Locker username'},
-					password             => {type => 'string',  description => 'Locker password, as a vault reference'},
+					password             => {type => 'string',  description => 'Locker password, written into the pipeline as given; name a secret as ((path.key))'},
 					ca_cert              => {type => 'string',  description => 'CA certificate for the locker'},
 					skip_ssl_validation  => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS verification'},
 				}
@@ -3165,7 +3165,7 @@ sub _pipeline_config_schema {
 						type        => 'hash',
 						description => 'Where the pipeline posts to Slack',
 						schema      => {
-							webhook             => {type => 'string', required => 1, description => 'Vault reference to the webhook URL'},
+							webhook             => {type => 'string', required => 1, description => 'Vault reference, as <path>:<key> or ((path.key)), to the webhook URL'},
 							channel             => {type => 'string', description => 'The channel posted to, for a legacy webhook'},
 							username            => {type => 'string', description => 'The name posted as, for a legacy webhook'},
 							icon                => {type => 'string', description => 'The icon URL posted with, for a legacy webhook'},
@@ -3331,7 +3331,7 @@ sub _credential_schema {
 		schema      => {
 			type => {type => 'enum', values => [sort keys %$types], required => 1, description => 'The kind of credential'},
 			path => {type => 'string', description => 'The vault secret holding every component under its own name'},
-			(map {($_ => {type => 'string', description => "The <path>:<key> holding $_, in place of path's"})}
+			(map {($_ => {type => 'string', description => "The <path>:<key> or ((path.key)) holding $_, in place of path's"})}
 				sort keys %components),
 			($block eq 'source_control' ? (vault => {type => 'string', check => \&_retired_credential_vault,
 				description => 'Retired: the vault secret is named by path'}) : ()),
