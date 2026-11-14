@@ -114,22 +114,23 @@ through the same steps.
 
 =item 2. Export the referenced paths
 
-One C<safe export> names every referenced path, and its raw text is decoded
-with L<Service::Vault/decode_export_text>, which keeps each value's JSON type
-and marks every path holding a value that is not a string.
+One C<safe export> names every referenced path, and the export is checked
+and copied by L<Service::Vault/plain_export>. It reads the form C<safe>
+writes unasked, in which every value is a string, so a value stored as a
+number or a boolean arrives as the text C<safe> gives it. A versioned or
+typed export is refused there, before anything is started or written; only
+C<safe> 1.26.0 writes one unasked.
 
-=item 3. Read what the export can't give as text
+=item 3. Read what the export left out
 
 A referenced path is read whole with L<Service::Vault/read_flattened_secret>,
-which runs C<safe get> on that one secret with no key, when the export holds
-a typed value there, when the export left the path out, or when the export
-itself failed. Every field of that path then comes from that one read, which
-gives each value as the text a flat export gives on every C<safe> version. So
-a referenced number or boolean reaches CredHub as the same text, and under
-the same credential name, whichever route found it. A typed path that no
-reference uses is never read, so a value nobody needs, such as the numeric
-C<pid> an older Genesis writes into its network lock beside the director's
-exodus, can't stop entombment.
+which runs C<safe get> on that one secret with no key, when the export left
+the path out or when the export itself failed. That read gives each value as
+the same text the export gives, so a referenced number or boolean reaches
+CredHub as the same text, and under the same credential name, whichever
+route found it. The read is strict in a read-only render too: a path the
+vault refuses stops the render, and only a path C<safe> says holds nothing
+is stood in for by a placeholder.
 
 =item 4. Resolve every reference
 
@@ -155,10 +156,8 @@ the local Vault, prime the CredHub cache, and write each value.
 
 The order exists because entombment used to start the local Vault and write
 values one reference at a time, so a missing value after the first one left
-earlier values written. Before typed values were read again, the export's
-strict policy refused any typed value under a referenced path, including a
-lock that nothing references, and a failed export with nothing on stderr read
-as a run of misleading "no value" errors.
+earlier values written, and a failed export with nothing on stderr read as a
+run of misleading "no value" errors.
 
 The fallback to C<safe get> is kept because Genesis still accepts C<safe> as
 old as 1.6.1, and older C<safe> exports dropped one of two paths when one name
@@ -215,12 +214,14 @@ those reads all happen before the first write.
 
 =item *
 
-C<"Cannot use the safe export..."> --
-raised via C<bail()> by L<Service::Vault/decode_export_text> when the export
-exits cleanly but its output is not JSON, or is in a shape or version Genesis
-does not read. The rest of the message names the path, when there is one,
-and says what is wrong. Nothing has been written
-when it is raised.
+C<"Cannot use the safe export of #C{%s}: ..."> --
+raised via C<bail()> when the export exits cleanly but its output is not
+JSON, and by L<Service::Vault/plain_export> when it is a versioned or typed
+export or holds a value that is not a string. The substitution is the
+referenced paths, or the first of them and how many more when there are more
+than three. The second kind goes on to say that C<safe> 1.26.0, or the
+C<-a> and C<--typed> flags, write such an export, and to use C<safe> 1.26.1
+or later. Nothing has been started or written when it is raised.
 
 =item *
 

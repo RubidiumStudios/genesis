@@ -7,8 +7,9 @@ use lib 'lib';
 use helper;
 
 # _entomb_secrets reads every vault path a manifest references with one safe
-# export, reads any path the export left out or holds a typed value at again
-# on its own, and resolves every reference before it writes anything.  These
+# export, reads any path the export left out again on its own, and resolves
+# every reference before it writes anything.  It reads the export safe writes
+# unasked, and refuses a versioned or typed one before any side effect.  These
 # tests run the real mixin in a stand-in manifest class whose environment,
 # CredHub, and local vault record every side effect, in order, and whose vault
 # is a real Service::Vault that answers safe from a script.  The last one runs
@@ -55,7 +56,8 @@ package EntombEnv {
 package EntombBuilder {
 	sub unevaluated { }
 	# A deploy's builder writes CredHub; only a read-only render does not.
-	sub writes_credhub { 1 }
+	our $WRITES = 1;
+	sub writes_credhub { $WRITES }
 }
 package EntombCredhub {
 	sub base         { '/lab-mgmt-bosh/lab-mgmt/' }
@@ -181,83 +183,75 @@ subtest 'every number shape reaches CredHub through the fallback as safe get pri
 	is(scalar(grep {$_->[0] eq 'get'} @{safe_calls()}), 1, 'from one safe get of the secret');
 };
 
-# The director's exodus on kv v2 in the shape safe 1.26.0 exports it, beside
-# a network lock that an older Genesis left holding a numeric pid, and the
-# same exodus on kv v1, where no secret has a first version number.
-my $EXODUS    = 'secret/exodus/lab-mgmt/bosh';
-my $CA_CERT   = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----";
-my $EXODUS_V2 = '[{"export_version":3,"data":{"secret/exodus/lab-mgmt/bosh":{"first":7,"versions":[{"value":{"ca_cert":"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----","url":"https://10.108.16.4:25555"}}]},"secret/exodus/lab-mgmt/bosh/network-claim-lock":{"first":19,"versions":[{"value":{"at":"2026-10-24 12:09:14 +0000","env":"lab-mgmt","hostname":"bastion","pid":3834038,"token":"6f1c2a9e","user":"ubuntu"}}]}},"requires_versioning":{}}]';
-my $EXODUS_V1 = $EXODUS_V2 =~ s/"first":\d+,//gr;
-
-# The ocfp config blobstore in the shape safe 1.26.0 exports it, with a
-# boolean path_style and a numeric port, and what safe 1.26.0 prints for a
-# safe get of it.
-my $BLOBSTORE        = 'secret/config/ocfp-lab-wayneeseguin/mgmt/bosh/blobstores/bosh';
-my $EXPORT_BLOBSTORE = qq([{"export_version":3,"data":{"$BLOBSTORE":{"first":2,"versions":[{"value":{"bucket":"bosh","endpoint":"https://s3.lab:9000","host":"s3.lab","path_style":true,"port":9000,"region":"us-east-1"}}]},"secret/config/ocfp-lab-wayneeseguin/mgmt/policies":{"versions":[{"value":{"user_provided_bosh_creds":"allow"}}]}},"requires_versioning":{}}]);
-my $GET_BLOBSTORE    = qq(--- # $BLOBSTORE\nbucket: bosh\nendpoint: https://s3.lab:9000\nhost: s3.lab\npath_style: "true"\nport: "9000"\nregion: us-east-1\n\n);
-
 sub gets_of   { [map {$_->[1]} grep {$_->[0] eq 'get'} @{safe_calls()}] }
 sub harnessed { [grep {$_->[0] ne 'safe'} @EVENTS] }
 
-subtest 'every number shape reaches CredHub as the same text by every route' => sub {
-	plan tests => 4;
+subtest 'every number shape reaches CredHub as the same text by either route' => sub {
+	plan tests => 3;
 	my @refs = map {"$NUMBERS:$_"} sort keys %PRINTED;
 	my $expected = {map {entombed_as('fixture/numbers', $_, $PRINTED{$_})} sort keys %PRINTED};
 
-	# safe 1.26.0 exports the numbers as JSON numbers, so the secret is read
-	# again with safe get.
-	my $typed = qq([{"export_version":3,"data":{"$NUMBERS":{"versions":[{"value":{"big":12345678901234567890,"e20":1e20,"e21":1e21,"half":0.5,"huge":999999999999999999999999999999999999999999,"negzero":-0,"port":"9000","tiny":1e-7}}]}},"requires_versioning":{}}]);
-	is_deeply(entomb(safe_answers($typed, $NUMBERS => $GET_NUMBERS), @refs), $expected,
-		'a format 3 export read again with safe get gives the text safe get prints');
-	is_deeply(gets_of(), [$NUMBERS], 'with one safe get of the secret');
-
-	# safe 1.25.1 and 1.26.1 export the text safe get prints.
+	# safe exports a value stored as a number as the text safe get prints.
 	my $flat = '{"'.$NUMBERS.'":{'.join(',', map {qq("$_":"$PRINTED{$_}")} sort keys %PRINTED).'}}';
-	is_deeply(entomb(safe_answers($flat), @refs), $expected,
-		'a flat format 1 export gives the same text and the same names');
+	is_deeply(entomb(safe_answers($flat), @refs), $expected, 'the export gives each number as that text');
+	is_deeply(gets_of(), [], 'with nothing read again');
 
 	# An export that left the path out reaches it through the fallback.
 	is_deeply(entomb(safe_answers('{}', $NUMBERS => $GET_NUMBERS), @refs), $expected,
-		'and so does the fallback');
+		'and the fallback gives the same text and the same names');
 };
 
-subtest 'entombment ignores a typed value the manifest does not reference' => sub {
-	plan tests => 4;
-	my $expected = {
-		entombed_as('exodus/lab-mgmt/bosh', 'ca_cert', $CA_CERT),
-		entombed_as('exodus/lab-mgmt/bosh', 'url', 'https://10.108.16.4:25555'),
-	};
-	for ([kv2 => $EXODUS_V2], [kv1 => $EXODUS_V1]) {
-		my ($kv, $export) = @$_;
-		is_deeply(entomb(safe_answers($export), "$EXODUS:url", "$EXODUS:ca_cert"), $expected,
-			"on $kv, the exodus reaches CredHub though the lock beside it holds a numeric pid");
-		is_deeply(gets_of(), [], 'and nothing is read with safe get, the lock least of all');
+# The ocfp config blobstore, whose path_style is stored as a boolean and
+# whose port as a number, as safe exports it: each as text.
+my $BLOBSTORE        = 'secret/config/ocfp-lab-wayneeseguin/mgmt/bosh/blobstores/bosh';
+my $EXPORT_BLOBSTORE = qq({"$BLOBSTORE":{"bucket":"bosh","endpoint":"https://s3.lab:9000","host":"s3.lab","path_style":"true","port":"9000","region":"us-east-1"},"secret/config/ocfp-lab-wayneeseguin/mgmt/policies":{"user_provided_bosh_creds":"allow"}});
+
+subtest 'a value stored as a boolean or a number reaches CredHub as the text safe exports' => sub {
+	plan tests => 2;
+	is_deeply(entomb(safe_answers($EXPORT_BLOBSTORE), "$BLOBSTORE:port", "$BLOBSTORE:path_style"), {
+		entombed_as('config/ocfp-lab-wayneeseguin/mgmt/bosh/blobstores/bosh', 'port', '9000'),
+		entombed_as('config/ocfp-lab-wayneeseguin/mgmt/bosh/blobstores/bosh', 'path_style', 'true'),
+	}, 'the port reaches CredHub as 9000 and path_style as true');
+	is_deeply(gets_of(), [], 'straight from the export');
+};
+
+# The exports safe writes only when given -a or --typed, which Genesis never
+# passes, and which safe 1.26.0 alone wrote unasked: here the director's
+# exodus beside a network lock holding a numeric pid.
+my $EXODUS   = 'secret/exodus/lab-mgmt/bosh';
+my $TYPED    = '[{"export_version":3,"data":{"secret/exodus/lab-mgmt/bosh":{"first":7,"versions":[{"value":{"url":"https://10.108.16.4:25555"}}]},"secret/exodus/lab-mgmt/bosh/network-claim-lock":{"first":19,"versions":[{"value":{"pid":3834038,"user":"ubuntu"}}]}},"requires_versioning":{}}]';
+my $VERSIONED = '[{"export_version":2,"data":{"secret/exodus/lab-mgmt/bosh":{"versions":[{"value":{"url":"https://10.108.16.3:25555"}},{"value":{"url":"https://10.108.16.4:25555"}}]}},"requires_versioning":{"secret":true}}]';
+
+subtest 'entombment refuses a versioned or typed export before any side effect' => sub {
+	plan tests => 6;
+	for (['a typed export' => $TYPED], ['a versioned export' => $VERSIONED]) {
+		my ($what, $export) = @$_;
+		throws_ok { entomb(safe_answers($export), "$EXODUS:url") }
+			qr{Cannot\s+use\s+the\s+safe\s+export\s+of\s+\Q$EXODUS\E.*safe\s+1\.26\.0.*-a.*--typed.*safe\s+1\.26\.1\s+or\s+later}s,
+			"$what stops entombment, naming the path, the safe that writes it, and the remedy";
+		is_deeply(gets_of(), [], "$what: nothing is read another way");
+		is_deeply(harnessed(), [], "$what: and it stops before the local vault starts or anything reaches CredHub");
 	}
 };
 
-subtest 'entombment takes a referenced typed value from safe get' => sub {
-	plan tests => 4;
-	is_deeply(entomb(safe_answers($EXPORT_BLOBSTORE, $BLOBSTORE => $GET_BLOBSTORE), "$BLOBSTORE:port"),
-		{entombed_as('config/ocfp-lab-wayneeseguin/mgmt/bosh/blobstores/bosh', 'port', '9000')},
-		'a referenced numeric port reaches CredHub as 9000');
-	is_deeply(gets_of(), [$BLOBSTORE], 'read again whole with one safe get');
-	is_deeply(entomb(safe_answers($EXPORT_BLOBSTORE, $BLOBSTORE => $GET_BLOBSTORE), "$BLOBSTORE:path_style"),
-		{entombed_as('config/ocfp-lab-wayneeseguin/mgmt/bosh/blobstores/bosh', 'path_style', 'true')},
-		'a referenced boolean path_style reaches CredHub as true');
-	is_deeply(gets_of(), [$BLOBSTORE], 'read again whole with one safe get');
-};
+subtest 'a read-only render stops on a read the vault refuses, and does not call the secret missing' => sub {
+	plan tests => 5;
+	local $EntombBuilder::WRITES = 0;
+	my @refs = ('secret/a:password', 'secret/ab:password');
+	my $placeholders = sub { [map {[@{$_}[1..3]]} grep {$_->[0] eq 'local_vault_set' && $_->[3] eq '<missing>'} @EVENTS] };
 
-subtest 'a referenced zero is untouched by an unreferenced -0 elsewhere' => sub {
-	plan tests => 4;
-	my $export = sub {qq([{"export_version":3,"data":{"secret/app":{"versions":[{"value":{"retries":$_[0]}}]},"secret/app/other":{"versions":[{"value":{"offset":-0}}]}},"requires_versioning":{}}])};
-	my $get_app = qq(--- # secret/app\nretries: "0"\n\n);
+	throws_ok { entomb(safe_answers($EXPORT_A, 'secret/ab' => ['', 1, $REFUSED]), @refs) }
+		qr{Could not read secret/ab from vault at https://vault\.example\.com:8200:\s.*Code: 403.*permission denied}s,
+		'a refused read of a path the export left out stops the render, naming the path and the reason';
+	is_deeply($placeholders->(), [], 'and nothing is stood in for it as a missing secret');
 
-	is_deeply(entomb(safe_answers($export->('0'), 'secret/app' => $get_app), 'secret/app:retries'),
-		{entombed_as('app', 'retries', '0')}, 'a referenced numeric zero reaches CredHub as 0');
-	is_deeply(gets_of(), ['secret/app'], 'from a safe get of its own secret, and secret/app/other is never read');
-	is_deeply(entomb(safe_answers($export->('"0"'), 'secret/app' => $get_app), 'secret/app:retries'),
-		{entombed_as('app', 'retries', '0')}, 'a referenced string zero reaches CredHub as 0');
-	is_deeply(gets_of(), [], 'straight from the export, since the -0 marks only the path that holds it');
+	throws_ok { entomb(safe_answers(['', 1, $REFUSED], 'secret/a' => ['', 1, $REFUSED], 'secret/ab' => ['', 1, $REFUSED]), @refs) }
+		qr{Could not read secret/ab? from vault .*permission denied}s,
+		'and so does a refused export whose paths are then each refused';
+
+	lives_ok { entomb(safe_answers($EXPORT_A), @refs) } 'a secret safe says does not exist still renders';
+	is_deeply($placeholders->(), [['/secret/ab', 'password', '<missing>']],
+		'with a placeholder standing in for it, which the render\'s reader names');
 };
 
 subtest 'entombment reports a missing value before any side effect' => sub {
@@ -321,17 +315,6 @@ subtest 'entombment keeps dots and colons in key names' => sub {
 	is_deeply(entomb(safe_answers('{"secret/app":{"tls.key:v2":"pem"}}'), 'secret/app:tls.key:v2'),
 		{entombed_as('app', 'tls.key:v2', 'pem')},
 		'the reference splits at its first colon, so the key is tls.key:v2');
-};
-
-subtest 'entombment gives the same names for string values whether safe wrote format 1 or format 3' => sub {
-	plan tests => 3;
-	my @refs = ('secret/a:password', 'secret/b:user');
-	my $v1 = entomb(safe_answers('{"secret/a":{"password":"apple"},"secret/b":{"user":"bob"}}'), @refs);
-	# safe 1.26.0 writes format 3 only because secret/c holds a number.
-	my $v3 = entomb(safe_answers('[{"export_version":3,"data":{"secret/a":{"versions":[{"value":{"password":"apple"}}]},"secret/b":{"first":4,"versions":[{"value":{"user":"bob"}}]},"secret/c":{"versions":[{"value":{"n":1}}]}},"requires_versioning":{}}]'), @refs);
-	is_deeply($v1, {entombed_as('a', 'password', 'apple'), entombed_as('b', 'user', 'bob')}, 'format 1 gives these names');
-	is_deeply($v3, $v1, 'and format 3 gives the same ones');
-	is_deeply(gets_of(), [], 'without reading anything again');
 };
 
 subtest 'a CredHub failure after the first write leaves earlier writes in place and fails the run' => sub {

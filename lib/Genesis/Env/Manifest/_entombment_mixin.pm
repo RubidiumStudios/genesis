@@ -1,6 +1,6 @@
 # Mixin to provide entombment functionality - require to use;
 
-use Genesis qw/info debug bail lines uniq/;
+use Genesis qw/info debug bail lines uniq read_json_from/;
 use Genesis::Term qw/terminal_width wrap csprintf/;
 
 use Service::Vault;
@@ -65,31 +65,37 @@ sub _entomb_secrets {
 			$canonical{$s} = $s =~ s#/$##r =~ s#^/##r =~ s#/{2,}#/#gr;
 		}
 
-		# One export reads every referenced path, decoded from its raw text so
-		# that a value that is not a string is seen as one.  A failed export
-		# leaves each path to be read on its own below, where the read says
-		# why it failed or finds nothing stored.
-		my ($text, $rc, $err) = $src_vault->query(
+		# One export reads every referenced path.  A failed export leaves each
+		# path to be read on its own below, where the read says why it failed
+		# or finds nothing stored.  An export that worked is read as the plain
+		# form or refused, before anything is started or written.
+		my @paths = uniq(sort values %canonical);
+		my ($export, $rc, $err) = read_json_from($src_vault->query(
 			{stderr => 0, redact_output => 1, exact => 1}, "export", keys %secret_keys
-		);
-		debug(
-			"safe export of the referenced paths failed, so each is read on its own: %s",
-			$err || "exit code $rc"
-		) if $rc;
-		my ($export, $typed) = $rc ? ({}, {}) : Service::Vault::decode_export_text($text);
+		));
+		my $exported = @paths > 3
+			? sprintf("%s and %d more paths", $paths[0], @paths - 1)
+			: join(' and ', @paths);
+		if ($rc) {
+			debug(
+				"safe export of the referenced paths failed, so each is read on its own: %s",
+				$err || "exit code $rc"
+			);
+			$export = {};
+		} else {
+			bail(
+				"Cannot use the safe export of #C{%s}: it is not JSON: %s",
+				$exported, ($err =~ s/\s+$//r) || 'it is empty'
+			) if $err;
+			$export = Service::Vault::plain_export($export, $exported);
+		}
 
-		# safe get gives every value of a typed path as the text a flat export
-		# gives, so a referenced typed path is read again whole and all its
-		# fields come from that one read.  A path the export left out is read
-		# the same way, since older safe exports dropped one of two paths when
-		# one name begins with the other.  Only referenced paths are read, so a
-		# typed value nobody references, such as the numeric pid an older
-		# Genesis writes into its network lock, cannot stop entombment.
+		# A path the export left out is read whole on its own, since older
+		# safe exports dropped one of two paths when one name begins with the
+		# other.
 		my %secret_values;
-		for my $path (uniq(sort values %canonical)) {
-			$secret_values{$path} = (defined($export->{$path}) && !$typed->{$path})
-				? $export->{$path}
-				: $src_vault->read_flattened_secret($path);
+		for my $path (@paths) {
+			$secret_values{$path} = $export->{$path} // $src_vault->read_flattened_secret($path);
 		}
 
 		# Every reference resolves before the local vault starts or anything
