@@ -12,6 +12,7 @@ use Genesis qw/
 	EXODUS_TIME_FORMAT EXODUS_TIME_FORMAT_SHORT
 /;
 use Genesis::Env::Deployment;
+use Genesis::Exit qw/DATAERR/;
 use Genesis::Term;
 
 use Digest::file qw/digest_file_hex/;
@@ -293,6 +294,28 @@ sub _all {
 		unless ($deployments && keys %$deployments) {
 			$self->{__all_deployments} = [];
 			return wantarray ? () : [];
+		}
+
+		# An older shape is filled below; an entry that is not a record at all
+		# is not, because nothing says which deployment it stands where, and
+		# it could be the latest.  A value set on the history's own path
+		# reads as such an entry.
+		my $path = $env->exodus_base.'/deployments';
+		for my $at (sort keys %$deployments) {
+			my $entry = $deployments->{$at};
+			next if ref($entry) eq 'HASH';
+			bail({exitcode => DATAERR},
+				"The deployment history of #C{%s}, at #C{%s}, holds an entry that ".
+				"is not a deployment record: #C{%s} is %s, where each entry is a ".
+				"record of one deployment, named by when it was made.\n\n".
+				"Nothing was read from the rest of the history, since this entry ".
+				"could stand where the latest deployment is.  #C{safe get %s} ".
+				"shows what is stored there.  Remove what is not a deployment's ".
+				"record, and run the command again.",
+				$env->name, $path, $at,
+				ref($entry) ? 'a '.lc(ref($entry)) : 'a single value',
+				($path =~ s{^/}{}r)
+			);
 		}
 
 		# Create a new deployment object for each deployment.  from_storage

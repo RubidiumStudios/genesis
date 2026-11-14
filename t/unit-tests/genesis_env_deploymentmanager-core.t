@@ -1654,6 +1654,47 @@ subtest 'the deprecated-record note is emitted once, not per record' => sub {
 		'timestamps stay out of the note -- they are trace detail');
 };
 
+# A record in an older shape is read and filled, because it is a deployment
+# that happened.  An entry that is not a record at all is a different thing:
+# the manager owns the history (D161), cannot tell which deployment the entry
+# stands where, and so says what it found rather than fall over on it or
+# pass it by.  A value set on the history's own path reads as such an entry.
+subtest 'an entry that is not a deployment record is named, not tripped over' => sub {
+	plan tests => 6;
+
+	my $history = {
+		'20261114120000' => {action => 'deploy', result => 'success', deployer => 'a', kit_id => 'generic/1.0.0'},
+		'note'           => 'left here by hand',
+	};
+	my $mock_vault = Mock->new(
+		has          => sub { return 0 },
+		get          => sub { return '{}' },
+		get_path     => sub { return $history },
+		authenticate => sub { return $_[0] },
+		query        => sub { return ('', 0, '') },
+	);
+	my $env = make_mock_env(vault => $mock_vault, exodus_lookup => sub { return undef });
+	my $mgr = bless {env => $env}, 'Genesis::Env::DeploymentManager';
+
+	local $SIG{__DIE__} = 'DEFAULT';
+	my ($err, $raw);
+	combined_from { eval { $mgr->_all; 1 } or $raw = $@ };
+	$err = ($raw // '') =~ s/\s+/ /gr;
+
+	like($err, qr{deployment history of test-env, at /secret/exodus/test-env/deployments, holds an entry that is not a deployment record},
+		'it raises, naming the environment and the history');
+	like($err, qr/note is a single value/, 'the entry, and what it is');
+	like($err, qr{safe get secret/exodus/test-env/deployments}, 'and how to look at it');
+	unlike($err, qr/Can't use string|strict refs/, 'in its own words and not in Perl\'s');
+	ok(!defined $mgr->{__all_deployments}, 'and no history is cached from it');
+
+	# The older shape beside it is still read
+	delete $history->{note};
+	my @all;
+	combined_from { @all = eval { $mgr->_all } };
+	is(scalar(@all), 1, 'the same history without the stray entry reads, older shape and all');
+};
+
 subtest 'the deployment history stops on a nonzero export exit instead of reading as undeployed' => sub {
 	plan tests => 3;
 	require Service::Vault;

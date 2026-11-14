@@ -490,6 +490,14 @@ killed by a signal, it dies naming the path and caches nothing. It once read
 a failed read as an empty history, so an outage made an environment look as
 though it had never been deployed.
 
+Each entry of the history is a record of one deployment, named by when it
+was made. A record in an older shape is read and filled by
+C<Genesis::Env::Deployment>, because it is a deployment that happened. An
+entry that is not a map at all is not a record, and the manager, which owns
+the history, says so and reads nothing. It cannot tell which deployment the
+entry stands where, and it could be the latest. A value set on the
+history's own path reads as such an entry.
+
 Modifies the object in-place by populating C<{__all_deployments}> on first
 call.
 
@@ -501,6 +509,14 @@ B<Errors:>
 
 Raised by C<Service::Vault::get_path> when the deployment history cannot be
 read for any reason other than nothing being stored there.
+
+=item C<"The deployment history of #C{%s}, at #C{%s}, holds an entry that is not a deployment record: ...">
+
+Raised (via C<bail()>, exit C<DATAERR>) when an entry of the history is not
+a map. The message names the environment, the history's path, the entry and
+what it is, and says that nothing was read from the rest, how to look at
+what is stored with C<safe get>, and to remove what is not a deployment's
+record. Nothing is cached.
 
 =back
 
