@@ -6,13 +6,12 @@ use lib 't';
 use lib 'lib';
 use helper;
 
-# Safe's export text is decoded by Service::Vault::decode_export_text, which
-# turns the v1, v2, and v3 export formats into the flat v1 shape, keeps the
-# JSON type of every value, and marks every path holding a value that is not
-# a string.  Service::Vault::normalize_export does the same for an export
-# already decoded, and refuses any value that is not a string.  The fixtures
-# are JSON text, because a JSON number is told from a JSON string by how it
-# was decoded.
+# How Genesis reads safe's export and its whole-secret get: the one form of
+# export it reads and the refusal of every other, by get_path and by the
+# secrets store; what a read that did not finish does in each; and what the
+# strict whole-secret reader keeps of the bytes safe prints.  The export
+# fixtures are JSON text, because a JSON number is told from a JSON string
+# by how it was decoded.
 
 use_ok 'Service::Vault';
 use_ok 'Genesis::Env::Secrets::Store::Vault';
@@ -21,8 +20,8 @@ use Genesis qw/load_json/;
 use Test::Output;
 use Cwd ();
 
-# v2 and v3 wrap one export object in an array; the values of v3 keep the
-# JSON type they were stored with.
+# The versioned and typed exports wrap one export object in an array; the
+# values of the typed one keep the JSON type they were stored with.
 sub versioned {
 	my ($version, $data) = @_;
 	return sprintf('[{"export_version":%s,"data":%s,"requires_versioning":{}}]', $version, $data);
@@ -107,193 +106,6 @@ subtest 'plain_export refuses every other form with one message' => sub {
 		throws_ok { Service::Vault::plain_export($data, 'secret/myapp') } $REFUSAL,
 			"$case: and which safe, or which flags, write such an export";
 	}
-};
-
-subtest 'normalize_export reads every export version as v1' => sub {
-	is_deeply(Service::Vault::normalize_export(load_json($V1)), \%WANT,
-		'v1 comes back as it was');
-	is_deeply(Service::Vault::normalize_export(load_json($V2)), {%WANT, 'secret/myapp/empty' => {}},
-		'v2 gives the newest version of each path, and an empty live version as no keys');
-	is_deeply(Service::Vault::normalize_export(load_json($V3)), \%WANT,
-		'v3 gives the newest version, and a typed value in an older version does not matter');
-	is_deeply(Service::Vault::normalize_export({}), {}, 'an empty export is empty');
-	is(Service::Vault::normalize_export(undef), undef, 'no export at all stays undef');
-	is_deeply(Service::Vault::normalize_export(load_json('{"secret/myapp":null,"secret/b":{"k":"v"}}')),
-		{'secret/b' => {k => 'v'}}, 'a v1 path with no value is left out');
-};
-
-subtest 'normalize_export keeps strings that look like other types' => sub {
-	my $data = load_json(versioned(3,
-		'{"secret/a":{"versions":[{"value":{"n":"42","b":"true","z":"null","o":"{}","e":""}}]}}'));
-	is_deeply(Service::Vault::normalize_export($data),
-		{'secret/a' => {n => '42', b => 'true', z => 'null', o => '{}', e => ''}},
-		'v3 strings come through whatever they spell');
-};
-
-subtest 'normalize_export refuses a typed value, naming its path and key' => sub {
-	my %typed = (
-		'a number'  => ['42',          'number'],
-		'a float'   => ['1.5',         'number'],
-		'a boolean' => ['true',        'boolean'],
-		'a null'    => ['null',        'null'],
-		'an object' => ['{"a":"b"}',   'object'],
-		'a list'    => ['["a","b"]',   'list'],
-	);
-	plan tests => keys(%typed) + 2;
-	for my $case (sort keys %typed) {
-		my ($json, $type) = @{$typed{$case}};
-		my $data = load_json(versioned(3,
-			qq({"secret/myapp/db":{"versions":[{"value":{"host":"localhost","port":$json}}]}})));
-		throws_ok { Service::Vault::normalize_export($data) }
-			qr{secret/myapp/db.*\bport\b.*typed.*JSON\s+$type.*not\s+a\s+string.*Genesis}s,
-			"v3 with $case dies naming the path, the key, and the type";
-	}
-	throws_ok { Service::Vault::normalize_export(load_json('{"secret/myapp":{"port":8443}}')) }
-		qr{secret/myapp.*\bport\b.*typed.*JSON\s+number}s,
-		'a typed value in v1 dies as well';
-	throws_ok { Service::Vault::normalize_export(load_json(versioned(2,
-		'{"secret/myapp":{"versions":[{"value":{"port":8443}}]}}'))) }
-		qr{secret/myapp.*\bport\b.*typed.*JSON\s+number}s,
-		'and in v2';
-};
-
-subtest 'normalize_export refuses a format it does not know' => sub {
-	my %bad = (
-		'an unknown export_version' => [versioned(4, '{}'),                      qr/export_version\s+4.*1,\s+2,\s+and\s+3/s],
-		'no export_version'         => ['[{"data":{}}]',                          qr/export_version\s+\(none\)/s],
-		'two exports in the array'  => ['['.versioned(2,'{}').','.versioned(2,'{}').']', qr/one\s+export.*holds\s+2/s],
-		'an array of a string'      => ['["nope"]',                               qr/one\s+export/s],
-		'a bare string'             => ['"nope"',                                 qr/not\s+an\s+object\s+or\s+an\s+array/s],
-		'a v1 path that is a list'  => ['{"secret/a":["x"]}',                     qr{secret/a.*not\s+an\s+object\s+of\s+keys}s],
-		'versions that are not a list' => [versioned(2, '{"secret/a":{"versions":{}}}'), qr{secret/a.*versions.*not\s+a\s+list}s],
-		'a value that is not an object' => [versioned(3, '{"secret/a":{"versions":[{"value":"x"}]}}'), qr{secret/a.*not\s+an\s+object\s+of\s+keys}s],
-	);
-	plan tests => scalar keys %bad;
-	for my $case (sort keys %bad) {
-		my ($json, $error) = @{$bad{$case}};
-		my $data = load_json($json);
-		throws_ok { Service::Vault::normalize_export($data) } qr/Cannot\s+use\s+the\s+safe\s+export.*$error/s,
-			"$case dies clearly";
-	}
-};
-
-# ---------------------------------------------------------------------------
-# Decoding safe's export text
-# ---------------------------------------------------------------------------
-
-# Exports in the shape safe 1.26.0 writes.  The values of format 3 are the
-# JSON each secret was stored as, verbatim, so a number keeps the digits it
-# was written with.  Strings in them are escaped as Go's json.Marshal
-# escapes them, so <, &, and > are the six-byte \u003c, \u0026, and \u003e.
-my $EXODUS_KV2 = '[{"export_version":3,"data":{"secret/exodus/lab-mgmt/bosh":{"first":7,"versions":[{"value":{"ca_cert":"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----","url":"https://10.108.16.4:25555"}}]},"secret/exodus/lab-mgmt/bosh/network-claim-lock":{"first":19,"versions":[{"value":{"at":"2026-10-24 12:09:14 +0000","env":"lab-mgmt","hostname":"bastion","pid":3834038,"token":"6f1c2a9e","user":"ubuntu"}}]}},"requires_versioning":{}}]';
-my $OCFP_CONFIG = '[{"export_version":3,"data":{"secret/config/ocfp-lab-wayneeseguin/mgmt/bosh/blobstores/bosh":{"first":2,"versions":[{"value":{"bucket":"bosh","endpoint":"https://s3.lab:9000","host":"s3.lab","path_style":true,"port":9000,"region":"us-east-1"}}]},"secret/config/ocfp-lab-wayneeseguin/mgmt/policies":{"versions":[{"value":{"user_provided_bosh_creds":"allow"}}]}},"requires_versioning":{}}]';
-my $HUGE = '999999999999999999999999999999999999999999';
-my $NUMBERS = '[{"export_version":3,"data":{"secret/fixture/numbers":{"versions":[{"value":{'.
-	'"e20":1e20,"e21":1e21,"half":0.5,"huge":'.$HUGE.',"negzero":-0,"quoted":"9000","tiny":1e-7,"u64":12345678901234567890'.
-	'}}]},"secret/fixture/strings":{"versions":[{"value":{"n":"9000","t":"true"}}]}},"requires_versioning":{}}]';
-my $LOCK = 'secret/exodus/lab-mgmt/bosh/network-claim-lock';
-
-sub value_type { Service::Vault::_export_value_type($_[0]) // 'string' }
-
-subtest 'decode_export_text keeps the JSON type of every value' => sub {
-	my $text = versioned(3, '{"secret/a":{"versions":[{"value":{"n":"42"}},{"value":{'.
-		'"bool":false,"count":42,"empty":"","list":["p",{"q":1}],"nothing":null,'.
-		'"config":{"a":"x","b":[1,2],"tag":"\u003ca\u0026b\u003e"},"ratio":0.5,"tag":"\u003ca\u0026b\u003e"'.
-	'}}]}}');
-	my ($export, $typed) = Service::Vault::decode_export_text($text);
-	my $pairs = $export->{'secret/a'};
-	my %want = (bool => 'boolean', count => 'number', empty => 'string', list => 'list',
-		nothing => 'null', config => 'object', ratio => 'number', tag => 'string');
-	is_deeply({map {($_ => value_type($pairs->{$_}))} keys %$pairs}, \%want,
-		'each value of the current version keeps its JSON type');
-	ok(!$pairs->{bool} && JSON::PP::is_bool($pairs->{bool}), 'a boolean stays a JSON boolean');
-	is(0 + $pairs->{count}, 42, 'a number keeps its value');
-	is_deeply($pairs->{config}, {a => 'x', b => [1, 2], tag => '<a&b>'},
-		'an object keeps its structure, and its escaped strings decode');
-	is($pairs->{tag}, '<a&b>', 'a string escaped by json.Marshal decodes to its text');
-	is_deeply($typed, {'secret/a' => [qw/bool config count list nothing ratio/]},
-		'and the path is marked with every key that is not a string');
-
-	my $only = Service::Vault::decode_export_text($text);
-	is(ref($only), 'HASH', 'in scalar context it returns just the export');
-	ok(exists $only->{'secret/a'}, 'with its paths');
-
-	for my $case (['v1', $V1, \%WANT], ['v2', $V2, {%WANT, 'secret/myapp/empty' => {}}], ['v3', $V3, \%WANT]) {
-		my ($label, $json, $want) = @$case;
-		my ($got, $marks) = Service::Vault::decode_export_text($json);
-		is_deeply($got, $want, "$label reads as normalize_export reads it");
-		is_deeply($marks, {}, "and with only strings current, no path is marked");
-	}
-};
-
-subtest 'decode_export_text reads an integer too large for Perl as a number' => sub {
-	my $text = versioned(3, '{"secret/a":{"versions":[{"value":{"big":'.$HUGE.'}}]}}');
-	is(value_type(load_json($text)->[0]{data}{'secret/a'}{versions}[0]{value}{big}), 'string',
-		'decoded without bignums, it reads as a string of digits');
-	my ($export, $typed) = Service::Vault::decode_export_text($text);
-	is(value_type($export->{'secret/a'}{big}), 'number', 'decoded from the raw text, it is a number');
-	is("$export->{'secret/a'}{big}", $HUGE, 'with every digit');
-	is_deeply($typed, {'secret/a' => ['big']}, 'and its path is marked');
-};
-
-subtest 'decode_export_text marks every path holding a value that is not a string' => sub {
-	my ($export, $typed) = Service::Vault::decode_export_text($NUMBERS);
-	is_deeply($typed, {'secret/fixture/numbers' => [qw/e20 e21 half huge negzero tiny u64/]},
-		'every number shape marks its path, and the strings path and the quoted "9000" are left unmarked');
-	is(value_type($export->{'secret/fixture/numbers'}{negzero}), 'number',
-		'-0 is a number, though it decodes as zero');
-	is($export->{'secret/fixture/numbers'}{quoted}, '9000', 'the quoted "9000" is the string 9000');
-	is(value_type($export->{'secret/fixture/numbers'}{quoted}), 'string', 'and stays a string');
-
-	($export, $typed) = Service::Vault::decode_export_text($EXODUS_KV2);
-	is_deeply($typed, {$LOCK => ['pid']}, 'a lock with a number pid marks only the lock');
-	is($export->{'secret/exodus/lab-mgmt/bosh'}{url}, 'https://10.108.16.4:25555',
-		'and the exodus beside it holds its strings');
-
-	($export, $typed) = Service::Vault::decode_export_text($OCFP_CONFIG);
-	is_deeply($typed, {'secret/config/ocfp-lab-wayneeseguin/mgmt/bosh/blobstores/bosh' => [qw/path_style port/]},
-		'a blobstore with a boolean path_style and a number port marks the blobstore');
-	is_deeply($export->{'secret/config/ocfp-lab-wayneeseguin/mgmt/policies'}, {user_provided_bosh_creds => 'allow'},
-		'and leaves the policies beside it as they are');
-
-	($export, $typed) = Service::Vault::decode_export_text(versioned(3, '{'.
-		'"secret/old":{"versions":[{"value":{"n":1}},{"value":{"n":"1"}}]},'.
-		'"secret/gone":{"versions":[{"value":{"n":"1"}},{"value":{"n":2},"deleted":true}]}}'));
-	is_deeply([$export, $typed], [{'secret/old' => {n => '1'}}, {}],
-		'a typed value in an older or deleted version marks nothing');
-};
-
-subtest 'decode_export_text refuses a format it does not know, or text that does not decode' => sub {
-	throws_ok { Service::Vault::decode_export_text(versioned(4, '{}')) }
-		qr/Cannot\s+use\s+the\s+safe\s+export.*export_version\s+4/s, 'an unknown export_version dies as normalize_export does';
-	throws_ok { Service::Vault::decode_export_text('{"secret/a":["x"]}') }
-		qr{Cannot\s+use\s+the\s+safe\s+export\s+of\s+secret/a.*not\s+an\s+object\s+of\s+keys}s, 'and so does a path that is not an object';
-	throws_ok { Service::Vault::decode_export_text('{"secret/a":') }
-		qr/Cannot\s+use\s+the\s+safe\s+export:\s+it\s+is\s+not\s+JSON/s, 'text that does not decode dies';
-	throws_ok { Service::Vault::decode_export_text('') }
-		qr/Cannot\s+use\s+the\s+safe\s+export:\s+it\s+is\s+not\s+JSON/s, 'and so does no text at all';
-};
-
-subtest 'normalize_export already refuses 12345678901234567890 as a number' => sub {
-	plan tests => 1;
-	throws_ok { Service::Vault::normalize_export(load_json(versioned(3,
-		'{"secret/a":{"versions":[{"value":{"u64":12345678901234567890}}]}}'))) }
-		qr{secret/a.*\bu64\b.*typed.*JSON\s+number}s,
-		'an integer that fits an unsigned native type decodes as a number';
-};
-
-subtest 'normalize_export reads a released kv v2 lock in format 1 and in format 3' => sub {
-	plan tests => 3;
-	is_deeply(Service::Vault::normalize_export(load_json(qq({"$LOCK":{}}))), {$LOCK => {}},
-		'format 1 gives the released lock no keys');
-	is_deeply(Service::Vault::normalize_export(load_json(versioned(3,
-		qq({"secret/exodus/lab-mgmt/bosh":{"versions":[{"value":{"url":"https://10.108.16.4:25555"}}]},"$LOCK":{"first":20,"versions":[{}]}})))),
-		{'secret/exodus/lab-mgmt/bosh' => {url => 'https://10.108.16.4:25555'}, $LOCK => {}},
-		'and so does format 3, where the released version has no value');
-	my ($export, $typed) = Service::Vault::decode_export_text(versioned(3,
-		qq({"secret/exodus/lab-mgmt/bosh":{"versions":[{"value":{"port":25555}}]},"$LOCK":{"first":20,"versions":[{}]}})));
-	is_deeply([$export->{$LOCK}, $typed], [{}, {'secret/exodus/lab-mgmt/bosh' => ['port']}],
-		'and a format 3 export forced by a typed value beside it marks only that value\'s path');
 };
 
 subtest 'get_path and get_path_strict read a plain export, and refuse any other' => sub {

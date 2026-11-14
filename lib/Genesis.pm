@@ -851,12 +851,11 @@ sub lines {
 }
 
 sub read_json_from {
-	my $opts = ref($_[0]) eq 'HASH' ? shift : undef; # load_json's options, such as allow_bignum
 	my ($out, $rc, $err) = @_;
 	local $@;
 	my $json;
 	unless ($rc) {
-		eval {$json = load_json($out, $opts)};
+		eval {$json = load_json($out)};
 		$err = $@; # previous error was non-fatal, so override
 	}
 	return ($json,$rc,$err) if (wantarray);
@@ -1257,10 +1256,8 @@ sub time_exec {
 # Data handling
 
 sub load_json {
-	my ($json, $opts) = @_;
-	my $decoder = JSON::PP->new->allow_nonref;
-	$decoder->allow_bignum if ($opts // {})->{allow_bignum};
-	return $decoder->decode($json);
+	my ($json) = @_;
+	return JSON::PP->new->allow_nonref->decode($json);
 }
 
 sub load_json_file {

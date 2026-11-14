@@ -126,7 +126,7 @@ for my $kv_version (1, 2) {
 		my $stored = stored_json($mount, $kv_version, 'exodus/lock-it/bosh/network-claim-lock');
 		is_deeply([sort keys %{$stored // {}}], [qw(at env hostname pid token user)],
 			'the vault holds every field of the lock');
-		is_deeply([grep { ref($stored->{$_}) || Service::Vault::_export_value_type($stored->{$_}) } sort keys %$stored], [],
+		is_deeply([grep { Service::Vault::_json_type($stored->{$_}) ne 'string' } sort keys %$stored], [],
 			'each as a JSON string');
 		is($stored->{pid}, "$$", 'with this process\'s pid');
 		like($stored->{at}, qr/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \+0000$/, 'and the time in UTC, spaces and all');
@@ -215,7 +215,7 @@ for my $kv_version (1, 2) {
 		}), 0, 'once it is two hours old');
 		is(try_acquire($bosh), 'won', 'it is taken over');
 		my $stored = stored_json($mount, $kv_version, $rest);
-		is(Service::Vault::_export_value_type($stored->{pid}), undef, 'and the pid the vault now holds is a JSON string');
+		is(Service::Vault::_json_type($stored->{pid}), 'string', 'and the pid the vault now holds is a JSON string');
 		ok($bosh->clear_network_lock, 'and the lock is released');
 	};
 }
