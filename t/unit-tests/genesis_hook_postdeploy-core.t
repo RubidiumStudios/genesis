@@ -826,7 +826,7 @@ subtest 'update_director_network_config - fails at once on a stale lock and leav
 # step checks that it still holds the lock before the upload and again
 # before the write.
 subtest 'update_director_network_config - a lock lost while the config was built stops the upload' => sub {
-	plan tests => 6;
+	plan tests => 7;
 	@netcalls = ();
 	my $bosh = net_bosh(lose_lock_after => 0);
 	my $hook = make_hook(env => net_env(self_bosh => $bosh));
@@ -837,13 +837,15 @@ subtest 'update_director_network_config - a lock lost while the config was built
 	like($all, qr/Cannot upload the cloud config.*lab-ocf.*no longer holds.*ops\@jumpbox/,
 		'the step stops, naming who holds the lock now');
 	like($all, qr/failed while uploading the director cloud config/, 'and says which part of the step it was');
+	like($all, qr/its own cloud config lab-ocf\.bosh\.director and its network record in exodus were not updated/,
+		'and that neither the cloud config nor the network record was updated');
 	ok(!defined(netcall('upload_config')), 'nothing is uploaded');
 	ok(!defined(netcall('set_path')), 'no network record is written');
 	ok(!defined(netcall('clear_network_lock')), 'and the other process\'s lock is left alone');
 };
 
 subtest 'update_director_network_config - a lock lost during the upload stops the exodus write' => sub {
-	plan tests => 6;
+	plan tests => 8;
 	@netcalls = ();
 	my $bosh = net_bosh(lose_lock_after => 1);
 	my $hook = make_hook(env => net_env(self_bosh => $bosh));
@@ -854,6 +856,9 @@ subtest 'update_director_network_config - a lock lost during the upload stops th
 	like($all, qr/Cannot write the network claims.*lab-ocf.*no longer holds.*ops\@jumpbox/,
 		'the step stops, naming who holds the lock now');
 	like($all, qr/failed while storing the director network details in exodus/, 'and says which part of the step it was');
+	like($all, qr/its own cloud config lab-ocf\.bosh\.director was uploaded, but its network record in exodus was not updated/,
+		'that the cloud config was uploaded and the network record was not updated');
+	unlike($all, qr/were not updated/, 'without saying the cloud config was not updated');
 	like($all, qr/genesis lab-ocf bosh-configs upload --type cloud --name lab-ocf\.bosh\.director -y/,
 		'and gives the command that finishes the step');
 	ok(!defined(netcall('set_path')), 'no network record is written over the other process\'s');
@@ -903,7 +908,7 @@ subtest 'update_director_network_config - says what the write changes before it 
 };
 
 subtest 'update_director_network_config - a failed strict read after a good deploy says what failed and what to check' => sub {
-	plan tests => 7;
+	plan tests => 9;
 	@netcalls = ();
 	my $bosh = net_bosh();
 	my $read_error = "Could not read secret/exodus/lab-ocf/bosh/network from vault at https://v:8200: permission denied\n";
@@ -913,6 +918,11 @@ subtest 'update_director_network_config - a failed strict read after a good depl
 		'the failure is reported as the director having deployed';
 	$err = $@ =~ s/\s+/ /gr;
 	like($err, qr/while storing the director network details in exodus/, 'it names the step');
+	# The read comes after the upload, so "not updated" is true of the
+	# record alone (D156, T486)
+	like($err, qr/its own cloud config lab-ocf\.bosh\.director was uploaded, but its network record in exodus was not updated/,
+		'it says the cloud config was uploaded and the network record was not updated');
+	unlike($err, qr/were not updated/, 'and does not say the cloud config was not updated');
 	like($err, qr/secret\/exodus\/lab-ocf\/bosh\/network.*permission denied/, 'and the path and safe\'s reason');
 	like($err, qr/token has expired or has no read or write access.*sealed or unreachable|sealed or unreachable.*token has expired/s,
 		'it gives the likely causes');

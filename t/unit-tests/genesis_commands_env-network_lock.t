@@ -60,6 +60,7 @@ sub make_env {
 		name   => 'test-env',
 		bosh   => $director,
 		notify => sub { 1 },
+		get_call_path_with_env => sub { 'genesis test-env' },
 	};
 }
 
@@ -466,6 +467,79 @@ subtest 'the claims write says what changed, and says nothing when nothing did' 
 	($out, $err) = output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, $map) };
 	unlike(($out.$err), qr/the network claims at|keep the same addresses/, 'a write that changes nothing prints no summary');
 	ok(grep({$_ eq 'set_path'} @calls), 'and still writes the record');
+};
+
+# The claims are read after the cloud config is uploaded, so a read that
+# fails there cannot say "nothing was done" (D156, T486).  The vault's own
+# refusal is raised by the code that words it, so the row reads what an
+# operator gets.
+sub unreadable_claims_env {
+	my ($reason) = @_;
+	my $refusing = mock "Mock::NetworkLock::RefusingVault" => {
+		get_path_strict => sub {
+			Service::Vault::bail_read_failure(
+				'https://v:8200', 'secret/exodus/parent/bosh/network',
+				$reason // '!! Vault is sealed', 'export secret/exodus/parent/bosh/network'
+			);
+		},
+		set_path => sub { push @calls, 'set_path'; 1 },
+	};
+	my $env = make_env(vault => sub { $refusing });
+	$held = 1;
+	return $env;
+}
+
+subtest 'claims that cannot be read after the upload stop the deploy, which says what was done' => sub {
+	plan tests => 9;
+	require Service::Vault;
+	local $SIG{__DIE__} = 'DEFAULT';
+	# Narrow, so the reader's message is wrapped before the deploy's is
+	local $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+	$status = 'locked';
+	my $env = unreadable_claims_env();
+	throws_ok {
+		output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}, uploaded => 'test-env.bosh') }
+	} qr/Could\s+not\s+read\s+secret\/exodus\/parent\/bosh\/network\s+from\s+vault/, 'the deploy stops, naming the path';
+	my $raw = $@;
+	my @starts = ($raw =~ /\n[ \t]*\n( *)\S/g);
+	is_deeply([map {length} @starts], [(length($starts[0])) x @starts],
+		'every paragraph after the first starts at the same indent') or diag $raw;
+	my $said = $raw =~ s/\s+/ /gr;
+	like($said, qr/Vault is sealed/, 'and what the vault answered');
+	like($said, qr/[Cc]loud config test-env\.bosh was uploaded to the parent BOSH director/, 'it says the upload was made');
+	like($said, qr/claims .*were not written/, 'that the claims were not written');
+	like($said, qr/[Nn]othing was deployed/, 'and that nothing was deployed');
+	like($said, qr/genesis test-env deploy/, 'and the command that finishes the step');
+	is(scalar(() = $said =~ /\[FATAL\]/g), 1, 'under one [FATAL] prefix');
+	ok(!grep({$_ eq 'set_path'} @calls), 'and nothing is written') or diag explain \@calls;
+};
+
+subtest 'claims that cannot be read when nothing was uploaded do not claim an upload' => sub {
+	plan tests => 3;
+	local $SIG{__DIE__} = 'DEFAULT';
+	$status = 'locked';
+	my $env = unreadable_claims_env();
+	throws_ok {
+		output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}) }
+	} qr/claims\s.*were\s+not\s+written/s, 'the deploy stops, saying the claims were not written';
+	my $said = $@ =~ s/\s+/ /gr;
+	unlike($said, qr/[Cc]loud config \S+ was uploaded to/, 'without saying a cloud config was uploaded');
+	like($said, qr/already up to date.*nothing was uploaded/, 'and says the director\'s cloud config was left as it was');
+};
+
+# The reason is an argument to the message that carries it, not part of its
+# format, so a percent sign in it is the vault's and is shown once.
+subtest 'a reason holding a percent sign is shown as the vault gave it' => sub {
+	plan tests => 2;
+	local $SIG{__DIE__} = 'DEFAULT';
+	$status = 'locked';
+	my $env = unreadable_claims_env('!! disk 100% full, Vault is sealed');
+	throws_ok {
+		output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}) }
+	} qr/disk 100% full/, 'the claims stop shows the percent sign once';
+	throws_ok {
+		output_from { Genesis::Commands::Env::_deploy_stop_unread("[FATAL] Could not read a from vault at b: disk 100% full") }
+	} qr/disk 100% full/, 'and so does the pre-flight stop';
 };
 
 # ---------------------------------------------------------------------------

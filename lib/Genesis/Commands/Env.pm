@@ -1889,7 +1889,8 @@ sub deploy {
 								"Network map would be updated on the BOSH director if not in dry-run mode."
 							);
 						} else {
-							_deploy_submit_network_claims($env, $network_map);
+							_deploy_submit_network_claims($env, $network_map,
+								uploaded => $uploaded && $cloud_config_name);
 						}
 					}
 				}, dryrun => $dryrun, yes => $options{yes}, completed =>
@@ -2200,13 +2201,40 @@ sub _deploy_reading {
 # _deploy_stop_unread - stop the deploy on a record its pre-flight could not read {{{
 sub _deploy_stop_unread {
 	my ($why) = @_;
-	$why = ($why // 'unknown reason') =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/^\s+|\s+$//gr;
 	bail({exitcode => UNAVAILABLE},
 		"%s\n\n".
 		"The deploy reads this before it decides anything, and will not guess ".
 		"at what it holds.  Nothing was deployed.",
-		$why =~ s/%/%%/gr
+		_deploy_unread_reason($why)
 	);
+}
+
+# }}}
+# _deploy_stop_claims_unread - stop the deploy on network claims it could not read, saying what it had done by then {{{
+sub _deploy_stop_claims_unread {
+	my ($env, $why, $path, $uploaded) = @_;
+	my @director = ($uploaded ? $uploaded : (), $env->bosh->alias);
+	my $state = $uploaded
+		? "Cloud config #C{%s} was uploaded to the #M{%s} BOSH director before the read, and stays there."
+		: "The cloud config on the #M{%s} BOSH director was already up to date, so nothing was uploaded.";
+	bail({exitcode => UNAVAILABLE},
+		"%s\n\n".
+		"The network claims at #C{%s} are read before they are replaced, so ".
+		"the claims of this deployment were not written.  $state  Nothing was ".
+		"deployed.\n\n".
+		"Once the vault can be read, run #C{%s deploy} again.  It finds the ".
+		"cloud config up to date on the director, writes the claims, and ".
+		"goes on to deploy.",
+		_deploy_unread_reason($why), $path, @director,
+		scalar($env->get_call_path_with_env)
+	);
+}
+
+# }}}
+# _deploy_unread_reason - a caught read failure as text to put inside another message {{{
+sub _deploy_unread_reason {
+	my ($why) = @_;
+	return scalar(plain_error(($why // 'unknown reason') =~ s/\e\[[0-9;]*m//gr));
 }
 
 # }}}
@@ -2919,7 +2947,7 @@ sub _deploy_upload_cloud_config {
 # }}}
 # _deploy_submit_network_claims - write this deployment's network claims to the director, then release the lock {{{
 sub _deploy_submit_network_claims {
-	my ($env, $network_map) = @_;
+	my ($env, $network_map, %opts) = @_;
 	my $bosh = $env->bosh;
 	$env->notify(
 		"submitting network claims for this deployment to #M{%s} BOSH director...",
@@ -2932,10 +2960,19 @@ sub _deploy_submit_network_claims {
 	$bosh->ensure_network_lock_held('write the network claims');
 
 	my $network_path = $bosh->exodus_path.'/network';
+
+	# Strict, because a read that failed would look like a record with no
+	# claims, and the summary would show every claim as new.  The cloud
+	# config may be on the director by now, so a read that fails says so.
+	my $stored;
+	eval { $stored = $bosh->vault->get_path_strict($network_path) // {}; 1 } or do {
+		my $err = $@;
+		die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
+		info("  - #R{failed to read the network map}\n");
+		_deploy_stop_claims_unread($env, $err, $network_path, $opts{uploaded});
+	};
+
 	eval {
-		# Strict, because a read that failed would look like a record
-		# with no claims, and the summary would show every claim as new
-		my $stored = $bosh->vault->get_path_strict($network_path) // {};
 		Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $network_map);
 		$bosh->vault->set_path($network_path, $network_map, flatten => 1, clear => 1);
 		1;

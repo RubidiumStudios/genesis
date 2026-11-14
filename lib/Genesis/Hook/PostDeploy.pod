@@ -252,10 +252,15 @@ there is one, so a failed release never hides why the step stopped.
 
 =item C<"The %s BOSH director deployed and is working, but its own cloud config %s and its network record in exodus were not updated. The step failed while %s: ...">
 
+=item C<"The %s BOSH director deployed and is working, and its own cloud config %s was uploaded, but its network record in exodus was not updated. The step failed while %s: ...">
+
 Raised with C<bail()> after the lock is released, when the hook, the upload,
 the strict read of the stored record, or the exodus write fails, and when
 this process is found to have lost the lock before the upload or before the
-write, in which case nothing more is changed. The message
+write, in which case nothing more is changed. The first form is for a step
+that stopped before the upload finished. The second is for one that stopped
+after it, which is where the stored record is read and written, so the new
+cloud config is on the director and only the record is behind. The message
 names the step and the original error, gives the likely causes (a sealed or
 unreachable vault, an expired token or one without access to the record, or a
 director that refused the cloud config), says what to check, and gives the

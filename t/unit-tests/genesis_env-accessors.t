@@ -1350,7 +1350,7 @@ subtest 'exodus_lookup returns the default when nothing is stored, for a plain a
 };
 
 subtest 'a successful terminate stops when the exodus secret cannot be read' => sub {
-	plan tests => 3;
+	plan tests => 6;
 	my $env = exodus_env();
 	require Service::Vault;
 	my $vault = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
@@ -1371,11 +1371,59 @@ subtest 'a successful terminate stops when the exodus secret cannot be read' => 
 	throws_ok { quietly { $env->update_deployment_exodus('terminate', 'success', quiet => 1) } }
 		qr{Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*Code: 403}s,
 		'the refused read is raised, naming the exodus path';
+	# The read comes after the termination, so the stop says what was done
+	# and what was not (D156, T486)
+	my $said = $@ =~ s/\s+/ /gr;
+	like($said, qr/The termination of lab-mgmt went through, but its exodus record .* was not updated/,
+		'it says the termination went through and the record was not updated');
+	like($said, qr/still reads as a deployment that exists/, 'what that leaves behind');
+	like($said, qr/run the terminate again/, 'and how to finish');
 	my @calls = -f $calls ? split("\n", get_file($calls)) : ();
 	ok(scalar(@calls), 'after safe was asked for the exodus secret');
 	ok(!grep({/^(?:rm|set)\b/ || /\s--\s/} @calls), 'and nothing was removed or written');
 };
 
-done_testing;  # 23 subtests + 4 use_ok calls = 27 tests total
+subtest 'a successful deploy stops when the exodus secret cannot be read, and says the deployment is up' => sub {
+	plan tests => 8;
+	my $env = exodus_env();
+	require Service::Vault;
+	my $vault = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
+	no warnings 'redefine';
+	local *Genesis::Env::vault = sub { $vault };
+	local *Service::Vault::authenticated = sub { 1 };
+	local *Service::Vault::authenticate = sub { $_[0] };
+	use warnings 'redefine';
+	my $root = ($env->exodus_mount.$env->exodus_slug) =~ s{^/}{}r;
+	# Narrow, so the reader's message is wrapped before this one is
+	local $ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+	local $SIG{__DIE__} = 'DEFAULT';
+
+	# The BOSH deploy has succeeded by the time exodus is read, so "nothing
+	# was done" would be false (D156, T486).
+	my $calls = workdir('exodus-deploy-calls').'/calls';
+	local $ENV{PATH} = fake_safe_path(join("\n",
+		"echo \"\$*\" >> '$calls'",
+		q{printf '!! Vault is sealed\n' >&2; exit 1},
+	));
+	throws_ok { quietly { $env->update_deployment_exodus('deploy', 'success', quiet => 1) } }
+		qr{Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*Vault is sealed}s,
+		'the failed read is raised, naming the exodus path and what the vault said';
+	my $raw = $@;
+	my $said = $raw =~ s/\s+/ /gr;
+	like($said, qr/The deployment of lab-mgmt succeeded and is running, but its exodus record .* was not written/,
+		'it says the deployment is up and the record was not written');
+	like($said, qr/post-deploy steps were not run/, 'that the post-deploy steps were not run');
+	like($said, qr/run the deploy again: the deployment is already up, and the re-run completes the exodus update/,
+		'and how to finish');
+	is(scalar(() = $raw =~ /\[FATAL\]/g), 1, 'under one [FATAL] prefix');
+	my @starts = ($raw =~ /\n[ \t]*\n( *)\S/g);
+	is_deeply([map {length} @starts], [(length($starts[0])) x @starts],
+		'with every paragraph after the first at the same indent') or diag $raw;
+	my @calls = -f $calls ? split("\n", get_file($calls)) : ();
+	ok(scalar(@calls), 'after safe was asked for the exodus secret');
+	ok(!grep({/^(?:rm|set)\b/ || /\s--\s/} @calls), 'and nothing was removed or written');
+};
+
+done_testing;  # 24 subtests + 4 use_ok calls = 28 tests total
 
 # vim: ts=2 sw=2 sts=2 noet fdm=marker foldlevel=1 nu

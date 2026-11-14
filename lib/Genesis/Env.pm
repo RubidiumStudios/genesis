@@ -8,7 +8,7 @@ use base 'Genesis::Base'; # for _memoize
 
 use Genesis; # We import 50% of the functions provided, so more efficient to just use promiscuous import
 use Genesis::State qw/envset under_test in_callback/;
-use Genesis::Term qw/csprintf wrap fix_wrap decolorize in_controlling_terminal bullet/;
+use Genesis::Term qw/csprintf wrap fix_wrap plain_error decolorize in_controlling_terminal bullet/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_line prompt_for_choice new_prompt_for_choice/;
 use Genesis::Commands qw/current_command known_commands/;
 use Genesis::Exit qw/CONFIG DATAERR UNAVAILABLE/;
@@ -6225,6 +6225,39 @@ sub extract_manifest_exodus {
 }
 
 # }}}
+# _stop_exodus_unread - stop on an exodus record that could not be read after a deploy or a terminate, saying what was done {{{
+sub _stop_exodus_unread {
+	my ($self, $action, $result, $why) = @_;
+	$why = plain_error(($why // 'unknown reason') =~ s/\e\[[0-9;]*m//gr);
+	my $went_through = Genesis::Env::Deployment::is_a_successful_result($result);
+	my $unwritten =
+		"The record is read before it is replaced, and Genesis does not write ".
+		"over what it could not read.";
+
+	bail({exitcode => UNAVAILABLE},
+		"%s\n\n".
+		"The termination of #C{%s} %s, but its exodus record at #C{%s} was not ".
+		"updated to say so.  $unwritten%s\n\n".
+		"Once the vault can be read, run the terminate again so the record is ".
+		"brought up to date.",
+		$why, $self->name, $went_through ? 'went through' : 'did not complete',
+		$self->exodus_base,
+		$went_through ? '  Until it is updated, the record still reads as a deployment that exists.' : ''
+	) if $action eq 'terminate';
+
+	bail({exitcode => UNAVAILABLE},
+		"%s\n\n".
+		"The deployment of #C{%s} %s, but its exodus record at #C{%s} was not ".
+		"written.  $unwritten  The post-deploy steps were not run.\n\n".
+		"Once the vault can be read, run the deploy again: the deployment is ".
+		"already up, and the re-run completes the exodus update.",
+		$why, $self->name,
+		$went_through ? 'succeeded and is running' : "ended as $result",
+		$self->exodus_base
+	);
+}
+
+# }}}
 # update_deployment_exodus - update the exodus data in the vault {{{
 sub update_deployment_exodus {
 	my ($self, $action, $result, %deployment_details) = @_;
@@ -6247,9 +6280,13 @@ sub update_deployment_exodus {
 	# The read is strict.  A failed read taken as no exodus data would leave
 	# the old data in place after a successful terminate, where it later
 	# reads as a director that still exists, so nothing is written unless
-	# safe said what is stored there.
+	# safe said what is stored there.  The deploy or the terminate has
+	# already run by now, so a read that fails says what it did.
 	my @rm_exodus_cmds = ();
-	if (keys(($self->vault->read_flattened_secret($self->exodus_base) // {})->%*)) {
+	my $stored;
+	eval { $stored = $self->vault->read_flattened_secret($self->exodus_base); 1 }
+		or $self->_stop_exodus_unread($action, $result, $@);
+	if (keys(($stored // {})->%*)) {
 		# If the exodus data already exists, we need to remove it first
 		push @rm_exodus_cmds, ('rm', $self->exodus_base, "-f");
 	}

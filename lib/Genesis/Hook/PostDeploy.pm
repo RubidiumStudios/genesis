@@ -70,6 +70,7 @@ sub update_director_network_config {
 	local $SIG{QUIT} = sub { $on_signal->("Quit\n") };
 
 	my $acquired = 0;
+	my $uploaded = 0;
 	my $step = 'taking the network claims lock';
 	my ($ok, $err);
 	eval {
@@ -89,6 +90,7 @@ sub update_director_network_config {
 				info({pending => 1}, "[[  - >>uploading #c{%s} cloud-config...", $config_name);
 				$tstart = gettimeofday;
 				$bosh->upload_config($config, 'cloud', $config_name);
+				$uploaded = 1;
 				info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
 
 				# The write below clears the whole network record, so a step that
@@ -134,10 +136,14 @@ sub update_director_network_config {
 
 		# An error Genesis raised that already gives its likely causes or what
 		# to check says them once; any other, such as a die from a library or
-		# an error with neither, gets the causes and checks for this step
+		# an error with neither, gets the causes and checks for this step.
+		# The network record is read and written after the upload, so a
+		# failure there leaves the new cloud config on the director.
+		my $state = $uploaded
+			? "and its own cloud config #C{%s} was uploaded, but its network record in exodus was not updated"
+			: "but its own cloud config #C{%s} and its network record in exodus were not updated";
 		bail(
-			"The #M{%s} BOSH director deployed and is working, but its own cloud config ".
-			"#C{%s} and its network record in exodus were not updated.  The step failed ".
+			"The #M{%s} BOSH director deployed and is working, $state.  The step failed ".
 			"while %s:\n\n%s\n\n%s",
 			$bosh->alias, $config_name, $step, $reason,
 			$has_causes
