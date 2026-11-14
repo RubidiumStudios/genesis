@@ -13,7 +13,7 @@ use Genesis::UI;
 use Genesis::CI::Marker;
 use Genesis::CI::Preflight;
 use Genesis::Env::NetworkClaims;
-use Genesis::Exit qw/ABORTED DATAERR/;
+use Genesis::Exit qw/ABORTED DATAERR UNAVAILABLE/;
 use Service::Vault;
 use Encode qw(decode_utf8);
 
@@ -1280,7 +1280,7 @@ sub _deploy_preflight {
 	# walk.  Nothing refuses on it: propagation's hold orders delivery (D121).
 	my $bare         = Genesis::Env->bare($name, $top);
 	my $prior        = $top->pipeline_topology->{parent_of}{$name} // '';
-	my $prior_record = _prior_env_record($bare, $prior);
+	my $prior_record = _deploy_reading(sub { _prior_env_record($bare, $prior) });
 
 	# 7.  The provider gate, the last refusal of ours; -y never answers it.
 	Genesis::CI::Preflight::assert_provider_gate($top, $options,
@@ -1298,39 +1298,44 @@ sub _deploy_preflight {
 	}
 
 	# 9 to 12.  The four warnings, through _warn_about_the_tip, fed by the
-	# propagate run's own walk read-only; an unreadable record skips them.
-	my $tip;
+	# propagate run's own walk read-only.  A record they read that the vault
+	# will not give stops the deploy here, before anything is deployed.
 	if (defined(my $unread = _unread_applied_record($top))) {
-		warning(
-			"\nCould not read the applied record at #C{%s}: %s\n\n".
-			"The stale-pipeline, standing-hold, commits-due and drift ".
-			"warnings, which read it, were skipped.",
+		_deploy_stop_unread(sprintf(
+			"Could not read the applied record at #C{%s}: %s",
 			$top->applied_record_path, $unread
-		);
-		$tip = {due => [], drifted => []};
-	} else {
-		require Genesis::CI::Walk;
-		# The predecessor's record was read once above, so the walk takes it
-		# rather than reading it a second time (T326, D112).
-		my $walk = Genesis::CI::Walk::plan($top,
-			git       => $git,
-			scope     => [$name],
-			branches  => {$name => {branch => $branch}},
-			certified => $prior ? {
-				$prior => Genesis::CI::Walk::certified_from_record($prior_record)
-			} : {},
-		);
-		# Asked about one environment, so an empty answer is a bug, not "nothing due".
-		my ($due_record) = @{$walk->{environments} || []};
-		bug("The walk answered no environment for #C{%s}.", $name)
-			unless $due_record;
+		));
+	}
 
-		$tip = _warn_about_the_tip($top, $name, $git,
+	require Genesis::CI::Walk;
+	# The predecessor's record was read once above, so the walk takes it
+	# rather than reading it a second time (T326, D112).
+	my $walk = Genesis::CI::Walk::plan($top,
+		git       => $git,
+		scope     => [$name],
+		branches  => {$name => {branch => $branch}},
+		certified => $prior ? {
+			$prior => Genesis::CI::Walk::certified_from_record($prior_record)
+		} : {},
+	);
+	# Asked about one environment, so an empty answer is a bug, not "nothing due".
+	my ($due_record) = @{$walk->{environments} || []};
+	bug("The walk answered no environment for #C{%s}.", $name)
+		unless $due_record;
+
+	# The walk answers a record of this environment it could not read as a
+	# state, so that a run over many environments fails only that one.  A
+	# deploy is about that one.
+	_deploy_stop_unread($due_record->{error})
+		if ((($due_record->{certified} || {})->{state}) // '') eq 'unreadable';
+
+	my $tip = _deploy_reading(sub {
+		_warn_about_the_tip($top, $name, $git,
 			bare   => $bare,
 			record => $due_record,
 			target => $target,
-		);
-	}
+		)
+	});
 
 	# The one prompt --yes answers, asked once every warning has printed.
 	_confirm_commits_due($name, $tip->{due}, $options);
@@ -2177,14 +2182,41 @@ sub _warn_stale_pipeline {
 }
 
 # }}}
+# _deploy_reading - run one of the pre-flight's reads, stopping the deploy on a vault read that fails {{{
+sub _deploy_reading {
+	my ($read) = @_;
+	my $answer;
+	return $answer if eval {$answer = $read->(); 1};
+	my $err = $@;
+	# Only a read the vault did not finish is worded here; a signal, a
+	# refusal with its own account, and a bug pass through as they came.
+	# The message arrives wrapped to the terminal, so its words are matched
+	# across whatever whitespace the wrap left between them.
+	die $err unless $err =~ /Could\s+not\s+read\s+\S.*?\s+from\s+vault\s+at\s/s;
+	_deploy_stop_unread($err);
+}
+
+# }}}
+# _deploy_stop_unread - stop the deploy on a record its pre-flight could not read {{{
+sub _deploy_stop_unread {
+	my ($why) = @_;
+	$why = ($why // 'unknown reason') =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/^\s+|\s+$//gr;
+	bail({exitcode => UNAVAILABLE},
+		"%s\n\n".
+		"The deploy reads this before it decides anything, and will not guess ".
+		"at what it holds.  Nothing was deployed.",
+		$why =~ s/%/%%/gr
+	);
+}
+
+# }}}
 # _unread_applied_record - what the vault said, where it would not give the record {{{
 #
-# The pre-flight's warnings all read the applied record, and the reader
-# refuses on an error, which is right for a propagate run and wrong for a
-# deploy, where the record only ever feeds a warning.  So the deploy asks
-# first, and hears back the vault's own words where the read failed.  A
-# repository with no pipeline has no record to address, and one whose record
-# is merely absent reads it as absent, so both answer undef.
+# The pre-flight reads the applied record before it walks, and the deploy
+# stops where the vault will not give it.  This asks first, and hears back
+# the vault's own words where the read failed.  A repository with no
+# pipeline has no record to address, and one whose record is merely absent
+# reads it as absent, so both answer undef.
 sub _unread_applied_record {
 	my ($top) = @_;
 	return undef unless $top->pipeline_enabled;
