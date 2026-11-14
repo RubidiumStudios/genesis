@@ -495,11 +495,8 @@ sub get_path {
 sub get_path_strict {
 	my ($self, $path) = @_;
 	$path =~ s{(^/*|/*$)}{}; # Trim preceeding and trailing / as safe doesn't honour it
-	# Decoded with bignums, as decode_export_text decodes, so an integer too
-	# large for Perl is seen as a number rather than as its digits.  When safe
-	# exited cleanly, only an unparseable payload is an error.
+	# When safe exited cleanly, only an unparseable payload is an error.
 	my ($data,$rc,$err) = read_json_from(
-		{allow_bignum => 1},
 		$self->query({stderr => 0, redact_output => 1, exact => 1}, 'export', $path)
 	);
 	if ($rc || $err) {
@@ -639,7 +636,7 @@ sub get_if_present {
 # _unpack_path_export - nest the paths in a safe export under the path it was made for {{{
 sub _unpack_path_export {
 	my ($self, $path, $data) = @_;
-	$data = flatten_export($data, $self) // {};
+	$data = plain_export($data, $path);
 	my $results = {};
 	for my $subpath (sort keys %$data) {
 		if ($subpath eq $path) {
@@ -657,6 +654,63 @@ sub _unpack_path_export {
 	}
 	return $results;
 }
+# }}}
+# plain_export - a decoded safe export as {path => {key => string}}, refusing any form but the one safe writes unasked {{{
+sub plain_export {
+	my ($data, $what) = @_;
+	return {} unless defined($data);
+
+	_refuse_export($what, "it is %s, where the export Genesis reads is an object of paths",
+		ref($data) eq 'ARRAY' ? 'an array' : 'a '._json_type($data)
+	) unless ref($data) eq 'HASH';
+
+	my %export;
+	for my $path (sort CORE::keys %$data) {
+		my $pairs = $data->{$path};
+		next unless defined($pairs); # a path with no value has nothing to read
+		_refuse_export($what, "#C{%s} is not an object of keys, but a JSON %s", $path, _json_type($pairs))
+			unless ref($pairs) eq 'HASH';
+		for my $key (sort CORE::keys %$pairs) {
+			my $type = _json_type($pairs->{$key});
+			_refuse_export($what, "the #C{%s} key of #C{%s} holds a JSON %s, not a string", $key, $path, $type)
+				unless $type eq 'string';
+		}
+		$export{$path} = {%$pairs};
+	}
+	return \%export;
+}
+
+# }}}
+# _refuse_export - stop on an export Genesis does not read, saying what writes one {{{
+sub _refuse_export {
+	my ($what, $detail, @args) = @_;
+	bail(
+		"Cannot use the safe export of #C{%s}: $detail.\n\n".
+		"Genesis reads the export safe writes when it is asked for nothing more: ".
+		"an object of paths, each holding keys whose values are strings.  Only ".
+		"safe 1.26.0 wrote another form unasked, and any safe does when it is ".
+		"given #C{-a} or #C{--typed}.  Check #C{safe version}, and use safe ".
+		"1.26.1 or later.",
+		$what, @args
+	);
+}
+
+# }}}
+# _json_type - the JSON type a decoded value had {{{
+my $JSON_SCALAR = JSON::PP->new->allow_nonref;
+sub _json_type {
+	my ($value) = @_;
+	return 'null' unless defined($value);
+	if (my $type = ref($value)) {
+		return 'object'  if $type eq 'HASH';
+		return 'list'    if $type eq 'ARRAY';
+		return 'boolean' if JSON::PP::is_bool($value);
+		return 'number'; # a bignum, where the decoder was asked for them
+	}
+	# JSON::PP writes back unquoted only what it decoded as a number.
+	return $JSON_SCALAR->encode($value) =~ /\A"/ ? 'string' : 'number';
+}
+
 # }}}
 # decode_export_text - decode safe's export text to {path => {key => value}}, keeping each value's type {{{
 sub decode_export_text {

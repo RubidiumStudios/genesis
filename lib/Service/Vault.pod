@@ -1083,7 +1083,7 @@ B<Examples:>
 
 Reads all secrets under C<$path> and all subpaths, returning a nested hash
 structure. Uses C<safe export> to retrieve the entire tree in a single JSON
-call, and reads every export version through L</flatten_export>.
+call, and reads it through L</plain_export>.
 Automatically unflattens paths stored with the C<__flattened__> marker.
 
 It is L</get_path_strict> with an empty tree in place of C<undef>, so the two
@@ -1094,20 +1094,11 @@ can end dies naming the path. That covers a nonzero exit, a refusal, an
 unreachable or sealed vault, a C<safe> killed by a signal, and output that
 does not decode.
 
-Every value in the tree is a string. A path that holds only strings keeps
-the strings the export gave it. A path holding any value that is not a
-string, such as the boolean C<path_style> in an ocfp blobstore config or a
-numeric C<pid> in a network lock, is read again whole with
-L</read_flattened_secret>, and every field of that path comes from that one
-read, so its values arrive as the text C<safe> 1.25.1 and 1.26.1 give for
-them. A typed secret that holds nothing when it is read again changed while
-Genesis was reading it, and that dies too. L</flatten_export> explains why
-Genesis never turns a typed value into text itself, and why one read is
-used for the whole secret. The export is decoded with C<allow_bignum>, as
-L</decode_export_text> decodes it, so an integer too large for Perl counts
-as a number and its path is read again, where it used to pass as its
-digits. With C<safe> 1.25.x and 1.26.1 the export is already flat, so there
-is nothing to read again and no extra C<safe get>.
+Every value in the tree is a string, because the export C<safe> writes
+unasked holds only strings: a value stored as a number or a boolean, such
+as the C<path_style> of an ocfp blobstore config, arrives as the text
+C<safe> gives it. An export in any other form is refused, as
+L</plain_export> describes; only C<safe> 1.26.0 writes one unasked.
 
 It used to return C<{}> for a failed read as well. An outage then looked
 like a path with nothing in it, so a pipeline C<--pull> whose predecessor's
@@ -1136,14 +1127,10 @@ B<Errors:>
 
 Raised by L</get_path_strict> when the export fails for any reason other
 than the path having nothing stored, or when its output cannot be parsed.
-Raised by L</read_flattened_secret>, naming the typed path, when reading a
-typed path again fails, and by L</flatten_export> when that read finds
-nothing stored.
 
-=item C<"Cannot use the safe export ...">
+=item C<"Cannot use the safe export of #C{%s}: ...">
 
-Raised by L</flatten_export> when the export is in a format it does not
-read.
+Raised by L</plain_export> when the export is not the plain form.
 
 =back
 
@@ -1151,10 +1138,6 @@ B<Examples:>
 
   my $tree = $vault->get_path('secret/myapp');
   # Returns: { password => 'hunter2', db => { host => 'localhost' } }
-
-  my $tree = $vault->get_path('secret/config/ocfp-lab/mgmt');
-  # A blobstore stored with "path_style": true and "port": 9000 comes back
-  # as { bosh => { blobstores => { bosh => { path_style => 'true', port => '9000', ... } } }, ... }
 
   my $none = $vault->get_path('secret/never-written');
   # Returns: {}
@@ -1198,20 +1181,9 @@ C<forbidden> reads as absent when nothing is stored.
 
 The export runs with C<run>'s C<exact> option, so a C<safe> killed by a
 signal is a failed read rather than an exit of 0 with whatever it printed.
-It is decoded through C<read_json_from> with C<allow_bignum>, as
-L</decode_export_text> decodes, so an integer too large for Perl is seen as
-a number.
 
-Every value it returns is a string, as with L</get_path>. A path holding
-only strings keeps what the export gave it, and a path holding any value
-that is not a string is read again whole with L</read_flattened_secret>,
-which supplies every field of that path from its one read. Genesis never
-turns a typed value into text itself, so the text matches what C<safe>
-1.25.1 and 1.26.1 give on every C<safe> version, and the one read can't mix
-fields from two moments of a secret written again during the read. A typed
-secret that holds nothing when it is read again dies, since it changed
-while Genesis was reading it. With C<safe> 1.25.x and 1.26.1 the export is
-already flat, so they cost no extra read.
+Every value it returns is a string, as with L</get_path>, and an export
+that is not in the plain form is refused by L</plain_export>.
 
 Use it where a read that failed must not pass for an empty record, and where
 nothing stored must be told from a record with nothing in it.
@@ -1246,15 +1218,9 @@ token without read on the path, a sealed vault, or an unreachable vault) and
 to say to run C<safe export> on the path and C<safe vault status>. The text
 here is the start of it.
 
-The same message names a typed path when L</read_flattened_secret> cannot
-read it again, and when L</flatten_export> finds it holding nothing on that
-second read, in which case the reason says it changed while Genesis was
-reading it.
+=item C<"Cannot use the safe export of #C{%s}: ...">
 
-=item C<"Cannot use the safe export ...">
-
-Raised by L</flatten_export> when the export is in a format it does not
-read.
+Raised by L</plain_export> when the export is not the plain form.
 
 =back
 
@@ -1494,6 +1460,68 @@ B<Examples:>
 
   $vault->read_flattened_secret('secret/odd:name');
   # Runs: safe get 'secret/odd\:name'
+
+=head2 plain_export
+
+  my $export = Service::Vault::plain_export($data, $what);
+
+Checks a decoded C<safe export> and returns it as a hash of full vault
+paths to the key/value pairs stored at each, every value a string. A
+function, not a method.
+
+C<safe> writes this form when it is asked for nothing more. It writes a
+versioned form (an array, C<export_version> 2) only when given C<-a>, and a
+typed form (C<export_version> 3) only when given C<--typed>, and Genesis
+passes neither. C<safe> 1.26.0 alone wrote the typed form unasked, when a
+secret held a value that is not a string. On every other C<safe> such a
+value arrives here already as the text C<safe get> shows for it. So any
+other form means C<safe> 1.26.0, or a caller that passed one of those
+flags, and it is refused with one message that says so.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$data>
+
+The decoded export. C<undef> reads as an export with no paths.
+
+=item C<$what>
+
+What was exported, for the refusal to name: the path, or the paths.
+
+=back
+
+B<Returns:> A hash reference of path to a hash reference of key to string.
+Each is a copy, so changing it leaves C<$data> alone. A path whose value is
+C<null> is left out, and a secret with no keys is a path with no keys.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Cannot use the safe export of #C{%s}: %s. ...">
+
+Raised (via C<bail()>) through L</_refuse_export> when the export is not an
+object, when a path in it is not an object of keys, or when a key holds
+anything but a string. The message names what was exported and what is
+wrong with it, then says which C<safe> and which flags write such an
+export, and to use C<safe> 1.26.1 or later.
+
+=back
+
+B<Limitations:> Nothing here reads a refused export another way. A vault
+holding a value that is not a string is unreadable to Genesis under
+C<safe> 1.26.0, until C<safe> is replaced.
+
+B<Examples:>
+
+  my $export = Service::Vault::plain_export(
+    {'secret/myapp' => {password => 'hunter2'}}, 'secret/myapp');
+  # Returns: { 'secret/myapp' => { password => 'hunter2' } }
+
+  Service::Vault::plain_export([{export_version => 3, data => {}}], 'secret/myapp');
+  # Dies: Cannot use the safe export of secret/myapp: it is an array, ...
 
 =head2 decode_export_text
 
@@ -3188,17 +3216,15 @@ and those are not read back.
   my $tree = $vault->_unpack_path_export($path, $data);
 
 Nests the paths of a C<safe export> under the path the export was made for,
-for L</get_path> and L</get_path_strict>. The export is first reduced to a
-flat hash of full vault paths to the key/value pairs stored at each by
-L</flatten_export>, whatever its export version, so a path holding a value
-that is not a string is read again whole with C<safe get> and every value
-is a string. The pairs stored at C<$path> itself become the top level of the result, and the pairs at each
+for L</get_path> and L</get_path_strict>. The export is first checked and
+copied by L</plain_export>, so every value is a string. The pairs stored at
+C<$path> itself become the top level of the result, and the pairs at each
 subpath are placed under the keys named by the rest of its path. A path
 stored with the C<__flattened__> marker has the marker removed and is
 unflattened with C<Genesis::unflatten>.
 
 C<$data> itself is not modified, since the marker is deleted from the copies
-C<flatten_export> makes.
+C<plain_export> makes.
 
 B<Parameters:>
 
@@ -3210,7 +3236,7 @@ The path the export was made for, without leading or trailing slashes.
 
 =item C<$data>
 
-The decoded export, of any export version.
+The decoded export.
 
 =back
 
@@ -3220,15 +3246,10 @@ B<Errors:>
 
 =over 4
 
-=item C<"Cannot use the safe export ...">
+=item C<"Cannot use the safe export of #C{%s}: ...">
 
-Raised (via C<bail()>) by L</flatten_export> when the export is in a format
-it does not read.
-
-=item C<"Could not read #C{%s} from vault at #M{%s}: ...">
-
-Raised by L</flatten_export> when a path holding a value that is not a
-string cannot be read again, or holds nothing when it is.
+Raised (via C<bail()>) by L</plain_export> when the export is not the plain
+form.
 
 =back
 
@@ -3239,6 +3260,77 @@ B<Examples:>
     'secret/myapp/db' => {host => 'localhost'},
   });
   # Returns: { user => 'admin', db => { host => 'localhost' } }
+
+=head2 _refuse_export
+
+  _refuse_export($what, $detail, @args);
+
+Stops on an export L</plain_export> does not read. A function, not a
+method.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$what>
+
+What was exported: the path, or the paths.
+
+=item C<$detail>
+
+What is wrong with the export, as a C<bail()> format that completes
+"Cannot use the safe export of ...:".
+
+=item C<@args>
+
+The values for C<$detail>'s placeholders.
+
+=back
+
+B<Returns:> Never returns.
+
+B<Errors:>
+
+Always dies, with C<$detail> and then the one explanation every refused
+export gets: the form Genesis reads, that only C<safe> 1.26.0 wrote another
+unasked and that C<-a> and C<--typed> ask for one, and to check
+C<safe version> and use C<safe> 1.26.1 or later.
+
+B<Examples:>
+
+  _refuse_export('secret/myapp', "#C{%s} is not an object of keys, but a JSON %s", 'secret/myapp', 'list');
+  # Dies: Cannot use the safe export of secret/myapp: secret/myapp is not an object of keys, but a JSON list. ...
+
+=head2 _json_type
+
+  my $type = _json_type($value);
+
+Names the JSON type a decoded value had. A function, not a method. A
+number is told from a string by encoding it again: C<JSON::PP> writes back
+unquoted only what it decoded as a number.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+A value from decoded JSON.
+
+=back
+
+B<Returns:> C<'string'>, C<'number'>, C<'boolean'>, C<'null'>,
+C<'object'>, or C<'list'>.
+
+B<Errors:>
+
+None.
+
+B<Examples:>
+
+  _json_type(load_json('{"n":42}')->{n});    # Returns: 'number'
+  _json_type(load_json('{"n":"42"}')->{n});  # Returns: 'string'
+  _json_type(undef);                         # Returns: 'null'
 
 =head2 _unwrap_export
 
