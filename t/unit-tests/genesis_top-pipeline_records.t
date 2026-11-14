@@ -120,6 +120,38 @@ subtest 'the applied record is judged by the accessor that receives it' => sub {
 		'a record holding a control commit alone is accepted');
 };
 
+# The applied record is read by the reader every other record is read by, so
+# a read the vault refuses says what theirs say: the path, the vault, the
+# reason, and what to do about a refusal.  It had a reader of its own, which
+# gave safe's bare words and named neither the path nor the vault.
+subtest 'an applied record the vault refuses reads as every other refused record does' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
+	my $control = commit_on_control($h,
+		files => {'ops/shared.yml' => "---\nshared: 1\n"},
+		message => 'publish', push => 1,
+	);
+	fixture_applied($h, control => $control, provider => 'manual');
+	my $path = $h->applied_path;
+	break_vault_reads($h, $path);
+
+	# The harness's safe goes on the path for the read, as a run's does.
+	local $ENV{PATH} = "$h->{tmp}/bin:$ENV{PATH}" if -d "$h->{tmp}/bin";
+	# Carp::Always, which the harness loads, appends a stack trace to every
+	# die; the operator sees the message without it
+	local $SIG{__DIE__} = 'DEFAULT';
+	my $read = eval {Genesis::Top->new($h->a)->applied_record};
+	my $raw  = $@ // '';
+	my $err  = $raw =~ s/\s+/ /gr;
+	is($read, undef, 'nothing is answered');
+	like($err, qr/Could not read \Q$path\E from vault at \S+: .*permission denied/,
+		'it raises with the path, the vault and what the vault said');
+	like($err, qr/The vault refused the read.*safe auth/, 'and what to do about a refusal');
+	unlike($raw, qr/\[FATAL\]/, 'as text a caller can put in its own message, with no prefix of its own');
+	unlike($raw, qr/\n[ \t]+\S/, 'and no wrap');
+};
+
 subtest 'no environment can claim the applied record address' => sub {
 	plan tests => 4;
 

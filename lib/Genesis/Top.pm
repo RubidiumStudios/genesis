@@ -8,7 +8,7 @@ use Genesis;
 use Genesis qw/without_backtrace/;
 use Scalar::Util ();
 use Genesis::State;
-use Genesis::Term qw/in_controlling_terminal csprintf decolorize bullet/;
+use Genesis::Term qw/in_controlling_terminal csprintf decolorize bullet plain_error/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_choice/;
 use Genesis::Env;
 use Genesis::Kit::Compiled;
@@ -2108,7 +2108,11 @@ sub applied_record {
 			or die "no vault is available for this repository: it configures ".
 			       "no secrets_provider.url, and safe has no current target to ".
 			       "read instead\n";
-		my $data = $vault->get_if_present($path);
+		# The reader every record is read by.  Its error comes back as plain
+		# text, because each caller puts it inside a message of its own.
+		my $data;
+		eval {$data = $vault->read_flattened_secret($path); 1}
+			or die scalar(plain_error($@ =~ s/\e\[[0-9;]*m//gr))."\n";
 		return undef unless defined $data;
 
 		# What was read with fidelity and is still not an applied record is

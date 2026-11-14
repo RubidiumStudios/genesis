@@ -2540,9 +2540,10 @@ answers C<undef> where the path is absent, and a write answers the fields it
 wrote.
 
 A read tells an absent record from a vault that answered an error, through
-L<Service::Vault/get_if_present>, because the two mean different things to a
-propagate run: the absence is a pipeline never applied, and the error is an
-input it cannot read.
+L<Service::Vault/read_flattened_secret>, the reader every other record is
+read by, because the two mean different things to a propagate run: the
+absence is a pipeline never applied, and the error is an input it cannot
+read.
 
 A read also judges what it was given, because this method is the record's
 owner. A record with no C<control_commit>, or with one that is not a
@@ -2568,8 +2569,11 @@ the record itself.
 
 =item *
 
-A read dies with what the vault said where the read failed for any reason
-other than an absence, and with
+A read dies with the reader's message, C<"Could not read ... from vault at
+...: ...">, and its advice for a refusal or an outage, where the read failed
+for any reason other than an absence. The text is plain, with no C<[FATAL]>
+prefix and no line wrap, because each caller puts it inside a message of its
+own. It dies with
 C<"no vault is available for this repository: ..."> where the repository
 configures no C<secrets_provider.url> and C<safe> has no current target.
 C<Genesis::CI::Walk::read_durable_state> turns either into a refusal at
