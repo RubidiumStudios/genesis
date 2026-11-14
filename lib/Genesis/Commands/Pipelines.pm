@@ -2301,9 +2301,9 @@ sub _apply_records {
 			: '(undefined)'
 	) unless ($opts{control_commit} // '') =~ m/^[0-9a-f]{40}$/;
 
-	# A record that cannot be read is answered as absent, so the writing run
-	# writes it and the dry run says it would.
-	my $had = eval {$top->applied_record} || {};
+	# A record that cannot be read raises here, before anything is written:
+	# answering it as absent would write over a record nobody had seen.
+	my $had = $top->applied_record || {};
 	my @moved = (
 		(($had->{control_commit} // '') ne $opts{control_commit}
 			? sprintf('moving control from #C{%s} to #C{%s}',
@@ -2384,7 +2384,26 @@ sub _apply_records {
 		my $counted   = sprintf("#C{%s} with %d dependenc%s%s",
 			$name, scalar(@$deps), (@$deps == 1 ? 'y' : 'ies'),
 			($complete ? '' : ' #Y{(discovery incomplete)}'));
+		# Compared before it is written, so a record that cannot be read
+		# stops the stage here, saying what this run has already written.
 		my $was = eval {$env->pipeline_record};
+		if (my $err = $@) {
+			# A signal passes through as it came.
+			die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
+			$err = $err =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/\s+$//r;
+			bail(
+				"%s\n\n".
+				"This happened while reading the pipeline record of #C{%s}, to compare it ".
+				"with what was compiled.  %s  The record of #C{%s} was not written, nor ".
+				"that of any environment after it.  Run #C{genesis pipeline-apply} ".
+				"again once the read works; it writes only what differs.",
+				$err, $name,
+				$opts{dry_run} ? "A dry run writes nothing."
+					: "The applied pipeline record was written before this, as were ".
+					  "the records of the environments listed above.",
+				$name
+			);
+		}
 		my @was = $was ? (
 			(join(',', @{$was->{dependencies} || []}) ne join(',', @$deps)
 				? sprintf('was %d: %s', scalar(@{$was->{dependencies} || []}),

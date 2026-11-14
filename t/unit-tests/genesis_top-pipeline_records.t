@@ -195,6 +195,74 @@ subtest 'the record stage refuses a control commit that is not a sha' => sub {
 	is_deeply(\@reached, [], 'and the vault was never reached');
 };
 
+# The record stage compares what is stored with what it compiled and writes
+# the difference, so a read it could not make must stop it: answering such a
+# read as nothing stored is how a record gets written over.
+subtest 'the record stage writes nothing over a record it could not read' => sub {
+	plan tests => 8;
+
+	require Genesis::Commands::Pipelines;
+
+	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
+	my $control = commit_on_control($h,
+		files => {'ops/shared.yml' => "---\nshared: 1\n"},
+		message => 'publish', push => 1,
+	);
+	my $top = Genesis::Top->new($h->a);
+	local $ENV{GENESIS_IGNORE_EVAL} = '';
+
+	my @written;
+	my $stage = sub {
+		my (%opts) = @_;
+		@written = ();
+		my $ok = eval {
+			Genesis::Commands::Pipelines::_apply_records($top,
+				control_commit => $control, provider => 'manual', %opts);
+			1;
+		};
+		return $ok ? '' : "$@";
+	};
+
+	no warnings 'redefine';
+	{
+		# The applied record cannot be read.
+		local *Genesis::Top::applied_record = sub {
+			my ($self, %fields) = @_;
+			if (%fields) { push @written, 'applied'; return \%fields }
+			die "Could not read /secret/exodus/_pipelines/bosh from vault at https://v:8200: Code: 403. permission denied\n";
+		};
+		local *Genesis::Env::pipeline_record = sub {
+			my ($self, %fields) = @_;
+			push @written, 'pipeline' if %fields;
+			return undef;
+		};
+		like($stage->(), qr{Could not read /secret/exodus/_pipelines/bosh.*Code: 403}s,
+			'an applied record that cannot be read stops the stage, with what the vault said');
+		is_deeply(\@written, [], 'and nothing is written, the applied record least of all');
+		like($stage->(dry_run => 1), qr{Code: 403}, 'a dry run stops on it too, and does not say what it would write');
+	}
+	{
+		# The applied record is absent, and one environment's own record cannot be read.
+		local *Genesis::Top::applied_record = sub {
+			my ($self, %fields) = @_;
+			if (%fields) { push @written, 'applied'; return \%fields }
+			return undef;
+		};
+		local *Genesis::Env::pipeline_record = sub {
+			my ($self, %fields) = @_;
+			if (%fields) { push @written, 'pipeline'; return \%fields }
+			die "Could not read /secret/exodus/qa/bosh/pipeline from vault at https://v:8200: connection refused\n";
+		};
+		my $err = $stage->() =~ s/\s+/ /gr;
+		like($err, qr{Could not read /secret/exodus/qa/bosh/pipeline.*connection refused},
+			"an environment's record that cannot be read stops the stage, with what the vault said");
+		is_deeply(\@written, ['applied'], 'the applied record had been written, and no environment record after it');
+		like($err, qr{applied pipeline.*was (?:written|updated|recorded)}i, 'the stage says what it had already written');
+		like($err, qr{qa.*(?:was not|not written|not recorded)}i, 'and what it did not');
+		like($err, qr{genesis pipeline-apply}, 'and the command that finishes it');
+	}
+};
+
 subtest 'the address needs no environment' => sub {
 	# T351's address half.  The mount is pipeline.exodus_mount, a key of the
 	# pipeline itself, so the record's address is read off the configuration
