@@ -2109,7 +2109,30 @@ sub applied_record {
 			       "no secrets_provider.url, and safe has no current target to ".
 			       "read instead\n";
 		my $data = $vault->get_if_present($path);
-		return undef unless ref($data) eq 'HASH' && keys %$data;
+		return undef unless defined $data;
+
+		# What was read with fidelity and is still not an applied record is
+		# neither a record nor an absence.  Answered as a record it matches
+		# no commit a reader knows, and answered as absent the next apply
+		# writes over it, so it is said here, by the method that owns it.
+		my $found =
+			ref($data) ne 'HASH' ? 'it holds a single value where the record is a set of fields'
+			: !defined($data->{control_commit}) || !length($data->{control_commit}) ? sprintf(
+				'it holds %s, and no control_commit',
+				join(' and ', sort keys %$data) || 'no fields')
+			: $data->{control_commit} !~ m/^[0-9a-f]{40}$/ ? sprintf(
+				'its control_commit is "%s", which is not a commit sha',
+				join(' ', split(/\s+/, $data->{control_commit})))
+			: undef;
+		die sprintf(
+			"the record at %s is not a valid applied record: %s.  An applied ".
+			"record names the control commit the pipeline was applied from.  ".
+			"Look at it with `safe get %s`.  If it is not what pipeline-apply ".
+			"wrote, remove it with `safe rm %s` and run `genesis pipeline-apply`, ".
+			"which records the pipeline again.\n",
+			$path, $found, $path, $path
+		) if $found;
+
 		return {
 			map  {($_ => $data->{$_})}
 			grep {defined $data->{$_}}

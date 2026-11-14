@@ -2544,9 +2544,27 @@ L<Service::Vault/get_if_present>, because the two mean different things to a
 propagate run: the absence is a pipeline never applied, and the error is an
 input it cannot read.
 
+A read also judges what it was given, because this method is the record's
+owner. A record with no C<control_commit>, or with one that is not a
+forty-character commit sha, is neither a record nor an absence. Answered as
+a record it would be compared against real commits and match none, and
+answered as absent the next apply would write over it. A record holding its
+control commit alone is accepted: C<provider> and C<at> are left out of the
+answer where they are not there.
+
 B<Errors:>
 
 =over 4
+
+=item *
+
+C<"the record at ... is not a valid applied record: ..."> - a read dies
+with this where what is stored is not an applied record. It names the path,
+what it found (the fields held where C<control_commit> is missing, or the
+value where it is not a commit sha), what the record is for, and how to look
+at it and repair it: C<safe get> to see it, and C<safe rm> followed by
+C<genesis pipeline-apply> to record the pipeline again. It never repairs
+the record itself.
 
 =item *
 

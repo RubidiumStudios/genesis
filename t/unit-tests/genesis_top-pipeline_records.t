@@ -75,6 +75,51 @@ subtest 'each accessor reads its own path' => sub {
 		"with discovery's incomplete mark beside it");
 };
 
+# The accessor that receives the record owns its correctness (D161).  What
+# the vault gave it with fidelity and is still not an applied record is
+# neither a record nor an absence: answered as a record it is compared
+# against real commits and matches none, and answered as absent it is
+# written over by the next apply.
+subtest 'the applied record is judged by the accessor that receives it' => sub {
+	plan tests => 9;
+
+	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
+	my $control = commit_on_control($h,
+		files => {'ops/shared.yml' => "---\nshared: 1\n"},
+		message => 'publish', push => 1,
+	);
+	my $path = $h->applied_path;
+
+	my %cases = (
+		'no control commit' => {
+			fields => {provider => 'manual', at => '2026-11-14 12:00:00 +0000'},
+			says   => qr/holds at and provider, and no control_commit/,
+		},
+		'a control commit that is not a commit sha' => {
+			fields => {control_commit => 'fatal: ambiguous argument', provider => 'manual'},
+			says   => qr/its control_commit is "fatal: ambiguous argument", which is not a commit sha/,
+		},
+	);
+	for my $case (sort keys %cases) {
+		$h->_write_record($path, %{$cases{$case}{fields}});
+		my $read = eval {Genesis::Top->new($h->a)->applied_record};
+		my $err  = ($@ // '') =~ s/\s+/ /gr;
+		is($read, undef, "$case: nothing is answered");
+		like($err, qr/\Q$path\E is not a valid applied record/, "$case: it raises, naming the record");
+		like($err, $cases{$case}{says}, "$case: and what it found there");
+		like($err, qr/safe get \Q$path\E.*safe rm \Q$path\E.*genesis pipeline-apply/,
+			"$case: and how to look at it and repair it");
+		Genesis::run({env => {SAFE_TARGET => $h->{vault_target}}, stderr => 0},
+			Harness::Propagation::_real_safe(), 'rm', '-f', $path);
+	}
+
+	# A record with only its control commit is one an older apply could have
+	# written, and it is enough to route from.
+	$h->_write_record($path, control_commit => $control);
+	is_deeply(Genesis::Top->new($h->a)->applied_record, {control_commit => $control},
+		'a record holding a control commit alone is accepted');
+};
+
 subtest 'no environment can claim the applied record address' => sub {
 	plan tests => 4;
 
