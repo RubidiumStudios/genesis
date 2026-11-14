@@ -2607,14 +2607,18 @@ sub fixture_vault {
 # it, so an unarmed harness pays one file test and hands the call straight on.
 #
 # A read at a path break_vault_reads named answers an error, which is not
-# safe's "no secret exists" and so is not an absence either.
+# safe's "no secret exists" and so is not an absence either.  The two paths
+# are compared as safe addresses them, with or without a leading slash, since
+# an export is given the path without one.
 case "\$1" in
 	get|read|export)
 		echo "\$2" >> "$self->{vault_log}"
 		if [ -s "$self->{vault_refuse_reads}" ]; then
+			addressed="\${2#/}"
 			while IFS= read -r refused; do
 				[ -n "\$refused" ] || continue
-				case "\$2" in
+				refused="\${refused#/}"
+				case "\$addressed" in
 					"\$refused"|"\$refused"/*|"\$refused":*)
 						echo >&2 "!! the harness vault refuses to read \$2: permission denied"
 						exit 1

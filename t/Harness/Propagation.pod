@@ -1182,6 +1182,10 @@ and refuses, which a reader must not take for an absence.  It is armed like
 C<break_vault_writes>, in a file the recording C<safe> consults, and
 C<restore_vault> disarms it.
 
+A path is matched as C<safe> addresses it, with or without a leading slash
+on either side.  A reader that exports a path gives it to C<safe> without
+one, and a refusal that matched the spelling alone let such a read through.
+
 =head2 restore_vault($h)
 
 Puts back everything C<break_vault> moved aside and disarms whatever

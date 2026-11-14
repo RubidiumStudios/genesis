@@ -124,6 +124,31 @@ subtest 'the applied record alone can be made unreadable' => sub {
 		"and every environment's record is still readable");
 };
 
+subtest 'a refused read is refused however the path is spelled' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa']);
+	certify($h, 'qa', control_commit => $h->git('a')->sha($h->control));
+	my $path = $h->env_path('qa');   # armed with its leading slash
+	(my $bare = $path) =~ s{^/}{};
+	break_vault_reads($h, $path);
+
+	# The recording safe is first on the path a run is given, so the row puts
+	# it first for the reads it makes itself.
+	local $ENV{PATH} = join(':',
+		Harness::Propagation::_path_prefix($h), $ENV{PATH});
+	local $ENV{SAFE_TARGET} = $h->{vault_target};
+	for my $read (['get', $path], ['get', $bare], ['export', $bare], ['export', "$bare/deployments"]) {
+		my (undef, $rc, $err) = run({stderr => 0}, 'safe', @$read);
+		like($err // '', qr/refuses to read .*permission denied/,
+			"safe @$read is refused") or diag "rc=$rc";
+	}
+
+	restore_vault($h);
+	my (undef, $rc) = run({stderr => 0}, 'safe', 'export', $bare);
+	is($rc, 0, 'and reads again once the vault is restored');
+};
+
 subtest 'the three pre-flight shapes are what git refuses on' => sub {
 	plan tests => 3;
 
