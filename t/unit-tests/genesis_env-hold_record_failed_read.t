@@ -176,4 +176,27 @@ subtest 'a release says whether there was a hold to remove' => sub {
 	is(scalar(grep {/^rm\b/} @{$calls->()}), 1, 'with one removal');
 };
 
+# A removal never asks the record's owner whether the record is a good one
+# (D161), or a record somebody damaged could not be taken away.  The release
+# asks only whether something is stored, which the strict has answers, and
+# removes it.
+subtest 'a release removes a record that holds none of a hold\'s fields' => sub {
+	plan tests => 3;
+	no warnings qw/redefine once/;
+	local *Service::Vault::authenticated = sub { 1 };
+	local *Service::Vault::needs_write_confirmation = sub { 0 };
+	use warnings qw/redefine once/;
+
+	my $env = held_env();
+	my ($path, $calls) = logging_safe(join("\n",
+		'[ "$1" = rm ] && exit 0',
+		q{printf -- '--- # x\nnote: left here by hand\n\n'},
+	));
+	local $ENV{PATH} = $path;
+	is_deeply($env->hold_record, {reason => undef, user => undef, hostname => undef, at => undef},
+		'the record reads as a hold with nothing in it');
+	is($env->clear_hold, 1, 'the release answers that it removed one');
+	is(scalar(grep {/^rm\b/} @{$calls->()}), 1, 'with one removal');
+};
+
 done_testing;
