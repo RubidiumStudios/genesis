@@ -179,15 +179,19 @@ a config YAML document and a network hash.
 
 =item 4.
 
-Uploads the cloud config to the director under the name
+Checks, with C<Service::BOSH::Director::ensure_network_lock_held>, that
+this process still holds the lock, since building the config can outlast
+the lock's stale timeout and taking the lock is not atomic.  Then uploads
+the cloud config to the director under the name
 C<$env_name.$env_type.director>.
 
 =item 5.
 
-Reads the stored record at C<< $env->exodus_base . '/network' >> strictly,
-prints what the write changes through
-L<Genesis::Env::NetworkClaims/claims_summary>, and stores the network hash
-there with C<flatten> and C<clear>.
+Checks the lock again, since the write that follows clears the director's
+whole network record.  Then reads the stored record at
+C<< $env->exodus_base . '/network' >> strictly, prints what the write
+changes through L<Genesis::Env::NetworkClaims/claims_summary>, and stores
+the network hash there with C<flatten> and C<clear>.
 
 =item 6.
 
@@ -249,7 +253,9 @@ there is one, so a failed release never hides why the step stopped.
 =item C<"The %s BOSH director deployed and is working, but its own cloud config %s and its network record in exodus were not updated. The step failed while %s: ...">
 
 Raised with C<bail()> after the lock is released, when the hook, the upload,
-the strict read of the stored record, or the exodus write fails. The message
+the strict read of the stored record, or the exodus write fails, and when
+this process is found to have lost the lock before the upload or before the
+write, in which case nothing more is changed. The message
 names the step and the original error, gives the likely causes (a sealed or
 unreachable vault, an expired token or one without access to the record, or a
 director that refused the cloud config), says what to check, and gives the

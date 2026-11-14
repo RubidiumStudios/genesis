@@ -82,15 +82,22 @@ sub update_director_network_config {
 				my ($config, $network) = $env->run_hook('cloud-config', purpose => 'director');
 				info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
 
+				# Building the config can outlast the lock's stale timeout, and
+				# another process can have taken the lock in the same moment
 				$step = 'uploading the director cloud config';
+				$bosh->ensure_network_lock_held('upload the cloud config');
 				info({pending => 1}, "[[  - >>uploading #c{%s} cloud-config...", $config_name);
 				$tstart = gettimeofday;
 				$bosh->upload_config($config, 'cloud', $config_name);
 				info("#G{done}" . pretty_duration(gettimeofday - $tstart, 5, 10));
 
+				# The write below clears the whole network record, so a step that
+				# lost the lock would wipe the claims of the process that holds it
+				$step = 'storing the director network details in exodus';
+				$bosh->ensure_network_lock_held('write the network claims');
+
 				# Strict, because a failed read would look like a record with no
 				# claims, and the summary would then show every claim as new
-				$step = 'storing the director network details in exodus';
 				my $network_path = $env->exodus_base.'/network';
 				my $stored = $env->vault->get_path_strict($network_path) // {};
 				Genesis::Env::NetworkClaims::claims_summary($network_path, $stored, $network);
