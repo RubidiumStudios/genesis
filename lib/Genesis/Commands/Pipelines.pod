@@ -1928,20 +1928,51 @@ It warns, naming the exodus record, where the environment is still recorded
 as deployed: removing a file is not a teardown, and C<terminate> needs the
 file, which the branch still holds.
 
+Where an orphan's vault records were not read, its row stays and shows the
+gap in place of the records and the deployed warning, since both are things
+nothing read. Under C<skip_vault> the gap reads C<unverified>, as the other
+stages say it. Otherwise it reads C<could not read> with the reason, and the
+report is counted as incomplete: the apply goes on and exits non-zero when
+it is done.
+
 Without C<cleanup> it removes nothing and says so. With it, a dry run says it
 would remove the traces, and a real run asks first unless C<yes>, then hands
 each orphan to L</_cleanup_orphan>. The Concourse jobs need no report, since
 C<set-pipeline> drops whatever the compiled pipeline no longer holds.
+
+A cleanup stops before it removes anything when any orphan's records were
+not read, under C<skip_vault> included. The records are among an orphan's
+traces, so without them the full set is not known. A cleanup that went ahead
+would remove the branch and the ruleset and leave records in the vault that
+nothing then points at.
 
 B<Parameters:> the repository handle, its git service, and the options
 above. C<gh> and C<owner_repo> are passed only where C<GITHUB_AUTH_TOKEN> is
 set, so without a token the pull request and the rulesets are neither
 reported nor removed.
 
-B<Returns:> nothing.
+B<Returns:> how many orphans' vault records could not be read, not counting
+those left unread because C<skip_vault> was given. It is 0 where the report
+is whole, where there are no orphans, and after a cleanup.
 
-B<Errors:> those of L</_find_orphans>; a trace that cannot be removed is
-reported, never raised.
+B<Errors:>
+
+=over 4
+
+=item *
+
+Those of L</_find_orphans>. A trace that cannot be removed is reported,
+never raised.
+
+=item *
+
+C<"Cannot remove the traces of the orphaned environments: the vault records of %s could not be read, because %s. ..."> -
+raised (via C<bail()>, exit C<UNAVAILABLE>) when C<cleanup> is asked for and
+an orphan's records were not read. The message says nothing was removed,
+what the apply had done before this stage and what it had not, and to run
+the cleanup again once the vault can be read.
+
+=back
 
 B<Examples:>
 
@@ -1960,16 +1991,23 @@ last test tells an orphan from a branch of the same type another root of the
 repository keeps. Its pull request branch is counted where the remote holds
 it; the open pull request and the ruleset are asked of GitHub where a client
 is given; and the records, and whether the environment is still deployed,
-are asked of the repository's vault unless C<skip_vault> or the vault is not
-reachable and authenticated.
+are asked of the repository's vault.
+
+Where they are not read, the orphan carries why, and none of the three: a
+list cut short by a read that failed would pass for the whole of what the
+orphan left. That covers C<skip_vault>, a vault that is not reachable and
+authenticated, and a check on one orphan's own path that the vault refused
+or did not answer.
 
 B<Parameters:> the repository handle, its git service, and C<gh>,
 C<owner_repo> and C<skip_vault>.
 
 B<Returns:> a list of hashes, each with C<env>, C<branch>, C<exodus> (the
-deployment's exodus path), and, where found, C<pr_branch>, C<pr>,
-C<rulesets> (each a C<name> with an C<id> or a C<why>), C<records>,
-C<deployed>, and the C<vault> they were read from.
+deployment's exodus path), and, where found, C<pr_branch>, C<pr>, and
+C<rulesets> (each a C<name> with an C<id> or a C<why>). Where the vault was
+read, each also has C<records>, C<deployed>, and the C<vault> they were read
+from. Where it was not, each has C<unread> in their place, a hash of C<why>,
+and C<skipped> where C<skip_vault> is the reason.
 
 B<Errors:> bails where the remote's branches cannot be listed, through
 C<Service::Git::remote_heads>.

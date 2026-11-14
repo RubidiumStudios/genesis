@@ -7,7 +7,7 @@ use Genesis;
 use Genesis::State;
 use Genesis::Term qw/bullet boxed/;
 use Genesis::Commands;
-use Genesis::Exit qw/CONFIG ABORTED TEMPFAIL/;
+use Genesis::Exit qw/CONFIG ABORTED TEMPFAIL UNAVAILABLE/;
 use Genesis::Config;
 use Genesis::Top;
 use Genesis::Env;
@@ -176,14 +176,15 @@ sub apply {
 	}
 
 	# What the pipeline left for environments whose files are gone (D153).
-	_apply_orphans($top, $git,
+	# A report with a gap in it is the apply's to answer for when it ends.
+	my $ending = _apply_orphans($top, $git,
 		($ENV{GITHUB_AUTH_TOKEN}
 			? (gh => $top->github_client, owner_repo => $top->source_control_repository) : ()),
 		dry_run    => $dry_run,
 		cleanup    => $opts->{'cleanup-orphans'},
 		yes        => $opts->{yes},
 		skip_vault => $opts->{'skip-vault'},
-	);
+	) ? UNAVAILABLE : 0;
 
 	_apply_records($top,
 		control_commit => $git->sha($top->control_branch),
@@ -194,7 +195,7 @@ sub apply {
 
 	if ($platform eq 'manual') {
 		info("\n%s", _manual_pipeline_notice());
-		exit 0;
+		exit $ending;
 	}
 
 	_dump_debug_artifacts($opts->{'debug-dir'}, $result, $platform)
@@ -214,7 +215,7 @@ sub apply {
 		mkfile_or_fail("$out_dir/ast.json",
 			JSON::PP->new->pretty->canonical->encode({%$ast}));
 		info("Wrote #C{%s/ast.json}", $out_dir);
-		exit 0;
+		exit $ending;
 	}
 
 	if ($platform eq 'concourse') {
@@ -225,7 +226,7 @@ sub apply {
 			my $yaml = $output->{'pipeline.yml'}
 				or bail("Concourse provider did not produce pipeline.yml");
 			output({raw => 1}, $yaml);
-			exit 0;
+			exit $ending;
 		}
 
 		# A target only where the operator names one; fly resolves it otherwise (D86).
@@ -241,7 +242,7 @@ sub apply {
 				output "#G{--- %s ---}", $file;
 				output({raw => 1}, $output->{$file});
 			}
-			exit 0;
+			exit $ending;
 		}
 		for my $file (sort keys %$output) {
 			my $path = ".github/workflows/$file";
@@ -255,7 +256,7 @@ sub apply {
 		bail("Unsupported platform '%s' for pipeline apply", $platform);
 	}
 
-	exit 0;
+	exit $ending;
 }
 
 # }}}
@@ -1683,8 +1684,8 @@ sub _director_record {
 sub _apply_orphans {
 	my ($top, $git, %opts) = @_;
 	# A dry run without a remote (D118) has no branches to find orphans by.
-	return if $opts{dry_run} && defined $top->source_control_problem;
-	my @orphans = _find_orphans($top, $git, %opts) or return;
+	return 0 if $opts{dry_run} && defined $top->source_control_problem;
+	my @orphans = _find_orphans($top, $git, %opts) or return 0;
 
 	info("\n#Y{Orphaned environments}, whose files have left control, and what the pipeline made for them");
 	for my $o (@orphans) {
@@ -1694,28 +1695,60 @@ sub _apply_orphans {
 			$o->{pr} ? sprintf(", open as #%d", $o->{pr}{number}) : '') if $o->{pr_branch};
 		info("    ruleset       #C{%s}%s", $_->{name}, $_->{why} ? " (unverified: $_->{why})" : '')
 			for @{$o->{rulesets}};
+		if (my $gap = $o->{unread}) {
+			# The row stays, with the gap shown: whether it left records, and
+			# whether it is still deployed, are both things nothing read.
+			info("    records       #Y{%s}, because %s",
+				$gap->{skipped} ? 'unverified' : 'could not read', $gap->{why});
+			next;
+		}
 		info("    record        #C{%s}", $_) for @{$o->{records}};
 		warning("#C{%s} is still deployed, by its exodus record at #C{%s}: removing its file did not ".
 			"tear it down.  Restore the file from #C{%s} and run #C{genesis %s terminate}.",
 			$o->{env}, $o->{exodus}, $o->{branch}, $o->{env}) if $o->{deployed};
 	}
+	# A gap the operator did not ask for is the report's own failure.
+	my @unread   = grep {$_->{unread}} @orphans;
+	my $failures = scalar grep {!$_->{unread}{skipped}} @unread;
 
 	unless ($opts{cleanup}) {
 		info("  Nothing was removed; #C{--cleanup-orphans} removes these traces.");
-		return;
+		warning(
+			"The report above is incomplete: the vault records of %s could not be read.  ".
+			"The apply goes on, and exits non-zero when it is done.",
+			join(', ', map {"#C{$_->{env}}"} grep {!$_->{unread}{skipped}} @unread)
+		) if $failures;
+		return $failures;
 	}
+
+	# A cleanup that cannot read an orphan's records does not know the full
+	# set of its traces, so it removes none of them.
+	bail({exitcode => UNAVAILABLE},
+		"Cannot remove the traces of the orphaned environments: the vault records of ".
+		"%s could not be read, because %s.  The records an orphan left in the vault are ".
+		"among its traces, so without them the full set is not known.\n\n".
+		"Nothing was removed.  %s  Run #C{genesis pipeline-apply --cleanup-orphans} ".
+		"again once the vault can be read%s.",
+		join(', ', map {"#C{$_->{env}}"} @unread), $unread[0]{unread}{why},
+		$opts{dry_run} ? "A dry run changes nothing."
+			: "Before this, the apply created any deployment branch that was missing and ".
+			  "applied the branch protection.  It had not yet written its records or set ".
+			  "the pipeline, which #C{genesis pipeline-apply} without #C{--cleanup-orphans} does.",
+		$unread[0]{unread}{skipped} ? ', without #C{--skip-vault}' : ''
+	) if @unread;
+
 	if ($opts{dry_run}) {
 		info("  #Yi{would remove} every trace above but the deployments themselves");
-		return;
+		return 0;
 	}
 	require Genesis::UI;
 	unless ($opts{yes} || Genesis::UI::prompt_for_boolean(
 			"Remove these traces of the orphaned environments? [y|n]", 0)) {
 		info("  Nothing was removed.");
-		return;
+		return 0;
 	}
 	_cleanup_orphan($git, $_, %opts) for @orphans;
-	return;
+	return 0;
 }
 
 # }}}
@@ -1729,10 +1762,16 @@ sub _find_orphans {
 	my @heads   = $git->remote_heads;
 	my %on      = map {($_ => 1)} @heads;
 
-	my $vault;
-	unless ($opts{skip_vault}) {
+	# The records an orphan left in the vault are among its traces.  Where
+	# they are not read, each orphan carries why, so the report can show the
+	# gap and a cleanup knows it does not have the full set.
+	my ($vault, $unread);
+	if ($opts{skip_vault}) {
+		$unread = {skipped => 1, why => '#C{--skip-vault} was given'};
+	} else {
 		$vault = eval {$top->vault};
-		undef $vault unless $vault && (eval {$vault->status} // '') eq 'ok';
+		my $status = $vault ? (eval {$vault->status} // 'unreachable') : 'unreachable';
+		($vault, $unread) = (undef, {why => "the vault is $status"}) unless $status eq 'ok';
 	}
 	my $mount = $top->_pipeline_exodus_mount;
 
@@ -1760,9 +1799,21 @@ sub _find_orphans {
 			push @{$o{rulesets}}, {name => "genesis-$branch", why => $why} if $why;
 		}
 		if ($vault) {
-			push @{$o{records}}, grep {$vault->has($_)} map {"$o{exodus}/$_"} qw/pipeline hold proposed/;
-			$o{deployed} = $vault->has($o{exodus}) ? 1 : 0;
-			$o{vault} = $vault;
+			# All of them or none: a list cut short by a read that failed
+			# would pass for the whole of what the orphan left.
+			my (@records, $deployed);
+			if (eval {
+				@records  = grep {$vault->has($_)} map {"$o{exodus}/$_"} qw/pipeline hold proposed/;
+				$deployed = $vault->has($o{exodus}) ? 1 : 0;
+				1;
+			}) {
+				@o{qw/records deployed vault/} = (\@records, $deployed, $vault);
+			} else {
+				require Genesis::CI::Walk;
+				$o{unread} = {why => Genesis::CI::Walk::_load_error($@)};
+			}
+		} else {
+			$o{unread} = $unread;
 		}
 		push @orphans, \%o;
 	}

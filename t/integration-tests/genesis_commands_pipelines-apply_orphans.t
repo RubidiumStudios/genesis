@@ -127,6 +127,67 @@ subtest '--cleanup-orphans asks first, and a dry run removes nothing' => sub {
 	ok(on_remote($h, $h->slug('prod')), 'and removing nothing');
 };
 
+# The records an orphan left in the vault are among its traces, and its
+# exodus record is what says it is still deployed.  A vault that will not
+# give them leaves the report with a gap it has to show (D160, T490), and a
+# cleanup with no way to know the full set of traces (D158, T488).
+subtest 'an orphan whose records cannot be read keeps its row, and the apply says so' => sub {
+	my ($h, $gh, $pr) = orphaned_prod();
+	my ($slug, $prb) = ($h->slug('prod'), $h->pr_branch('prod'));
+	break_vault_reads($h, $h->env_path('prod'));
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '-y');
+	my $said = "$out\n$err";
+
+	isnt($exit, 0, 'the apply exits non-zero') or diag($said);
+	like($said, qr/orphan\w*\b.*\bprod\b/i, 'prod is still named as an orphan');
+	like($said, qr/\Q$slug\E/, 'with its deployment branch');
+	like($said, qr/genesis-\Q$slug\E/, 'and its ruleset');
+	like($said, qr/records\s+could not read/i, 'its records are shown as not read');
+	like($said, qr/permission denied/, 'with what the vault said');
+	unlike($said, qr/still deployed/i, 'and it is not said to be deployed, which nothing read');
+	like($said, qr/already recorded qa\b|recorded qa\b/, 'the rest of the apply was done');
+	ok(on_remote($h, $slug), 'and nothing was removed');
+};
+
+subtest '--cleanup-orphans removes nothing when it cannot read an orphan\'s records' => sub {
+	my ($h, $gh, $pr) = orphaned_prod();
+	my ($slug, $prb) = ($h->slug('prod'), $h->pr_branch('prod'));
+	break_vault_reads($h, $h->env_path('prod'));
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '-y', '--cleanup-orphans');
+	my $said = "$out\n$err";
+
+	isnt($exit, 0, 'the apply stops') or diag($said);
+	like($said, qr/permission denied/, 'with what the vault said');
+	like($said, qr/Nothing was removed/, 'and says nothing was removed');
+	ok(on_remote($h, $slug), 'the deployment branch is left');
+	ok(on_remote($h, $prb), 'and the pull request branch');
+	ok(ruleset_for($gh, $slug), 'and the ruleset');
+	my ($open) = grep {$_->{number} == $pr} @{$h->_gh_read->{prs}};
+	isnt($open->{state}, 'closed', 'and the pull request is left open');
+
+	restore_vault($h);
+	($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '-y', '--cleanup-orphans');
+	is($exit, 0, 'once the vault answers, the cleanup goes through') or diag("$out\n$err");
+	ok(!on_remote($h, $slug), 'and the branch is removed');
+};
+
+subtest '--cleanup-orphans removes nothing under --skip-vault' => sub {
+	my ($h, $gh, $pr) = orphaned_prod();
+	my $slug = $h->slug('prod');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '-y', '--skip-vault');
+	my $said = "$out\n$err";
+	is($exit, 0, 'a report under --skip-vault succeeds') or diag($said);
+	like($said, qr/records\s+unverified.*--skip-vault/i, 'and shows the records as unverified, saying why');
+
+	($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '-y', '--skip-vault', '--cleanup-orphans');
+	$said = "$out\n$err";
+	isnt($exit, 0, 'a cleanup under --skip-vault stops') or diag($said);
+	like($said, qr/Nothing was removed/, 'and says nothing was removed');
+	ok(on_remote($h, $slug), 'leaving the deployment branch');
+	ok(ruleset_for($gh, $slug), 'and the ruleset');
+};
+
 subtest 'a trace it cannot remove is reported and the apply goes on' => sub {
 	my ($h, $gh) = orphaned_prod(no_admin => 1);
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '-y', '--cleanup-orphans');
