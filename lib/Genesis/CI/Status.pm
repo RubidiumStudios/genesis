@@ -211,10 +211,26 @@ sub status_records {
 	# staleness is unverifiable.
 	if (my $applied = $record->{applied}) {
 		if ($git->holds_commit($applied->{control_commit})) {
-			my $changes = $top->pipeline_staleness($git);
-			$applied->{stale}         = @$changes ? JSON::PP::true : JSON::PP::false;
+			# An environment whose records the query could not read keeps its
+			# row and says why on it.  The staleness is then only known where
+			# another environment already makes the pipeline stale; otherwise
+			# it is left null, since "not stale" would answer for a record
+			# nobody read.
+			my %row = map {($_->{env} => $_)} @{$record->{environments} || []};
+			my @unread;
+			my $changes = $top->pipeline_staleness($git, unread => sub {
+				my ($name, $why) = @_;
+				push @unread, $name;
+				my $row = $row{$name} or return;
+				return if $row->{error};
+				$row->{error}   = Genesis::CI::Walk::_load_error($why);
+				$row->{reading} = undef;
+			});
+			$applied->{stale}         = @$changes ? JSON::PP::true
+			                          : @unread   ? undef : JSON::PP::false;
 			$applied->{stale_envs}    = [map {$_->{env}} @$changes];
 			$applied->{stale_because} = [map {$_->{reason}} @$changes];
+			$applied->{stale_unread}  = \@unread;
 		}
 	}
 
@@ -323,6 +339,19 @@ sub _read_remote {
 	return {ok => 1, kind => 'success', created => [],
 	        fetched => [grep { defined $held->{$_}} @branches],
 	        absent  => [grep {!defined $held->{$_}} @branches]};
+}
+
+# }}}
+# unread_environments - the rows whose records the vault would not give {{{
+sub unread_environments {
+	my ($record) = @_;
+	# A row that failed to load says so in the same field, and that is the
+	# repository's fault and not the vault's.  The two are told apart by the
+	# words every failed vault read opens with, until a failure carries what
+	# kind it is.
+	return map  {$_->{env}}
+	       grep {($_->{error} // '') =~ /^Could not read \S.* from vault at /}
+	       @{($record || {})->{environments} || []};
 }
 
 # }}}
@@ -735,8 +764,16 @@ sub _applied_line {
 	# query that answers the staleness cannot be asked about a commit git
 	# does not have.  The remedy is the fetch that brings it, said in one
 	# clause, because a report is not the place to argue the case.
-	return $line.csprintf("  #R{[stale: %s]}  this clone does not hold that commit",
-		UNVERIFIABLE) unless defined $applied->{stale};
+	#
+	# The other null is a query that ran and could not read an environment's
+	# records.  The row says why; the header says only that it cannot answer.
+	if (!defined $applied->{stale}) {
+		my @unread = @{$applied->{stale_unread} || []};
+		return $line.csprintf("  #R{[stale: %s]}  could not read %s",
+			UNVERIFIABLE, join(', ', @unread)) if @unread;
+		return $line.csprintf("  #R{[stale: %s]}  this clone does not hold that commit",
+			UNVERIFIABLE);
+	}
 
 	return $line unless $applied->{stale};
 

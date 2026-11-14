@@ -152,6 +152,14 @@ clone does not hold the commit the pipeline was applied from, and both
 renderers read that null as unverifiable rather than as a pipeline that is
 not stale.
 
+Where the query was asked and the vault would not give one environment's
+records, that environment is named in C<stale_unread>, which is an empty
+list otherwise and absent where the query was never asked.  Its row keeps
+whatever the walk read for it and carries the reason in C<error>, with
+C<reading> null.  C<stale> is then true where another environment already
+makes the pipeline stale, and null where none does, since false would answer
+for a record nobody read.
+
 The record also carries C</unfetchable_markers>' answer under C<breaches>,
 which is every environment whose marker names a control commit no ref in this
 repository still reaches.
@@ -563,6 +571,44 @@ B<Examples:>
       [settled => 'deployed'], [in_flight => '1 pending']);
   # 'in_flight'
 
+=head2 unread_environments($record)
+
+  my @envs = Genesis::CI::Status::unread_environments($record);
+
+Names the environments whose rows carry a failed vault read, which is what
+C<genesis pipeline-status> exits C<UNAVAILABLE> on after it has printed the
+report.  The report keeps those rows, so its exit is the only thing that
+tells a reader who looks at nothing else that it did not read everything.
+
+A row that failed to load carries its reason in the same C<error> field,
+and is not counted: an environment file that will not load is the
+repository's fault, and the vault answered.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$record>
+
+The record C</status_records> answered with.
+
+=back
+
+B<Returns:> the environment names, in the record's order, and the empty
+list where every row was read.
+
+B<Errors:> None.
+
+B<Limitations:> A failed vault read is told from a load error by the words
+every such read opens with, C<Could not read ... from vault at>, because a
+row's error is text and carries no kind.  A vault failure worded any other
+way, such as a repository with no vault at all, is not counted.
+
+B<Examples:>
+
+  my @envs = Genesis::CI::Status::unread_environments($record);
+  # ('qa') where the vault refused qa's hold
+
 =head1 INTERNAL FUNCTIONS
 
 =head2 _pull_request_state($top, $scope)
@@ -886,10 +932,12 @@ command that fixes it.  It reads the fields C</status_records> wrote and asks
 no question of its own, so the header and C<--json> cannot come to disagree
 about whether the pipeline is stale.
 
-Where C<stale> is null rather than false, the staleness was never read,
-because this clone does not hold the commit the pipeline was applied from.
-The line then reads C<[stale: unverifiable]> with the reason in one clause,
-which is the one reading the query cannot be asked for.
+Where C<stale> is null rather than false, the staleness is not known.
+Either it was never read, because this clone does not hold the commit the
+pipeline was applied from, or the query ran and could not read the records
+of the environments in C<stale_unread>.  The line then reads
+C<[stale: unverifiable]> with the reason in one clause: that the clone does
+not hold the commit, or C<could not read> and the environments' names.
 
 B<Parameters:>
 
@@ -908,6 +956,9 @@ B<Examples:>
 
   my $line = Genesis::CI::Status::_applied_line($record);
   # '  applied at 6084166  [stale: dev configuration-changed]  run genesis pipeline-apply'
+
+  my $line = Genesis::CI::Status::_applied_line($record);
+  # '  applied at 6084166  [stale: unverifiable]  could not read qa'
 
 =head2 _pull_request_component($row)
 

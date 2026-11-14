@@ -311,7 +311,10 @@ sub pipeline_status {
 		: Genesis::CI::Status::render_tree($record, stale => !$refresh,
 			standing_on => $git->checked_out_branch));
 
-	exit 0;
+	# The report is printed whole, and the exit says whether it is: a row
+	# the vault would not answer for is on it with its reason, and a reader
+	# of the exit alone is not told the report read everything.
+	exit(Genesis::CI::Status::unread_environments($record) ? UNAVAILABLE : 0);
 }
 
 # }}}

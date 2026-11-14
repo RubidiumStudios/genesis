@@ -2163,7 +2163,7 @@ sub applied_record {
 # _pipeline_exodus_mount, which would stop an ordinary deploy with a
 # sentence about a pipeline the operator does not have.
 sub pipeline_staleness {
-	my ($self, $git) = @_;
+	my ($self, $git, %opts) = @_;
 
 	return [] unless $self->pipeline_enabled;
 
@@ -2219,9 +2219,28 @@ sub pipeline_staleness {
 			next;
 		}
 
-		my $record = $env->pipeline_record or next;
+		# A command that acts stops on a record it cannot read, so the read
+		# raises.  A report hands in `unread`, and is told which environment
+		# could not be answered for, so one refused record costs it a row
+		# and not the rows that could be read.
+		my ($record, $recorded);
+		my $read = sub {
+			$record   = $env->pipeline_record or return 1;
+			$recorded = $env->last_read_dependencies;
+			return 1;
+		};
+		if (my $unread = $opts{unread}) {
+			unless (eval {$read->()}) {
+				$unread->($name, $@);
+				next;
+			}
+		} else {
+			$read->();
+		}
+		next unless $record;
+
 		my $compiled  = join("\n", sort @{$record->{dependencies}});
-		my $last_read = join("\n", sort @{$env->last_read_dependencies});
+		my $last_read = join("\n", sort @$recorded);
 		push @changes, {env => $name, reason => 'dependencies-changed'}
 			if $compiled ne $last_read;
 	}

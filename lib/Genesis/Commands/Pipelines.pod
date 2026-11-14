@@ -436,9 +436,19 @@ the header says the staleness is unverifiable and names what is missing
 rather than ending the report.  A force-pushed control and an applied commit
 this clone never fetched both read that way.
 
-B<Returns:> Exits 0 after printing, C<CONFIG> where the configuration disowns
-a live pipeline, or C<UNAVAILABLE> where vault cannot be reached.  See
-L<Genesis::CI::Status> for the record's shape and its two renderings.
+A record the vault will not give for one environment costs the report that
+row's reading and nothing else.  The row is kept and says what could not be
+read and what the vault answered, the header says the staleness is
+unverifiable where that environment was the one it turned on, and the
+report is printed whole.  The exit is then C<UNAVAILABLE>, because a reader
+of the exit alone would otherwise take the report for complete.
+
+B<Returns:> Exits 0 after printing a report that read everything, and
+C<UNAVAILABLE> after printing one with a row the vault would not answer
+for.  Exits C<CONFIG> where the configuration disowns a live pipeline, or
+C<UNAVAILABLE> with no report where vault cannot be reached for the applied
+record.  See L<Genesis::CI::Status> for the record's shape and its two
+renderings.
 
 B<Errors:>
 

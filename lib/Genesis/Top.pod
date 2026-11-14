@@ -2581,6 +2581,7 @@ B<Examples:>
 =head2 pipeline_staleness
 
     my $changes = $top->pipeline_staleness($git);
+    my $changes = $top->pipeline_staleness($git, unread => sub { my ($env, $why) = @_; ... });
 
 The environments whose pipeline no longer matches what is on control.
 
@@ -2637,10 +2638,33 @@ root for this deployment type resolves to L</_no_pipeline_shape> instead,
 whose empty topology leaves nothing to iterate and so answers nothing here
 too.
 
-B<Parameters:> A C<Service::Git> for the repository.
+An environment's pipeline record and the dependency set its last deploy
+recorded are read from the vault, and a read that fails raises. A command
+that acts on the answer stops there, which is what the two pre-flights
+want. A command that only reports hands in C<unread>, and is told instead:
+the environment is left out of the answer, the callback is given its name
+and the error, and the rest are still compared.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$git>
+
+A C<Service::Git> for the repository.
+
+=item C<unread>
+
+B<(optional)> A code reference called with an environment's name and the
+error, for each environment whose records could not be read. With it, such
+a read does not raise.
+
+=back
 
 B<Returns:> An arrayref of hashrefs, each with C<env> and C<reason>, where
-the reason is C<configuration-changed> or C<dependencies-changed>.
+the reason is C<configuration-changed> or C<dependencies-changed>. With
+C<unread>, an environment the callback was given is in neither state: the
+answer says nothing about it.
 
 B<Errors:>
 
@@ -2655,12 +2679,23 @@ applied commit or the commit L</_shape> resolved is not in the local
 repository. A clean answer there would be a wrong answer, so the query
 refuses instead.
 
+=item *
+
+C<< "Could not read <path> from vault at <url>: <reason>" >> - raised by the
+applied record's read, and, without C<unread>, by the read of an
+environment's pipeline record or of its exodus record.
+
 =back
 
 B<Examples:>
 
     my $changes = $top->pipeline_staleness($git);
     # returns [] where the pipeline is current
+
+    my @unread;
+    my $changes = $top->pipeline_staleness($git, unread => sub { push @unread, $_[0] });
+    # returns the changes among the environments that could be read, and
+    # leaves @unread as ('qa') where the vault refused qa's pipeline record
 
     my $changes = $top->pipeline_staleness($git);
     # returns [{env => 'staging', reason => 'configuration-changed'}]
