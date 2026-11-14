@@ -47,6 +47,44 @@ subtest 'a deploy with no predecessor reads no record' => sub {
 		'an environment naming no predecessor asks the vault nothing');
 };
 
+# A history that could not be read says nothing about the predecessor, so it
+# is never answered as one that has not deployed.
+subtest 'a history that cannot be read stops the read' => sub {
+	plan tests => 2;
+	no warnings 'redefine';
+	for my $case (
+		['a refusal', "Could not read secret/exodus/lab/bosh/deployments from vault at https://v:8200: Code: 403. permission denied\n", qr/Code: 403/],
+		['an outage', "Could not read secret/exodus/lab/bosh/deployments from vault at https://v:8200: connection refused\n", qr/connection refused/],
+	) {
+		my ($what, $error, $reason) = @$case;
+		local *Service::Vault::get_path = sub { die $error };
+		throws_ok { Genesis::Commands::Env::_prior_env_record($env, 'lab') }
+			qr{Could not read secret/exodus/lab/bosh/deployments.*$reason}s,
+			"$what raises what the vault said, and is not read as never deployed";
+	}
+};
+
+# The reader walks the history newest first for the latest deployment that
+# reached the director.  An entry it cannot read as a record could be that
+# one, so it stops there instead of passing over it.
+subtest 'an entry that is not a record stops the read' => sub {
+	plan tests => 3;
+	no warnings 'redefine';
+	local *Service::Vault::get_path = sub {
+		return {
+			'20261101120000' => {result => 'success', git => {commit => 'abc'}},
+			'20261102120000' => 'left by something else',
+		};
+	};
+	throws_ok { Genesis::Commands::Env::_prior_env_record($env, 'lab') }
+		qr{deployment history of lab.*deployments}s, 'it raises, naming the predecessor and the path';
+	throws_ok { Genesis::Commands::Env::_prior_env_record($env, 'lab') }
+		qr{not\s+a\s+deployment\s+record.*20261102120000\s+is\s+a\s+single\s+value}s,
+		'and the entry, and that it is not a record';
+	throws_ok { Genesis::Commands::Env::_prior_env_record($env, 'lab') }
+		qr{safe get }, 'and how to look at it';
+};
+
 subtest 'a predecessor with nothing at its path reads no record' => sub {
 	plan tests => 1;
 

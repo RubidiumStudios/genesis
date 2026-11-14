@@ -2081,16 +2081,16 @@ sub deploy {
 # certified commit goes through.  The flat record beside them holds the same
 # facts under different names and is the staleness comparison's half.
 #
-# The read is wrapped in an eval, so a predecessor whose history cannot be
-# read at all is answered the same way as one that never deployed, and the
-# check that reads this answer is where that refusal is worded.
+# A history that cannot be read raises, since it says nothing about the
+# predecessor and must not pass for one that never deployed.  A path with
+# nothing stored is a predecessor that never deployed.
 sub _prior_env_record {
 	my ($env, $prior_name) = @_;
 	return undef unless $prior_name;
 
 	# exodus_mount already ends with '/', so the path is composed directly.
 	my $path = $env->exodus_mount.$prior_name.'/'.$env->type.'/deployments';
-	my $deploys = eval { $env->vault->get_path($path) };
+	my $deploys = $env->vault->get_path($path);
 	return undef unless $deploys && ref($deploys) eq 'HASH';
 
 	# Newest first, the entry names being the compact timestamps the deploy
@@ -2112,7 +2112,20 @@ sub _prior_env_record {
 	require Genesis::Env::Deployment;
 	for my $at (sort {$b cmp $a} keys %$deploys) {
 		my $entry = $deploys->{$at};
-		next unless ref($entry) eq 'HASH';
+		# An entry that is not a record could be the latest deployment that
+		# reached the director, so it is not passed over for an older one.
+		bail({exitcode => DATAERR},
+			"The deployment history of #C{%s}, at #C{%s}, holds an entry that is ".
+			"not a deployment record: #C{%s} is %s, where each entry is a record ".
+			"of one deployment, named by when it was made.\n\n".
+			"The history is read newest first for the latest deployment that ".
+			"reached the director, and this entry could be that one, so nothing ".
+			"was decided from the entries older than it.  #C{safe get %s} shows ".
+			"what is stored there.",
+			$prior_name, $path, $at,
+			ref($entry) ? 'a '.lc(ref($entry)) : 'a single value',
+			($path =~ s{^/}{}r)
+		) unless ref($entry) eq 'HASH';
 		my $record = Genesis::Env::Deployment->new(
 			{from_storage => 1}, $env, timestamp => $at, %$entry
 		);
