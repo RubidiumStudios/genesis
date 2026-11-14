@@ -2409,7 +2409,7 @@ sub exodus_lookup {
 			? $self->vault->get_path_strict($path)
 			: $self->vault->read_flattened_secret($path);
 	};
-	bail "Could not get $for exodus data from the Vault: $@" if $@;
+	bail("Could not get %s exodus data from the Vault:\n\n%s", $for, scalar plain_error($@)) if $@;
 	return $default unless defined($out);
 	return struct_lookup($extended ? $out : unflatten($out), $key, $default);
 }
@@ -2427,7 +2427,7 @@ sub exodus_lookup_strict {
 	# that fails dies, since reading it as the default would look to the
 	# caller like an exodus record with nothing in it.
 	my $out = eval {$self->vault->get_path_strict($path)};
-	bail "Could not get $for exodus data from the Vault: $@" if $@;
+	bail("Could not get %s exodus data from the Vault:\n\n%s", $for, scalar plain_error($@)) if $@;
 	return $default unless defined($out);
 	return struct_lookup($out, $inner // '', $default);
 }
