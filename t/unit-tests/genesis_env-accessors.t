@@ -502,11 +502,30 @@ EOF
 };
 
 subtest 'user_provided_bosh_creds_policy reads a config whose blobstore has a boolean path_style' => sub {
-	plan tests => 4;
+	plan tests => 7;
 
-	my $top = make_top(name => 'thing', no_vault => 1);
-	$top->link_dev_kit('t/src/simple');
-	put_file($top->path('lab-mgmt.yml'), <<EOF);
+	# The ocfp config holds a blobstore whose path_style is stored as a
+	# boolean and whose port as a number.  safe exports each as text, which is
+	# how the config is read.  Only safe 1.26.0 exported them with their JSON
+	# types, in a form Genesis refuses.
+	my $base = 'secret/config/ocfp-lab-wayneeseguin/mgmt';
+	my %export = (
+		plain => qq({"$base/bosh/blobstores/bosh":{"bucket":"bosh","endpoint":"https://s3.lab:9000","host":"s3.lab","path_style":"true","port":"9000","region":"us-east-1"},"$base/policies":{"user_provided_bosh_creds":"allow"}}),
+		typed => qq([{"export_version":3,"data":{"$base/bosh/blobstores/bosh":{"first":2,"versions":[{"value":{"bucket":"bosh","endpoint":"https://s3.lab:9000","host":"s3.lab","path_style":true,"port":9000,"region":"us-east-1"}}]},"$base/policies":{"versions":[{"value":{"user_provided_bosh_creds":"allow"}}]}},"requires_versioning":{}}]),
+	);
+
+	require Service::Vault;
+	my $vault = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
+	no warnings 'redefine';
+	local *Genesis::Env::vault = sub { $vault };
+	use warnings 'redefine';
+
+	# A fresh environment for each export, since it remembers its config.
+	my $env_reading = sub {
+		my ($form) = @_;
+		my $top = make_top(name => "thing-$form", no_vault => 1);
+		$top->link_dev_kit('t/src/simple');
+		put_file($top->path('lab-mgmt.yml'), <<EOF);
 ---
 kit:
   name:    dev
@@ -517,34 +536,35 @@ genesis:
 ocfp:
   bloc: ocfp-lab-wayneeseguin
 EOF
-	my $env = $top->load_env('lab-mgmt');
-	ok($env->is_ocfp, 'the env is an ocfp env');
+		my $dir = workdir("ocfp-config-$form");
+		put_file("$dir/export.json", $export{$form});
+		my $path = fake_safe_path(join("\n",
+			qq{echo "\$*" >> '$dir/calls'},
+			qq{[ "\$1" = export ] && [ "\$2" = '$base' ] && exec cat '$dir/export.json'},
+			'exit 1',
+		));
+		return ($top->load_env('lab-mgmt'), $dir, $path);
+	};
 
-	# The config export in the shape safe 1.26.0 writes, with the blobstore's
-	# path_style a JSON boolean and its port a number, and what safe 1.26.0
-	# prints for a safe get of that blobstore.
-	my $base = 'secret/config/ocfp-lab-wayneeseguin/mgmt';
-	my $dir = workdir('ocfp-config');
-	put_file("$dir/export.json", qq([{"export_version":3,"data":{"$base/bosh/blobstores/bosh":{"first":2,"versions":[{"value":{"bucket":"bosh","endpoint":"https://s3.lab:9000","host":"s3.lab","path_style":true,"port":9000,"region":"us-east-1"}}]},"$base/policies":{"versions":[{"value":{"user_provided_bosh_creds":"allow"}}]}},"requires_versioning":{}}]));
-	put_file("$dir/get.yml", qq(--- # $base/bosh/blobstores/bosh\nbucket: bosh\nendpoint: https://s3.lab:9000\nhost: s3.lab\npath_style: "true"\nport: "9000"\nregion: us-east-1\n\n));
+	{
+		my ($env, $dir, $path) = $env_reading->('plain');
+		local $ENV{PATH} = $path;
+		ok($env->is_ocfp, 'the env is an ocfp env');
+		is($env->user_provided_bosh_creds_policy, 'allow', 'the policy beside the blobstore reads as allow');
+		is($env->ocfp_config_lookup('bosh.blobstores.bosh.path_style'), 'true',
+			'and the boolean path_style comes back as the text safe exports for it');
+		is($env->ocfp_config_lookup('bosh.blobstores.bosh.port'), '9000', 'as does the numeric port');
+		is(get_file("$dir/calls"), "export $base\n", 'after the one config export, and nothing else');
+	}
 
-	require Service::Vault;
-	my $vault = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
-	no warnings 'redefine';
-	local *Genesis::Env::vault = sub { $vault };
-	use warnings 'redefine';
-	local $ENV{PATH} = fake_safe_path(join("\n",
-		qq{echo "\$*" >> '$dir/calls'},
-		qq{[ "\$1" = export ] && [ "\$2" = '$base' ] && exec cat '$dir/export.json'},
-		qq{[ "\$1" = get ] && [ "\$2" = '$base/bosh/blobstores/bosh' ] && exec cat '$dir/get.yml'},
-		'exit 1',
-	));
-
-	is($env->user_provided_bosh_creds_policy, 'allow', 'the policy beside the blobstore reads as allow');
-	is($env->ocfp_config_lookup('bosh.blobstores.bosh.path_style'), 'true',
-		'and the boolean path_style comes back as the text safe prints for it');
-	is(get_file("$dir/calls"), "export $base\nget $base/bosh/blobstores/bosh\n",
-		'after the config export and one safe get, of the blobstore');
+	{
+		my ($env, $dir, $path) = $env_reading->('typed');
+		local $ENV{PATH} = $path;
+		throws_ok { $env->user_provided_bosh_creds_policy }
+			qr{Cannot\s+use\s+the\s+safe\s+export\s+of\s+\Q$base\E.*safe\s+1\.26\.0.*safe\s+1\.26\.1\s+or\s+later}s,
+			'the export safe 1.26.0 writes for it is refused, naming the config path, that safe, and the remedy';
+		is(get_file("$dir/calls"), "export $base\n", 'and the blobstore is not read again another way');
+	}
 };
 
 subtest 'minimum_genesis_version' => sub {
