@@ -452,7 +452,7 @@ subtest 'get_path_strict - tells a failed read from a path with nothing stored' 
 	my %cases = (
 		'permission denied' => {
 			stderr => "!! permission denied reading secret/myapp\n",
-			error  => qr{Could not read secret/myapp from vault at https://vault\.example\.com:8200: .*permission denied.*token has no read access.*sealed.*cannot be reached.*safe export secret/myapp}s,
+			error  => qr{Could not read secret/myapp from vault at https://vault\.example\.com:8200: .*permission denied.*vault refused the read.*token has no read access.*safe auth.*safe export secret/myapp}s,
 		},
 		'a 403 from the vault' => {
 			stderr => "Error making API request.\nCode: 403. Errors:\n* 1 error occurred:\n\t* permission denied\n",

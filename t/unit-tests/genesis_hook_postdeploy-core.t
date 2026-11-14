@@ -923,7 +923,7 @@ subtest 'update_director_network_config - a failed strict read after a good depl
 };
 
 subtest 'update_director_network_config - a failed strict read reports once, with one prefix and one set of causes' => sub {
-	plan tests => 10;
+	plan tests => 11;
 	# Carp::Always, which the harness may load, appends a stack trace to every
 	# die; the operator sees the message without it
 	local $SIG{__DIE__} = 'DEFAULT';
@@ -942,8 +942,9 @@ subtest 'update_director_network_config - a failed strict read reports once, wit
 	like($err, qr/while storing the director network details in exodus/, 'it still names the step');
 	like($err, qr/Could not read secret\/exodus\/lab-ocf\/bosh\/network from vault at https:\/\/v:8200: !! permission denied reading/,
 		'and the path, the vault, and safe\'s reason');
-	like($err, qr/safe export secret\/exodus\/lab-ocf\/bosh\/network.*safe vault status|safe vault status.*safe export secret\/exodus\/lab-ocf\/bosh\/network/,
-		'and the checks to run');
+	like($err, qr/safe auth.*safe export secret\/exodus\/lab-ocf\/bosh\/network/,
+		'and the remedy for a refusal, with the check to run');
+	unlike($err, qr/safe vault status/, 'and not the check for an outage');
 	like($err, qr/genesis lab-ocf bosh-configs upload --type cloud --name lab-ocf\.bosh\.director -y/,
 		'and the command that finishes the step');
 	my @starts = ($raw =~ /\n[ \t]*\n( *)\S/g);

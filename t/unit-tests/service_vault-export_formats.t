@@ -341,6 +341,55 @@ subtest 'read_flattened_secret tells a missing secret from a refused read' => su
 	is_deeply($v->read_flattened_secret('secret/myapp'), {password => 'hunter2', port => '8443'}, 'a good read comes back as its keys');
 };
 
+# A refusal and an outage stop a read alike, and are told apart in what the
+# read says, since they are fixed by different people in different ways.
+subtest 'a refusal and an outage read differently, and both stop the read' => sub {
+	my $v = test_vault();
+	my %kinds = (
+		'a 403' => {
+			stderr => $REFUSED,
+			says   => qr/The\s+vault\s+refused\s+the\s+read.*no\s+read\s+access.*expired\s+or\s+been\s+revoked/s,
+			remedy => qr/safe\s+auth\b.*policy/s,
+			not    => qr/sealed|cannot\s+be\s+reached/,
+		},
+		'a plain permission denied' => {
+			stderr => "!! permission denied reading secret/myapp\n",
+			says   => qr/The\s+vault\s+refused\s+the\s+read/,
+			remedy => qr/safe\s+auth\b/,
+			not    => qr/sealed|cannot\s+be\s+reached/,
+		},
+		'a connection refused' => {
+			stderr => $UNREACHED,
+			says   => qr/The\s+vault\s+gave\s+no\s+usable\s+answer.*sealed\s+or\s+cannot\s+be\s+reached/s,
+			remedy => qr/safe\s+vault\s+status/,
+			not    => qr/safe\s+auth\b|policy/,
+		},
+		'a sealed vault' => {
+			stderr => "!! 503 Sealed: Vault is sealed\n",
+			says   => qr/The\s+vault\s+gave\s+no\s+usable\s+answer/,
+			remedy => qr/safe\s+vault\s+status/,
+			not    => qr/safe\s+auth\b|policy/,
+		},
+		'text that is neither' => {
+			stderr => "!! something safe has never said before\n",
+			says   => qr/Likely\s+causes\s+are.*no\s+read\s+access.*sealed.*cannot\s+be\s+reached/s,
+			remedy => qr/safe\s+get\s+secret\/myapp.*safe\s+vault\s+status/s,
+			not    => qr/The\s+vault\s+refused|gave\s+no\s+usable\s+answer/,
+		},
+	);
+	plan tests => 5 * keys %kinds;
+	for my $kind (sort keys %kinds) {
+		my $k = $kinds{$kind};
+		local $ENV{PATH} = fake_safe("printf '%s' '$k->{stderr}' >&2; exit 1").":$ENV{PATH}";
+		my $raised = eval { $v->read_flattened_secret('secret/myapp'); 1 } ? '' : "$@";
+		like($raised, qr{Could not read secret/myapp from vault at https://vault\.example\.com:8200: }, "$kind: the read stops, naming the path and the vault");
+		like($raised, $k->{says}, "$kind: it says which kind of failure it was");
+		like($raised, $k->{remedy}, "$kind: and gives the remedy for that kind");
+		unlike($raised, $k->{not}, "$kind: and not the other kind's");
+		throws_ok { $v->has('secret/myapp') } qr{Could not read secret/myapp}, "$kind: an existence check stops the same way";
+	}
+};
+
 subtest 'read_flattened_secret treats a child killed by a signal as a failed read' => sub {
 	plan tests => 2;
 	my $v = test_vault();

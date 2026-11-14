@@ -1225,10 +1225,9 @@ the path having nothing stored, or when its output cannot be parsed as JSON.
 The placeholders are the path, the vault URL, and the reason, which is the
 text C<safe> wrote to stderr, or C<safe exited with code N> when it wrote
 none, with C<killed by signal N> added when a signal stopped it. The message
-comes from L</bail_read_failure>, which goes on to name the likely causes (a
-token without read on the path, a sealed vault, or an unreachable vault) and
-to say to run C<safe export> on the path and C<safe vault status>. The text
-here is the start of it.
+comes from L</bail_read_failure>, which goes on to say what to do about a
+refusal, an outage, or a failure that is neither, in the words for that
+kind. The text here is the start of it.
 
 =item C<"Cannot use the safe export of #C{%s}: ...">
 
@@ -1327,11 +1326,39 @@ what counts as absent and whether to read again, through L</read_failure>,
 and calls this only once the read has failed. It is a function, not a
 method.
 
-The message names what was read, the vault, and the reason, then the likely
-causes, which are a token without read access on the path, a sealed vault,
-or an unreachable vault. It ends by telling the operator to run the same
-C<safe> command with the same token to see which, and C<safe vault status>
-to check for a sealed vault.
+The message names what was read, the vault, and the reason, then one
+paragraph of advice chosen by what L</read_failure_kind> makes of the
+reason. A refusal and an outage both stop the read, and are fixed by
+different people in different ways, so each has its own words.
+
+=over 4
+
+=item C<refused>
+
+Says the vault refused the read, that the token most likely has no read
+access on the path or has expired or been revoked, and to authenticate again
+with C<safe auth> or have the token's policy extended. It ends with the
+C<safe> command that shows the refusal.
+
+=item C<unreachable>
+
+Says the vault gave no usable answer, that it is most likely sealed or
+cannot be reached, and to check it with C<safe vault status> and run the
+command again once it answers. It ends with the C<safe> command that shows
+whether the read works.
+
+=item C<unclassified>
+
+Lists all three causes, a token without read access on the path, a sealed
+vault, and an unreachable vault, and says to run the C<safe> command with
+the same token to see which, and C<safe vault status> to check for a sealed
+vault.
+
+=back
+
+Each paragraph holds exactly one of the phrases C<usually means> and
+C<Likely causes>, which is what a caller that wraps this message looks for
+to tell whether advice is already given.
 
 B<Parameters:>
 
@@ -1365,8 +1392,8 @@ B<Errors:>
 =item C<"Could not read #C{%s} from vault at #M{%s}: %s">
 
 Always raised (via C<bail()>). The placeholders are C<$what>, C<$url>, and
-C<$reason>, and the text that follows names the likely causes and the
-C<safe> command to run.
+C<$reason>, and the paragraph that follows is the advice for the kind of
+failure, with the C<safe> command to run.
 
 =back
 
@@ -1374,7 +1401,68 @@ B<Examples:>
 
   Service::Vault::bail_read_failure($vault->{url}, 'secret/myapp', 'Code: 403', 'get secret/myapp');
   # Dies: Could not read secret/myapp from vault at https://...: Code: 403
-  #       ...Run safe get secret/myapp with the same token to see which...
+  #       The vault refused the read. ...Authenticate again with safe auth...
+
+  Service::Vault::bail_read_failure($vault->{url}, 'secret/myapp', 'Vault is sealed', 'get secret/myapp');
+  # Dies: Could not read secret/myapp from vault at https://...: Vault is sealed
+  #       The vault gave no usable answer. ...Check it with safe vault status...
+
+  Service::Vault::bail_read_failure($vault->{url}, 'secret/myapp', 'safe exited with code 2', 'get secret/myapp');
+  # Dies: Could not read secret/myapp from vault at https://...: safe exited with code 2
+  #       Likely causes are ...Run safe get secret/myapp with the same token to see which...
+
+=head2 read_failure_kind
+
+  my $kind = Service::Vault::read_failure_kind($reason);
+
+Sorts the reason a read failed into a refusal, an outage, or neither, so
+L</bail_read_failure> can word its advice for the one that happened. It is a
+function, not a method, and it reads only the text of the reason.
+
+A reason holding C<403>, C<permission denied>, or C<forbidden> is
+C<refused>. The vault answers that way for a path the token's policy does
+not cover, and for a token that has expired or been revoked, so the two are
+not told apart here. A reason that says the vault is sealed, holds C<502>,
+C<503>, or C<504>, or is one of the network failures C<safe> passes on
+(connection refused or reset, C<dial tcp>, no such host, no route to host,
+network is unreachable, an i/o timeout, a timeout, deadline exceeded, a TLS
+handshake failure) is C<unreachable>. Everything else is C<unclassified>.
+The refusal test runs first, so a reason holding both reads as a refusal.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$reason>
+
+Why the read failed, usually the reason L</read_failure> gave. C<undef>
+reads as the empty string.
+
+=back
+
+B<Returns:> One of C<refused>, C<unreachable>, or C<unclassified>.
+
+B<Errors:> None. Text it does not recognize is C<unclassified>.
+
+B<Limitations:> The reason is matched as text, since C<safe> gives no code
+for why a read failed. A path that holds C<403> or C<forbidden> and is named
+in an unrelated failure reads as a refusal here; L</read_failure> leaves
+quoted paths out of its own scan, and this does not. Only the wording of the
+advice depends on the answer.
+
+B<Examples:>
+
+  Service::Vault::read_failure_kind("Code: 403. Errors:\n* permission denied");
+  # Returns: 'refused'
+
+  Service::Vault::read_failure_kind('!! Vault is sealed');
+  # Returns: 'unreachable'
+
+  Service::Vault::read_failure_kind('dial tcp 10.0.0.1:8200: connect: connection refused');
+  # Returns: 'unreachable'
+
+  Service::Vault::read_failure_kind('safe exited with code 2');
+  # Returns: 'unclassified'
 
 =head2 read_flattened_secret
 
@@ -1459,9 +1547,10 @@ nothing being stored, when it is killed by a signal, when it prints nothing,
 or when what it prints is not a YAML map of keys. With C<lenient>, only the
 last of those is raised. The placeholders are the path, the vault URL, and
 the reason. For a C<safe> that exited zero and printed nothing, the reason
-is C<safe printed nothing>, followed by whatever it wrote to standard error. The message comes from L</bail_read_failure>, which goes on to
-name the likely causes and to say to run C<safe get> on the path and C<safe
-vault status>.
+is C<safe printed nothing>, followed by whatever it wrote to standard error.
+The message comes from L</bail_read_failure>, which goes on to the advice
+for a refusal, an outage, or neither, and the C<safe get> command to run on
+the path.
 
 =back
 

@@ -528,14 +528,46 @@ sub read_failure {
 # bail_read_failure - stop on a read that safe did not finish, saying how to see why {{{
 sub bail_read_failure {
 	my ($url, $what, $reason, $command) = @_;
+	# A refusal and an outage stop a read alike, and are fixed by different
+	# people in different ways, so each is said in its own words.  What safe
+	# said that is neither gets the list of all three causes.
+	my $kind = read_failure_kind($reason);
+	my $advice =
+		$kind eq 'refused' ?
+			"The vault refused the read.  This usually means the token has no read ".
+			"access on that path, or has expired or been revoked.  Authenticate ".
+			"again with #C{safe auth}, or have the token's policy extended to cover ".
+			"the path.  #C{safe %s} with the same token shows the refusal."
+		: $kind eq 'unreachable' ?
+			"The vault gave no usable answer.  This usually means it is sealed or ".
+			"cannot be reached.  Check it with #C{safe vault status}, and run the ".
+			"command again once it answers.  #C{safe %s} shows whether the read works."
+		:
+			"Likely causes are that the token has no read access on that path, ".
+			"that the vault is sealed, or that the vault cannot be reached.  ".
+			"Run #C{safe %s} with the same token to see which, and ".
+			"#C{safe vault status} to check whether the vault is sealed.";
 	bail(
-		"Could not read #C{%s} from vault at #M{%s}: %s\n\n".
-		"Likely causes are that the token has no read access on that path, ".
-		"that the vault is sealed, or that the vault cannot be reached.  ".
-		"Run #C{safe %s} with the same token to see which, and ".
-		"#C{safe vault status} to check whether the vault is sealed.",
+		"Could not read #C{%s} from vault at #M{%s}: %s\n\n$advice",
 		$what, $url, $reason, $command
 	);
+}
+# }}}
+# read_failure_kind - whether a failed read's reason is a refusal, an outage, or neither {{{
+sub read_failure_kind {
+	my ($reason) = @_;
+	$reason //= '';
+	# The vault answers 403 for a path the policy does not cover, and for a
+	# token that has expired or been revoked.
+	return 'refused' if $reason =~ /\b403\b|permission denied|forbidden/i;
+	# No usable answer came back: sealed, or not reached at all.
+	return 'unreachable' if $reason =~ m{
+		\bsealed\b | \b50[234]\b | connection\s+refused | connection\s+reset
+		| dial\s+tcp | no\s+such\s+host | no\s+route\s+to\s+host
+		| network\s+is\s+unreachable | i/o\s+timeout | timed\s+out
+		| deadline\s+exceeded | tls\s+handshake
+	}xi;
+	return 'unclassified';
 }
 # }}}
 # read_flattened_secret - read one secret whole with safe get, as the strings safe prints {{{
