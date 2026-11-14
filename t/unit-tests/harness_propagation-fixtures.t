@@ -208,6 +208,20 @@ subtest 'the fixture answers the two vault addresses' => sub {
 		"the environment's compiled pipeline facts sit under a pipeline subpath");
 };
 
+# ready_harness hands its options to make_harness, where control is the
+# control branch's name, and on to ready_envs, where control is the commit the
+# pipeline was applied from.  A row that named its control branch had that
+# name written into the applied record, which no pipeline-apply can write,
+# and git resolved it wherever a commit was wanted, so nothing said so.
+subtest 'a harness with a named control branch records a commit as applied' => sub {
+	plan tests => 2;
+
+	my $h = ready_harness(envs => ['qa'], control => 'trunk');
+	my $applied = secret($h->applied_path . ':control_commit');
+	like($applied, qr/^[0-9a-f]{40}$/, 'the applied record names a commit sha');
+	is($applied, $h->git('a')->sha('trunk'), 'which is the commit the control branch is at');
+};
+
 subtest 'a broken read refuses rather than answering stale' => sub {
 	plan tests => 4;
 

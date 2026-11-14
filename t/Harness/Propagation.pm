@@ -4957,7 +4957,11 @@ EOS
 sub ready_envs {
 	my ($self, %opts) = @_;
 	my @envs    = @{$opts{envs} // $self->{envs}};
-	my $control = $opts{control} // $self->git('a')->sha($self->{control});
+	# ready_harness passes its options through, and there control is the
+	# control branch's name, so what is given is resolved here: a name
+	# becomes the commit it is at, and a commit stays the commit it is.  The
+	# records below hold a commit, as the ones pipeline-apply writes do.
+	my $control = $self->git('a')->sha($opts{control} // $self->{control});
 	my %delivered = map {($_ => 1)} @{$opts{delivered} // \@envs};
 	my %certified = map {($_ => 1)} @{$opts{certified} // \@envs};
 	# What each environment last read is per environment wherever the
@@ -4968,8 +4972,9 @@ sub ready_envs {
 	my $read = delete $opts{dependencies_read};
 
 	$self->fixture_vault;
-	$self->fixture_applied(control => $control,
-		provider => $opts{provider} // $self->{provider}, %opts)
+	$self->fixture_applied(
+		provider => $opts{provider} // $self->{provider}, %opts,
+		control => $control)
 		unless defined $opts{applied} && !$opts{applied};
 
 	for my $env (@envs) {
