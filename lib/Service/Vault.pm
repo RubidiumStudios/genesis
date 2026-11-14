@@ -495,6 +495,10 @@ sub get_path_strict {
 		return undef unless defined($reason);
 		bail_read_failure($self->{url}, $path, $reason, "export $path");
 	}
+	# KV version 2 still lists a secret whose newest version was deleted or
+	# destroyed, so safe exports it without a word and with nothing in it.
+	# Nothing is stored there, which is undef here on either version.
+	return undef if ref($data) eq 'HASH' && !CORE::keys(%$data);
 	return $self->_unpack_path_export($path, $data);
 }
 # }}}

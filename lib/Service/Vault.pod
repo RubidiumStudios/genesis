@@ -1160,6 +1160,13 @@ stripped.
 B<Returns:> A nested hash reference as C<get_path> returns, or C<undef> when
 nothing is stored at the path.
 
+Nothing stored is said two ways, and both answer C<undef>. C<safe> names a
+path that holds nothing and exits 1. Under KV version 2 it does neither for
+a secret whose newest version was deleted or destroyed, which the engine
+still lists: the export succeeds and holds nothing. An export with nothing
+in it is therefore read as nothing stored, so the answer is the same on
+either version of the engine.
+
 B<Errors:>
 
 =over 4

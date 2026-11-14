@@ -559,6 +559,7 @@ integration-tests/genesis_new-refresh.t                       # genesis new refr
 integration-tests/genesis_new-index_check.t                   # genesis new refuses a staged index, ignores an unstaged edit, and skips both under --no-commit
 integration-tests/branch_class-feature_branch.t               # a feature branch is permitted only when it descends from control and is named for no environment
 integration-tests/service_vault-operations.t  # Service::Vault real vault operations
+integration-tests/service_vault-kv_versions.t  # T496: every reader, has, the write and the clear answer alike on KV v1 and v2
 integration-tests/service_bosh-director-network_lock.t  # network claims lock on real kv v1 and kv v2 mounts
 integration-tests/service_vault_local-concurrent_create.t  # Concurrent local vaults share one .saferc
 # Genesis::Env integration tests - require vault/BOSH mocks
