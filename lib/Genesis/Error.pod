@@ -1,0 +1,427 @@
+=head1 NAME
+
+Genesis::Error - A raised error that keeps its kind and its exit code
+
+=head1 SYNOPSIS
+
+    use Genesis;
+
+    eval { $vault->get_path_strict($path) };
+    if (my $raised = raised($@)) {
+        exit $raised->exitcode if $raised->is_refused;
+    }
+
+    # As text, it is what bail always died with
+    like($@, qr/Could not read/);
+
+=head1 DESCRIPTION
+
+C<bail> exits with the code it is given when nothing is there to catch it.
+Inside an C<eval> it has to die instead, and it used to die with a string,
+so the code went no further than the C<eval> and a caller that caught the
+error could only guess at the kind of failure from its wording.
+
+This class is what C<bail> dies with there. It reads as the text C<bail>
+died with before, through its string form, so a caller that matches a
+caught error against a pattern, compares it, or puts it into a message is
+unchanged. Beside the text it carries the message as it was written, a
+C<state> that names the kind of failure, and the exit code that kind earns.
+
+A caught error that is one of these is asked through its methods.
+C<Genesis::raised> answers the object for a caught error that is one, and
+C<undef> for one that is not, so a caller never has to name this class.
+
+=head2 The states
+
+The state is the cause of the failure, and four of them say why a vault
+record could not be used. Each earns an exit code by being that state, as
+C<D163> of the pipeline propagation design fixes them:
+
+=over 4
+
+=item C<refused>
+
+The vault refused the read. Exits C<Genesis::Exit::NOPERM>.
+
+=item C<unreachable>
+
+The vault gave no usable answer: sealed, or not reached. Exits
+C<Genesis::Exit::UNAVAILABLE>.
+
+=item C<unread>
+
+The read did not finish and what was said fits neither of the above, or
+what came back was not a faithful copy of what is stored. Exits
+C<Genesis::Exit::UNAVAILABLE>.
+
+=item C<invalid>
+
+The read worked, and what it gave is not a valid record. Exits
+C<Genesis::Exit::DATAERR>.
+
+=item C<error>
+
+Everything else, and the state of an error given none. It names no exit
+code of its own, and exits with the one the raise gave it, or as any plain
+failure does.
+
+=back
+
+=head2 Its place beside Genesis::Result
+
+The accessor and predicate names are the ones
+C<plans/genesis-result-module.md> proposes for C<Genesis::Result>, the class
+for what a check or a fix answers. That class is to replace this one once it
+exists, so the names are kept the same and this class adds only what a
+raised error needs: a string form and an exit code.
+
+=head1 LIMITATIONS
+
+The object is lost wherever it is rewritten as text. Putting it through
+C<sprintf>, or editing a caught error in place with C<s///> or C<chomp>,
+leaves a plain string with no state and no code. C<bail> looks for one among
+its arguments before it formats them for that reason. Raising it again with
+C<die $err> keeps it.
+
+There is no C<AUTOLOAD>, so a predicate for a state not listed here does not
+exist and calling one dies, where C<Genesis::Result> as proposed would
+answer false.
+
+=head1 CONSTRUCTOR
+
+=head2 new
+
+    my $error = Genesis::Error->new(msg => $msg, %args);
+
+Builds an error.
+
+B<Parameters:>
+
+=over 4
+
+=item C<msg>
+
+The message as it was written, with any colour markup still in it.
+Required.
+
+=item C<state>
+
+B<(optional)> The kind of failure. Defaults to C<error>.
+
+=item C<text>
+
+B<(optional)> The rendered text the error reads as when it is used as a
+string. Defaults to C<msg>.
+
+=item C<exitcode>
+
+B<(optional)> The exit code. Defaults to the one the state earns, and to
+C<undef> for a state that earns none.
+
+=item C<data>
+
+B<(optional)> A hashref of anything else worth carrying. Defaults to an
+empty one.
+
+=back
+
+B<Returns:> The new C<Genesis::Error>.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Genesis::Error needs a msg, and was given none">
+
+Raised with a plain C<die> when C<msg> is not given. It is not raised
+through C<bail>, because C<bail> builds one of these to say what it says.
+
+=back
+
+B<Examples:>
+
+    my $error = Genesis::Error->new(state => 'refused', msg => 'Could not read secret/a');
+    # $error->exitcode is Genesis::Exit::NOPERM
+
+    my $error = Genesis::Error->new(msg => 'No such kit', exitcode => Genesis::Exit::CONFIG);
+    # $error->state is 'error', and $error->exitcode is Genesis::Exit::CONFIG
+
+=head1 METHODS - ACCESSORS
+
+=head2 state
+
+    my $state = $error->state;
+
+The kind of failure, one of the states above.
+
+B<Returns:> The state's name.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->state;   # 'refused'
+
+=head2 msg
+
+    my $msg = $error->msg;
+
+The message as it was written, before it was wrapped to the terminal and
+given its C<[FATAL]> prefix. It still holds any colour markup, so it can be
+put inside another message that will be rendered once.
+
+B<Returns:> The message.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    bail("Could not load the record:\n\n%s", $error->msg);
+
+=head2 text
+
+    my $text = $error->text;
+
+The rendered text, which is also what the error reads as when it is used as
+a string.
+
+B<Returns:> The text.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->text eq "$error";   # true
+
+=head2 exitcode
+
+    my $code = $error->exitcode;
+
+The exit code the failure earns: the one the raise gave, or else the one
+its state earns.
+
+B<Returns:> The code, or C<undef> where the raise gave none and the state
+earns none.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    exit($error->exitcode // 1);
+
+=head2 data
+
+    my $data = $error->data;
+
+Whatever else the raise chose to carry.
+
+B<Returns:> A hashref, empty where nothing was given.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $path = $error->data->{path};
+
+=head2 data_for
+
+    my $value = $error->data_for($key);
+
+One value of L</data>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$key>
+
+The key to read.
+
+=back
+
+B<Returns:> The value, or C<undef> where the key is not there.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $path = $error->data_for('path');
+
+=head2 message_or
+
+    my $msg = $error->message_or($default);
+
+The message, or a default where the message is empty.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$default>
+
+What to answer for an empty message.
+
+=back
+
+B<Returns:> The message or the default.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $why = $error->message_or('unknown reason');
+
+=head1 METHODS - PREDICATES
+
+=head2 is_ok
+
+    $error->is_ok;
+
+Always false. A raised error is never a passing result. It is here so that a
+caller written for C<Genesis::Result> can ask it.
+
+B<Returns:> C<0>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->is_ok;   # 0
+
+=head2 is_warning
+
+    $error->is_warning;
+
+Always false, for the reason L</is_ok> is.
+
+B<Returns:> C<0>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->is_warning;   # 0
+
+=head2 is_passable
+
+    $error->is_passable;
+
+Always false, for the reason L</is_ok> is.
+
+B<Returns:> C<0>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->is_passable;   # 0
+
+=head2 is_fatal
+
+    $error->is_fatal;
+
+Always true. An error that was raised stopped what raised it.
+
+B<Returns:> C<1>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->is_fatal;   # 1
+
+=head2 is_error
+
+    $error->is_error;
+
+Whether the state is the plain C<error> state. It is false for an error that
+names its cause, so a caller asking whether something failed asks
+L</is_passable> or L</is_fatal>, and not this.
+
+B<Returns:> C<1> or C<0>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    Genesis::Error->new(msg => 'x')->is_error;                       # 1
+    Genesis::Error->new(msg => 'x', state => 'refused')->is_error;   # 0
+
+=head2 is_refused
+
+    $error->is_refused;
+
+Whether the vault refused the read.
+
+B<Returns:> C<1> or C<0>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->is_refused;   # 1 for a 403
+
+=head2 is_unreachable
+
+    $error->is_unreachable;
+
+Whether the vault gave no usable answer.
+
+B<Returns:> C<1> or C<0>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->is_unreachable;   # 1 for a sealed vault
+
+=head2 is_unread
+
+    $error->is_unread;
+
+Whether a read did not finish for a reason that is neither a refusal nor an
+outage, or gave back something that is not a faithful copy.
+
+B<Returns:> C<1> or C<0>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->is_unread;   # 1 where safe exited 2 and said nothing
+
+=head2 is_invalid
+
+    $error->is_invalid;
+
+Whether a read worked and gave something that is not a valid record.
+
+B<Returns:> C<1> or C<0>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->is_invalid;   # 1 for an applied record with no control commit
+
+=head2 is_unreadable
+
+    $error->is_unreadable;
+
+Whether a read did not finish, for whichever reason: a refusal, an outage,
+or neither. An invalid record was read, so it is not one of these.
+
+B<Returns:> C<1> or C<0>.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    die $error unless $error->is_unreadable;
+
+=head1 SEE ALSO
+
+L<Genesis::Exit> for the codes, and C<Genesis::bail> and C<Genesis::raised>
+for where one of these is made and read.
+
+=cut
