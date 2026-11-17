@@ -176,7 +176,8 @@ sub apply {
 	}
 
 	# What the pipeline left for environments whose files are gone (D153).
-	# A report with a gap in it is the apply's to answer for when it ends.
+	# A report with a gap in it is the apply's to answer for when it ends,
+	# with the code the report answers: 0 where it read everything.
 	my $ending = _apply_orphans($top, $git,
 		($ENV{GITHUB_AUTH_TOKEN}
 			? (gh => $top->github_client, owner_repo => $top->source_control_repository) : ()),
@@ -184,7 +185,7 @@ sub apply {
 		cleanup    => $opts->{'cleanup-orphans'},
 		yes        => $opts->{yes},
 		skip_vault => $opts->{'skip-vault'},
-	) ? UNAVAILABLE : 0;
+	) || 0;
 
 	_apply_records($top,
 		control_commit => $git->sha($top->control_branch),
@@ -1714,23 +1715,29 @@ sub _apply_orphans {
 			"tear it down.  Restore the file from #C{%s} and run #C{genesis %s terminate}.",
 			$o->{env}, $o->{exodus}, $o->{branch}, $o->{env}) if $o->{deployed};
 	}
-	# A gap the operator did not ask for is the report's own failure.
+	# A gap the operator did not ask for is the report's own failure, and is
+	# worth the worst of the causes the reads failed for (D163).  One that
+	# names no code, such as a vault that is not up, is worth UNAVAILABLE.
 	my @unread   = grep {$_->{unread}} @orphans;
-	my $failures = scalar grep {!$_->{unread}{skipped}} @unread;
+	my @failures = grep {!$_->{unread}{skipped}} @unread;
+	my $code = @failures
+		? Genesis::CI::Preflight::worst_code(
+			map {$_->{unread}{exit_code} // UNAVAILABLE} @failures) // UNAVAILABLE
+		: 0;
 
 	unless ($opts{cleanup}) {
 		info("  Nothing was removed; #C{--cleanup-orphans} removes these traces.");
 		warning(
 			"The report above is incomplete: the vault records of %s could not be read.  ".
 			"The apply goes on, and exits non-zero when it is done.",
-			join(', ', map {"#C{$_->{env}}"} grep {!$_->{unread}{skipped}} @unread)
-		) if $failures;
-		return $failures;
+			join(', ', map {"#C{$_->{env}}"} @failures)
+		) if @failures;
+		return $code;
 	}
 
 	# A cleanup that cannot read an orphan's records does not know the full
 	# set of its traces, so it removes none of them.
-	bail({exitcode => UNAVAILABLE},
+	bail({exitcode => $code || UNAVAILABLE},
 		"Cannot remove the traces of the orphaned environments: the vault records of ".
 		"%s could not be read, because %s.  The records an orphan left in the vault are ".
 		"among its traces, so without them the full set is not known.\n\n".
@@ -1816,8 +1823,13 @@ sub _find_orphans {
 			}) {
 				@o{qw/records deployed vault/} = (\@records, $deployed, $vault);
 			} else {
+				# The reason, and the code its cause earns beside it (D163).
+				my $failure = $@;
 				require Genesis::CI::Walk;
-				$o{unread} = {why => Genesis::CI::Walk::_load_error($@)};
+				$o{unread} = {
+					why       => Genesis::CI::Walk::_load_error($failure),
+					exit_code => Genesis::CI::Walk::_error_code($failure),
+				};
 			}
 		} else {
 			$o{unread} = $unread;

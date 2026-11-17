@@ -1974,9 +1974,14 @@ above. C<gh> and C<owner_repo> are passed only where C<GITHUB_AUTH_TOKEN> is
 set, so without a token the pull request and the rulesets are neither
 reported nor removed.
 
-B<Returns:> how many orphans' vault records could not be read, not counting
-those left unread because C<skip_vault> was given. It is 0 where the report
-is whole, where there are no orphans, and after a cleanup.
+B<Returns:> the exit code the report is worth, which the apply exits with
+when it is done. It is 0 where the report is whole, where there are no
+orphans, and after a cleanup. Where an orphan's vault records could not be
+read, not counting those left unread because C<skip_vault> was given, it is
+the worst of the causes those reads failed for (D163), by
+C<Genesis::CI::Preflight/worst_code(@codes)>: C<NOPERM> for a refusal,
+C<UNAVAILABLE> for an outage, and C<UNAVAILABLE> for a gap that names no
+code, such as a vault that is not up.
 
 B<Errors:>
 
@@ -1990,8 +1995,10 @@ never raised.
 =item *
 
 C<"Cannot remove the traces of the orphaned environments: the vault records of %s could not be read, because %s. ..."> -
-raised (via C<bail()>, exit C<UNAVAILABLE>) when C<cleanup> is asked for and
-an orphan's records were not read. The message says nothing was removed,
+raised (via C<bail()>) when C<cleanup> is asked for and an orphan's records
+were not read. It exits the worst of the causes the reads failed for, as the
+report does, and C<UNAVAILABLE> where none names a code, C<skip_vault>
+included. The message says nothing was removed,
 what the apply had done before this stage and what it had not, and to run
 the cleanup again once the vault can be read.
 
@@ -2030,7 +2037,8 @@ deployment's exodus path), and, where found, C<pr_branch>, C<pr>, and
 C<rulesets> (each a C<name> with an C<id> or a C<why>). Where the vault was
 read, each also has C<records>, C<deployed>, and the C<vault> they were read
 from. Where it was not, each has C<unread> in their place, a hash of C<why>,
-and C<skipped> where C<skip_vault> is the reason.
+of C<exit_code> where a read failed and its error names the code its cause
+earns (D163), and of C<skipped> where C<skip_vault> is the reason.
 
 B<Errors:> bails where the remote's branches cannot be listed, through
 C<Service::Git::remote_heads>.

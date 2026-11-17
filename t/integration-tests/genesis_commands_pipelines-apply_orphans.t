@@ -138,7 +138,8 @@ subtest 'an orphan whose records cannot be read keeps its row, and the apply say
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '-y');
 	my $said = "$out\n$err";
 
-	isnt($exit, 0, 'the apply exits non-zero') or diag($said);
+	# The harness's broken read is a refusal, which exits NOPERM (D163).
+	is($exit, Genesis::Exit::NOPERM, 'the apply exits NOPERM, as on a refusal') or diag($said);
 	like($said, qr/orphan\w*\b.*\bprod\b/i, 'prod is still named as an orphan');
 	like($said, qr/\Q$slug\E/, 'with its deployment branch');
 	like($said, qr/genesis-\Q$slug\E/, 'and its ruleset');
@@ -156,7 +157,7 @@ subtest '--cleanup-orphans removes nothing when it cannot read an orphan\'s reco
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '-y', '--cleanup-orphans');
 	my $said = "$out\n$err";
 
-	isnt($exit, 0, 'the apply stops') or diag($said);
+	is($exit, Genesis::Exit::NOPERM, 'the apply stops, as on a refusal') or diag($said);
 	like($said, qr/permission denied/, 'with what the vault said');
 	like($said, qr/Nothing was removed/, 'and says nothing was removed');
 	ok(on_remote($h, $slug), 'the deployment branch is left');
