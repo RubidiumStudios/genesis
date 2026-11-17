@@ -149,6 +149,34 @@ subtest 'a refused read is refused however the path is spelled' => sub {
 	is($rc, 0, 'and reads again once the vault is restored');
 };
 
+# A reader exits differently for a refusal and for an outage (D163), so a row
+# about the cause has to be able to arm either.
+subtest 'a broken read answers as an outage where it is asked to' => sub {
+	plan tests => 5;
+
+	my $h = make_harness(envs => ['qa']);
+	certify($h, 'qa', control_commit => $h->git('a')->sha($h->control));
+	my $path = $h->env_path('qa');
+	(my $bare = $path) =~ s{^/}{};
+
+	local $ENV{PATH} = join(':',
+		Harness::Propagation::_path_prefix($h), $ENV{PATH});
+	local $ENV{SAFE_TARGET} = $h->{vault_target};
+
+	break_vault_reads($h, {as => 'outage'}, $path);
+	for my $read (['get', $path], ['export', $bare]) {
+		my (undef, $rc, $err) = run({stderr => 0}, 'safe', @$read);
+		like($err // '', qr/did not answer for .*Vault is sealed/,
+			"safe @$read answers as a sealed vault does") or diag "rc=$rc";
+		unlike($err // '', qr/permission denied|forbidden|\b403\b/,
+			"safe @$read says nothing a reader takes for a refusal");
+	}
+
+	eval { break_vault_reads($h, {as => 'on fire'}, $path) };
+	like($@, qr/a refusal or an outage, and was asked for 'on fire'/,
+		'and a cause it does not know is refused by name');
+};
+
 subtest 'the three pre-flight shapes are what git refuses on' => sub {
 	plan tests => 3;
 

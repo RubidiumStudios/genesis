@@ -2609,18 +2609,25 @@ sub fixture_vault {
 # A read at a path break_vault_reads named answers an error, which is not
 # safe's "no secret exists" and so is not an absence either.  The two paths
 # are compared as safe addresses them, with or without a leading slash, since
-# an export is given the path without one.
+# an export is given the path without one.  Each line of the file is how the
+# read fails and then the path: a refusal says what a vault says for a token
+# with no access, and an outage what it says when it is sealed, which are
+# the two causes a reader tells apart.
 case "\$1" in
 	get|read|export)
 		echo "\$2" >> "$self->{vault_log}"
 		if [ -s "$self->{vault_refuse_reads}" ]; then
 			addressed="\${2#/}"
-			while IFS= read -r refused; do
+			while IFS=' ' read -r how refused; do
 				[ -n "\$refused" ] || continue
 				refused="\${refused#/}"
 				case "\$addressed" in
 					"\$refused"|"\$refused"/*|"\$refused":*)
-						echo >&2 "!! the harness vault refuses to read \$2: permission denied"
+						if [ "\$how" = outage ]; then
+							echo >&2 "!! the harness vault did not answer for \$2: Vault is sealed"
+						else
+							echo >&2 "!! the harness vault refuses to read \$2: permission denied"
+						fi
 						exit 1
 						;;
 				esac
@@ -3338,11 +3345,22 @@ sub break_vault_writes {
 # with a message that is not safe's "no secret exists", and it is armed the way
 # break_vault_writes is, in a file the recording wrapper consults.
 # restore_vault disarms it.
+#
+# The read is refused, as a vault refuses a token with no access, unless the
+# options say {as => 'outage'}, which answers as a sealed vault does.  A
+# reader tells the two apart and exits differently for each (D163), so a row
+# about the cause names it.  One call arms one cause for all of its paths,
+# and replaces whatever an earlier call armed.
 sub break_vault_reads {
-	my ($self, @paths) = @_;
+	my ($self, @rest) = @_;
+	my %opts  = map {%$_} grep {ref($_) eq 'HASH'} @rest;
+	my @paths = grep {!ref($_)} @rest;
+	my $as = $opts{as} // 'refusal';
+	die "break_vault_reads answers a refusal or an outage, and was asked for '$as'\n"
+		unless $as eq 'refusal' || $as eq 'outage';
 	$self->fixture_vault;
 	helper::put_file($self->{vault_refuse_reads},
-		join('', map {"$_\n"} @paths));
+		join('', map {"$as $_\n"} @paths));
 	return $self;
 }
 

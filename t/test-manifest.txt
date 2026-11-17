@@ -489,7 +489,8 @@ integration-tests/genesis_ci_status-record.t                  # one canonical re
 integration-tests/genesis_ci_status-reads.t                   # status reads R once into T, creates no branch, and leaves T alone while a propagate runs
 integration-tests/genesis_ci_status-rendering.t               # detail in brackets, each component in its own colour, and the row in the worst one
 integration-tests/genesis_ci_status-roots_and_mapping.t       # each root reports its own branch and reading, and every line of the mapping table has a fixture
-integration-tests/genesis_ci_status-unreadable_record.t       # T490: a record the vault refuses keeps its row with the reason, and the report exits UNAVAILABLE
+integration-tests/genesis_ci_status-unreadable_record.t       # T490: a record the vault refuses keeps its row with the reason, and the report exits NOPERM
+integration-tests/genesis_ci-read_failure_exit_codes.t        # T493: propagate and pipeline-status exit by cause on an outage and an invalid record, and a run exits its worst
 integration-tests/genesis_ci_report-outcomes.t                # one outcome per environment, one line per routed commit, and the overwritten file
 integration-tests/genesis_ci_report-preview_warnings.t        # the preview warns where its answer rests on a push or a reset it did not make
 integration-tests/genesis_ci_report-totals.t                  # the totals line counts the commits the run published, and no others
@@ -583,6 +584,7 @@ integration-tests/genesis_commands_env-deploy_provider_gate.t  # an automated pr
 integration-tests/genesis_commands_env-deploy_stale_pipeline.t  # the stale-pipeline warning names the changed environments and the apply
 integration-tests/genesis_commands_env-deploy_unreadable_record.t  # T485: a deploy stops on a pre-flight record it cannot read, and goes on where it is absent
 integration-tests/genesis_commands_env-read_only_unreadable_record.t  # T490: a read-only command fails on a record it cannot read, and shows no default for it
+integration-tests/genesis_commands_env-read_failure_exit_codes.t      # T493: deploy, pending-changes and rotate-secrets exit by cause on an outage and an invalid record
 integration-tests/genesis_commands_env-deploy_due_commits.t  # the due-commits warning, its silence, the proposed record, and the warning order
 integration-tests/genesis_commands_env-deploy_drifted.t  # the drifted warning names the files and deploys anyway, over the two-hash record
 integration-tests/genesis_commands_env-deploy_exodus_record.t  # the dependency set a deploy records, the two timestamp forms, and a failed record write
