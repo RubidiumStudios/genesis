@@ -13,6 +13,7 @@ use Data::Dumper;
 use File::Basename qw/basename dirname/;
 use File::Find ();
 use IO::Socket;
+use Scalar::Util ();
 
 use base 'Exporter';
 our @EXPORT = qw/
@@ -490,6 +491,11 @@ sub _frames_without_args {
 
 sub plain_error {
 	my ($err) = @_;
+	# An error bail raised says what it said itself, as it was written, and
+	# needs nothing taken off it.  It is asked by what it can do and not by
+	# its class, which this module does not load.
+	return wantarray ? ($err->msg, 1) : $err->msg
+		if Scalar::Util::blessed($err) && $err->can('msg') && $err->can('rendered');
 	$err //= '';
 	$err =~ s/^\s+|\s+$//g;
 	my $prefix = qr/(?:\e\[[0-9;]*m)*\[FATAL\](?:\e\[[0-9;]*m)*[ \t]*/;

@@ -18,6 +18,7 @@ our $GITHUB  = "https://github.com/genesis-community/genesis";
 use Genesis::Log;
 use Genesis::Term;
 use Genesis::State;
+use Genesis::Error;
 
 use Cwd ();
 # Snapshot cwd as early as possible so the END block below can restore
@@ -34,6 +35,7 @@ use File::Temp qw/tempdir/;
 use IO::Socket;
 use JSON::PP ();
 use POSIX qw/strftime/;
+use Scalar::Util ();
 #use Symbol qw/qualify_to_ref/;
 use Time::HiRes qw/gettimeofday/;
 use Time::Piece;
@@ -76,6 +78,7 @@ our @EXPORT = qw/
 
 	logger
 	error bail bug fatal warning info output success notice dryrun
+	raised
 	debug trace dump_stack dump_var qtrace
 
 	vaulted
@@ -372,23 +375,57 @@ sub bail {
 		@{$options}{keys %$more_options} = values %$more_options;
 	}
 
-	my $msg = fix_wrap(@_)."\n";
+	# A caught error handed on as an argument keeps what it knew: the kind
+	# of failure, and its exit code where it named one.  It is looked for
+	# before the arguments are formatted, which leaves only their text.
+	my ($carried) = grep {raised($_)} @_;
+	my $state = delete($options->{state});
+	my $rc    = delete($options->{exitcode});
+	($state, $rc) = ($carried->state, $carried->exitcode)
+		if $carried && defined $carried->exitcode;
+
+	# It goes into this message as it was written, so its colours are made
+	# once, with this message's, and it is wrapped once with it.
+	my $msg = fix_wrap(map {raised($_) ? $_->msg : $_} @_)."\n";
+	my $error = Genesis::Error->new(
+		state => $state // 'error', exitcode => $rc, msg => $msg =~ s/\s+\z//r);
 
 	# Make sure there's a stderr log running and its level is at least fatal
 	logger->configure_log(level => "FATAL") unless (logger->is_logging("FATAL"));
 
 	if ($^S && !envset("GENESIS_IGNORE_EVAL")) {
-		# die if in an eval;
+		# die if in an eval, with an error that still says its kind and its
+		# code to whoever catches it
 		logger->trace("Fatal exception caught: $msg");
-		die "\n".csprintf("%s",wrap($msg,terminal_width,"#r{[FATAL]} "))."\n";
+		die $error;
 	}
 
 	# log a fatal message and exit
-	my $rc = delete($options->{exitcode}) // 1;
+	$rc = $error->exitcode // 1;
 	logger->fatal({offset=>1},$options, "\n".$msg);
 	show_cursor(); # restore cursor visibility if we hid it
 	exit $rc;
 }
+
+# raised - the error a caught failure is, where bail raised it {{{
+sub raised {
+	my ($caught) = @_;
+	return Scalar::Util::blessed($caught) && $caught->isa('Genesis::Error')
+		? $caught : undef;
+}
+
+# }}}
+# uncaught - a __DIE__ handler: an error bail raised leaves with its own code {{{
+sub uncaught {
+	# Compiling, or inside an eval, where something is there to catch it
+	return if !defined($^S) || $^S;
+	my $raised = raised($_[0]) or return;
+	print STDERR $raised->rendered;
+	show_cursor();
+	exit($raised->exitcode // 1);
+}
+
+# }}}
 
 sub bug {
 

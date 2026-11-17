@@ -487,18 +487,27 @@ lines still separate the paragraphs. An error without the prefix, such as a
 die from a library, is trimmed and otherwise returned as it is, since its
 line breaks are its own.
 
+A C<bail> caught as the L<Genesis::Error> it now raises needs none of that.
+It is answered with its C<msg>, the message as it was written, and counts as
+raised. It is known by having C<msg> and C<rendered> and not by its class,
+which this module does not load. What is left for the text path is what
+still dies as text: C<bug>, a C<bail> under C<GENESIS_IGNORE_EVAL>, and
+anything that reached this as a string.
+
 B<Parameters:>
 
 =over 4
 
 =item C<$err>
 
-The error text, usually C<$@>. C<undef> reads as the empty string.
+The caught error, usually C<$@>: the object or its text. C<undef> reads as
+the empty string.
 
 =back
 
 B<Returns:> The cleaned text. In list context, the text and then C<1> when
-the error carried the C<[FATAL]> prefix and C<0> when it did not.
+the error was raised by C<bail>, which is to say it was the object or its
+text carried the C<[FATAL]> prefix, and C<0> when it was not.
 
 B<Errors:> None.
 

@@ -2112,7 +2112,7 @@ sub applied_record {
 		# text, because each caller puts it inside a message of its own.
 		my $data;
 		eval {$data = $vault->read_flattened_secret($path); 1}
-			or die scalar(plain_error($@ =~ s/\e\[[0-9;]*m//gr))."\n";
+			or die scalar(plain_error("$@" =~ s/\e\[[0-9;]*m//gr))."\n";
 		return undef unless defined $data;
 
 		# What was read with fidelity and is still not an applied record is

@@ -11,8 +11,12 @@ Genesis::Error - A raised error that keeps its kind and its exit code
         exit $raised->exitcode if $raised->is_refused;
     }
 
-    # As text, it is what bail always died with
-    like($@, qr/Could not read/);
+    # As a string it is what was said, in plain words
+    like($@, qr/Could not read secret\/a from vault/);
+
+    # More can be said after it, and it is still the error it was
+    $@ .= "\n\nNothing was changed.";
+    die $@;
 
 =head1 DESCRIPTION
 
@@ -21,15 +25,59 @@ Inside an C<eval> it has to die instead, and it used to die with a string,
 so the code went no further than the C<eval> and a caller that caught the
 error could only guess at the kind of failure from its wording.
 
-This class is what C<bail> dies with there. It reads as the text C<bail>
-died with before, through its string form, so a caller that matches a
-caught error against a pattern, compares it, or puts it into a message is
-unchanged. Beside the text it carries the message as it was written, a
+This class is what C<bail> dies with there. It carries the message, a
 C<state> that names the kind of failure, and the exit code that kind earns.
 
 A caught error that is one of these is asked through its methods.
 C<Genesis::raised> answers the object for a caught error that is one, and
 C<undef> for one that is not, so a caller never has to name this class.
+
+=head2 Its three forms
+
+The object holds one thing, the message as it was written, and nothing
+rendered from it. There are three ways to read that, and a caller says which
+it wants by how it asks.
+
+=over 4
+
+=item C<msg>
+
+The source: the message as written, colour markup and all, such as
+C<Could not read #C{secret/a} from vault>. This is what goes into another
+message that will be rendered once.
+
+=item As a string
+
+The plain reading of C<msg>: markup resolved, no C<[FATAL]> prefix, not
+wrapped, such as C<Could not read secret/a from vault>. Every string
+operation gives this one form, whether it is a pattern match, a comparison,
+an interpolation, a concatenation or a C<sprintf>, and what comes back is a
+plain string. L</sentence> is the same thing by name.
+
+=item C<rendered>
+
+The block an operator is shown: a blank line, the C<[FATAL]> prefix, the
+message wrapped to the terminal, a blank line. It is made when it is asked
+for, at the width the terminal has then.
+
+=back
+
+C<msg> differs from the string form by the markup and by nothing else. A
+message with no markup reads the same both ways. So a caller that matches or
+compares uses the string, and a caller building another message hands over
+the error itself, or its C<msg>.
+
+=head2 Saying more after it
+
+C<$error .= $more> gives the error with C<$more> added to its message, and
+with the state, the code and the data it had. What is added is part of the
+source, so it is rendered with the rest, as part of the same block. An
+earlier copy of the error says what it said before.
+
+Only the append is overloaded. C<$error . $more> and C<"... $error ..."> are
+plain strings holding the plain reading. A concatenation that answered an
+object would hand one to every caller that interpolates a caught error, and
+a JSON encoder given one refuses it.
 
 =head2 The states
 
@@ -73,15 +121,22 @@ The accessor and predicate names are the ones
 C<plans/genesis-result-module.md> proposes for C<Genesis::Result>, the class
 for what a check or a fix answers. That class is to replace this one once it
 exists, so the names are kept the same and this class adds only what a
-raised error needs: a string form and an exit code.
+raised error needs: an exit code, the string form, C<rendered>, and the
+append. C<Genesis::Result> takes those on with it.
 
 =head1 LIMITATIONS
 
 The object is lost wherever it is rewritten as text. Putting it through
-C<sprintf>, or editing a caught error in place with C<s///> or C<chomp>,
-leaves a plain string with no state and no code. C<bail> looks for one among
-its arguments before it formats them for that reason. Raising it again with
-C<die $err> keeps it.
+C<sprintf>, interpolating it, or changing a caught error in place with
+C<s///> or C<chomp>, leaves a plain string with no state and no code.
+C<bail> looks for one among its arguments before it formats them for that
+reason. Raising it again with C<die $err> keeps it, and so does C<.=>.
+
+C<$error .= $more> adds to the source, so markup in C<$more> is rendered,
+where C<$error . $more> leaves C<$more> as it is.
+
+A caught error does not read as the block C<bail> prints. A caller that
+wants the prefix or the wrap asks for C<rendered>.
 
 There is no C<AUTOLOAD>, so a predicate for a state not listed here does not
 exist and calling one dies, where C<Genesis::Result> as proposed would
@@ -107,11 +162,6 @@ Required.
 =item C<state>
 
 B<(optional)> The kind of failure. Defaults to C<error>.
-
-=item C<text>
-
-B<(optional)> The rendered text the error reads as when it is used as a
-string. Defaults to C<msg>.
 
 =item C<exitcode>
 
@@ -146,6 +196,75 @@ B<Examples:>
     my $error = Genesis::Error->new(msg => 'No such kit', exitcode => Genesis::Exit::CONFIG);
     # $error->state is 'error', and $error->exitcode is Genesis::Exit::CONFIG
 
+=head2 with_more
+
+    my $longer = $error->with_more($more);
+    $error .= $more;
+
+The same error with C<$more> said after its message. This is what C<.=>
+does, by name.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$more>
+
+The text to add. It joins the source, so any markup in it is rendered with
+the rest. C<undef> adds nothing.
+
+=back
+
+B<Returns:> A new C<Genesis::Error> with the longer message and the state,
+the exit code and the data of this one. This one is left as it was, so a
+copy somebody kept of it says what it said.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error .= "\n\nNothing was changed.";
+    # the same state and exit code, with a second paragraph
+
+    my $longer = $error->with_more(' Check the vault.');
+    # $error is unchanged
+
+=head1 METHODS - FORMS
+
+=head2 sentence
+
+    my $plain = $error->sentence;
+    my $plain = "$error";
+
+The message in plain words, which is what the error is as a string: markup
+resolved, no prefix, not wrapped. A layout mark in the message becomes the
+indent it stands for.
+
+B<Returns:> The plain text.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->sentence;   # 'Could not read secret/a from vault'
+
+=head2 rendered
+
+    print STDERR $error->rendered;
+
+The block an operator is shown: a blank line, the C<[FATAL]> prefix, the
+message coloured and wrapped to the terminal, and a blank line. It is made
+when it is asked for, so it is wrapped to the width the terminal has then.
+
+B<Returns:> The block, as text.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $error->rendered;
+    # "\n[FATAL] Could not read secret/a from\n        vault\n\n" at 40 columns
+
 =head1 METHODS - ACCESSORS
 
 =head2 state
@@ -166,9 +285,10 @@ B<Examples:>
 
     my $msg = $error->msg;
 
-The message as it was written, before it was wrapped to the terminal and
-given its C<[FATAL]> prefix. It still holds any colour markup, so it can be
-put inside another message that will be rendered once.
+The source: the message as it was written, with any colour markup still in
+it. It is the one thing the error holds, and the string form and
+C<rendered> are both read from it. It can be put inside another message
+that will be rendered once.
 
 B<Returns:> The message.
 
@@ -176,22 +296,9 @@ B<Errors:> None.
 
 B<Examples:>
 
-    bail("Could not load the record:\n\n%s", $error->msg);
+    $error->msg;   # 'Could not read #C{secret/a} from vault'
 
-=head2 text
-
-    my $text = $error->text;
-
-The rendered text, which is also what the error reads as when it is used as
-a string.
-
-B<Returns:> The text.
-
-B<Errors:> None.
-
-B<Examples:>
-
-    $error->text eq "$error";   # true
+    info("The check failed: %s", $error->msg);
 
 =head2 exitcode
 

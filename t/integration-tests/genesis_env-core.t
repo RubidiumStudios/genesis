@@ -260,7 +260,9 @@ genesis:
 EOF
 	local $ENV{NOCOLOR} = 'y';
 	quietly { throws_ok { $env = $top->load_env('standalone-with-another.yml');}
-		qr/\[FATAL\] Environment standalone-with-another.yml could not be loaded:\n\s+- kit bosh\/0.2.0 is not compatible with secrets_mount feature; check for\n\s+newer kit version or remove feature.\n\s+- kit bosh\/0.2.0 is not compatible with exodus_mount feature; check for\n\s+newer kit version or remove feature./ms,
+		# A caught bail reads as what it said, one item to a line; the prefix
+		# and the wrap this row used to match belong to the block it prints.
+		qr/^Environment standalone-with-another.yml could not be loaded:\n- kit bosh\/0.2.0 is not compatible with secrets_mount feature; check for newer kit version or remove feature.\n- kit bosh\/0.2.0 is not compatible with exodus_mount feature; check for newer kit version or remove feature./ms,
 		"Outdated kits bail when using v2.7.0 features";
 	};
 
@@ -317,9 +319,9 @@ EOF
 	ok($env->has_feature('vsphere'), "standalone env has the vsphere feature");
 	ok($env->has_feature('second-feature'), "standalone env has the second-feature feature");
 	ok(!$env->has_feature('xyzzy'), "standalone env doesn't have the xyzzy feature");
-	throws_ok { $env->use_create_env() } qr/FATAL/;
+	ok(!eval { $env->use_create_env(); 1 } && Genesis::raised($@), 'asking raises a fatal error');
 	throws_ok { $env->use_create_env() }
-		qr/\[FATAL\] This bosh environment does not use create-env \(proto\) or specify an\n\s+alternative genesis.bosh_env/sm,
+		qr/^This bosh environment does not use create-env \(proto\) or specify an alternative genesis.bosh_env/sm,
 		"bosh environments without specifying bosh_env require bosh create-env";
 
 	put_file $top->path("regular-deploy.yml"), <<EOF;
@@ -338,7 +340,7 @@ EOF
 	lives_ok { $env = $top->load_env('regular-deploy') } "Genesis::Env should be able to load the `regular-deploy' environment.";
 	ok($env->has_feature('vsphere'), "regular-deploy env has the vsphere feature");
 	quietly { throws_ok { $env->use_create_env() }
-		qr/\[FATAL\] This bosh environment specifies an alternative bosh_env, but is marked\n\s+as a create-env \(proto\) environment./sm,
+		qr/^This bosh environment specifies an alternative bosh_env, but is marked as a create-env \(proto\) environment./sm,
 		"bosh environments with bosh_env can't be a protobosh, or vice versa";
 	};
 

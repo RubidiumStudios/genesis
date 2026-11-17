@@ -1,7 +1,11 @@
 package Genesis::Error;
-# What bail dies with inside an eval: the text it always died with, and with
-# it the kind of failure and the exit code that earns, so a caller that
-# catches the error can keep both (D163).
+# What bail dies with inside an eval: its message, and with it the kind of
+# failure and the exit code that earns, so a caller that catches the error
+# can keep both (D163).
+#
+# It holds the message as written and nothing rendered from it.  As a string
+# it is that message as a plain sentence, and the block an operator is shown,
+# with its prefix and its wrap, is made from it where it is printed.
 #
 # The names are the ones plans/genesis-result-module.md proposes for
 # Genesis::Result, which is to replace this class, so a caller written
@@ -10,8 +14,16 @@ use strict;
 use warnings;
 
 use Genesis::Exit qw/NOPERM UNAVAILABLE DATAERR/;
+use Genesis::Term qw/csprintf wrap terminal_width decolorize/;
 
-use overload '""' => sub {$_[0]{text}}, fallback => 1;
+# Only the string form and the append are overloaded.  Concatenation falls
+# back to the string form, so "context: $error" is a plain string; a
+# concatenation that answered an object would hand one to every caller that
+# interpolates a caught error, and an encoder given one refuses it.
+use overload
+	'""' => sub {$_[0]->sentence},
+	'.=' => sub {$_[0]->with_more($_[1])},
+	fallback => 1;
 
 ### The states {{{
 
@@ -39,10 +51,35 @@ sub new {
 	return bless({
 		state    => $state,
 		msg      => $args{msg},
-		text     => $args{text} // $args{msg},
 		exitcode => $args{exitcode} // $EXIT_FOR{$state},
 		data     => $args{data} // {},
 	}, $class);
+}
+
+# }}}
+# with_more - the same error with more said after its message {{{
+sub with_more {
+	my ($self, $more) = @_;
+	# A new one, so a copy somebody kept of this error says what it said.
+	return bless({%$self, msg => $self->{msg}.($more // '')}, ref $self);
+}
+
+# }}}
+# }}}
+
+### Its forms {{{
+
+# sentence - the message in plain words, which is what it is as a string {{{
+sub sentence {
+	# Laid out at a width nothing reaches, so the layout marks a message
+	# may carry become the indent they stand for and no line is broken.
+	return decolorize(wrap($_[0]{msg}, 100_000));
+}
+
+# }}}
+# rendered - the block an operator is shown: the prefix, wrapped to the terminal {{{
+sub rendered {
+	return "\n".csprintf("%s", wrap($_[0]{msg}."\n", terminal_width, "#r{[FATAL]} "))."\n";
 }
 
 # }}}
@@ -52,7 +89,6 @@ sub new {
 
 sub state    { $_[0]{state} }
 sub msg      { $_[0]{msg} }
-sub text     { $_[0]{text} }
 sub exitcode { $_[0]{exitcode} }
 sub data     { $_[0]{data} }
 sub data_for { $_[0]{data}{$_[1]} }

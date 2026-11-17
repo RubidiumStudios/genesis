@@ -945,7 +945,8 @@ subtest 'update_director_network_config - a failed strict read reports once, wit
 	));
 	throws_ok { output_from { $hook->update_director_network_config } } qr/BOSH director deployed and is working/,
 		'the failure is reported as the director having deployed';
-	my $raw = $@;
+	# The block an operator is shown, which the caught error makes on request
+	my $raw = $@->rendered;
 	my $err = $raw =~ s/\s+/ /gr;
 	is(scalar(() = $raw =~ /\[FATAL\]/g), 1, 'it carries one [FATAL] prefix');
 	is(scalar(() = $err =~ /likely causes|usually means/gi), 1, 'and one paragraph of likely causes');
@@ -1012,7 +1013,7 @@ subtest 'update_director_network_config - an error that lists its own causes get
 		my $hook = make_hook(env => net_env(self_bosh => net_bosh(), fail_read => $nested));
 		throws_ok { output_from { $hook->update_director_network_config } } qr/BOSH director deployed and is working/,
 			"$name is reported as the director having deployed";
-		my $raw = $@;
+		my $raw = $@->rendered;
 		my $err = $raw =~ s/\s+/ /gr;
 		is(scalar(() = $raw =~ /\[FATAL\]/g), 1, "$name carries one [FATAL] prefix");
 		like($err, $says, "$name keeps what it said");
@@ -1025,7 +1026,7 @@ subtest 'update_director_network_config - an error that lists its own causes get
 	my $hook = make_hook(env => net_env(self_bosh => net_bosh(), fail_read => "connection reset by peer\n"));
 	throws_ok { output_from { $hook->update_director_network_config } } qr/BOSH director deployed and is working/,
 		'a bare die is reported as the director having deployed';
-	my $raw = $@;
+	my $raw = $@->rendered;
 	like($raw =~ s/\s+/ /gr, qr/connection reset by peer/, 'it keeps the text it died with');
 	like($raw =~ s/\s+/ /gr, qr/This usually means the vault is sealed or unreachable, the token has expired/,
 		'and the step adds the causes and checks for it');

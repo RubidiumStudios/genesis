@@ -132,7 +132,8 @@ EOF
 			},
 			$@
 		);
-		eq_or_diff($err, <<EOF, "deploy error should specify incorrect reactions");
+		# The block the operator is shown, which the caught error makes on request
+		eq_or_diff($err->rendered, <<EOF, "deploy error should specify incorrect reactions");
 
 [FATAL] Unexpected reactions specified under genesis.reactions: post, pre
         Valid values: pre-deploy, post-deploy
@@ -172,7 +173,8 @@ EOF
 		# help/list/blank scripts, so has_hook('addon') stays true and the
 		# bail fires one layer deeper -- in Kit::run_hook, naming the
 		# specific script that wasn't found.
-		eq_or_diff($err, <<EOF, "deploy error should specify incorrect reactions");
+		# The block the operator is shown, which the caught error makes on request
+		eq_or_diff($err->rendered, <<EOF, "deploy error should specify incorrect reactions");
 
 [FATAL] Could not find addon hook for 'working-addon' script in kit
         reactions/in-development (dev)
@@ -185,7 +187,7 @@ EOF
 		output_from {dies_ok {$env->deploy()} "deploy exits when specified addon hook fails"},
 		$@
 	);
-	eq_or_diff($err, <<EOF, "deploy error should specify failed reactions");
+	eq_or_diff($err->rendered, <<EOF, "deploy error should specify failed reactions");
 
 [FATAL] Cannnot deploy: environment pre-deploy reaction failed!
 

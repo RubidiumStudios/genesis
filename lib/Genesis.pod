@@ -799,8 +799,24 @@ B<Examples:>
 
 Formats a FATAL-level error message and exits the process. When called inside
 an active C<eval> block (and C<GENESIS_IGNORE_EVAL> is not set), C<bail>
-C<die>s instead of exiting; the die string begins with C<"\n"> followed by
-the formatted message.
+C<die>s instead of exiting. What it dies with is a L<Genesis::Error>, which
+holds the message as written, the kind of failure, and the exit code. As a
+string it is the message in plain words, with no C<[FATAL]> prefix and no
+wrap; the block that is printed is its C<rendered>. L</raised> answers that
+object for a caught error.
+
+A caught error passed on as one of C<@args> keeps what it knew. Where it
+names an exit code, this C<bail> exits or dies with that code and that
+state, whatever C<exitcode> it was given itself, because the first raise
+knew what kind of failure it was and a caller wrapping it in context does
+not. Where it names none, the C<exitcode> given here stands. The error has
+to be passed whole for this: once it is text, by C<sprintf> or by an edit in
+place, there is nothing left to carry.
+
+Such an argument goes into the message as it was written. Its colours are
+made once, with this message's, and the whole is wrapped once under one
+prefix, so a caller quoting an error it caught has nothing to take off it
+first.
 
 Multiple leading hash-reference arguments may be passed; their keys are
 merged, with C<offset> values summed.
@@ -819,7 +835,13 @@ keys:
 
 =item C<exitcode>
 
-Integer exit code. Defaults to 1.
+Integer exit code. Defaults to the code the C<state> earns, and to 1 where
+it earns none.
+
+=item C<state>
+
+The kind of failure, one of the states L<Genesis::Error> lists: C<refused>,
+C<unreachable>, C<unread>, C<invalid>, or C<error>, which is the default.
 
 =item C<offset>
 
@@ -844,8 +866,8 @@ C<eval> block).
 B<Errors:>
 
 When called inside an active C<eval> block and C<GENESIS_IGNORE_EVAL> is not
-set, C<bail> throws an exception whose string begins with C<"\n"> followed by
-the formatted message.
+set, C<bail> throws a L<Genesis::Error> whose string form is the message in
+plain words.
 
 B<Examples:>
 
@@ -854,6 +876,79 @@ B<Examples:>
 
     bail({exitcode => 2}, "Too many arguments: expected %d, got %d", $exp, $got);
     # prints: FATAL-level message to STDERR, then exits with code 2
+
+    eval { $vault->get_path_strict($path) };
+    bail("Could not load the record:\n\n%s", $@) if $@;
+    # exits with the code the reader set: NOPERM where the vault refused
+
+=head2 raised
+
+    my $raised = raised($@);
+
+Answers the L<Genesis::Error> a caught failure is, where C<bail> raised it,
+so a caller can ask it what kind of failure it was without matching its
+wording and without naming its class.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$caught>
+
+The caught error, normally C<$@>.
+
+=back
+
+B<Returns:> The error object, or C<undef> where what was caught is a plain
+string, some other object, or nothing.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    eval { $vault->get_path_strict($path) };
+    if (my $raised = raised($@)) {
+        return 'unreadable' if $raised->is_unreadable;
+    }
+
+    raised("a library died\n");
+    # returns: undef
+
+=head2 uncaught
+
+    $SIG{__DIE__} = \&Genesis::uncaught;
+
+A C<__DIE__> handler for the top of a program. An error C<bail> raised
+inside an C<eval>, caught, and raised again with C<die> where nothing is
+left to catch it, would leave as any uncaught C<die> does, with whatever
+status perl makes of it. This prints the error's C<rendered> block and exits
+with the code it names, or with 1 where it names none.
+
+It does nothing inside an C<eval>, where something is there to catch the
+error, and nothing for a failure that is not one of these, which dies as
+perl has it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<@_>
+
+What C<die> was given, as perl hands it to a C<__DIE__> handler.
+
+=back
+
+B<Returns:> Nothing, where it leaves the failure to perl. It does not
+return for an error C<bail> raised that nothing caught.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $SIG{__DIE__} = \&Genesis::uncaught;
+    eval { bail({state => 'refused'}, "Could not read the record") };
+    die $@;
+    # prints the message once and exits Genesis::Exit::NOPERM
 
 =head2 bug
 

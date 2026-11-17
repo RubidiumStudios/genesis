@@ -1408,7 +1408,8 @@ subtest 'a successful deploy stops when the exodus secret cannot be read, and sa
 	throws_ok { quietly { $env->update_deployment_exodus('deploy', 'success', quiet => 1) } }
 		qr{Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*Vault is sealed}s,
 		'the failed read is raised, naming the exodus path and what the vault said';
-	my $raw = $@;
+	# The block an operator is shown, which the caught error makes on request
+	my $raw = $@->rendered;
 	my $said = $raw =~ s/\s+/ /gr;
 	like($said, qr/The deployment of lab-mgmt succeeded and is running, but its exodus record .* was not written/,
 		'it says the deployment is up and the record was not written');

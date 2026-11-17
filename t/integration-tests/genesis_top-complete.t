@@ -72,8 +72,10 @@ subtest 'init' => sub {
 	$tmp = workdir;
 	my $dir = "être_réel.my-dep";
 	$ENV{NOCOLOR} = 1;
-	throws_ok {Genesis::Top->create($tmp, 'jumpbox', directory => '../bad', vault=>$VAULT_URL)} qr/\[FATAL\] Repository directory name must only contain alpha-numeric characters,\n *periods, hyphens and underscores/, "Doesn't accept slashes in directory names";
-	throws_ok {Genesis::Top->create($tmp, 'jumpbox', directory => 'also bad', vault=>$VAULT_URL)} qr/\[FATAL\] Repository directory name must only contain alpha-numeric characters,\n *periods, hyphens and underscores/, "Doesn't accept spaces in directory names";
+	# A caught bail reads as what it said, in one piece; the prefix and the
+	# wrap these rows used to match belong to the block it prints.
+	throws_ok {Genesis::Top->create($tmp, 'jumpbox', directory => '../bad', vault=>$VAULT_URL)} qr/^Repository directory name must only contain alpha-numeric characters, periods, hyphens and underscores/, "Doesn't accept slashes in directory names";
+	throws_ok {Genesis::Top->create($tmp, 'jumpbox', directory => 'also bad', vault=>$VAULT_URL)} qr/^Repository directory name must only contain alpha-numeric characters, periods, hyphens and underscores/, "Doesn't accept spaces in directory names";
 	lives_ok  {$top = Genesis::Top->create($tmp, 'jumpbox', directory => $dir, vault=>$VAULT_URL)} "Accepts underscore, period, dashes and accents in directory name";
 	ok -f Cwd::abs_path("$tmp/$dir/.genesis/config"), ".genesis created in correct top dir";
 	ok -f $top->path('.genesis/config'), "Top->create should create a new .genesis/config";
@@ -83,7 +85,7 @@ subtest 'init' => sub {
 	# overwrite tests
 	$tmp = workdir;
 	lives_ok { Genesis::Top->create($tmp, 'test', vault=>$VAULT_URL) } "it should be okay to init once";
-	throws_ok { Genesis::Top->create($tmp, 'test', vault=>$VAULT_URL) } qr/\[FATAL\] Cannot create new deployments repository `test': already exists!/,
+	throws_ok { Genesis::Top->create($tmp, 'test', vault=>$VAULT_URL) } qr/^Cannot create new deployments repository `test': already exists!/,
 		"it is not okay to init twice";
 
 	# name validation

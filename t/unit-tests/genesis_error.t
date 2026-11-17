@@ -1,13 +1,18 @@
 #!/usr/bin/env perl
-# Proves the carrier half of T493: an error that reads as the text it was
-# raised with and still says what kind of failure it was and which exit code
-# that earns (D163, D168).
+# Proves the carrier half of T493: an error that reads as its message and
+# still says what kind of failure it was and which exit code that earns
+# (D163, D168).
 #
 # bail dies with a plain string inside an eval, so the code it was given
 # never reached the caller that caught it.  This class is what it dies with
 # instead.  It is written to the interface plans/genesis-result-module.md
 # proposes for Genesis::Result, which replaces it after the MVP, so the rows
 # hold the names a caller asks it by as well as what it answers.
+#
+# It holds one thing, the message as written.  The rows hold the three forms
+# made from it and how a caller asks for each: as a string it is the plain
+# sentence, msg is the message with its markup, and rendered is the block an
+# operator is shown.
 use strict;
 use warnings;
 
@@ -21,6 +26,9 @@ use Test::Exception;
 use Genesis::Exit qw/NOPERM UNAVAILABLE DATAERR CONFIG/;
 use_ok 'Genesis::Error';
 
+$ENV{NOCOLOR} = 1;
+$ENV{GENESIS_OUTPUT_COLUMNS} = 40;
+
 # Carp::Always, which the helper may load, appends a stack trace to a string
 # die; the rows here are about what the class itself carries
 local $SIG{__DIE__} = 'DEFAULT';
@@ -28,26 +36,55 @@ local $SIG{__DIE__} = 'DEFAULT';
 sub refused {
 	return Genesis::Error->new(
 		state => 'refused',
-		msg   => 'Could not read #C{secret/a} from vault',
-		text  => "\n[FATAL] Could not read secret/a from\n        vault\n\n",
+		msg   => 'Could not read #C{secret/a} from the vault',
 		@_,
 	);
 }
 
-subtest 'it reads as the text it was raised with' => sub {
-	plan tests => 7;
+subtest 'as a string it is the plain sentence' => sub {
+	plan tests => 8;
 	my $e = refused();
-	is("$e", "\n[FATAL] Could not read secret/a from\n        vault\n\n", 'as a string it is the rendered text');
-	like($e, qr/Could\s+not\s+read\s+secret\/a/, 'so a pattern matches it as it matched the string');
+	is("$e", 'Could not read secret/a from the vault', 'with its markup resolved, no prefix and no wrap');
+	like($e, qr/Could not read secret\/a from the vault/, 'so a pattern matches it');
 	ok($e, 'it is true in a condition');
-	is($e, "$e", 'and equal to its own text');
-	is($e->msg, 'Could not read #C{secret/a} from vault', 'msg is the message as it was written, markup and all');
-	is($e->text, "$e", 'text is the rendered form by name');
-	is(Genesis::Error->new(msg => 'plain')."", 'plain', 'with no rendered text given, it reads as its message');
+	is($e, 'Could not read secret/a from the vault', 'and equal to its own words');
+	is(ref("context: $e"), '', 'put into a string, the result is a plain string');
+	is("context: $e", 'context: Could not read secret/a from the vault', 'holding the sentence');
+	is(ref($e . ' more'), '', 'and so is the result of joining something to it');
+	is(Genesis::Error->new(msg => "First.\n\n[[  - >>#C{an item}")."", "First.\n\n  - an item",
+		'a layout mark in the message becomes the indent it stands for');
+};
+
+subtest 'msg and rendered are the other two forms, by name' => sub {
+	plan tests => 5;
+	my $e = refused();
+	is($e->msg, 'Could not read #C{secret/a} from the vault', 'msg is the message as it was written, markup and all');
+	my $block = $e->rendered;
+	like($block, qr/\A\n\[FATAL\] Could not read secret\/a from the\n {8}vault\n\n\z/,
+		'rendered is the block: a blank line, the prefix, wrapped to the terminal, a blank line');
+	is(scalar(() = $block =~ /\[FATAL\]/g), 1, 'with one prefix');
+	is($e->sentence, "$e", 'sentence is the string form by name');
+	is($e->message_or('fallback'), $e->msg, 'message_or answers the message where there is one');
+};
+
+subtest 'more can be said after it, and it stays what it was' => sub {
+	plan tests => 8;
+	my $e = refused(data => {path => 'secret/a'});
+	my $kept = $e;
+	$e .= "\n\nNothing was changed.";
+	isa_ok($e, 'Genesis::Error', 'an error appended to');
+	is($e->msg, "Could not read #C{secret/a} from the vault\n\nNothing was changed.", 'its message has what was added');
+	is($e->state, 'refused', 'its state is the one it had');
+	is($e->exitcode, NOPERM, 'and so is its code');
+	is($e->data_for('path'), 'secret/a', 'and what else it carried');
+	is("$kept", 'Could not read secret/a from the vault', 'a copy kept from before says what it said');
+	like($e->rendered, qr/ {8}vault\n[ \t]*\n {8}Nothing was changed\.\n\n\z/,
+		'and what was added is rendered with the rest, as a paragraph of the same block');
+	is($e->with_more(' Again.')->msg, $e->msg.' Again.', 'with_more is the append by name');
 };
 
 subtest 'it answers its state through the names Genesis::Result uses' => sub {
-	plan tests => 11;
+	plan tests => 10;
 	my $e = refused();
 	is($e->state, 'refused', 'state is the cause');
 	is($e->is_fatal, 1, 'a raised error is fatal');
@@ -59,7 +96,6 @@ subtest 'it answers its state through the names Genesis::Result uses' => sub {
 	is(Genesis::Error->new(msg => 'x')->is_error, 1, 'and is_error answers yes for it');
 	is_deeply($e->data, {}, 'data is an empty set when none is given');
 	is(refused(data => {path => 'secret/a'})->data_for('path'), 'secret/a', 'data_for reads one key of it');
-	is($e->message_or('fallback'), $e->msg, 'message_or answers the message where there is one');
 };
 
 subtest 'each failed-read state has a predicate of its own, and an exit code' => sub {
@@ -95,7 +131,7 @@ subtest 'it survives being raised again, and not being rewritten' => sub {
 
 	my $e = refused();
 	is(ref(sprintf('%s', $e)), '', 'put through a format it is a plain string');
-	is(ref($e =~ s/\s+$//r), '', 'and so is a trimmed copy of it');
+	is(ref($e =~ s/vault/safe/r), '', 'and so is a rewritten copy of it');
 	isa_ok($e, 'Genesis::Error', 'the error itself, after both');
 };
 

@@ -2,7 +2,7 @@ package Genesis::Config;
 use strict;
 use warnings;
 
-use Genesis qw/bail bug debug info warning struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff priority_merge flatten unflatten without_backtrace/;
+use Genesis qw/bail bug raised debug info warning struct_lookup struct_set_value struct_has in_array load_yaml_file run workdir mkdir_or_fail semver save_to_yaml_file spruce_diff priority_merge flatten unflatten without_backtrace/;
 use Genesis::Term qw/bullet decolorize/;
 use Genesis::Exit qw/CONFIG/;
 
@@ -979,7 +979,9 @@ sub _validate_custom_struct {
 	my @errors = eval {$entry->{class}->$method($self, $key, $field)};
 	my $caught = $@; # copied first: the readers below run evals that clear it
 	if ($caught) {
-		die $caught if decolorize($caught) =~ m{^\s*\[FATAL\]}; # a defect, not the operator's
+		# A defect, not the operator's: what bail raised, or what bug did,
+		# which still dies with its text.
+		die $caught if raised($caught) || decolorize($caught) =~ m{^\s*\[FATAL\]};
 		return ("#R{$key}: ".without_backtrace(decolorize($caught)));
 	}
 	return grep {defined($_) && length($_)} @errors;

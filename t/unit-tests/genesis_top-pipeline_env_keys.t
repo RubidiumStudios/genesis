@@ -332,12 +332,12 @@ subtest 'every problem the load finds is refused at once (T411)' => sub {
 	});
 	my $refusal = '';
 	eval {load_with($g, "pipeline:\n  enabled: true\n  provider:\n    type: manual\nbogus: 1"); 1}
-		or $refusal = Genesis::Term::decolorize("$@") =~ s/\s+/ /gr;
+		or $refusal = Genesis::Term::decolorize($@->rendered) =~ s/\s+/ /gr;
 
 	like($refusal, qr/\bbogus: unknown configuration key/, "the schema's problem");
 	like($refusal, qr/genesis\.pipeline\.manual in qa/, "the capability gate's");
 	like($refusal, qr/genesis\.pipeline\.track_dependencies/, "an environment block's");
-	my @refusals = $refusal =~ /\[FATAL\]/g; # the stack trace repeats the format
+	my @refusals = $refusal =~ /\[FATAL\]/g; # the block shown has one prefix per refusal
 	is(scalar(@refusals), 1, 'in one refusal');
 	unlike($refusal, qr/environment qa:/, 'under one heading, not one per check');
 };

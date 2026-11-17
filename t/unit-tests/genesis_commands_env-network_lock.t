@@ -270,7 +270,10 @@ subtest 'a release that fails after a successful locked step stops the deploy' =
 	my $text = ($err // '') =~ s/\s+/ /gr;
 	like($text, qr{secret/exodus/parent/bosh/network-claim-lock}, 'the error names the lock path');
 	like($text, qr/may still be held/, 'and says the lock may still be held');
-	like($text, qr/the cloud config was uploaded/, 'and says what had already completed');
+	# The message opens a sentence with it.  The lower-case words used to be
+	# found in the stack trace Carp::Always put after a string die, where
+	# they are the argument this row passed, and not in the message at all.
+	like($text, qr/The cloud config was uploaded before the release failed/, 'and says what had already completed');
 };
 
 subtest 'a held signal outranks a release failure' => sub {
@@ -500,7 +503,8 @@ subtest 'claims that cannot be read after the upload stop the deploy, which says
 	throws_ok {
 		output_from { Genesis::Commands::Env::_deploy_submit_network_claims($env, {subnets => {}}, uploaded => 'test-env.bosh') }
 	} qr/Could\s+not\s+read\s+secret\/exodus\/parent\/bosh\/network\s+from\s+vault/, 'the deploy stops, naming the path';
-	my $raw = $@;
+	# The block an operator is shown, which the caught error makes on request
+	my $raw = $@->rendered;
 	my @starts = ($raw =~ /\n[ \t]*\n( *)\S/g);
 	is_deeply([map {length} @starts], [(length($starts[0])) x @starts],
 		'every paragraph after the first starts at the same indent') or diag $raw;
