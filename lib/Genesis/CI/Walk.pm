@@ -15,7 +15,7 @@ use warnings;
 use Exporter qw/import/;
 use JSON::PP ();
 use Scalar::Util ();
-use Genesis qw/run bug bail info/;
+use Genesis qw/run bug bail info raised/;
 use Genesis::CI::Marker qw/STAGE RELEASE_STAGE/;
 use Genesis::CI::PullRequest;
 use Genesis::CI::Report;
@@ -105,12 +105,14 @@ sub read_durable_state {
 	# and a command that only reports owe the operator different accounts of
 	# where they stopped.  "Nothing was written" says nothing to somebody who
 	# asked for a report and never expected a write.
+	# The reader's error goes in whole, so the refusal keeps the code its
+	# cause earns (D163); UNAVAILABLE is for a failure that names none.
 	$refuse->(
 		{exitcode => UNAVAILABLE},
 		"Could not read the applied record at #C{%s}: %s\n\n".
 		"The run reads which commit the pipeline was applied from before it ".
 		"decides anything, so it will not guess at one.  %s",
-		$top->applied_record_path, $failure =~ s/\s+$//r,
+		$top->applied_record_path, raised($failure) // $failure =~ s/\s+$//r,
 		$args{outcome} // 'Nothing was written.'
 	) if $failure;
 

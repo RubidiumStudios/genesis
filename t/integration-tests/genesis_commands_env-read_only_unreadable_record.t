@@ -48,7 +48,9 @@ subtest 'pending-changes: the deployment history cannot be read' => sub {
 		'qa', 'pending-changes', '--summary-file', $summary);
 	my $said = unfolded($out.$err);
 
-	isnt($exit, 0, 'the command fails') or diag("what it said:\n$out$err");
+	# The harness's broken read is a refusal, which exits NOPERM (D163).
+	is($exit, Genesis::Exit::NOPERM, 'the command fails, as on a refusal')
+		or diag("what it said:\n$out$err");
 	# A reader that exports names the path without its leading slash.
 	like($said, qr/\Q@{[$path =~ s{^\/}{}r]}\E/, 'naming the path it could not read');
 	like($said, qr/permission denied/, 'and what the vault answered');
@@ -93,7 +95,8 @@ for my $row (@ROWS) {
 		my ($out, $err, $exit) = run_genesis($h, 'qa', @$args);
 		my $said = unfolded($out.$err);
 
-		isnt($exit, 0, 'the command fails') or diag("what it said:\n$out$err");
+		is($exit, Genesis::Exit::NOPERM, 'the command fails, as on a refusal')
+			or diag("what it said:\n$out$err");
 		like($said, qr/Could not read \/?\Q@{[$path =~ s{^\/}{}r]}\E/, 'naming the path it could not read');
 		like($said, qr/permission denied/, 'and what the vault answered');
 		unlike($out.$err, $default, 'it prints nothing it would have for a record that is not there');

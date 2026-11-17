@@ -472,27 +472,30 @@ B<Examples:>
   my $text = plain_error($err);
   my ($text, $raised) = plain_error($err);
 
-Turns an error caught from a C<bail> into text that can sit inside another
-message. A C<bail> that is caught arrives with its C<[FATAL]> prefix and
-already wrapped to the terminal. Put into a second C<bail> as it is, it is
-wrapped again, which breaks its lines in mid-sentence, indents them twice,
-and shows two prefixes.
+Makes a caught error ready to sit inside another message.
 
-The surrounding whitespace is trimmed and the leading C<[FATAL]> prefix is
-dropped, with any colour codes around it. When that prefix was there, the
+A C<bail> caught as the L<Genesis::Error> it raises is answered whole, as
+the error itself, and counts as raised. Handed to the next C<bail> among
+its arguments, its message goes in as it was written, to be rendered once,
+and its state and exit code are kept. It is known by having C<msg> and
+C<rendered> and not by its class, which this module does not load. A caller
+that puts it in a C<sprintf> of its own gets its plain reading, and one
+that wants the markup asks it for C<msg>.
+
+What is left for the text path is what still dies as text: C<bug>, a
+C<bail> under C<GENESIS_IGNORE_EVAL>, and anything that reached this as a
+string. Such a C<bail> arrives with its C<[FATAL]> prefix and already
+wrapped to the terminal. Put into a second C<bail> as it is, it is wrapped
+again, which breaks its lines in mid-sentence, indents them twice, and
+shows two prefixes.
+
+Colour codes are taken off, the surrounding whitespace is trimmed, and the
+leading C<[FATAL]> prefix is dropped. When that prefix was there, the
 lines the first C<bail> wrapped are joined back into paragraphs, the indent
 that wrap gave them is removed, and a C<[FATAL]> prefix at the start of a
 later paragraph, left by a C<bail> inside a C<bail>, is dropped too. Blank
 lines still separate the paragraphs. An error without the prefix, such as a
-die from a library, is trimmed and otherwise returned as it is, since its
-line breaks are its own.
-
-A C<bail> caught as the L<Genesis::Error> it now raises needs none of that.
-It is answered with its C<msg>, the message as it was written, and counts as
-raised. It is known by having C<msg> and C<rendered> and not by its class,
-which this module does not load. What is left for the text path is what
-still dies as text: C<bug>, a C<bail> under C<GENESIS_IGNORE_EVAL>, and
-anything that reached this as a string.
+die from a library, keeps its line breaks, since they are its own.
 
 B<Parameters:>
 
@@ -505,14 +508,14 @@ the empty string.
 
 =back
 
-B<Returns:> The cleaned text. In list context, the text and then C<1> when
-the error was raised by C<bail>, which is to say it was the object or its
-text carried the C<[FATAL]> prefix, and C<0> when it was not.
+B<Returns:> The error itself where it is the object C<bail> raised, and
+otherwise the cleaned text. In list context, that and then C<1> when the
+error was raised by C<bail>, which is to say it was the object or its text
+carried the C<[FATAL]> prefix, and C<0> when it was not.
 
 B<Errors:> None.
 
-B<Limitations:> Colour codes inside the text are kept, so a caller that
-wants none removes them first. Line breaks that the first message wrote on
+B<Limitations:> Line breaks that the first message wrote on
 purpose inside a paragraph, such as a list with one item to a line and no
 blank line between, are joined like the wrapped ones, because the two
 cannot be told apart once the text is wrapped.
@@ -524,6 +527,10 @@ B<Examples:>
 
   my ($text, $raised) = plain_error("a library died\n");
   # Returns: ('a library died', 0)
+
+  eval { $vault->get_path_strict($path) };
+  bail("Could not check the record:\n\n%s", scalar plain_error($@)) if $@;
+  # Raises the reader's message under these words, in its state and with its code
 
 =head2 colored_block
 

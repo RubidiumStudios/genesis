@@ -147,7 +147,9 @@ subtest 'a rotation stops before it changes anything when the history cannot be 
 	my ($out, $err, $exit) = run_genesis($h, 'qa', 'rotate-secrets', '-y');
 	my $said = ($out.$err) =~ s/\s+/ /gr;
 
-	isnt($exit, 0, 'the rotation stops') or diag("what it said:\n$out$err");
+	# The harness's broken read is a refusal, which exits NOPERM (D163).
+	is($exit, Genesis::Exit::NOPERM, 'the rotation stops, as on a refusal')
+		or diag("what it said:\n$out$err");
 	like($said, qr/Could not read \/?\Q@{[$path =~ s{^\/}{}r]}\E/, 'naming the path it could not read');
 	like($said, qr/permission denied/, 'and what the vault answered');
 	like($said, qr/Nothing was changed/, 'it says nothing was changed');

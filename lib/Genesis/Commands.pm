@@ -665,7 +665,7 @@ sub deployed_target {
 		"Refusing to target the deployed commit for #C{%s}.\n\n%s\n\n".
 		"The deployed commit is named by that record, and the tip of #C{%s} ".
 		"is not taken in its place.  Nothing was changed.",
-		$name, scalar plain_error($@ =~ s/\e\[[0-9;]*m//gr), $branch
+		$name, scalar plain_error($@), $branch
 	);
 	unless ($record && $record->{git} && $record->{git}{commit}) {
 		return undef unless $flagged;

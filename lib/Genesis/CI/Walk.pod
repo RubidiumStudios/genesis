@@ -452,10 +452,15 @@ it where it renders it.
 B<Errors:> Raises a bug where either C<top> or C<git> is missing, since every
 reading is made through one or the other.
 
-Refuses at C<Genesis::Exit::UNAVAILABLE> where the vault answers an error for
+Refuses where the vault answers an error for
 the applied record, naming C<< $top->applied_record_path >>, because the
 record is a whole-run input and a run that guessed at it would decide every
-environment off a value nobody wrote.  An absent record is not that: it is
+environment off a value nobody wrote.  The reader's error goes into the
+refusal whole, so the exit is the one its cause earns (D163):
+C<Genesis::Exit::NOPERM> for a refusal, C<Genesis::Exit::UNAVAILABLE> for an
+outage, C<Genesis::Exit::DATAERR> for a record that is not an applied
+record, and C<Genesis::Exit::UNAVAILABLE> for a failure that names no code.
+An absent record is not that: it is
 legitimately absent until C<genesis pipeline-apply> has run, so it comes back
 null and every environment takes the C<not-propagated> reading.
 

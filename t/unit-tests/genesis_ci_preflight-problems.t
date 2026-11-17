@@ -327,7 +327,7 @@ subtest 'every pull request environment\'s collision is named' => sub {
 };
 
 subtest 'the applied record is asked for, and its absence named' => sub {
-	plan tests => 6;
+	plan tests => 8;
 	no warnings qw/once redefine/;
 	local *Stub::Top::applied_record_path = sub {'/secret/exodus/_pipelines/bosh'};
 
@@ -343,6 +343,19 @@ subtest 'the applied record is asked for, and its absence named' => sub {
 	is($unread[0] && $unread[0]{code}, UNAVAILABLE, 'a vault that would not say is UNAVAILABLE');
 	like($unread[0] && $unread[0]{text}, qr/Could not read the applied record.*permission denied/s,
 		'with what it said');
+
+	# The reader's own error names its cause, and the problem takes its code
+	# from it (D163).  The plain die above names none.
+	require Genesis::Error;
+	local *Stub::Top::applied_record = sub {
+		die Genesis::Error->new(state => 'refused',
+			msg => 'Could not read #C{/secret/exodus/_pipelines/bosh} from vault: permission denied');
+	};
+	my (undef, @refused) = Genesis::CI::Preflight::applied_record_problems(Stub::Top->new);
+	is($refused[0] && $refused[0]{code}, NOPERM, 'a vault that refused is NOPERM, the code the reader raised');
+	like($refused[0] && $refused[0]{text},
+		qr/Could not read the applied record.*#C\{\/secret\/exodus\/_pipelines\/bosh\} from vault: permission denied/s,
+		'with the reader\'s message as it was written, to be coloured once');
 
 	local *Stub::Top::applied_record = sub {{control_commit => 'abc'}};
 	my ($record, @fine) = Genesis::CI::Preflight::applied_record_problems(Stub::Top->new);

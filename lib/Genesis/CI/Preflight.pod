@@ -190,8 +190,12 @@ B<Examples:>
 
 The applied record, read from the vault, and why the run cannot have it (D109):
 no record at all, which means the pipeline was never applied or the mount
-holding it is gone, at C<CONFIG>; and a vault that would not say, at
-C<UNAVAILABLE>, which is not taken for a record that is not there. Each is in
+holding it is gone, at C<CONFIG>; and a read that failed, which is not taken
+for a record that is not there, at the code the reader's error names (D163):
+C<NOPERM> for a refusal, C<UNAVAILABLE> for an outage, C<DATAERR> for a
+record that is not an applied record, and C<UNAVAILABLE> for a failure that
+names none. The reader's message goes into the problem as it was written,
+to be rendered once. Each is in
 the words the run's refusal had, the outcome left to the one refusal. Nothing
 else a run asks reads the vault, so neither is a gate.
 

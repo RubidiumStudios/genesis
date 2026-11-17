@@ -6239,7 +6239,7 @@ sub extract_manifest_exodus {
 # _stop_exodus_unread - stop on an exodus record that could not be read after a deploy or a terminate, saying what was done {{{
 sub _stop_exodus_unread {
 	my ($self, $action, $result, $why) = @_;
-	$why = plain_error(($why // 'unknown reason') =~ s/\e\[[0-9;]*m//gr);
+	$why = plain_error($why // 'unknown reason');
 	my $went_through = Genesis::Env::Deployment::is_a_successful_result($result);
 	my $unwritten =
 		"The record is read before it is replaced, and Genesis does not write ".

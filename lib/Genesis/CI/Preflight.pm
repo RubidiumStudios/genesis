@@ -133,11 +133,17 @@ sub applied_record_problems {
 	my $path    = $top->applied_record_path;
 	my $applied = eval {$top->applied_record};
 
-	return (undef, problem(UNAVAILABLE, sprintf(
-		"Could not read the applied record at #C{%s}: %s\n\n".
-		"The run reads which commit the pipeline was applied from before it ".
-		"decides anything, so it will not guess at one.",
-		$path, $@ =~ s/\s+$//r))) if $@;
+	# The reader's error names the code its cause earns (D163), and its
+	# message goes in as written, to be rendered once with the problem.
+	# UNAVAILABLE is for a failure that names no code.
+	if (my $failure = $@) {
+		my $raised = raised($failure);
+		return (undef, problem(($raised && $raised->exitcode) // UNAVAILABLE, sprintf(
+			"Could not read the applied record at #C{%s}: %s\n\n".
+			"The run reads which commit the pipeline was applied from before it ".
+			"decides anything, so it will not guess at one.",
+			$path, $raised ? $raised->msg : $failure =~ s/\s+$//r)));
+	}
 
 	return (undef, problem(CONFIG, sprintf(
 		"#C{genesis pipeline-apply} has never been run against this ".
@@ -513,7 +519,8 @@ sub assert_not_disowned {
 			"Could not read the applied record at #C{%s}: %s\n\n".
 			"Whether this repository's disabled pipeline is still live could ".
 			"not be checked.",
-			$top->applied_record_path, $unread =~ s/\s+$//r
+			$top->applied_record_path,
+			raised($unread) ? raised($unread)->msg : $unread =~ s/\s+$//r
 		);
 		return 1;
 	}

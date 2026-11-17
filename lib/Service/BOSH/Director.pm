@@ -6,7 +6,7 @@ use utf8;
 
 use base 'Service::BOSH';
 use Genesis qw(
-    trace debug info warning error bail bug dump_stack dump_var
+    trace debug info warning error bail bug raised dump_stack dump_var
     run lines read_json_from load_yaml load_yaml_file
 		save_to_yaml_file mkfile_or_fail copy_or_fail to_yaml
     is_valid_uri tcp_listening workdir
@@ -1216,7 +1216,10 @@ sub _refuse_legacy_network_lock {
 		my $err = $@;
 		# A signal passes through as it came, for the caller's release to handle.
 		die $err if $err =~ /^(?:Interrupted by user|Terminated|Hung up|Quit)\b/;
-		$err = $err =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/\s+$//r;
+		# An error the reader raised goes in whole, and keeps its state and
+		# its exit code; text has its colour and prefix taken off.
+		$err = raised($err)
+			// $err =~ s/\e\[[0-9;]*m//gr =~ s/^\s*\[FATAL\]\s*//mgr =~ s/\s+$//r;
 		# The reader's own message says what was read, why it failed, and
 		# how to see which, so it closes this one.
 		bail(

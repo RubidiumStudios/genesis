@@ -4,8 +4,9 @@
 # two copies produce the same trees and the same markers, and two overlapping
 # runs read only durable state.
 #
-# It proves T144 as D109 rules it.  A whole-run input the vault answers an
-# error for refuses the run at UNAVAILABLE naming the path and what the vault
+# It proves T144 as D109 rules it and D163 refines it.  A whole-run input the
+# vault answers an error for refuses the run at the code that error's cause
+# earns, NOPERM for the refusal here, naming the path and what the vault
 # said, and a repository with no vault to read says that rather than failing
 # inside Perl; break_vault_reads makes the vault refuse the read.  An applied
 # record that is absent refuses the run and a dry run at CONFIG, before any
@@ -225,7 +226,8 @@ subtest 'an applied record the vault errors on refuses the run' => sub {
 
 	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 	my $said = unfolded($err);
-	is($exit, Genesis::Exit::UNAVAILABLE, 'the run refuses as the vault being unavailable');
+	# D163 refines D109 here: the vault refused, and a refusal exits NOPERM.
+	is($exit, Genesis::Exit::NOPERM, 'the run refuses as the vault refusing the read');
 	like($said, qr/\Q@{[$h->applied_path]}\E/, 'naming the path it could not read');
 	like($said, qr/permission denied/, 'and what the vault answered');
 	is(ref_in($h->r, 'refs/heads/'.$h->slug('qa')), $before,

@@ -312,6 +312,25 @@ subtest 'plain_error - a bail raised inside a bail loses every prefix' => sub {
 		'the nested prefix goes with the first';
 };
 
+# An error bail raised carries its state and its exit code, and the next
+# bail reads its message for itself, so it is handed on whole (D168).
+subtest 'plain_error - an error bail raised is answered whole' => sub {
+	require Genesis::Error;
+	my $error = Genesis::Error->new(state => 'refused', msg => 'Could not read #C{secret/a}');
+	my ($said, $raised) = plain_error($error);
+	is ref($said), 'Genesis::Error', 'the error itself comes back';
+	is $said->state, 'refused', 'with the state it was raised in';
+	ok $raised, 'and it is known to have come from a bail';
+	is ref(scalar(plain_error($error))), 'Genesis::Error', 'in scalar context too';
+};
+
+subtest 'plain_error - colour a caught string carries is taken off' => sub {
+	my $caught = "\e[1;31m[FATAL]\e[0m Could not read \e[36msecret/a\e[0m from\n".
+		"        vault at \e[35mhttps://v:8200\e[0m: sealed\n";
+	is scalar(plain_error($caught)), 'Could not read secret/a from vault at https://v:8200: sealed',
+		'so the next message colours it once';
+};
+
 subtest 'plain_error - an error that is not a bail is trimmed and otherwise kept' => sub {
 	my ($text, $raised) = plain_error("  a library died\n  at line 3\n");
 	is $text, "a library died\n  at line 3", 'its own line breaks stay';

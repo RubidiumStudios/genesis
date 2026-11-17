@@ -700,9 +700,10 @@ sub _version_served {
 	return [$served, $git, $gap]
 		if eval {$gap = $env->uncertified_secrets_target($served, $git); 1};
 
-	# Only a read the vault did not finish is worded here.
+	# Only a read that did not finish is worded here.  The error keeps the
+	# code its cause earns; UNAVAILABLE is for one that names none.
 	my $err = $@;
-	die $err unless $err =~ /Could\s+not\s+read\s+\S.*?\s+from\s+vault\s+at\s/s;
+	die $err unless raised($err) && raised($err)->is_unreadable;
 	bail({exitcode => UNAVAILABLE},
 		"%s\n\n".
 		"The deployment history says which version #C{%s} is running, and ".
@@ -1329,9 +1330,9 @@ sub _deploy_preflight {
 	# propagate run's own walk read-only.  A record they read that the vault
 	# will not give stops the deploy here, before anything is deployed.
 	if (defined(my $unread = _unread_applied_record($top))) {
-		_deploy_stop_unread(sprintf(
-			"Could not read the applied record at #C{%s}: %s",
-			$top->applied_record_path, $unread
+		_deploy_stop_unread($unread, sprintf(
+			"Could not read the applied record at #C{%s}: ",
+			$top->applied_record_path
 		));
 	}
 
@@ -2217,23 +2218,24 @@ sub _deploy_reading {
 	my $answer;
 	return $answer if eval {$answer = $read->(); 1};
 	my $err = $@;
-	# Only a read the vault did not finish is worded here; a signal, a
-	# refusal with its own account, and a bug pass through as they came.
-	# The message arrives wrapped to the terminal, so its words are matched
-	# across whatever whitespace the wrap left between them.
-	die $err unless $err =~ /Could\s+not\s+read\s+\S.*?\s+from\s+vault\s+at\s/s;
+	# Only a read that did not finish is worded here; a signal, a refusal
+	# with its own account, an invalid record, and a bug pass through as
+	# they came.
+	die $err unless raised($err) && raised($err)->is_unreadable;
 	_deploy_stop_unread($err);
 }
 
 # }}}
 # _deploy_stop_unread - stop the deploy on a record its pre-flight could not read {{{
 sub _deploy_stop_unread {
-	my ($why) = @_;
+	my ($why, $what) = @_;
+	# The caught error goes in whole, so the stop keeps the code its cause
+	# earns; UNAVAILABLE is for one that names none.
 	bail({exitcode => UNAVAILABLE},
-		"%s\n\n".
+		"%s%s\n\n".
 		"The deploy reads this before it decides anything, and will not guess ".
 		"at what it holds.  Nothing was deployed.",
-		_deploy_unread_reason($why)
+		$what // '', _deploy_unread_reason($why)
 	);
 }
 
@@ -2262,7 +2264,7 @@ sub _deploy_stop_claims_unread {
 # _deploy_unread_reason - a caught read failure as text to put inside another message {{{
 sub _deploy_unread_reason {
 	my ($why) = @_;
-	return scalar(plain_error(($why // 'unknown reason') =~ s/\e\[[0-9;]*m//gr));
+	return scalar(plain_error($why // 'unknown reason'));
 }
 
 # }}}
@@ -2277,7 +2279,7 @@ sub _unread_applied_record {
 	my ($top) = @_;
 	return undef unless $top->pipeline_enabled;
 	return undef if eval {$top->applied_record; 1};
-	return $@ =~ s/\s+$//r;
+	return raised($@) // $@ =~ s/\s+$//r;
 }
 
 # }}}
