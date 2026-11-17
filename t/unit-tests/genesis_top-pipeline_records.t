@@ -81,7 +81,7 @@ subtest 'each accessor reads its own path' => sub {
 # against real commits and matches none, and answered as absent it is
 # written over by the next apply.
 subtest 'the applied record is judged by the accessor that receives it' => sub {
-	plan tests => 9;
+	plan tests => 13;
 
 	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
 	my $control = commit_on_control($h,
@@ -103,8 +103,11 @@ subtest 'the applied record is judged by the accessor that receives it' => sub {
 	for my $case (sort keys %cases) {
 		$h->_write_record($path, %{$cases{$case}{fields}});
 		my $read = eval {Genesis::Top->new($h->a)->applied_record};
+		my $raised = Genesis::raised($@);
 		my $err  = ($@ // '') =~ s/\s+/ /gr;
 		is($read, undef, "$case: nothing is answered");
+		is($raised && $raised->state, 'invalid', "$case: it raises as an invalid record (D163)");
+		is($raised && $raised->exitcode, Genesis::Exit::DATAERR, "$case: which exits DATAERR");
 		like($err, qr/\Q$path\E is not a valid applied record/, "$case: it raises, naming the record");
 		like($err, $cases{$case}{says}, "$case: and what it found there");
 		like($err, qr/safe get \Q$path\E.*safe rm \Q$path\E.*genesis pipeline-apply/,
@@ -125,7 +128,7 @@ subtest 'the applied record is judged by the accessor that receives it' => sub {
 # reason, and what to do about a refusal.  It had a reader of its own, which
 # gave safe's bare words and named neither the path nor the vault.
 subtest 'an applied record the vault refuses reads as every other refused record does' => sub {
-	plan tests => 5;
+	plan tests => 7;
 
 	my $h = make_harness(envs => ['qa'], type => 'bosh', vault => 1);
 	my $control = commit_on_control($h,
@@ -143,8 +146,11 @@ subtest 'an applied record the vault refuses reads as every other refused record
 	local $SIG{__DIE__} = 'DEFAULT';
 	my $read = eval {Genesis::Top->new($h->a)->applied_record};
 	my $raw  = $@ // '';
+	my $raised = Genesis::raised($raw);
 	my $err  = $raw =~ s/\s+/ /gr;
 	is($read, undef, 'nothing is answered');
+	is($raised && $raised->state, 'refused', 'the reader\'s error comes through whole, as a refusal');
+	is($raised && $raised->exitcode, Genesis::Exit::NOPERM, 'which exits NOPERM (D163)');
 	like($err, qr/Could not read \Q$path\E from vault at \S+: .*permission denied/,
 		'it raises with the path, the vault and what the vault said');
 	like($err, qr/The vault refused the read.*safe auth/, 'and what to do about a refusal');

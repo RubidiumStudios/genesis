@@ -68,7 +68,7 @@ subtest 'a history that cannot be read stops the read' => sub {
 # reached the director.  An entry it cannot read as a record could be that
 # one, so it stops there instead of passing over it.
 subtest 'an entry that is not a record stops the read' => sub {
-	plan tests => 3;
+	plan tests => 5;
 	no warnings 'redefine';
 	local *Service::Vault::get_path = sub {
 		return {
@@ -76,6 +76,10 @@ subtest 'an entry that is not a record stops the read' => sub {
 			'20261102120000' => 'left by something else',
 		};
 	};
+	eval { Genesis::Commands::Env::_prior_env_record($env, 'lab') };
+	my $raised = Genesis::raised($@);
+	is($raised && $raised->state, 'invalid', 'it raises as an invalid record (D163)');
+	is($raised && $raised->exitcode, Genesis::Exit::DATAERR, 'which exits DATAERR');
 	throws_ok { Genesis::Commands::Env::_prior_env_record($env, 'lab') }
 		qr{deployment history of lab.*deployments}s, 'it raises, naming the predecessor and the path';
 	throws_ok { Genesis::Commands::Env::_prior_env_record($env, 'lab') }

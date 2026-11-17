@@ -1791,7 +1791,8 @@ causes, and the commands that tell them apart.
 =item *
 
 Dies when the record holds an C<at> that is not a time Genesis writes,
-since such a record cannot be judged held or stale.  The message names the
+since such a record cannot be judged held or stale.  It is raised in the
+C<invalid> state, which exits C<Genesis::Exit::DATAERR>.  The message names the
 director, the path, the vault, and the value, and gives the C<safe get>
 command that shows the record and the C<safe rm> command that removes it.
 

@@ -2148,7 +2148,7 @@ sub _prior_env_record {
 		my $entry = $deploys->{$at};
 		# An entry that is not a record could be the latest deployment that
 		# reached the director, so it is not passed over for an older one.
-		bail({exitcode => DATAERR},
+		bail({state => 'invalid'},
 			"The deployment history of #C{%s}, at #C{%s}, holds an entry that is ".
 			"not a deployment record: #C{%s} is %s, where each entry is a record ".
 			"of one deployment, named by when it was made.\n\n".

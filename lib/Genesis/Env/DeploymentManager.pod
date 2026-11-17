@@ -512,7 +512,8 @@ read for any reason other than nothing being stored there.
 
 =item C<"The deployment history of #C{%s}, at #C{%s}, holds an entry that is not a deployment record: ...">
 
-Raised (via C<bail()>, exit C<DATAERR>) when an entry of the history is not
+Raised (via C<bail()>, in the C<invalid> state, which exits C<DATAERR>)
+when an entry of the history is not
 a map. The message names the environment, the history's path, the entry and
 what it is, and says that nothing was read from the rest, how to look at
 what is stored with C<safe get>, and to remove what is not a deployment's

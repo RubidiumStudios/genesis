@@ -12,7 +12,6 @@ use Genesis qw/
 	EXODUS_TIME_FORMAT EXODUS_TIME_FORMAT_SHORT
 /;
 use Genesis::Env::Deployment;
-use Genesis::Exit qw/DATAERR/;
 use Genesis::Term;
 
 use Digest::file qw/digest_file_hex/;
@@ -304,7 +303,7 @@ sub _all {
 		for my $at (sort keys %$deployments) {
 			my $entry = $deployments->{$at};
 			next if ref($entry) eq 'HASH';
-			bail({exitcode => DATAERR},
+			bail({state => 'invalid'},
 				"The deployment history of #C{%s}, at #C{%s}, holds an entry that ".
 				"is not a deployment record: #C{%s} is %s, where each entry is a ".
 				"record of one deployment, named by when it was made.\n\n".

@@ -68,9 +68,13 @@ subtest 'a record that is not a proposal raises, naming the record and what it h
 		'a field that is a subtree' => [{control_commit => {deeper => 'abc123'}, number => 7},    qr/control_commit.*not\s+a\s+value/s],
 		'only fields it never writes' => [{reason => 'left by something else'},                   qr/no\s+control\s+commit/],
 	);
-	plan tests => 3 * keys %bad;
+	plan tests => 5 * keys %bad;
 	for my $case (sort keys %bad) {
 		my ($holds, $found) = @{$bad{$case}};
+		eval { proposed($holds) };
+		my $raised = Genesis::raised($@);
+		is($raised && $raised->state, 'invalid', "$case: raises as an invalid record (D163)");
+		is($raised && $raised->exitcode, Genesis::Exit::DATAERR, "$case: which exits DATAERR");
 		throws_ok { proposed($holds) } qr{proposed\s+record\s+for\s+qa.*secret/exodus/qa/bosh/proposed}s,
 			"$case: raises, naming the environment and the path";
 		throws_ok { proposed($holds) } $found, "$case: says what it found";

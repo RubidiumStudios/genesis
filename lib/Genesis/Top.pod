@@ -2559,25 +2559,33 @@ B<Errors:>
 
 =item *
 
-C<"the record at ... is not a valid applied record: ..."> - a read dies
-with this where what is stored is not an applied record. It names the path,
-what it found (the fields held where C<control_commit> is missing, or the
-value where it is not a commit sha), what the record is for, and how to look
-at it and repair it: C<safe get> to see it, and C<safe rm> followed by
+C<"The record at ... is not a valid applied record: ..."> - raised through
+C<bail> in the C<invalid> state, which exits C<Genesis::Exit::DATAERR>,
+where what is stored is not an applied record. It names the path, what it
+found (the fields held where C<control_commit> is missing, or the value
+where it is not a commit sha), what the record is for, and how to look at
+it and repair it: C<safe get> to see it, and C<safe rm> followed by
 C<genesis pipeline-apply> to record the pipeline again. It never repairs
 the record itself.
 
 =item *
 
-A read dies with the reader's message, C<"Could not read ... from vault at
-...: ...">, and its advice for a refusal or an outage, where the read failed
-for any reason other than an absence. The text is plain, with no C<[FATAL]>
-prefix and no line wrap, because each caller puts it inside a message of its
-own. It dies with
-C<"no vault is available for this repository: ..."> where the repository
-configures no C<secrets_provider.url> and C<safe> has no current target.
-C<Genesis::CI::Walk::read_durable_state> turns either into a refusal at
-C<Genesis::Exit::UNAVAILABLE> naming the path.
+The reader's own error, C<"Could not read ... from vault at ...: ...">,
+with its advice for a refusal or an outage, where the read failed for any
+reason other than an absence. It goes through whole, as the
+L<Genesis::Error> the reader raised, so a caller that catches it can ask
+why the read failed and what it exits with: C<refused> and
+C<Genesis::Exit::NOPERM>, or C<unreachable> or C<unread> and
+C<Genesis::Exit::UNAVAILABLE>. As a string it reads as plain text, with no
+C<[FATAL]> prefix and no line wrap.
+
+=item *
+
+C<"no vault is available for this repository: ..."> - a plain C<die>
+where the repository configures no C<secrets_provider.url> and C<safe> has
+no current target. It names no state and no code, so
+C<Genesis::CI::Walk::read_durable_state> refuses on it at
+C<Genesis::Exit::UNAVAILABLE>, naming the path.
 
 =item *
 

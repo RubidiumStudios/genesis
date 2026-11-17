@@ -551,7 +551,8 @@ sub bail_read_failure {
 			"that the vault is sealed, or that the vault cannot be reached.  ".
 			"Run #C{safe %s} with the same token to see which, and ".
 			"#C{safe vault status} to check whether the vault is sealed.";
-	bail(
+	# The state is the cause, and earns the exit code (D163).
+	bail({state => $kind eq 'unclassified' ? 'unread' : $kind},
 		"Could not read #C{%s} from vault at #M{%s}: %s\n\n$advice",
 		$what, $url, $reason, $command
 	);
@@ -684,7 +685,9 @@ sub plain_export {
 # _refuse_export - stop on an export Genesis does not read, saying what writes one {{{
 sub _refuse_export {
 	my ($what, $detail, @args) = @_;
-	bail(
+	# What came back is not a faithful copy of what is stored, so the record
+	# was not read.
+	bail({state => 'unread'},
 		"Cannot use the safe export of #C{%s}: $detail.\n\n".
 		"Genesis reads the export safe writes when it is asked for nothing more: ".
 		"an object of paths, each holding keys whose values are strings.  Only ".

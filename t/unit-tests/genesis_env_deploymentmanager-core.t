@@ -1660,7 +1660,7 @@ subtest 'the deprecated-record note is emitted once, not per record' => sub {
 # stands where, and so says what it found rather than fall over on it or
 # pass it by.  A value set on the history's own path reads as such an entry.
 subtest 'an entry that is not a deployment record is named, not tripped over' => sub {
-	plan tests => 6;
+	plan tests => 8;
 
 	my $history = {
 		'20261114120000' => {action => 'deploy', result => 'success', deployer => 'a', kit_id => 'generic/1.0.0'},
@@ -1680,7 +1680,10 @@ subtest 'an entry that is not a deployment record is named, not tripped over' =>
 	my ($err, $raw);
 	combined_from { eval { $mgr->_all; 1 } or $raw = $@ };
 	$err = ($raw // '') =~ s/\s+/ /gr;
+	my $raised = Genesis::raised($raw);
 
+	is($raised && $raised->state, 'invalid', 'it raises as an invalid record (D163)');
+	is($raised && $raised->exitcode, Genesis::Exit::DATAERR, 'which exits DATAERR');
 	like($err, qr{deployment history of test-env, at /secret/exodus/test-env/deployments, holds an entry that is not a deployment record},
 		'it raises, naming the environment and the history');
 	like($err, qr/note is a single value/, 'the entry, and what it is');

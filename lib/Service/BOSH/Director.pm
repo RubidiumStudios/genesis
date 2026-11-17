@@ -956,7 +956,7 @@ sub check_network_lock {
 		unless ref($lock) eq 'HASH' && defined($lock->{at});
 
 	my ($status, $lock_age) = $self->_network_lock_freshness($lock, $max_age);
-	bail(
+	bail({state => 'invalid'},
 		"Cannot tell whether the network claims lock on the #M{%s} BOSH director is ".
 		"held: the record at #C{%s} in the vault at #M{%s} gives the time it was ".
 		"taken as '%s', which is not a time Genesis writes.\n\n".

@@ -8,7 +8,7 @@ use Genesis;
 use Genesis qw/without_backtrace/;
 use Scalar::Util ();
 use Genesis::State;
-use Genesis::Term qw/in_controlling_terminal csprintf decolorize bullet plain_error/;
+use Genesis::Term qw/in_controlling_terminal csprintf decolorize bullet/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_choice/;
 use Genesis::Env;
 use Genesis::Kit::Compiled;
@@ -2108,11 +2108,9 @@ sub applied_record {
 			or die "no vault is available for this repository: it configures ".
 			       "no secrets_provider.url, and safe has no current target to ".
 			       "read instead\n";
-		# The reader every record is read by.  Its error comes back as plain
-		# text, because each caller puts it inside a message of its own.
-		my $data;
-		eval {$data = $vault->read_flattened_secret($path); 1}
-			or die scalar(plain_error("$@" =~ s/\e\[[0-9;]*m//gr))."\n";
+		# The reader every record is read by.  Its error goes through whole,
+		# so a caller can ask it why the read failed.
+		my $data = $vault->read_flattened_secret($path);
 		return undef unless defined $data;
 
 		# What was read with fidelity and is still not an applied record is
@@ -2128,12 +2126,12 @@ sub applied_record {
 				'its control_commit is "%s", which is not a commit sha',
 				join(' ', split(/\s+/, $data->{control_commit})))
 			: undef;
-		die sprintf(
-			"the record at %s is not a valid applied record: %s.  An applied ".
+		bail({state => 'invalid'},
+			"The record at #C{%s} is not a valid applied record: %s.  An applied ".
 			"record names the control commit the pipeline was applied from.  ".
-			"Look at it with `safe get %s`.  If it is not what pipeline-apply ".
-			"wrote, remove it with `safe rm %s` and run `genesis pipeline-apply`, ".
-			"which records the pipeline again.\n",
+			"Look at it with #C{safe get %s}.  If it is not what pipeline-apply ".
+			"wrote, remove it with #C{safe rm %s} and run #C{genesis pipeline-apply}, ".
+			"which records the pipeline again.",
 			$path, $found, $path, $path
 		) if $found;
 

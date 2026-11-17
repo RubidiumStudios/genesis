@@ -1348,6 +1348,12 @@ Always raised (via C<bail()>). The placeholders are C<$what>, C<$url>, and
 C<$reason>, and the paragraph that follows is the advice for the kind of
 failure, with the C<safe> command to run.
 
+It is raised in the state that names the cause, which earns the exit code:
+C<refused> and C<Genesis::Exit::NOPERM> for a refusal, C<unreachable> and
+C<Genesis::Exit::UNAVAILABLE> for an outage, and C<unread> and
+C<Genesis::Exit::UNAVAILABLE> for a reason that is neither. A caller that
+catches it asks L<Genesis::Error> which, and does not match the wording.
+
 =back
 
 B<Examples:>
@@ -3096,6 +3102,10 @@ Always dies, with C<$detail> and then the one explanation every refused
 export gets: the form Genesis reads, that only C<safe> 1.26.0 wrote another
 unasked and that C<-a> and C<--typed> ask for one, and to check
 C<safe version> and use C<safe> 1.26.1 or later.
+
+It is raised in the C<unread> state, which exits
+C<Genesis::Exit::UNAVAILABLE>: what came back is not a faithful copy of
+what is stored, so the record was not read.
 
 B<Examples:>
 

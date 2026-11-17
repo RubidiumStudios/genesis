@@ -272,6 +272,10 @@ subtest 'a lock whose time cannot be read stops the check, and says how to look 
 	my $vault = MockLockVault->new;
 	seed_lock($vault, {%{lock_record()}, at => 'yesterday afternoon'});
 	my $bosh = director($vault);
+	eval { $bosh->check_network_lock };
+	my $raised = Genesis::raised($@);
+	is($raised && $raised->state, 'invalid', 'the check raises as an invalid record (D163)');
+	is($raised && $raised->exitcode, Genesis::Exit::DATAERR, 'which exits DATAERR');
 	throws_ok { $bosh->check_network_lock } qr/lock-test.*\Q$LOCK_PATH\E.*yesterday afternoon/s,
 		'the check raises, naming the director, the record, and the time it holds';
 	throws_ok { $bosh->check_network_lock } qr/safe get \Q$LOCK_PATH\E.*safe rm \Q$LOCK_PATH\E/s,

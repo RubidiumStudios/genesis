@@ -11,7 +11,7 @@ use Genesis::State qw/envset under_test in_callback/;
 use Genesis::Term qw/csprintf wrap fix_wrap plain_error decolorize in_controlling_terminal bullet/;
 use Genesis::UI qw/prompt_for_boolean prompt_for_line prompt_for_choice new_prompt_for_choice/;
 use Genesis::Commands qw/current_command known_commands/;
-use Genesis::Exit qw/CONFIG DATAERR UNAVAILABLE/;
+use Genesis::Exit qw/CONFIG UNAVAILABLE/;
 use Genesis::Env::ManifestProvider;
 use Genesis::Env::Secrets::Plan;
 
@@ -3768,7 +3768,7 @@ sub proposed_record {
 		: !(defined $record->{control_commit} && length $record->{control_commit}) ? "it holds no control commit"
 		: !(defined $record->{number} && length $record->{number}) ? "it holds no pull request number"
 		: undef;
-	bail({exitcode => DATAERR},
+	bail({state => 'invalid'},
 		"The proposed record for #C{%s}, at #C{%s}, is not one Genesis writes: %s.  ".
 		"A proposal carries the control commit a pull request proposes and that ".
 		"pull request's number.\n\n".
