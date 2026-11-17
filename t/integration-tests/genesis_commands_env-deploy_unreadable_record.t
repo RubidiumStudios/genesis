@@ -64,7 +64,9 @@ for my $read (@READS) {
 			'qa', 'deploy', '--no-propagate', '-y', 'r');
 		my $said = unfolded($err);
 
-		isnt($exit, 0, 'the deploy stops') or diag("what the deploy said:\n$err");
+		# The harness's broken read is a refusal, which exits NOPERM (D163).
+		is($exit, Genesis::Exit::NOPERM, 'the deploy stops, as on a refusal')
+			or diag("what the deploy said:\n$err");
 		# A reader that exports names the path without its leading slash.
 		like($said, qr/\Q@{[$path =~ s{^\/}{}r]}\E/, 'naming the path it could not read');
 		like($said, qr/permission denied/, 'and what the vault answered');

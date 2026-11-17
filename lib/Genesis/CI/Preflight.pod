@@ -125,6 +125,39 @@ B<Examples:>
     exit_code_for(problem(DATAERR, $a), problem(CONFIG, $b));
     # returns CONFIG
 
+=head2 worst_code(@codes)
+
+    my $code = Genesis::CI::Preflight::worst_code(@codes);
+
+The highest ranked of these exit codes, in the order
+L</exit_code_for(@problems)> ranks problems by. It is that order by itself,
+for a caller that holds codes and no problems: a propagate run choosing its
+exit from its failed environments, and C<pipeline-status> choosing its exit
+from its rows (D163).
+
+B<Parameters:>
+
+=over 4
+
+=item C<@codes>
+
+Exit codes. An undefined one is passed over.
+
+=back
+
+B<Returns:> The highest ranked code among them, or C<undef> where none of
+them is one the rank holds.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    worst_code(UNAVAILABLE, NOPERM, undef);
+    # returns NOPERM
+
+    worst_code(1);
+    # returns undef
+
 =head2 refuse_once(%opts)
 
     Genesis::CI::Preflight::refuse_once(

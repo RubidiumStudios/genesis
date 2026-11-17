@@ -440,12 +440,14 @@ A record the vault will not give for one environment costs the report that
 row's reading and nothing else.  The row is kept and says what could not be
 read and what the vault answered, the header says the staleness is
 unverifiable where that environment was the one it turned on, and the
-report is printed whole.  The exit is then C<UNAVAILABLE>, because a reader
-of the exit alone would otherwise take the report for complete.
+report is printed whole.  The exit is then the code that failed read's
+cause earns (D163), C<NOPERM> for a refusal and C<UNAVAILABLE> for an
+outage, and the worst of them where more than one row failed, because a
+reader of the exit alone would otherwise take the report for complete.
 
 B<Returns:> Exits 0 after printing a report that read everything, and
-C<UNAVAILABLE> after printing one with a row the vault would not answer
-for.  Exits C<CONFIG> where the configuration disowns a live pipeline, or
+the worst cause among its rows, by C<Genesis::CI::Status/exit_code($record)>,
+after printing one with a row whose record could not be read.  Exits C<CONFIG> where the configuration disowns a live pipeline, or
 C<UNAVAILABLE> with no report where vault cannot be reached for the applied
 record.  See L<Genesis::CI::Status> for the record's shape and its two
 renderings.
@@ -999,9 +1001,14 @@ B<Examples:>
     run_status($record);
 
 The exit status of the propagate run.  Zero when every environment in scope
-ended published or held with its reason, and C<Genesis::Exit/TEMPFAIL> when
-any of them ended C<failed>, C<not attempted>, or C<publish rejected>, which
-the next run repairs.
+ended published or held with its reason.  When any of them ended C<failed>,
+C<not attempted>, or C<publish rejected>, it is the worst of their causes
+(D163): each such environment is worth the C<exit_code> its record carries,
+or C<Genesis::Exit/TEMPFAIL> where it carries none, and the run exits the
+highest ranked of them by C<Genesis::CI::Preflight/worst_code(@codes)>.  So
+a run that failed only on faults the next run repairs exits C<TEMPFAIL>, as
+it always did, and one that failed on a record the vault refused exits
+C<NOPERM>.  A code the rank does not hold is worth C<TEMPFAIL>.
 
 The whole outcome is matched rather than a phrase cut at its comma, because
 the record carries the bare outcome word in C<outcome> and whatever
@@ -1028,7 +1035,7 @@ C<environments> list carries one outcome per environment in scope.
 =back
 
 B<Returns:> 0 where no environment ended in one of the three partial
-outcomes, and C<Genesis::Exit/TEMPFAIL> where any of them did.
+outcomes, and the worst of their causes where any of them did.
 
 B<Examples:>
 
@@ -1037,6 +1044,12 @@ B<Examples:>
 
   run_status({environments => [{env => 'qa', outcome => 'not attempted'}]});
   # 75, which is Genesis::Exit::TEMPFAIL
+
+  run_status({environments => [
+    {env => 'lab', outcome => 'failed'},
+    {env => 'qa',  outcome => 'failed', exit_code => Genesis::Exit::NOPERM},
+  ]});
+  # 77, which is Genesis::Exit::NOPERM
 
 =head2 open_control_session
 

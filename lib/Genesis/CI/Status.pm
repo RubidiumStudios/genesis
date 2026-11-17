@@ -223,8 +223,9 @@ sub status_records {
 				push @unread, $name;
 				my $row = $row{$name} or return;
 				return if $row->{error};
-				$row->{error}   = Genesis::CI::Walk::_load_error($why);
-				$row->{reading} = undef;
+				$row->{error}     = Genesis::CI::Walk::_load_error($why);
+				$row->{exit_code} = Genesis::CI::Walk::_error_code($why);
+				$row->{reading}   = undef;
 			});
 			$applied->{stale}         = @$changes ? JSON::PP::true
 			                          : @unread   ? undef : JSON::PP::false;
@@ -342,16 +343,15 @@ sub _read_remote {
 }
 
 # }}}
-# unread_environments - the rows whose records the vault would not give {{{
-sub unread_environments {
+# exit_code - what the command exits with for this report: the worst cause among its rows, or 0 {{{
+sub exit_code {
 	my ($record) = @_;
-	# A row that failed to load says so in the same field, and that is the
-	# repository's fault and not the vault's.  The two are told apart by the
-	# words every failed vault read opens with, until a failure carries what
-	# kind it is.
-	return map  {$_->{env}}
-	       grep {($_->{error} // '') =~ /^Could not read \S.* from vault at /}
-	       @{($record || {})->{environments} || []};
+	# A row whose record could not be read carries the code its cause earns
+	# (D163).  A row that failed to load carries none, since that is the
+	# repository's fault and not the vault's, and adds nothing here.
+	return Genesis::CI::Preflight::worst_code(
+		map {$_->{exit_code}} @{($record || {})->{environments} || []}
+	) // 0;
 }
 
 # }}}

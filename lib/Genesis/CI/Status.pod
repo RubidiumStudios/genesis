@@ -571,18 +571,23 @@ B<Examples:>
       [settled => 'deployed'], [in_flight => '1 pending']);
   # 'in_flight'
 
-=head2 unread_environments($record)
+=head2 exit_code($record)
 
-  my @envs = Genesis::CI::Status::unread_environments($record);
+  exit(Genesis::CI::Status::exit_code($record));
 
-Names the environments whose rows carry a failed vault read, which is what
-C<genesis pipeline-status> exits C<UNAVAILABLE> on after it has printed the
-report.  The report keeps those rows, so its exit is the only thing that
-tells a reader who looks at nothing else that it did not read everything.
+What C<genesis pipeline-status> exits with after it has printed the report:
+the worst cause among its rows, or 0.  The report keeps a row whose record
+could not be read, so its exit is the only thing that tells a reader who
+looks at nothing else that it did not read everything.
 
-A row that failed to load carries its reason in the same C<error> field,
-and is not counted: an environment file that will not load is the
-repository's fault, and the vault answered.
+A row whose record could not be read carries the code its cause earns in
+C<exit_code> (D163): C<NOPERM> for a refusal, C<UNAVAILABLE> for an outage,
+C<DATAERR> for a record its owner judged invalid.  The exit is the highest
+ranked of them, by C<Genesis::CI::Preflight/worst_code(@codes)>.
+
+A row that failed to load carries its reason in C<error> and no code, and
+adds nothing: an environment file that will not load is the repository's
+fault, and the vault answered.
 
 B<Parameters:>
 
@@ -594,20 +599,21 @@ The record C</status_records> answered with.
 
 =back
 
-B<Returns:> the environment names, in the record's order, and the empty
-list where every row was read.
+B<Returns:> the exit code, which is 0 where no row carries one.
 
 B<Errors:> None.
 
-B<Limitations:> A failed vault read is told from a load error by the words
-every such read opens with, C<Could not read ... from vault at>, because a
-row's error is text and carries no kind.  A vault failure worded any other
-way, such as a repository with no vault at all, is not counted.
+B<Limitations:> A failure that names no code is not counted, such as a
+repository with no vault at all.  Whether a row that failed to load should
+make the exit non-zero is open (Q63).
 
 B<Examples:>
 
-  my @envs = Genesis::CI::Status::unread_environments($record);
-  # ('qa') where the vault refused qa's hold
+  Genesis::CI::Status::exit_code($record);
+  # 77 (NOPERM) where the vault refused qa's hold
+
+  Genesis::CI::Status::exit_code($record);
+  # 0 where every row was read
 
 =head1 INTERNAL FUNCTIONS
 

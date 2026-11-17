@@ -1355,7 +1355,7 @@ sub _deploy_preflight {
 	# The walk answers a record of this environment it could not read as a
 	# state, so that a run over many environments fails only that one.  A
 	# deploy is about that one.
-	_deploy_stop_unread($due_record->{error})
+	_deploy_stop_unread($due_record->{error}, undef, $due_record->{exit_code})
 		if ((($due_record->{certified} || {})->{state}) // '') eq 'unreadable';
 
 	my $tip = _deploy_reading(sub {
@@ -2228,10 +2228,11 @@ sub _deploy_reading {
 # }}}
 # _deploy_stop_unread - stop the deploy on a record its pre-flight could not read {{{
 sub _deploy_stop_unread {
-	my ($why, $what) = @_;
+	my ($why, $what, $code) = @_;
 	# The caught error goes in whole, so the stop keeps the code its cause
-	# earns; UNAVAILABLE is for one that names none.
-	bail({exitcode => UNAVAILABLE},
+	# earns.  The walk records a failed read as text with its code beside
+	# it, which is $code.  UNAVAILABLE is for a failure that names none.
+	bail({exitcode => $code // UNAVAILABLE},
 		"%s%s\n\n".
 		"The deploy reads this before it decides anything, and will not guess ".
 		"at what it holds.  Nothing was deployed.",

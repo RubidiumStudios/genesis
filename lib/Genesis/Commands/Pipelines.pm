@@ -312,9 +312,9 @@ sub pipeline_status {
 			standing_on => $git->checked_out_branch));
 
 	# The report is printed whole, and the exit says whether it is: a row
-	# the vault would not answer for is on it with its reason, and a reader
+	# whose record could not be read is on it with its reason, and a reader
 	# of the exit alone is not told the report read everything.
-	exit(Genesis::CI::Status::unread_environments($record) ? UNAVAILABLE : 0);
+	exit(Genesis::CI::Status::exit_code($record));
 }
 
 # }}}
@@ -933,11 +933,15 @@ sub run_status {
 	my %partial = map {$_ => 1}
 		('failed', 'not attempted', 'publish rejected');
 
-	for my $env (@{$record->{environments}}) {
-		my $outcome = $env->{outcome} // 'idempotent';
-		return TEMPFAIL if $partial{$outcome};
-	}
-	return 0;
+	# The run exits the worst of its partial environments' causes (D163).
+	# One whose error names no code, or a code the rank does not hold, is
+	# worth TEMPFAIL.
+	my @partial = grep {$partial{$_->{outcome} // 'idempotent'}}
+		@{$record->{environments}};
+	return 0 unless @partial;
+	return Genesis::CI::Preflight::worst_code(
+		map {$_->{exit_code} // TEMPFAIL} @partial
+	) // TEMPFAIL;
 }
 
 # }}}

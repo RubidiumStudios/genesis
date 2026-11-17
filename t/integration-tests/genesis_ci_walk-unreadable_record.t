@@ -9,7 +9,7 @@
 # things off the run: that environment ends failed, naming the path and what
 # the vault said; the one below it is held as behind an ancestor that could
 # not be read; and the one above it, which the failure has nothing to do
-# with, is delivered.  The run exits non-zero.
+# with, is delivered.  The run exits NOPERM, the code a refusal earns (D163).
 #
 # A reader that took the refusal for nothing stored would answer no hold, a
 # never-certified environment, no proposal, or an environment the pipeline
@@ -73,7 +73,9 @@ for my $what (sort keys %READS) {
 		my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 		my $said = unfolded($err);
 
-		isnt($exit, 0, 'the run exits non-zero');
+		# The harness's broken read is a refusal, and the run exits the worst
+		# of its failed environments' causes (D163).
+		is($exit, Genesis::Exit::NOPERM, 'the run exits NOPERM, as on a refusal');
 		like($err, qr/^\s*qa: failed/m, 'qa, whose record it was, ends failed')
 			or diag $err;
 		is(ref_in($h->r, 'refs/heads/'.$h->slug('qa')), $before, 'and nothing is delivered to it');

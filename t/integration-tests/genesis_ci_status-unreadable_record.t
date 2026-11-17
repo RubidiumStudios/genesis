@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
 # Proves T490's second half: pipeline-status keeps every row when a record
 # cannot be read, says "could not read" with the reason on the row it
-# belongs to, and exits non-zero (D160).
+# belongs to, and exits the code the failed read's cause earns (D160, D163).
 #
 # A report is read by somebody deciding what to do next, so an environment
 # whose records the vault refused is neither left out nor shown with the
@@ -24,7 +24,7 @@ use Test::More;
 use JSON::PP qw/decode_json/;
 
 use Genesis;
-use Genesis::Exit qw/UNAVAILABLE/;
+use Genesis::Exit qw/NOPERM/;
 
 $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
@@ -56,7 +56,8 @@ for my $read (@READS) {
 		my ($row)   = grep {/^\s*\Q$env\E\s/}   split /\n/, $out;
 		my ($stood) = grep {/^\s*\Q$other\E\s/} split /\n/, $out;
 
-		is($exit, UNAVAILABLE, 'the command exits UNAVAILABLE')
+		# The harness's broken read is a refusal, which exits NOPERM (D163).
+		is($exit, NOPERM, 'the command exits NOPERM, as on a refusal')
 			or diag("stdout:\n$out\nstderr:\n$err");
 		ok(defined $row, "the report still has a row for $env") or diag("stdout:\n$out\nstderr:\n$err");
 		# A reader that exports names the path without its leading slash.
@@ -69,8 +70,8 @@ for my $read (@READS) {
 }
 
 subtest 'the header does not answer for an environment the staleness could not read' => sub {
-	# Seven rows, and one for each run's own restoration assertion.
-	plan tests => 9;
+	# Nine rows, and one for each run's own restoration assertion.
+	plan tests => 11;
 
 	my $h = two_stage();
 	break_vault_reads($h, $h->env_path('qa').'/pipeline');
@@ -86,11 +87,13 @@ subtest 'the header does not answer for an environment the staleness could not r
 	my $record = eval {decode_json($out)};
 	ok($record, 'the JSON report is still one document on standard output')
 		or diag("stdout:\n$out\nstderr:\n$err");
-	is($exit, UNAVAILABLE, 'and the JSON run exits UNAVAILABLE too');
+	is($exit, NOPERM, 'and the JSON run exits NOPERM too');
 	my %row = map {($_->{env} => $_)} @{($record || {})->{environments} || []};
 	is_deeply([sort keys %row], [qw/lab qa/], 'with both environments in it');
 	like($row{qa}{error} // '', qr/Could not read .*pipeline.*permission denied/,
 		'the unread environment carries the reason');
+	is($row{qa}{exit_code}, NOPERM, 'and the code its cause earns, beside it');
+	is($row{lab}{exit_code}, undef, 'which the environment that was read does not carry');
 	is_deeply(
 		[$record->{applied}{stale}, $record->{applied}{stale_unread}],
 		[undef, ['qa']],

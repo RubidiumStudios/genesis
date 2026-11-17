@@ -250,7 +250,10 @@ last being an arrayref of per-environment records in DAG order.  Each of those c
 C<branch>, C<prior_env>, C<depth>, C<reading>, C<merged>, C<deployed>,
 C<certified>, C<pending>, C<held>, C<proposed>, C<hold>, C<drifted>,
 C<pr>, C<manual>,
-C<divergence>, C<discovery>, C<error>, C<outcome>, and C<outcome_detail>.
+C<divergence>, C<discovery>, C<error>, C<exit_code>, C<outcome>, and C<outcome_detail>.
+C<exit_code> stands beside C<error>: the exit code the error's cause earns
+(D163), such as C<NOPERM> for a record the vault refused, and null where
+there is no error or the error names no code.
 C<pr> is a hashref carrying the pull request branch under C<branch> for an
 environment whose policy asks for a pull request, and C<undef> for every
 other, so a reader can tell which environments deliver that way without
@@ -508,9 +511,11 @@ C<proposed>, and C<pipeline> beside them carrying that environment's hold,
 proposed and pipeline records, each null where none stands.  An unreadable
 certified commit is answered as it stands, with none of the three read at
 all, because the environment has already ended.  Where one of the three
-cannot be read the answer is C<state> as C<unreadable> and C<error> as the
+cannot be read the answer is C<state> as C<unreadable>, C<error> as the
 first paragraph of what the reader raised, which names the path and what the
-vault said, and nothing else.
+vault said, and C<exit_code> as the code that failure's cause earns (D163):
+C<NOPERM> for a refusal, C<UNAVAILABLE> for an outage, C<DATAERR> for a
+record its owner judged invalid, and null where the failure names none.
 
 B<Errors:> None of its own.  A record that cannot be read is answered as the
 C<unreadable> state, because the run delivers on these answers and will not
@@ -941,7 +946,9 @@ The environment whose record is read.
 B<Returns:> A hashref carrying C<state>, which is one of C<certified>,
 C<never-certified>, C<never-applied>, and C<unreadable>, with
 C<control_commit>, C<commit>, and C<at> beside it where the state is
-C<certified>, and C<error> where it is C<unreadable>.  It never answers
+C<certified>, and C<error> where it is C<unreadable>, with C<exit_code>
+beside it: the code the failure's cause earns, or null where it names none.
+It never answers
 C<no-branch>, which L</plan> writes onto the record for an environment whose
 deployment branch neither side holds, because that state is read off the refs
 and this function reads a vault record.
@@ -1411,8 +1418,8 @@ B<Parameters:>
 =item C<record>
 
 One environment's record, as L</plan> builds it.  On a confined error it
-gains C<error> and an C<outcome> of C<failed>, and its C<pending> list is
-emptied.
+gains C<error>, the C<exit_code> that error names where it names one, and
+an C<outcome> of C<failed>, and its C<pending> list is emptied.
 
 =item C<deliver>
 
@@ -1747,6 +1754,40 @@ B<Examples:>
   Genesis::CI::Walk::_load_error("the blueprint hook exited 1 at x.pl line 3.\n".
     "\tmain::f() called at x.pl line 9\n");
   # returns "the blueprint hook exited 1"
+
+=head2 _error_code
+
+    my $code = Genesis::CI::Walk::_error_code($err);
+
+The exit code a caught error's cause earns, which the record carries as
+C<exit_code> beside the reason L</_load_error> makes of the same error.
+The run and C<pipeline-status> exit the worst of these codes (D163), and
+the deploy's pre-flight stops with the one its environment carries.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$err>
+
+Whatever the failed read left in C<$@>.
+
+=back
+
+B<Returns:> The code, where C<$err> is an error C<bail> raised that names
+one, and C<undef> for one that names none, for a plain C<die>, and for
+text.
+
+B<Errors:> None.
+
+B<Examples:>
+
+  eval { $env->hold_record };
+  Genesis::CI::Walk::_error_code($@);
+  # returns Genesis::Exit::NOPERM where the vault refused the read
+
+  Genesis::CI::Walk::_error_code("the blueprint hook exited 1\n");
+  # returns undef
 
 =head1 AUTHOR
 

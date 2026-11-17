@@ -1,7 +1,8 @@
 #!/usr/bin/env perl
 # Proves T172: a run in which every environment ended published or held
 # exits 0, and one in which any environment failed, was not attempted, or
-# had its publish rejected exits TEMPFAIL.
+# had its publish rejected exits TEMPFAIL.  D163 refines it: a failed
+# environment whose error names a code makes the run exit the worst of them.
 use strict;
 use warnings;
 use utf8;
@@ -83,6 +84,50 @@ subtest 'an environment the run never attempted exits TEMPFAIL' => sub {
 		{env => 'lab', outcome => 'propagated'},
 		{env => 'qa',  outcome => 'idempotent'},
 	]}), 0, 'and one where every environment ended well is not');
+};
+
+# D163 refines T172: where a failed environment's error names the code its
+# cause earns, the run exits the worst of them, by the rank the pre-flight
+# already orders problems by.  TEMPFAIL is what a failure that names no
+# code is worth, as it always was.
+subtest 'a run exits the worst of its failed environments\' causes' => sub {
+	plan tests => 6;
+	require Genesis::Commands::Pipelines;
+	my $status = sub {
+		Genesis::Commands::Pipelines::run_status({environments => [@_]});
+	};
+	my ($NOPERM, $DATAERR, $UNAVAILABLE, $TEMPFAIL) = (
+		Genesis::Exit::NOPERM, Genesis::Exit::DATAERR,
+		Genesis::Exit::UNAVAILABLE, Genesis::Exit::TEMPFAIL);
+
+	is($status->(
+		{env => 'lab', outcome => 'propagated'},
+		{env => 'qa',  outcome => 'failed', exit_code => $NOPERM},
+	), $NOPERM, 'one environment the vault refused exits NOPERM');
+
+	is($status->(
+		{env => 'lab',  outcome => 'failed', exit_code => $UNAVAILABLE},
+		{env => 'qa',   outcome => 'failed', exit_code => $NOPERM},
+		{env => 'prod', outcome => 'failed', exit_code => $DATAERR},
+	), $NOPERM, 'a refusal outranks an invalid record and an outage');
+
+	is($status->(
+		{env => 'lab', outcome => 'failed', exit_code => $UNAVAILABLE},
+		{env => 'qa',  outcome => 'failed', exit_code => $DATAERR},
+	), $DATAERR, 'an invalid record outranks an outage');
+
+	is($status->(
+		{env => 'lab', outcome => 'failed', exit_code => $UNAVAILABLE},
+		{env => 'qa',  outcome => 'not attempted'},
+	), $UNAVAILABLE, 'an outage outranks a failure that names no code');
+
+	is($status->(
+		{env => 'qa', outcome => 'failed', exit_code => 1},
+	), $TEMPFAIL, 'a code the rank does not hold is worth TEMPFAIL');
+
+	is($status->(
+		{env => 'qa', outcome => 'held', exit_code => $NOPERM},
+	), 0, 'and an environment that did not fail adds nothing');
 };
 
 done_testing;

@@ -40,11 +40,18 @@ sub problem {
 my @RANK = (CONFIG, NOPERM, DATAERR, UNAVAILABLE, TEMPFAIL);
 sub exit_code_for {
 	my (@problems) = @_;
-	my %found = map {($_->{code} => 1)} @problems;
+	return worst_code(map {$_->{code}} @problems)
+		// ($problems[0] ? $problems[0]{code} : undef);
+}
+
+# }}}
+# worst_code - the highest ranked of these exit codes, or undef where the rank holds none of them {{{
+sub worst_code {
+	my %found = map {($_ => 1)} grep {defined} @_;
 	for my $code (@RANK) {
 		return $code if $found{$code};
 	}
-	return $problems[0] ? $problems[0]{code} : undef;
+	return undef;
 }
 
 # }}}

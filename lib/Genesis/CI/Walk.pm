@@ -169,7 +169,8 @@ sub env_state {
 	for my $read (qw/hold_record proposed_record pipeline_record/) {
 		next if eval {$record{$read} = $env->$read; 1};
 		my $failure = $@;
-		return {state => 'unreadable', error => _load_error($failure)};
+		return {state => 'unreadable', error => _load_error($failure),
+			exit_code => _error_code($failure)};
 	}
 
 	return {
@@ -463,13 +464,21 @@ sub certified_from_record {
 sub certified_for {
 	my ($env) = @_;
 
+	# The failure is taken off $@ before anything else runs, since asking it
+	# for its code can eval.
 	my $with_vault = eval {$env->with_vault};
-	return {state => 'unreadable', error => _load_error($@)}
-		unless $with_vault;
+	unless ($with_vault) {
+		my $failure = $@;
+		return {state => 'unreadable', error => _load_error($failure),
+			exit_code => _error_code($failure)};
+	}
 
 	my $deployment;
-	return {state => 'unreadable', error => _load_error($@)}
-		unless eval {$deployment = $with_vault->deployments->latest_successful; 1};
+	unless (eval {$deployment = $with_vault->deployments->latest_successful; 1}) {
+		my $failure = $@;
+		return {state => 'unreadable', error => _load_error($failure),
+			exit_code => _error_code($failure)};
+	}
 	return {state => 'never-certified'} unless $deployment;
 
 	my $certified = $deployment->lookup('git.control_commit');
@@ -937,10 +946,11 @@ sub walk_one {
 	}
 	# A record that did not load was never read, so it carries its error and
 	# no reading, since error is not one of the four (D94).
-	$record->{error}   = _load_error($error);
-	$record->{reading} = undef;
-	$record->{outcome} = 'failed';
-	$record->{pending} = [];
+	$record->{error}     = _load_error($error);
+	$record->{exit_code} = _error_code($error);
+	$record->{reading}   = undef;
+	$record->{outcome}   = 'failed';
+	$record->{pending}   = [];
 	return $record;
 }
 
@@ -1280,6 +1290,7 @@ sub plan {
 			} : undef,
 			discovery      => undef,
 			error          => undef,
+			exit_code      => undef,
 			outcome        => undef,
 			outcome_detail => undef,
 		};
@@ -1353,9 +1364,10 @@ sub plan {
 				? $certified->{pipeline}{discovery} : undef;
 
 			if ($certified->{state} eq 'unreadable') {
-				$env_record->{error}   = $certified->{error};
-				$env_record->{reading} = undef;
-				$env_record->{outcome} = 'failed';
+				$env_record->{error}     = $certified->{error};
+				$env_record->{exit_code} = $certified->{exit_code};
+				$env_record->{reading}   = undef;
+				$env_record->{outcome}   = 'failed';
 				return;
 			}
 
@@ -1692,6 +1704,13 @@ sub _load_error {
 	$first =~ s/^\s*\[[^\]]*\]\s*//;
 	$first =~ s/^\s+|\s+$//g;
 	return length($first) ? $first : 'unknown reason';
+}
+
+# }}}
+# _error_code - the exit code a caught error's cause earns, where it names one {{{
+sub _error_code {
+	my $raised = raised($_[0]) or return undef;
+	return $raised->exitcode;
 }
 
 # }}}
