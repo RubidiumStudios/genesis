@@ -4,10 +4,10 @@ use warnings;
 
 # `spruce diff` exits 0 when the files match, 1 when they differ, and 2 or
 # more when it cannot compare them.  Genesis runs it under script(1) so the
-# diff keeps its colours, and the two script(1)s report that code
-# differently.  macOS `script -e` passes the child's code through, while
-# util-linux `script` without -e always exits 0 and records the real code in
-# the "Script done" trailer of its typescript.
+# diff keeps its colours, and reads the diff from script's stdout, in
+# memory, with the typescript sent to /dev/null, because a diff shows values
+# from both documents.  macOS script(1) passes the child's code through, and
+# util-linux script(1) does so under -e.
 #
 # The cloud config check in `genesis deploy` and the job spec comparison in
 # `genesis compare-kits` used to read the code straight from script(1).  On
@@ -36,28 +36,25 @@ my $tmp = workdir();
 my $fakebin = "$tmp/fakebin";
 mkdir $fakebin or die "mkdir $fakebin: $!";
 
-# A fake script(1) that behaves like the platform named by its flags.  The
-# terminal turns each newline into CR-LF, so the fake does the same.
+# A fake script(1) that behaves like the platform named by its arguments.
+# The terminal turns each newline into CR-LF, so the fake does the same, and
+# like macOS script(1) with stdin off a terminal, it echoes the EOF it sends.
+# It refuses any typescript but /dev/null, so a diff written to disk fails.
 put_file("$fakebin/script", 0755, <<'SH');
 #!/bin/bash
 case "$1" in
-	-qeF) # macOS: run the arguments, pass the exit code through
-		file="$2"; shift 2
-		"$@" 2>&1 | sed 's/$/\r/' | tee "$file"
+	-q) # macOS: script -q FILE command...; the exit code passes through
+		[[ "$2" == /dev/null ]] || { echo "fake script: typescript $2 is not /dev/null" >&2; exit 65; }
+		shift 2
+		printf '^D\b\b'
+		"$@" 2>&1 | sed 's/$/\r/'
 		exit "${PIPESTATUS[0]}"
 		;;
-	-qef) # util-linux with -e: run the -c string, record the exit code in a trailer, and return it
-		file="$2"
-		[[ "$3" == "-c" ]] || { echo "fake script: expected -c" >&2; exit 64; }
-		printf 'Script started on 2026-10-01 12:00:00+00:00 [COMMAND="%s" TERM="xterm" TTY="/dev/pts/0" COLUMNS="80" LINES="24"]\n' "$4" > "$file"
-		bash -c "$4" 2>&1 | sed 's/$/\r/' | tee -a "$file"
-		rc="${PIPESTATUS[0]}"
-		if [[ -n "$FAKE_SCRIPT_TRAILER" ]]; then
-			printf '\nScript done on 2026-10-01 12:00:01+00:00 [%s]\n' "$FAKE_SCRIPT_TRAILER" >> "$file"
-		else
-			printf '\nScript done on 2026-10-01 12:00:01+00:00 [COMMAND_EXIT_CODE="%s"]\n' "$rc" >> "$file"
-		fi
-		exit "$rc"
+	-qef) # util-linux: script -qef -c COMMAND FILE; -e returns the child's code
+		[[ "$2" == "-c" ]] || { echo "fake script: expected -c" >&2; exit 64; }
+		[[ "$4" == /dev/null ]] || { echo "fake script: typescript $4 is not /dev/null" >&2; exit 65; }
+		bash -c "$3" 2>&1 | sed 's/$/\r/'
+		exit "${PIPESTATUS[0]}"
 		;;
 esac
 echo "fake script: unexpected flags $1" >&2
@@ -72,6 +69,7 @@ case "${FAKE_SPRUCE_RC:-0}" in
 	0) exit 0 ;;
 	1) printf '\n\n(root level)\n  ± order changed\n\nnetworks.default.subnets\n  + one list entry added:\n    - range: 10.0.0.0/24\n\n\n'
 	   exit 1 ;;
+	kill) echo "partial output"; kill -TERM $$ ;;
 	*) echo "unable to parse data from $3: yaml: line 1: did not find expected node content" >&2
 	   exit "$FAKE_SPRUCE_RC" ;;
 esac
@@ -95,7 +93,7 @@ for my $os (qw/darwin linux/) {
 		($out, $rc) = spruce_diff("$tmp/old.yml", "$tmp/new.yml");
 		is($rc, 1, 'differing files give rc 1');
 		like($out, qr/\A\(root level\).*range: 10\.0\.0\.0\/24\z/s, 'the diff is returned, trimmed');
-		unlike($out, qr/Script (started|done)/, 'no script(1) header or trailer is left in the diff');
+		unlike($out, qr/\^D/, 'with nothing of script(1) left in it');
 
 		$ENV{FAKE_SPRUCE_RC} = 2;
 		($out, $rc) = spruce_diff("$tmp/old.yml", "$tmp/new.yml");
@@ -142,14 +140,23 @@ for my $os (qw/darwin linux/) {
 	};
 }
 
-subtest 'a linux trailer without an exit code is a failure, not a difference' => sub {
-	local $^O = 'linux';
+for my $os (qw/darwin linux/) {
+	local $^O = $os;
+	subtest "a spruce killed by a signal is a failure, not a difference, on $os" => sub {
+		local $ENV{FAKE_SPRUCE_RC} = 'kill';
+		my ($out, $rc) = spruce_diff("$tmp/old.yml", "$tmp/new.yml");
+		cmp_ok($rc, '>', 1, 'a command that did not exit normally gives an error rc');
+	};
+}
+
+subtest 'no copy of the diff is written to disk' => sub {
+	local $^O = 'darwin';
 	local $ENV{FAKE_SPRUCE_RC} = 1;
-	local $ENV{FAKE_SCRIPT_TRAILER} = '<terminated by signal 15>';
+	# The typescript used to be written to the diff's scratch directory.
 	my ($out, $rc) = spruce_diff("$tmp/old.yml", "$tmp/new.yml");
-	cmp_ok($rc, '>', 1, 'a command that did not exit normally gives an error rc');
-	like($out, qr/terminated by signal 15/, 'the output says why the command stopped');
-	unlike($out, qr/Script done/, 'the trailer line itself is removed');
+	is($rc, 1, 'the diff runs');
+	like($out, qr/range: 10\.0\.0\.0/, 'and returns the diff');
+	is_deeply([glob(workdir('spruce-diff')."/*")], [], 'but leaves no file in its scratch directory');
 };
 
 done_testing;

@@ -1508,29 +1508,13 @@ sub spruce_diff {
 	$first = $process_arg->($first, "first");
 	$second = $process_arg->($second, "second");
 
-	my $out_file = "$scratchdir/out.diff";
-	# The diff shows values from both manifests, so script(1)'s copy of it
-	# stays out of the trace.
-	my (undef,$rc,$err) = run(fake_tty($out_file, "spruce", "diff", $first, $second));
-	my $out = slurp($out_file);
-
-	# util-linux script(1) records the command's exit code in a "Script done"
-	# trailer as well as returning it under -e.  When the trailer carries a
-	# reason in place of a code, the command did not exit on its own
-	# (`[<terminated by signal 15>]`, for example); that is a failure, and the
-	# reason is kept in the output so the caller can report it.  Releases older
-	# than 2.35 write a bare date, which is removed and leaves the exit code as
-	# script(1) gave it.
-	if ($out =~ s/\n?^Script done on ([^\n]*)\n?\z//m) {
-		my $trailer = $1;
-		if ($trailer =~ /\[COMMAND_EXIT_CODE="(\d+)"\]/) {
-			$rc = $1;
-		} elsif ($trailer =~ /\[<(.*)>\]/) {
-			$out .= "\n$1";
-			$rc = 2 unless $rc && $rc > 1;
-		}
-	}
-	$out =~ s/\A\s*Script started on [^\n]*\n//; # remove script header (linux)
+	# The diff shows values from both documents, so it is read from the
+	# pipe, in memory, and never traced: script(1) writes no typescript.
+	# Its exit code is spruce's own on both platforms, and a spruce killed
+	# by a signal ends with a code above 1, which is a failure to compare.
+	my ($out, $rc, $err) = run({stderr => 0, exact => 1}, pty_command("spruce", "diff", $first, $second));
+	$out //= '';
+	$out =~ s/\A\^D\x08*//; # macOS script(1) echoes the EOF it sends when stdin is not a terminal
 
 	$out = decode_utf8($out) =~ s/\A\s*(.*?)\s*\z/$1/smr;
 	return ($out, $rc, $err);
