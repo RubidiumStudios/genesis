@@ -5,9 +5,11 @@
 # verbatim only for an allowlist of read-only listing commands, and every
 # other command, including any shell command that chains more onto a
 # listing, leaves a byte count.  bosh's own debug logging writes whole
-# director responses, so it is turned off for every command Genesis runs,
-# and an interactive command's typescript lives in a private directory
-# only until Genesis has read it.
+# director responses, so it is turned off for every command Genesis runs.
+# An interactive command's transcript is read from script(1)'s stdout, in
+# memory, and never written to disk or traced.  Off a terminal, as in a CI
+# log, Genesis shows only the tasks bosh starts, how each ends, and when
+# bosh asks whether to continue.
 use strict;
 use warnings;
 
@@ -36,19 +38,33 @@ echo "debug response: $FAKE_STDERR_VALUE" >&2
 exit 0
 SH
 
-# A fake script(1) that keeps the typescript out of the TAP stream, and
-# records where the typescript went and who could read it.
+# A fake macOS script(1) that copies the command's output to its stdout,
+# as script(1) does, and records the typescript it was given.
 mkdir "$dir/bin";
 put_file("$dir/bin/script", 0755, <<'SH');
 #!/bin/bash
 while [[ "$1" == -* ]]; do shift; done
-file="$1"; shift
-echo "$file" > "$FAKE_SCRIPT_RECORD"
-stat -f '%Lp' "$file" "$(dirname "$file")" >> "$FAKE_SCRIPT_RECORD" 2>/dev/null ||
-	stat -c '%a' "$file" "$(dirname "$file")" >> "$FAKE_SCRIPT_RECORD"
-"$@" > "$file" 2>&1
+echo "$1" > "$FAKE_SCRIPT_RECORD"
+shift
+"$@" 2>&1
 SH
 $ENV{FAKE_SCRIPT_RECORD} = "$dir/script-record";
+
+# A fake bosh deploy that starts a task, quotes made-up values on both of
+# its streams, and asks whether to continue.
+put_file("$dir/bosh-deploy", 0755, <<'SH');
+#!/bin/bash
+echo "+     password: $FAKE_STDOUT_VALUE"
+echo "Error: $FAKE_STDERR_VALUE" >&2
+printf 'Continue? [yN]: '
+read -r answer
+echo
+echo "Task 1234"
+echo "Task 1234 | 12:00:00 | Updating instance web/0"
+echo "Task 1235"
+echo "Task 1234 done"
+exit "${FAKE_BOSH_RC:-0}"
+SH
 
 # A fake bosh that reports the logging settings it was run with.
 put_file("$dir/bosh-logging", 0755, <<'SH');
@@ -138,19 +154,74 @@ sub script_record {
 	return @lines;
 }
 
-subtest 'an interactive transcript is private and short-lived' => sub {
+subtest 'an interactive transcript stays in memory and out of the trace' => sub {
+	local $ENV{PATH} = "$dir/bin:$ENV{PATH}";
+	local $^O = 'darwin';
+	my ($log, $stderr, $stdout, @results);
+	($log, $stderr, $stdout) = capture_trace { @results = director->execute({interactive => 1}, 'deploy', 'manifest.yml') };
+	like($results[0], qr/\Q$out_secret\E/, 'the caller still gets the transcript');
+	like($results[0], qr/\Q$err_secret\E/, 'with what bosh wrote to stderr');
+	unlike($log, qr/\Q$out_secret\E|\Q$err_secret\E/, 'neither is in the trace');
+	unlike($stdout.$stderr, qr/\Q$out_secret\E|\Q$err_secret\E/, 'nor shown off a terminal');
+	my ($file) = script_record();
+	is($file, '/dev/null', 'and script(1) writes no typescript');
+};
+
+subtest 'an interactive listing is private too' => sub {
 	local $ENV{PATH} = "$dir/bin:$ENV{PATH}";
 	local $^O = 'darwin';
 	my ($log, @results);
-	$log = capture_trace { @results = director->execute({interactive => 1}, 'deploy', 'manifest.yml') };
-	like($results[0], qr/\Q$out_secret\E/, 'the caller still gets the transcript');
-	unlike($log, qr/\Q$out_secret\E/, 'the transcript is absent from the trace');
-	like($log, qr/\d+b of redacted bosh output omitted from debug/, 'a byte count is kept');
-	my ($file, $file_mode, $dir_mode) = script_record();
-	is($file_mode, '600', 'the typescript is readable by its owner alone');
-	is($dir_mode, '700', 'in a directory only its owner can enter');
-	ok(defined($file) && !-e $file, 'and it is gone once read');
-	ok(defined($file) && !-e dirname($file), 'along with its directory');
+	$log = capture_trace { @results = director->execute({interactive => 1}, 'vms') };
+	like($results[0], qr/\Q$out_secret\E/, 'the caller gets the listing');
+	unlike($log, qr/\Q$out_secret\E/, 'but the trace does not');
+};
+
+subtest 'off a terminal, bosh progress is shown as tasks and a prompt' => sub {
+	local $ENV{PATH} = "$dir/bin:$ENV{PATH}";
+	local $^O = 'darwin';
+	my $d = director;
+	Service::BOSH->set_command("$dir/bosh-deploy");
+	my ($log, $stderr, $stdout, @results);
+	($log, $stderr, $stdout) = capture_trace {
+		Genesis::set_stdin(\"y\n");
+		@results = $d->execute({interactive => 1}, 'deploy', 'manifest.yml');
+		Genesis::reset_stdin();
+	};
+	my $shown = $stdout.$stderr;
+	like($shown, qr/bosh is asking whether to continue/, 'the prompt is announced');
+	like($shown, qr/bosh started task 1234/, 'each task is announced as it starts');
+	like($shown, qr/bosh started task 1235/, 'every one of them');
+	like($shown, qr/bosh task 1234 ended: done/, 'and as it ends');
+	unlike($shown, qr/\Q$out_secret\E|\Q$err_secret\E|Updating instance/, 'and nothing else bosh printed is shown');
+	like($log, qr/bosh tasks: 1234 done, 1235 with no final state; exit code 0/, 'the trace keeps the task states');
+	is_deeply($d->last_interactive_status, {
+		rc => 0, signal => undef, interrupted => 0,
+		tasks => [{id => 1234, state => 'done'}, {id => 1235}],
+	}, 'and so does the status the caller reads');
+	script_record();
+};
+
+subtest 'an exit code that means a signal marks the run interrupted' => sub {
+	local $ENV{PATH} = "$dir/bin:$ENV{PATH}";
+	my $d = director;
+	Service::BOSH->set_command("$dir/bosh-deploy");
+	for my $case ([linux => 130, 1], [darwin => 2, 1], [darwin => 1, 0], [linux => 1, 0]) {
+		my ($os, $rc, $interrupted) = @$case;
+		local $^O = $os;
+		local $ENV{FAKE_BOSH_RC} = $rc;
+		# The fake script runs the command directly whatever the platform.
+		no warnings 'redefine';
+		local *Genesis::pty_command = sub { ('script', '-q', '/dev/null', @_) };
+		use warnings 'redefine';
+		capture_trace {
+			Genesis::set_stdin(\"n\n");
+			$d->execute({interactive => 1}, 'deploy', 'manifest.yml');
+			Genesis::reset_stdin();
+		};
+		is($d->last_interactive_status->{interrupted}, $interrupted,
+			"exit code $rc on $os is ".($interrupted ? '' : 'not ').'an interrupt');
+		script_record();
+	}
 };
 
 subtest 'verbose bosh logging is off for an interactive run, whatever stdout is' => sub {
@@ -168,7 +239,7 @@ subtest 'verbose bosh logging is off for an interactive run, whatever stdout is'
 	like($stderr, qr/BOSH_LOG_LEVEL/, 'with a warning that it was turned off');
 	unlike($log, qr/level=/, 'and the transcript is not traced');
 	my ($file) = script_record();
-	ok(defined($file) && !-e $file, 'the typescript is gone');
+	is($file, '/dev/null', 'and no typescript is written');
 };
 
 done_testing;

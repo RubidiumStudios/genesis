@@ -1,12 +1,12 @@
 package Service::BOSH;
 
-use File::Temp qw/tempfile tempdir/;
-use File::Path qw/rmtree/;
+use IO::Handle;
 
 use Genesis qw/
-	trace debug bail run slurp new_enough logger dump_var humanize_path dryrun
+	trace debug info bail run slurp new_enough logger dump_var humanize_path dryrun
 	shell_quote
 /;
+use Genesis::Term ();
 use Genesis::State qw/envset/;
 
 ## Class Variables {{{
@@ -255,7 +255,7 @@ sub execute {
 	# A caller that says otherwise is honoured; see %TRACEABLE_OUTPUT.
 	$opts->{public_output} //= 1 if $TRACEABLE_OUTPUT{_subcommand(@cmd)};
 
-	my ($file, $file_dir);
+	my $watch;
 
 	my $bosh = ref($self)->command();
 	if ($cmd[0] =~ m/^bosh(\s|$)/) {
@@ -274,54 +274,138 @@ sub execute {
 		unshift(@cmd, '-n') if $noninteractive;
 		unshift(@cmd, $bosh);
 
-		# Capture output if interactive using script command
-		if ($opts->{interactive} && $allow_script_wrapper) {
-			my $OS = "$^O";
-			# The typescript holds everything bosh printed, so it goes in a
-			# directory only this user can enter, readable by this user alone,
-			# and both are removed as soon as it has been read.
-			$file_dir = tempdir('bosh-output-XXXXXXXX', TMPDIR => 1);
-			chmod(0700, $file_dir);
-			(undef, $file) = tempfile('typescript-XXXXXXXX', DIR => $file_dir);
-			chmod(0600, $file);
-
-			if ($OS eq 'darwin') {
-				unshift(@cmd, "script", "-q", "$file");
-			} elsif ($OS eq 'linux') {
-				# `script -c` re-parses its argument with a shell, so the
-				# argument list must be flattened with shell_quote: naive
-				# joining lets values containing shell metacharacters split
-				# into separate arguments or execute as injected commands.
-				# shell_command carries wrapped arguments through as values.
-				@cmd = ('script', '-qe', $file, '-c', Genesis::shell_command(@cmd));
-			}
+		# An interactive command runs on a pseudo-terminal, through script(1),
+		# so that bosh prompts and shows progress as it would for an operator.
+		# What it prints is read from the pipe, in memory, and no typescript
+		# is written.  It merges bosh's stdout and stderr, and either can
+		# quote a credential, so none of it is traced, whatever the command.
+		#
+		# A passthrough command is one whose output the operator asked for,
+		# such as `genesis <env> bosh vms`.  Off a terminal, it needs no
+		# pseudo-terminal: bosh writes to the operator's stdout itself, as it
+		# would if run by hand, and Genesis neither reads nor keeps it.
+		my $direct = delete($opts->{passthrough}) && !-t STDOUT;
+		if ($opts->{interactive} && $allow_script_wrapper && !$direct) {
+			@cmd = Genesis::pty_command(@cmd);
+			$watch = _interactive_watch();
+			$opts->{stream}    = $watch->{chunk};
+			$opts->{on_signal} = $watch->{signal};
+			delete @{$opts}{qw/public public_output public_stderr/};
 		}
 	}
 
 	dump_var("bosh command" => [map {Genesis::traced_arg($_)} @cmd]);
-	my @results = eval { run($opts, @cmd) };
-	if (my $died = $@) {
-		rmtree($file_dir) if $file_dir;
-		die $died;
-	}
+	delete $self->{last_interactive_status};
+	my @results = run($opts, @cmd);
 
-	if ($opts->{interactive} && $file) {
-		$results[0] = slurp($file);
-		rmtree($file_dir);
-		if ($results[0] =~ s/\nScript done.*\[COMMAND_EXIT_CODE="(.*)"]$//m) {
-			$results[1] = $1;  # Linux stores command exit code in the script output
-		}
-		$results[0] =~ s/^Script [^\n]+\n//m; # remove script header (linux)
-		$results[0] =~ s/^\^D[\x08]*//;       # remove macOS script ^D prefix + backspaces
-		if (($opts->{public_output} || $opts->{public}) && !$opts->{redact}) {
-			logger->dump_var("bosh results" => \@results);
-		} else {
-			trace("[%sb of redacted bosh output omitted from debug, exit code %s]",
-				length($results[0] // ''), $results[1] // 'unknown');
-		}
+	if ($watch) {
+		my $status = $self->{last_interactive_status} = $watch->{finish}->($results[1]);
+		$results[0] =~ s/^\^D[\x08]*// if defined($results[0]); # macOS script(1) echoes the EOF it sends
+		$results[2] = undef; # script(1)'s own stderr, which is not bosh's
+		trace("bosh tasks: %s; exit code %s%s",
+			(join(', ', map {"$_->{id} ".($_->{state} // 'with no final state')} @{$status->{tasks}}) || 'none'),
+			$results[1] // 'unknown',
+			$status->{interrupted} ? '; interrupted' : '');
 	}
 	return !$results[1] if $opts->{passfail};
 	return wantarray ? @results : $results[1];
+}
+
+# }}}
+# last_interactive_status - how the last interactive bosh command ended {{{
+#
+# The tasks it named, each with the final state bosh reported for it, if
+# any, its exit code, and whether it was interrupted, all taken from what
+# bosh printed and how it ended, as they happened.  A task with no final
+# state may still be running on the director.
+sub last_interactive_status {
+	return $_[0]->{last_interactive_status};
+}
+
+# }}}
+# _interactive_watch - follow an interactive bosh command's output {{{
+#
+# On a terminal, what bosh prints is passed straight to it and to nothing
+# else.  Anywhere else, such as a CI log, it is not shown, since a log
+# would keep any credential it quotes; Genesis says instead when bosh
+# starts a task, how each task ends, and when bosh asks whether to
+# continue.  Either way, the tasks bosh names and the final state it
+# reports for each are kept.
+sub _interactive_watch {
+	my $tty = -t STDOUT;
+	my $raw;
+	if ($tty) {
+		STDOUT->flush;
+		STDERR->flush;
+		open($raw, '>&', \*STDOUT) or undef($raw);
+		binmode($raw) if $raw;
+	}
+	my %status = (tasks => [], signal => undef);
+	my %task;
+	my ($line, $asked) = ('', 0);
+	my $prompt = qr/Continue\?\s*\[yN\]:?\s*/;
+	my $ask = sub {
+		info("[[  - >>bosh is asking whether to continue; answer #C{y} or #C{n}") unless $tty || $asked++;
+	};
+	my $seen = sub {
+		my ($text) = @_;
+		$text = Genesis::Term::decolorize($text) =~ s/\r//gr =~ s/\s+\z//r;
+		return unless $text =~ /^Task (\d{1,12})(?: (done|error|cancelled|timeout))?$/;
+		my ($id, $state) = ($1, $2);
+		unless ($task{$id}) {
+			push @{$status{tasks}}, ($task{$id} = {id => $id});
+			info("[[  - >>bosh started task #C{%s}", $id) unless $tty;
+		}
+		if ($state && !$task{$id}{state}) {
+			$task{$id}{state} = $state;
+			info("[[  - >>bosh task #C{%s} ended: #%s{%s}", $id, $state eq 'done' ? 'G' : 'R', $state) unless $tty;
+		}
+	};
+	return {
+		chunk => sub {
+			my ($data) = @_;
+			if ($raw) {
+				syswrite($raw, $data);
+			} elsif ($tty) {
+				print STDOUT $data;
+			}
+			$line .= $data;
+			while ($line =~ s/\A([^\n]*)\n//) {
+				my $done = $1;
+				# The answer can come back in the same read as the question.
+				$ask->() if Genesis::Term::decolorize($done) =~ $prompt;
+				$seen->($done);
+				$asked = 0;
+			}
+			# bosh's question has no newline until it is answered.
+			$ask->() if Genesis::Term::decolorize($line) =~ /$prompt\z/;
+			$line = substr($line, -4096) if length($line) > 65536;
+		},
+		signal => sub { $status{signal} //= $_[0] },
+		finish => sub {
+			my ($rc) = @_;
+			$seen->($line) if length($line);
+			close($raw) if $raw;
+			$status{rc} = $rc;
+			$status{interrupted} = (defined($status{signal}) || _interrupt_exit($rc)) ? 1 : 0;
+			return \%status;
+		},
+	};
+}
+
+# }}}
+# _interrupt_exit - whether an exit code is that of a command stopped by a signal {{{
+#
+# util-linux script(1) and a shell report a command killed by a signal as
+# 128 plus its number.  macOS script(1) exits with the signal's number,
+# so there INT and TERM are 2 and 15; HUP would be 1, which is also how
+# bosh reports any failure, so it is not counted.
+sub _interrupt_exit {
+	my ($rc) = @_;
+	return 0 unless defined($rc) && $rc =~ /\A\d+\z/;
+	return 1 if $rc > 128 && $rc < 160;
+	return 1 if $^O eq 'darwin' && ($rc == 2 || $rc == 15);
+	return 0;
 }
 
 # }}}

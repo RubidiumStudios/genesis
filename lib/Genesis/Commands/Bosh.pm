@@ -65,7 +65,7 @@ sub bosh {
 		# The arguments come from the operator and can carry a credential, so
 		# only flags and bosh's own command names stay in view in the trace.
 		my ($out, $rc) = $bosh->execute(
-			{interactive => 1, dir => $ENV{GENESIS_ORIGINATING_DIR}},
+			{interactive => 1, passthrough => 1, dir => $ENV{GENESIS_ORIGINATING_DIR}},
 			Genesis::passthrough_args(\@BOSH_COMMANDS, @_)
 		);
 		exit $rc;
@@ -224,7 +224,7 @@ sub broadcast {
 		info("\n" . ('=' x terminal_width()));
 		info("#g{Broadcasting to }#C{%s}#g{...}", $target);
 		info('-' x terminal_width());
-		my ($out, $rc, $err) = $bosh->execute({interactive => 1}, 'ssh', $target, '--', @extra_args);
+		my ($out, $rc, $err) = $bosh->execute({interactive => 1, passthrough => 1}, 'ssh', $target, '--', @extra_args);
 		error("Failed to broadcast to %s: bosh exited %d", $target, $rc) if $rc;
 	}
 

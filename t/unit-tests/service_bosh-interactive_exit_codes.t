@@ -3,10 +3,10 @@ use strict;
 use warnings;
 
 # An interactive bosh command runs under script(1), so that bosh still sees a
-# terminal while Genesis keeps a copy of its output.  macOS script(1) always
-# exits with the child's code.  util-linux script(1) exits 0 whatever the
-# child did unless it is given -e (--return), and records the child's code
-# in a "Script done" trailer of its typescript either way.
+# terminal, and Genesis reads what it prints from script's own stdout, with
+# the typescript sent to /dev/null.  macOS script(1) always exits with the
+# child's code.  util-linux script(1) exits 0 whatever the child did unless
+# it is given -e (--return).
 #
 # Without -e on Linux, run() saw script's 0, so an onfailure message never
 # fired, and run_errand(), which relied on onfailure alone and returned 1,
@@ -30,15 +30,17 @@ my $tmp = workdir();
 my $fakebin = "$tmp/fakebin";
 mkdir $fakebin or die "mkdir $fakebin: $!";
 
-# A fake script(1) for the platform named by FAKE_SCRIPT_OS.  It writes the
-# typescript only, so nothing reaches the TAP stream.
+# A fake script(1) for the platform named by FAKE_SCRIPT_OS.  It copies the
+# child's output to its stdout, as script(1) does, and refuses any
+# typescript but /dev/null, so a transcript written to disk fails the test.
 put_file("$fakebin/script", 0755, <<'SH');
 #!/bin/bash
 if [[ "$FAKE_SCRIPT_OS" == darwin ]]; then
 	# BSD form: script [-aeFkqr] file command...; the code always passes through
 	while [[ "$1" == -* ]]; do shift; done
 	file="$1"; shift
-	"$@" > "$file" 2>&1
+	[[ "$file" == /dev/null ]] || { echo "fake script: typescript $file is not /dev/null" >&2; exit 65; }
+	"$@" 2>&1
 	exit $?
 fi
 
@@ -56,11 +58,9 @@ while [[ $# -gt 0 ]]; do
 		*)            file="$1"; shift ;;
 	esac
 done
-[[ -n "$cmd" && -n "$file" ]] || { echo "fake script: expected a file and -c" >&2; exit 64; }
-printf 'Script started on 2026-10-21 12:00:00+00:00 [COMMAND="%s" TERM="xterm" TTY="/dev/pts/0" COLUMNS="80" LINES="24"]\n' "$cmd" > "$file"
-bash -c "$cmd" >> "$file" 2>&1
+[[ -n "$cmd" && "$file" == /dev/null ]] || { echo "fake script: expected -c and a /dev/null typescript" >&2; exit 64; }
+bash -c "$cmd" 2>&1
 rc=$?
-printf '\nScript done on 2026-10-21 12:00:01+00:00 [COMMAND_EXIT_CODE="%s"]\n' "$rc" >> "$file"
 [[ $ret == 1 ]] && exit "$rc"
 exit 0
 SH
@@ -89,8 +89,7 @@ for my $os (qw/darwin linux/) {
 		local $ENV{FAKE_BOSH_RC} = 3;
 		my ($out, $rc) = director->execute({interactive => 1}, '-n', 'run-errand', 'smoke-tests');
 		is($rc, 3, 'a bosh command that exits 3 reports rc 3');
-		like($out, qr/Running errand 'smoke-tests':/, 'the output is read back from the typescript');
-		unlike($out, qr/Script (started|done)/, 'no script(1) header or trailer is left in the output');
+		like($out, qr/Running errand 'smoke-tests':/, 'the output is read back from the pipe');
 	};
 
 	subtest "an interactive bosh command honours onfailure on $os" => sub {
@@ -117,15 +116,15 @@ for my $os (qw/darwin linux/) {
 		is($result, 1, 'a passing errand returns 1');
 	};
 
-	subtest "fake_tty keeps the wrapped command's exit code on $os" => sub {
-		my (undef, $rc) = run({stderr => 0}, fake_tty("$tmp/fake-tty-$os.out", 'bash', '-c', 'exit 3'));
-		is($rc, 3, 'a command that exits 3 under fake_tty reports rc 3');
+	subtest "pty_command keeps the wrapped command's exit code on $os" => sub {
+		my ($out, $rc) = run({stderr => 0}, pty_command('bash', '-c', 'echo wrapped; exit 3'));
+		is($rc, 3, 'a command that exits 3 under pty_command reports rc 3');
+		is($out, 'wrapped', 'and what it printed comes back through the pipe');
 	};
 }
 
-# run_errand must not lean on the wrapper alone: execute() recovers the code
-# from the typescript when script(1) hides it, and run_errand has to act on
-# what execute() returns.
+# run_errand must not lean on the wrapper alone: it has to act on the exit
+# code execute() returns.
 subtest 'run_errand acts on the exit code execute returns' => sub {
 	no warnings qw(redefine once);
 	local *Service::BOSH::Director::execute = sub { return wantarray ? ("Exit code 1", 1) : 1 };

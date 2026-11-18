@@ -120,7 +120,7 @@ our @EXPORT = qw/
 
 	spruce_diff changed_paths
 
-	run lines curl fake_tty shell_quote
+	run lines curl fake_tty pty_command shell_quote
 	read_json_from
 	safe_path_exists
 
@@ -1025,7 +1025,9 @@ sub run {
 	set_stdin($opts{stdin}) if ($opts{stdin});
 
 	eval {
-		if ($opts{interactive}) {
+		if ($opts{stream}) {
+			$out = _run_streaming(\%opts, @cmd);
+		} elsif ($opts{interactive}) {
 			system @cmd;
 		} else {
 			open my $pipe, "-|", @cmd
@@ -1068,14 +1070,17 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 	if (defined($out)) {
 		if ($out =~ m/[\x00-\x08\x0b-\x0c\x0e\x1f\x7f-\xff]/) {
 			qtrace "[%sb of binary data omitted from debug]", length($out);
-		} elsif ($opts{public_output}) {
+		} elsif ($opts{public_output} && !$rc) {
+			# A command that failed can print its error, with whatever it
+			# quotes, where its output would have been, so only a successful
+			# command's public output is traced.
 			dump_var -1, run_output => $out;
 		} else {
 			qtrace "[%sb of redacted data omitted from debug]", length($out);
 		}
 	}
 	if (defined($err)) {
-		if ($opts{public_stderr}) {
+		if ($opts{public_stderr} && !$rc) {
 			dump_var -1, run_stderr => $err;
 		} else {
 			qtrace "[%sb of redacted stderr omitted from debug]", length($err);
@@ -1093,6 +1098,7 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 
 	return unless defined(wantarray);
 	return ($rc == 0) if $opts{passfail};
+	return (wantarray ? ($out, $rc, $err) : $rc) if $opts{stream};
 	return (wantarray ? (undef, $rc) : $rc) if $opts{interactive};
 	return $out if $opts{onfailure};
 	return ($out,  $rc, $err) if wantarray;
@@ -1122,6 +1128,64 @@ sub shell_command {
 	return {redact => $real, display => shell_quote(map {traced_arg($_)} @cmd)};
 }
 
+# _run_streaming - run a command, handing what it prints to a callback as it comes {{{
+#
+# For run()'s stream option.  The output is kept in memory and returned
+# whole, and each chunk goes to $opts->{stream} as it arrives, so a caller
+# can show it live without any copy reaching a file.  INT, TERM, and HUP
+# are passed on to the command rather than ending Genesis, so that the
+# command, such as bosh waiting on a director task, decides how to stop;
+# the first one is handed to $opts->{on_signal}, so the caller knows the
+# run was interrupted however the command reports it.
+sub _run_streaming {
+	my ($opts, @cmd) = @_;
+	my $pid = open(my $pipe, '-|', @cmd)
+		or bail("Could not open pipe to run #C{%s}", $cmd[0]);
+	my $signal;
+	my $pass_on = sub {
+		my ($name) = @_;
+		return sub { $signal //= $name; kill($name, $pid) };
+	};
+	local $SIG{INT}  = $pass_on->('INT');
+	local $SIG{TERM} = $pass_on->('TERM');
+	local $SIG{HUP}  = $pass_on->('HUP');
+	my $out = '';
+	while (1) {
+		my $read = sysread($pipe, my $chunk, 65536);
+		if (!defined($read)) {
+			next if $!{EINTR};
+			last;
+		}
+		last unless $read;
+		$out .= $chunk;
+		$opts->{stream}->($chunk);
+	}
+	close($pipe);
+	my $status = $?;
+	$opts->{on_signal}->($signal) if defined($signal) && $opts->{on_signal};
+	$? = $status;
+	return $out;
+}
+
+# }}}
+# pty_command - run a command on a pseudo-terminal, with no typescript {{{
+#
+# script(1) gives the command a terminal, so that it prompts and colours
+# its output as it would for an operator, and copies what it prints to its
+# own stdout.  The typescript goes to /dev/null, so no copy of the
+# transcript is ever written to disk; the caller reads it from the pipe,
+# in memory.
+sub pty_command {
+	my @cmd = @_;
+	return ('script', '-q', '/dev/null', @cmd) if $^O eq 'darwin';
+	# util-linux: -e returns the command's own exit code, -f flushes as it
+	# goes, and -c re-parses its argument with a shell, so the list is
+	# flattened with shell_command, which keeps wrapped arguments wrapped.
+	return ('script', '-qef', '-c', shell_command(@cmd), '/dev/null') if $^O eq 'linux';
+	return @cmd;
+}
+
+# }}}
 # Wrap the command in an OS-specific script call to fake being in a tty terminal.
 sub fake_tty {
 	my ($file, @cmd) = @_;

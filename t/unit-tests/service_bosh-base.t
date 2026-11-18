@@ -934,15 +934,15 @@ subtest 'execute() interactive on linux shell-quotes the script -c payload' => s
 
 	is scalar(@captured), 5, 'run() receives script as an argument list, not one string';
 	is $captured[0], 'script', 'wrapped in script';
-	is $captured[1], '-qe',    'quiet flag, returning the child exit code';
-	like $captured[2], qr/bosh-output/, 'output capture file';
-	is $captured[3], '-c',     'subcommand passed via -c';
-	is $captured[4], "'/fake/bosh' 'attach-disk' 'web/0' 'disk-1|orphan;rm -rf /'",
+	is $captured[1], '-qef',   'quiet, flushing, and returning the child exit code';
+	is $captured[2], '-c',     'subcommand passed via -c';
+	is $captured[4], '/dev/null', 'with no typescript written';
+	is $captured[3], "'/fake/bosh' 'attach-disk' 'web/0' 'disk-1|orphan;rm -rf /'",
 		'-c payload is shell_quoted so metacharacters stay literal';
 };
 
 subtest 'execute() interactive on darwin keeps the plain argument list' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
 	local $^O = 'darwin';
 	local $ENV{GENESIS_BOSH_COMMAND} = '/fake/bosh';
@@ -955,7 +955,8 @@ subtest 'execute() interactive on darwin keeps the plain argument list' => sub {
 
 	$obj->execute({ interactive => 1 }, 'attach-disk', 'web/0', 'disk-1|orphan');
 
-	is scalar(@captured), 7, 'script file plus original arguments, unflattened';
+	is scalar(@captured), 7, 'script and its typescript, plus original arguments, unflattened';
+	is_deeply [@captured[0..2]], ['script', '-q', '/dev/null'], 'with no typescript written';
 	is_deeply [@captured[3..6]], ['/fake/bosh', 'attach-disk', 'web/0', 'disk-1|orphan'],
 		'bosh and subcommand args pass through as separate words';
 };

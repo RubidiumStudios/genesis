@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
-# An interactive bosh command runs under `script` so its output can be
-# captured, and on Linux `script -c` takes the whole command as one shell
+# An interactive bosh command runs under `script` so that bosh sees a
+# terminal, and on Linux `script -c` takes the whole command as one shell
 # string.  A credential wrapped as {redact => $value} must reach bosh as
 # the value itself, in its own argument, and stay out of the trace.  Each
 # test checks the argv a fake bosh actually receives.
@@ -28,15 +28,14 @@ exit 0
 EOS
 
 # The fake script follows the real one's calling conventions on each OS:
-# Linux takes `-qe FILE -c 'shell string'`, macOS takes `-q FILE cmd...`.
+# Linux takes `-qef -c 'shell string' FILE`, macOS takes `-q FILE cmd...`.
 put_file("$dir/bin/script", 0755, <<'EOS');
 #!/bin/bash
-if [[ $1 == -qe ]]; then
-	file=$2; shift 3
-	/bin/bash -c "$1" > "$file"
+if [[ $1 == -qef ]]; then
+	/bin/bash -c "$3"
 else
-	file=$2; shift 2
-	"$@" > "$file"
+	shift 2
+	"$@"
 fi
 EOS
 $ENV{PATH} = "$dir/bin:$ENV{PATH}";
@@ -59,6 +58,16 @@ for my $os (qw/linux darwin/) {
 		like($log, qr/<redacted:\d+ bytes>/, 'the trace marks where it was');
 	};
 }
+
+subtest "pty_command on linux carries a wrapped argument as its value" => sub {
+	my $value = fake_secret("pty");
+	local $^O = "linux";
+	my @cmd = pty_command("spruce", "diff", {redact => $value});
+	is(ref($cmd[3]), "HASH", "the -c command is wrapped");
+	is($cmd[3]{redact}, "'spruce' 'diff' '$value'", "its value is the real command");
+	unlike($cmd[3]{display}, qr/\Q$value\E/, "its display form leaves the value out");
+	is($cmd[4], '/dev/null', 'and no typescript is written');
+};
 
 subtest "fake_tty on linux carries a wrapped argument as its value" => sub {
 	my $value = fake_secret("tty");

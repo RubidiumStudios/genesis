@@ -1323,6 +1323,23 @@ A hash reference controlling execution behaviour:
 If true, runs the command with the C<system> call so that it shares the
 terminal. Captured output is undefined.
 
+=item C<stream>
+
+A code reference. The command's output is read from a pipe, and each chunk
+is handed to the callback as it arrives, so a caller can show it live; see
+C<_run_streaming>. The whole output is also returned, untrimmed, as with
+C<exact>. Nothing is written to disk, and the output stays out of the trace
+unless C<public_output> is set. Takes precedence over C<interactive>.
+
+While the command runs, C<INT>, C<TERM>, and C<HUP> are passed on to it
+rather than ending Genesis, so the command decides how to stop.
+
+=item C<on_signal>
+
+With C<stream>, a code reference called after the command ends with the
+name of the first signal passed on to it, such as C<INT>. It is not called
+when no signal came in.
+
 =item C<passfail>
 
 If true, returns C<1> (success) or C<0> (failure) rather than output.
@@ -1393,17 +1410,20 @@ C<public>, C<public_output>, or C<public_stderr> mark is ignored.
 
 =item C<public_output>
 
-If true, the command's captured output is written to the trace and to an
-C<onfailure> message. Without it, the trace records only the output's length
-as C<[Nb of redacted data omitted from debug]>, since a command's output can
-carry any credential it read. Mark only output that provably holds no
-secret, such as a version string or a plain listing. The caller receives the
-output unchanged either way.
+If true, the output of a command that succeeds is written to the trace and
+to an C<onfailure> message. Without it, the trace records only the output's
+length as C<[Nb of redacted data omitted from debug]>, since a command's
+output can carry any credential it read. Mark only output that provably
+holds no secret, such as a version string or a plain listing. A command
+that fails can print an error quoting anything in that place, so its
+output is never traced, marked or not. The caller receives the output
+unchanged either way.
 
 =item C<public_stderr>
 
-The same as C<public_output>, for the command's captured stderr. Without
-it, the trace records C<[Nb of redacted stderr omitted from debug]>.
+The same as C<public_output>, for the captured stderr of a command that
+succeeds. Without it, or when the command fails, the trace records
+C<[Nb of redacted stderr omitted from debug]>.
 
 =item C<public>
 
@@ -1492,6 +1512,9 @@ When C<passfail> is set: C<1> on success or C<''> (empty string) on failure.
 
 When C<onfailure> is set and the command succeeds: the bare C<$out> scalar
 (not a three-element list).
+
+When C<stream> is set: C<($out, $rc, $err)> in list context, with C<$out>
+untrimmed, and C<$rc> in scalar.
 
 When C<interactive> is set: C<(undef, $rc)> in list context, C<$rc> in scalar.
 
@@ -1745,6 +1768,38 @@ B<Examples:>
   my $arg = Genesis::shell_command('bosh', 'update-config', {redact => 'abcdef'});
   # $arg->{redact}  is "'bosh' 'update-config' 'abcdef'"
   # $arg->{display} is "'bosh' 'update-config' '<redacted:6 bytes>'"
+
+=head2 pty_command
+
+    my @cmd = pty_command(@cmd);
+    my ($out, $rc) = run({stream => sub {print $_[0]}}, @cmd);
+
+Wraps C<@cmd> in an OS-specific C<script> invocation so that the command
+runs on a pseudo-terminal, and prompts and colours its output as it would
+for an operator. C<script> copies what the command prints to its own
+stdout, where the caller reads it, and its typescript goes to C</dev/null>,
+so no copy of the transcript is written to disk. C<script> merges the
+command's stdout and stderr.
+
+On macOS the result is C<('script', '-q', '/dev/null', @cmd)>, with the
+arguments unchanged, and C<script> exits with the command's code. On Linux
+it is C<('script', '-qef', '-c', $command, '/dev/null')>, where C<-e>
+returns the command's code and C<$command> is C<shell_command(@cmd)>, so
+each argument survives the inner shell whole, and an argument wrapped as
+C<{redact =E<gt> $value}> keeps the whole command wrapped. Elsewhere,
+C<@cmd> is returned as it is.
+
+macOS C<script> echoes the EOF it sends a command when its own stdin is
+not a terminal, so its output can start with C<^D> and backspaces, which a
+caller strips. When the command is killed by signal C<N>, macOS C<script>
+exits C<N> and util-linux C<script> exits C<128 + N>.
+
+B<Examples:>
+
+    my @cmd = pty_command('spruce', 'diff', $a, $b);
+    # Returns (macOS): ('script', '-q', '/dev/null', 'spruce', 'diff', $a, $b)
+    # Returns (Linux): ('script', '-qef', '-c', "'spruce' 'diff' '$a' '$b'", '/dev/null')
+    my ($diff, $rc) = run({stderr => 0, exact => 1}, @cmd);
 
 =head2 fake_tty
 
@@ -4104,6 +4159,30 @@ private stream. A stream the caller marked public with C<public_output> or
 C<public_stderr> is appended as it was printed.
 
 B<Returns:> The message string.
+
+=head2 _run_streaming
+
+    my $out = _run_streaming(\%opts, @cmd);
+
+Internal to C<run>, for its C<stream> option. Opens a pipe from C<@cmd>,
+reads it until the command closes it, appends each chunk to the output, and
+hands the chunk to C<< $opts{stream} >>. A read interrupted by a signal is
+retried. While it reads, C<INT>, C<TERM>, and C<HUP> are passed on to the
+command with C<kill>, and the first one is recorded and handed to
+C<< $opts{on_signal} >>, if given, once the command has ended. C<$?> holds
+the command's status on return, for C<run> to read.
+
+B<Errors:>
+
+Dies with C<Could not open pipe to run ...> when the command cannot be
+started.
+
+B<Examples:>
+
+    # As run() calls it for {stream => ...}
+    my $out = _run_streaming({stream => sub {print $_[0]}, on_signal => sub {$sig = $_[0]}},
+        '/bin/bash', '-c', 'bosh deploy "$@"', 'bash', $manifest);
+    my $rc = $? >> 8;
 
 =head1 AUTHOR
 

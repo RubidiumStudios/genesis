@@ -288,20 +288,32 @@ any C<-n> flag are unshifted onto the argument list.
 =back
 
 When C<$opts-E<gt>{interactive}> is true and the command is not C<int>,
-output is captured via the C<script> command (using C<script -q> on macOS
-and C<script -qe -c> on Linux) so that interactive terminal output is
-available in C<$results[0]> after the command completes.  The typescript
-is written to a directory only the current user can enter, the file is
-readable by that user alone, and both are removed as soon as C<execute>
-has read it, even when the command dies.
+bosh runs on a pseudo-terminal through C<Genesis::pty_command>, so that it
+prompts and shows progress as it would for an operator.  What it prints is
+read from C<script>'s stdout, in memory, through C<run>'s C<stream> option,
+and comes back in C<$results[0]>.  No typescript is written, and C<$results[2]>
+is undefined, since C<script> merges bosh's stderr into its output.  macOS
+C<script>'s echo of C<^D> is stripped.
+
+On a terminal, what bosh prints is passed straight to it as it arrives.  Off
+a terminal, such as in a CI log, it is not shown at all, since a log keeps
+whatever bosh quotes; Genesis prints instead when bosh starts a task, how
+each task ends, and when bosh asks whether to continue.  See
+C<_interactive_watch>.  Either way, C<last_interactive_status> afterwards
+reports the tasks bosh named, the final state of each, the exit code, and
+whether the run was interrupted, and the trace records the same facts and
+nothing bosh printed.
+
+A command whose output the operator asked for, such as C<genesis E<lt>envE<gt>
+bosh vms>, passes C<passthrough>.  Off a terminal, it runs without a
+pseudo-terminal, and bosh writes to the operator's stdout itself, as it
+would if run by hand; Genesis neither reads nor keeps that output, so
+C<$results[0]> is undefined.
 
 The Linux wrapper must keep C<-e>.  util-linux C<script> exits 0 without it,
-whatever bosh did, so C<run()> never fires an C<onfailure> message, and the
-exit code is left to the typescript's C<[COMMAND_EXIT_CODE="N"]> trailer.
-util-linux releases older than 2.35 write no such trailer, and a bosh killed
-by a signal leaves a reason there instead of a code, so both read as
-success.  macOS C<script> always exits with the child's code.  C<deploy> and
-C<run_errand> in L<Service::BOSH::Director> depend on it.
+whatever bosh did, so C<run()> never fires an C<onfailure> message.  macOS
+C<script> always exits with the child's code.  C<deploy> and C<run_errand>
+in L<Service::BOSH::Director> depend on it.
 
 Much of what bosh prints carries credentials, so C<execute> keeps it out of
 the trace. Stdout is traced verbatim only for the read-only listings in
@@ -313,8 +325,11 @@ credentials there, and every other command, along with any command whose
 subcommand cannot be identified, leaves only a byte count for each stream.
 A shell command that pipes, chains, quotes, or substitutes anything counts
 as unidentified, and so does a command with an option C<_subcommand> does
-not know. An interactive transcript follows the same rule. A caller can
-still mark a call's output public with C<public_output>, as C<run> allows.
+not know. An interactive transcript is never traced, whatever the
+command, and a C<public_output> mark on an interactive call is ignored.
+Otherwise a caller can still mark a call's output public with
+C<public_output>, as C<run> allows, and it is traced only when the command
+succeeds.
 
 bosh's own debug logging writes whole director requests and responses,
 tokens included, to its output or to the file C<BOSH_LOG_PATH> names.
@@ -346,8 +361,14 @@ If true, returns a boolean: C<1> on success (exit code 0), C<''> on failure.
 
 =item interactive
 
-If true, captures output via C<script> and runs the command attached to
-the terminal.
+If true, runs bosh on a pseudo-terminal, shows its output on a terminal or
+its task progress elsewhere, and returns its output, as described above.
+
+=item passthrough
+
+With C<interactive>, marks output the operator asked for.  Off a
+terminal, bosh then runs without a pseudo-terminal and writes to stdout
+itself.
 
 =item deployment
 
@@ -393,6 +414,45 @@ B<Examples:>
   # Interactive command with output capture
   my ($out, $rc) = $bosh->execute({interactive => 1}, 'deploy', $manifest);
   # Returns: ($captured_output, 0) on success
+  my $status = $bosh->last_interactive_status;
+  # {rc => 0, interrupted => 0, signal => undef, tasks => [{id => 1234, state => 'done'}]}
+
+=head2 last_interactive_status
+
+  my $status = $bosh->last_interactive_status;
+
+Reports how the last interactive command C<execute> ran on a
+pseudo-terminal ended, or C<undef> when the last command was not one.  The
+facts come from what bosh printed and how it ended, as they happened, and
+none of bosh's own text is kept.
+
+B<Returns:> A hash reference with these keys:
+
+=over 4
+
+=item tasks
+
+An array reference of the tasks bosh started, in order, each a hash
+reference with C<id>, the task number, and C<state>, which is C<done>,
+C<error>, C<cancelled>, or C<timeout> when bosh reported how the task
+ended, and absent otherwise.  A task with no state may still be running on
+the director.
+
+=item rc
+
+The exit code C<run> reported.
+
+=item signal
+
+The name of the first signal Genesis passed on to bosh, such as C<INT>, or
+C<undef>.
+
+=item interrupted
+
+C<1> when a signal was passed on, or the exit code is one a command
+stopped by a signal ends with; see C<_interrupt_exit>.  C<0> otherwise.
+
+=back
 
 =head2 dryrun_of
 
@@ -504,6 +564,42 @@ precedence over the calling process's environment. C<execute> uses the
 list to warn the operator, once per process, that it turned them off.
 
 B<Returns:> a list of zero, one, or two setting names.
+
+=head2 _interactive_watch
+
+  my $watch = _interactive_watch();
+  run({stream => $watch->{chunk}, on_signal => $watch->{signal}}, @cmd);
+  my $status = $watch->{finish}->($rc);
+
+Builds the callbacks C<execute> hands to C<run> for an interactive command.
+
+When stdout is a terminal, C<chunk> writes each chunk of output straight
+to it, unbuffered, so bosh's prompts and progress appear as they would
+without Genesis.  Otherwise nothing bosh printed is shown, and C<info>
+reports when bosh starts a task (C<bosh started task N>), how each ends
+(C<bosh task N ended: STATE>), and when bosh asks C<Continue? [yN]>, whose
+line has no newline until it is answered.
+
+Either way, C<chunk> follows complete lines, with colour codes and
+carriage returns ignored, for bosh's C<Task N> and C<Task N STATE> lines,
+where C<N> is a number of up to twelve digits.  C<signal> records the
+signal C<run> passed on, and C<finish> reads any last partial line and
+returns the status that C<last_interactive_status> reports.
+
+B<Returns:> A hash reference of the three code references C<chunk>,
+C<signal>, and C<finish>.
+
+=head2 _interrupt_exit
+
+  my $interrupted = _interrupt_exit($rc);
+
+Whether C<$rc> is the code a command stopped by a signal ends with.
+util-linux C<script> and a shell report signal C<N> as C<128 + N>, so a
+code from 129 to 159 counts.  macOS C<script> exits with the signal's
+number, so there C<2> (C<INT>) and C<15> (C<TERM>) count as well.  C<1>
+(C<HUP>) does not, since bosh exits 1 for any failure.
+
+B<Returns:> C<1> or C<0>.
 
 =head1 OVERRIDE POINTS
 

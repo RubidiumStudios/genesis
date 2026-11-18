@@ -18,6 +18,7 @@ sanity-tests/pod-complete.t      # Every module's POD present, complete, filed c
 # Naming: {lib-path}_{module}-{context}.t (e.g., genesis-struct.t, genesis_env-core.t)
 # Genesis.pm tests split by context:
 unit-tests/genesis-core.t        # Error/logging/env utilities
+unit-tests/genesis-run_stream.t  # streamed run output stays in memory; signals reach the command
 unit-tests/genesis-string.t      # String utilities (ordify, count_nouns, sentence_join)
 unit-tests/genesis-semver.t      # Semantic versioning (semver, by_semver, new_enough)
 unit-tests/genesis-struct.t      # Data structures (struct_*, flatten, deep_merge)
@@ -39,7 +40,7 @@ unit-tests/service_bosh-director-network_lock.t  # network claims lock: check-an
 unit-tests/service_bosh-director-proxy_timeout.t  # status() reports a director that hangs behind BOSH_ALL_PROXY as unreachable
 unit-tests/service_bosh-stemcell.t
 unit-tests/service_bosh-interactive_argv.t   # interactive bosh gets wrapped arguments as their values
-unit-tests/service_bosh-trace_redaction.t   # bosh output that can carry secrets stays out of the trace
+unit-tests/service_bosh-trace_redaction.t   # bosh output stays out of the trace; off a terminal only tasks show
 unit-tests/genesis_commands_bosh-connect_exports.t  # bosh --connect exports round-trip in the caller shell
 unit-tests/genesis_command_line-privacy.t    # operator arguments stay out of logs
 unit-tests/genesis_cli-args_privacy.t        # hyphenated values and parse errors stay out of logs
@@ -65,7 +66,7 @@ unit-tests/genesis_run-signal_exit.t  # a signal-killed command fails in every c
 unit-tests/genesis_run-private_streams.t  # a child's streams reach no trace or failure message unless marked public
 unit-tests/genesis_command_failures-privacy.t  # errors from failed safe, credhub, and secret commands quote nothing they printed
 unit-tests/genesis-spruce_diff_exit_codes.t   # spruce diff's exit code survives script(1) on macOS and Linux
-unit-tests/service_bosh-interactive_exit_codes.t  # interactive bosh and fake_tty keep the exit code under script(1)
+unit-tests/service_bosh-interactive_exit_codes.t  # interactive bosh and pty_command keep the exit code under script(1)
 unit-tests/genesis-tcp_listening_alarm.t      # tcp_listening leaves no alarm armed
 unit-tests/service_vault-core.t          # Service::Vault base class + None with MockWrapper
 unit-tests/service_vault-strongbox_intent.t  # tri-state strongbox read from ~/.saferc

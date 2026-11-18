@@ -37,6 +37,26 @@ use Service::Vault::Local;
 
 fake_bosh;
 
+# What bosh printed during a deploy, which execute() returns to the deploy
+# but, off a terminal, no longer shows; the fake bosh prints its argv.
+sub deploy_transcript {
+	my ($env, %opts) = @_;
+	my $eval = delete $opts{_eval};
+	my $transcript;
+	my $execute = \&Service::BOSH::execute;
+	no warnings 'redefine';
+	local *Service::BOSH::execute = sub {
+		my @results = $execute->(@_);
+		$transcript = $results[0] if ref($_[1]) eq 'HASH' && $_[1]{interactive};
+		return wantarray ? @results : $results[1];
+	};
+	use warnings 'redefine';
+	my ($stdout, $stderr) = output_from {$eval ? eval {$env->deploy(%opts)} : $env->deploy(%opts)};
+	$transcript //= '';
+	$transcript =~ s/\r//g; # the terminal script(1) gives bosh ends lines with CR-LF
+	return ($transcript, $stdout, $stderr);
+}
+
 $ENV{GENESIS_CALLBACK_BIN} ||= abs_path('bin/genesis');
 $ENV{GENESIS_LIB} ||= abs_path('lib');
 $ENV{GENESIS_OUTPUT_COLUMNS}=80;
@@ -988,11 +1008,10 @@ EOF
 	ok ! defined($sha), "sha1 sum for manifest not computed.";
 	ok defined($errors) && scalar(@$errors) == 1 , "errors reported";
 	is($errors->[0], "No previously deployed manifest found.", "correct error reported");
-	my ($stdout, $stderr) = output_from {$env->deploy(canaries => 2, "max-in-flight" => 5);};
-	$stdout =~ s/\r//g;  # Using script to wrap bosh calls injects <CR> characters for some reason?!
-	$stdout =~ s/^\^D\x08*//; # macOS BSD script(1) session-header prefix that leaks through fd-level test capture
+	my ($transcript, $stdout, $stderr) = deploy_transcript($env, canaries => 2, "max-in-flight" => 5);
+	unlike($stdout, qr/--no-redact/, "Off a terminal, nothing bosh printed is shown");
 	my $expected_manifest = $env->deployment_cache_path_lookup('manifest');
-	eq_or_diff($stdout, <<EOF, "Deploy should call BOSH with the correct options");
+	eq_or_diff($transcript, <<EOF, "Deploy should call BOSH with the correct options");
 bosh
 deploy
 --tty
@@ -1161,12 +1180,10 @@ cc-stuff: cloud-config-data
 EOF
 
 	$env->manifest_provider->reset->set_deployment('unredacted');
-	my ($stdout, $stderr) = output_from {eval {$env->deploy();}};
-	$stdout =~ s/\r//g;
-	$stdout =~ s/^\^D\x08*//; # macOS script(1) session-header prefix that survives non-TTY capture
+	my ($transcript) = deploy_transcript($env, _eval => 1);
 	my $manifest_file = $env->deployment_cache_path_lookup('manifest');
 	my $varsfile = $env->deployment_cache_path_lookup('vars');
-	eq_or_diff($stdout, <<EOF, "Deploy should call BOSH with the correct options, including vars file");
+	eq_or_diff($transcript, <<EOF, "Deploy should call BOSH with the correct options, including vars file");
 bosh
 deploy
 --tty

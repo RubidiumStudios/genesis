@@ -35,14 +35,15 @@ for a in "\$@"; do printf '%s\\n' "\$a"; done > "$dir/argv-$name"
 exit 0
 EOS
 }
+# script(1) on Linux takes `-qef -c 'shell string' FILE`, and on macOS
+# `-q FILE cmd...`; Genesis sends the typescript to /dev/null.
 put_file("$dir/bin/script", 0755, <<'EOS');
 #!/bin/bash
-if [[ $1 == -qe ]]; then
-	file=$2; shift 3
-	/bin/bash -c "$1" > "$file"
+if [[ $1 == -qef ]]; then
+	/bin/bash -c "$3"
 else
-	file=$2; shift 2
-	"$@" > "$file"
+	shift 2
+	"$@"
 fi
 EOS
 my $system_path = $ENV{PATH};
