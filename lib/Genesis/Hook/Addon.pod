@@ -241,7 +241,9 @@ an option string is unrecognized by the parser).
 C<"Unknown option(s) passed to %s: %s"> -- raised via C<bail()> if any
 element remaining in C<< $self->{args} >> after parsing begins with C<->.
 The first C<%s> is the hook's label and the second is the comma-separated
-list of unrecognized option strings.
+list of those elements, each shown only by its length. Getopt::Long has
+already refused any unknown flag by then, so such an element followed a
+C<-->, and is an operand that can be a credential.
 
 =back
 

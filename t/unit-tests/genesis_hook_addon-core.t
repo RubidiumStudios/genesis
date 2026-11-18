@@ -339,6 +339,20 @@ subtest 'parse_options - unknown option dies' => sub {
 		'GetOptionsFromArray reports the rejected flag by name');
 };
 
+subtest 'parse_options - a hyphenated operand is not quoted when refused' => sub {
+	plan tests => 2;
+
+	# Only an operand after -- is left looking like an option, and an
+	# operand can be a credential, so the refusal gives its length.
+	my $value = '-fake-addon-operand-'.join('', map {sprintf '%x', int rand 16} 1..16);
+	my $hook = make_hook(args => ['--', $value]);
+	throws_ok {
+		$hook->parse_options(['verbose|v']);
+	} qr/Unknown option\(s\) passed to .*<redacted:\d+ bytes>/s,
+		'parse_options() refuses the operand by its length';
+	unlike($@, qr/\Q$value\E/, 'and does not quote it');
+};
+
 subtest 'parse_options - non-option args remain in args array' => sub {
 	plan tests => 2;
 

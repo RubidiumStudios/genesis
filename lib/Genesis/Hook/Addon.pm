@@ -105,7 +105,10 @@ sub parse_options {
 	);
 	GetOptionsFromArray($self->{args}, \%opts, @$opt_defn)
 		or bail("Error parsing command line arguments");
-	my $bad_opts = join(", ", grep {/^-/} @{$self->{args}});
+	# Getopt::Long has already refused any unknown flag, so what is left
+	# looking like one followed a --, and is an operand that can be a
+	# credential: the refusal gives only its length.
+	my $bad_opts = join(", ", map {Genesis::traced_arg({redact => $_})} grep {/^-/} @{$self->{args}});
 	bail("Unknown option(s) passed to %s: %s", $self->label, $bad_opts) if $bad_opts;
 	return wantarray ? %opts : \%opts;
 }
