@@ -6005,8 +6005,10 @@ sub bosh_logs {
 
 	if (grep {$_ =~ /^(-h|--help)$/} @extra_opts) {
 		info("\nFetching help for 'bosh logs'...\n");
-		$self->bosh->execute({interactive => 1}, "logs", "--help");
-		exit 0;
+		# Help is output the operator asked for, so it goes to stdout as bosh
+		# prints it, terminal or not, and bosh's exit status is ours.
+		my (undef, $rc) = $self->bosh->execute({interactive => 1, passthrough => 1}, "logs", "--help");
+		exit($rc // 1);
 	}
 
 	bail(

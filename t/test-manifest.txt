@@ -208,6 +208,7 @@ unit-tests/genesis_ci_propagation-core.t            # propagation engine core
 unit-tests/genesis_ci_propagation-pr_idempotency.t  # PR idempotency
 unit-tests/genesis_ci_propagation-propagate_envs.t  # env propagation
 unit-tests/genesis_env-propagation_git_results.t   # propagation diff and last SHA read git's output
+unit-tests/genesis_env-bosh_logs_help.t           # logs --help reaches stdout off a terminal with bosh's exit status
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi
