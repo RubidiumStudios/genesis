@@ -58,6 +58,17 @@ subtest 'a real deploy leaves the confirmation to bosh' => sub {
 	ok(!(grep {$_ eq '--dry-run'} @{$deploys[0]{flags}}), 'bosh deploy runs without --dry-run');
 };
 
+subtest 'persistent disks are recreated only when asked' => sub {
+	plan tests => 2;
+	@deploys = ();
+	my $env = make_env();
+	$env->_deploy_to_bosh('recreate-persistent-disks' => 1, redact => 1);
+	ok((grep {$_ eq '--recreate-persistent-disks'} @{$deploys[0]{flags}}), 'bosh deploy runs with --recreate-persistent-disks when asked');
+	@deploys = ();
+	$env->_deploy_to_bosh(redact => 1);
+	ok(!(grep {/recreate-persistent-disks/} @{$deploys[0]{flags}}), 'and without it otherwise');
+};
+
 # bosh can exit zero after Ctrl-C reached Genesis, or with a task it never
 # reported the end of; neither is a success, and everything after the
 # deploy follows that one outcome.

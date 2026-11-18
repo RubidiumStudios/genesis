@@ -4470,7 +4470,7 @@ sub _deploy_create_env {
 	copy_or_fail($store_source, $store_path) if $store_source;
 
 	my @bosh_opts;
-	push @bosh_opts, "--$_" for grep { $opts{$_} } qw/recreate skip-drain/;
+	push @bosh_opts, "--$_" for grep { $opts{$_} } qw/recreate recreate-persistent-disks skip-drain/;
 
 	# Dry-run: skip the bosh create-env call but report what would deploy.
 	# bosh create-env doesn't support --dry-run natively, but we've already
@@ -4550,7 +4550,7 @@ sub _deploy_to_bosh {
 	my $state = $self->{deployment_state};
 
 	my @bosh_opts = ('--tty');
-	push @bosh_opts, "--$_"             for grep { $opts{$_} } qw/fix fix-releases recreate dry-run/;
+	push @bosh_opts, "--$_"             for grep { $opts{$_} } qw/fix fix-releases recreate recreate-persistent-disks dry-run/;
 	# A dry run changes nothing, so there is nothing for bosh to confirm.
 	# Without -n, bosh waits on its "Continue?" question, which never shows
 	# when stdout is a pipe.
@@ -4677,6 +4677,7 @@ sub _post_deploy {
 		$noprompt ? 'yes' : undef,
 		$state->{disable_reactions} ? 'no-reactions' : undef,
 		$opts{recreate} ? 'recreate' : undef,
+		$opts{'recreate-persistent-disks'} ? 'recreate-persistent-disks' : undef,
 		scalar(@skip_drains) ?
 			scalar(grep {$_ eq ''} @skip_drains)
 			? 'skip-drain'
