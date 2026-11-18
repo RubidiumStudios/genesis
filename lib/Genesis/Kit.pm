@@ -29,7 +29,7 @@ sub new {
 sub known_hooks {
 	# Returns a list of known hooks that can be used in the kit.
 	return qw/
-		new feature blueprint info check pre-deploy post-deploy terminate
+		new feature prereqs blueprint info check pre-deploy post-deploy terminate
 		edit shell addon
 		cloud-config cpi-config features runtime-config
 	/;
@@ -226,7 +226,7 @@ sub run_hook {
 		}
 	} else {
 		bug("The 'env' option to run_hook is required for the '$hook' hook!!")
-			if (grep { $_ eq $hook } qw/new secrets info addon check blueprint pre-deploy post-deploy cloud-config cpi-config features terminate/);
+			if (grep { $_ eq $hook } qw/new secrets info addon check prereqs blueprint pre-deploy post-deploy cloud-config cpi-config features terminate/);
 	}
 
 	my (@args, %module_options);
@@ -442,7 +442,7 @@ EOF
 	}
 
 	$ENV{GENESIS_IS_HELPING_YOU} = 'yes';
-	my $interactive = ($is_shell || $is_edit || scalar($hook =~ m/^(addon|new|info|check|secrets|post-deploy|pre-deploy)$/)) ? 1 : 0;
+	my $interactive = ($is_shell || $is_edit || scalar($hook =~ m/^(addon|new|info|check|prereqs|secrets|post-deploy|pre-deploy)$/)) ? 1 : 0;
 	# A hook whose stdout Genesis parses has its stderr kept in memory, too,
 	# since what it prints there can quote the values it handled.  It is
 	# shown afterward as private detail, which only a terminal displays.
@@ -520,6 +520,7 @@ EOF
 	return ($rc == 0 ? 1 : 0) if (
 		$hook eq 'addon' ||
 		$hook eq 'check' ||
+		$hook eq 'prereqs' ||
 		($hook eq 'secrets' && $opts{action} eq 'check')
 	);
 
@@ -839,9 +840,8 @@ sub check_prereqs {
 	}
 
 	if ($self->has_hook('prereqs')) {
-		my ($out,$rc) = run_hook('prereqs',env => $env);
-		if ($rc > 0) {
-			error("Prerequisite check for kit #C{$id} failed with exit code $rc");
+		unless ($self->run_hook('prereqs', env => $env)) {
+			error("Prerequisite check for kit #C{$id} failed");
 			$ok = 0;
 		}
 	}

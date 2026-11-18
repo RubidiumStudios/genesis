@@ -188,7 +188,7 @@ subtest 'version requirements' => sub {
 # ---------------------------------------------------------------------------
 subtest 'known_hooks' => sub {
 	my @expected = qw(
-		new feature blueprint info check pre-deploy post-deploy terminate
+		new feature prereqs blueprint info check pre-deploy post-deploy terminate
 		edit shell addon cloud-config cpi-config features runtime-config
 	);
 
@@ -203,8 +203,8 @@ subtest 'known_hooks' => sub {
 	cmp_deeply(\@inst_hooks, \@expected,
 		"known_hooks() instance call returns the same list as the class call");
 
-	ok scalar(@class_hooks) == 15,
-		"known_hooks() returns exactly 15 hooks";
+	ok scalar(@class_hooks) == 16,
+		"known_hooks() returns exactly 16 hooks";
 };
 
 # ---------------------------------------------------------------------------
