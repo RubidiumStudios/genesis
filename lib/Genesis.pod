@@ -1402,9 +1402,11 @@ output. The caller still receives the stderr unchanged.
 If true, every environment value C<env> sets is written to the trace as
 C<E<lt>redactedE<gt>>. Without it, a value is written only if its key is in
 C<%Genesis::TRACE_VISIBLE_ENV>, an allowlist of keys that can never hold a
-credential, such as C<BOSH_ENVIRONMENT> and C<GENESIS_ENVIRONMENT>; every
-other key is written by name with C<E<lt>redacted:N bytesE<gt>> in place of
-its value. The environment handed to commands routinely carries
+credential, such as C<GENESIS_ENVIRONMENT>. Keys in
+C<%Genesis::TRACE_ENDPOINT_ENV>, such as C<BOSH_ENVIRONMENT> and
+C<VAULT_ADDR>, are written as their scheme, host, and port only, since a URL
+can carry a password; see C<traced_endpoint>. Every other key is written by
+name with C<E<lt>redacted:N bytesE<gt>> in place of its value. The environment handed to commands routinely carries
 C<BOSH_CLIENT_SECRET> and C<CREDHUB_SECRET>, so a key is never shown merely
 because nobody thought to hide it. Keys that C<env> unsets follow the same
 rule for the value they had.
@@ -1551,6 +1553,25 @@ B<Examples:>
 
   Genesis::traced_arg({redact => 'password=abcdef', prefix => 'password='});
   # Returns: 'password=<redacted:6 bytes>'
+
+=head2 traced_endpoint
+
+  my $shown = Genesis::traced_endpoint($url);
+
+Returns an endpoint as a trace or log may show it. A URL is reduced to its
+scheme, host, and port, so any username and password in it, and any path,
+query, or fragment, are dropped. A bare name or C<host:port>, such as a bosh
+alias or a safe target name, is returned as it is. Anything else becomes
+C<E<lt>redacted:N bytesE<gt>>, and an undefined value C<E<lt>undefE<gt>>.
+
+B<Returns:> A string.
+
+B<Examples:>
+
+  Genesis::traced_endpoint('https://admin:pw@10.0.0.6:25555/info');
+  # Returns: 'https://10.0.0.6:25555'
+  Genesis::traced_endpoint('my-director');
+  # Returns: 'my-director'
 
 =head2 shell_quote
 
@@ -3694,7 +3715,9 @@ B<Returns:> A string.
 
 Returns what C<run> writes to the trace for one environment value: the
 value itself if C<$key> is in C<%Genesis::TRACE_VISIBLE_ENV> and
-C<$redact_all> is false, C<E<lt>redacted:N bytesE<gt>> for any other key, and
+C<$redact_all> is false, C<traced_endpoint($value)> if C<$key> is in
+C<%Genesis::TRACE_ENDPOINT_ENV>, C<E<lt>redacted:N bytesE<gt>> for any other
+key, and
 C<E<lt>redactedE<gt>> for every key when C<$redact_all> (C<run>'s
 C<redact_env> option) is true.
 
@@ -3702,7 +3725,7 @@ B<Returns:> A colourised string for the trace.
 
 B<Examples:>
 
-  Genesis::_traced_env_value('BOSH_ENVIRONMENT', 'https://10.0.0.6:25555');
+  Genesis::_traced_env_value('BOSH_ENVIRONMENT', 'https://admin:pw@10.0.0.6:25555/');
   # Returns: 'https://10.0.0.6:25555'
   Genesis::_traced_env_value('BOSH_CLIENT_SECRET', 'abcdefgh');
   # Returns: '<redacted:8 bytes>'

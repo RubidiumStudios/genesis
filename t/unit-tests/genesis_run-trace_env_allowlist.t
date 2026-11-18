@@ -77,4 +77,47 @@ subtest 'the command still receives the real values' => sub {
 	is($out, $bosh_secret, 'redaction is for the trace only');
 };
 
+subtest 'endpoints show only their scheme, host, and port' => sub {
+	my %pw = map {$_ => fake_secret("userinfo-$_")} qw/bosh credhub vault safe target exodus/;
+	my $log = capture_trace {
+		run({env => {
+			BOSH_ENVIRONMENT     => "https://admin:$pw{bosh}\@10.0.0.6:25555/info?x=1",
+			CREDHUB_SERVER       => "https://user:$pw{credhub}\@10.0.0.6:8844",
+			VAULT_ADDR           => "https://$pw{vault}\@10.0.0.5:8200/",
+			SAFE_TARGET          => "https://u:$pw{safe}\@10.0.0.5",
+			GENESIS_TARGET_VAULT => "https://u:$pw{target}\@10.0.0.5",
+			BOSH_EXODUS_VAULT    => "https://u:$pw{exodus}\@10.0.0.5",
+		}}, 'true');
+	};
+	unlike($log, qr/\Q$pw{$_}\E/, "the $_ userinfo is not in the trace") for sort keys %pw;
+	like($log, qr{BOSH_ENVIRONMENT='https://10\.0\.0\.6:25555'}, 'the endpoint itself stays in view');
+	like($log, qr{VAULT_ADDR='https://10\.0\.0\.5:8200'}, 'with its port');
+
+	$log = capture_trace {
+		run({env => {BOSH_ENVIRONMENT => 'fake-alias', VAULT_ADDR => "not a url $pw{vault}"}}, 'true');
+	};
+	like($log, qr{BOSH_ENVIRONMENT='fake-alias'}, 'a bare name or host is shown');
+	unlike($log, qr/\Q$pw{vault}\E/, 'anything else is redacted');
+};
+
+subtest 'a vault descriptor is free-form, so its value is redacted' => sub {
+	my $descriptor = fake_secret('descriptor');
+	my $log = capture_trace {
+		run({env => {GENESIS_ENV_VAULT_DESCRIPTOR => "https://u:$descriptor\@10.0.0.5"}}, 'true');
+	};
+	unlike($log, qr/\Q$descriptor\E/, 'the descriptor is not in the trace');
+};
+
+subtest 'the director built from the environment logs its endpoint safely' => sub {
+	require Service::BOSH::Director;
+	my $pw = fake_secret('director-userinfo');
+	no warnings 'redefine';
+	local *Service::BOSH::Director::new = sub { bless({}, $_[0]) };
+	local $ENV{BOSH_ENVIRONMENT} = "https://admin:$pw\@10.0.0.6:25555";
+	local $ENV{BOSH_CLIENT} = 'admin';
+	my $log = capture_trace { Service::BOSH::Director->from_environment };
+	like($log, qr/BOSH_ENVIRONMENT=https:\/\/10\.0\.0\.6:25555/, 'the endpoint is logged');
+	unlike($log, qr/\Q$pw\E/, 'its userinfo is not');
+};
+
 done_testing;

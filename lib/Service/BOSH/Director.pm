@@ -228,7 +228,7 @@ sub from_environment {
 	# 2. We need to indicate if we want the self or parent BOSH director
 
 	debug("from_environment: BOSH_ALIAS=%s BOSH_ENVIRONMENT=%s BOSH_CLIENT=%s BOSH_DEPLOYMENT=%s",
-		$ENV{BOSH_ALIAS}//'(undef)', $ENV{BOSH_ENVIRONMENT}//'(undef)',
+		$ENV{BOSH_ALIAS}//'(undef)', Genesis::traced_endpoint($ENV{BOSH_ENVIRONMENT}),
 		$ENV{BOSH_CLIENT}//'(undef)', $ENV{BOSH_DEPLOYMENT}//'(undef)');
 	if (is_valid_uri($ENV{BOSH_ENVIRONMENT}) && $ENV{BOSH_CLIENT}) {
 		return $class->new(

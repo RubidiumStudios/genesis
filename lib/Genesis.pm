@@ -623,31 +623,55 @@ sub is_valid_uri {
 # so this is an allowlist: a key shows its value only if it is named here,
 # and every other key shows its name and a byte count.  Add a key only if
 # its value can never be a credential.  Proxy URLs stay off the list,
-# since they can embed a username and password.
+# since they can embed a username and password, and so do free-form
+# values such as a vault descriptor.
 our %TRACE_VISIBLE_ENV = map {$_ => 1} qw(
-	BOSH_ALIAS BOSH_CLIENT BOSH_DEPLOYMENT BOSH_ENVIRONMENT BOSH_EXODUS_PATH
-	BOSH_EXODUS_VAULT BOSH_NON_INTERACTIVE BOSH_REL_TO_ENV BOSH_LOG_LEVEL
+	BOSH_ALIAS BOSH_CLIENT BOSH_DEPLOYMENT BOSH_EXODUS_PATH
+	BOSH_NON_INTERACTIVE BOSH_REL_TO_ENV BOSH_LOG_LEVEL
 
-	CREDHUB_CLIENT CREDHUB_SERVER
+	CREDHUB_CLIENT
 
-	SAFE_TARGET VAULT_ADDR VAULT_NAMESPACE VAULT_SKIP_VERIFY DEBUG NOCOLOR
+	VAULT_NAMESPACE VAULT_SKIP_VERIFY DEBUG NOCOLOR
 
 	GENESIS_CALL GENESIS_CALL_BIN GENESIS_CALL_ENV GENESIS_CALL_FULL
 	GENESIS_CALL_PREFIX GENESIS_CI_BASE GENESIS_CI_MOUNT
 	GENESIS_CI_MOUNT_OVERRIDE GENESIS_CREDHUB_EXODUS_SOURCE
 	GENESIS_CREDHUB_EXODUS_SOURCE_OVERRIDE GENESIS_CREDHUB_ROOT
 	GENESIS_ENVIRONMENT GENESIS_ENV_IAAS GENESIS_ENV_KIT_OVERRIDE_FILES
-	GENESIS_ENV_REF GENESIS_ENV_SCALE GENESIS_ENV_VAULT_DESCRIPTOR
+	GENESIS_ENV_REF GENESIS_ENV_SCALE
 	GENESIS_EXODUS_BASE GENESIS_EXODUS_MOUNT GENESIS_EXODUS_MOUNT_OVERRIDE
 	GENESIS_KIT_HOOK GENESIS_KIT_ID GENESIS_KIT_NAME GENESIS_KIT_PATH
 	GENESIS_KIT_VERSION GENESIS_MIN_VERSION GENESIS_MIN_VERSION_FOR_KIT
 	GENESIS_PREFIX_TYPE GENESIS_REQUESTED_FEATURES GENESIS_ROOT
 	GENESIS_ROOT_CA_PATH GENESIS_SECRETS_BASE GENESIS_SECRETS_MOUNT
 	GENESIS_SECRETS_MOUNT_OVERRIDE GENESIS_SECRETS_PATH GENESIS_SECRETS_SLUG
-	GENESIS_SECRETS_SLUG_OVERRIDE GENESIS_TARGET_VAULT GENESIS_TYPE
+	GENESIS_SECRETS_SLUG_OVERRIDE GENESIS_TYPE
 	GENESIS_USE_CREATE_ENV GENESIS_VAULT_ENV_SLUG GENESIS_VAULT_PREFIX
 	GENESIS_VERIFY_VAULT
 );
+
+# Environment variables that name an endpoint.  A URL can carry a username
+# and password, so run() shows these only as their scheme, host, and port.
+our %TRACE_ENDPOINT_ENV = map {$_ => 1} qw(
+	BOSH_ENVIRONMENT BOSH_EXODUS_VAULT CREDHUB_SERVER
+	GENESIS_TARGET_VAULT SAFE_TARGET VAULT_ADDR
+);
+
+# traced_endpoint - an endpoint as a trace may show it
+#
+# A URL is reduced to its scheme, host, and port, dropping any userinfo,
+# path, query, and fragment.  A bare name or host[:port], such as a bosh
+# alias or a safe target name, is shown as it is.  Anything else is a
+# byte count.
+sub traced_endpoint {
+	my ($value) = @_;
+	return '<undef>' unless defined($value);
+	if ($value =~ m{\A([a-zA-Z][a-zA-Z0-9+.-]*)://(?:[^/?\#]*\@)?(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9._~-]+)(:\d+)?(?:[/?\#]|\z)}) {
+		return sprintf("%s://%s%s", $1, $2, $3 // '');
+	}
+	return $value if $value =~ /\A[A-Za-z0-9._~-]+(?::\d+)?\z/;
+	return sprintf("<redacted:%d bytes>", length($value));
+}
 
 # Response headers whose values curl() may write to a trace.  Any other
 # header, such as Set-Cookie or a Location carrying a signed URL, is shown
@@ -701,6 +725,7 @@ sub _traced_env_value {
 	my ($key, $value, $redact_all) = @_;
 	return csprintf("#Ci{<redacted>}") if $redact_all;
 	return csprintf("#C{%s}", $value) if $TRACE_VISIBLE_ENV{$key};
+	return csprintf("#C{%s}", traced_endpoint($value)) if $TRACE_ENDPOINT_ENV{$key};
 	return csprintf("#Ci{<redacted:%d bytes>}", length($value // ''));
 }
 
