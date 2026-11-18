@@ -593,6 +593,7 @@ sub _authenticate_interactively {
 			? prompt_for_password($field->{prompt})
 			: prompt_for_line(undef, $field->{prompt}, undef, undef, undef);
 		return 0 unless defined($value) && $value ne '';
+		Genesis::Log::register_secret($value, 'vault-auth-credential') if $field->{hide};
 		push @creds, $value;
 	}
 

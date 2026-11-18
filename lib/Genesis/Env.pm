@@ -2740,6 +2740,7 @@ sub credhub_connection_env {
 	}
 
 	if ($credhub_info) {
+		Genesis::Log::register_secret($credhub_info->{credhub_password}, 'credhub-secret');
 		$env{CREDHUB_SERVER} = $credhub_info->{credhub_url}||"";
 		$env{CREDHUB_CLIENT} = $credhub_info->{credhub_username}||"";
 		$env{CREDHUB_SECRET} = $credhub_info->{credhub_password}||"";

@@ -39,6 +39,7 @@ sub new {
 	my ($class, $alias, %opts) = @_;
 
 	my ($schema,$host,$port) = $opts{url} =~ qr(^(http(?:s?))://(.*?)(?::([0-9]*))?$);
+	Genesis::Log::register_secret($opts{secret}, 'bosh-client-secret');
 
 	my $director = {
 		schema => $schema,
@@ -119,6 +120,11 @@ sub from_exodus {
 		);
 		return;
 	}
+
+	# The director's exodus carries its own credentials whether or not they
+	# end up being the ones used, so the logs must scrub them either way.
+	Genesis::Log::register_secret($exodus->{admin_password}, 'bosh-admin-password');
+	Genesis::Log::register_secret($exodus->{credhub_password}, 'credhub-secret');
 
 	my ($user, $pw);
 	if ($env->user_provided_bosh_creds_policy ne 'ignore') {

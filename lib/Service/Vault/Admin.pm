@@ -167,6 +167,7 @@ sub get_approle_credentials {
 		'vault write', '-field=secret_id', '-f', "auth/approle/role/$role_name/secret-id"
 	);
 	chomp($secret_id) if defined $secret_id;
+	Genesis::Log::register_secret($secret_id, 'vault-approle-secret-id');
 
 	if ($rid_rc || $sid_rc) {
 		bail("Failed to retrieve credentials for AppRole #C{$role_name}");

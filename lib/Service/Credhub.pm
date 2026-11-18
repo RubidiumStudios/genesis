@@ -14,6 +14,7 @@ use UUID::Tiny ();
 # new - raw instantiation of a credhub object {{{
 sub new {
 	my ($class, $name, $base, $url, $username, $password, $ca_cert) = @_;
+	Genesis::Log::register_secret($password, 'credhub-secret');
 	return bless({
 		name     => $name,
 		base     => $base,

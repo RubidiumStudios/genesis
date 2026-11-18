@@ -1488,6 +1488,7 @@ sub env {
 					env => {SAFE_TARGET => $self->ref }
 				},'safe', 'env', '--json')
 		);
+		Genesis::Log::register_secret($self->{_env}{VAULT_TOKEN}, 'vault-token');
 		$self->{_env}{VAULT_SKIP_VERIFY} ||= "";
 		# Explicitly override any existing SAFE_TARGET
 		$self->{_env}{SAFE_TARGET} = $self->{_env}{VAULT_ADDR};
@@ -1567,6 +1568,7 @@ sub fetch_unseal_keys {
 			|| $a cmp $b
 	} CORE::keys(%$stored);
 	$self->{unseal_keys} = [map {$stored->{$_}} @names];
+	Genesis::Log::register_secret($_, 'vault-unseal-key') for @{$self->{unseal_keys}};
 	my $key_count = scalar(@{$self->{unseal_keys}});
 
 	# Check if the keys path exists
