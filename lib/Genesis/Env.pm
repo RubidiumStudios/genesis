@@ -5187,8 +5187,11 @@ sub update_deployment_exodus {
 			# A director's exodus holds its admin and CredHub passwords.  query()
 			# keeps the values of the set out of the trace; run() never read
 			# the `redact` option this passed before.
-			my ($out, $rc, $err) = $self->vault->query({redact_output => 1}, @exodus_cmds);
-			push @errors, "Failed to set exodus data in vault: $err" if $rc;
+			my ($out, $rc, $err) = $self->vault->query({redact_output => 1, redact_stderr => 1}, @exodus_cmds);
+			push @errors, sprintf(
+				"Failed to set exodus data in vault: safe exited %d (%s)",
+				$rc, Genesis::failure_summary($err)
+			) if $rc;
 		}
 	} else {
 		debug("$action failed, not updating exodus in vault");

@@ -2716,9 +2716,11 @@ B<Errors:>
 
 =over 4
 
-=item C<"Error converting data to YAML: $err">
+=item C<"Error converting data to YAML: spruce exited RC (SUMMARY)">
 
-Raised via C<bail> if spruce exits non-zero. C<$err> is the captured stderr.
+Raised via C<bail> if spruce exits non-zero. C<SUMMARY> comes from
+C<failure_summary>, because spruce's own message can quote the data being
+converted.
 
 =back
 

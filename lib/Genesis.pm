@@ -1556,8 +1556,9 @@ sub to_yaml {
 	my $tmp = tmpfile(template => 'to_yaml_XXXXXXXXXX', ext => '.json');
 	mkfile_or_fail($tmp, 0644, $json);
 	# As in load_yaml_file, the converted copy stays out of the trace.
-	my ($out,$rc,$err) = run({ stderr => 0, redact_output => 1 }, qw/spruce merge --skip-eval/, $tmp);
-	bail("Error converting data to YAML: $err") if $rc;
+	# A parse error can quote the data, so only a summary of it is shown.
+	my ($out,$rc,$err) = run({ stderr => 0, redact_output => 1, redact_stderr => 1 }, qw/spruce merge --skip-eval/, $tmp);
+	bail("Error converting data to YAML: spruce exited %d (%s)", $rc, failure_summary($err)) if $rc;
 	return $out if $out;
 }
 

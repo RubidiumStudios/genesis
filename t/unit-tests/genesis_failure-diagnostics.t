@@ -20,11 +20,13 @@ use Genesis;
 use Genesis::Env::ManifestProvider;
 use Service::Credhub;
 use Service::BOSH::Director;
+use Service::Vault;
+use Genesis::Env;
 
 my $dir = tempdir(CLEANUP => 1);
 mkdir "$dir/bin";
 mkdir "$dir/work";
-for my $name (qw/spruce credhub bosh/) {
+for my $name (qw/spruce credhub bosh safe/) {
 	put_file("$dir/bin/$name", 0755, <<"EOS");
 #!/bin/bash
 printf 'stdout: \$.properties.password: %s\\n' "\$FAKE_OUT"
@@ -89,6 +91,29 @@ my $credhub = bless({
 	name => 'fake', base => '/fake/', url => 'https://10.0.0.6:8844',
 	username => 'credhub-admin', password => 'not-under-test', ca_cert => 'ca',
 }, 'Service::Credhub');
+
+fails_privately('yaml conversion', sub {
+	Genesis::to_yaml({properties => {password => 'not-the-marker'}});
+});
+
+subtest 'exodus write' => sub {
+	my $vault = bless({url => 'https://10.0.0.5', name => 'fake'}, 'Service::Vault');
+	no warnings qw/redefine once/;
+	local *Service::Vault::authenticate = sub { 1 };
+	local *Service::Vault::authenticated = sub { 1 };
+	local *Service::Vault::read_flattened_secret = sub { {} };
+	local *Genesis::Env::vault = sub { $vault };
+	local *Genesis::Env::exodus_base = sub { 'secret/exodus/fake-env/fake' };
+	local *Genesis::Env::extract_manifest_exodus = sub { {admin_password => 'not-the-marker'} };
+	local *Genesis::Env::manifest_store = sub { 'exodus' };
+	local *Genesis::Env::deployments = sub { bless({}, 'FakeDeployments') };
+	local *FakeDeployments::next_sequence_number = sub { 1 };
+	local *Genesis::Env::_create_deployment_audit_log = sub { 1 };
+	my $env = bless({name => 'fake-env'}, 'Genesis::Env');
+	fails_privately('exodus write', sub {
+		$env->update_deployment_exodus('deploy', 'success', quiet => 1);
+	});
+};
 
 fails_privately('credhub set', sub {
 	$credhub->set('x', {password => 'not-the-marker'}, 'password');
