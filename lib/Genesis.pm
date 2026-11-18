@@ -380,6 +380,10 @@ sub qtrace     {logger->trace({show_stack => 'none', offset => 1},@_);}
 sub dump_var   {logger->dump_var({offset => 1},@_);}
 sub dump_stack {logger->dump_stack({offset => 1},@_);}
 
+# Set with local by a caller that reports an exception itself, so a bail
+# inside its eval does not trace the message.
+our $BAIL_IS_PRIVATE = 0;
+
 sub bail {
 	# Get any prefix options (sent as hash references)
 	my $options = {};
@@ -395,8 +399,14 @@ sub bail {
 	logger->configure_log(level => "FATAL") unless (logger->is_logging("FATAL"));
 
 	if ($^S && !envset("GENESIS_IGNORE_EVAL")) {
-		# die if in an eval;
-		logger->trace("Fatal exception caught: $msg");
+		# die if in an eval.  A caller that will report the failure itself,
+		# such as a config hook whose kit messages can quote credentials,
+		# sets $BAIL_IS_PRIVATE, and the trace then gets only the size.
+		if ($BAIL_IS_PRIVATE) {
+			logger->trace("Fatal exception caught (%d bytes of message withheld)", length($msg));
+		} else {
+			logger->trace("Fatal exception caught: %s", $msg);
+		}
 		die "\n".csprintf("%s",wrap($msg,terminal_width,"#r{[FATAL]} "))."\n";
 	}
 

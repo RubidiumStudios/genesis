@@ -213,6 +213,7 @@ unit-tests/genesis_commands-quiet_getopt.t        # option parsers report refuse
 unit-tests/genesis_run-stderr_in_memory.t         # a command's stderr is captured through a pipe, never a file
 unit-tests/genesis_log-private_off_terminal.t     # private detail is shown only on a real terminal
 unit-tests/genesis_kit-hook_stderr_capture.t      # structured hooks' stderr is shown only on a terminal
+unit-tests/genesis_kit-config_hook_failure_privacy.t # config hooks' failures are reported by kind
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi

@@ -338,17 +338,22 @@ sub build {
 	my ($config_data,$status,$msg) = $self->$build_method();
 	delete $self->{__current_config};
 
+	# The kit's own message can quote the credentials the config is built
+	# from, so the log gets which config it was and the kind of failure, and
+	# the message itself is shown only as private detail.
 	if ($status && $status eq 'failed') {
 		info("#R{failed}".pretty_duration(gettimeofday() - $start_time));
-		error({prefix => '    '}, $msg);
+		error({prefix => '    '},
+			"Could not synthesize the #C{%s} runtime config (%s)",
+			$build, Genesis::failure_summary($msg)
+		);
+		info({private => 1, prefix => '    '}, "%s", $msg) if defined($msg) && length($msg);
 		delete $self->{secrets}{$build};
 		return undef;
 	} elsif ($status && $status eq 'skipped') {
 		info("#y{skipped}".pretty_duration(gettimeofday() - $start_time));
-		warning({prefix => '    '},
-			"#y{Skipping %s runtime config generation: %s}",
-			$build, $msg
-		);
+		warning({prefix => '    '}, "#y{Skipping %s runtime config generation}", $build);
+		info({private => 1, prefix => '    '}, "%s", $msg) if defined($msg) && length($msg);
 		return undef;
 	} else {
 		info("#G{done}".pretty_duration(gettimeofday() - $start_time));

@@ -32,7 +32,14 @@ sub done {
 	} else {
 		$self->{contents} = undef;
 	}
-	$self->{error} = $error || undef;
+	# A kit's error can quote the credentials the config is built from, so
+	# it is shown only as private detail, and the results carry its kind.
+	if ($error) {
+		info({private => 1, raw => 1}, "%s\n", $error =~ s/\s+\z//r);
+		$self->{error} = Genesis::failure_summary($error);
+	} else {
+		$self->{error} = undef;
+	}
 	return $self->{complete} = 1;
 }
 

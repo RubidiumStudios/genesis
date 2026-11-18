@@ -623,6 +623,9 @@ subtest 'build - returns undef when build method returns failed status' => sub {
 	my $hook = make_hook();
 	$hook->register_runtime_config_builds('failing');
 	my $result;
+	# The kit's own reason is private detail, which only a terminal shows.
+	no warnings 'redefine';
+	local *Genesis::Log::_is_terminal = sub { 1 };
 	my $out = stderr_from {
 		lives_ok { $result = $hook->build('failing') }
 			'build() does not die when build method returns failed status';
@@ -643,6 +646,9 @@ subtest 'build - returns undef when build method returns skipped status' => sub 
 	my $hook = make_hook();
 	$hook->register_runtime_config_builds('skipped');
 	my $result;
+	# The kit's own reason is private detail, which only a terminal shows.
+	no warnings 'redefine';
+	local *Genesis::Log::_is_terminal = sub { 1 };
 	my $out = stderr_from {
 		lives_ok { $result = $hook->build('skipped') }
 			'build() does not die when build method returns skipped status';

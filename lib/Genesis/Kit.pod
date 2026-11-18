@@ -1312,6 +1312,42 @@ B<Examples:>
   my $traced = Genesis::Kit::_xtrace_hook_file($kit->path('hooks/info'));
   # $traced is ".../hooks/info-trace"
 
+=head2 _show_config_failure
+
+  Genesis::Kit::_show_config_failure($died);
+
+Shows what a Perl hook module listed in C<@Genesis::Kit::CONFIG_HOOKS> died
+with. Those are the C<cloud-config>, C<cpi-config>, and C<runtime-config>
+hooks, which build configs for the director from the environment's
+credentials, so their own messages can quote them. C<run_hook> runs them
+inside an C<eval> with C<$Genesis::BAIL_IS_PRIVATE> set, so a bail in the
+hook leaves the trace only its size, and then bails itself with a fixed
+message naming the hook and the kit and the kind of failure
+C<Genesis::failure_summary> finds. The message the hook died with, with its
+colors and any C<[FATAL]> prefix removed, is logged here as private detail,
+so only a terminal shows it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$died>
+
+What the hook died with.
+
+=back
+
+B<Returns:> C<1> when something was shown, and nothing when the message is
+empty or blank.
+
+B<Examples:>
+
+  if (my $died = $@) {
+    _show_config_failure($died);
+    bail("Could not synthesize a config with the #C{%s} hook in kit %s (%s)",
+      $hook, $self->id, Genesis::failure_summary($died));
+  }
+
 =head2 _show_hook_stderr
 
   Genesis::Kit::_show_hook_stderr($hook, $err);

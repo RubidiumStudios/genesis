@@ -173,6 +173,10 @@ EOF
 # runtime-config and terminate hooks can prompt, so theirs is left alone.
 our @CAPTURED_STDERR_HOOKS = qw/blueprint features cloud-config cpi-config/;
 
+# Perl hook modules that build configs for the director, which hold
+# credentials.  What they die with is shown only on a terminal.
+our @CONFIG_HOOKS = qw/cloud-config cpi-config runtime-config/;
+
 sub run_hook {
 
 	# FIXME: run_hook should always return a scalar (simple or reference), not an array or hash.
@@ -422,10 +426,27 @@ EOF
 			return $hook_obj->results();
 		}
 
-		# TODO: wrap in an eval, give better error messages
-		my $ok = $module_options{help} && $hook_obj->can('help')
-			? $hook_obj->help()
-			: $hook_obj->perform();
+		# A config hook's own messages can quote the credentials it builds
+		# the config from, so what it dies with is shown only as private
+		# detail, and the failure is reported by its kind.
+		my $ok;
+		if (grep {$_ eq $hook} @CONFIG_HOOKS) {
+			$ok = eval {
+				local $Genesis::BAIL_IS_PRIVATE = 1;
+				$hook_obj->perform();
+			};
+			if (my $died = $@) {
+				_show_config_failure($died);
+				bail(
+					"Could not synthesize a config with the #C{%s} hook in kit %s (%s)",
+					$hook, $self->id, Genesis::failure_summary($died)
+				);
+			}
+		} else {
+			$ok = $module_options{help} && $hook_obj->can('help')
+				? $hook_obj->help()
+				: $hook_obj->perform();
+		}
 
 		bail(
 			"Could not run '%s' hook successfully!",
@@ -542,6 +563,16 @@ sub _show_hook_stderr {
 	return 1;
 }
 
+# }}}
+# _show_config_failure - show privately what a config hook died with {{{
+sub _show_config_failure {
+	my ($died) = @_;
+	my $text = Genesis::Term::decolorize("$died") =~ s/\A\s+//r =~ s/\s+\z//r;
+	$text =~ s/\A\[FATAL\] //;
+	return unless length($text);
+	info({private => 1, raw => 1}, "%s\n", $text);
+	return 1;
+}
 
 # }}}
 # _hook_ended - how a Bash hook ended, for a failure message {{{

@@ -268,7 +268,7 @@ subtest 'done - with error message: stores error and sets complete=1' => sub {
 
 	is($ret, 1, 'done(undef, $error) returns 1');
 	is($hook->{complete}, 1, 'complete flag set to 1 after done with error');
-	is($hook->{error}, 'IaaS not supported', 'error stored from done(undef, $error)');
+	is($hook->{error}, Genesis::failure_summary('IaaS not supported'), 'the kind of error is stored from done(undef, $error)');
 };
 
 subtest 'done - without error: error field is undef' => sub {
@@ -323,7 +323,7 @@ subtest 'results - scalar context hashref has content/credhub_secrets/error keys
 
 	my $r = $hook->results;
 	ok(exists $r->{error}, 'hashref has "error" key');
-	is($r->{error}, 'some error', 'error key holds the error message');
+	is($r->{error}, Genesis::failure_summary('some error'), 'error key holds the kind of error, not its text');
 	ok(defined $r->{content}, 'content key holds YAML string');
 };
 
@@ -349,7 +349,7 @@ subtest 'results - list context returns 3-tuple with undef content when no confi
 	my ($content, $secrets, $error) = $hook->results;
 	ok(!defined $content, 'list context: content is undef when no config given to done()');
 	ok(ref $secrets eq 'HASH', 'list context: secrets is always a hashref');
-	is($error, 'no config produced', 'list context: error message is returned');
+	is($error, Genesis::failure_summary('no config produced'), 'list context: the kind of error is returned');
 };
 
 subtest 'results - credhub_secrets in results is initially empty hashref' => sub {

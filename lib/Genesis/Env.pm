@@ -6326,8 +6326,8 @@ sub _fix_cpi_config {
 				result => 'error',
 				fatal  => 1,
 				msg    => sprintf(
-					"failed to upload CPI config: %s",
-					$err ? $err : $out
+					"failed to upload CPI config: bosh exited %d (%s)",
+					$rc, Genesis::failure_summary($err, $out)
 				),
 			}
 		}

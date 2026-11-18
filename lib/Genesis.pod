@@ -800,7 +800,11 @@ B<Examples:>
 Formats a FATAL-level error message and exits the process. When called inside
 an active C<eval> block (and C<GENESIS_IGNORE_EVAL> is not set), C<bail>
 C<die>s instead of exiting; the die string begins with C<"\n"> followed by
-the formatted message.
+the formatted message. The message is traced as it dies, unless the
+caller set C<$Genesis::BAIL_IS_PRIVATE> with C<local> because it reports
+the failure itself, as C<run_hook> in L<Genesis::Kit> does for a config
+hook whose kit messages can quote credentials. The trace then gets only
+the message's size.
 
 Multiple leading hash-reference arguments may be passed; their keys are
 merged, with C<offset> values summed.
