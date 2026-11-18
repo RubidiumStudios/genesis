@@ -762,11 +762,14 @@ B<Examples:>
 Compares the generated runtime config against the config currently on the
 BOSH director.
 
-If the named config does not yet exist on the director, logs its content and
-returns C<1> (indicating an upload is needed).
+If the named config does not yet exist on the director, logs its size, shows
+its content on the terminal only, and returns C<1> (indicating an upload is
+needed).
 
 If the config already exists, uses C<spruce_diff> to compare the existing
-and generated YAML. If there are differences, logs the diff and returns C<1>.
+and generated YAML. If there are differences, logs how many paths changed,
+shows the diff on the terminal only, and returns C<1>. A runtime config can
+carry credentials, so neither its content nor a diff reaches a log.
 If there are no differences, logs that the config is up to date and returns
 C<undef> (indicating no upload is needed).
 
@@ -796,11 +799,12 @@ B<Errors:>
 
 =over 4
 
-=item C<"Could not compare the existing and generated %s runtime config:\n\n%s">
+=item C<"Could not compare the existing and generated %s runtime config: %s">
 
 Raised (via C<bail()>) when spruce exits 2 or higher because it could not
 compare the two configs.  The first C<%s> is the build's description and the
-second is spruce's output.  Nothing is shown as changes and nothing is
+second is C<Genesis::compare_failure>, which gives spruce's exit status and
+kinds of failure, never what it printed.  Nothing is shown as changes and nothing is
 uploaded.
 
 =back

@@ -505,11 +505,14 @@ B<Examples:>
 
 Synthesizes the provided configs and uploads those that differ from, or are
 missing on, the director.  For each such config it shows the diff (or the
-whole content when the director has none) and asks for confirmation unless
+whole content when the director has none) on the terminal, logs only the
+config's identity, status, and counts of changed paths, and asks for
+confirmation unless
 C<--yes> was given; outside a controlling terminal C<--yes> is required.
 Configs that are already identical are reported and skipped.  A config
 that spruce could not compare with the director's copy is reported with
-spruce's output and never uploaded, and a runtime config in that state is
+spruce's exit status and kinds of failure, never its output, and is never
+uploaded, and a runtime config in that state is
 excluded from the C<runtime-config> hook's upload.
 
 Cloud configs are handled the way the deploy path handles them: the network
@@ -720,7 +723,10 @@ B<Examples:>
 Synthesizes the provided configs and reports, for each, whether the
 director's copy is identical, different (with the C<spruce diff> output),
 missing (with the synthesized content), or could not be compared (with
-spruce's output, reported as an error).  Honors C<--type> and C<--name>.
+spruce's exit status and kinds of failure, reported as an error).  A diff
+or a synthesized config is shown on the terminal only, and a log records
+the config's identity, status, and counts of changed paths, since a config
+can carry credentials.  Honors C<--type> and C<--name>.
 Nothing is changed on the director.  It takes no network claims lock, even
 for a director's own cloud config, so it is safe to run while a deploy
 holds the lock; the claims it reads may then be about to change.
@@ -1090,8 +1096,10 @@ on it: C<unsynthesized> when C<content> is undefined, C<missing> when the
 director has no current config of that type and name, otherwise
 C<identical> or C<different> from C<spruce_diff>, or C<error> when spruce
 exits 2 or higher because it could not compare the two.  Sets C<uploaded>
-and C<diff> on the record when a comparison was made; for C<error>, C<diff>
-holds spruce's output rather than a diff.
+and C<diff> on the record when a comparison was made.  For C<error>, it
+sets C<compare_failure> to the text from C<Genesis::compare_failure>, which
+gives spruce's exit status and kinds of failure, and never keeps what
+spruce printed, since that can quote either config.
 
 B<Parameters:>
 
@@ -1111,7 +1119,45 @@ B<Examples:>
   # Returns: 'different'; $config->{diff} holds the spruce diff output
 
   _bosh_configs_status($unparseable);
-  # Returns: 'error'; $unparseable->{diff} holds spruce's error
+  # Returns: 'error'; $unparseable->{compare_failure} says how spruce failed
+
+=head2 _bosh_configs_show_change($config, $label, $missing_intro)
+
+  _bosh_configs_show_change($config, $label, 'it would be created with');
+
+Describes a config whose status is C<missing> or C<different>.  A config
+can carry credentials, such as a CPI's API key, so the log gets the
+config's label, its status, and the size of the change from
+C<Genesis::change_counts>.  The config's body, for a missing one, or its
+diff, for a different one, goes to the terminal as private output, so a
+log file records only that it was withheld.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$config>
+
+A config record that C<_bosh_configs_status> has compared.
+
+=item C<$label>
+
+The config's label from C<_bosh_configs_label>.
+
+=item C<$missing_intro>
+
+The words that introduce a missing config's body, such as C<it would be
+created with>.
+
+=back
+
+B<Returns:> C<1>.
+
+B<Examples:>
+
+  _bosh_configs_show_change($config, $label, 'the synthesized config is');
+  # Logs: "runtime config x on parent is different from the director's
+  # copy (1 path changed):", and shows the diff on the terminal only
 
 =head2 _bosh_configs_status_label($config)
 

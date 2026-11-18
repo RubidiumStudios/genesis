@@ -5,6 +5,7 @@ use utf8;
 
 use lib 't';
 use helper;
+use TraceCapture;
 use Test::More;
 use Test::Exception;
 use Test::Deep;
@@ -769,8 +770,8 @@ subtest 'compare_configs - a spruce failure bails before anything is shown as ch
 	my $err = '';
 	throws_ok {
 		$err = stderr_from { $hook->compare_configs('dns', "releases: [\n", 'test-env-bosh.dns') };
-	} qr/could not compare.*BOSH DNS.*unable to parse data from generated/si,
-		'the hook bails with what spruce said';
+	} qr/could not compare.*BOSH DNS.*spruce diff exited 2 \(.*could not parse its input\)/si,
+		'the hook bails saying how spruce failed';
 	unlike($err, qr/found the following changes/, 'nothing is shown as changes');
 };
 
@@ -783,6 +784,36 @@ subtest 'compare_configs - differences still ask for an upload' => sub {
 	my $err = stderr_from { $result = $hook->compare_configs('dns', "releases:\n- name: bosh-dns\n", 'test-env-bosh.dns') };
 	is($result, 1, 'a difference needs an upload');
 	like($err, qr/found the following changes/, 'the differences are shown');
+};
+
+subtest 'compare_configs - a runtime config change is logged by its size' => sub {
+	# A runtime config can hold credentials, so its diff, a new config's
+	# body, and what spruce said about a failed comparison stay out of logs.
+	my ($old, $new, $body, $said) = map {fake_secret($_)} qw(old new body said);
+	no warnings 'redefine';
+	local *Genesis::Hook::RuntimeConfig::spruce_diff = sub { return ("addons.0.key\n  - $old\n  + $new\n", 1, undef) };
+	my $hook = compare_hook();
+	my ($log, $stderr) = capture_trace { $hook->compare_configs('dns', "releases: []\naddons:\n- key: $new\n", 'test-env-bosh.dns') };
+	like($log, qr/found the following changes between existing and generated BOSH DNS runtime\s+config\s+\(1\s+path\s+added\)/,
+		'a change is logged by how many paths changed');
+	unlike($log, qr/\Q$_\E/, 'the log holds no value from the diff') for ($old, $new);
+	like($stderr, qr/\Q$new\E/, 'the terminal shows the diff');
+
+	# Only where the body goes matters here, not how it is coloured.
+	local *Genesis::Hook::RuntimeConfig::render_markdown = sub {$_[0]};
+	$hook->{bosh} = mock 'Mock::RuntimeConfig::MissingBosh' => {alias => 'mock-bosh', has_config => 0};
+	($log, $stderr) = capture_trace { $hook->compare_configs('dns', "addons:\n- key: $body\n", 'test-env-bosh.dns') };
+	like($log, qr/no existing BOSH DNS runtime config found, generated the following\s+\(1\s+path\s+added\)/,
+		'a new config is logged by its size');
+	unlike($log, qr/\Q$body\E/, 'not by its body');
+	like($stderr, qr/\Q$body\E/, 'which the terminal shows');
+
+	$hook = compare_hook();
+	local *Genesis::Hook::RuntimeConfig::spruce_diff = sub { return ("unable to parse data from generated: yaml: $said", 2, undef) };
+	my $error;
+	($log, $stderr) = capture_trace { eval {$hook->compare_configs('dns', "releases: [\n", 'test-env-bosh.dns')}; $error = $@ };
+	like($error, qr/spruce diff exited 2/, 'a failed comparison says how spruce ended');
+	unlike($error.$log.$stderr, qr/\Q$said\E/, 'and not what it said');
 };
 
 # ---------------------------------------------------------------------------

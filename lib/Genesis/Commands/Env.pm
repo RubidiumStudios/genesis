@@ -1341,12 +1341,14 @@ sub deploy {
 						$env->bosh->download_configs($old_path,'cloud',$cloud_config_name);
 						my $out = _deploy_cloud_config_diff($old_path, $new_path_diff);
 						if ($out) {
-							info "[[  - >>#yui{found the following differences:}\n\n%s", $out;
+							_deploy_show_cloud_config_diff($old_path, $new_path_diff, $out);
 							if ($dryrun) {
 								_deploy_dryrun_cloud_config_warning($env, $cloud_config_name, 'outdated');
 								dryrun(
-									"Cloud config check failed: %s\n\nThis would be fixed if not in dry-run mode.",
-									$out
+									"Cloud config check failed: cloud config #C{%s} differs from the ".
+									"director's copy, as shown above.\n\nThis would be fixed if not in ".
+									"dry-run mode.",
+									$cloud_config_name
 								);
 							} else {
 								_deploy_confirm(
@@ -1376,10 +1378,7 @@ sub deploy {
 						}
 					} elsif ($dryrun) {
 						_deploy_dryrun_cloud_config_warning($env, $cloud_config_name, 'missing');
-						dryrun(
-							"Cloud config #C{%s} missing.  This would be created and uploaded if not in dry-run mode.  Content:\n\n%s",
-							$cloud_config_name, slurp($new_path_diff)
-						);
+						_deploy_show_missing_cloud_config($cloud_config_name, $new_path_diff);
 					} else {
 						info(
 							"[[  - >>uploading new cloud config to #M{%s} BOSH director...",
@@ -1847,11 +1846,41 @@ sub _format_deploy_feature_opt_in {
 sub _deploy_cloud_config_diff {
 	my ($old_path, $new_path) = @_;
 	my ($out, $rc) = spruce_diff($old_path, $new_path);
-	bail("Error comparing cloud configs: spruce diff exited %d (%s)", $rc, Genesis::failure_summary($out))
+	bail("Error comparing cloud configs: %s", Genesis::compare_failure($rc, $out))
 		if $rc > 1;
 	return '' unless $rc;
 	$out =~ s/\(root level\)/<root>/m;
 	return $out;
+}
+
+# }}}
+# _deploy_show_cloud_config_diff - say how a cloud config differs, showing the diff privately {{{
+#
+# A cloud config can carry credentials that a kit put into it, and its
+# diff would show the old and the new ones, so the log gets how many
+# paths differ and the diff goes only to the terminal.
+sub _deploy_show_cloud_config_diff {
+	my ($old_path, $new_path, $diff) = @_;
+	info(
+		"[[  - >>#yui{found differences} (%s):",
+		Genesis::change_counts(slurp($old_path), slurp($new_path)) // 'their number could not be counted'
+	);
+	info({private => 1}, "\n%s", $diff);
+	return 1;
+}
+
+# }}}
+# _deploy_show_missing_cloud_config - say a dry run would create a cloud config, showing it privately {{{
+sub _deploy_show_missing_cloud_config {
+	my ($name, $path) = @_;
+	my $content = slurp($path);
+	dryrun(
+		"Cloud config #C{%s} missing.  This would be created and uploaded if ".
+		"not in dry-run mode, with %s:",
+		$name, Genesis::change_counts(undef, $content) // 'content that could not be counted'
+	);
+	info({private => 1}, "\n%s", $content);
+	return 1;
 }
 
 # }}}

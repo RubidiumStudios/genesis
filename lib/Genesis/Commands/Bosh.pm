@@ -391,7 +391,7 @@ sub bosh_configs_upload {
 				if ($config->{status} eq 'error') {
 					# Excluded from the runtime-config hook's upload as well, which
 					# would otherwise upload every enabled build.
-					error("[[  - >>%s could not be compared with the director's copy:\n\n%s\n", $label, $config->{diff});
+					error("[[  - >>%s could not be compared with the director's copy: %s", $label, $config->{compare_failure});
 					push @runtime_skipped, $config->{build} if $config->{type} eq 'runtime';
 					$compare_failures++;
 					next;
@@ -406,17 +406,7 @@ sub bosh_configs_upload {
 					next;
 				}
 
-				if ($config->{status} eq 'missing') {
-					info(
-						"[[  - >>%s is #R{missing} from the director; it would be created with:\n\n%s",
-						$label, $config->{content}
-					);
-				} else {
-					info(
-						"[[  - >>%s is #Y{different} from the director's copy:\n\n%s\n",
-						$label, $config->{diff}
-					);
-				}
+				_bosh_configs_show_change($config, $label, 'it would be created with');
 
 				unless (_bosh_configs_confirm(sprintf(
 					"Upload %s config #C{%s} to #M{%s} BOSH director? [y|n]",
@@ -606,19 +596,11 @@ sub bosh_configs_compare {
 		if ($config->{status} eq 'unsynthesized') {
 			error("[[  - >>%s could not be synthesized; see the errors above.", $label);
 		} elsif ($config->{status} eq 'error') {
-			error("[[  - >>%s could not be compared with the director's copy:\n\n%s\n", $label, $config->{diff});
-		} elsif ($config->{status} eq 'missing') {
-			info(
-				"[[  - >>%s is #R{missing} from the director; the synthesized config is:\n\n%s",
-				$label, $config->{content}
-			);
+			error("[[  - >>%s could not be compared with the director's copy: %s", $label, $config->{compare_failure});
 		} elsif ($config->{status} eq 'identical') {
 			info("[[  - >>%s is #G{identical} to the director's copy.", $label);
 		} else {
-			info(
-				"[[  - >>%s is #Y{different} from the director's copy:\n\n%s\n",
-				$label, $config->{diff}
-			);
+			_bosh_configs_show_change($config, $label, 'the synthesized config is');
 		}
 	}
 	_bosh_configs_notes($notes);
@@ -903,15 +885,42 @@ sub _bosh_configs_status {
 	);
 	$config->{uploaded} = $uploaded;
 	# spruce exits 2 or more when it cannot compare the two, and its output
-	# is then the reason, not a diff.
+	# is then the reason, not a diff.  The reason can quote either config,
+	# so only its exit status and kinds of failure are kept.
 	if ($rc > 1) {
-		$config->{diff}   = $diff || "spruce diff exited $rc with no output";
+		$config->{compare_failure} = Genesis::compare_failure($rc, $diff);
 		$config->{status} = 'error';
 		return $config->{status};
 	}
 	$config->{diff}     = $diff;
 	$config->{status}   = $rc ? 'different' : 'identical';
 	return $config->{status};
+}
+
+# }}}
+# _bosh_configs_show_change - describe a missing or different config {{{
+#
+# A config can carry credentials, such as a CPI's API key, so the log gets
+# the config's identity, its status, and how many paths differ, and the
+# config or its diff goes only to the terminal, as private output.
+sub _bosh_configs_show_change {
+	my ($config, $label, $missing_intro) = @_;
+	if ($config->{status} eq 'missing') {
+		my $size = Genesis::change_counts(undef, $config->{content});
+		info(
+			"[[  - >>%s is #R{missing} from the director (%s); %s:",
+			$label, $size // 'its paths could not be counted', $missing_intro
+		);
+		info({private => 1}, "\n%s", $config->{content});
+	} else {
+		my $size = Genesis::change_counts($config->{uploaded}, $config->{content});
+		info(
+			"[[  - >>%s is #Y{different} from the director's copy (%s):",
+			$label, $size // 'its changes could not be counted'
+		);
+		info({private => 1}, "\n%s\n", $config->{diff});
+	}
+	return 1;
 }
 
 # }}}

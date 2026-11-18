@@ -6,6 +6,7 @@ use utf8;
 use lib 'lib';
 use lib 't';
 use helper;
+use TraceCapture;
 
 use Test::More;
 use Test::Deep;
@@ -1208,8 +1209,8 @@ subtest '_check_cpi_config - a spruce failure is fatal, never a change' => sub {
 	stderr_from { $result = Genesis::Env::_check_cpi_config(cpi_check_env()) };
 	is $result->{state}, 'error', 'the state is error';
 	ok $result->{fatal}, 'the error is fatal';
-	like $result->{msg}, qr/could not be compared.*unable to parse data from new/s,
-		'the message carries what spruce said';
+	like $result->{msg}, qr/could not be compared.*spruce diff exited 2 \(.*could not parse its input\)/s,
+		'the message says how spruce failed, not what it said';
 	ok !exists $result->{fix_data}, 'no fix is offered for a config that could not be compared';
 };
 
@@ -1222,6 +1223,26 @@ subtest '_check_cpi_config - a difference is still a change' => sub {
 	stderr_from { $result = Genesis::Env::_check_cpi_config(cpi_check_env()) };
 	is $result->{state}, 'changed', 'the state is changed';
 	ok !$result->{fatal}, 'a change is not fatal';
+};
+
+subtest '_check_cpi_config - a CPI config change is logged by its size' => sub {
+	# A CPI config holds the IaaS credentials, so neither its diff nor what
+	# spruce said about a failed comparison may reach a log.
+	my ($old, $new, $said) = map {fake_secret($_)} qw(old new said);
+	no warnings qw(redefine once);
+	local *Genesis::Env::spruce_diff = sub { return ("cpis.0.properties.key\n  - $old\n  + $new\n", 1, undef) };
+	my $result;
+	my ($log, $stderr) = capture_trace { $result = Genesis::Env::_check_cpi_config(cpi_check_env()) };
+	is $result->{state}, 'changed', 'the change is found';
+	like $log, qr/required CPI config test-env\.aws\.cf is different from the one currently on the\s+BOSH\s+director\s+\(1\s+path\s+changed\)/,
+		'the log says how many paths changed';
+	unlike $log, qr/\Q$_\E/, 'the log holds no value from the diff' for ($old, $new);
+	like $stderr, qr/\Q$new\E/, 'the terminal shows the diff';
+
+	local *Genesis::Env::spruce_diff = sub { return ("unable to parse data from new: yaml: $said", 2, undef) };
+	($log, $stderr) = capture_trace { $result = Genesis::Env::_check_cpi_config(cpi_check_env()) };
+	is $result->{state}, 'error', 'a failed comparison is an error';
+	unlike $result->{msg}.$log.$stderr, qr/\Q$said\E/, 'and nothing spruce said is kept';
 };
 
 # ======================================================================

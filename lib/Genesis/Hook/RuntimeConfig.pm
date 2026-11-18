@@ -388,21 +388,32 @@ sub compare_configs {
 			{content => $config_data,    label => 'generated'}
 		);
 		# spruce exits 2 or more when it cannot compare the two, and its
-		# output is then the reason rather than a diff.
+		# output is then the reason rather than a diff.  Either can quote a
+		# config's credentials, so the log gets the exit status, the kinds of
+		# failure, and counts of changed paths, and a diff goes only to the
+		# terminal.
 		bail(
-			"Could not compare the existing and generated #m{%s} runtime config:\n\n%s",
-			$description, $diff || "spruce diff exited $rc with no output"
+			"Could not compare the existing and generated #m{%s} runtime config: %s",
+			$description, Genesis::compare_failure($rc, $diff)
 		) if $rc > 1;
 		if ($rc) {
-			info("  - found the following changes between existing and generated #m{%s} runtime config:\n\n%s", $description, $diff);
+			info(
+				"  - found the following changes between existing and generated #m{%s} runtime config (%s):",
+				$description,
+				Genesis::change_counts($current_config, $config_data) // 'their number could not be counted'
+			);
+			info({private => 1}, "\n%s", $diff);
 		} else {
 			info("  - existing #m{%s} runtime config is already up to date", $description);
 			return undef;
 		}
 	} else {
 		info(
-			"  - no existing #m{%s} runtime config found, generated the following:\n\n%s",
+			"  - no existing #m{%s} runtime config found, generated the following (%s):",
 			$description,
+			Genesis::change_counts(undef, $config_data) // 'its paths could not be counted'
+		);
+		info({private => 1}, "\n%s",
 			render_markdown("```yaml\n$config_data```") . $Genesis::Term::ansi_cursor_up
 		);
 	}

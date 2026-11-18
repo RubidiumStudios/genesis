@@ -1321,6 +1321,49 @@ sub _changed_paths {
 	return @changes;
 }
 
+# change_counts - how far two documents differ, in counts of paths {{{
+#
+# A BOSH config or manifest can hold credentials, so a change to one is
+# logged by its size and never by its text or its paths.  Either side may
+# be YAML text, a decoded structure, or undef for a document that does
+# not exist yet.  Returns text such as "2 paths changed, 1 path added", or
+# undef when a side cannot be parsed, since a count of a document that
+# could not be read would mislead.
+sub change_counts {
+	my ($old, $new) = @_;
+	my @sides;
+	for my $side ($old, $new) {
+		if (!defined($side) || ref($side)) {
+			push @sides, $side // {};
+			next;
+		}
+		my ($data, $rc) = eval {load_yaml($side)};
+		return undef if $@ || $rc;
+		push @sides, $data // {};
+	}
+	my %n = map {($_ => 0)} ('~', '+', '-');
+	$n{substr($_, 0, 1)}++ for changed_paths(@sides);
+	my @parts = map {
+		my ($sign, $verb) = @$_;
+		$n{$sign} ? sprintf("%d path%s %s", $n{$sign}, $n{$sign} == 1 ? '' : 's', $verb) : ()
+	} (['~', 'changed'], ['+', 'added'], ['-', 'removed']);
+	return @parts ? join(', ', @parts) : 'no paths changed';
+}
+
+# }}}
+# compare_failure - why spruce could not compare two documents {{{
+#
+# spruce diff exits 2 or more when it cannot compare, and what it printed
+# then is the reason.  That can quote either document, so the reason is
+# given as its exit status and the fixed kinds of failure it matched.
+sub compare_failure {
+	my ($rc, $out) = @_;
+	return sprintf("spruce diff exited %d with no output", $rc)
+		unless defined($out) && $out =~ /\S/;
+	return sprintf("spruce diff exited %d (%s)", $rc, failure_summary($out));
+}
+
+# }}}
 # _same_value - whether two decoded scalars are the same value of one type
 sub _same_value {
 	my ($old, $new) = @_;

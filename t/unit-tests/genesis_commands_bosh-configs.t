@@ -11,6 +11,7 @@ use warnings;
 use lib 'lib';
 use lib 't';
 use helper;
+use TraceCapture;
 use Test::More;
 use Test::Exception;
 use Test::Output;
@@ -276,8 +277,8 @@ subtest '_bosh_configs_status - a spruce failure is an error, not a difference' 
 	my $broken = {type => 'cloud', name => 'test-env.cf', bosh => $director, content => "azs: [BROKEN\n"};
 	is(Genesis::Commands::Bosh::_bosh_configs_status($broken), 'error',
 		'a config spruce cannot compare has the error status');
-	like($broken->{diff}, qr/unable to parse data from synthesized/,
-		'spruce\'s output is kept as the diff');
+	is($broken->{compare_failure}, 'spruce diff exited 2 (could not parse its input)',
+		'the failure is kept as spruce\'s exit status and kinds of failure');
 	is(Genesis::Commands::Bosh::_bosh_configs_status_label($broken), '#R{could not compare}',
 		'the summary label says the comparison failed');
 	isnt(Genesis::Commands::Bosh::_bosh_configs_status_label($broken), '#R{unknown}',
@@ -435,8 +436,8 @@ subtest 'bosh_configs_compare - reports identical, different, and missing' => su
 	like($all, qr/runtime config test-env\.cf\.ops on parent is missing.*addons: \[\]/s, 'missing config reported with its content');
 };
 
-subtest 'bosh_configs_compare - a spruce failure is reported as an error with its output' => sub {
-	plan tests => 3;
+subtest 'bosh_configs_compare - a spruce failure is reported as an error, by how it failed' => sub {
+	plan tests => 4;
 	no warnings 'redefine';
 	local *Genesis::Commands::Bosh::spruce_diff = \&broken_diff;
 	my $director = make_director('parent',
@@ -449,8 +450,59 @@ subtest 'bosh_configs_compare - a spruce failure is reported as an error with it
 	my $all = $out.$err;
 	like($all, qr/cloud config test-env\.cf on parent could not be compared with the director's copy/,
 		'the config is reported as not compared');
-	like($all, qr/unable to parse data from synthesized/, 'spruce\'s output is shown');
+	like($all, qr/spruce diff exited 2 \(.*could not parse its input\)/, 'how spruce failed is shown');
+	unlike($all, qr/unable to parse data|did not find expected/, 'not what spruce said, which can quote the config');
 	unlike($all, qr/\b(different|identical)\b/, 'it is not reported as different or identical');
+};
+
+subtest 'bosh-configs logs a config change by its size, never its text' => sub {
+	# A config can hold a credential, such as a CPI's API key, so neither a
+	# missing config's body, nor a diff, nor what spruce said about a failed
+	# comparison may reach a log file.  The terminal still shows the body
+	# and the diff.
+	my ($old, $new, $body, $said) = map {fake_secret($_)} qw(old new body said);
+	no warnings 'redefine';
+	local *Genesis::Commands::Bosh::spruce_diff = sub {
+		my ($first, $second) = @_;
+		return ("unable to parse data from $second->{label}: yaml: $said", 2, undef)
+			if $second->{content} =~ /BROKEN/;
+		return ('', 0, '') if $first->{content} eq $second->{content};
+		return ("properties.key\n  - $old\n  + $new\n", 1, '');
+	};
+	my $director = make_director('parent',
+		{runtime => {'test-env.cf.dns' => entry(7), 'test-env.cf.bad' => entry(9)}},
+		contents => {
+			'runtime|test-env.cf.dns' => "properties:\n  key: $old\n",
+			'runtime|test-env.cf.bad' => "addons: []\n",
+		},
+	);
+	my $env = make_env(
+		hooks   => {'runtime-config' => 1},
+		runtime => [
+			{build => 'dns', name => 'test-env.cf.dns', description => 'Dns', content => "properties:\n  key: $new\n"},
+			{build => 'ops', name => 'test-env.cf.ops', description => 'Ops', content => "addons:\n- name: ops\n  key: $body\n"},
+			{build => 'bad', name => 'test-env.cf.bad', description => 'Bad', content => "addons: [BROKEN $said\n"},
+		],
+		lookups => {'bosh-configs.runtime' => {dns => {}, ops => {}, bad => {}}},
+	);
+
+	for my $action (qw(compare upload)) {
+		my $code = Genesis::Commands::Bosh->can("bosh_configs_$action");
+		my ($log, $stderr, $stdout) = capture_trace {
+			eval {$code->($env, $director, ($action eq 'upload' ? (yes => 1) : ()))};
+		};
+		my $terminal = $stderr.$stdout;
+		like($log, qr/runtime\s+config\s+test-env\.cf\.dns\s+on\s+parent\s+is\s+different\s+from\s+the\s+director's\s+copy\s+\(1\s+path\s+changed\)/,
+			"$action logs a changed config by how many paths changed");
+		like($log, qr/runtime\s+config\s+test-env\.cf\.ops\s+on\s+parent\s+is\s+missing\s+from\s+the\s+director\s+\(1\s+path\s+added\)/,
+			"$action logs a missing config by its size");
+		like($log, qr/runtime\s+config\s+test-env\.cf\.bad\s+on\s+parent\s+could\s+not\s+be\s+compared\s+with\s+the\s+director's\s+copy:\s+spruce\s+diff\s+exited\s+2\s+\(could\s+not\s+parse\s+its\s+input\)/,
+			"$action logs a failed comparison by how spruce failed");
+		unlike($log, qr/\Q$_\E/, "$action keeps a value out of the log") for ($old, $new, $body, $said);
+		like($terminal, qr/\Q$new\E/, "$action shows the diff on the terminal");
+		like($terminal, qr/\Q$body\E/, "$action shows the missing config on the terminal");
+		unlike($terminal, qr/\Q$said\E/, "$action does not repeat what spruce said, even on the terminal");
+	}
 };
 
 # ---------------------------------------------------------------------------

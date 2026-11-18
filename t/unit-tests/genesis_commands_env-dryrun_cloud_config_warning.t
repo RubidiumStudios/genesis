@@ -10,6 +10,7 @@ use warnings;
 use lib 'lib';
 use lib 't';
 use helper;
+use TraceCapture;
 use Test::More;
 use Test::Exception;
 use Test::Output;
@@ -74,6 +75,40 @@ subtest 'an unknown state is a bug, not a silent warning' => sub {
 	throws_ok {
 		output_from { Genesis::Commands::Env::_deploy_dryrun_cloud_config_warning(make_env(), 'lab.cf', 'sideways') }
 	} qr/Unknown cloud config state 'sideways'/, 'an unrecognized state is reported as a bug';
+};
+
+subtest 'a deploy shows cloud config changes on the terminal only' => sub {
+	# A kit can put a credential into a cloud config, and the deploy's diff
+	# would show the old and new ones, so the log gets how many paths
+	# differ, and the diff and a new config's body reach only the terminal.
+	my ($old, $new, $said) = map {fake_secret($_)} qw(old new said);
+	my $dir = workdir();
+	put_file("$dir/old.yml", "azs:\n- name: z1\n  key: $old\n");
+	put_file("$dir/new.yml", "azs:\n- name: z1\n  key: $new\n");
+
+	my ($log, $stderr) = capture_trace {
+		Genesis::Commands::Env::_deploy_show_cloud_config_diff("$dir/old.yml", "$dir/new.yml", "azs.z1.key\n  - $old\n  + $new\n");
+	};
+	like($log, qr/found differences \(1 path changed\)/, 'the log says how many paths changed');
+	unlike($log, qr/\Q$_\E/, 'and holds no value from the diff') for ($old, $new);
+	like($stderr, qr/\Q$new\E/, 'the terminal shows the diff');
+
+	($log, $stderr) = capture_trace {
+		Genesis::Commands::Env::_deploy_show_missing_cloud_config('lab.cf', "$dir/new.yml");
+	};
+	like($log, qr/Cloud config lab\.cf missing\..*with 1 path added/s, 'a dry run logs a missing config by its size');
+	unlike($log, qr/\Q$new\E/, 'and not by its body');
+	like($stderr, qr/\Q$new\E/, 'which the terminal shows');
+
+	no warnings 'redefine';
+	local *Genesis::Commands::Env::spruce_diff = sub { return ("unable to parse data from new: yaml: $said", 2, undef) };
+	my $error;
+	($log, $stderr) = capture_trace {
+		eval {Genesis::Commands::Env::_deploy_cloud_config_diff("$dir/old.yml", "$dir/new.yml")}; $error = $@;
+	};
+	like($error, qr/Error comparing cloud configs: spruce diff exited 2 \(could not parse its input\)/,
+		'a failed comparison says how spruce ended');
+	unlike($error.$log.$stderr, qr/\Q$said\E/, 'and not what it said');
 };
 
 done_testing;

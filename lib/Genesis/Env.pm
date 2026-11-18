@@ -6176,23 +6176,29 @@ sub _check_cpi_config {
 
 	# spruce exits 2 or more when it cannot compare the two configs, and its
 	# output is then the reason rather than a diff, so nothing is uploaded.
+	# A CPI config holds the IaaS credentials, and the reason can quote it,
+	# so only spruce's exit status and kinds of failure are reported.
 	if ($rc > 1) {
 		info("[[  - >>CPI config comparison #R{failed}");
 		return {
 			state => 'error',
 			fatal => 1,
 			msg   => sprintf(
-				"CPI config #m{%s} could not be compared with the one on the BOSH director:\n\n%s",
-				$cpi_name, $diff || "spruce diff exited $rc with no output"
+				"CPI config #m{%s} could not be compared with the one on the BOSH director: %s",
+				$cpi_name, Genesis::compare_failure($rc, $diff)
 			),
 		};
 	}
 
 	if ($rc) {
+		# The diff can show old and new credentials, so the log gets only how
+		# many paths differ, and the diff goes to the terminal.
 		info(
-			"[[  - >>required CPI config #m{%s} is different from the one currently on the BOSH director:\n\n%s",
-			$cpi_name, $diff
+			"[[  - >>required CPI config #m{%s} is different from the one currently on the BOSH director (%s):",
+			$cpi_name,
+			Genesis::change_counts($current_config, $cpi_config->{content}) // 'its changes could not be counted'
 		);
+		info({private => 1}, "\n%s\n", $diff);
 		return {
 			state    => 'changed',
 			fix_data => {

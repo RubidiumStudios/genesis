@@ -2045,6 +2045,47 @@ B<Examples:>
                 {instance_groups => [{name => 'bosh', instances => 2}]});
   # Returns: ('~ instance_groups.bosh.instances')
 
+=head2 change_counts
+
+  my $size = Genesis::change_counts($old, $new);
+
+Says how far two documents differ, in counts of paths, so that a change to a
+BOSH config or manifest that holds credentials can be logged by its size and
+never by its text or its paths. Either side may be YAML text, a decoded
+structure, or C<undef> for a document that does not exist yet, which counts
+every top-level key of the other side as added. YAML is read with
+C<load_yaml>, and paths are counted with C<changed_paths>.
+
+B<Returns:> Text such as C<"2 paths changed, 1 path added">, or C<"no paths
+changed">. Returns C<undef> when either side cannot be parsed, since a count
+of a document that could not be read would mislead.
+
+B<Examples:>
+
+  Genesis::change_counts("a: 1\nb: 2\n", "a: 1\nb: 3\nc: 4\n");
+  # Returns: '1 path changed, 1 path added'
+
+  Genesis::change_counts(undef, "azs: []\nnetworks: []\n");
+  # Returns: '2 paths added'
+
+=head2 compare_failure
+
+  my $why = Genesis::compare_failure($rc, $out);
+
+Says why C<spruce diff> could not compare two documents. spruce exits 2 or
+more when it cannot compare, and what it printed then is the reason, which
+can quote either document. So the reason is given as spruce's exit status
+and the fixed kinds of failure from C<failure_summary> that its output
+matched, and never as the output itself.
+
+B<Returns:> Text such as C<"spruce diff exited 2 (could not parse its
+input)">, or C<"spruce diff exited 2 with no output">.
+
+B<Examples:>
+
+  Genesis::compare_failure(2, "unable to parse data from new: yaml: ...");
+  # Returns: 'spruce diff exited 2 (could not parse its input)'
+
 =head2 spruce_diff
 
     my ($diff, $rc, $err) = spruce_diff($first, $second);
