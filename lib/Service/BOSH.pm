@@ -115,13 +115,26 @@ sub environment_variables {
 #
 # Much of what bosh prints carries credentials: `bosh manifest`, `bosh int`,
 # configs, variables, and the diff in a deploy transcript, and a failing
-# command can quote them on stderr.  Stdout and stderr are written to the
-# trace verbatim only for these read-only listings; every other command
-# leaves a byte count.  A command that cannot be identified, including a
-# shell command that chains anything onto a listing, is redacted, so a
-# misreading errs on the safe side.
+# command can quote them on stderr.  Stdout is written to the trace only
+# for these read-only listings, and stderr never is; everything else
+# leaves a byte count.  `events` is left out because an event's context
+# can carry a task's error text.  A command that cannot be identified,
+# including a shell command that chains anything onto a listing or one
+# with an option the parser does not know, is private, so a misreading
+# errs on the safe side.
 our %TRACEABLE_OUTPUT = map {$_ => 1} qw(
-	deployments env errands events instances locks releases stemcells tasks vms
+	deployments env errands instances locks releases stemcells tasks vms
+);
+
+# bosh's global options, split by whether they take a value.  An option's
+# value is never the subcommand: `bosh -e vms manifest` runs `manifest`
+# against an environment named vms.
+our %BOSH_VALUE_OPTIONS = map {$_ => 1} qw(
+	-e --environment -d --deployment --ca-cert --client --client-secret
+	--config --column --parallel
+);
+our %BOSH_FLAG_OPTIONS = map {$_ => 1} qw(
+	--json --tty --no-color -n --non-interactive --sha2 -v --version -h --help
 );
 
 # _subcommand - the bosh subcommand a command list runs, or '' if unknown
@@ -129,14 +142,25 @@ sub _subcommand {
 	my (@cmd) = @_;
 	# A shell command can pipe, chain, or substitute more output onto the
 	# listing it starts with, so it can't be identified.
-	return '' if @cmd && defined($cmd[0]) && !ref($cmd[0]) && $cmd[0] =~ /[|;&\$`<>()\n]/;
+	return '' if @cmd && defined($cmd[0]) && !ref($cmd[0]) && $cmd[0] =~ /[|;&\$`<>()\n'"\\]/;
 	my @words = (@cmd && defined($cmd[0]) && !ref($cmd[0]) && $cmd[0] =~ /\s/)
-		? split(/\s+/, $cmd[0] =~ s/^\s+//r)
+		? (split(/\s+/, $cmd[0] =~ s/^\s+//r), @cmd[1..$#cmd])
 		: @cmd;
 	shift @words if @words && defined($words[0]) && !ref($words[0]) && $words[0] =~ m{(?:^|/)bosh$};
-	for (@words) {
-		next if !defined($_) || ref($_) || /^-/;
-		return $_;
+	while (@words) {
+		my $word = shift @words;
+		return '' if !defined($word) || ref($word) || $word eq '' || $word eq '--';
+		return $word unless $word =~ /^-/;
+		next if $BOSH_FLAG_OPTIONS{$word};
+		if ($BOSH_VALUE_OPTIONS{$word}) {
+			return '' unless @words;
+			shift @words;
+			next;
+		}
+		# --option=value, and a short option with its value attached.
+		next if $word =~ /^(--[a-z][a-z0-9-]*)=/ && $BOSH_VALUE_OPTIONS{$1};
+		next if $word =~ /^(-[ed])./ && $BOSH_VALUE_OPTIONS{$1};
+		return '';
 	}
 	return '';
 }
@@ -174,10 +198,7 @@ sub execute {
 	# A caller that says otherwise is honoured; see %TRACEABLE_OUTPUT.
 	my $verbose = _verbose_log_level($opts->{env});
 	my $private = ($TRACEABLE_OUTPUT{_subcommand(@cmd)} && !$verbose) ? 0 : 1;
-	unless ($private) {
-		$opts->{public_output} //= 1;
-		$opts->{public_stderr} //= 1;
-	}
+	$opts->{public_output} //= 1 unless $private;
 
 	# Verbose bosh logging is the operator's own debugging switch, and it
 	# writes director requests and responses, tokens included, into the

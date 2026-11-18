@@ -62,6 +62,15 @@ for my $cmd (
 	['bosh manifest'], ['manifest "$@" | cat'], ['-n', 'manifest'],
 	['env --json; bosh manifest'], ['env --json | cat'], ['env --json && bosh manifest'],
 	['env $(bosh manifest)'],
+	# An option's value is not the subcommand: each of these runs
+	# `manifest` against a target or deployment named like a listing.
+	['--environment', 'deployments', 'manifest'], ['-e', 'vms', 'manifest'],
+	['-d', 'env', 'manifest'], ['--deployment', 'tasks', 'manifest'],
+	['--client', 'env', 'manifest'], ['--client-secret', 'env', 'manifest'],
+	['--ca-cert', 'env', 'manifest'], ['--config', 'env', 'manifest'],
+	['--column', 'env', 'manifest'], ['--parallel', '5', 'manifest'],
+	# Anything the parser does not know is treated as private.
+	['--made-up-flag', 'env'], ['--', 'env'], ['events'],
 ) {
 	my $name = join(' ', @$cmd);
 	subtest "stdout of `bosh $name` is redacted" => sub {
@@ -73,11 +82,18 @@ for my $cmd (
 	};
 }
 
-subtest 'stdout of an allowlisted listing command is still traced' => sub {
-	my $log = capture_trace { director->execute('env', '--json') };
-	like($log, qr/\Q$out_secret\E/, 'the output of bosh env is traced');
-	like($log, qr/\Q$err_secret\E/, 'and so is its stderr');
-};
+for my $cmd (
+	['env', '--json'], ['-n', 'vms'], ['--json', 'deployments'], ['-e', 'lab', 'env'],
+	['--environment=lab', '-d', 'cf', 'instances'], ['-dcf', 'vms'], ['--tty', '--no-color', 'tasks'],
+) {
+	my $name = join(' ', @$cmd);
+	subtest "stdout of the listing `bosh $name` is traced, and its stderr is not" => sub {
+		my $log = capture_trace { director->execute(@$cmd) };
+		like($log, qr/\Q$out_secret\E/, 'the listing is traced');
+		unlike($log, qr/\Q$err_secret\E/, 'its stderr is not');
+		like($log, qr/\[\d+b of redacted stderr omitted from debug\]/, 'which leaves its byte count');
+	};
+}
 
 for my $level (qw/debug info warn error/) {
 	subtest "BOSH_LOG_LEVEL=$level redacts stdout and stderr" => sub {
@@ -92,12 +108,7 @@ for my $level (qw/debug info warn error/) {
 subtest 'BOSH_LOG_LEVEL=none is the default' => sub {
 	local $ENV{BOSH_LOG_LEVEL} = 'none';
 	my $log = capture_trace { director->execute('env', '--json') };
-	like($log, qr/\Q$err_secret\E/, 'stderr is traced');
-};
-
-subtest 'a caller can still ask for output to be traced' => sub {
-	my $log = capture_trace { director->execute({public_output => 1}, 'manifest') };
-	like($log, qr/\Q$out_secret\E/, 'an explicit public_output mark is honoured');
+	like($log, qr/\Q$out_secret\E/, 'a listing is traced');
 };
 
 subtest 'an interactive transcript is redacted' => sub {

@@ -278,17 +278,20 @@ success.  macOS C<script> always exits with the child's code.  C<deploy> and
 C<run_errand> in L<Service::BOSH::Director> depend on it.
 
 Much of what bosh prints carries credentials, so C<execute> keeps it out of
-the trace. Stdout and stderr are traced verbatim only for the read-only
-listings in C<%Service::BOSH::TRACEABLE_OUTPUT> (C<deployments>, C<env>,
-C<errands>, C<events>, C<instances>, C<locks>, C<releases>, C<stemcells>,
-C<tasks>, and C<vms>). Every other command, and any command whose
-subcommand cannot be identified, leaves only a byte count for each stream,
-since a failing command can quote credentials on stderr. A shell command
-that pipes, chains, or substitutes anything counts as unidentified. When
-C<BOSH_LOG_LEVEL> is set to anything other than C<none>, bosh logs whole
-director requests and responses, so stdout and stderr are both redacted
+the trace. Stdout is traced verbatim only for the read-only listings in
+C<%Service::BOSH::TRACEABLE_OUTPUT> (C<deployments>, C<env>, C<errands>,
+C<instances>, C<locks>, C<releases>, C<stemcells>, C<tasks>, and C<vms>).
+C<events> is not among them, since an event's context can carry a task's
+error text. Stderr is never traced, since a failing command can quote
+credentials there, and every other command, along with any command whose
+subcommand cannot be identified, leaves only a byte count for each stream.
+A shell command that pipes, chains, quotes, or substitutes anything counts
+as unidentified, and so does a command with an option C<_subcommand> does
+not know. When C<BOSH_LOG_LEVEL> is set to anything other than C<none>, bosh
+logs whole director requests and responses, so both streams are redacted
 whatever the command. An interactive transcript follows the same rule. A
-caller that sets C<redact_output> or C<redact_stderr> itself is honoured.
+caller can still mark a call's output public with C<public_output>, as
+C<run> allows.
 
 That verbose logging is the operator's own debugging switch. An
 interactive command run with it shows bosh's output on the terminal only:
@@ -440,18 +443,29 @@ B<Examples:>
 
 Returns the bosh subcommand that a command list given to C<execute> runs,
 such as C<manifest> for C<('manifest')>, C<('bosh manifest')>, or
-C<('-n', 'manifest')>. A leading C<bosh> word and any word starting with
-C<-> are skipped. A command given as one string is split on whitespace,
-and a string holding any of C<| ; & $ ` E<lt> E<gt> ( )> or a newline gives
-an empty string, since a shell command can pipe, chain, or substitute
-other output onto the listing it starts with.
+C<('-n', 'manifest')>. A leading C<bosh> word is skipped, and so are bosh's
+global options. A boolean option in C<%Service::BOSH::BOSH_FLAG_OPTIONS>,
+such as C<--json> or C<-n>, is skipped alone. An option in
+C<%Service::BOSH::BOSH_VALUE_OPTIONS>, such as C<-e> or C<--deployment>, is
+skipped along with its value, whether the value follows as the next word,
+after C<=>, or attached to C<-e> or C<-d>. So C<('-e', 'vms', 'manifest')> runs
+C<manifest>, not C<vms>.
+
+Anything the parser cannot be sure of gives an empty string, which
+C<execute> treats as private. That covers an option it does not know, an
+option missing its value, C<-->, a wrapped or undefined argument, and a
+command string holding any of C<| ; & $ ` E<lt> E<gt> ( ) ' " \> or a
+newline, since a shell command can pipe, chain, or substitute other output
+onto the listing it starts with. A command given as one string is split on
+whitespace.
 
 B<Returns:> The subcommand, or an empty string if none can be found.
 
 B<Examples:>
 
   Service::BOSH::_subcommand('int', 'manifest.yml');      # Returns: 'int'
-  Service::BOSH::_subcommand('deploy "$1" | jq .x', $f);  # Returns: 'deploy'
+  Service::BOSH::_subcommand('-e', 'vms', 'manifest');    # Returns: 'manifest'
+  Service::BOSH::_subcommand('deploy "$1" | jq .x', $f);  # Returns: ''
 
 =head2 _verbose_log_level
 
