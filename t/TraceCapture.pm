@@ -10,6 +10,7 @@ use strict;
 use warnings;
 
 use File::Temp qw/tempdir/;
+use IO::Handle;
 use Digest::SHA qw/sha1_hex/;
 
 use base 'Exporter';
@@ -28,6 +29,7 @@ sub capture_trace(&;%) {
 	my $dir  = tempdir(CLEANUP => 1);
 	my $file = "$dir/trace.log";
 	my ($stderr, $stdout) = ('', '');
+	my ($ok, $error);
 	{
 		no warnings 'once';
 		local $Genesis::Log::Logger = undef;
@@ -42,21 +44,41 @@ sub capture_trace(&;%) {
 		my $logger = Genesis::Log->new;
 		$logger->configure_log(level => ($opts{terminal_level} // 'INFO'));
 		$logger->configure_log($file, level => 'TRACE');
-		local *STDERR;
-		local *STDOUT;
-		open STDERR, '>', \$stderr or die "cannot capture stderr: $!";
-		open STDOUT, '>', \$stdout or die "cannot capture stdout: $!";
+		# Capture file descriptors 1 and 2 themselves, so what a child
+		# process writes is captured along with Perl's own output.
+		my %utf8 = map {
+			my $fh = $_->[1];
+			($_->[0] => scalar(grep {/utf8/} PerlIO::get_layers($fh)))
+		} (['out', \*STDOUT], ['err', \*STDERR]);
+		open my $saved_out, '>&', \*STDOUT or die "cannot save stdout: $!";
+		open my $saved_err, '>&', \*STDERR or die "cannot save stderr: $!";
+		open STDOUT, '>', "$dir/stdout" or die "cannot capture stdout: $!";
+		open STDERR, '>', "$dir/stderr" or die "cannot capture stderr: $!";
 		binmode STDERR, ':utf8';
 		binmode STDOUT, ':utf8';
-		$code->($logger, $file);
+		STDOUT->autoflush(1);
+		STDERR->autoflush(1);
+		$ok = eval { $code->($logger, $file); 1 };
+		$error = $@;
+		open STDOUT, '>&', $saved_out or die "cannot restore stdout: $!";
+		open STDERR, '>&', $saved_err or die "cannot restore stderr: $!";
+		binmode STDOUT, ':utf8' if $utf8{out};
+		binmode STDERR, ':utf8' if $utf8{err};
+		$stdout = _slurp("$dir/stdout");
+		$stderr = _slurp("$dir/stderr");
 	}
-	my $log = '';
-	if (-f $file) {
-		open my $fh, '<:encoding(UTF-8)', $file or die "cannot read $file: $!";
-		$log = do {local $/; <$fh>};
-		close $fh;
-	}
+	die $error unless $ok;
+	my $log = _slurp($file);
 	return wantarray ? ($log, $stderr, $stdout, $file) : $log;
+}
+
+sub _slurp {
+	my ($file) = @_;
+	return '' unless -f $file;
+	open my $fh, '<:encoding(UTF-8)', $file or die "cannot read $file: $!";
+	my $content = do {local $/; <$fh>};
+	close $fh;
+	return $content // '';
 }
 
 1;

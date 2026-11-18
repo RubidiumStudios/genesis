@@ -105,8 +105,17 @@ subtest 'exodus writes keep their values out of the trace' => sub {
 	local *FakeDeployments::next_sequence_number = sub { 1 };
 	local *Genesis::Env::_create_deployment_audit_log = sub { 1 };
 	my $env = bless({name => 'fake-env'}, 'Genesis::Env');
-	my $log = capture_trace { $env->update_deployment_exodus('deploy', 'success', quiet => 1) };
+	received('safe');
+	my ($ok, $error);
+	my ($log, $stderr, $stdout) = capture_trace {
+		$ok = eval { $env->update_deployment_exodus('deploy', 'success', quiet => 1); 1 };
+		$error = $@;
+	};
+	ok($ok, 'the exodus update succeeds') or diag $error;
+	like(received('safe'), qr/^set\nsecret\/exodus\/fake-env\/fake\n(?:.*\n)*admin_password=\Q$value\E$/m,
+		'safe is asked to write the exact value');
 	unlike($log, qr/\Q$value\E/, 'the value is absent from the trace');
+	unlike($stderr.$stdout, qr/\Q$value\E/, 'and from the terminal');
 	like($log, qr/admin_password=<redacted:\d+ bytes>/, 'the key stays in view');
 };
 

@@ -73,20 +73,29 @@ subtest 'the command line written at the top of a log is scrubbed' => sub {
 	unlike($log, qr/\Q$secret\E/, 'the value is absent from the command line');
 };
 
+# The next two use values no earlier subtest has registered, and each
+# first shows its value would reach the log unregistered, so neither can
+# pass on a registration left over from before.
 subtest 'the package-level form registers a value too' => sub {
+	my $value = fake_secret('package-level');
+	like(capture_trace { trace("control line with %s", $value) }, qr/\Q$value\E/,
+		'unregistered, the value reaches the log');
 	my $log = capture_trace {
-		Genesis::Log::register_secret($secret, 'early');
-		trace("late line with %s", $secret);
+		Genesis::Log::register_secret($value, 'early');
+		trace("late line with %s", $value);
 	};
-	unlike($log, qr/\Q$secret\E/, 'the package-level form registers too');
+	unlike($log, qr/\Q$value\E/, 'the package-level form registers too');
 };
 
 subtest 'credential environment variables are registered at startup' => sub {
-	local $ENV{BOSH_CLIENT_SECRET} = $secret;
+	my $value = fake_secret('startup-env');
+	like(capture_trace { trace("control line with %s", $value) }, qr/\Q$value\E/,
+		'unregistered, the value reaches the log');
+	local $ENV{BOSH_CLIENT_SECRET} = $value;
 	my $log = capture_trace {
-		trace("env line with %s", $secret);
+		trace("env line with %s", $value);
 	};
-	unlike($log, qr/\Q$secret\E/, 'BOSH_CLIENT_SECRET from the caller is scrubbed');
+	unlike($log, qr/\Q$value\E/, 'BOSH_CLIENT_SECRET from the caller is scrubbed');
 };
 
 subtest 'a short value is scrubbed where it stands alone' => sub {

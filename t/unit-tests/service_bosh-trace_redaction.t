@@ -114,18 +114,12 @@ subtest 'verbose bosh logging is shown live and never captured' => sub {
 	local $ENV{PATH} = "$dir/bin:$ENV{PATH}";
 	local $ENV{BOSH_LOG_LEVEL} = 'debug';
 	local $^O = 'darwin';
-	# bosh writes to the real terminal, so fd 1 and 2 go to a file here.
-	open(my $saved_out, '>&', \*STDOUT) or die "cannot save stdout: $!";
-	open(my $saved_err, '>&', \*STDERR) or die "cannot save stderr: $!";
-	open(STDOUT, '>', "$dir/terminal") or die "cannot redirect stdout: $!";
-	open(STDERR, '>>', "$dir/terminal") or die "cannot redirect stderr: $!";
-	my ($log, $warned, @results);
-	($log, $warned) = capture_trace { @results = director->execute({interactive => 1}, 'deploy', 'manifest.yml') };
-	open(STDOUT, '>&', $saved_out);
-	open(STDERR, '>&', $saved_err);
-	my $terminal = Genesis::slurp("$dir/terminal");
-	like($terminal, qr/\Q$out_secret\E/, 'the operator still sees what bosh prints');
-	like($warned, qr/BOSH_LOG_LEVEL/, 'with a warning that verbose logging is on');
+	# bosh writes to the real terminal, which capture_trace captures at
+	# file descriptors 1 and 2.
+	my ($log, $stderr, $stdout, @results);
+	($log, $stderr, $stdout) = capture_trace { @results = director->execute({interactive => 1}, 'deploy', 'manifest.yml') };
+	like($stdout.$stderr, qr/\Q$out_secret\E/, 'the operator still sees what bosh prints');
+	like($stderr, qr/BOSH_LOG_LEVEL/, 'with a warning that verbose logging is on');
 	unlike($results[0] // '', qr/\Q$out_secret\E|\Q$err_secret\E/, 'no transcript holding it is returned');
 	unlike($log, qr/\Q$out_secret\E|\Q$err_secret\E/, 'and the trace holds neither stream');
 };
