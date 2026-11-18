@@ -168,9 +168,19 @@ suppress_warnings:
 
 Each log configuration object supports:
 
-##### `file` (required)
+##### `file`
 - **Type:** string
-- **Description:** File path for the log file.
+- **Description:** File path for the log file.  With neither `file` nor `path`, Genesis writes to its default trace file, `~/.genesis/last-trace`.
+
+##### `path`
+- **Type:** string
+- **Description:** Directory for the log file.  With `file`, the log goes to `file` inside this directory.  Without it, Genesis writes to `{env}/{command}/{timestamp}.log` inside this directory.
+
+##### `on_reuse`
+- **Type:** enum
+- **Values:** `truncate`, `append`, `rotate`
+- **Default:** `truncate`
+- **Description:** What to do when the log file already exists.
 
 ##### `level`
 - **Type:** enum

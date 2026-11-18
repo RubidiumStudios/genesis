@@ -238,7 +238,9 @@ Each log entry supports the following schema:
 
 | Option | Type | Default | Values | Required |
 |--------|------|---------|--------|----------|
-| `file` | string | - | any path | ✓ |
+| `file` | string | - | any path | |
+| `path` | string | - | any directory | |
+| `on_reuse` | enum | `truncate` | `truncate`, `append`, `rotate` | |
 | `level` | enum | `INFO` | `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `OUTPUT` | |
 | `show_stack` | enum | `default` | `default`, `none`, `full`, `current`, `fatal` | |
 | `style` | enum | `plain` | `plain`, `fun`, `pointer`, `rfc-5424` | |
@@ -246,6 +248,18 @@ Each log entry supports the following schema:
 
 ##### `file`
 Path to the log file where messages will be written.
+
+With neither `file` nor `path`, Genesis writes to its default trace file, `~/.genesis/last-trace`.
+
+##### `path`
+Directory for the log file.  When `file` is also given, the log goes to `file` inside this directory.  When it is not, Genesis writes to `{env}/{command}/{timestamp}.log` inside this directory.
+
+##### `on_reuse`
+What to do when the log file already exists.
+
+- `truncate`: Empty the existing file (the default)
+- `append`: Add to the end of the existing file
+- `rotate`: Keep the existing file as `<name>.1`, shifting older archives up
 
 ##### `level`
 Minimum log level to record. Messages at this level and above will be logged.

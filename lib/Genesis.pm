@@ -2876,8 +2876,19 @@ sub global_config_schema {
 			schema => {
 				file => {
 					type        => 'string',
-					required    => 1,
-					description => 'File path for the log file'
+					description => 'File path (or template) for the log file; '.
+						'with neither file nor path, the default trace file is used'
+				},
+				path => {
+					type        => 'string',
+					description => 'Directory for the log file; with no file, '.
+						'logs go to <path>/{env}/{command}/{timestamp}.log'
+				},
+				on_reuse => {
+					type        => 'enum',
+					default     => 'truncate',
+					values      => [qw/truncate append rotate/],
+					description => 'What to do when the log file already exists'
 				},
 				level => {
 					type => 'enum',

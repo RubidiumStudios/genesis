@@ -193,6 +193,26 @@ subtest 'the oversized secrets warning can be suppressed by either spelling' => 
 	}
 };
 
+subtest 'a logs entry may use path and on_reuse in place of file' => sub {
+	require Genesis;
+	my $validates = sub {
+		my ($yaml) = @_;
+		my $config_file = "$tmp/test-logs.yml";
+		put_file($config_file, $yaml);
+		my $config = Genesis::Config->new($config_file);
+		return eval { $config->validate(Genesis::global_config_schema()); 1 } ? 1 : 0;
+	};
+
+	ok($validates->("---\nlogs:\n  - path: ~/logs\n    on_reuse: append\n    lifespan: 5\n"),
+		"an entry with path and on_reuse, and no file, is valid");
+	ok($validates->("---\nlogs:\n  - level: DEBUG\n"),
+		"an entry with neither file nor path is valid");
+	ok($validates->("---\nlogs:\n  - file: /tmp/x.log\n    on_reuse: rotate\n"),
+		"an entry with file and on_reuse is valid");
+	ok(!$validates->("---\nlogs:\n  - path: ~/logs\n    on_reuse: explode\n"),
+		"an on_reuse that Genesis does not know is rejected");
+};
+
 subtest 'schema defaults' => sub {
 	my $config_file = "$tmp/test4.yml";
 	put_file($config_file, "---\nfoo: bar\n");

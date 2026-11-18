@@ -4015,8 +4015,9 @@ colors.
 
 =item C<logs>
 
-Array of log-destination hashes. Each entry supports C<file>, C<level>,
-C<show_stack>, C<truncate>, C<style>, C<lifespan>, and C<timestamp>.
+Array of log-destination hashes. Each entry supports C<file>, C<path>,
+C<on_reuse>, C<level>, C<show_stack>, C<truncate>, C<style>, C<lifespan>,
+and C<timestamp>.  None is required.
 
 =back
 
