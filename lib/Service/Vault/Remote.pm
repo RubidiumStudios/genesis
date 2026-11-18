@@ -370,7 +370,7 @@ sub authenticate {
 		if (scalar(grep {$ENV{$_}} @vars) == scalar(@vars)) {
 			debug "Attempting to authenticate with $auth->{label} to #M{$ref} vault";
 			my ($out, $rc) = $self->query(
-				'safe auth ${1} < <(echo "$2")', $auth->{method}, join("\n", map {$ENV{$_}} @vars)
+				'safe auth ${1} < <(echo "$2")', $auth->{method}, {redact => join("\n", map {$ENV{$_}} @vars)}
 			);
 			return $self->_on_auth_success if $self->authenticated;
 			debug "Authentication with $auth->{label} to #M{$ref} vault failed!";
@@ -600,7 +600,7 @@ sub _authenticate_interactively {
 	my ($out, $rc) = $self->query(
 		'safe auth ${1} < <(echo "$2")',
 		$spec->{value},
-		join("\n", @creds),
+		{redact => join("\n", @creds)},
 	);
 	return 0 if $rc;
 

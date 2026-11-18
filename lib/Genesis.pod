@@ -1381,6 +1381,12 @@ Change to this directory before executing the command.
 
 Redirect stdin for the command.
 
+=item C<redact>
+
+If true, keeps everything about the command out of the trace: every
+argument is shown as C<E<lt>redacted:N bytesE<gt>>, and C<redact_output>,
+C<redact_stderr>, and C<redact_env> default to true.
+
 =item C<redact_output>
 
 If true, suppresses output from trace/debug logs.
@@ -1451,6 +1457,14 @@ The command string, with optional C<$1>-style argument placeholders.
 Positional arguments substituted into C<$command>'s C<$1>, C<$2>, ...
 placeholders.
 
+Every argument is written to the trace, so an argument that carries a
+credential must be wrapped as C<{redact =E<gt> $value}>. The command gets
+C<$value>, and the trace shows C<E<lt>redacted:N bytesE<gt>>. Adding
+C<prefix =E<gt> $p>, where C<$value> starts with C<$p>, keeps C<$p> in view,
+so the pair C<admin_password=...> traces as
+C<admin_password=E<lt>redacted:N bytesE<gt>>. C<redacted_arg> builds the
+wrapper for a pair.
+
 =back
 
 B<Returns:>
@@ -1497,6 +1511,44 @@ B<Examples:>
     # Bail on failure
     run({ onfailure => "git fetch failed" }, 'git fetch origin');
     # Returns: nothing (exits on failure)
+
+=head2 redacted_arg
+
+  my $arg = Genesis::redacted_arg($value);
+
+Wraps a command argument so that C<run> passes C<$value> to the command
+and writes it to the trace redacted. A C<key=value> pair or a
+C<Name: value> header keeps its C<key=> or C<Name: > in view, and anything
+else is redacted whole. An argument that is already wrapped is returned as
+it is.
+
+B<Returns:> A C<{redact =E<gt> $value}> hashref, with C<prefix> set when
+the value has a key.
+
+B<Examples:>
+
+  run('safe set "$1" "$2"', $path, Genesis::redacted_arg("password=$pw"));
+  # Traced as: password=<redacted:N bytes>
+
+  Genesis::redacted_arg('Authorization: Bearer abc');
+  # Returns: {redact => 'Authorization: Bearer abc', prefix => 'Authorization: '}
+
+=head2 traced_arg
+
+  my $shown = Genesis::traced_arg($arg);
+
+Returns what C<run> writes to the trace for one argument: the argument
+itself, or for a C<{redact =E<gt> ...}> wrapper, its prefix followed by
+C<E<lt>redacted:N bytesE<gt>>. Callers that write a command line to the
+trace themselves, such as C<curl> and C<Service::BOSH::execute>, use it so
+that a wrapped argument reads the same everywhere.
+
+B<Returns:> A string.
+
+B<Examples:>
+
+  Genesis::traced_arg({redact => 'password=abcdef', prefix => 'password='});
+  # Returns: 'password=<redacted:6 bytes>'
 
 =head2 shell_quote
 
@@ -1741,6 +1793,13 @@ For C<HEAD> requests: C<($status, $status_line, $combined_output)>.
 For all other requests: C<($status, $status_line, $body_or_file, $headers, $stderr)>.
 
 On curl execution failure: C<(599, "Error executing curl command", $stderr)>.
+
+B<Tracing:> header values, the request body, and the credentials are written
+to the trace redacted, with each header name kept in view. Curl's stderr,
+which holds the response headers and, under C<GENESIS_DEBUG>, the request
+headers, is never traced; the response headers are traced instead through
+C<_traced_header>. The response body of a request made with C<$creds> is
+traced as a byte count.
 
 B<Errors:>
 
@@ -3582,6 +3641,28 @@ B<Examples:>
 
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
+
+=head2 _is_redacted_arg
+
+  my $wrapped = Genesis::_is_redacted_arg($arg);
+
+Returns true if C<$arg> is a C<{redact =E<gt> $value}> wrapper, with an
+optional C<prefix> key and no others.
+
+B<Returns:> C<1> or C<0>.
+
+=head2 _traced_header
+
+  my $line = Genesis::_traced_header($header_line);
+
+Returns a curl response header line as C<curl> writes it to the trace. A
+header named in C<%Genesis::TRACE_VISIBLE_HEADERS>, such as
+C<Content-Type> or C<X-RateLimit-Remaining>, keeps its value; any other
+header, such as C<Set-Cookie> or a C<Location> that carries a signed URL,
+is shown as C<Name: E<lt>redacted:N bytesE<gt>>. A status line or a blank
+line is returned as it is.
+
+B<Returns:> A string.
 
 =head2 _traced_env_value
 

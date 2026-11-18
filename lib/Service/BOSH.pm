@@ -208,7 +208,7 @@ sub execute {
 		}
 	}
 
-	dump_var("bosh command" => \@cmd);
+	dump_var("bosh command" => [map {Genesis::traced_arg($_)} @cmd]);
 	my @results = run($opts, @cmd);
 
 	if ($opts->{interactive} && $file) {

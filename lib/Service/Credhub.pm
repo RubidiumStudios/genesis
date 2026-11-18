@@ -171,7 +171,7 @@ sub set {
 		) if scalar(@$optional) != 1;
 
 		push @args, '-c', $value->{certificate};
-		push @args, '-p', $value->{private_key};
+		push @args, '-p', {redact => $value->{private_key}};
 		push @args, '-r', $value->{root} if defined($value->{root});
 		push @args, '-m', $value->{root_path} if defined($value->{root_path});
 
@@ -189,7 +189,7 @@ sub set {
 		) if @$missing;
 
 		push @args, '-u', $value->{public_key};
-		push @args, '-p', $value->{private_key};
+		push @args, '-p', {redact => $value->{private_key}};
 
 	} elsif ($type eq 'user' || $type eq 'password') {
 		my @valid_keys = ('password');
@@ -206,7 +206,7 @@ sub set {
 		) if @$missing;
 
 		push @args, '-z', $value->{username} if defined($value->{username});
-		push @args, '-w', $value->{password};
+		push @args, '-w', {redact => $value->{password}};
 
 	} elsif ($type eq 'json') {
 		bail(
@@ -329,7 +329,7 @@ sub query {
 	my @args;
 	push @args, '-X', uc(delete($params{_method}))
 		if defined $params{_method};
-	push @args, '-d', delete($params{_data})
+	push @args, '-d', {redact => delete($params{_data})}
 		if defined $params{_data};
 	# TODO: extract uri-encoded query params out of %params
 	# The API's reply can be any credential, so it stays out of the trace.

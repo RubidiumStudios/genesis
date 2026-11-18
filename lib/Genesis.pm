@@ -649,6 +649,52 @@ our %TRACE_VISIBLE_ENV = map {$_ => 1} qw(
 	GENESIS_VERIFY_VAULT
 );
 
+# Response headers whose values curl() may write to a trace.  Any other
+# header, such as Set-Cookie or a Location carrying a signed URL, is shown
+# by name only.
+our %TRACE_VISIBLE_HEADERS = map {$_ => 1} qw(
+	content-length content-type date etag last-modified server
+	x-github-request-id x-ratelimit-limit x-ratelimit-remaining
+	x-ratelimit-reset x-ratelimit-used
+);
+
+# _traced_header - a response header line as curl() traces it
+sub _traced_header {
+	my ($line) = @_;
+	my ($name, $value) = ($line // '') =~ /\A([^:\s]+):\s?(.*?)\s*\z/s;
+	return $line unless defined($name);  # status line or blank line
+	return $line if $TRACE_VISIBLE_HEADERS{lc($name)};
+	return sprintf("%s: <redacted:%d bytes>", $name, length($value));
+}
+
+# _is_redacted_arg - true for a {redact => $value [, prefix => $p]} argument
+sub _is_redacted_arg {
+	my ($arg) = @_;
+	return 0 unless ref($arg) eq 'HASH' && exists($arg->{redact});
+	return (grep {$_ ne 'redact' && $_ ne 'prefix'} keys %$arg) ? 0 : 1;
+}
+
+# redacted_arg - wrap a command argument so run() traces it redacted
+#
+# A `key=value` or `key: value` argument keeps its key in view; anything
+# else is redacted whole.
+sub redacted_arg {
+	my ($value) = @_;
+	return $value if _is_redacted_arg($value);
+	my ($prefix) = ($value // '') =~ /\A([^=:\s]+(?:=|: ))/;
+	return defined($prefix) ? {redact => $value, prefix => $prefix} : {redact => $value};
+}
+
+# traced_arg - how run() shows one argument in the trace
+sub traced_arg {
+	my ($arg) = @_;
+	return $arg unless _is_redacted_arg($arg);
+	my $value = $arg->{redact} // '';
+	my $prefix = $arg->{prefix} // '';
+	$prefix = '' unless substr($value, 0, length($prefix)) eq $prefix;
+	return sprintf("%s<redacted:%d bytes>", $prefix, length($value) - length($prefix));
+}
+
 # _traced_env_value - what run()'s trace shows for one environment value
 sub _traced_env_value {
 	my ($key, $value, $redact_all) = @_;
@@ -661,6 +707,12 @@ sub run {
 	my (@args) = @_;
 	my %opts = %{((ref($args[0]) eq 'HASH') ? shift @args: {})};
 	$opts{stderr} = '&1' unless exists $opts{stderr};
+
+	# `redact` keeps everything about a command out of the trace: its
+	# arguments, environment values, output, and stderr.
+	if ($opts{redact}) {
+		$opts{$_} //= 1 for qw/redact_output redact_stderr redact_env/;
+	}
 
 	# stderr is a shell redirect target, so `stderr => 1` renders `2>1` and
 	# writes a file called "1" into the working directory -- silently, since
@@ -736,10 +788,11 @@ sub run {
 	for (my $i = 0; $i < scalar(@args); $i++) {
 		my $cmd_arg = $args[$i];
 		my $trace_arg = undef;
-		if (ref($cmd_arg) eq 'HASH' && (scalar(keys %{$cmd_arg}) eq 1) && defined($cmd_arg->{redact})) {
-			my $size = length($cmd_arg->{redact}//'');
-			$trace_arg = "<redacted:$size bytes>";
-			$cmd_arg = $cmd_arg->{redact};
+		if (_is_redacted_arg($cmd_arg)) {
+			$trace_arg = traced_arg($cmd_arg);
+			$cmd_arg = $cmd_arg->{redact} // '';
+		} elsif ($opts{redact} && $i > 0) {
+			$trace_arg = sprintf("<redacted:%d bytes>", length($cmd_arg // ''));
 		}
 		# FIXME: How to handle undefined values
 		# Opt-in only: arguments are handed to the shell positionally, so they
@@ -923,14 +976,16 @@ sub curl {
 	}
 	push (@flags, "-D", "/dev/stderr")      if  $method ne "HEAD";
 	push @flags, qw/--post301 --post302/    if  $method eq "POST";
-	push @flags, "-H", "$_: $headers->{$_}" for (keys %$headers);
-	push @flags, "-d", $data                if  $data;
+	# Header values, the request body, and the credentials can each carry a
+	# token, so run() traces them redacted.
+	push @flags, "-H", redacted_arg("$_: $headers->{$_}") for (keys %$headers);
+	push @flags, "-d", redacted_arg($data)  if  $data;
 	push @flags, "-k"                       if  $skip_verify;
 	if ($creds) {
 		if ($creds =~ "^Bearer ") {
-			push @flags, "-H", "Authorization: $creds"
+			push @flags, "-H", redacted_arg("Authorization: $creds")
 		} else {
-			push @flags, "-u", $creds
+			push @flags, "-u", {redact => $creds}
 		}
 	}
 	push @flags, "-v"                       if  (envset('GENESIS_DEBUG'));
@@ -939,8 +994,14 @@ sub curl {
 	my $status = "";
 	my $status_line = "";
 
-	trace 'Running cURL: `'.'curl -'.$header_opt.'sSL $url '.join(' ',@flags).'`';
-	my ($out, $rc, $err) = run({ stderr => 0 }, 'curl', '-'.$header_opt.'sSL', $url, @flags);
+	trace 'Running cURL: `'.'curl -'.$header_opt.'sSL $url '.join(' ', map {traced_arg($_)} @flags).'`';
+	# Stderr holds the response headers, and with -v the request headers
+	# too, Authorization included; the headers are traced below by name.
+	# What a credentialed request returns stays out as well.
+	my ($out, $rc, $err) = run(
+		{stderr => 0, redact_stderr => 1, redact_output => ($creds ? 1 : 0)},
+		'curl', '-'.$header_opt.'sSL', $url, @flags
+	);
 	return (599, "Error executing curl command", $err) if ($rc);
 
 	my @data = lines($out, $rc);
@@ -962,7 +1023,7 @@ sub curl {
 	}
 	unshift @$header_src, $line if defined($line);
 
-	dump_var header => join($/,@header_data);
+	dump_var header => join($/, map {_traced_header($_)} @header_data);
 	return  $status, $status_line, join($/, @header_data, @data, @err_data)
 		if ($header_opt eq 'I');
 	return $status, $status_line, $file ? $file : join($/, @data), join($/, @header_data), join($/, @err_data);

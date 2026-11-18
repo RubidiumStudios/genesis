@@ -904,6 +904,12 @@ and stderr. The command is automatically prefixed with C<safe> if not already
 present. C<SAFE_TARGET> is always set to this vault's reference, and C<DEBUG>
 is always cleared.
 
+The value of every C<key=value> argument to C<safe set>, including a
+C<set> chained after another command with C<-->, is passed to C<run>
+wrapped, so the trace shows C<key=E<lt>redacted:N bytesE<gt>>. Every value
+is treated this way, not just ones that look secret. See
+C<_redact_set_values>.
+
 B<Parameters:>
 
 =over 4
@@ -3113,6 +3119,25 @@ Propagates the errors of L</_write_batch>.
 B<Examples:>
 
   $vault->_write_pairs('secret/myapp', {user => 'admin', port => 8080});
+
+=head2 _redact_set_values
+
+  my @cmd = Service::Vault::_redact_set_values(@cmd);
+
+Private function (not a method). Returns C<@cmd> with each C<key=value>
+argument of a C<safe set> wrapped by C<Genesis::redacted_arg>, so C<run>
+hands safe the value but traces C<key=E<lt>redacted:N bytesE<gt>>. The
+subcommand is the first word of the command, after any leading C<safe>,
+and again after each C<-->, so C<('rm', $path, '-f', '--', 'set', $path,
+@pairs)> has its pairs wrapped. Arguments of any other subcommand, and an
+argument already wrapped, are returned as they are.
+
+B<Returns:> The command list.
+
+B<Examples:>
+
+  my @cmd = Service::Vault::_redact_set_values('set', 'secret/x', 'password=abc123');
+  # Returns: ('set', 'secret/x', {redact => 'password=abc123', prefix => 'password='})
 
 =head2 _write_batch
 

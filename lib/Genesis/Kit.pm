@@ -180,8 +180,9 @@ sub run_hook {
 			trace ('got extra env info');
 			for (keys %{$opts{extra_vars}}) {
 				trace(
-					"Overwriting env var #M{%s} with #C{%s} (was #C{%s})",
-					$_, $opts{extra_vars}{$_}, $ENV{$_}
+					"Overwriting env var #M{%s} with %s (was %s)",
+					$_, Genesis::_traced_env_value($_, $opts{extra_vars}{$_}),
+					Genesis::_traced_env_value($_, $ENV{$_})
 				) if exists($ENV{$_});
 				$ENV{$_} = $opts{extra_vars}{$_}
 			}

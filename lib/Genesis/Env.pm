@@ -5215,7 +5215,10 @@ sub update_deployment_exodus {
 		if ($err) {
 			push @errors, "Failed to authenticate to vault: $err";
 		} elsif (@exodus_cmds) {
-			my ($out, $rc, $err) = $self->vault->query({ redact => 1}, @exodus_cmds);
+			# A director's exodus holds its admin and CredHub passwords.  query()
+			# keeps the values of the set out of the trace; run() never read
+			# the `redact` option this passed before.
+			my ($out, $rc, $err) = $self->vault->query({redact_output => 1}, @exodus_cmds);
 			push @errors, "Failed to set exodus data in vault: $err" if $rc;
 		}
 	} else {

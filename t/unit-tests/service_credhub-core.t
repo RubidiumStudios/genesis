@@ -1492,7 +1492,8 @@ subtest 'Phase 5: List/Delete/Query/Execute' => sub {
 
 		$ch->query('/api/v1/data', _data => $body);
 		ok((grep { $_ eq '-d' } @captured_cmd), '-d flag present');
-		ok((grep { $_ eq $body } @captured_cmd), 'data body passed');
+		# The body goes to run() wrapped, so it is traced redacted.
+		ok((grep { (ref($_) eq 'HASH' ? $_->{redact} : $_) eq $body } @captured_cmd), 'data body passed');
 	};
 
 	subtest 'query() — combined _method and _data' => sub {

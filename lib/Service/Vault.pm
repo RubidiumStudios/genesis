@@ -442,13 +442,46 @@ sub initialized {
 sub query {
 	my $self = shift;
 	my $opts = ref($_[0]) eq "HASH" ? shift : {};
-	my @cmd = @_;
+	my @cmd = _redact_set_values(@_);
 	unshift(@cmd, 'safe') unless $cmd[0] eq 'safe' || $cmd[0] =~ /^safe /;
 	$opts->{env} ||= {};
 	$opts->{env}{DEBUG} = ""; # safe DEBUG is disruptive
 	$opts->{env}{SAFE_TARGET} = $self->ref unless defined($opts->{env}{SAFE_TARGET});
 	$opts->{stderr} = 0 unless defined($opts->{stderr});
 	return run($opts, @cmd);
+}
+
+# }}}
+# _redact_set_values - wrap the values of `safe set` pairs for the trace {{{
+#
+# Every value written with `safe set`, in any of the commands chained with
+# `--`, goes to safe as data but to the trace as key=<redacted:N bytes>.
+# All values are redacted, not just the ones that look secret: exodus data,
+# generated secrets, and kit secrets all pass through here.
+sub _redact_set_values {
+	my @cmd = @_;
+	my $sub = '';
+	my $at_start = 1;
+	for my $arg (@cmd) {
+		next if ref($arg);
+		if ($at_start) {
+			# The subcommand is the first word, after any leading `safe`.
+			my @words = split(/\s+/, $arg =~ s/^\s+//r);
+			shift @words if @words && $words[0] eq 'safe';
+			if (@words) {
+				$sub = $words[0];
+				$at_start = 0;
+			}
+			next;
+		}
+		if ($arg eq '--') {
+			$at_start = 1;
+			$sub = '';
+			next;
+		}
+		$arg = Genesis::redacted_arg($arg) if $sub eq 'set' && $arg =~ /=/;
+	}
+	return @cmd;
 }
 
 # }}}
