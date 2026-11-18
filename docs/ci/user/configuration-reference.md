@@ -170,19 +170,32 @@ CI clones the repository by a URL composed from `repository` and `auth.type`: `g
 
 ## pipeline.vault
 
-The deployment vault every pipeline task logs in to, to read secrets, generate missing ones, and write exodus.
+How every pipeline task logs in to the deployment vault, to read secrets, generate missing ones, and write exodus.
 
 ```yaml
 vault:
-  url:       https://vault.example.com
-  namespace: my-namespace          # Vault Enterprise only
   auth:
     type: approle                  # or token
     path: vault/approle            # role_id and secret_id
+```
+
+That is a complete block. Where the vault is comes from the repository's own `secrets_provider`, in the same file: its `url`, its `namespace`, whether TLS is verified (`insecure`), and whether the vault runs without strongbox (`strongbox: false`).
+
+A task that reaches the vault by another address than an operator does says so here, and what the block says wins:
+
+```yaml
+vault:
+  url:       https://vault.internal.example.com
+  namespace: my-namespace          # Vault Enterprise only
+  auth:
+    type: approle
+    path: vault/approle
   options:
     tls_verify:   true
     no_strongbox: false
 ```
+
+A block that names no `url`, in a repository whose `secrets_provider` names none, is refused.
 
 The AppRole's policy and where its credentials are stored are in the operator's guide, *Pipeline Accounts and Permissions*.
 

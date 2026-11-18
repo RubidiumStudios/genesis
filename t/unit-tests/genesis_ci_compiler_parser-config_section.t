@@ -43,6 +43,9 @@ use_ok 'Genesis::CI::Compiler::Parser';
 	sub config { $_[0]->{config} }
 	# The section as control holds it, which for this stand-in is its own.
 	sub pipeline_section { $_[0]->{config}->get('pipeline') }
+	# The vault block as its owner resolves it (D169).  This stand-in has
+	# no secrets_provider to read into it, so it is the block as written.
+	sub pipeline_vault { ($_[0]->pipeline_section || {})->{vault} }
 	sub pipeline_unredacted { (($_[0]->pipeline_section || {})->{unredacted}) ? 1 : 0 }
 	sub type   { $_[0]->{type} }
 	sub path {

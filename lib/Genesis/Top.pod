@@ -2169,6 +2169,61 @@ B<Examples:>
 
     $top->pipeline_secrets_vault->has('/concourse/main/github', 'token');
 
+=head2 pipeline_vault
+
+    my $vault = $top->pipeline_vault;
+
+The vault a pipeline task writes exodus through, as control holds it
+(D169). C<pipeline.vault> says how a task logs in, and where the vault is
+comes from the repository's own C<secrets_provider>, in the same file. This
+answers the block with the repository's vault read into what it leaves
+unsaid, and is what L<Genesis::CI::Compiler::Parser/parse> hands the
+compiler.
+
+=over 4
+
+=item *
+
+C<url> and C<namespace> are C<secrets_provider>'s where the block names
+none.
+
+=item *
+
+C<options.tls_verify> is false where C<secrets_provider.insecure> is true
+and the block does not say. Where the block writes C<options> and says
+nothing of TLS, it is the repository's answer, which is to verify unless
+the repository says insecure.
+
+=item *
+
+C<options.no_strongbox> is true where C<secrets_provider.strongbox> is
+false and the block does not say.
+
+=back
+
+What the block does say wins in each case, for a task that reaches the vault
+by another address than an operator does. A block that says nothing of TLS
+or strongbox, beside a repository that says nothing either, carries no
+C<options>, and a task verifies TLS.
+
+This is not L</pipeline_secrets_vault>, which is the provider's own vault,
+where Concourse resolves the pipeline's references.
+
+B<Returns:> a hash reference of C<url>, C<namespace>, C<auth> and
+C<options>, each where there is one, or undef where the configuration
+carries no C<pipeline.vault>.
+
+B<Errors:> None. The load refuses a block that names no C<url> beside a
+repository that names none, under an automated provider.
+
+B<Examples:>
+
+    # pipeline.vault holds auth alone, and secrets_provider.url is
+    # https://vault.example.com:8200
+    my $vault = $top->pipeline_vault;
+    # {url => 'https://vault.example.com:8200',
+    #  auth => {type => 'approle', path => 'genesis-ci-approle'}}
+
 =head2 pipeline_section
 
     my $section = $top->pipeline_section();
@@ -4836,6 +4891,44 @@ B<Examples:>
     my $bool = _automated_provider_configured({}, $config);
     # returns 1 where pipeline.provider.type is concourse
     # returns 0 where the pipeline is off, or the provider is manual
+
+=head2 _repository_names_no_vault
+
+    my $bool = _repository_names_no_vault($siblings, $config);
+
+Whether the repository's C<secrets_provider> gives no C<url>. It is the
+predicate the C<required> flag of C<pipeline.vault.url> reads (D169): the
+block takes its vault from the repository's own, so it has to name one only
+where the repository names none.
+
+Plain function, not a method: C<Genesis::Config> calls it through the
+C<required> flag rather than through an object.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$siblings>
+
+Hash reference of the values beside the key being judged. Unused here,
+because C<secrets_provider> sits elsewhere in the configuration.
+
+=item C<$config>
+
+The C<Genesis::Config> being validated, which the predicate reads
+C<secrets_provider.url> from.
+
+=back
+
+B<Returns:> 1 where the repository names no vault, 0 where it names one.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $bool = _repository_names_no_vault({}, $config);
+    # returns 0 where secrets_provider.url is set
+    # returns 1 where there is no secrets_provider, or it has no url
 
 =head2 _source_control
 

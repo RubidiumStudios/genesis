@@ -132,6 +132,9 @@ sub _parse_genesis_config {
 	# Every declared block the compiler uses reaches it (T382).
 	my %integ;
 	$integ{$_} = $data->{$_} for grep {$data->{$_}} qw/vault locker notifications shuttle redeploy/;
+	# The vault block as its owner resolves it, with the repository's own
+	# vault read into what the block leaves unsaid (D169).
+	$integ{vault} = $self->{top}->pipeline_vault if $integ{vault} && $self->{top};
 	$integ{source_control} = $self->_source_control_model($data->{source_control})
 		if $data->{source_control};
 	$parsed{integrations} = \%integ;

@@ -1873,6 +1873,42 @@ sub pipeline_secrets_vault {
 }
 
 # }}}
+# pipeline_vault - the vault a pipeline task writes exodus through, or undef (D169) {{{
+sub pipeline_vault {
+	my ($self) = @_;
+	my $config = $self->_shape->config;
+	my $block  = $config->get('pipeline.vault');
+	return undef unless ref($block) eq 'HASH';
+
+	# Where the vault is comes from the repository's own, in the same file.
+	# What the block says of it wins.
+	my $repository = $config->get('secrets_provider');
+	$repository = {} unless ref($repository) eq 'HASH';
+
+	my %vault = %$block;
+	for my $key (qw/url namespace/) {
+		$vault{$key} = $repository->{$key}
+			if !(defined $vault{$key} && length $vault{$key})
+			&& defined $repository->{$key} && length $repository->{$key};
+	}
+
+	# Each option the block leaves unsaid takes the repository's answer.  A
+	# block that says nothing at all of either, beside a repository that
+	# says nothing either, carries no options, and a task verifies TLS.
+	my %options = %{ref($block->{options}) eq 'HASH' ? $block->{options} : {}};
+	$options{tls_verify} = $repository->{insecure} ? 0 : 1
+		if !defined $options{tls_verify}
+		&& ($repository->{insecure} || exists $block->{options});
+	$options{no_strongbox} = 1
+		if !defined $options{no_strongbox}
+		&& defined $repository->{strongbox} && !$repository->{strongbox};
+	delete $vault{options};
+	$vault{options} = \%options if %options;
+
+	return \%vault;
+}
+
+# }}}
 # pipeline_section - the pipeline section of the configuration, as control holds it {{{
 #
 # For a reader that takes the whole block, such as the compiler's parser, so
@@ -3151,14 +3187,15 @@ sub _pipeline_config_schema {
 				},
 			},
 
-			# The vault a pipeline task writes exodus through.
+			# How a pipeline task logs in to the vault it writes exodus
+			# through.  Where that vault is comes from secrets_provider (D169).
 			vault => {
 				type        => 'hash',
 				required    => \&_automated_provider_configured,
-				description => 'The vault a pipeline task writes exodus through',
+				description => 'How a pipeline task logs in to the vault it writes exodus through',
 				schema => {
-					url       => {type => 'string', required => 1, description => 'Vault URL'},
-					namespace => {type => 'string', description => 'Vault namespace'},
+					url       => {type => 'string', required => \&_repository_names_no_vault, description => "Vault URL, where it is not the repository's secrets_provider.url"},
+					namespace => {type => 'string', description => "Vault namespace, where it is not the repository's"},
 					auth      => _credential_schema(vault => 'The task credential, as a type and its vault paths'),
 					# Typed, so a value set as text reads as the boolean it names.
 					options   => {
@@ -3432,6 +3469,14 @@ sub _automated_provider_configured {
 	return 0 unless $config && $config->get('pipeline.enabled');
 	my $type = $config->get('pipeline.provider.type', 'manual') // 'manual';
 	return $type eq 'manual' ? 0 : 1;
+}
+
+# }}}
+# _repository_names_no_vault - true where secrets_provider gives no url for pipeline.vault to take (D169) {{{
+sub _repository_names_no_vault {
+	my ($siblings, $config) = @_;
+	my $url = $config ? $config->get('secrets_provider.url') : undef;
+	return (defined $url && length $url) ? 0 : 1;
 }
 
 # }}}
