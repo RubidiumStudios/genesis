@@ -767,27 +767,95 @@ offer_environment_editor() {
 }
 export -f offer_environment_editor
 
+# __genesis_exact_value VAR CMD... - run CMD, and set VAR to what it printed
+# byte for byte, less the one newline that safe and the CredHub reader end
+# a value with.  Command substitution alone drops every trailing newline,
+# which would change a value that ends in one.  Returns CMD's exit status.
+__genesis_exact_value() {
+  local __var="$1" __got __rc ; shift
+  __got="$("$@" && printf x)" && __rc=0 || __rc=$?
+  [[ $__rc -eq 0 ]] || return $__rc
+  __got="${__got%x}"
+  printf -v "$__var" '%s' "${__got%$'\n'}"
+}
+export -f __genesis_exact_value
+
+# __genesis_vault_version SECRET - the newest version of a kv v2 secret,
+# or nothing on a mount that keeps no versions.
+__genesis_vault_version() {
+  safe versions "$1" 2>/dev/null \
+    | sed -e $'s/\x1b\\[[0-9;]*m//g' \
+    | awk '$1 ~ /^[0-9]+$/ && $1+0 > v+0 {v=$1} END {if (v+0 > 0) print v}'
+}
+export -f __genesis_vault_version
+
+# __genesis_credhub_value NAME - print a CredHub value exactly as stored
+__genesis_credhub_value() {
+  credhub get -n "$1" -j 2>/dev/null \
+    | /usr/bin/perl -MJSON::PP -0777 -e '
+        my $d = eval {JSON::PP->new->utf8->decode(scalar(<STDIN>) // "")};
+        exit 2 unless ref($d) eq "HASH" && defined($d->{value}) && !ref($d->{value});
+        binmode STDOUT, ":utf8"; print $d->{value}, "\n";'
+}
+export -f __genesis_credhub_value
+
 move_secrets_to_credhub() {
   # The value passes through this function, so it is never traced, even
-  # when the operator has asked for the hook's xtrace.
-  local value src="$1" dst="$2" rc __xtrace=''
+  # when the operator has asked for the hook's xtrace, and no message
+  # below quotes it or anything safe or credhub printed.
+  local value check src="$1" dst="$2" rc __xtrace='' secret key='' version='' now from
   { [[ $- == *x* ]] && __xtrace=1 && set +x; } 2>/dev/null
-  value="$(safe get "${GENESIS_SECRETS_BASE}$src")" && rc=0 || rc=$?
+  secret="${GENESIS_SECRETS_BASE}${src%%:*}"
+  [[ "$src" == *:* ]] && key=":${src#*:}"
+
+  # On a kv v2 mount, the newest version is read by its number, so the
+  # copy, the checks, and the delete are all about that one version.
+  version="$(__genesis_vault_version "$secret")"
+  from="$secret${version:+^$version}$key"
+  __genesis_exact_value value safe get "$from" && rc=0 || rc=$?
   if [[ $rc -gt 0 ]] ; then
     [[ -n $__xtrace ]] && set -x
     bail "#R{[ERROR]} Failed to read secret #C{$1} from vault: safe exited $rc"
   fi
-  result="$(credhub set -n "/$GENESIS_CREDHUB_ROOT/$dst" -t value -v "$value" 2>&1)" && rc=0 || rc=$?
-  value=''
-  [[ -n $__xtrace ]] && set -x
+  credhub set -n "/$GENESIS_CREDHUB_ROOT/$dst" -t value -v "$value" >/dev/null 2>&1 && rc=0 || rc=$?
   if [[ $rc -gt 0 ]] ; then
+    value=''; [[ -n $__xtrace ]] && set -x
     # What credhub printed can echo the request, so only its exit status is
     # reported.
     bail "#R{[ERROR]} Failed to store secret #C{$1} under credhub path #C{$2}: credhub exited $rc"
   fi
-  result="$(safe rm "${GENESIS_SECRETS_BASE}$src" 2>&1)"
-  if [[ $? -gt 0 ]] ; then
-    bail "#R{[ERROR]} Failed to remove secret #C{$1} from vault:" "$result"
+
+  # Nothing is deleted until CredHub is shown to hold the very same bytes,
+  # and vault is shown to still hold what was copied.
+  check=''
+  __genesis_exact_value check __genesis_credhub_value "/$GENESIS_CREDHUB_ROOT/$dst" && rc=0 || rc=$?
+  if [[ $rc -gt 0 || "$check" != "$value" ]] ; then
+    value=''; check=''; [[ -n $__xtrace ]] && set -x
+    bail "#R{[ERROR]} The value CredHub holds under #C{$2} does not match secret #C{$1} " \
+         "(credhub read exited $rc), so the vault secret was left in place."
+  fi
+  now="$(__genesis_vault_version "$secret")"
+  check=''
+  __genesis_exact_value check safe get "$secret$key" && rc=0 || rc=$?
+  if [[ $rc -gt 0 || "$now" != "$version" || "$check" != "$value" ]] ; then
+    value=''; check=''; [[ -n $__xtrace ]] && set -x
+    bail "#R{[ERROR]} Secret #C{$1} changed in vault while it was being copied to CredHub " \
+         "(or could not be read again), so it was left in place; run this again to copy " \
+         "its current value."
+  fi
+  value=''; check=''
+
+  # A versioned secret holding nothing but this key loses just the version
+  # that was copied; one holding other keys loses only this key.
+  if [[ -n $version && -n $key && "$(safe get --keys "$secret^$version" 2>/dev/null)" == "${key#:}" ]] ; then
+    from="$secret^$version"
+  else
+    from="$secret$key"
+  fi
+  safe rm "$from" >/dev/null 2>&1 && rc=0 || rc=$?
+  [[ -n $__xtrace ]] && set -x
+  if [[ $rc -gt 0 ]] ; then
+    bail "#R{[ERROR]} Copied secret #C{$1} to CredHub, but failed to remove it from vault: safe exited $rc"
   fi
 }
 export -f move_secrets_to_credhub

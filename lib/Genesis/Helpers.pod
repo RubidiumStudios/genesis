@@ -1385,6 +1385,13 @@ C</$GENESIS_CREDHUB_ROOT/DST_PATH>, then removes the source secret from
 Vault. The value is never traced, so the function turns off a hook's
 xtrace while it holds the value and turns it back on afterward.
 
+The value travels byte for byte, trailing newlines included. Nothing is
+removed from Vault until CredHub is read back and shown to hold the same
+bytes, and Vault is read again and shown to still hold what was copied.
+On a kv v2 mount, the newest version is read by its number, and a secret
+whose only key is the one moved loses just that version; a secret with
+other keys loses only the moved key.
+
 B<Parameters:>
 
 =over 4
@@ -1410,6 +1417,18 @@ removed.
 Calls C<bail> with C<"[ERROR] Failed to store secret $SRC_PATH under
 credhub path $DST_PATH: credhub exited RC"> if C<credhub set> fails. What
 credhub printed is left out, since it can echo the request.
+
+Calls C<bail> without removing anything if CredHub does not hold exactly
+the value read, or if the Vault secret changed, gained a version, or could
+not be read again while it was being copied.  Running the function again
+copies the current value.
+
+Calls C<bail> with C<"[ERROR] Copied secret $SRC_PATH to CredHub, but
+failed to remove it from vault: safe exited RC"> if C<safe rm> fails.
+
+The internal helpers C<__genesis_exact_value>, C<__genesis_vault_version>,
+and C<__genesis_credhub_value> read a command's output exactly, find the
+newest version of a kv v2 secret, and read a CredHub value exactly.
 
 B<Examples:>
 

@@ -27,12 +27,17 @@ my $dir = tempdir(CLEANUP => 1);
 mkdir "$dir/bin";
 mkdir "$dir/kit";
 mkdir "$dir/kit/hooks";
-for my $name (qw/credhub bosh/) {
-	put_file("$dir/bin/$name", 0755, join("\n",
-		'#!/bin/bash',
-		qq(for a in "\$@"; do printf '%s\\n' "\$a"; done >> "$dir/argv-$name"),
-		'exit 0', ''));
-}
+put_file("$dir/bin/bosh", 0755, join("\n",
+	'#!/bin/bash',
+	qq(for a in "\$@"; do printf '%s\\n' "\$a"; done >> "$dir/argv-bosh"),
+	'exit 0', ''));
+# The fake CredHub answers the read-back the move makes before it deletes
+# anything, and records only the arguments of the write.
+put_file("$dir/bin/credhub", 0755, join("\n",
+	'#!/bin/bash',
+	q([[ $1 == get ]] && exec perl -MJSON::PP -e 'print encode_json({value => $ENV{FAKE_VAULT_VALUE}})'),
+	qq(for a in "\$@"; do printf '%s\\n' "\$a"; done >> "$dir/argv-credhub"),
+	'exit 0', ''));
 put_file("$dir/bin/safe", 0755, join("\n",
 	'#!/bin/bash',
 	qq(for a in "\$@"; do printf '%s\\n' "\$a"; done >> "$dir/argv-safe"),
