@@ -441,7 +441,7 @@ sub upload_runtime_config {
 	my ($out, $rc, $err) = $self->bosh->upload_config($config_data, 'runtime', $config_name);
 	if ($rc) {
 		info("#R{failed}".pretty_duration(gettimeofday() - $start_time));
-		error("Failed to upload %s runtime config: %s", $description, $err||$out);
+		error("Failed to upload %s runtime config: bosh exited %d (%s)", $description, $rc, Genesis::failure_summary($err, $out));
 		delete $self->{secrets}{$build};
 		return undef;
 	}
@@ -595,7 +595,7 @@ sub _get_runtime_configs {
 	my @cmd = ('configs', '--type=runtime', '--json');
 	push @cmd, '--name='.$name if $name;
 	my ($data, $rc, $err) = read_json_from($self->bosh->execute(@cmd));
-	bail("Failed to get runtime configs: %s", $err) if $rc;
+	bail("Failed to get runtime configs: bosh exited %d (%s)", $rc, Genesis::failure_summary($err)) if $rc;
 	return $data->{Tables}[0]{Rows};
 }
 

@@ -69,7 +69,7 @@ sub create_policy {
 	);
 
 	if ($rc) {
-		bail("Failed to create policy #C{$policy_name}: $output");
+		bail("Failed to create policy #C{$policy_name}: safe exited %d (%s)", $rc, Genesis::failure_summary($output));
 	}
 
 	info("#G{[OK]} Policy #C{$policy_name} created");
@@ -141,7 +141,7 @@ sub create_approle {
 	my ($output, $rc) = $self->vault->query('vault write', @args);
 
 	if ($rc) {
-		bail("Failed to create AppRole #C{$role_name}: $output");
+		bail("Failed to create AppRole #C{$role_name}: safe exited %d (%s)", $rc, Genesis::failure_summary($output));
 	}
 
 	info("#G{[OK]} AppRole #C{$role_name} created");

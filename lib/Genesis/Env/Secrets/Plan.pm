@@ -345,7 +345,7 @@ sub generate_secrets {
 					$self->notify(@update_args, 'done-item', result => 'ok')
 				}
 			} else {
-				$self->notify(@update_args, 'done-item', result => 'error', msg => $out);
+				$self->notify(@update_args, 'done-item', result => 'error', msg => _command_failure($out, $rc, $err));
 			}
 			last if ($rc);
 		}
@@ -487,7 +487,7 @@ sub regenerate_secrets {
 			} elsif ($rc == '0') {
 				$self->notify(@update_args, 'done-item', result => 'ok', msg => $out||undef)
 			} else {
-				$self->notify(@update_args, 'done-item', result => 'error', msg => $out);
+				$self->notify(@update_args, 'done-item', result => 'error', msg => _command_failure($out, $rc, $err));
 			}
 			last if ($rc);
 		}
@@ -1312,7 +1312,7 @@ sub _remove_secrets {
 			}
 		}
 
-		my ($result, $msg, $out, $rc, @command) = ();
+		my ($result, $msg, $out, $rc, $err, @command) = ();
 		if ($source eq 'credhub') {
 			# Credhub - to be implemented
 			my $credhub = $self->env->credhub;
@@ -1328,7 +1328,7 @@ sub _remove_secrets {
 			bug (
 				"Interactive removal of secrets is not yet supported"
 			) if $cmd_interactive;
-			($out, $rc) = $secret->process_command_output('remove', $self->store->service->query(@command));
+			($out, $rc, $err) = $secret->process_command_output('remove', $self->store->service->query(@command));
 			$secret->reset;
 		} else {
 			bug "Unknown secret type for removal";
@@ -1337,7 +1337,7 @@ sub _remove_secrets {
 		if ($rc == '0') {
 			$self->notify('remove', 'done-item', result => 'ok', msg => $out||undef)
 		} else {
-			$self->notify('remove', 'done-item', result => 'error', msg => $out);
+			$self->notify('remove', 'done-item', result => 'error', msg => _command_failure($out, $rc, $err));
 		}
 		last if ($rc);
 	}
@@ -1351,5 +1351,20 @@ sub _remove_secrets {
 # }}}
 # }}}
 
+
+# _command_failure - describe a failed secret command without its output {{{
+#
+# What safe or credhub prints on a failure can quote the secret it was
+# working on, so the message names the exit code and the kinds of failure
+# the streams matched.  A command that exited 0 but printed something
+# unexpected is described by the size of what it printed.
+sub _command_failure {
+	my ($out, $rc, $err) = @_;
+	return sprintf("command exited %d (%s)", $rc, Genesis::failure_summary($out, $err)) if $rc;
+	return sprintf("command printed %d bytes of unexpected output, withheld since it can quote the secret",
+		length($out // ''));
+}
+
+# }}}
 1;
 # vim: fdm=marker:foldlevel=1:noet

@@ -485,7 +485,7 @@ sub upload_runtime_configs {
 	my ($out, $rc, $err) = $env->run_hook('runtime-config', args => $runtime_opts, interactive => $self->{interactive});
 
 	if ($rc) {
-		error("Failed to successfully run runtime config hook: %s", $err);
+		error("Failed to successfully run runtime config hook: it exited %d", $rc);
 		return 0;
 	}
 	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));

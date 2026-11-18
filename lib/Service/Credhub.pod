@@ -639,10 +639,10 @@ no credentials match.
 
 B<Errors:>
 
-Dies with C<"Could not list CredHub paths under %s:%s\n\n[Exit Code: %s]">
+Dies with C<"Could not list CredHub paths under %s: credhub exited %d (%s)">
 if the C<credhub find> command fails for a reason other than no matching
-credentials. C<%s> placeholders are the filter or base path, optional
-stderr output, and the exit code.
+credentials. The placeholders are the filter or base path, the exit code,
+and C<Genesis::failure_summary> of credhub's stderr.
 
 B<Examples:>
 

@@ -480,7 +480,8 @@ sub _process_running {
 	trace "Checking for process ID $pid...";
 	my $out = scalar(qx(ps -o 'pid,command' -p $pid | grep '^\\s*$pid'));
 	my $rc = $? >> 8;
-	trace "[rc: $rc] $out";
+	# The process's command line can carry the vault's root token.
+	trace "[rc: $rc] %d bytes of ps output omitted", length($out // '');
 	return $rc == '0';
 }
 # }}}

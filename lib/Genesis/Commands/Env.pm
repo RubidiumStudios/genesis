@@ -1328,7 +1328,7 @@ sub deploy {
 					mkdir($diff_dir) unless -d $diff_dir;
 					mkfile_or_fail($new_path, 0644, $cloud_config);
 					my ($out, $rc, $err) = run( 'spruce merge --skip-eval $1 > $2',$new_path,$new_path_diff);
-					bail "Error generating cloud config for diff: %s", $err//$out if $rc;
+					bail "Error generating cloud config for diff: spruce exited %d (%s)", $rc, Genesis::failure_summary($err, $out) if $rc;
 					info "[[  - >>checking for existing cloud config on #M{%s} BOSH director...", $env->bosh->{alias};
 					if ($env->bosh->has_config('cloud',$cloud_config_name)) {
 						my $old_path = "$cloud_config_dir/current-${cloud_config_name}.yml";
@@ -1359,10 +1359,9 @@ sub deploy {
 									# Upload the new cloud config
 									$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
 								} or bail(
-									"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
+									"Failed to upload cloud config %s to BOSH director: %s",
 									$cloud_config_name,
-									fix_wrap($@),
-									slurp($new_path)
+									fix_wrap($@)
 								);
 								$uploaded = 1;
 								info "[[  - >>cloud config for #C{%s} deployment has been updated.\n", $env->name;
@@ -1384,10 +1383,9 @@ sub deploy {
 						eval {
 							$env->bosh->upload_config_from_file($new_path,'cloud',$cloud_config_name);
 						} or bail(
-							"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
+							"Failed to upload cloud config %s to BOSH director: %s",
 							$cloud_config_name,
-							fix_wrap($@),
-							slurp($new_path)
+							fix_wrap($@)
 						);
 						$uploaded = 1;
 						info "[[  - >>cloud config for #C{%s} deployment has been created.\n", $env->name;
@@ -1844,7 +1842,7 @@ sub _format_deploy_feature_opt_in {
 sub _deploy_cloud_config_diff {
 	my ($old_path, $new_path) = @_;
 	my ($out, $rc) = spruce_diff($old_path, $new_path);
-	bail("Error comparing cloud configs: %s", $out || "spruce diff exited $rc with no output")
+	bail("Error comparing cloud configs: spruce diff exited %d (%s)", $rc, Genesis::failure_summary($out))
 		if $rc > 1;
 	return '' unless $rc;
 	$out =~ s/\(root level\)/<root>/m;

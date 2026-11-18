@@ -363,15 +363,20 @@ subtest 'process_command_output filters add output' => sub {
 	is($rc, 0, "return code preserved");
 };
 
-subtest 'process_command_output preserves non-add output' => sub {
+subtest 'process_command_output filters a rotated value and keeps other output' => sub {
 	local $ENV{GENESIS_SKIP_SECRET_DEFINITION_VALIDATION} = 1;
 
 	my $secret = Genesis::Secret::UUID->new('some/path:mykey', version => 'v4');
 
+	# The rotated value is reported as a done-item message, so it is
+	# filtered out just as it is when the secret is added.
 	my $output = "mykey: 550e8400-e29b-41d4-a716-446655440000";
 	my ($filtered, $rc, $err) = $secret->process_command_output('rotate', $output, 0, '');
+	is($filtered, '', "the rotated value is filtered out");
 
-	is($filtered, $output, "output preserved for non-add actions");
+	$output = "mykey: 550e8400-e29b-41d4-a716-446655440000";
+	($filtered) = $secret->process_command_output('remove', $output, 0, '');
+	is($filtered, $output, "output preserved for other actions");
 };
 
 # ------------------------------------------------------------------------------

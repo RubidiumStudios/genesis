@@ -289,10 +289,9 @@ sub paths {
 	if ($rc) {
 		$err = decolorize($err) =~ s/\AWARNING: Two different login methods were detected.*?\n\n\n//sr =~ s/^\s+|\s+\z//gr;
 		bail(
-			"Could not list CredHub paths under #c{%s}:%s\n\n[Exit Code: %s]",
+			"Could not list CredHub paths under #c{%s}: credhub exited %d (%s)",
 			defined($filter) ? $filter : $self->{base},
-			$err ? "\n\n#rui{STDERR:}\n$err" : '',
-			$rc
+			$rc, Genesis::failure_summary($err)
 		) unless $err =~ /^No credentials exist which match/;
 		return ();
 	}

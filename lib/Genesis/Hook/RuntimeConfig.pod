@@ -1046,8 +1046,9 @@ B<Errors:>
 
 =item *
 
-C<"Failed to get runtime configs: %s"> -- raised via C<bail()> if the BOSH
-command fails. C<%s> is replaced with the error output.
+C<"Failed to get runtime configs: bosh exited %d (%s)"> -- raised via C<bail()>
+if the BOSH command fails. The placeholders are bosh's exit code and
+C<Genesis::failure_summary> of its stderr.
 
 =back
 

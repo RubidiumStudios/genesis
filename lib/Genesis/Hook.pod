@@ -884,9 +884,9 @@ is replaced with the unrecognized argument.
 
 =item *
 
-C<"Failed to merge spruce files: %s"> -- raised via C<bail()> in scalar
-context if C<spruce merge> exits with a non-zero status. C<%s> is replaced
-with the error output from C<spruce>.
+C<"Failed to merge spruce files: spruce exited %d (%s)"> -- raised via C<bail()>
+in scalar context if C<spruce merge> exits with a non-zero status. The
+placeholders are spruce's exit code and C<Genesis::failure_summary> of what it printed.
 
 =back
 

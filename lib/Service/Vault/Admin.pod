@@ -200,10 +200,11 @@ Thrown when C<$policy_name> is undefined or empty.
 
 Thrown when C<$policy_content> is undefined or empty.
 
-=item C<"Failed to create policy E<lt>policy_nameE<gt>: E<lt>outputE<gt>">
+=item C<"Failed to create policy E<lt>policy_nameE<gt>: safe exited %d (%s)">
 
 Thrown when the C<vault policy write> command exits with a non-zero status.
-The policy name and vault command output are interpolated into the message.
+The message names the policy, the exit code, and C<Genesis::failure_summary> of
+the command's output.
 
 =back
 
@@ -330,10 +331,11 @@ B<Errors:>
 
 Thrown when C<$role_name> is undefined or empty.
 
-=item C<"Failed to create AppRole E<lt>role_nameE<gt>: E<lt>outputE<gt>">
+=item C<"Failed to create AppRole E<lt>role_nameE<gt>: safe exited %d (%s)">
 
 Thrown when the C<vault write> command exits with a non-zero status. The
-role name and vault command output are interpolated into the message.
+message names the role, the exit code, and C<Genesis::failure_summary> of the
+command's output.
 
 =back
 

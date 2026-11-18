@@ -120,8 +120,8 @@ for my $os (qw/darwin linux/) {
 		$ENV{FAKE_SPRUCE_RC} = 2;
 		throws_ok {
 			stderr_from { Genesis::Commands::Env::_deploy_cloud_config_diff("$tmp/old.yml", "$tmp/new.yml") }
-		} qr/Error comparing cloud configs:.*unable to parse data from/s,
-			'a spruce failure aborts the deploy and says what spruce said';
+		} qr/Error comparing cloud configs: spruce diff exited 2 \(could not parse its input\)/,
+			'a spruce failure aborts the deploy and says what kind of failure it was';
 	};
 
 	subtest "the job spec comparison reads spruce's exit code on $os" => sub {

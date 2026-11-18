@@ -440,7 +440,8 @@ sub deploy {
 	my $k_flag = $insecure ? ' -k' : '';
 
 	# Pause pipeline before updating (safe to do even when not found yet)
-	my ($out, $rc) = run(
+	# fly names the pipeline and its own errors here, never a credential.
+	my ($out, $rc) = run({public_output => 1},
 		"fly${k_flag} -t \$1 pause-pipeline -p \$2",
 		$target, $pipeline_name
 	);

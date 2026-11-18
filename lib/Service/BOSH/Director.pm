@@ -403,7 +403,9 @@ sub status {
 	}
 
 	($err,$rc) = ($@,70)if ($@); # 70 is EX_SOFTWARE in sysexits.h,denoting internal software error
-	return {status => 'error', msg => $err} if ($rc);
+	# bosh's stderr is described, never shown; an exception from execute
+	# is Genesis's own message.
+	return {status => 'error', msg => ($@ ? $err : sprintf("bosh env exited %d (%s)", $rc, Genesis::failure_summary($err, $out)))} if ($rc);
 	return {status => 'unauthorized', msg => 'not logged in'} if ($out =~ /\(not logged in\)/);
 
 	# `bosh env --json` transposes its table, so the whole director summary

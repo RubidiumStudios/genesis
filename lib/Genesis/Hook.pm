@@ -223,7 +223,7 @@ sub spruce_merge {
 
 	my ($out, $rc, $err) = run($opts, 'spruce','merge', @spruce_opts, @files);
 	return ($out, $rc, $err) if wantarray; # allows caller to handle errors
-	bail "Failed to merge spruce files: %s", $err if $rc;
+	bail "Failed to merge spruce files: spruce exited %d (%s)", $rc, Genesis::failure_summary($err, $out) if $rc;
 	return $out;
 }
 

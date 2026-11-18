@@ -76,7 +76,8 @@ EOF
 	my $bosh = proxied_director();
 	my $status = $bosh->status();
 	is($status->{status}, 'error', 'status is error');
-	like($status->{msg}, qr/connection refused/, 'message carries the bosh error');
+	like($status->{msg}, qr/bosh env exited 1 \(connection failed\)/, 'message names the exit code and kind of failure');
+	unlike($status->{msg}, qr/dial tcp/, 'without repeating what bosh printed');
 	ok(!$bosh->{validated}, 'director is not marked validated');
 	is(alarm(0), 0, 'no alarm is left pending');
 };

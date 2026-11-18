@@ -492,7 +492,11 @@ sub _import_from_credhub {
 		push(@cmd, '--signed-by', $signed_by);
 	}
 	my ($out, $rc, $err) = $self->plan->store->service->query(@cmd);
-	return ('error', $out."\n".($err||'')) unless $rc == 0 && $out =~ /^\s*Renewed x509 certificate at/;
+	# safe's own messages can quote the certificate, so they are described.
+	return ('error', $rc
+		? sprintf("safe x509 renew exited %d (%s)", $rc, Genesis::failure_summary($out, $err))
+		: "safe x509 renew did not report renewing the certificate"
+	) unless $rc == 0 && $out =~ /^\s*Renewed x509 certificate at/;
 
 	# load secret and check that it contains crl and serial
 	$self->load();

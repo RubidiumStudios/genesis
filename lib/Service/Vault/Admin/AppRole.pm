@@ -24,7 +24,7 @@ sub enabled {
 	my ($auths, $rc, $err) = read_json_from(
 		$self->vault->query(qw/vault auth list --format=json/)
 	);
-	bail("Failed to list auth methods: $err") if $rc;
+	bail("Failed to list auth methods: safe exited %d (%s)", $rc, Genesis::failure_summary($err)) if $rc;
 	return exists $auths->{'approle/'};
 
 }
@@ -35,7 +35,7 @@ sub enable {
 	return 1 if $self->enabled();
 
 	my ($output, $rc, $err) = $self->vault->query(qw/vault auth enable approle/);
-	bail("Failed to enable AppRole auth method: %s", $err // '(no error message)')
+	bail("Failed to enable AppRole auth method: safe exited %d (%s)", $rc, Genesis::failure_summary($err, $output))
 		if $rc;
 	return 1;
 }

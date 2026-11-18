@@ -29,7 +29,7 @@ sub generate_value {
 # }}}
 sub process_command_output {
 	my ($self, $action, $out, $rc, $err) = @_;
-	return ($out, $rc, $err) unless $action eq 'add';
+	return ($out, $rc, $err) unless $action eq 'add' || $action eq 'rotate';
 	$out = join("\n",
 		grep {
 			my (undef, $key) = split(':',$self->path);

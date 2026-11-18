@@ -184,7 +184,7 @@ sub broadcast {
 	my $env = Genesis::Top->new('.')->load_env($env_name)->with_vault()->with_bosh();
 	my $bosh = $env->bosh;
 	my ($out,$rc, $err) = read_json_from($bosh->execute({interactive => 0}, 'vms', '--json'));
-	bail("Failed to fetch VM list: %s", $err) if $rc;
+	bail("Failed to fetch VM list: bosh exited %d (%s)", $rc, Genesis::failure_summary($err)) if $rc;
 	my @vms = ();
 	eval {
 		@vms = @{$out->{Tables}[0]{Rows}};
@@ -220,7 +220,7 @@ sub broadcast {
 		info("#g{Broadcasting to }#C{%s}#g{...}", $target);
 		info('-' x terminal_width());
 		my ($out, $rc, $err) = $bosh->execute({interactive => 1}, 'ssh', $target, '--', @extra_args);
-		error("Failed to broadcast to %s: %s", $target, $err) if $rc;
+		error("Failed to broadcast to %s: bosh exited %d", $target, $rc) if $rc;
 	}
 
 	info("\n" . ('=' x terminal_width()));
@@ -1101,8 +1101,8 @@ sub _bosh_configs_upload_cloud {
 	if ($rc) {
 		info "#R{failed}";
 		bail(
-			"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s",
-			$config->{name}, fix_wrap($err // $out // ''), $config->{content}
+			"Failed to upload cloud config %s to BOSH director: bosh exited %d (%s)",
+			$config->{name}, $rc, Genesis::failure_summary($err, $out)
 		);
 	}
 	info "#G{done}";

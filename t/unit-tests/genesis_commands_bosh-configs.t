@@ -991,7 +991,8 @@ subtest 'bosh_configs_upload - a release that fails keeps the original error and
 	my ($out, $stderr) = output_from {
 		eval { Genesis::Commands::Bosh::bosh_configs_upload($env, $parent, yes => 1, type => 'cloud'); 1 } or $err = $@;
 	};
-	like($err // '', qr/director refused the cloud config/, 'the upload\'s own error is the one passed on');
+	like($err // '', qr/Failed to upload cloud config .*bosh exited 1/, 'the upload\'s own failure is the one passed on');
+	unlike($err // '', qr/director refused the cloud config/, 'described, since bosh can quote the config');
 	like($out.$stderr, qr/lab-ocf.*could not be released.*Vault is sealed/s, 'the failed release is logged, with why');
 	ok(defined(call_index('clear_network_lock', 'lab-mgmt')), 'and the parent director\'s lock is still released')
 		or diag explain \@director_calls;

@@ -286,10 +286,10 @@ B<Errors:>
 
 =over 4
 
-=item C<"Failed to fetch VM list: %s">
+=item C<"Failed to fetch VM list: bosh exited %d (%s)">
 
-Raised (via C<bail()>) when the C<bosh vms --json> call fails.  The C<%s>
-placeholder contains the error output from the BOSH CLI.
+Raised (via C<bail()>) when the C<bosh vms --json> call fails.  The
+placeholders are bosh's exit code and C<Genesis::failure_summary> of its stderr.
 
 =item C<"Failed to parse VM list: %s">
 
@@ -1472,9 +1472,11 @@ B<Errors:>
 
 Raised (via C<bail()>) when the lock is gone at upload time.
 
-=item C<"Failed to upload cloud config %s to BOSH director: %s\n\nContent:\n%s">
+=item C<"Failed to upload cloud config %s to BOSH director: bosh exited %d (%s)">
 
-Raised (via C<bail()>) when the bosh upload fails.
+Raised (via C<bail()>) when the bosh upload fails.  The placeholders are the
+config name, bosh's exit code, and C<Genesis::failure_summary> of what bosh printed.
+The config itself is left out, since a config can carry credentials.
 
 =item C<"Cloud config %s %s, but the network map could not be updated at %s:\n\n%s\n\n...">
 

@@ -2399,7 +2399,7 @@ sub upload_director_cpi_config {
 	my ($out, $rc, $err) = $bosh->upload_config($config, 'cpi', $bosh_config_name);
 	if ($rc) {
 		info("#G{failed}" . pretty_duration(gettimeofday - $tstart, 2, 5));
-		error("Failed to upload the cpi-config: %s", $err);
+		error("Failed to upload the cpi-config: bosh exited %d (%s)", $rc, Genesis::failure_summary($err, $out));
 		return 0;
 	}
 	info("#G{done}" . pretty_duration(gettimeofday - $tstart, 2, 5));
@@ -5887,8 +5887,8 @@ sub remove_secrets {
 			output {pending => 1}, "Deleting existing secrets under '#C{%s}'...", $store->base;
 			my ($out,$rc) = $store->service->query('rm', '-rf', $store->base);
 			if ($rc) {
-				my $msg = "Failed to remove secrets under '#C{%s}':\n%s";
-				return ({error => 1}, sprintf($msg, $store->base, $out));
+				my $msg = "Failed to remove secrets under '#C{%s}': safe exited %d (%s)";
+				return ({error => 1}, sprintf($msg, $store->base, $rc, Genesis::failure_summary($out)));
 			}
 			return ({success => 1}, "#G{All applicable secrets removed.}");
 		}
@@ -5955,8 +5955,8 @@ sub remove_secrets {
 		$self->secrets_plan->reset_secrets;
 
 		if ($rc) {
-			my $msg = "Failed to remove secrets under '#C{%s}':\n%s";
-			return ({error => 1}, sprintf($msg, $store->base, $out));
+			my $msg = "Failed to remove secrets under '#C{%s}': safe exited %d (%s)";
+			return ({error => 1}, sprintf($msg, $store->base, $rc, Genesis::failure_summary($out)));
 		}
 		return ({success => 1}, "#G{All applicable secrets removed.}");
 	}
@@ -6051,7 +6051,7 @@ sub bosh_logs {
 	my ($out, $rc, $err) = $bosh->execute({interactive => 1}, "logs", @extra_opts);
 	info("");
 	if ($rc) {
-		bail("Failed to fetch logs: %s", $err);
+		bail("Failed to fetch logs: bosh exited %d", $rc);
 	}
 
 	$self->notify("extracting logs...");
@@ -6092,7 +6092,7 @@ sub bosh_logs {
 
 		my ($out, $rc, $err) = run("tar", "-zxf", $archive, "-C", $target_dir);
 		if ($rc) {
-			warning("failed to extract archive %s: %s", $file_name, $err);
+			warning("failed to extract archive %s: tar exited %d (%s)", $file_name, $rc, Genesis::failure_summary($out));
 		} else {
 			info("- extracted archive %s", $file_name);
 		}
@@ -7057,7 +7057,8 @@ sub _advise_stemcell_updates {
 sub _genesis_inherits {
 	my ($self,$file, @files) = @_;
 	my ($out,$rc,$err) = run({stderr => 0},'cat "$1" | spruce merge --skip-eval --go-patch --multi-doc | spruce json', $self->path($file));
-	bail "Error processing json in $file!:\n$err" if $rc;
+	bail "Error processing json in %s: spruce exited %d (%s)%s", $file, $rc, Genesis::failure_summary($err),
+		Genesis::Env::ManifestProvider::_failure_paths($err, $self->path($file)) if $rc;
 
 	# Better error handling for empty output
 	if (!$out || $out =~ /^\s*$/) {
@@ -7068,7 +7069,7 @@ sub _genesis_inherits {
 		map {load_json($_)} lines($out)
 	};
 	if ($@) {
-		bail "Failed to parse JSON from spruce output for file %s: %s\nOutput was: %s", $file, $@, $out;
+		bail "Failed to parse JSON from spruce output for file %s: %s", $file, $@ =~ s/\n.*//sr;
 	}
 
 	my @new_files;
