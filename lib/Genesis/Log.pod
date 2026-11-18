@@ -242,12 +242,15 @@ there without saying what it was. Genesis calls this as it loads each
 credential; it is the second line of defence behind the redaction each call
 site does, and catches whatever a call site misses.
 
-The value's raw form, its Data::Dumper form (as C<dump_var> writes it), and
-its JSON string form are all registered, so a value with quotes or
-backslashes is caught however it was written. Values shorter than
-C<$Genesis::Log::MIN_SECRET_LENGTH> (6) characters, empty values, undefined
-values, and references are ignored, since scrubbing a value that short
-would mangle ordinary words.
+The value's raw form, its Data::Dumper form (as C<dump_var> writes it), its
+JSON and ASCII JSON string forms, and the three forms shell quoting gives
+it (inside single quotes, inside double quotes spliced with C<"\"">, and
+backslash-escaped inside double quotes) are all registered, so a value with
+quotes, backslashes, or characters outside ASCII is caught however it was
+written. A value shorter than C<$Genesis::Log::MIN_SECRET_LENGTH> (6)
+characters is matched only where no letter or digit touches it, since
+scrubbing it inside longer words would mangle the log. Empty values,
+undefined values, and references are ignored.
 
 The registry belongs to the package rather than the logger object, so a
 value can be registered before any logger exists, and registering one never
@@ -255,9 +258,11 @@ creates a logger (which would skip the terminal setup that
 C<Genesis::logger> does on first use).
 
 File logs are scrubbed at every level. On the terminal, C<OUTPUT> and
-C<INFO> lines are left alone, because commands such as
-C<genesis bosh --connect> print credentials there on purpose; every other
-terminal level, including C<-T> trace output, is scrubbed.
+C<INFO> lines are left alone, because they carry what the operator asked to
+see; every other terminal level, including C<-T> trace output, is
+scrubbed. Commands that print credentials on purpose, such as
+C<genesis bosh --connect>, print them straight to stdout instead of
+through the logger, so they never reach a log file.
 
 B<Parameters:>
 
@@ -1770,8 +1775,10 @@ B<Examples:>
 Registers the value of each credential environment variable the caller set,
 listed in C<@Genesis::Log::CREDENTIAL_ENV_VARS> (C<BOSH_CLIENT_SECRET>,
 C<CREDHUB_SECRET>, C<VAULT_TOKEN>, and the like), with C<register_secret>.
-C<new> calls it once, when it creates the logger, so a credential handed to
-Genesis or to a hook through the environment is scrubbed from the start.
+C<new> calls it when it creates the logger, and C<flush_logs> calls it again
+before every write, so a credential handed to Genesis or to a hook through
+the environment is scrubbed from the start, and one put in the environment
+later is scrubbed from then on.
 
 B<Returns:> The logger.
 

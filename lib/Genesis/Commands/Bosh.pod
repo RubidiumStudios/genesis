@@ -813,6 +813,16 @@ B<Examples:>
 
 =head1 INTERNAL FUNCTIONS
 
+=head2 _print_connect_exports($alias, %envs)
+
+Prints an C<export NAME="value"> line for each of the director's
+environment variables, for C<bosh --connect>. The values carry the
+director's credentials, so they go straight to stdout, where the caller's
+C<eval> reads them, and never pass through the logger. The log line that
+follows names the variables only.
+
+B<Returns:> Nothing.
+
 Helpers shared by the C<bosh-configs> actions.  A "config record" below is
 the hash the helpers pass around: C<type>, C<name>, C<bosh> (the director
 that holds it), C<content> (the synthesized YAML, or C<undef>), and, once

@@ -162,6 +162,7 @@ sub get_approle_credentials {
 		'vault read', '-field=role_id', "auth/approle/role/$role_name/role-id"
 	);
 	chomp($role_id) if defined $role_id;
+	Genesis::Log::register_secret($role_id, 'vault-approle-role-id');
 
 	# Generate new secret-id
 	my ($secret_id, $sid_rc) = $self->vault->query(

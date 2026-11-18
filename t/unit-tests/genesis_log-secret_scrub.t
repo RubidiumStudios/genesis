@@ -6,8 +6,7 @@
 # credential it loads with the logger, and the logger replaces every
 # registered value before a line reaches a log file, whatever level or
 # path the line took.  On the terminal, OUTPUT and INFO are left alone,
-# since commands such as `genesis bosh --connect` print credentials there
-# on purpose.
+# since they carry what the operator asked to see.
 use strict;
 use warnings;
 
@@ -90,13 +89,61 @@ subtest 'credential environment variables are registered at startup' => sub {
 	unlike($log, qr/\Q$secret\E/, 'BOSH_CLIENT_SECRET from the caller is scrubbed');
 };
 
-subtest 'short and empty values are not registered' => sub {
+subtest 'a short value is scrubbed where it stands alone' => sub {
+	# A short director password is still a password.  Matching it inside
+	# longer words would mangle the log, so it is matched only where no
+	# letter or digit touches it.
+	my $short = 'k'.int(rand(9)).'Q';
 	my $log = capture_trace {
 		my ($logger) = @_;
-		$logger->register_secret($_, 'short') for ('', undef, 'abc');
-		trace("abc stays readable");
+		$logger->register_secret($_, 'short') for ('', undef, $short);
+		trace("password=%s;", $short);
+		trace("export BOSH_CLIENT_SECRET=\"%s\"", $short);
+		trace("x%sy stays readable", $short);
 	};
-	like($log, qr/abc stays readable/, 'a trivially short value is not scrubbed');
+	unlike($log, qr/password=\Q$short\E;/, 'a short value standing alone is scrubbed');
+	unlike($log, qr/"\Q$short\E"/, 'quoted as well');
+	like($log, qr/x\Q$short\Ey stays readable/, 'inside a longer word it is left alone');
+};
+
+subtest 'credential variables set after the logger starts are registered' => sub {
+	my ($role_id, $late) = map {fake_secret($_)} qw/role-id late-token/;
+	local $ENV{VAULT_ROLE_ID} = $role_id;
+	my $log = capture_trace {
+		$ENV{VAULT_TOKEN} = $late;
+		trace("role %s token %s", $role_id, $late);
+		delete $ENV{VAULT_TOKEN};
+	};
+	unlike($log, qr/\Q$role_id\E/, 'VAULT_ROLE_ID is registered');
+	unlike($log, qr/\Q$late\E/, 'a token set after startup is registered when the log is written');
+};
+
+subtest 'shell-quoted and ASCII-escaped forms are scrubbed' => sub {
+	my $value = fake_secret('quoted') . q{'"$} . "\x{e9}";
+	my $log = capture_trace {
+		my ($logger) = @_;
+		$logger->register_secret($value, 'quoted');
+		trace("single %s", Genesis::shell_quote($value));
+		trace("double \"%s\"", $value =~ s/"/"\\""/gr);
+		trace("backslashed \"%s\"", $value =~ s/(["\\\$`])/\\$1/gr);
+		trace("ascii json %s", JSON::PP->new->ascii->allow_nonref->encode($value));
+	};
+	my ($core) = $value =~ /^(fake-quoted-[0-9a-f]+)/;
+	unlike($log, qr/\Q$core\E/, 'no form of the value is written');
+};
+
+subtest 'bosh --connect exports go to stdout and never to a log' => sub {
+	require Genesis::Commands::Bosh;
+	my $secret = fake_secret('connect');
+	my $short = 'p'.int(rand(9)).'w';
+	my ($log, $stderr, $stdout) = capture_trace {
+		Genesis::Commands::Bosh::_print_connect_exports('fake-alias',
+			BOSH_CLIENT_SECRET => $secret, BOSH_CLIENT => 'admin', BOSH_PASSWORD => $short);
+	};
+	like($stdout, qr/^export BOSH_CLIENT_SECRET="\Q$secret\E"$/m, 'the operator gets the export');
+	like($stdout, qr/^export BOSH_PASSWORD="\Q$short\E"$/m, 'short values included');
+	unlike($log, qr/\Q$secret\E|BOSH_PASSWORD="\Q$short\E"/, 'the log never sees a value');
+	like($log, qr/BOSH_CLIENT_SECRET/, 'the log names what was exported');
 };
 
 subtest 'terminal trace output is scrubbed, deliberate output is not' => sub {

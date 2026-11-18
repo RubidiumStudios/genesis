@@ -63,8 +63,9 @@ sub new {
 # password, a vault token -- is registered here, and flush_logs() replaces
 # each registered value before a line is written.  Redacting each call
 # site is the first line of defence; this catches whatever a call site
-# misses.  Values shorter than $MIN_SECRET_LENGTH are not registered,
-# since scrubbing a value that short would mangle ordinary words.
+# misses.  A value shorter than $MIN_SECRET_LENGTH is still a credential,
+# but scrubbing it inside longer words would mangle the log, so it is
+# matched only where no letter or digit touches it.
 
 our $MIN_SECRET_LENGTH = 6;
 
@@ -83,10 +84,12 @@ our $SECRET_PATTERN;  # the compiled scrub pattern, rebuilt when %SECRETS change
 our @CREDENTIAL_ENV_VARS = qw(
 	BOSH_CLIENT_SECRET BOSH_PASSWORD
 	CREDHUB_SECRET CREDHUB_PASSWORD
-	VAULT_TOKEN VAULT_AUTH_TOKEN VAULT_PASSWORD VAULT_SECRET_ID
+	VAULT_TOKEN VAULT_AUTH_TOKEN VAULT_PASSWORD VAULT_ROLE_ID VAULT_SECRET_ID
 	VAULT_GITHUB_TOKEN
 );
 
+# Called when a logger is created and again each time logs are flushed,
+# so a credential put in the environment after startup is caught too.
 sub _register_env_secrets {
 	my $self = shift;
 	register_secret($ENV{$_}, lc($_ =~ s/_/-/gr)) for grep {defined $ENV{$_}} @CREDENTIAL_ENV_VARS;
@@ -102,17 +105,26 @@ sub register_secret {
 	shift if ref($_[0]) && eval {$_[0]->isa(__PACKAGE__)};
 	shift if defined($_[0]) && !ref($_[0]) && $_[0] eq __PACKAGE__;
 	my ($value, $label) = @_;
-	return unless defined($value) && !ref($value) && length($value) >= $MIN_SECRET_LENGTH;
+	return unless defined($value) && !ref($value) && length($value);
+	return if exists($SECRETS{$value}); # its forms were registered with it
 	$label = (defined($label) && length($label)) ? $label =~ s/[^\w.:\/-]+/-/gr : 'secret';
 
 	# A value can reach a log escaped as well as raw: Data::Dumper (what
-	# dump_var uses) escapes quotes and backslashes, and JSON escapes those
-	# and control characters.  Each form is registered, so each is caught.
-	my @forms = ($value);
-	push @forms, $value =~ s/([\\'])/\\$1/gr;
+	# dump_var uses) escapes quotes and backslashes, JSON escapes those and
+	# control characters, ASCII JSON escapes anything outside ASCII, and a
+	# command line quotes it for the shell in one of three ways.  Each form
+	# is registered, so each is caught.
 	require JSON::PP;
-	push @forms, substr(JSON::PP->new->allow_nonref->ascii(0)->encode($value), 1, -1);
-	for my $form (grep {length($_) >= $MIN_SECRET_LENGTH} @forms) {
+	my @forms = (
+		$value,
+		$value =~ s/([\\'])/\\$1/gr,
+		substr(JSON::PP->new->allow_nonref->ascii(0)->encode($value), 1, -1),
+		substr(JSON::PP->new->allow_nonref->ascii(1)->encode($value), 1, -1),
+		$value =~ s/'/'\\''/gr,
+		$value =~ s/"/"\\""/gr,
+		$value =~ s/(["\\\$`])/\\$1/gr,
+	);
+	for my $form (@forms) {
 		next if exists($SECRETS{$form});
 		$SECRETS{$form} = $label;
 		$SECRET_PATTERN = undef;
@@ -127,7 +139,7 @@ sub scrub {
 	return $text unless defined($text) && %SECRETS;
 	$SECRET_PATTERN //= do {
 		my $alternatives = join('|',
-			map {quotemeta}
+			map {length($_) >= $MIN_SECRET_LENGTH ? quotemeta($_) : '(?<![A-Za-z0-9])'.quotemeta($_).'(?![A-Za-z0-9])'}
 			sort {length($b) <=> length($a) || $a cmp $b}
 			keys %SECRETS
 		);
@@ -985,6 +997,7 @@ sub flush_logs {
 	my $last_line = $#{$self->{buffer}};
 
 	return if $flushing; $flushing = 1;
+	$self->_register_env_secrets;
 
 	my ($s,$us) = gettimeofday;
 	my $ms = $s * 1000 + int($us/1000);
@@ -1108,7 +1121,7 @@ sub flush_logs {
 				# Scrub before wrapping: wrap() can break a value across lines,
 				# and a broken value no longer matches.  The terminal keeps its
 				# OUTPUT and INFO lines, which are where commands print what the
-				# operator asked to see, such as `genesis bosh --connect`.
+				# operator asked to see.
 				$content = $self->scrub($content)
 					unless $log eq '<terminal>' && ($level eq 'OUTPUT' || $level eq 'INFO');
 				my ($pre_pad, $post_pad) = ("","");

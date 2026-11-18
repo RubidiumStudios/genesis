@@ -112,9 +112,9 @@ subtest 'an AppRole secret-id' => sub {
 	local *Service::Vault::Admin::approles = sub {bless({}, 'FakeAppRoles')};
 	my $admin = bless({vault => bless({}, 'FakeVaultForAppRole')}, 'Service::Vault::Admin');
 	local *Service::Vault::Admin::vault = sub {$_[0]->{vault}};
-	assert_scrubbed('the AppRole secret-id', sub {
+	assert_scrubbed('the AppRole role-id and secret-id', sub {
 		$admin->get_approle_credentials('fake-role');
-	}, $secret_id);
+	}, $role_id, $secret_id);
 };
 
 done_testing;

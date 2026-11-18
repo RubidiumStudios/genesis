@@ -33,18 +33,28 @@ sub bosh {
 			);
 			exit 1;
 		}
-		my %bosh_envs = $bosh->environment_variables
-			unless in_controlling_terminal;
-		for (keys %bosh_envs) {
-			(my $escaped_value = $bosh_envs{$_}||"") =~ s/"/"\\""/g;
-			output 'export %s="%s"', $_, $escaped_value;
-		}
-		info "Exported environmental variables for BOSH director %s", $bosh->{alias};
+		_print_connect_exports($bosh->{alias}, $bosh->environment_variables);
 		exit 0;
 	} else {
 		my ($out, $rc) = $bosh->execute({interactive => 1, dir => $ENV{GENESIS_ORIGINATING_DIR}}, @_);
 		exit $rc;
 	}
+}
+
+# }}}
+# _print_connect_exports - print a director's exports for `eval` {{{
+#
+# The exports carry the director's credentials, so they are printed
+# straight to stdout, where the caller's `eval` reads them, and never pass
+# through the logger.  The log names the variables only.
+sub _print_connect_exports {
+	my ($alias, %envs) = @_;
+	for (sort keys %envs) {
+		(my $escaped_value = $envs{$_}//"") =~ s/"/"\\""/g;
+		print STDOUT qq(export $_="$escaped_value"\n);
+	}
+	info "Exported environmental variables for BOSH director %s: %s", $alias, join(', ', sort keys %envs);
+	return;
 }
 
 # }}}
