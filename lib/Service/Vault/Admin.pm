@@ -158,7 +158,6 @@ sub get_approle_credentials {
 
 	# Get role-id
 	my ($role_id, $rid_rc) = $self->vault->query(
-		{redact_output => 1},
 		'vault read', '-field=role_id', "auth/approle/role/$role_name/role-id"
 	);
 	chomp($role_id) if defined $role_id;
@@ -166,7 +165,6 @@ sub get_approle_credentials {
 
 	# Generate new secret-id
 	my ($secret_id, $sid_rc) = $self->vault->query(
-		{redact_output => 1},
 		'vault write', '-field=secret_id', '-f', "auth/approle/role/$role_name/secret-id"
 	);
 	chomp($secret_id) if defined $secret_id;

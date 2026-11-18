@@ -922,10 +922,11 @@ the command words, the flags that cannot be an option's value, and the key
 of each C<key=value> in view. See C<_private_query_args>.
 
 What safe prints can be any secret in vault, so a query is private by
-default: C<redact_output> and C<redact_stderr> default to true, and the
-trace shows a byte count in place of either stream. A caller that needs a
-stream traced passes C<redact_output =E<gt> 0> or C<redact_stderr =E<gt> 0>.
-The streams are returned to the caller either way.
+default, as every C<run> is, so the trace shows a byte count in place of
+either stream. A caller that needs a stream traced, which is only for
+output that provably holds no secret, passes C<public_output =E<gt> 1> or
+C<public_stderr =E<gt> 1>. The streams are returned to the caller either
+way.
 
 B<Parameters:>
 

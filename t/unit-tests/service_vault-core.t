@@ -565,8 +565,9 @@ subtest 'get() splits combined path:key from single arg' => sub {
 	# The last arg should be path:key
 	like($query_args[-1], qr{/secret/myapp:password},
 		'path:key form passed through correctly');
-	# The first arg should be an opts hash (redact_output)
-	is(ref($query_args[0]), 'HASH', 'first arg is options hash');
+	# Output is private unless marked public, and a read never is.
+	my $opts = ref($query_args[0]) eq 'HASH' ? $query_args[0] : {};
+	ok(!($opts->{public} || $opts->{public_output}), 'the value read is not marked public');
 };
 
 # -------------------------------------------------------------------------

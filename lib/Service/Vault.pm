@@ -456,8 +456,6 @@ sub query {
 	# credentials as arguments, so only the arguments of commands that
 	# name paths and keys are traced as they are.
 	@cmd = _private_query_args($opts, @cmd);
-	$opts->{redact_output} //= 1;
-	$opts->{redact_stderr} //= 1;
 	unshift(@cmd, 'safe') unless $cmd[0] eq 'safe' || $cmd[0] =~ /^safe /;
 	$opts->{env} ||= {};
 	$opts->{env}{DEBUG} = ""; # safe DEBUG is disruptive
@@ -642,7 +640,7 @@ sub get {
 		($path, $key) = $path =~ m/^(.*?)(?::([^:]*))?$/;
 	}
 	if (defined($key)) {
-		my ($out,$rc) = $self->query({redact_output => 1}, 'get', "$path:$key");
+		my ($out,$rc) = $self->query('get', "$path:$key");
 		return $out if $rc == 0;
 		debug(
 			"#R{[ERROR]} Could not read #C{%s:%s} from vault at #M{%s}",
@@ -678,7 +676,7 @@ sub get_path_strict {
 	# exited cleanly, only an unparseable payload is an error.
 	my ($data,$rc,$err) = read_json_from(
 		{allow_bignum => 1},
-		$self->query({stderr => 0, redact_output => 1, exact => 1}, 'export', $path)
+		$self->query({stderr => 0, exact => 1}, 'export', $path)
 	);
 	if ($rc || $err) {
 		my ($reason) = $rc ? read_failure($rc, $err) : ($err);
@@ -748,7 +746,7 @@ sub read_flattened_secret {
 	# newline of a literal block that ends the output, and it reports a safe
 	# killed by a signal rather than reading what it printed as finished.
 	my $start = gettimeofday();
-	my ($yaml,$rc,$err) = $self->query({stderr => 0, redact_output => 1, exact => 1}, 'get', $arg);
+	my ($yaml,$rc,$err) = $self->query({stderr => 0, exact => 1}, 'get', $arg);
 	my $values;
 	unless ($rc) {
 		if (defined($yaml) && length($yaml)) {
@@ -1319,7 +1317,7 @@ sub max_json_string_value_length {
 	# (request_id, data, ...) is preserved, so the actual content lives
 	# at $decoded->{data}->...
 	my ($out, $rc, $err) = $self->query(
-		{redact_output => 1, stderr => 0},
+		{stderr => 0},
 		'curl', '--data-only', '/sys/config/state/sanitized'
 	);
 	if ($rc == 0 && defined($out) && length($out)) {
@@ -1357,7 +1355,7 @@ sub needs_write_confirmation {
 	# ha_enabled decides it, never is_self: leadership fails over, and the
 	# target is usually a load balancer fronting more than one node.
 	my ($out, $rc, $err) = $self->query(
-		{redact_output => 1, stderr => 0},
+		{stderr => 0},
 		'curl', '--data-only', '/sys/leader'
 	);
 	if ($rc == 0 && defined($out) && length($out)) {
@@ -1552,7 +1550,7 @@ sub _kv_curl {
 	# exit code, because safe before 1.20 exits 0 whatever the vault
 	# answered, so a refusal there looks like success to anything else.
 	my ($out, $rc, $err) = $self->query(
-		{redact_output => 1, stderr => 0},
+		{stderr => 0},
 		'curl', $method, "/$uri",
 		defined($payload) ? (encode_json($payload)) : ()
 	);
@@ -1654,7 +1652,7 @@ sub _confirm_kv_version {
 sub token_info {
 	my $self = shift;
 	# The lookup returns the token itself as its id.
-	my ($out,$rc, $err) = $self->query({redact_output => 1}, 'vault', 'token', 'lookup', '-format=json');
+	my ($out,$rc, $err) = $self->query('vault', 'token', 'lookup', '-format=json');
 	return read_json_from($out) if $rc == 0;
 	debug(
 		"#R{[ERROR]} Could not get token information from vault at #M{%s}",
@@ -1679,7 +1677,6 @@ sub env {
 		$self->{_env} = read_json_from(
 			run({
 					stderr =>'/dev/null',
-					redact_output => 1,
 					env => {SAFE_TARGET => $self->ref }
 				},'safe', 'env', '--json')
 		);
@@ -1803,7 +1800,7 @@ sub unseal {
 	my ($out, $rc, $err);
 	my ($tries, $max_tries) = (0, 3);
 	while ($tries++ < $max_tries) {
-		($out, $rc, $err) = $self->query({stdin => $keys_input, redact_output => 1, redact_stderr => 1}, 'unseal');
+		($out, $rc, $err) = $self->query({stdin => $keys_input}, 'unseal');
 		if (($rc == 0) || ($out =~ /Vault is already unsealed/)) {
 			# A success here may only cover one node.  The caller checks
 			# status next, which also sees only that node, so nothing
@@ -2102,7 +2099,6 @@ sub _node_request {
 
 	my $opts = {
 		stderr => 0,
-		redact_output => 1,
 		env => {CURL_HOME => undef, SSLKEYLOGFILE => undef},
 	};
 	if (defined($payload)) {

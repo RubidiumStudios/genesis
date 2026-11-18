@@ -176,8 +176,8 @@ subtest 'every sealed node is unsealed through its own address' => sub {
 		'and CURL_HOME is cleared');
 	ok(!(grep {!exists($_->{env}{SSLKEYLOGFILE}) || defined($_->{env}{SSLKEYLOGFILE})} @$calls),
 		'as is SSLKEYLOGFILE');
-	ok(!(grep {!$_->{opts}{redact_output}} @$calls),
-		'every node call redacts its output from the trace');
+	ok(!(grep {$_->{opts}{public} || $_->{opts}{public_output}} @$calls),
+		'no node call marks its output public, so none is traced');
 	ok(!(grep {$_->{resets}} values %nodes),
 		'and no node with nothing in progress is reset');
 	ok(!mentions_a_key($stderr), 'no key reaches the trace or stderr');

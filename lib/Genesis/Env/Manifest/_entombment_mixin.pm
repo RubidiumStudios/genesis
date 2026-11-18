@@ -65,7 +65,7 @@ sub _entomb_secrets {
 		# leaves each path to be read on its own below, where the read says
 		# why it failed or finds nothing stored.
 		my ($text, $rc, $err) = $src_vault->query(
-			{stderr => 0, redact_output => 1, exact => 1}, "export", keys %secret_keys
+			{stderr => 0, exact => 1}, "export", keys %secret_keys
 		);
 		debug(
 			"safe export of the referenced paths failed, so each is read on its own: %s",

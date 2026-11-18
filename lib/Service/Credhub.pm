@@ -90,8 +90,6 @@ sub preload {
 	my ($out,$rc,$err) = run({
 			env => $self->env(),
 			redact_env => 1,
-			redact_output => 1,
-			redact_stderr => 1,
 			stderr => 0
 		},
 		'credhub', 'export', '-j', '-p', $self->base
@@ -138,8 +136,6 @@ sub data {
 	my ($out,$rc,$err) = run({
 			env => $self->env(),
 			redact_env => 1,
-			redact_output => 1,
-			redact_stderr => 1,
 			stderr => 0
 		},
 		'credhub', 'get', '-j', '-n', $self->_full_path($path)
@@ -239,8 +235,6 @@ sub set {
 	unshift @args, "-n", $self->_full_path($path), "-t", $type;
 	my ($out,$rc, $err) =run({
 			env => $self->env(),
-			redact_output => 1,
-			redact_stderr => 1,
 			redact_env => 1,
 			stderr => 0
 		},
@@ -341,8 +335,6 @@ sub query {
 	my ($out, $rc, $err) = run({
 			env => $self->env(),
 			redact_env => 1,
-			redact_output => 1,
-			redact_stderr => 1,
 			stderr => 0
 		},
 		'credhub', 'curl', '--path', "$path", @args

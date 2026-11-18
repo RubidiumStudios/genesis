@@ -1222,7 +1222,7 @@ sub curl {
 	# too, Authorization included; the headers are traced below by name.
 	# What a credentialed request returns stays out as well.
 	my ($out, $rc, $err) = run(
-		{stderr => 0, redact_stderr => 1, redact_output => ($creds ? 1 : 0)},
+		{stderr => 0},
 		'curl', '-'.$header_opt.'sSL', $url, @flags
 	);
 	return (599, "Error executing curl command", $err) if ($rc);
@@ -1404,10 +1404,7 @@ sub spruce_diff {
 	my $out_file = "$scratchdir/out.diff";
 	# The diff shows values from both manifests, so script(1)'s copy of it
 	# stays out of the trace.
-	my (undef,$rc,$err) = run(
-		{redact_output => 1, redact_stderr => 1},
-		fake_tty($out_file, "spruce", "diff", $first, $second)
-	);
+	my (undef,$rc,$err) = run(fake_tty($out_file, "spruce", "diff", $first, $second));
 	my $out = slurp($out_file);
 
 	# util-linux script(1) records the command's exit code in a "Script done"
@@ -1674,7 +1671,7 @@ sub load_yaml_file {
 	my ($file) = @_;
 	# Manifests and vault data pass through here, so the converted copy
 	# stays out of the trace.
-	my ($out, $rc, $err) = run({ stderr => 0, redact_output => 1, redact_stderr => 1 }, 'spruce json < "$1"', $file);
+	my ($out, $rc, $err) = run({ stderr => 0 }, 'spruce json < "$1"', $file);
 	my $json = load_json($out) if $rc == 0;
 	return (wantarray) ? ($json,$rc,$err) : $json;
 }
@@ -1728,7 +1725,7 @@ sub to_yaml {
 	mkfile_or_fail($tmp, 0644, $json);
 	# As in load_yaml_file, the converted copy stays out of the trace.
 	# A parse error can quote the data, so only a summary of it is shown.
-	my ($out,$rc,$err) = run({ stderr => 0, redact_output => 1, redact_stderr => 1 }, qw/spruce merge --skip-eval/, $tmp);
+	my ($out,$rc,$err) = run({ stderr => 0 }, qw/spruce merge --skip-eval/, $tmp);
 	bail("Error converting data to YAML: spruce exited %d (%s)", $rc, failure_summary($err)) if $rc;
 	return $out if $out;
 }

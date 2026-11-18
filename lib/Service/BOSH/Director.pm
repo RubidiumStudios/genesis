@@ -603,7 +603,7 @@ sub download_configs {
 		# contents, the merged result, and spruce's errors stay out of the
 		# trace, and a failure names the exit status and kind of failure.
 		my ($out, $rc, $err) = run(
-			{interactive => 0, stderr=>0, redact_output => 1, redact_stderr => 1},
+			{interactive => 0, stderr=>0},
 			'spruce merge --multi-doc --go-patch --fallback-append <(echo "$1")',
 			{redact => join("\n---\n", @config_contents)}
 		);

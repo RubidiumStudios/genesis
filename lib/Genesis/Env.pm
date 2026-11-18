@@ -3679,7 +3679,6 @@ sub last_deployed_manifest {
 						# The deployed manifest goes in as an argument and comes
 						# back out, and both stay out of the trace.
 						my ($pruned_data, $rc, $err) = run(
-							{redact_output => 1},
 							'fin=$1; shift 1; echo "$fin" | spruce merge "$@" -',
 							{redact => $data},
 							map {('--prune',$_)} $self->prunable_keys
@@ -5171,7 +5170,7 @@ sub update_deployment_exodus {
 			# A director's exodus holds its admin and CredHub passwords.  query()
 			# keeps the values of the set out of the trace; run() never read
 			# the `redact` option this passed before.
-			my ($out, $rc, $err) = $self->vault->query({redact_output => 1, redact_stderr => 1}, @exodus_cmds);
+			my ($out, $rc, $err) = $self->vault->query(@exodus_cmds);
 			push @errors, sprintf(
 				"Failed to set exodus data in vault: safe exited %d (%s)",
 				$rc, Genesis::failure_summary($err)

@@ -126,7 +126,7 @@ sub store_data {
 			# Decoded with bignums, so every typed path is seen, and each one is
 			# read again whole with safe get, as the vault readers do.
 			my ($json, $rc, $err) = read_json_from({allow_bignum => 1}, $self->service->query(
-				{stderr => 0, redact_output => 1, exact => 1},
+				{stderr => 0, exact => 1},
 				'export', @paths
 			));
 			unless ($rc || $err) {

@@ -215,8 +215,6 @@ sub merge {
 		# spruce named.
 		($out,my $rc, my $err) = run({
 				stderr => 0,
-				redact_output => 1,
-				redact_stderr => 1,
 				env => $env_vars
 			},
 			'spruce', 'merge', @merge_opts, @$sources
@@ -319,7 +317,7 @@ sub get_subset {
 			bug("Invalid subset operator '$operator'")
 		}
 		# The source can be an evaluated manifest, so neither stream is shown.
-		my ($out, $rc, $err) = run({stderr => 0, redact_output => 1, redact_stderr => 1}, @cmd);
+		my ($out, $rc, $err) = run({stderr => 0}, @cmd);
 		popd;
 
 		bail (
@@ -564,7 +562,7 @@ sub _adaptive_merge {
 	# The merged and unevaluated manifests stay out of the trace.
 	# The merged and unevaluated manifests, and spruce's errors, which can
 	# quote a resolved value, all stay out of the trace.
-	my ($out,$rc,$err) = run({stderr=>0, redact_output => 1, redact_stderr => 1, %opts}, 'spruce merge --multi-doc --go-patch "$@"', @files);
+	my ($out,$rc,$err) = run({stderr=>0, %opts}, 'spruce merge --multi-doc --go-patch "$@"', @files);
 	# What spruce printed alongside a successful merge is not handed on.
 	return (wantarray ? ($out, undef) : $out) unless $rc;
 
@@ -584,7 +582,7 @@ sub _adaptive_merge {
 		$contents .= $content;
 	}
 	my ($uneval_json, $uneval_rc, $uneval_err) = run(
-		{ stderr => 0, redact_output => 1, redact_stderr => 1, %opts },
+		{ stderr => 0, %opts },
 		'set -o pipefail; spruce merge --multi-doc --go-patch --skip-eval "$@" | spruce json', @files
 	);
 	bail(
@@ -654,7 +652,7 @@ sub _adaptive_merge {
 			}
 		}
 		my $premerge = mkfile_or_fail($self->env->workpath('premerge.yml'),$contents);
-		($out,$rc,$err) = run({stderr => 0, redact_output => 1, redact_stderr => 1, %opts }, 'spruce merge --multi-doc --go-patch "$1"', $premerge);
+		($out,$rc,$err) = run({stderr => 0, %opts }, 'spruce merge --multi-doc --go-patch "$1"', $premerge);
 	}
 
 	# spruce's errors can quote a resolved value, so the failure names the
