@@ -84,19 +84,43 @@ case "$1" in
 esac
 SH
 
-# A fake CredHub that stores what `set -v` is given, or with
+# A fake CredHub that stores what `set --value=` is given, or with
 # FAKE_CREDHUB_TRIMS a value with its trailing newlines dropped, and
-# answers `get -j` with that value as JSON.
+# counts the versions written.  `get --output-json` answers with the
+# newest value, or with --versions=2 the newest two, and a name with no
+# value gets CredHub's "does not exist" answer.  FAKE_CREDHUB_RACE is a
+# value something else writes just before the fake's own write, and
+# FAKE_CREDHUB_GET_FAILS makes every read fail some other way.
 put_file("$dir/bin/credhub", 0755, <<'SH');
 #!/bin/bash
-printf '%s\n' "$1" >> "$FAKE_DIR/credhub-calls"
-case "$1" in
+store="$FAKE_DIR/credhub-value"; count="$FAKE_DIR/credhub-count"
+cmd="$1"; shift
+attached=''; value=''; versions=''
+for a in "$@"; do
+  case "$a" in
+    --value=*)    value="${a#--value=}"; attached=' value-attached' ;;
+    --versions=*) versions="${a#--versions=}" ;;
+  esac
+done
+printf '%s%s\n' "$cmd" "$attached" >> "$FAKE_DIR/credhub-calls"
+bump() { echo $(( $(cat "$count" 2>/dev/null || echo 0) + 1 )) > "$count"; }
+case "$cmd" in
   set)
-    while [[ $# -gt 0 ]]; do [[ "$1" == -v ]] && { value="$2"; break; }; shift; done
+    if [[ -n "${FAKE_CREDHUB_RACE:-}" ]]; then printf '%s' "$FAKE_CREDHUB_RACE" > "$store"; bump; fi
     [[ -n "${FAKE_CREDHUB_TRIMS:-}" ]] && value="$(printf '%s' "$value")"
-    printf '%s' "$value" > "$FAKE_DIR/credhub-value" ;;
+    printf '%s' "$value" > "$store"; bump ;;
   get)
-    perl -MJSON::PP -0777 -e 'print JSON::PP->new->encode({value => scalar <STDIN>})' < "$FAKE_DIR/credhub-value" ;;
+    [[ -n "${FAKE_CREDHUB_GET_FAILS:-}" ]] && { echo >&2 "error: fake-credhub-diagnostic"; exit 1; }
+    [[ -f "$store" ]] || {
+      echo >&2 "The request could not be completed because the credential does not exist or you do not have sufficient authorization."
+      exit 1
+    }
+    perl -MJSON::PP -0777 -e '
+      my ($versions, $count, $type) = @ARGV;
+      my $v = {type => $type, value => scalar(<STDIN>)};
+      my $n = $versions ? ($count < $versions ? $count : $versions) : 0;
+      print JSON::PP->new->encode($n ? {versions => [$v, ({type => $type, value => "fake-older"}) x ($n - 1)]} : $v);
+    ' "$versions" "$(cat "$count")" "${FAKE_CREDHUB_TYPE:-value}" < "$store" ;;
 esac
 SH
 
@@ -105,8 +129,13 @@ SH
 sub move {
 	my ($versions, %env) = @_;
 	my $next = delete $env{next};
+	my $holds = delete $env{holds};
 	my $src = delete($env{src}) // 'path:password';
-	system('rm', '-rf', "$dir/vault", "$dir/safe-calls", "$dir/credhub-calls", "$dir/credhub-value");
+	system('rm', '-rf', "$dir/vault", "$dir/safe-calls", "$dir/credhub-calls", "$dir/credhub-value", "$dir/credhub-count");
+	if (defined($holds)) {
+		put_file("$dir/credhub-value", $holds);
+		put_file("$dir/credhub-count", "1\n");
+	}
 	put_file("$dir/vault/next/password", $next) if defined($next);
 	for my $v (keys %$versions) {
 		for my $k (keys %{$versions->{$v}}) {
@@ -180,6 +209,52 @@ subtest 'a secret with no key is refused before anything changes' => sub {
 	ok(!defined($r->{stored}), 'nothing is written to CredHub');
 	unlike($r->{safe}, qr/^(?:get|rm) /m, 'and vault is neither read nor changed');
 	like($r->{out}, qr/names no key/, 'the operator is told to name the key');
+};
+
+subtest 'a value that starts with a hyphen is given to credhub attached' => sub {
+	my $r = move({1 => {password => '-fake-hyphen-value'}}, FAKE_KV => 2);
+	is($r->{rc}, 0, 'the move succeeds') or diag $r->{out};
+	is($r->{stored}, '-fake-hyphen-value', 'CredHub holds the value exactly');
+	like($r->{credhub}, qr/^set value-attached$/m, 'it was passed as --value=, so it is never taken for an option');
+};
+
+subtest 'a destination already holding the same value is a retry' => sub {
+	my $r = move({1 => {password => $multiline}}, FAKE_KV => 2, holds => $multiline);
+	is($r->{rc}, 0, 'the move succeeds') or diag $r->{out};
+	unlike($r->{credhub}, qr/^set/m, 'the value is not written again');
+	is($r->{stored}, $multiline, 'CredHub still holds it');
+	like($r->{safe}, qr/^rm secret\/fake\/path\^1$/m, 'and the vault original is removed');
+};
+
+subtest 'a destination holding a different credential is never replaced' => sub {
+	for my $case (['a different value', 'fake-live-value', 'value'], ['another type', 'fake-live-value', 'password']) {
+		my ($what, $live, $type) = @$case;
+		my $r = move({1 => {password => 'fake-vault-value'}}, FAKE_KV => 2, holds => $live, FAKE_CREDHUB_TYPE => $type);
+		isnt($r->{rc}, 0, "the move fails when CredHub holds $what");
+		unlike($r->{credhub}, qr/^set/m, '... nothing is written to CredHub');
+		is($r->{stored}, $live, '... which still holds its live credential');
+		unlike($r->{safe}, qr/^rm /m, '... nothing is removed from vault');
+		like($r->{out}, qr/already holds a different credential under\s+\S*password/, '... and the operator is told why');
+		unlike($r->{out}, qr/fake-(?:live|vault)-value/, '... without either value');
+	}
+};
+
+subtest 'a destination that cannot be read is not written' => sub {
+	my $r = move({1 => {password => 'fake-vault-value'}}, FAKE_KV => 2, FAKE_CREDHUB_GET_FAILS => 1);
+	isnt($r->{rc}, 0, 'the move fails');
+	unlike($r->{credhub}, qr/^set/m, 'nothing is written to CredHub');
+	unlike($r->{safe}, qr/^rm /m, 'nothing is removed from vault');
+	like($r->{out}, qr/could not tell whether CredHub already holds a credential/, 'the operator is told why');
+	unlike($r->{out}, qr/fake-credhub-diagnostic|fake-vault-value/, 'without what credhub said or the value');
+};
+
+subtest 'a write that races another keeps the vault copy' => sub {
+	# Something else writes the name between the check and the write.
+	my $r = move({1 => {password => 'fake-vault-value'}}, FAKE_KV => 2, FAKE_CREDHUB_RACE => 'fake-racing-value');
+	isnt($r->{rc}, 0, 'the move fails');
+	unlike($r->{safe}, qr/^rm /m, 'nothing is removed from vault');
+	like($r->{out}, qr/holds more than one version under/, 'the operator is told CredHub was written meanwhile');
+	unlike($r->{out}, qr/fake-(?:racing|vault)-value/, 'without either value');
 };
 
 subtest 'a value CredHub does not hold exactly is never deleted' => sub {

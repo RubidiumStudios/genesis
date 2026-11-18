@@ -847,16 +847,34 @@ __genesis_safe_read() {
 }
 export -f __genesis_safe_read
 
-# __genesis_credhub_value NAME - print a CredHub value exactly as stored.
-# A value with a NUL byte cannot be compared exactly, so it is never
-# printed, and the read ends with 3.
+# __genesis_credhub_value NAME [versions] - print the value CredHub holds
+# under NAME exactly, and a newline.  Ends with 0 when it holds one, 1 when
+# CredHub says NAME does not exist, 3 when NAME holds something the move
+# cannot compare exactly, such as a credential of another type or a value
+# with a NUL byte, and 2 when it cannot tell.  With "versions", it asks
+# for the newest two versions, prints the newest, and ends with 4 when
+# there are two.  What credhub says on stderr is only matched, to tell a
+# missing name apart, and never printed.
 __genesis_credhub_value() {
-  credhub get -n "$1" -j 2>/dev/null \
-    | /usr/bin/perl -MJSON::PP -0777 -e '
-        my $d = eval {JSON::PP->new->utf8->decode(scalar(<STDIN>) // "")};
-        exit 2 unless ref($d) eq "HASH" && defined($d->{value}) && !ref($d->{value});
-        exit 3 if $d->{value} =~ /\0/;
-        binmode STDOUT, ":utf8"; print $d->{value}, "\n";'
+  /usr/bin/perl -MIPC::Open3 -MSymbol=gensym -MJSON::PP -e '
+    my ($name, $versions) = @ARGV;
+    my @cmd = ("credhub", "get", "--name=$name", "--output-json");
+    push @cmd, "--versions=2" if $versions;
+    my ($in, $out, $err) = (undef, undef, gensym);
+    my $pid = eval {open3($in, $out, $err, @cmd)} or exit 2;
+    close($in);
+    my $json = do {local $/; <$out>} // "";
+    my $said = do {local $/; <$err>} // "";
+    waitpid($pid, 0);
+    exit(($said =~ /does not exist/i) ? 1 : 2) if $?;
+    my $d = eval {JSON::PP->new->utf8->decode($json)};
+    my @v = (ref($d) eq "HASH" && ref($d->{versions}) eq "ARRAY") ? @{$d->{versions}} : ($d);
+    exit 2 unless @v && ref($v[0]) eq "HASH";
+    my $v = $v[0];
+    exit 3 unless ($v->{type} // "value") eq "value"
+      && defined($v->{value}) && !ref($v->{value}) && $v->{value} !~ /\0/;
+    binmode STDOUT, ":utf8"; print $v->{value}, "\n";
+    exit(@v > 1 ? 4 : 0);' "$@"
 }
 export -f __genesis_credhub_value
 
@@ -865,6 +883,7 @@ move_secrets_to_credhub() {
   # when the operator has asked for the hook's xtrace, and no message
   # below quotes it or anything safe or credhub printed.
   local value check src="$1" dst="$2" rc __xtrace='' secret key='' kv='' version='' now from keys kept='' why=''
+  local name="/$GENESIS_CREDHUB_ROOT/$dst" held='' refused='' readback=versions
   { [[ $- == *x* ]] && __xtrace=1 && set +x; } 2>/dev/null
   secret="${GENESIS_SECRETS_BASE}${src%%:*}"
   [[ "$src" == *:* ]] && key=":${src#*:}"
@@ -904,18 +923,47 @@ move_secrets_to_credhub() {
     [[ -n $__xtrace ]] && set -x
     bail "#R{[ERROR]} Failed to read secret #C{$1} from vault: safe exited $rc"
   fi
-  credhub set -n "/$GENESIS_CREDHUB_ROOT/$dst" -t value -v "$value" >/dev/null 2>&1 && rc=0 || rc=$?
-  if [[ $rc -gt 0 ]] ; then
+
+  # The CredHub CLI has no write that refuses to replace a value, so what
+  # CredHub holds is checked right before the write.  The same value is
+  # a retry, and is not written again; any other is refused, since the
+  # live credential would change before the move is known to be safe.
+  check=''
+  __genesis_exact_value check __genesis_credhub_value "$name" && rc=0 || rc=$?
+  if [[ $rc -eq 0 && "$check" == "$value" ]] ; then
+    held=1; readback=''
+  elif [[ $rc -eq 0 || $rc -eq 3 ]] ; then
+    refused="CredHub already holds a different credential under #C{$2}, so nothing was written to CredHub or removed from vault.  Decide which of the two is right, and remove the other, before running this again."
+  elif [[ $rc -ne 1 ]] ; then
+    refused="Genesis could not tell whether CredHub already holds a credential under #C{$2} (credhub read exited $rc), so nothing was written to CredHub or removed from vault."
+  fi
+  check=''
+  if [[ -n $refused ]] ; then
     value=''; [[ -n $__xtrace ]] && set -x
-    # What credhub printed can echo the request, so only its exit status is
-    # reported.
-    bail "#R{[ERROR]} Failed to store secret #C{$1} under credhub path #C{$2}: credhub exited $rc"
+    bail "#R{[ERROR]} Secret #C{$1} was not moved: $refused"
+  fi
+  if [[ -z $held ]] ; then
+    # The value is attached to its option, so one that starts with a
+    # hyphen is not taken for another option.
+    credhub set --name="$name" --type=value --value="$value" >/dev/null 2>&1 && rc=0 || rc=$?
+    if [[ $rc -gt 0 ]] ; then
+      value=''; [[ -n $__xtrace ]] && set -x
+      # What credhub printed can echo the request, so only its exit status
+      # is reported.
+      bail "#R{[ERROR]} Failed to store secret #C{$1} under credhub path #C{$2}: credhub exited $rc"
+    fi
   fi
 
   # Nothing is deleted until CredHub is shown to hold the very same bytes,
-  # and vault is shown to still hold what was copied.
+  # and vault is shown to still hold what was copied.  After a write,
+  # CredHub must hold that one version, or something else wrote the name
+  # between the check and the write, or after it.
   check=''
-  __genesis_exact_value check __genesis_credhub_value "/$GENESIS_CREDHUB_ROOT/$dst" && rc=0 || rc=$?
+  __genesis_exact_value check __genesis_credhub_value "$name" $readback && rc=0 || rc=$?
+  if [[ $rc -eq 4 ]] ; then
+    value=''; check=''; [[ -n $__xtrace ]] && set -x
+    bail "#R{[ERROR]} CredHub holds more than one version under #C{$2}, so something else wrote it while secret #C{$1} was being moved, and the vault secret was left in place.  Check which value CredHub should hold before running this again."
+  fi
   if [[ $rc -gt 0 || "$check" != "$value" ]] ; then
     value=''; check=''; [[ -n $__xtrace ]] && set -x
     bail "#R{[ERROR]} The value CredHub holds under #C{$2} does not match secret #C{$1} " \

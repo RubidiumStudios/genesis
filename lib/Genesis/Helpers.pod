@@ -1400,6 +1400,18 @@ key's value and a whole Vault record is a map of keys. Nothing is removed
 from Vault until CredHub is read back and shown to hold the same bytes,
 and Vault is read again and shown to still hold what was copied.
 
+The CredHub CLI has no write that refuses to replace a value, so what
+CredHub holds under C<DST_PATH> is read right before the write. When it
+already holds the same value, the move is a retry, and the value is not
+written again. When it holds a different credential, or the read fails
+for any reason but the name not existing, the move is refused before
+anything is written or removed, so the live credential never changes
+before the move is known to be safe. After a write, CredHub must hold
+exactly one version under the name, holding the value, or something else
+wrote it meanwhile and the Vault copy is kept. The value is passed as
+C<--value=VALUE>, so one that starts with a hyphen is not taken for an
+option.
+
 The only delete it makes names the kv v2 version it copied, with
 C<safe rm SECRET^VERSION>, so a value written after the last read is a
 newer version that survives it. The function asks Vault which kv version
@@ -1440,12 +1452,17 @@ Calls C<bail> with C<"[ERROR] Failed to read secret $SRC_PATH from vault:
 safe exited RC"> if C<safe get> fails, before anything is stored or
 removed.
 
+Calls C<bail> with C<"[ERROR] Secret $SRC_PATH was not moved: CredHub
+already holds a different credential under $DST_PATH">, or with a message
+that it could not tell whether it does, before anything is stored or
+removed.
+
 Calls C<bail> with C<"[ERROR] Failed to store secret $SRC_PATH under
 credhub path $DST_PATH: credhub exited RC"> if C<credhub set> fails. What
 credhub printed is left out, since it can echo the request.
 
 Calls C<bail> without removing anything if CredHub does not hold exactly
-the value read, or if the Vault secret changed, gained a version, or could
+the value read, if it holds more than one version after the write, or if the Vault secret changed, gained a version, or could
 not be read again while it was being copied.  Running the function again
 copies the current value.
 
@@ -1465,7 +1482,9 @@ output exactly, tell a kv v2 mount from a kv v1 one (or fail when they
 cannot), find the newest version of a kv v2 secret (or fail when safe
 cannot list it), read Vault without keeping what safe says on stderr and
 refuse a value the move cannot carry exactly, and read a CredHub value
-exactly, refusing one with a NUL byte.
+exactly. That last tells a missing name from a failed read, refuses a
+value with a NUL byte or a credential of another type, and, when asked,
+says whether the name holds more than one version.
 
 B<Examples:>
 

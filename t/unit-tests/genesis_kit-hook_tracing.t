@@ -31,10 +31,12 @@ put_file("$dir/bin/bosh", 0755, join("\n",
 	'#!/bin/bash',
 	qq(for a in "\$@"; do printf '%s\\n' "\$a"; done >> "$dir/argv-bosh"),
 	'exit 0', ''));
-# The fake CredHub answers the read-back the move makes before it deletes
-# anything, and records only the arguments of the write.
+# The fake CredHub says the name does not exist until it has been written,
+# and then answers the read-back the move makes before it deletes
+# anything.  It records only the arguments of the write.
 put_file("$dir/bin/credhub", 0755, join("\n",
 	'#!/bin/bash',
+	qq([[ \$1 == get && ! -f "$dir/argv-credhub" ]] && { echo >&2 'The request could not be completed because the credential does not exist'; exit 1; }),
 	q([[ $1 == get ]] && exec perl -MJSON::PP -e 'print encode_json({value => $ENV{FAKE_VAULT_VALUE}})'),
 	qq(for a in "\$@"; do printf '%s\\n' "\$a"; done >> "$dir/argv-credhub"),
 	'exit 0', ''));
@@ -140,7 +142,7 @@ subtest 'a hook traced at TRACE level keeps its values to itself' => sub {
 	like($r->{stderr}, qr/^\s*FAKE_HOOK_TOKEN$/m, 'the helper still names the variables it was given');
 	unlike($r->{stderr}, qr/^\+ /m, 'the hook does not run under set -x');
 	like($r->{stdout}, qr/hook-stdout-marker.*hook-finished-marker/s, 'the hook\'s stdout still reaches the caller');
-	is($r->{credhub}, "set\n-n\n/fake-bosh/fake/fake/password\n-t\nvalue\n-v\n$r->{vault_value}\n",
+	is($r->{credhub}, "set\n--name=/fake-bosh/fake/fake/password\n--type=value\n--value=$r->{vault_value}\n",
 		'credhub gets the exact arguments');
 	is($r->{bosh}, "-d\nfake\nupdate-config\n--var\npassword=$r->{token}\n", 'bosh gets the exact arguments');
 	ok(!defined($r->{traced_hook}), 'no xtrace copy of the hook is written');
@@ -175,7 +177,9 @@ subtest 'a failed vault read moves nothing and deletes nothing' => sub {
 
 subtest 'a failed credhub set does not echo what credhub printed' => sub {
 	my $marker = fake_secret('credhub-output');
-	put_file("$dir/bin/credhub", 0755, "#!/bin/bash\necho 'stdout $marker'; echo >&2 'stderr $marker'; exit 3\n");
+	put_file("$dir/bin/credhub", 0755, "#!/bin/bash\n"
+		. "[[ \$1 == get ]] && { echo >&2 'stderr $marker does not exist'; exit 1; }\n"
+		. "echo 'stdout $marker'; echo >&2 'stderr $marker'; exit 3\n");
 	my $r = run_info_hook();
 	ok(!$r->{ok}, 'the hook fails');
 	no_values_anywhere($r);
