@@ -114,7 +114,7 @@ sub target {
 		     $w, $w, $_->{name},
 		                  $_->{url} =~ /^https/ ? ($_->{verify} ? "" : "(noverify)") : "(insecure)",
 		                             $_->{name} eq $opts{default_vault}->{name} ? "Y" : "-",
-		                                $_->{url}
+		                                Genesis::traced_endpoint($_->{url})
 		),$_->{name}]);
 	}
 
@@ -276,7 +276,7 @@ sub _reconcile_strongbox {
 			"node, not the rest of the cluster.\n".
 			"Run #G{safe target %s--strongbox %s %s} to record it.",
 			$wanted ? 'enabled' : 'disabled', $vault->name,
-			$vault->verify ? '' : '-k ', $vault->url, $vault->name
+			$vault->verify ? '' : '-k ', $vault->endpoint, $vault->name
 		) if $wanted;
 		return;
 	}
@@ -294,7 +294,7 @@ sub _reconcile_strongbox {
 		$stated ? 'enabled' : 'disabled',
 		$vault->verify ? '' : '-k ',
 		$wanted ? '--strongbox' : '--no-strongbox',
-		$vault->url, $vault->name
+		$vault->endpoint, $vault->name
 	) if ($stated ? 1 : 0) != ($wanted ? 1 : 0);
 
 	return;
@@ -324,7 +324,7 @@ sub connect_and_validate {
 	unless ($self->is_current) {
 		my $log_id = info({pending => 1, delay => 2000 }, # don't show for 2 seconds (NYI)
 			"\n#yi{Verifying availability of vault '%s' (%s)...}",
-			$self->name, $self->url
+			$self->name, $self->endpoint
 		) unless in_callback || under_test || $silent;
 		my $status = $self->status;
 		if ($status eq 'unauthenticated') {
@@ -353,7 +353,7 @@ sub connect_and_validate {
 			unless in_callback || under_test || $silent;
 		debug "Vault status: $status";
 		bail("Could not connect to vault%s",
-			(in_callback || under_test || $silent) ? sprintf(" '%s' (%s): status is %s)", $self->name, $self->url,$status):""
+			(in_callback || under_test || $silent) ? sprintf(" '%s' (%s): status is %s)", $self->name, $self->endpoint,$status):""
 		) unless $status eq "ok";
 	}
 	return $self->set_as_current;

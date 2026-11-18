@@ -849,7 +849,7 @@ sub set_vault {
 			"Cannot use %s as the secrets provider for this repository, because ".
 			"only a remote safe target can be one.",
 			blessed($vault) && $vault->isa('Service::Vault')
-				? sprintf("vault #C{%s} at #M{%s}", $vault->name, $vault->url)
+				? sprintf("vault #C{%s} at #M{%s}", $vault->name, $vault->endpoint)
 				: "an unresolved vault"
 		) unless blessed($vault) && $vault->isa('Service::Vault::Remote');
 		$new_vault = $vault;
@@ -896,7 +896,9 @@ sub vault_status {
 	my @candidates = Service::Vault->find(url => $info->{url});
 	if (! scalar(@candidates)) {
 		$info->{alias_error} = "No alias for this URL found on local system";
-		$info->{status} = qq(Run 'safe target "$info->{url}" "}#Ri{<alias>}#R{") . ($info->{insecure} ? " -k" : "") . "' to create an alias for this URL";
+		# A URL can carry a username and password, so the suggestion names
+		# the vault by its scheme, host, and port.
+		$info->{status} = sprintf(q(Run 'safe target "%s" "}#Ri{<alias>}#R{"), Genesis::traced_endpoint($info->{url})) . ($info->{insecure} ? " -k" : "") . "' to create an alias for this URL";
 		return %$info;
 	}
 

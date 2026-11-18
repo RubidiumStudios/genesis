@@ -387,12 +387,13 @@ sub status {
 		};
 		alarm 0;
 		if ($@ =~ /\Atimeout\n/) { # Carp::Always appends a backtrace
-			(my $proxy = $ENV{BOSH_ALL_PROXY}) =~ s/\?.*//; # drop private-key and other options
+			# Each is reduced to its scheme, host, and port, which drops a
+			# proxy's userinfo along with private-key and its other options.
 			return {
 				status => 'unreachable',
 				msg => sprintf(
 					"timed out after %s seconds waiting for %s through proxy %s",
-					$timeout, $self->url, $proxy
+					$timeout, Genesis::traced_endpoint($self->url), Genesis::traced_endpoint($ENV{BOSH_ALL_PROXY})
 				)
 			};
 		}
@@ -1051,7 +1052,7 @@ sub acquire_network_lock {
 			"target is a standby node whose reads lag the leader.  Nothing holds the ".
 			"lock now, so running the command again is safe; if this keeps happening, ".
 			"point the vault target at the cluster leader.",
-			$self->alias, $path, $self->vault->url
+			$self->alias, $path, Genesis::traced_endpoint($self->vault->url)
 		);
 	}
 
@@ -1063,7 +1064,7 @@ sub acquire_network_lock {
 		"this director are taking and releasing the lock in quick succession.  Wait ".
 		"for them to finish and try again, and check #C{safe get %s} to see who holds ".
 		"it now.",
-		$self->alias, $path, $self->vault->url, $path
+		$self->alias, $path, Genesis::traced_endpoint($self->vault->url), $path
 	);
 }
 # }}}
@@ -1119,7 +1120,7 @@ sub clear_network_lock {
 		"This usually means several deploys or #C{bosh-configs upload} runs against ".
 		"this director are taking and releasing the lock in quick succession.  Check ".
 		"#C{safe get %s} to see who holds it now.",
-		$self->alias, $path, $self->vault->url, $path
+		$self->alias, $path, Genesis::traced_endpoint($self->vault->url), $path
 	);
 }
 # }}}
@@ -1327,7 +1328,7 @@ sub _refuse_legacy_network_lock {
 			"The #C{%s} key of #C{%s} in the vault at #M{%s} is not a lock record, so ".
 			"it is being ignored.  If an older Genesis is not deploying against the ".
 			"#M{%s} BOSH director, it can be removed with #C{safe rm -f %s:%s}.",
-			$key, $path, $self->vault->url, $self->alias, $path, $key
+			$key, $path, Genesis::traced_endpoint($self->vault->url), $self->alias, $path, $key
 		);
 		return;
 	}
@@ -1345,7 +1346,7 @@ sub _refuse_legacy_network_lock {
 		"as its process exits, when that ran on this same host).  #C{safe get %s:%s} ".
 		"shows the lock as it is stored, and once you have checked that nothing is ".
 		"deploying, #C{safe rm -f %s:%s} clears it.",
-		$what, $self->alias, $appears, $key, $path, $self->vault->url,
+		$what, $self->alias, $appears, $key, $path, Genesis::traced_endpoint($self->vault->url),
 		$lock->{user} // 'unknown', $lock->{hostname} // 'unknown',
 		$lock->{env} // 'unknown', $lock->{pid} // 'unknown',
 		strfuzzytime($lock->{at}), $lock->{at},
@@ -1390,7 +1391,7 @@ sub _refuse_network_lock {
 		$self->alias, $lock->{user} // 'unknown', $lock->{hostname} // 'unknown',
 		$lock->{env} // 'unknown', $lock->{pid} // 'unknown',
 		strfuzzytime($lock->{at}), $lock->{at}, $race,
-		$current->{path}, $self->vault->url, $max_minutes, $current->{path}
+		$current->{path}, Genesis::traced_endpoint($self->vault->url), $max_minutes, $current->{path}
 	);
 }
 # }}}

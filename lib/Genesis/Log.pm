@@ -146,11 +146,15 @@ sub register_secret {
 #
 # It also replaces the userinfo of any URL, such as the user:password in
 # https://user:password@vault.example, which is a credential that need
-# not have been registered.
+# not have been registered.  The authority is everything after :// up to
+# the first whitespace, /, ?, or #, and its userinfo runs to the last @
+# in it, so quotes, sub-delims, and an unescaped @ in a password are all
+# caught.  Text that only looks like an authority loses a little more
+# than it needs to, which is the safe way to be wrong.
 sub scrub {
 	my ($self, $text) = @_;
 	return $text unless defined($text);
-	$text =~ s{\b([A-Za-z][A-Za-z0-9+.-]*://)[^\s/?\#\@'"<>]+\@}{$1<redacted:url-userinfo>\@}g;
+	$text =~ s{\b([A-Za-z][A-Za-z0-9+.-]*://)[^\s/?\#]*\@}{$1<redacted:url-userinfo>\@}g;
 	return $text unless %SECRETS;
 	$SECRET_PATTERN //= do {
 		my $alternatives = join('|',

@@ -63,4 +63,41 @@ subtest 'creating a target does not trace its URL or quote what safe said' => su
 	unlike($error, qr/<redacted:url-userinfo>/, 'which it never had to scrub');
 };
 
+subtest 'the scrubber parses the whole authority of a URL' => sub {
+	# RFC 3986 lets userinfo hold sub-delims, percent escapes, and colons,
+	# and a hand-written URL can hold an unescaped @ or quote too.  The
+	# userinfo runs to the last @ before the path, query, or fragment.
+	my @passwords = (
+		"pa'ss-$secret",
+		"q\"uote-$secret",
+		"!\$&()*+,;=-$secret",
+		"%2Fescaped:$secret",
+		"user\@corp:$secret",
+		"<angle>$secret",
+	);
+	for my $password (@passwords) {
+		my ($log, $stderr) = capture_trace {
+			debug("could not reach 'https://admin:$password\@vault.example:8200/v1/sys/health'");
+			trace("target #M{http://admin:$password\@10.0.0.6}");
+		};
+		unlike($log.$stderr, qr/\Q$secret\E/, "the password in <$password> is in no log");
+		like($log, qr{https://<redacted:url-userinfo>\@vault\.example:8200/v1/sys/health'}, '... and the host and path are still shown');
+	}
+	my ($log) = capture_trace {
+		debug("mail ops\@example.com about https://vault.example:8200/ui?from=a\@b");
+	};
+	like($log, qr{ops\@example\.com about https://vault\.example:8200/ui\?from=a\@b}, 'text with no userinfo is left alone');
+};
+
+subtest 'a failed vault read names the vault by its endpoint' => sub {
+	my $vault = Service::Vault::Remote->new("https://admin:pa'ss-$secret\@vault.example:8200", 'ops', 1);
+	no warnings 'redefine';
+	local *Service::Vault::query = sub {('', 2, "Error: could not reach the vault")};
+	use warnings 'redefine';
+	my $error;
+	my ($log, $stderr) = capture_trace { eval {$vault->read_flattened_secret('secret/x')}; $error = $@ };
+	like($error, qr{https://vault\.example:8200}, 'the error names the vault');
+	unlike($error.$log.$stderr, qr/\Q$secret\E|<redacted:url-userinfo>/, 'without its userinfo, which it never had to scrub');
+};
+
 done_testing;

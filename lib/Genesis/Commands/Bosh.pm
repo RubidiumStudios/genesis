@@ -148,7 +148,7 @@ sub credhub {
 	pushd($ENV{GENESIS_ORIGINATING_DIR});
 	$env->notify(
 		"Running #C{credhub %s} against CredHub server on #M{%s} (#C{%s}):\n",
-		$cmd, $credhub->{name}, $credhub->{url}
+		$cmd, $credhub->{name}, Genesis::traced_endpoint($credhub->{url})
 	);
 	my ($out, $rc) = $credhub->execute($cmd, @args);
 	popd();

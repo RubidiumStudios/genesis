@@ -3064,7 +3064,7 @@ sub bosh {
 					"Calling shell has BOSH_ENVIRONMENT set to %s, but this environment ".
 					"specifies the BOSH director at #M{%s}; ignoring \$BOSH_ENVIRONMENT ".
 					"set in shell.\n",
-					$ENV{BOSH_ENVIRONMENT}, $bosh->url
+					Genesis::traced_endpoint($ENV{BOSH_ENVIRONMENT}), Genesis::traced_endpoint($bosh->url)
 				) if ($ENV{BOSH_ENVIRONMENT} ne $bosh->url);
 			} else {
 				error(
@@ -3379,7 +3379,7 @@ sub download_configs {
 
 	bail(
 		"Could not fetch requested configs from #M{%s} BOSH director at #c{%s}\n",
-		$self->bosh->{alias}, $self->bosh->{url}
+		$self->bosh->{alias}, Genesis::traced_endpoint($self->bosh->{url})
 	) if $err;
 	return $self;
 }

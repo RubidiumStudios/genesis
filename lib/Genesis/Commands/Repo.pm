@@ -661,7 +661,7 @@ sub secrets_provider {
 			"          URL: #G{%s} %s\n".
 			"  Local Alias: #%s{%s}\n".
 			"       Status: #%s{%s}\n",
-			"Safe/Vault", $vault_info{url}, $vault_info{security},
+			"Safe/Vault", Genesis::traced_endpoint($vault_info{url}), $vault_info{security},
 			$vault_info{alias_error} ? "R" : "G",
 			$vault_info{alias} ? $vault_info{alias} : "$vault_info{alias_error}",
 			$vault_info{status} eq "ok" ? "G" : "R",

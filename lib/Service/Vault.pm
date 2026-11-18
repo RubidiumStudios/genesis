@@ -288,7 +288,7 @@ sub get_vault_from_descriptor {
 			"Genesis needs one safe target per URL, because it hands the vault to ".
 			"safe by URL.  Remove the other targets for that URL from ~/.saferc, ".
 			"or point them elsewhere, before re-attempting this command.",
-			$target->name, $target->url, join(', ', map {$_->name} @shared)
+			$target->name, $target->endpoint, join(', ', map {$_->name} @shared)
 		) if @shared;
 		# The name already picked exactly one target, so it is used as is.
 		# attach would only look it up again, by fields it reads a leading
@@ -374,6 +374,13 @@ sub parse_vault_descriptor {
 # public accessors: url, name, port, verify, namespace, strongbox, tls {{{
 sub url {
 	$_[0]->{url};
+}
+
+# endpoint - the URL as a message may show it: its scheme, host, and port.
+# A target URL can carry a username and password, so no diagnostic, prompt,
+# or suggested command quotes the URL itself.
+sub endpoint {
+	Genesis::traced_endpoint($_[0]->{url});
 }
 
 sub name {
@@ -644,7 +651,7 @@ sub get {
 		return $out if $rc == 0;
 		debug(
 			"#R{[ERROR]} Could not read #C{%s:%s} from vault at #M{%s}",
-			$path, $key,$self->{url}
+			$path, $key,$self->endpoint
 		);
 		return undef;
 	}
@@ -681,7 +688,7 @@ sub get_path_strict {
 	if ($rc || $err) {
 		my ($reason) = $rc ? read_failure($rc, $err) : ($err);
 		return undef unless defined($reason);
-		bail_read_failure($self->{url}, $path, $reason, "export $path");
+		bail_read_failure($self->endpoint, $path, $reason, "export $path");
 	}
 	return $self->_unpack_path_export($path, $data);
 }
@@ -772,7 +779,7 @@ sub read_flattened_secret {
 	if ($opts{lenient} && ($rc || !(defined($yaml) && length($yaml)))) {
 		debug(
 			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}: %s",
-			$path, $self->{url}, $rc ? (read_failure($rc, $err))[0] // 'safe named it as holding nothing'
+			$path, $self->endpoint, $rc ? (read_failure($rc, $err))[0] // 'safe named it as holding nothing'
 				: $err // 'safe printed nothing'
 		);
 		return undef;
@@ -780,11 +787,11 @@ sub read_flattened_secret {
 	if ($rc || defined($err)) {
 		my ($reason) = $rc ? read_failure($rc, $err) : ($err);
 		return undef unless defined($reason);
-		bail_read_failure($self->{url}, $path, $reason, "get $arg");
+		bail_read_failure($self->endpoint, $path, $reason, "get $arg");
 	}
 	trace(
 		"Read %s key/value pairs from #C{%s} in vault at #M{%s} in %.3f seconds",
-		scalar(CORE::keys %$values), $path, $self->{url}, gettimeofday() - $start
+		scalar(CORE::keys %$values), $path, $self->endpoint, gettimeofday() - $start
 	);
 	return $values;
 }
@@ -849,7 +856,7 @@ sub flatten_export {
 			"a value that is not a string, but it held nothing when read again with ".
 			"#C{safe get}, so it changed while Genesis was reading it.  Run the ".
 			"command again.",
-			$path, $vault->{url} // 'the vault'
+			$path, $vault->endpoint // 'the vault'
 		) unless defined($secret);
 		$export->{$path} = $secret;
 	}
@@ -986,14 +993,14 @@ sub set {
 		bail(
 			"Could not write to #C{%s} in vault at #M{%s}: a joined path:key ".
 			"names a single key, so it takes at most one value.",
-			$path, $self->{url}
+			$path, $self->endpoint
 		) if @args > 1;
 		($path, @args) = ($base, $key, @args);
 	}
 
 	bail(
 		"Could not write to #C{%s} in vault at #M{%s}: no key was given.",
-		$path, $self->{url}
+		$path, $self->endpoint
 	) unless @args;
 
 	# A lone key, or an explicit undef value, means "prompt for it" -- the
@@ -1006,7 +1013,7 @@ sub set {
 		my ($out,$rc) = $self->query({interactive => 1},'set', $path, $key);
 		bail(
 			"Could not write #C{%s:%s} to vault at #M{%s}",
-			$path, $key,$self->{url}
+			$path, $key,$self->endpoint
 		) unless $rc == 0;
 		return $self->get($path,$key);
 	}
@@ -1014,7 +1021,7 @@ sub set {
 	bail(
 		"Could not write to #C{%s} in vault at #M{%s}: set() takes key/value ".
 		"pairs, but was given an odd number of arguments.",
-		$path, $self->{url}
+		$path, $self->endpoint
 	) if @args % 2;
 
 	my %pairs = @args;
@@ -1053,7 +1060,7 @@ sub _write_batch {
 	my ($out,$rc,$err) = $self->query('set', $path, @$batch);
 	bail(
 		"Could not write #C{%s} to vault at #M{%s}: safe exited %d (%s)",
-		$path,$self->{url},$rc,Genesis::failure_summary($out,$err)
+		$path,$self->endpoint,$rc,Genesis::failure_summary($out,$err)
 	) unless $rc == 0;
 
 	# Confirm everything written so far, not just this batch: a batch that
@@ -1103,7 +1110,7 @@ sub _confirm_written {
 		"discard what has already been written.\n\n".
 		"This usually means the vault target is a standby node whose reads ".
 		"lag the leader; pointing it at the cluster leader avoids it.",
-		$path, $self->{url}, scalar(@wrong),
+		$path, $self->endpoint, scalar(@wrong),
 		scalar(CORE::keys %$written), $timeout
 	) if @wrong;
 	return;
@@ -1146,7 +1153,7 @@ sub _confirm_cleared {
 		"continuing would carry those keys into the new value.\n\n".
 		"This usually means the vault target is a standby node whose reads ".
 		"lag the leader; pointing it at the cluster leader avoids it.",
-		$path, $self->{url}, scalar(@left), $timeout
+		$path, $self->endpoint, scalar(@left), $timeout
 	) if @left;
 	return;
 }
@@ -1157,21 +1164,21 @@ sub clear {
 	my ($self, $path, $recursive) = @_;
 	my ($out,$rc,$err) = ('',0,'');
 	if ($recursive) {
-		debug("Clearing #C{%s} and all subpaths in vault at #M{%s}", $path, $self->{url});
+		debug("Clearing #C{%s} and all subpaths in vault at #M{%s}", $path, $self->endpoint);
 		($out,$rc,$err) = $self->query('rm', '-rf', $path);
 	} elsif (!$self->has($path)) {
-		debug("Path #C{%s} does not exist in vault at #M{%s} - no need to clear", $path, $self->{url});
+		debug("Path #C{%s} does not exist in vault at #M{%s} - no need to clear", $path, $self->endpoint);
 		# A stale read can call a path absent while its keys are still there
 		# for the next write to merge into, so this is checked not trusted.
 		$self->_confirm_cleared($path);
 		return;
 	} else {
-		debug("Clearing #C{%s} in vault at #M{%s}", $path, $self->{url});
+		debug("Clearing #C{%s} in vault at #M{%s}", $path, $self->endpoint);
 		($out,$rc,$err) = $self->query('rm', '-f', $path);
 	}
 	bail(
 		"Could not clear #C{%s} in vault at #M{%s}: safe exited %d (%s)",
-		$path, $self->{url}, $rc, Genesis::failure_summary($out, $err)
+		$path, $self->endpoint, $rc, Genesis::failure_summary($out, $err)
 	) unless $rc == 0;
 	$self->_confirm_cleared($path);
 	return 1;
@@ -1275,7 +1282,7 @@ sub status {
 
 	# See if the url is reachable to start with
 	$self->url =~ qr(^http(s?)://(.*?)(?::([0-9]*))?$) or
-		bail("Invalid vault target URL #C{%s}: expecting http(s)://ip-or-domain(:port)", $self->url);
+		bail("Invalid vault target URL #C{%s}: expecting http(s)://ip-or-domain(:port)", $self->endpoint);
 	my $ip = $2;
 	my $port = $3 || ($1 eq "s" ? 443 : 80);
 	my $status = tcp_listening($ip,$port);
@@ -1399,7 +1406,7 @@ sub kv_mount {
 			"This usually means the path was mistyped, or that a mount configured for ".
 			"Genesis (an exodus or secrets mount) names the wrong engine.  Run ".
 			"#C{safe vault secrets list} to see what is mounted where.",
-			$path, $type || 'unknown', $self->{url}, $data->{path}
+			$path, $type || 'unknown', $self->endpoint, $data->{path}
 		) unless $type eq 'kv' || $type eq 'generic';
 		my $options = ref($data->{options}) eq 'HASH' ? $data->{options} : {};
 		my $mount = $data->{path} =~ s{^/+}{}r;
@@ -1421,7 +1428,7 @@ sub kv_mount {
 		"the token has no access at all to that path.  Run #C{safe curl GET ".
 		"/sys/internal/ui/mounts/%s} with the same token to see the vault's answer, ".
 		"and #C{safe vault status} to check whether the vault is sealed.",
-		$path, $self->{url}, $reason, $path
+		$path, $self->endpoint, $reason, $path
 	);
 }
 
@@ -1460,7 +1467,7 @@ sub kv_read {
 		"the token has no read access on that path.  Run #C{safe get %s} with the ".
 		"same token to see which, and #C{safe vault status} to check whether the ".
 		"vault is sealed.",
-		$path, $self->{url}, $reason, $path
+		$path, $self->endpoint, $reason, $path
 	);
 }
 
@@ -1496,7 +1503,7 @@ sub kv_write {
 			"the token has no create or update access on that path%s.  Run ".
 			"#C{safe vault status} to check whether the vault is sealed, and check the ".
 			"token's policies with #C{safe vault token lookup}.",
-			$path, $self->{url}, $reason,
+			$path, $self->endpoint, $reason,
 			$v2 ? sprintf(" (on a kv v2 mount the policy has to grant it on #C{%s})", _kv_data_uri($mount, $path)) : ''
 		);
 	}
@@ -1510,7 +1517,7 @@ sub kv_write {
 		"A kv v2 mount always reports the version it wrote, so this usually means ".
 		"something between Genesis and the vault (a proxy, or a different engine at ".
 		"that mount) answered instead.  Check the secret with #C{safe get %s}.",
-		$path, $self->{url}, $path
+		$path, $self->endpoint, $path
 	) unless defined($version) && $version =~ /^\d+$/;
 
 	$self->_confirm_kv_version($path, $version);
@@ -1532,7 +1539,7 @@ sub kv_delete {
 		"the token has no delete access on that path%s.  Run #C{safe vault status} ".
 		"to check whether the vault is sealed, and check the token's policies with ".
 		"#C{safe vault token lookup}.",
-		$path, $self->{url}, $reason,
+		$path, $self->endpoint, $reason,
 		$mount->{version} == 2 ? sprintf(" (on a kv v2 mount the policy has to grant it on #C{%s})", _kv_data_uri($mount, $path)) : ''
 	);
 }
@@ -1643,7 +1650,7 @@ sub _confirm_kv_version {
 		"Whatever reads next would act on the older version.  This usually means ".
 		"the vault target is a standby node whose reads lag the leader; pointing it ".
 		"at the cluster leader avoids it.",
-		$version, $path, $self->{url}, $seen, $timeout
+		$version, $path, $self->endpoint, $seen, $timeout
 	);
 }
 
@@ -1656,7 +1663,7 @@ sub token_info {
 	return read_json_from($out) if $rc == 0;
 	debug(
 		"#R{[ERROR]} Could not get token information from vault at #M{%s}",
-		$self->{url}
+		$self->endpoint
 	);
 	return {};
 }
@@ -1815,7 +1822,7 @@ sub unseal {
 		# finish by hand still has the keys at <secrets_mount>vault/seal/keys.
 		trace(
 			"[Attempt %s] Failed to unseal vault cluster at #M{%s}",
-			$tries, $self->{url}
+			$tries, $self->endpoint
 		);
 		$self->_pause(2) if $tries < $max_tries; # nothing to wait for before giving up
 	}
@@ -2048,11 +2055,11 @@ sub _strongbox_unseal_caveat {
 		"only reached #M{%s}; any other nodes in the cluster were left as they ".
 		"were.%s\n".
 		"Enable it with #G{safe target %s--strongbox %s %s}.",
-		$self->name, $self->url,
+		$self->name, $self->endpoint,
 		defined($self->strongbox) ? ''
 			: "  The target does not state the flag at all, which is how every ".
 			  "target written before safe made Strongbox opt-in appears.",
-		$self->verify ? '' : '-k ', $self->url, $self->name
+		$self->verify ? '' : '-k ', $self->endpoint, $self->name
 	);
 }
 

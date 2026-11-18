@@ -338,10 +338,15 @@ sub _use_vault_for_new {
 	my $vault_at    = $where->($vault->url, $vault->namespace);
 	return if $recorded_at eq $vault_at;
 
+	# A URL can carry a username and password, so each is shown by its
+	# scheme, host, and port, with the namespace after it.
+	$recorded_at = $where->(Genesis::traced_endpoint($recorded->{url}), $recorded->{namespace});
+	$vault_at    = $where->($vault->endpoint, $vault->namespace);
+
 	info(
 		"\n#Y{Note:} #C{.genesis/config} was left alone, so the repository's ".
 		"secrets provider is still #M{%s} (#C{%s}).  This command uses #M{%s} (#C{%s}).",
-		$recorded_at, $recorded->{alias} // 'no alias', $vault_at, $vault->name
+		$recorded_at, $recorded->{alias} // q(no alias), $vault_at, $vault->name
 	);
 	return;
 }
@@ -1233,7 +1238,7 @@ sub deploy {
 	if ($env->use_create_env) {
 		info "  - as a #M{create-env} deployment.";
 	} else {
-		info "  - to '#M{%s}' BOSH director at #c{%s}.", $env->bosh->{alias}, $env->bosh->{url};
+		info "  - to '#M{%s}' BOSH director at #c{%s}.", $env->bosh->{alias}, Genesis::traced_endpoint($env->bosh->{url});
 	}
 	# Specify the environment iaas and scale
 	my $scale = $env->scale;

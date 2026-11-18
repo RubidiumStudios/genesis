@@ -757,6 +757,20 @@ B<Examples:>
   print $vault->url();
   # Returns: 'https://vault.example.com:8200'
 
+=head2 endpoint
+
+  my $shown = $vault->endpoint();
+
+Returns the target's URL as a message may show it, which is its scheme, host, and port from C<Genesis::traced_endpoint>. A target URL can carry a username and password, so every diagnostic, prompt, and suggested command that names a vault uses this rather than C<url>, and the URL itself goes only to the commands Genesis runs.
+
+B<Returns:> A string such as C<'https://vault.example.com:8200'>.
+
+B<Examples:>
+
+  # For a target at https://admin:pw@vault.example.com:8200
+  print $vault->endpoint();
+  # Returns: 'https://vault.example.com:8200'
+
 =head2 port
 
   my $port = $vault->port();

@@ -306,7 +306,7 @@ wrapping it, since wrapping can break a value across lines.
 The userinfo of any URL, such as the C<user:password> in
 C<https://user:password@vault.example>, is replaced by
 C<E<lt>redacted:url-userinfoE<gt>> too, whether or not it was registered,
-since a URL can carry a credential Genesis never loaded as one.
+since a URL can carry a credential Genesis never loaded as one. The authority is read as everything after C<://> up to the first whitespace, C</>, C<?>, or C<#>, and the userinfo as everything in it up to its last C<@>, so a password holding a quote, a sub-delimiter, or an unescaped C<@> is caught.
 
 B<Parameters:>
 

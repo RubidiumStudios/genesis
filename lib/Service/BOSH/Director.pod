@@ -806,8 +806,9 @@ B<Errors:>
 None raised. When C<BOSH_ALL_PROXY> is set and the proxy timeout fires,
 the result is
 C<< { status => 'unreachable', msg => "timed out after N seconds waiting for URL through proxy PROXY" } >>,
-where C<URL> is the director's L</url> and C<PROXY> is C<BOSH_ALL_PROXY>
-with its query string (such as C<private-key>) removed. L</connect_and_validate>
+where C<URL> and C<PROXY> are the director's L</url> and C<BOSH_ALL_PROXY>
+reduced to their scheme, host, and port by C<Genesis::traced_endpoint>, which
+leaves out any userinfo, path, and query string (such as C<private-key>). L</connect_and_validate>
 turns that result into its C<unreachable> error. When C<bosh env> fails
 or dies, through the proxy or not, the result is C<error>, and the
 message carries C<bosh>'s stderr or the exception text.

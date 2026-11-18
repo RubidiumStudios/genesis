@@ -41,7 +41,8 @@ EOF
 	is($status->{status}, 'unreachable', 'status is unreachable');
 	like($status->{msg}, qr/timed out after 1 seconds?/, 'message gives the timeout');
 	like($status->{msg}, qr{https://10\.99\.0\.4:25555}, 'message names the director');
-	like($status->{msg}, qr{ssh\+socks5://jumpbox\@192\.0\.2\.10:22}, 'message names the proxy');
+	like($status->{msg}, qr{ssh\+socks5://192\.0\.2\.10:22}, 'message names the proxy by its scheme, host, and port');
+	unlike($status->{msg}, qr/jumpbox@/, 'message leaves out the proxy userinfo');
 	unlike($status->{msg}, qr/private-key/, 'message leaves out the proxy query string');
 	ok(!$bosh->{validated}, 'director is not marked validated');
 	ok(!$ENV{GENESIS_BOSH_VERIFIED}, 'GENESIS_BOSH_VERIFIED is not set');

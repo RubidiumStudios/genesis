@@ -138,7 +138,7 @@ sub store_data {
 			my @rest = grep {!$absent{$canonical->($_)}} @paths;
 			if (defined($reason) || @rest == @paths) {
 				Service::Vault::bail_read_failure(
-					eval {$self->service->{url}} // 'the vault',
+					eval {$self->service->endpoint} // 'the vault',
 					join(' and ', map {$canonical->($_)} @paths),
 					$reason // "safe said #C{".join(', ', @absent)."} held nothing, which it was not asked to read",
 					join(' ', 'export', map {$canonical->($_)} @paths)
