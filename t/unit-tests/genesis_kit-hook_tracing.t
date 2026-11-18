@@ -33,11 +33,12 @@ put_file("$dir/bin/bosh", 0755, join("\n",
 	'exit 0', ''));
 # The fake CredHub says the name does not exist until it has been written,
 # and then answers the read-back the move makes before it deletes
-# anything.  It records only the arguments of the write.
+# anything, with its one version when asked for versions.  It records
+# only the arguments of the write.
 put_file("$dir/bin/credhub", 0755, join("\n",
 	'#!/bin/bash',
-	qq([[ \$1 == get && ! -f "$dir/argv-credhub" ]] && { echo >&2 'The request could not be completed because the credential does not exist'; exit 1; }),
-	q([[ $1 == get ]] && exec perl -MJSON::PP -e 'print encode_json({value => $ENV{FAKE_VAULT_VALUE}})'),
+	qq([[ \$1 == get && ! -f "$dir/argv-credhub" ]] && { echo >&2 'The request could not be completed because the credential does not exist or you do not have sufficient authorization.'; exit 1; }),
+	q([[ $1 == get ]] && exec perl -MJSON::PP -e 'my $v = {type => "value", value => $ENV{FAKE_VAULT_VALUE}}; print encode_json((grep {/^--versions=/} @ARGV) ? {versions => [$v]} : $v)' -- "$@"),
 	qq(for a in "\$@"; do printf '%s\\n' "\$a"; done >> "$dir/argv-credhub"),
 	'exit 0', ''));
 put_file("$dir/bin/safe", 0755, join("\n",
@@ -178,7 +179,7 @@ subtest 'a failed vault read moves nothing and deletes nothing' => sub {
 subtest 'a failed credhub set does not echo what credhub printed' => sub {
 	my $marker = fake_secret('credhub-output');
 	put_file("$dir/bin/credhub", 0755, "#!/bin/bash\n"
-		. "[[ \$1 == get ]] && { echo >&2 'stderr $marker does not exist'; exit 1; }\n"
+		. "[[ \$1 == get ]] && { echo >&2 'The request could not be completed because the credential does not exist or you do not have sufficient authorization.'; exit 1; }\n"
 		. "echo 'stdout $marker'; echo >&2 'stderr $marker'; exit 3\n");
 	my $r = run_info_hook();
 	ok(!$r->{ok}, 'the hook fails');

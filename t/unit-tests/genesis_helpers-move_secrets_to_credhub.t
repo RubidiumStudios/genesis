@@ -93,7 +93,10 @@ SH
 # value something else writes just before the fake's own write, and
 # FAKE_CREDHUB_GET_FAILS makes every read fail some other way.  With
 # FAKE_CREDHUB_NOISE, every read first writes more to stderr than a pipe
-# holds, as a CLI full of warnings could.
+# holds, as a CLI full of warnings could.  A name with no value gets
+# FAKE_CREDHUB_SAYS on stderr, CredHub's own answer by default, and ends
+# with FAKE_CREDHUB_SAYS_RC, 1 by default.  FAKE_CREDHUB_FLAT answers a
+# request for versions with the newest value alone.
 put_file("$dir/bin/credhub", 0755, <<'SH');
 #!/bin/bash
 store="$FAKE_DIR/credhub-value"; count="$FAKE_DIR/credhub-count"
@@ -118,9 +121,11 @@ case "$cmd" in
   get)
     [[ -n "${FAKE_CREDHUB_GET_FAILS:-}" ]] && { echo >&2 "error: fake-credhub-diagnostic"; exit 1; }
     [[ -f "$store" ]] || {
-      echo >&2 "The request could not be completed because the credential does not exist or you do not have sufficient authorization."
-      exit 1
+      printf >&2 '%s\n' "${FAKE_CREDHUB_SAYS-The request could not be completed because the credential does not exist or you do not have sufficient authorization.}"
+      exit "${FAKE_CREDHUB_SAYS_RC:-1}"
     }
+    [[ -n "${FAKE_CREDHUB_FLAT:-}" ]] && versions=''
+
     perl -MJSON::PP -0777 -e '
       my ($versions, $count, $type) = @ARGV;
       my $v = {type => $type, value => scalar(<STDIN>)};
@@ -158,11 +163,12 @@ sub move {
 	my ($versions, %env) = @_;
 	my $next = delete $env{next};
 	my $holds = delete $env{holds};
+	my $history = delete($env{history}) // 1;
 	my $src = delete($env{src}) // 'path:password';
 	system('rm', '-rf', "$dir/vault", "$dir/safe-calls", "$dir/credhub-calls", "$dir/credhub-value", "$dir/credhub-count");
 	if (defined($holds)) {
 		put_file("$dir/credhub-value", $holds);
-		put_file("$dir/credhub-count", "1\n");
+		put_file("$dir/credhub-count", "$history\n");
 	}
 	put_file("$dir/vault/next/password", $next) if defined($next);
 	for my $v (keys %$versions) {
@@ -261,6 +267,52 @@ subtest 'a destination already holding the same value is a retry' => sub {
 	like($r->{safe}, qr/^rm secret\/fake\/path\^1$/m, 'and the vault original is removed');
 };
 
+subtest 'a retry after a collision keeps the vault copy' => sub {
+	# A move that found CredHub written meanwhile left it holding its value
+	# as the newest of two versions, and the older one is someone else's.
+	my $r = move({1 => {password => 'fake-vault-value'}}, FAKE_KV => 2, holds => 'fake-vault-value', history => 2);
+	isnt($r->{rc}, 0, 'the move fails');
+	unlike($r->{credhub}, qr/^set/m, 'nothing is written to CredHub');
+	unlike($r->{safe}, qr/^rm /m, 'nothing is removed from vault');
+	like($r->{out}, qr/holds\s+more\s+than\s+one\s+version\s+under/, 'the operator is told CredHub has more than one version');
+	unlike($r->{out}, qr/fake-(?:vault|older)-value/, 'without any value');
+};
+
+# CredHub gives a name the caller cannot read the same answer as one that
+# does not exist, so only that exact answer, alone and with the CLI's own
+# exit status, counts as a name the move may write.
+my $not_found = 'The request could not be completed because the credential does not exist or you do not have sufficient authorization.';
+for my $case (
+	['an authorization error that mentions a missing name', 'error: insufficient_scope: the credential does not exist', 1],
+	['the not-found answer with more besides', "$not_found\nerror: the token for fake-client has expired", 1],
+	['the not-found answer with another exit status', $not_found, 2],
+	['nothing at all', '', 1],
+) {
+	my ($what, $says, $status) = @$case;
+	subtest "a read that gives $what is not taken for a missing name" => sub {
+		my $r = move({1 => {password => 'fake-vault-value'}}, FAKE_KV => 2,
+			FAKE_CREDHUB_SAYS => $says, FAKE_CREDHUB_SAYS_RC => $status);
+		isnt($r->{rc}, 0, 'the move fails');
+		unlike($r->{credhub}, qr/^set/m, 'nothing is written to CredHub');
+		unlike($r->{safe}, qr/^rm /m, 'nothing is removed from vault');
+		like($r->{out}, qr/could\s+not\s+tell\s+whether\s+CredHub\s+already\s+holds\s+a\s+credential/, 'the operator is told why');
+		unlike($r->{out}, qr/insufficient_scope|fake-client|fake-vault-value/, 'without what credhub said or the value');
+	};
+}
+
+subtest 'a read with no version history is not trusted' => sub {
+	my $r = move({1 => {password => 'fake-vault-value'}}, FAKE_KV => 2, FAKE_CREDHUB_FLAT => 1);
+	isnt($r->{rc}, 0, 'the move fails when the readback has no version history');
+	unlike($r->{safe}, qr/^rm /m, 'nothing is removed from vault');
+	like($r->{out}, qr/did\s+not\s+return\s+the\s+versions\s+of\s+\S*password/, 'the operator is told why');
+	unlike($r->{out}, qr/fake-vault-value/, 'without the value');
+
+	$r = move({1 => {password => 'fake-vault-value'}}, FAKE_KV => 2, FAKE_CREDHUB_FLAT => 1, holds => 'fake-vault-value');
+	isnt($r->{rc}, 0, 'and when the check before the write has none');
+	unlike($r->{credhub}, qr/^set/m, '... nothing is written to CredHub');
+	unlike($r->{safe}, qr/^rm /m, '... nothing is removed from vault');
+};
+
 subtest 'a destination holding a different credential is never replaced' => sub {
 	for my $case (['a different value', 'fake-live-value', 'value'], ['another type', 'fake-live-value', 'password']) {
 		my ($what, $live, $type) = @$case;
@@ -279,7 +331,7 @@ subtest 'a destination that cannot be read is not written' => sub {
 	isnt($r->{rc}, 0, 'the move fails');
 	unlike($r->{credhub}, qr/^set/m, 'nothing is written to CredHub');
 	unlike($r->{safe}, qr/^rm /m, 'nothing is removed from vault');
-	like($r->{out}, qr/could not tell whether CredHub already holds a credential/, 'the operator is told why');
+	like($r->{out}, qr/could\s+not\s+tell\s+whether\s+CredHub\s+already\s+holds\s+a\s+credential/, 'the operator is told why');
 	unlike($r->{out}, qr/fake-credhub-diagnostic|fake-vault-value/, 'without what credhub said or the value');
 };
 
@@ -288,7 +340,7 @@ subtest 'a write that races another keeps the vault copy' => sub {
 	my $r = move({1 => {password => 'fake-vault-value'}}, FAKE_KV => 2, FAKE_CREDHUB_RACE => 'fake-racing-value');
 	isnt($r->{rc}, 0, 'the move fails');
 	unlike($r->{safe}, qr/^rm /m, 'nothing is removed from vault');
-	like($r->{out}, qr/holds more than one version under/, 'the operator is told CredHub was written meanwhile');
+	like($r->{out}, qr/holds\s+more\s+than\s+one\s+version\s+under/, 'the operator is told CredHub was written meanwhile');
 	unlike($r->{out}, qr/fake-(?:racing|vault)-value/, 'without either value');
 };
 

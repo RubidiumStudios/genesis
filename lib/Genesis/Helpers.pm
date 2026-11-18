@@ -849,14 +849,22 @@ export -f __genesis_safe_read
 
 # __genesis_credhub_value NAME [versions] - print the value CredHub holds
 # under NAME exactly, and a newline.  Ends with 0 when it holds one, 1 when
-# CredHub says NAME does not exist, 3 when NAME holds something the move
-# cannot compare exactly, such as a credential of another type or a value
-# with a NUL byte, and 2 when it cannot tell.  With "versions", it asks
-# for the newest two versions, prints the newest, and ends with 4 when
-# there are two.  What credhub says on stderr is only matched, to tell a
-# missing name apart, and never printed.  Its stdout and stderr are read
-# together, so a credhub that fills one pipe while Genesis waits on the
-# other cannot stall them both.
+# CredHub gives its answer for a name it has no credential under, 3 when
+# NAME holds something the move cannot compare exactly, such as a
+# credential of another type or a value with a NUL byte, and 2 when it
+# cannot tell.  With "versions", it asks for the newest two versions,
+# prints the newest, ends with 4 when there are two, and ends with 5 when
+# the answer holds no versions at all.
+#
+# Only CredHub's own not-found answer, alone on stderr with nothing on
+# stdout and the CLI's exit status of 1, ends with 1.  An authorization
+# error, any other failure, and any answer with more in it end with 2,
+# so the move never takes them for a name it may write.  CredHub gives the
+# same answer for a name the caller's ACLs keep it from reading, and no
+# read can tell that apart.  What credhub says on stderr is only matched,
+# and never printed.  Its stdout and stderr are read together, so a
+# credhub that fills one pipe while Genesis waits on the other cannot
+# stall them both.
 __genesis_credhub_value() {
   /usr/bin/perl -MIPC::Open3 -MIO::Select -MSymbol=gensym -MJSON::PP -e '
     my ($name, $versions) = @ARGV;
@@ -876,10 +884,18 @@ __genesis_credhub_value() {
     }
     my ($json, $said) = @got{fileno($out), fileno($err)};
     waitpid($pid, 0);
-    exit(($said =~ /does not exist/i) ? 1 : 2) if $?;
+    if ($?) {
+      $said =~ s/\e\[[0-9;]*m//g; $said =~ s/\A\s+|\s+\z//g;
+      exit 1 if $? == (1 << 8) && $json !~ /\S/ && $said eq "The request could not be "
+        . "completed because the credential does not exist or you do not have sufficient authorization.";
+      exit 2;
+    }
     my $d = eval {JSON::PP->new->utf8->decode($json)};
-    my @v = (ref($d) eq "HASH" && ref($d->{versions}) eq "ARRAY") ? @{$d->{versions}} : ($d);
-    exit 2 unless @v && ref($v[0]) eq "HASH";
+    my $history = ref($d) eq "HASH" && ref($d->{versions}) eq "ARRAY";
+    exit 5 if $versions && !$history;
+    my @v = $history ? @{$d->{versions}} : ($d);
+    exit($versions ? 5 : 2) unless @v;
+    exit 2 unless ref($v[0]) eq "HASH";
     my $v = $v[0];
     exit 3 unless ($v->{type} // "value") eq "value"
       && defined($v->{value}) && !ref($v->{value}) && $v->{value} !~ /\0/;
@@ -893,7 +909,7 @@ move_secrets_to_credhub() {
   # when the operator has asked for the hook's xtrace, and no message
   # below quotes it or anything safe or credhub printed.
   local value check src="$1" dst="$2" rc __xtrace='' secret key='' kv='' version='' now from keys kept='' why=''
-  local name="/$GENESIS_CREDHUB_ROOT/$dst" held='' refused='' readback=versions
+  local name="/$GENESIS_CREDHUB_ROOT/$dst" held='' refused=''
   { [[ $- == *x* ]] && __xtrace=1 && set +x; } 2>/dev/null
   secret="${GENESIS_SECRETS_BASE}${src%%:*}"
   [[ "$src" == *:* ]] && key=":${src#*:}"
@@ -935,13 +951,26 @@ move_secrets_to_credhub() {
   fi
 
   # The CredHub CLI has no write that refuses to replace a value, so what
-  # CredHub holds is checked right before the write.  The same value is
-  # a retry, and is not written again; any other is refused, since the
-  # live credential would change before the move is known to be safe.
+  # CredHub holds is checked right before the write, with its versions.
+  # The same value, as the only version, is a retry, and is not written
+  # again.  A name with more than one version is refused whatever its
+  # newest value, since that is what a move that found CredHub written
+  # meanwhile leaves behind, and a retry must not settle it by deleting
+  # the vault copy.  Any other credential is refused, since the live one
+  # would change before the move is known to be safe, and so is any
+  # answer but CredHub's own not-found one.
+  #
+  # Something else can still write the name between this check and the
+  # write below, and the write would then replace it.  No CredHub write
+  # can refuse that, so the window is accepted; the readback afterward
+  # finds the second version and keeps the vault copy, and CredHub keeps
+  # the other value as the older version.
   check=''
-  __genesis_exact_value check __genesis_credhub_value "$name" && rc=0 || rc=$?
+  __genesis_exact_value check __genesis_credhub_value "$name" versions && rc=0 || rc=$?
   if [[ $rc -eq 0 && "$check" == "$value" ]] ; then
-    held=1; readback=''
+    held=1
+  elif [[ $rc -eq 4 ]] ; then
+    refused="CredHub holds more than one version under #C{$2}, so something else has written it, perhaps while an earlier move was under way, and nothing was written to CredHub or removed from vault.  Check which value CredHub should hold before running this again."
   elif [[ $rc -eq 0 || $rc -eq 3 ]] ; then
     refused="CredHub already holds a different credential under #C{$2}, so nothing was written to CredHub or removed from vault.  Decide which of the two is right, and remove the other, before running this again."
   elif [[ $rc -ne 1 ]] ; then
@@ -969,7 +998,11 @@ move_secrets_to_credhub() {
   # CredHub must hold that one version, or something else wrote the name
   # between the check and the write, or after it.
   check=''
-  __genesis_exact_value check __genesis_credhub_value "$name" $readback && rc=0 || rc=$?
+  __genesis_exact_value check __genesis_credhub_value "$name" versions && rc=0 || rc=$?
+  if [[ $rc -eq 5 ]] ; then
+    value=''; check=''; [[ -n $__xtrace ]] && set -x
+    bail "#R{[ERROR]} CredHub did not return the versions of #C{$2}, so Genesis could not check that nothing else wrote it while secret #C{$1} was being moved, and the vault secret was left in place."
+  fi
   if [[ $rc -eq 4 ]] ; then
     value=''; check=''; [[ -n $__xtrace ]] && set -x
     bail "#R{[ERROR]} CredHub holds more than one version under #C{$2}, so something else wrote it while secret #C{$1} was being moved, and the vault secret was left in place.  Check which value CredHub should hold before running this again."
