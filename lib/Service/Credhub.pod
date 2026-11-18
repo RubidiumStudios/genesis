@@ -801,6 +801,12 @@ Executes an arbitrary C<credhub> subcommand in interactive mode, with
 CredHub authentication environment variables set and the environment
 redacted from logs. Stderr is suppressed.
 
+The operator can pass a credential as any argument, so the arguments are
+handed to C<run()> through C<Genesis::passthrough_args>. credhub receives
+each one whole, and the trace shows only flags and the credhub command
+names in C<@Service::Credhub::CREDHUB_COMMANDS>, with every other argument
+shown by its length.
+
 B<Parameters:>
 
 =over 4

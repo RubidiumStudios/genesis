@@ -197,7 +197,11 @@ sub Init {
 	$ENV{GENESIS_VERSION}        = $version;
 	$ENV{GENESIS_ORIGINATING_DIR}= Cwd::getcwd;
 	$ENV{GENESIS_CALL_BIN}       = humanize_bin();
-	$ENV{GENESIS_FULL_CALL}      = join(" ", map {$_ =~ / / ? "\"$_\"" : $_} ($ENV{GENESIS_CALL_BIN}, @ARGV));
+	# The command line can carry a credential an operator passed through to
+	# bosh or credhub, and it heads every log, so it shows flags and only
+	# the length of every other argument.  prepare_command names the
+	# command once it is known.
+	$ENV{GENESIS_FULL_CALL}      = join(" ", $ENV{GENESIS_CALL_BIN}, traced_cli_args(@ARGV));
 }
 
 sub deployment_roots_map {
@@ -753,6 +757,32 @@ sub traced_arg {
 	my $prefix = $arg->{prefix} // '';
 	$prefix = '' unless substr($value, 0, length($prefix)) eq $prefix;
 	return sprintf("%s<redacted:%d bytes>", $prefix, length($value) - length($prefix));
+}
+
+# passthrough_args - wrap the operands of a command line handed to a CLI
+#
+# An operator can pass a credential to bosh or credhub as any operand, so
+# only a bare flag such as -n or --json, and a word listed in $visible,
+# such as the CLI's command names, stay as they are.  A --flag=value has
+# its value wrapped with the flag kept as the prefix, and every other
+# operand is wrapped whole, so run() hands the child the same arguments
+# and the trace shows each one's length.
+sub passthrough_args {
+	my $visible = ref($_[0]) eq 'ARRAY' ? shift : [];
+	my %visible = map {($_ => 1)} @$visible;
+	return map {
+		  _is_redacted_arg($_)                         ? $_
+		: !defined($_)                                 ? $_
+		: /\A-{1,2}[A-Za-z][\w-]*\z/ || $visible{$_}     ? $_
+		: /\A(-{1,2}[A-Za-z][\w-]*=)/                   ? {redact => $_, prefix => $1}
+		:                                                {redact => $_}
+	} @_;
+}
+
+# traced_cli_args - how a trace or log shows command-line arguments
+sub traced_cli_args {
+	my $visible = ref($_[0]) eq 'ARRAY' ? shift : [];
+	return map {traced_arg($_)} passthrough_args($visible, @_);
 }
 
 # _traced_env_value - what run()'s trace shows for one environment value

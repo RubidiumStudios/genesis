@@ -14,6 +14,27 @@ use JSON::PP;
 use IPv4;
 
 # bosh - provide a wrapper around the bosh command {{{
+# The bosh CLI's own commands and their aliases, which a trace can show.
+our @BOSH_COMMANDS = qw/
+	add-blob alias-env attach-disk blobs cancel-task cancel-tasks clean-up
+	cloud-check cloud-config config configs cpi-config create-env
+	create-recovery-plan create-release curl delete-config
+	delete-deployment delete-disk delete-env delete-network delete-release
+	delete-snapshot delete-snapshots delete-stemcell delete-vm deploy
+	deployment deployments diff-config disks environment environments
+	errand errands event events export-release finalize-release
+	generate-job generate-package help ignore init-release
+	inspect-local-release inspect-local-stemcell inspect-release instances
+	interpolate locks log-in log-out logs manifest networks orphan-disk
+	orphaned-vms recover recreate releases remove-blob repack-stemcell
+	reset-release restart run-errand runtime-config scp ssh start stemcells
+	stop sync-blobs take-snapshot task tasks unignore update-cloud-config
+	update-config update-cpi-config update-resurrection
+	update-runtime-config upload-blobs upload-release upload-stemcell
+	variables vendor-package vms
+	cck cc d dep ds e env envs es is int l r rs ss t ts uc ur vars
+/;
+
 sub bosh {
 	append_options(redact => ! -t STDOUT);
 
@@ -36,7 +57,12 @@ sub bosh {
 		_print_connect_exports($bosh->{alias}, $bosh->environment_variables);
 		exit 0;
 	} else {
-		my ($out, $rc) = $bosh->execute({interactive => 1, dir => $ENV{GENESIS_ORIGINATING_DIR}}, @_);
+		# The arguments come from the operator and can carry a credential, so
+		# only flags and bosh's own command names stay in view in the trace.
+		my ($out, $rc) = $bosh->execute(
+			{interactive => 1, dir => $ENV{GENESIS_ORIGINATING_DIR}},
+			Genesis::passthrough_args(\@BOSH_COMMANDS, @_)
+		);
 		exit $rc;
 	}
 }

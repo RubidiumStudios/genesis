@@ -1577,6 +1577,38 @@ B<Examples:>
   Genesis::failure_summary('', "Error: permission denied on secret/x:password=abc");
   # Returns: 'permission denied'
 
+=head2 passthrough_args
+
+  my @args = Genesis::passthrough_args(\@visible_words, @operator_args);
+
+Wraps the arguments an operator passes through to another CLI, such as
+bosh or credhub, so that C<run()> hands the child every argument whole
+while the trace shows each one by its length. A bare flag such as C<-n>
+or C<--json>, and any word listed in the optional leading array
+reference, such as the CLI's command names, are returned as they are. A
+C<--flag=value> is wrapped as C<{redact =E<gt> $arg, prefix =E<gt>
+'--flag='}>, so the flag stays in view. Every other argument is wrapped as
+C<{redact =E<gt> $arg}>, and an argument that is already wrapped is left
+alone.
+
+B<Returns:> The list of arguments, ready for C<run()>.
+
+=head2 traced_cli_args
+
+  my @shown = Genesis::traced_cli_args(\@visible_words, @args);
+
+Returns how a trace or log shows a command line, which is the
+C<traced_arg> form of each argument C<passthrough_args> returns. Genesis
+uses it for the C<GENESIS_FULL_CALL> log header, the argument traces, and
+the usage error, since any operand can be a credential.
+
+B<Returns:> A list of strings.
+
+B<Examples:>
+
+  Genesis::traced_cli_args('set', '-w', 'abc', '--password=abc');
+  # Returns: ('<redacted:3 bytes>', '-w', '<redacted:3 bytes>', '--password=<redacted:3 bytes>')
+
 =head2 traced_endpoint
 
   my $shown = Genesis::traced_endpoint($url);

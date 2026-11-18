@@ -363,15 +363,25 @@ sub _full_path {
 	return $self->base . $path;
 }
 
+# The credhub CLI's own commands, which a trace can show as they are.
+our @CREDHUB_COMMANDS = qw/
+	api login logout get set generate regenerate bulk-regenerate delete find
+	export import interpolate curl get-permission set-permission
+	delete-permission update-permission version help
+	a l o g s n r d f e i
+/;
+
 sub execute {
 	my ($self,$cmd,@args) = @_;
+	# The arguments come from the operator and can carry a credential, so
+	# only flags and credhub's own command names stay in view.
 	return run({
 			env => $self->env(),
 			interactive => 1,
 			redact_env => 1,
 			stderr => 0
 		},
-		'credhub', $cmd, @args
+		'credhub', Genesis::passthrough_args(\@CREDHUB_COMMANDS, $cmd, @args)
 	);
 }
 

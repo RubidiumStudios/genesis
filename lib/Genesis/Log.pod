@@ -1483,8 +1483,11 @@ C<skip_commands> list matches the current C<$GENESIS_COMMAND> are marked as
 C<'E<lt>skippedE<gt>'> and no file is created.
 
 For file targets, if C<$GENESIS_FULL_CALL> is set and the file is newly
-created (zero bytes), the full command line is prepended as
-C<"Command: $GENESIS_FULL_CALL\n\n">.
+created (zero bytes), the command line is prepended as
+C<"Command: $GENESIS_FULL_CALL\n\n">. C<Genesis::Init> and
+C<prepare_command> build that variable with C<Genesis::traced_cli_args>, so
+it shows the command and its flags and only the length of each operand,
+which can be a credential an operator passed through to bosh or credhub.
 
 Output style is applied per target: C<pointer>, C<plain>, C<fun>, or
 C<rfc-5424>. Stack frames are appended when the entry's C<show_stack>

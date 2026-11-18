@@ -1557,7 +1557,7 @@ subtest 'Phase 5: List/Delete/Query/Execute' => sub {
 		is($captured_cmd[1], 'find', 'subcommand passed');
 		is($captured_cmd[2], '-j', 'extra arg 1');
 		is($captured_cmd[3], '-n', 'extra arg 2');
-		is($captured_cmd[4], '/prod-bosh/', 'extra arg 3');
+		is(ref($captured_cmd[4]) && $captured_cmd[4]{redact}, '/prod-bosh/', 'extra arg 3, an operand, is wrapped for the trace');
 	};
 };
 

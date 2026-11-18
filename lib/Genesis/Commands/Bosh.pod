@@ -51,7 +51,12 @@ Supports two modes of operation:
 =item Normal passthrough mode
 
 Executes C<bosh @bosh_args> interactively against the environment's BOSH
-director.  Exit code propagates directly to the shell.
+director.  Exit code propagates directly to the shell.  An operator can
+pass a credential as any argument, so the arguments go through
+C<Genesis::passthrough_args>: bosh receives each one whole, and the trace
+shows only flags and the bosh command names in
+C<@Genesis::Commands::Bosh::BOSH_COMMANDS>, with every other argument shown
+by its length.
 
 =item C<--connect> mode
 

@@ -243,6 +243,9 @@ sub known_commands { # list the known genesis commands specified by define_comma
 sub prepare_command { # {{{
 	($CALLED, my @args) = @_;
 	$COMMAND = $GENESIS_COMMANDS{$CALLED};
+	# The log header names the command now that it is known, and still
+	# shows only the length of each operand.
+	$ENV{GENESIS_FULL_CALL} = join(" ", $ENV{GENESIS_CALL_BIN} // 'genesis', $CALLED, Genesis::traced_cli_args(@args));
 	trace "Preparing genesis command '$COMMAND'".($CALLED ne $COMMAND ? ' (called as $CALLED)':'');
 	parse_options(\@args);
 	set_logging_state();
@@ -435,7 +438,7 @@ sub parse_options { # {{{
 			command_usage(1, sprintf(
 				"Unknown option%s: %s",
 				@unknown > 1 ? 's' : '',
-				join(', ', @unknown)
+				join(', ', Genesis::traced_cli_args(@unknown))
 			));
 		}
 	}
@@ -445,9 +448,16 @@ sub parse_options { # {{{
 	$ENV{QUIET}          = 'y' if  delete($COMMAND_OPTIONS->{quiet});
 
 	# Remove workaround options
-	dump_var 'Received Options' => $COMMAND_OPTIONS;
+	# Option values and arguments can carry a credential the operator typed,
+	# so the trace names each option and shows the length of each value.
+	dump_var 'Received Options' => {map {
+		my $v = $COMMAND_OPTIONS->{$_};
+		($_ => (!defined($v) || (!ref($v) && $v =~ /\A[01]?\z/)) ? $v
+		     : ref($v) ? sprintf('<%s redacted>', ref($v))
+		     : sprintf('<redacted:%d bytes>', length($v)))
+	} keys %$COMMAND_OPTIONS};
 	delete($COMMAND_OPTIONS->{no_cwd});
-	dump_var 'Received Arguments' => \@COMMAND_ARGS;
+	dump_var 'Received Arguments' => [Genesis::traced_cli_args(@COMMAND_ARGS)];
 	return;
 } # }}}
 
