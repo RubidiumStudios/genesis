@@ -1241,12 +1241,27 @@ sub curl {
 #
 # Lists each path added, removed, or changed, as "+ path", "- path", or
 # "~ path", and never a value, so it can describe a change to data that
-# holds credentials.  A list whose items are all hashes with a name is
-# matched by name, the way spruce names instance groups; any other list is
-# matched by position.
+# holds credentials.  A list is matched by name only where the BOSH
+# manifest schema says its items are named, as instance groups, jobs,
+# networks, and releases are, since a name anywhere else, such as a user's
+# under properties, can come from vault.  Any other list is matched by
+# position.  Booleans and numbers are compared by value, so a redeploy of
+# the same manifest shows no change.
+our %NAMED_LISTS = map {($_ => 1)} qw(
+	releases stemcells instance_groups addons variables networks
+	resource_pools disk_pools vm_types vm_extensions disk_types azs jobs
+	instance_groups.*.jobs instance_groups.*.networks addons.*.jobs
+	jobs.*.templates jobs.*.networks
+);
 sub changed_paths {
 	my ($old, $new, $path) = @_;
+	return _changed_paths($old, $new, $path, undef);
+}
+
+sub _changed_paths {
+	my ($old, $new, $path, $pattern) = @_;
 	my $at = sub { defined($path) ? "$path.$_[0]" : $_[0] };
+	my $like = sub { defined($pattern) ? "$pattern.$_[0]" : $_[0] };
 	my $named = sub {
 		my ($list) = @_;
 		return 0 unless @$list;
@@ -1256,12 +1271,13 @@ sub changed_paths {
 		}
 		return 1;
 	};
-	my (%old, %new);
+	my (%old, %new, $item);
 	if (ref($old) eq 'HASH' && ref($new) eq 'HASH') {
 		%old = %$old;
 		%new = %$new;
 	} elsif (ref($old) eq 'ARRAY' && ref($new) eq 'ARRAY') {
-		if ($named->($old) && $named->($new)) {
+		$item = 1;
+		if ($NAMED_LISTS{$pattern // ''} && $named->($old) && $named->($new)) {
 			%old = map {($_->{name} => $_)} @$old;
 			%new = map {($_->{name} => $_)} @$new;
 		} else {
@@ -1269,9 +1285,7 @@ sub changed_paths {
 			%new = map {($_ => $new->[$_])} 0..$#$new;
 		}
 	} else {
-		my $same = (!defined($old) && !defined($new))
-			|| (defined($old) && defined($new) && !ref($old) && !ref($new) && "$old" eq "$new");
-		return $same ? () : ("~ ".($path // '.'));
+		return _same_value($old, $new) ? () : ("~ ".($path // '.'));
 	}
 	my @changes;
 	for my $key (sort {($a =~ /\A\d+\z/ && $b =~ /\A\d+\z/) ? $a <=> $b : $a cmp $b} keys %{{%old, %new}}) {
@@ -1280,10 +1294,34 @@ sub changed_paths {
 		} elsif (!exists($old{$key})) {
 			push @changes, "+ ".$at->($key);
 		} else {
-			push @changes, changed_paths($old{$key}, $new{$key}, $at->($key));
+			push @changes, _changed_paths($old{$key}, $new{$key}, $at->($key), $like->($item ? '*' : $key));
 		}
 	}
 	return @changes;
+}
+
+# _same_value - whether two decoded scalars are the same value of one type
+sub _same_value {
+	my ($old, $new) = @_;
+	my ($old_type, $new_type) = (_value_type($old), _value_type($new));
+	return 0 unless $old_type eq $new_type;
+	return 1 if $old_type eq 'null';
+	return (!!$old) == (!!$new) if $old_type eq 'boolean';
+	return $old == $new if $old_type eq 'number';
+	return "$old" eq "$new" if $old_type eq 'string';
+	return 0;
+}
+
+# _value_type - null, boolean, number, string, or other, as JSON decoded it
+sub _value_type {
+	my ($value) = @_;
+	return 'null' unless defined($value);
+	return 'boolean' if JSON::PP::is_bool($value);
+	return 'other' if ref($value);
+	require B;
+	my $flags = B::svref_2object(\$value)->FLAGS;
+	return 'number' if $flags & (B::SVf_IOK() | B::SVf_NOK()) && !($flags & B::SVf_POK());
+	return 'string';
 }
 
 # }}}

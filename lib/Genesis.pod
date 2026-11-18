@@ -2020,9 +2020,19 @@ Lists the paths that differ between two data structures, as C<+ path> for
 an added path, C<- path> for a removed one, and C<~ path> for a changed
 one, and never shows a value. A create-env redeploy uses it to describe a
 change to a manifest or vars file that holds the director's credentials.
-Path segments are joined with C<.>. A list whose items are all hashes with
-a distinct C<name> is matched by name, the way spruce names instance
-groups, and any other list is matched by position.
+Path segments are joined with C<.>.
+
+A list is matched by name only where the BOSH manifest schema names its
+items, as listed in C<%Genesis::NAMED_LISTS>, such as C<instance_groups>,
+C<releases>, and the C<jobs> and C<networks> of an instance group, and only
+when every item has a distinct C<name>. A name anywhere else, such as a
+user's under C<properties>, can come from vault, so any other list is
+matched by position.
+
+Scalars are compared as JSON decoded them. Two booleans or two numbers are
+the same when their values are, so C<1> and C<1.0> match, and a value that
+changes type, such as the number C<1> becoming the string C<"1">, is a
+change.
 
 B<Returns:> A list of strings, empty when the two are the same.
 
@@ -2030,6 +2040,10 @@ B<Examples:>
 
   changed_paths({a => 1, b => {c => 'x'}}, {a => 1, b => {c => 'y'}, d => 2});
   # Returns: ('~ b.c', '+ d')
+
+  changed_paths({instance_groups => [{name => 'bosh', instances => 1}]},
+                {instance_groups => [{name => 'bosh', instances => 2}]});
+  # Returns: ('~ instance_groups.bosh.instances')
 
 =head2 spruce_diff
 
@@ -3871,6 +3885,56 @@ Returns true if C<$arg> is a C<{redact =E<gt> $value}> wrapper, with an
 optional C<prefix> key and no others.
 
 B<Returns:> C<1> or C<0>.
+
+=head2 _changed_paths
+
+  my @changes = Genesis::_changed_paths($old, $new, $path, $pattern);
+
+The recursion behind C<changed_paths>. C<$path> is where C<$old> and C<$new>
+sit, with list items named or numbered, and C<$pattern> is the same path
+with each list item written as C<*>, which C<%Genesis::NAMED_LISTS> is
+checked against.
+
+B<Returns:> A list of strings, as C<changed_paths> returns.
+
+B<Examples:>
+
+  Genesis::_changed_paths([{name => 'a', x => 1}], [{name => 'a', x => 2}], 'jobs', 'jobs');
+  # Returns: ('~ jobs.a.x')
+
+B<Errors:> None.
+
+=head2 _same_value
+
+  my $same = Genesis::_same_value($old, $new);
+
+Returns true if two decoded scalars are the same value of the same type,
+by C<_value_type>. Booleans compare by truth, numbers numerically, and
+strings as strings.
+
+B<Returns:> C<1> or C<0>.
+
+B<Examples:>
+
+  Genesis::_same_value(1, 1.0);   # Returns: 1
+  Genesis::_same_value(1, "1");   # Returns: 0
+
+B<Errors:> None.
+
+=head2 _value_type
+
+  my $type = Genesis::_value_type($value);
+
+Returns C<null>, C<boolean>, C<number>, C<string>, or C<other> for a value
+JSON decoded. A number is a scalar Perl holds only as a number.
+
+B<Returns:> A string.
+
+B<Examples:>
+
+  Genesis::_value_type(JSON::PP::true);   # Returns: 'boolean'
+
+B<Errors:> None.
 
 =head2 _traced_header
 

@@ -16,19 +16,53 @@ use File::Temp qw/tempdir/;
 
 use Genesis;
 use Genesis::Env;
+use JSON::PP;
 
 my $dir = tempdir(CLEANUP => 1);
 my $env = bless({name => 'fake-env'}, 'Genesis::Env');
 
 subtest 'changed_paths names paths and never values' => sub {
 	my @changes = Genesis::changed_paths(
-		{a => 1, b => {c => 'x', d => 'y'}, list => [1, 2], groups => [{name => 'bosh', p => 'old'}], gone => 1},
-		{a => 1, b => {c => 'z', d => 'y'}, list => [1, 3, 4], groups => [{name => 'bosh', p => 'new'}], added => {deep => 1}},
+		{a => 1, b => {c => 'x', d => 'y'}, list => [1, 2], instance_groups => [{name => 'bosh', p => 'old'}], gone => 1},
+		{a => 1, b => {c => 'z', d => 'y'}, list => [1, 3, 4], instance_groups => [{name => 'bosh', p => 'new'}], added => {deep => 1}},
 	);
 	is_deeply([sort @changes], [sort(
-		'+ added', '- gone', '~ b.c', '~ groups.bosh.p', '~ list.1', '+ list.2',
+		'+ added', '- gone', '~ b.c', '~ instance_groups.bosh.p', '~ list.1', '+ list.2',
 	)], 'each added, removed, and changed path is listed');
 	is_deeply([Genesis::changed_paths({a => [1]}, {a => [1]})], [], 'identical data has no changes');
+};
+
+subtest 'a list is labeled by name only where the manifest schema names it' => sub {
+	my $user = fake_secret('user-name');
+	my $new_user = fake_secret('new-user-name');
+	my @changes = Genesis::changed_paths(
+		{
+			instance_groups => [{name => 'bosh', jobs => [{name => 'director', properties => {users => [{name => $user, password => 'a'}]}}], networks => [{name => 'default', static_ips => ['10.0.0.6']}]}],
+			releases => [{name => 'bosh', version => '1'}],
+			properties => {users => [{name => $user, password => 'a'}, {name => 'two', password => 'b'}]},
+		},
+		{
+			instance_groups => [{name => 'bosh', jobs => [{name => 'director', properties => {users => [{name => $new_user, password => 'b'}]}}], networks => [{name => 'default', static_ips => ['10.0.0.7']}]}],
+			releases => [{name => 'bosh', version => '2'}],
+			properties => {users => [{name => $user, password => 'c'}, {name => 'two', password => 'b'}]},
+		},
+	);
+	unlike(join("\n", @changes), qr/\Q$user\E|\Q$new_user\E/, 'a name in a list the schema does not name is never shown');
+	is_deeply([sort @changes], [sort(
+		'~ instance_groups.bosh.jobs.director.properties.users.0.name',
+		'~ instance_groups.bosh.jobs.director.properties.users.0.password',
+		'~ instance_groups.bosh.networks.default.static_ips.0',
+		'~ properties.users.0.password',
+		'~ releases.bosh.version',
+	)], 'instance groups, jobs, networks, and releases are labeled by name, and other lists by index');
+};
+
+subtest 'equal booleans and numbers are not changes' => sub {
+	my $decode = sub { JSON::PP->new->decode($_[0]) };
+	is_deeply([Genesis::changed_paths($decode->('{"a":true,"b":false,"c":1,"d":2.50}'), $decode->('{"a":true,"b":false,"c":1.0,"d":2.5}'))], [],
+		'the same boolean or number is unchanged');
+	is_deeply([sort(Genesis::changed_paths($decode->('{"a":true,"b":1,"c":"x"}'), $decode->('{"a":false,"b":"1","c":"y"}')))], ['~ a', '~ b', '~ c'],
+		'a flipped boolean, a number become a string, and a changed string are changes');
 };
 
 subtest 'a create-env redeploy compares paths, not values' => sub {
