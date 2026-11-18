@@ -1320,8 +1320,9 @@ Shows what a Perl hook module listed in C<@Genesis::Kit::CONFIG_HOOKS> died
 with. Those are the C<cloud-config>, C<cpi-config>, and C<runtime-config>
 hooks, which build configs for the director from the environment's
 credentials, so their own messages can quote them. C<run_hook> runs them
-inside an C<eval> with C<$Genesis::BAIL_IS_PRIVATE> set, so a bail in the
-hook leaves the trace only its size, and then bails itself with a fixed
+through L</_run_config_hook_module>, which runs every step of the kit's
+code inside an C<eval> with C<$Genesis::BAIL_IS_PRIVATE> set, so a bail in
+the hook leaves the trace only its size, and then bails itself with a fixed
 message naming the hook and the kit and the kind of failure
 C<Genesis::failure_summary> finds. The message the hook died with, with its
 colors and any C<[FATAL]> prefix removed, is logged here as private detail,
@@ -1347,6 +1348,74 @@ B<Examples:>
     bail("Could not synthesize a config with the #C{%s} hook in kit %s (%s)",
       $hook, $self->id, Genesis::failure_summary($died));
   }
+
+=head2 _run_config_hook_module
+
+  my @results = $kit->_run_config_hook_module(
+    $hook, $module, $env, wantarray, %module_options
+  );
+
+Runs a Perl hook module listed in C<@Genesis::Kit::CONFIG_HOOKS> for
+C<run_hook>. The module's initializer, its C<completed> check for cached
+results, its C<perform>, and its C<results> are all kit code, and any of
+them can die with the credentials the config is built from. So all four
+run inside one C<eval> with C<$Genesis::BAIL_IS_PRIVATE> set. When any of
+them dies, L</_show_config_failure> shows what it died with as private
+detail, which only a terminal displays, and Genesis bails with
+C<"Could not synthesize a config with the #C{%s} hook in kit %s (%s)">,
+which names the hook, the kit, and the kind of failure. A caller that
+reports the exception, such as C<genesis bosh-configs>, therefore never
+gets the kit's words.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$hook>
+
+The hook's name, such as C<runtime-config>.
+
+=item C<$module>
+
+The hook's Perl package.
+
+=item C<$env>
+
+The environment the hook runs for.
+
+=item C<$want>
+
+The context C<run_hook> was called in, as C<wantarray> gives it. The
+results are taken in that context.
+
+=item C<%module_options>
+
+The options the module's initializer gets, besides C<env> and C<kit>.
+
+=back
+
+B<Returns:> The module's results, in the caller's context.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Could not synthesize a config with the #C{%s} hook in kit %s (%s)">
+
+A step of the module died. The placeholders are the hook name, the kit
+identity, and the kind of failure C<Genesis::failure_summary> finds.
+
+=item C<"Could not run '%s' hook successfully!">
+
+The module's C<perform> returned a false value.
+
+=back
+
+B<Examples:>
+
+  return $self->_run_config_hook_module(
+    $hook, $hook_module, $opts{env}, wantarray, %module_options
+  ) if grep {$_ eq $hook} @CONFIG_HOOKS;
 
 =head2 _show_hook_stderr
 

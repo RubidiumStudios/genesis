@@ -419,6 +419,10 @@ EOF
 			$hook_file, $hook_name, $self->id, Genesis::Hook::load_failure($@)
 		) if $@;
 
+		return $self->_run_config_hook_module(
+			$hook, $hook_module, $opts{env}, wantarray, %module_options
+		) if grep {$_ eq $hook} @CONFIG_HOOKS;
+
 		# Don't cache hooks that have side effects, just ones that are idempotent
 		my $hook_obj = $hook_module->init(env => $opts{env}, kit => $self, %module_options);
 		if ($hook_obj->can("completed") && $hook_obj->completed) {
@@ -426,27 +430,9 @@ EOF
 			return $hook_obj->results();
 		}
 
-		# A config hook's own messages can quote the credentials it builds
-		# the config from, so what it dies with is shown only as private
-		# detail, and the failure is reported by its kind.
-		my $ok;
-		if (grep {$_ eq $hook} @CONFIG_HOOKS) {
-			$ok = eval {
-				local $Genesis::BAIL_IS_PRIVATE = 1;
-				$hook_obj->perform();
-			};
-			if (my $died = $@) {
-				_show_config_failure($died);
-				bail(
-					"Could not synthesize a config with the #C{%s} hook in kit %s (%s)",
-					$hook, $self->id, Genesis::failure_summary($died)
-				);
-			}
-		} else {
-			$ok = $module_options{help} && $hook_obj->can('help')
-				? $hook_obj->help()
-				: $hook_obj->perform();
-		}
+		my $ok = $module_options{help} && $hook_obj->can('help')
+			? $hook_obj->help()
+			: $hook_obj->perform();
 
 		bail(
 			"Could not run '%s' hook successfully!",
@@ -548,6 +534,37 @@ EOF
 		}
 	}
 	return 1;
+}
+
+# }}}
+# _run_config_hook_module - run a Perl config hook, keeping its words private {{{
+#
+# A config hook's own messages can quote the credentials it builds the
+# config from, so every step that runs the kit's code, from its
+# initializer through its results, runs inside one eval.  What any of
+# them dies with is shown only as private detail, and the failure is
+# reported by its kind.  The results are taken in the caller's context.
+sub _run_config_hook_module {
+	my ($self, $hook, $module, $env, $want, %options) = @_;
+	my ($ok, $cached, @results);
+	eval {
+		local $Genesis::BAIL_IS_PRIVATE = 1;
+		my $obj = $module->init(env => $env, kit => $self, %options);
+		$cached = $obj->can("completed") && $obj->completed;
+		$ok = $cached || $obj->perform();
+		@results = $want ? $obj->results() : scalar($obj->results()) if $ok;
+		1;
+	} or do {
+		my $died = $@;
+		_show_config_failure($died);
+		bail(
+			"Could not synthesize a config with the #C{%s} hook in kit %s (%s)",
+			$hook, $self->id, Genesis::failure_summary($died)
+		);
+	};
+	trace("Using cached results for '%s' hook for env %s", $hook, $env ? $env->name : "(none)") if $cached;
+	bail("Could not run '%s' hook successfully!", $hook) unless $ok;
+	return $want ? @results : $results[0];
 }
 
 # }}}

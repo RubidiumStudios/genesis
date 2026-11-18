@@ -24,7 +24,10 @@ mkdir "$dir/kit";
 mkdir "$dir/kit/hooks";
 mkdir "$dir/work";
 
-# Each module hook dies with the value its environment hands it.
+# Each module hook dies with the value its environment hands it, in the
+# step FAKE_DIE_IN names: its initializer, its check for cached results,
+# its perform, or its results.  Perform bails, as kit code usually does,
+# and the others die as Perl does.
 for my $hook (qw/cloud-config cpi-config runtime-config/) {
 	my $pkg = join('', map {ucfirst} split(/-/, $hook)) =~ s/Config$/ConfigFake/r;
 	put_file("$dir/kit/hooks/$hook.pm", 0644, <<EOF_HOOK);
@@ -32,9 +35,15 @@ package Genesis::Hook::$pkg;
 use strict;
 use warnings;
 use Genesis;
-sub init { my (\$class, \%opts) = \@_; bless({\%opts}, \$class) }
-sub perform { bail("could not read the api key %s", \$ENV{FAKE_HOOK_VALUE}) }
-sub results { undef }
+sub dies_in { (\$ENV{FAKE_DIE_IN} // 'perform') eq \$_[0] }
+sub init {
+	my (\$class, \%opts) = \@_;
+	die "could not read the api key \$ENV{FAKE_HOOK_VALUE}\\n" if dies_in('init');
+	bless({\%opts}, \$class)
+}
+sub completed { die "could not read the api key \$ENV{FAKE_HOOK_VALUE}\\n" if dies_in('completed'); 0 }
+sub perform { bail("could not read the api key %s", \$ENV{FAKE_HOOK_VALUE}) if dies_in('perform'); 1 }
+sub results { die "could not read the api key \$ENV{FAKE_HOOK_VALUE}\\n" if dies_in('results'); undef }
 1;
 EOF_HOOK
 }
@@ -91,6 +100,21 @@ for my $hook (qw/cloud-config cpi-config runtime-config/) {
 		like($r->{stderr}, qr/could not read the api key \Q$r->{value}\E/, 'the terminal shows the kit\'s words');
 		unlike($r->{log}, qr/\Q$r->{value}\E/, 'and the trace still does not');
 	};
+
+	for my $step (qw/init completed results/) {
+		subtest "a $hook hook that dies in its $step step is described by its kind" => sub {
+			local $ENV{FAKE_DIE_IN} = $step;
+			my $r = run_module_hook($hook, 0);
+			like($r->{error}, qr/Could not synthesize a config with the \S*\Q$hook\E\S* hook/, 'the hook fails with the fixed message');
+			unlike($r->{error}.$r->{log}.$r->{stderr}, qr/\Q$r->{value}\E/,
+				'and neither the error, the trace, nor a redirected stderr gets the kit\'s words');
+			like($r->{stderr}, $note, 'which gets a note that detail was withheld');
+
+			$r = run_module_hook($hook, 1);
+			like($r->{stderr}, qr/could not read the api key \Q$r->{value}\E/, 'a terminal shows the kit\'s words');
+			unlike($r->{error}.$r->{log}, qr/\Q$r->{value}\E/, 'and the error and the trace still do not');
+		};
+	}
 }
 
 subtest 'a cpi-config error the kit reports is a kind of failure' => sub {
