@@ -132,8 +132,10 @@ They are available in every Genesis kit hook script after Genesis writes and
 sources the helper library, exported to the shell environment via
 C<export -f>.
 
-When C<GENESIS_TRACE=y> is set, the helper script prints all environment
-variables to STDERR at load time to assist with debugging.
+When C<GENESIS_TRACE=y> is set, the helper script prints the names of its
+environment variables to STDERR at load time to assist with debugging. It
+never prints their values, since they include the credentials Genesis
+hands the hook.
 
 B<Genesis CLI Functions>
 
@@ -702,9 +704,6 @@ exodus data if C<BOSH_ENVIRONMENT> or C<BOSH_CA_CERT> are not set, then
 validates connectivity via C<Service::BOSH::Director>.
 
 =back
-
-When C<GENESIS_SHOW_BOSH_CMD> is set, prints the BOSH command to STDERR
-before executing.
 
 B<Parameters:>
 
@@ -1383,7 +1382,8 @@ B<Examples:>
 Reads a secret value from the Genesis Vault at
 C<$GENESIS_SECRETS_BASE/SRC_PATH> and stores it in CredHub at
 C</$GENESIS_CREDHUB_ROOT/DST_PATH>, then removes the source secret from
-Vault.
+Vault. The value is never traced, so the function turns off a hook's
+xtrace while it holds the value and turns it back on afterward.
 
 B<Parameters:>
 
@@ -1404,7 +1404,8 @@ secret will be stored.  Required.
 B<Errors:>
 
 Calls C<bail> with C<"[ERROR] Failed to store secret $SRC_PATH under
-credhub path $DST_PATH: DETAIL"> if C<credhub set> fails.
+credhub path $DST_PATH: credhub exited RC"> if C<credhub set> fails. What
+credhub printed is left out, since it can echo the request.
 
 B<Examples:>
 
@@ -1619,13 +1620,8 @@ C<move_secrets_to_credhub>.
 
 =item C<GENESIS_TRACE>
 
-When set to C<"y">, the helper script prints all environment variables to
-STDERR at load time.
-
-=item C<GENESIS_SHOW_BOSH_CMD>
-
-When set, the C<bosh> bash wrapper prints the full BOSH command to STDERR
-before executing it.
+When set to C<"y">, the helper script prints the names of its environment
+variables, without their values, to STDERR at load time.
 
 =item C<GENESIS_LIB>
 

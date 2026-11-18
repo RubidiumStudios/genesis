@@ -1272,6 +1272,37 @@ so that the extraction is performed only once.
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
 
+=head2 _xtrace_hook_file
+
+  my $traced = Genesis::Kit::_xtrace_hook_file($hook_file);
+
+Writes C<$hook_file-trace>, a copy of a Bash hook that turns on xtrace,
+when the operator sets C<GENESIS_HOOK_XTRACE>. An xtrace shows every value
+the hook handles, credentials included, so the copy sends it to the
+controlling terminal through C<BASH_XTRACEFD> and never to the hook's
+stderr, which a caller or a CI log can capture. When the hook has no
+terminal, or runs under a bash older than 4.1, the copy prints a note and
+runs untraced. C<run_hook> warns each time it runs a traced copy.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$hook_file>
+
+Path to the hook script.
+
+=back
+
+B<Returns:> The path of the traced copy, or nothing when the hook is not a
+C</bin/bash> script or can't be read.
+
+B<Examples:>
+
+  # with GENESIS_HOOK_XTRACE set
+  my $traced = Genesis::Kit::_xtrace_hook_file($kit->path('hooks/info'));
+  # $traced is ".../hooks/info-trace"
+
 =head2 _deref_metadata
 
   my $copy = $self->_deref_metadata($metadata, $lookup);

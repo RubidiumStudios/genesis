@@ -46,9 +46,10 @@ sub log_from_script {
 
 __DATA__
 
-if [[ "${GENESIS_TRACE}" == "y" ]] ; then
-  echo >&2 "TRACE> Helper script environment variables:"
-  export >&2
+if [[ "${GENESIS_TRACE:-}" == "y" ]] ; then
+  # Names only: the values include the credentials Genesis hands the hook.
+  echo >&2 "TRACE> Helper script environment variables (values not shown):"
+  compgen -e | sort | sed 's/^/  /' >&2
 fi
 
 genesis() {
@@ -269,8 +270,6 @@ bosh() {
     fi
   fi
 
-  [[ -n "${GENESIS_SHOW_BOSH_CMD:-}" ]] && \
-    describe  >&2 "#M{BOSH>} $GENESIS_BOSH_COMMAND $*"
   command ${GENESIS_BOSH_COMMAND} "$@"
   return $?
 }
@@ -769,11 +768,18 @@ offer_environment_editor() {
 export -f offer_environment_editor
 
 move_secrets_to_credhub() {
-  local value src="$1" dst="$2"
+  # The value passes through this function, so it is never traced, even
+  # when the operator has asked for the hook's xtrace.
+  local value src="$1" dst="$2" rc __xtrace=''
+  { [[ $- == *x* ]] && __xtrace=1 && set +x; } 2>/dev/null
   value="$(safe get "${GENESIS_SECRETS_BASE}$src")"
-  result="$(credhub set -n "/$GENESIS_CREDHUB_ROOT/$dst" -t value -v "$value" 2>&1)"
-  if [[ $? -gt 0 ]] ; then
-    bail "#R{[ERROR]} Failed to store secret #C{$1} under credhub path #C{$2}:" "$result"
+  result="$(credhub set -n "/$GENESIS_CREDHUB_ROOT/$dst" -t value -v "$value" 2>&1)" && rc=0 || rc=$?
+  value=''
+  [[ -n $__xtrace ]] && set -x
+  if [[ $rc -gt 0 ]] ; then
+    # What credhub printed can echo the request, so only its exit status is
+    # reported.
+    bail "#R{[ERROR]} Failed to store secret #C{$1} under credhub path #C{$2}: credhub exited $rc"
   fi
   result="$(safe rm "${GENESIS_SECRETS_BASE}$src" 2>&1)"
   if [[ $? -gt 0 ]] ; then

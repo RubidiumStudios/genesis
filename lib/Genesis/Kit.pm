@@ -140,6 +140,33 @@ sub get_hook_module {
 
 # }}}
 # run_hook - {{{
+# _xtrace_hook_file - a copy of a Bash hook that traces to the terminal {{{
+#
+# An xtrace shows every value a hook handles, credentials included, so it
+# goes to the controlling terminal through BASH_XTRACEFD and never to the
+# hook's stderr, which a caller or a CI log can capture.  A hook that has
+# no terminal, or whose bash predates BASH_XTRACEFD, runs untraced.
+sub _xtrace_hook_file {
+	my ($hook_file) = @_;
+	open my $in, '<', $hook_file or return;
+	my $script = do {local $/; <$in>};
+	close $in;
+	return unless $script =~ s/\A(#!\s*\/bin\/bash(?:[ \t][^\n]*)?\n)//;
+	my $shebang = $1;
+	my $traced = "$hook_file-trace";
+	mkfile_or_fail($traced, 0755, $shebang . <<'EOF' . $script);
+if [[ ${BASH_VERSINFO[0]} -gt 4 || ( ${BASH_VERSINFO[0]} -eq 4 && ${BASH_VERSINFO[1]} -ge 1 ) ]] \
+  && { exec {__genesis_xtrace_fd}>/dev/tty; } 2>/dev/null ; then
+  BASH_XTRACEFD=$__genesis_xtrace_fd
+  set -x
+else
+  echo >&2 "GENESIS_HOOK_XTRACE: no terminal for the trace (or bash < 4.1), so this hook runs untraced."
+fi
+EOF
+	return $traced;
+}
+
+# }}}
 sub run_hook {
 
 	# FIXME: run_hook should always return a scalar (simple or reference), not an array or hash.
@@ -354,16 +381,16 @@ EOF
 			if (-f $hook_file && !envset('GENESIS_NO_MODULE_HOOKS'));
 
 		unless ($hook_module) {
-			# Implement tracing for bash scripts - not applicable to Perl modules
 			$hook_file = $self->path("hooks/$hook");
-			if (envset('GENESIS_TRACE')) {
-				open my $file, '<', $hook_file;
-				my $firstLine = <$file>;
-				close $file;
-				if ($firstLine =~ /(^#!\s*\/bin\/bash(?:$| .*$))/) {
-					run('(echo "$1"; echo "set -x"; cat "$2") > "$3"', $1, $hook_file, "$hook_file-trace");
-					$hook_file .= '-trace';
-					$hook_name .= '-trace';
+			if (envset('GENESIS_HOOK_XTRACE')) {
+				my $traced = _xtrace_hook_file($hook_file);
+				if ($traced) {
+					warning(
+						"GENESIS_HOOK_XTRACE is set: #C{%s} traces each command it runs, with ".
+						"its values, to this terminal only.",
+						$hook_name
+					);
+					($hook_file, $hook_name) = ($traced, "$hook_name-trace");
 				}
 			}
 			chmod 0755, $hook_file;

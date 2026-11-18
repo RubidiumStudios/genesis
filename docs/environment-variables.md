@@ -31,7 +31,7 @@ Variables affecting how output, logs, and terminal displays are presented.
 | `GENESIS_STACK_TRACE` | Enables stack trace logging for debugging purposes. | `true` (when enabled) | User environment / Logging configuration | /lib/Genesis/Commands.pm<br />/lib/Genesis/Log.pm | - |
 | `GENESIS_TRACE` | Enables trace-level logging for detailed debugging. | `true` (when enabled) | User environment / Logging configuration | /lib/Genesis/Commands.pm (trace logging setup)<br />/lib/Genesis/Helpers.pm (detailed trace output)<br />/lib/Service/Vault.pm (Vault trace logging)<br />Test files (validating trace logging) | - |
 | `GENESIS_DEBUG` | Enables debug-level logging for Genesis operations. Provides detailed debugging information. | `true` (when enabled) | User environment or logging configuration | Genesis::Commands (debug logging setup)<br />Genesis::Log (log level control)<br />Test scripts (e.g., t/00-utils.t) | - |
-| `GENESIS_SHOW_BOSH_CMD` | Enables the display of BOSH commands during execution. | `true` (when enabled) | User environment | /lib/Genesis/Helpers.pm | Example: `GENESIS_SHOW_BOSH_CMD="true"` |
+| `GENESIS_HOOK_XTRACE` | Runs Bash kit hooks under `set -x`, sending the trace to the controlling terminal only, never to stderr or a log file. The trace shows every value a hook handles, credentials included, so Genesis warns each time it is used. | unset | User environment | /lib/Genesis/Kit.pm | Example: `GENESIS_HOOK_XTRACE=1 genesis info my-env` |
 
 ## 3. Path & Directory Management
 Variables for managing directory and file paths used by Genesis.
