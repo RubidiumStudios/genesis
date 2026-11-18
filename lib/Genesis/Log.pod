@@ -211,6 +211,8 @@ circular dependency).
 Returns the global logger singleton, creating it if it does not yet exist.
 Subsequent calls return the same instance. On creation, the logger captures
 the current username (via C<whoami>), hostname (via C<hostname>), and PID.
+It also registers any credential environment variables the caller set, so
+that logs scrub them (see C<register_secret>).
 
 If C<$Genesis::VERSION> equals C<"(development)">, the version stored in the
 logger is set to C<"0.0.0-rc.0">; otherwise the actual C<$Genesis::VERSION>
@@ -227,6 +229,86 @@ B<Examples:>
   # A second call returns the same object
   my $same = Genesis::Log->new;
   print($logger == $same ? 'same' : 'different');  # Returns: 'same'
+
+=head2 register_secret
+
+  $logger->register_secret($value, $label);
+  Genesis::Log::register_secret($value, $label);
+
+Registers a credential value, such as a director's client secret, a CredHub
+password, or a vault token, so that every log replaces it before writing a
+line. The replacement is C<E<lt>redacted:LABELE<gt>>, which says what was
+there without saying what it was. Genesis calls this as it loads each
+credential; it is the second line of defence behind the redaction each call
+site does, and catches whatever a call site misses.
+
+The value's raw form, its Data::Dumper form (as C<dump_var> writes it), and
+its JSON string form are all registered, so a value with quotes or
+backslashes is caught however it was written. Values shorter than
+C<$Genesis::Log::MIN_SECRET_LENGTH> (6) characters, empty values, undefined
+values, and references are ignored, since scrubbing a value that short
+would mangle ordinary words.
+
+The registry belongs to the package rather than the logger object, so a
+value can be registered before any logger exists, and registering one never
+creates a logger (which would skip the terminal setup that
+C<Genesis::logger> does on first use).
+
+File logs are scrubbed at every level. On the terminal, C<OUTPUT> and
+C<INFO> lines are left alone, because commands such as
+C<genesis bosh --connect> print credentials there on purpose; every other
+terminal level, including C<-T> trace output, is scrubbed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$value>
+
+The credential value.
+
+=item C<$label>
+
+A short name for the value, such as C<bosh-client-secret>. Defaults to
+C<secret>. Characters other than word characters, C<.>, C<:>, C</>, and
+C<-> are replaced with C<->.
+
+=back
+
+B<Returns:> Nothing.
+
+B<Examples:>
+
+  $logger->register_secret($director_secret, 'bosh-client-secret');
+  trace("connecting with %s", $director_secret);
+  # The trace reads: connecting with <redacted:bosh-client-secret>
+
+=head2 scrub
+
+  my $clean = $logger->scrub($text);
+
+Returns C<$text> with every registered value replaced by its redaction
+marker. Longer values are matched first, so a value that contains another
+is replaced whole. C<flush_logs> calls this on each line's content before
+wrapping it, since wrapping can break a value across lines.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$text>
+
+The text to scrub. Undefined text is returned unchanged.
+
+=back
+
+B<Returns:> The scrubbed text.
+
+B<Examples:>
+
+  $logger->register_secret('s3cr3t-value', 'token');
+  print $logger->scrub('token is s3cr3t-value');
+  # Returns: 'token is <redacted:token>'
 
 =head2 configure_log
 
@@ -1675,6 +1757,18 @@ B<Examples:>
   # Called by public methods; not normally called directly.
   $logger->_log('INFO', 'Hello %s', 'world');
   # Returns: nothing (appends buffer entry and flushes)
+
+=head2 _register_env_secrets
+
+  $logger->_register_env_secrets;
+
+Registers the value of each credential environment variable the caller set,
+listed in C<@Genesis::Log::CREDENTIAL_ENV_VARS> (C<BOSH_CLIENT_SECRET>,
+C<CREDHUB_SECRET>, C<VAULT_TOKEN>, and the like), with C<register_secret>.
+C<new> calls it once, when it creates the logger, so a credential handed to
+Genesis or to a hook through the environment is scrubbed from the start.
+
+B<Returns:> The logger.
 
 =head2 _log_item_level_map
 

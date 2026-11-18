@@ -33,6 +33,7 @@ our @EXPORT = qw/
 
 sub new {
 	my ($class) = @_;
+	return $Genesis::Log::Logger if defined($Genesis::Log::Logger);
 	my $hostname =  (`type -p hostname &>/dev/null`)
 		? `hostname | cut -f 1 -d.`
 		: 'localhost';
@@ -51,8 +52,89 @@ sub new {
 			? "0.0.0-rc.0"
 			: $Genesis::VERSION #FIXME - include dirty indicator
 	}, $class);
+	$Genesis::Log::Logger->_register_env_secrets;
 	return $Genesis::Log::Logger;
 }
+
+# Secret scrubbing {{{
+#
+# Every credential Genesis loads -- a director's client secret, a CredHub
+# password, a vault token -- is registered here, and flush_logs() replaces
+# each registered value before a line is written.  Redacting each call
+# site is the first line of defence; this catches whatever a call site
+# misses.  Values shorter than $MIN_SECRET_LENGTH are not registered,
+# since scrubbing a value that short would mangle ordinary words.
+
+our $MIN_SECRET_LENGTH = 6;
+
+# The registry belongs to the package, not the logger object, so that a
+# credential can be registered before any logger exists -- creating one
+# here would skip the terminal setup Genesis::logger does on first use --
+# and so that it outlives a logger being replaced.
+our %SECRETS;
+my $secret_pattern;
+
+# Credentials a caller can hand Genesis in its environment.  Registering a
+# name here only adds scrubbing; it never makes anything visible.
+our @CREDENTIAL_ENV_VARS = qw(
+	BOSH_CLIENT_SECRET BOSH_PASSWORD
+	CREDHUB_SECRET CREDHUB_PASSWORD
+	VAULT_TOKEN VAULT_AUTH_TOKEN VAULT_PASSWORD VAULT_SECRET_ID
+	VAULT_GITHUB_TOKEN
+);
+
+sub _register_env_secrets {
+	my $self = shift;
+	register_secret($ENV{$_}, lc($_ =~ s/_/-/gr)) for grep {defined $ENV{$_}} @CREDENTIAL_ENV_VARS;
+	return $self;
+}
+
+# register_secret - have every log replace this value before writing it {{{
+#
+# Callable as a method or as Genesis::Log::register_secret($value, $label).
+# The label names the value in the redaction marker, so a trace still says
+# what was there without saying what it was.
+sub register_secret {
+	shift if ref($_[0]) && eval {$_[0]->isa(__PACKAGE__)};
+	shift if defined($_[0]) && !ref($_[0]) && $_[0] eq __PACKAGE__;
+	my ($value, $label) = @_;
+	return unless defined($value) && !ref($value) && length($value) >= $MIN_SECRET_LENGTH;
+	$label = (defined($label) && length($label)) ? $label =~ s/[^\w.:\/-]+/-/gr : 'secret';
+
+	# A value can reach a log escaped as well as raw: Data::Dumper (what
+	# dump_var uses) escapes quotes and backslashes, and JSON escapes those
+	# and control characters.  Each form is registered, so each is caught.
+	my @forms = ($value);
+	push @forms, $value =~ s/([\\'])/\\$1/gr;
+	require JSON::PP;
+	push @forms, substr(JSON::PP->new->allow_nonref->ascii(0)->encode($value), 1, -1);
+	for my $form (grep {length($_) >= $MIN_SECRET_LENGTH} @forms) {
+		next if exists($SECRETS{$form});
+		$SECRETS{$form} = $label;
+		$secret_pattern = undef;
+	}
+	return;
+}
+
+# }}}
+# scrub - replace every registered value in a piece of text {{{
+sub scrub {
+	my ($self, $text) = @_;
+	return $text unless defined($text) && %SECRETS;
+	$secret_pattern //= do {
+		my $alternatives = join('|',
+			map {quotemeta}
+			sort {length($b) <=> length($a) || $a cmp $b}
+			keys %SECRETS
+		);
+		qr/($alternatives)/;
+	};
+	$text =~ s/$secret_pattern/<redacted:$SECRETS{$1}>/g;
+	return $text;
+}
+
+# }}}
+# }}}
 
 sub configure_log {
 	my $self = shift;
@@ -970,6 +1052,12 @@ sub flush_logs {
 					$show_stack = 'full';
 					#TODO: log error without trigging another error in the log system...
 				}
+				# Scrub before wrapping: wrap() can break a value across lines,
+				# and a broken value no longer matches.  The terminal keeps its
+				# OUTPUT and INFO lines, which are where commands print what the
+				# operator asked to see, such as `genesis bosh --connect`.
+				$content = $self->scrub($content)
+					unless $log eq '<terminal>' && ($level eq 'OUTPUT' || $level eq 'INFO');
 				my ($pre_pad, $post_pad) = ("","");
 				($pre_pad, $content)  = $content =~ m/\A([\r\n]*)(.*)\z/s;
 				($content, $post_pad) = $content =~ m/\A(.*?)([\r\n]*)\z/s unless $pending;
@@ -1006,7 +1094,7 @@ sub flush_logs {
 
 					# Write command line as first entry if this is a new file
 					if ($ENV{GENESIS_FULL_CALL} && !$self->{command_logged}{$log} && -z $file) {
-						print $fh "Command: $ENV{GENESIS_FULL_CALL}\n\n";
+						print $fh "Command: ".$self->scrub($ENV{GENESIS_FULL_CALL})."\n\n";
 						$self->{command_logged}{$log} = 1;
 					}
 				}
