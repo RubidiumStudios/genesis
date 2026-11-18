@@ -795,6 +795,21 @@ subtest 'at_exit' => sub {
 	is(scalar(@$Genesis::Commands::END_HOOKS), 2, "two callbacks registered");
 };
 
+subtest 'every function group names a module that exists' => sub {
+	for my $group (qw/ENVIRONMENT BOSH INFO REPOSITORY KIT PIPELINE GENESIS UTILITY DEPRECATED DEV WIP/) {
+		my $module = Genesis::Commands->can($group)->()->{module};
+		ok(-f "lib/Genesis/Commands/$module.pm", "$group names module $module, which exists");
+	}
+};
+
+subtest 'a work-in-progress command with no function of its own reaches its handler' => sub {
+	reset_commands_state();
+	define_command('deployments', {function_group => Genesis::Commands::WIP});
+	throws_ok {
+		$Genesis::Commands::RUN{deployments}->()
+	} qr/not yet fully implemented/, "the handler's own message is reached";
+};
+
 subtest 'constants' => sub {
 	# Function group constants
 	is(ref(Genesis::Commands::ENVIRONMENT), 'HASH', "ENVIRONMENT is a hashref");

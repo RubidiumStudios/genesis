@@ -72,7 +72,7 @@ use constant { # {{{
 	UTILITY     => {order => -1, module => "Utility",    label => "Script Callback Helper"},
 	DEPRECATED  => {order => -2, module => "Deprecated", label => "Deprecated"},
 	DEV         => {order => -3, module => "Core",       label => "Development"},
-  WIP         => {order => -4, module => "Wip",        label => "Work in Progress"},
+  WIP         => {order => -4, module => "Info",       label => "Work in Progress"},
 
 	# Option Groups
 	BLANK_OPTIONS => 0,

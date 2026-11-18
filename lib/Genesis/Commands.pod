@@ -128,7 +128,7 @@ Order -3.  Module C<Core>.  Label C<Development>.
 
 =item C<WIP>
 
-Order -4.  Module C<Wip>.  Label C<Work in Progress>.
+Order -4.  Module C<Info>, where the work-in-progress handlers live.  Label C<Work in Progress>.
 
 =back
 
