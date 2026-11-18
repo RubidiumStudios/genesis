@@ -1329,8 +1329,11 @@ If true, returns C<1> (success) or C<0> (failure) rather than output.
 
 =item C<onfailure>
 
-A message string to C<bail> with if the command exits non-zero. The command's
-stderr and stdout are appended to the message.
+A message string to C<bail> with if the command exits non-zero. The message
+adds how the command ended, as its exit code or the signal that killed it,
+and C<failure_summary> of what it printed, which names a kind of failure and
+never repeats the text. A stream the caller marked public with
+C<public_output> or C<public_stderr> is appended as it was printed.
 
 =item C<env>
 
@@ -1385,18 +1388,26 @@ Redirect stdin for the command.
 
 If true, keeps everything about the command out of the trace: the command
 line is shown as its first word and a byte count, every argument is shown
-as C<E<lt>redacted:N bytesE<gt>>, and C<redact_output>, C<redact_stderr>,
-and C<redact_env> default to true.
+as C<E<lt>redacted:N bytesE<gt>>, C<redact_env> defaults to true, and any
+C<public>, C<public_output>, or C<public_stderr> mark is ignored.
 
-=item C<redact_output>
+=item C<public_output>
 
-If true, suppresses output from trace/debug logs.
+If true, the command's captured output is written to the trace and to an
+C<onfailure> message. Without it, the trace records only the output's length
+as C<[Nb of redacted data omitted from debug]>, since a command's output can
+carry any credential it read. Mark only output that provably holds no
+secret, such as a version string or a plain listing. The caller receives the
+output unchanged either way.
 
-=item C<redact_stderr>
+=item C<public_stderr>
 
-If true, keeps the command's captured stderr out of trace and debug logs, and
-out of the C<onfailure> message, in the same way C<redact_output> does for its
-output. The caller still receives the stderr unchanged.
+The same as C<public_output>, for the command's captured stderr. Without
+it, the trace records C<[Nb of redacted stderr omitted from debug]>.
+
+=item C<public>
+
+Sets both C<public_output> and C<public_stderr>.
 
 =item C<redact_env>
 
@@ -1801,7 +1812,9 @@ C<safe get>. Without the hash, the output is decoded as before.
 
 In scalar context, calls C<bail> with the JSON parse error if C<$out> is not valid JSON
 (and C<$rc> is zero). In list context, returns the data (possibly C<undef>),
-the original C<$rc>, and any error message encountered during parsing.
+the original C<$rc>, and any error message encountered during parsing. When
+C<$rc> is non-zero, the C<$err> returned in list context is the command's
+own stderr, which the caller must not log; C<failure_summary> describes it.
 
 B<Parameters:>
 
@@ -1832,6 +1845,22 @@ B<Returns:>
 In list context: C<($data, $rc, $err)>.
 
 In scalar context: the decoded JSON data structure, or dies on parse failure.
+
+B<Errors:>
+
+=over 4
+
+=item C<The command exited %d (%s)>
+
+In scalar context, when C<$rc> is non-zero and C<$err> holds the command's
+stderr. The placeholders are the exit code and C<failure_summary> of the
+stderr, which never repeats it.
+
+=item The C<load_json> error
+
+In scalar context, when C<$out> does not decode. See C<load_json>.
+
+=back
 
 B<Examples:>
 
@@ -3906,6 +3935,18 @@ B<Examples:>
 
     _u2d('skip_verify');  # Returns: 'skip-verify'
     _u2d('no_change');    # Returns: 'no-change'
+
+=head2 _run_failure_message
+
+    my $msg = _run_failure_message(\%opts, $rc, $signal, $out, $err);
+
+Builds the message C<run> bails with when a command given C<onfailure>
+fails. It holds the caller's message, how the command ended, as
+C<exited N> or C<killed by signal N>, and C<failure_summary> of each
+private stream. A stream the caller marked public with C<public_output> or
+C<public_stderr> is appended as it was printed.
+
+B<Returns:> The message string.
 
 =head1 AUTHOR
 

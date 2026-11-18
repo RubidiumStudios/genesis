@@ -111,7 +111,7 @@ sub check_prereqs {
 	}
 
 	if ($self->{min_fly_version}) {
-		my ($ver_out) = run({ stderr => 0 }, 'fly --version');
+		my ($ver_out) = run({stderr => 0, public => 1}, 'fly --version');
 		chomp($ver_out //= '');
 		if ($ver_out && $ver_out =~ /^(\d+)\.(\d+)\.(\d+)/) {
 			my @got = ($1+0, $2+0, $3+0);

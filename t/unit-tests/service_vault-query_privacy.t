@@ -49,7 +49,7 @@ subtest 'a query keeps its output and stderr out of the trace by default' => sub
 
 subtest 'a caller can ask for output to be traced' => sub {
 	local $ENV{FAKE_OUT} = 'secret/fake/listing';
-	my $log = capture_trace { $vault->query({redact_output => 0}, 'paths') };
+	my $log = capture_trace { $vault->query({public_output => 1}, 'paths') };
 	like($log, qr{secret/fake/listing}, 'the opted-in output is traced');
 	received();
 };

@@ -1241,7 +1241,7 @@ sub which_binary { # {{{
 } # }}}
 
 sub _safe_drives_openbao { # {{{
-	my ($out) = run({stderr => undef}, 'safe -v 2>&1');
+	my ($out) = run({stderr => undef, public_output => 1}, 'safe -v 2>&1');
 	return 0 unless $out && $out =~ qr(safe v(\S+));
 	my $v = $1;
 	$v = $SAFE_DEV_VERSION if $v =~ /^dev\b/;

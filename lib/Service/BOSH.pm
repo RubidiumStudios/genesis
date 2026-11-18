@@ -24,7 +24,7 @@ sub command {
 	$min_version ||= '0.0.0';
 	my %versions;
 	foreach my $boshcmd (qw(bosh-cli bosh2 boshv2 bosh)) {
-		my ($version, undef) = run("$boshcmd -v 2>&1 | grep version | head -n1");
+		my ($version, undef) = run({public_output => 1}, "$boshcmd -v 2>&1 | grep version | head -n1");
 		trace("Version for $boshcmd: '$version'");
 		next unless defined($version) && $version =~ /version (\S+?)(-.*)?$/;
 		$version = $1;
@@ -174,8 +174,10 @@ sub execute {
 	# A caller that says otherwise is honoured; see %TRACEABLE_OUTPUT.
 	my $verbose = _verbose_log_level($opts->{env});
 	my $private = ($TRACEABLE_OUTPUT{_subcommand(@cmd)} && !$verbose) ? 0 : 1;
-	$opts->{redact_output} = $private unless defined($opts->{redact_output});
-	$opts->{redact_stderr} = 1 if ($private || $verbose) && !defined($opts->{redact_stderr});
+	unless ($private) {
+		$opts->{public_output} //= 1;
+		$opts->{public_stderr} //= 1;
+	}
 
 	# Verbose bosh logging is the operator's own debugging switch, and it
 	# writes director requests and responses, tokens included, into the
@@ -239,11 +241,11 @@ sub execute {
 		}
 		$results[0] =~ s/^Script [^\n]+\n//m; # remove script header (linux)
 		$results[0] =~ s/^\^D[\x08]*//;       # remove macOS script ^D prefix + backspaces
-		if ($opts->{redact_output}) {
+		if (($opts->{public_output} || $opts->{public}) && !$opts->{redact}) {
+			logger->dump_var("bosh results" => \@results);
+		} else {
 			trace("[%sb of redacted bosh output omitted from debug, exit code %s]",
 				length($results[0] // ''), $results[1] // 'unknown');
-		} else {
-			logger->dump_var("bosh results" => \@results);
 		}
 	}
 	return !$results[1] if $opts->{passfail};

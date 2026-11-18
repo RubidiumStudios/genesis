@@ -96,8 +96,8 @@ subtest 'BOSH_LOG_LEVEL=none is the default' => sub {
 };
 
 subtest 'a caller can still ask for output to be traced' => sub {
-	my $log = capture_trace { director->execute({redact_output => 0}, 'manifest') };
-	like($log, qr/\Q$out_secret\E/, 'an explicit redact_output => 0 is honoured');
+	my $log = capture_trace { director->execute({public_output => 1}, 'manifest') };
+	like($log, qr/\Q$out_secret\E/, 'an explicit public_output mark is honoured');
 };
 
 subtest 'an interactive transcript is redacted' => sub {

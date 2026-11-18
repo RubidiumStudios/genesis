@@ -708,6 +708,24 @@ sub failure_summary {
 	return 'no known kind of failure; its own messages are withheld, since they can quote credentials';
 }
 
+# _run_failure_message - what run() bails with for a failed onfailure call {{{
+#
+# The caller's message, how the command ended, and the kinds of failure
+# its streams matched.  A stream is quoted only if the caller marked it
+# public; a private one contributes its kind of failure and nothing else.
+sub _run_failure_message {
+	my ($opts, $rc, $signal, $out, $err) = @_;
+	my $ended = $signal ? "killed by signal $signal" : "exited $rc";
+	my @private = grep {defined && length}
+		($opts->{public_stderr} ? () : $err), ($opts->{public_output} ? () : $out);
+	my $kind = @private ? ': '.failure_summary(@private) : '';
+	my $msg = sprintf("#R{%s} (command %s%s)", $opts->{onfailure}, $ended, $kind);
+	$msg .= "\n\nSTDERR:\n$err" if $opts->{public_stderr} && defined($err) && length($err);
+	$msg .= "\n\nSTDOUT:\n$out" if $opts->{public_output} && defined($out) && length($out);
+	return $msg;
+}
+
+# }}}
 # spruce_error_paths - the paths a failed spruce merge named, checked {{{
 #
 # Spruce names each node it could not resolve by its path, as in
@@ -828,10 +846,15 @@ sub run {
 	my %opts = %{((ref($args[0]) eq 'HASH') ? shift @args: {})};
 	$opts{stderr} = '&1' unless exists $opts{stderr};
 
-	# `redact` keeps everything about a command out of the trace: its
-	# arguments, environment values, output, and stderr.
+	# A child's output and stderr can carry any credential it read, so both
+	# are private unless the caller marks them public, which is only for
+	# output that provably holds no secret, such as a version or a listing.
+	# `redact` keeps everything about a command out of the trace, so it
+	# also wins over a public mark.
+	$opts{public_output} = $opts{public_stderr} = 1 if delete $opts{public};
 	if ($opts{redact}) {
-		$opts{$_} //= 1 for qw/redact_output redact_stderr redact_env/;
+		$opts{redact_env} //= 1;
+		delete @opts{qw/public_output public_stderr/};
 	}
 
 	# stderr is a shell redirect target, so `stderr => 1` renders `2>1` and
@@ -990,25 +1013,22 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 	if (defined($out)) {
 		if ($out =~ m/[\x00-\x08\x0b-\x0c\x0e\x1f\x7f-\xff]/) {
 			qtrace "[%sb of binary data omitted from debug]", length($out);
-		} elsif ($opts{redact_output}) {
-			qtrace "[%sb of redacted data omitted from debug]", length($out);
-		} else {
+		} elsif ($opts{public_output}) {
 			dump_var -1, run_output => $out;
+		} else {
+			qtrace "[%sb of redacted data omitted from debug]", length($out);
 		}
 	}
 	if (defined($err)) {
-		if ($opts{redact_stderr}) {
-			qtrace "[%sb of redacted stderr omitted from debug]", length($err);
-		} else {
+		if ($opts{public_stderr}) {
 			dump_var -1, run_stderr => $err;
+		} else {
+			qtrace "[%sb of redacted stderr omitted from debug]", length($err);
 		}
 	}
 	if ($rc) {
-		bail({raw => 1}, "#R{%s} (run failed)%s%s",
-		     $opts{onfailure},
-		     defined($err) ? "\n\nSTDERR:\n".($opts{redact_stderr}?"<redacted>":$err) : '',
-		     defined($out) ? "\n\nSTDOUT:\n".($opts{redact_output}?"<redacted>":$out) : ''
-		) if ($opts{onfailure});
+		bail({raw => 1}, "%s", _run_failure_message(\%opts, $rc, $signal, $out, $err))
+			if ($opts{onfailure});
 		trace("command %s (rc %d)",
 			$signal ? "killed by signal $signal" : sprintf("exited with status %x", $exit_status), $rc);
 	} else {
@@ -1078,6 +1098,9 @@ sub read_json_from {
 		$err = $@; # previous error was non-fatal, so override
 	}
 	return ($json,$rc,$err) if (wantarray);
+	# A failed command's stderr can quote a credential, so it is described
+	# rather than shown.  A parse error from load_json is fixed text.
+	bail("The command exited %d (%s)", $rc, failure_summary($err)) if $rc && $err;
 	bail($err) if $err && $err ne "";
 	return $json;
 }
