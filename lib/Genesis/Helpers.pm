@@ -828,18 +828,34 @@ __genesis_vault_version() {
 export -f __genesis_vault_version
 
 # __genesis_safe_read ARGS... - safe get, with what safe says on stderr
-# dropped, since a failed read can quote the value it was reading
+# dropped, since a failed read can quote the value it was reading.  What
+# safe printed is passed on only when the move can carry it exactly: a
+# value with a NUL byte, which no shell value or command argument can
+# hold, ends it with 90, and one that is not UTF-8, which CredHub cannot
+# store as it is, with 91.  Otherwise it ends with safe's exit status.
 __genesis_safe_read() {
-  safe get "$@" 2>/dev/null
+  local -a __st
+  safe get "$@" 2>/dev/null | /usr/bin/perl -MEncode -0777 -e '
+    my $v = scalar(<STDIN>) // "";
+    exit 90 if $v =~ /\0/;
+    my $copy = $v;
+    exit 91 unless eval {Encode::decode("UTF-8", $copy, Encode::FB_CROAK); 1};
+    print $v;'
+  __st=("${PIPESTATUS[@]}")
+  [[ ${__st[0]} -eq 0 ]] || return "${__st[0]}"
+  return "${__st[1]}"
 }
 export -f __genesis_safe_read
 
-# __genesis_credhub_value NAME - print a CredHub value exactly as stored
+# __genesis_credhub_value NAME - print a CredHub value exactly as stored.
+# A value with a NUL byte cannot be compared exactly, so it is never
+# printed, and the read ends with 3.
 __genesis_credhub_value() {
   credhub get -n "$1" -j 2>/dev/null \
     | /usr/bin/perl -MJSON::PP -0777 -e '
         my $d = eval {JSON::PP->new->utf8->decode(scalar(<STDIN>) // "")};
         exit 2 unless ref($d) eq "HASH" && defined($d->{value}) && !ref($d->{value});
+        exit 3 if $d->{value} =~ /\0/;
         binmode STDOUT, ":utf8"; print $d->{value}, "\n";'
 }
 export -f __genesis_credhub_value
@@ -848,10 +864,17 @@ move_secrets_to_credhub() {
   # The value passes through this function, so it is never traced, even
   # when the operator has asked for the hook's xtrace, and no message
   # below quotes it or anything safe or credhub printed.
-  local value check src="$1" dst="$2" rc __xtrace='' secret key='' kv='' version='' now from keys kept=''
+  local value check src="$1" dst="$2" rc __xtrace='' secret key='' kv='' version='' now from keys kept='' why=''
   { [[ $- == *x* ]] && __xtrace=1 && set +x; } 2>/dev/null
   secret="${GENESIS_SECRETS_BASE}${src%%:*}"
   [[ "$src" == *:* ]] && key=":${src#*:}"
+
+  # A CredHub value is one string, and a whole vault record is a map of
+  # keys, so copying one would change its shape.
+  if [[ -z $key ]] ; then
+    [[ -n $__xtrace ]] && set -x
+    bail "#R{[ERROR]} Secret #C{$1} names no key, and a CredHub value holds one key's value, so nothing was written to CredHub or removed from vault.  Name the key to move, as in #C{$1:KEY}."
+  fi
 
   # On a kv v2 mount, the newest version is read by its number, so the
   # copy, the checks, and the delete are all about that one version.  A
@@ -871,7 +894,13 @@ move_secrets_to_credhub() {
   fi
   from="$secret${version:+^$version}$key"
   __genesis_exact_value value __genesis_safe_read "$from" && rc=0 || rc=$?
-  if [[ $rc -gt 0 ]] ; then
+  if [[ $rc -eq 90 || $rc -eq 91 ]] ; then
+    value=''; [[ -n $__xtrace ]] && set -x
+    [[ $rc -eq 90 ]] \
+      && why="it holds a NUL byte, which no shell value or command argument can carry" \
+      || why="it is not valid UTF-8, which CredHub cannot store as it is"
+    bail "#R{[ERROR]} Secret #C{$1} cannot be moved to CredHub exactly, because $why, so nothing was written to CredHub or removed from vault."
+  elif [[ $rc -gt 0 ]] ; then
     [[ -n $__xtrace ]] && set -x
     bail "#R{[ERROR]} Failed to read secret #C{$1} from vault: safe exited $rc"
   fi

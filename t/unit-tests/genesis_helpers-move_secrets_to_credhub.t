@@ -105,11 +105,16 @@ SH
 sub move {
 	my ($versions, %env) = @_;
 	my $next = delete $env{next};
+	my $src = delete($env{src}) // 'path:password';
 	system('rm', '-rf', "$dir/vault", "$dir/safe-calls", "$dir/credhub-calls", "$dir/credhub-value");
 	put_file("$dir/vault/next/password", $next) if defined($next);
 	for my $v (keys %$versions) {
 		for my $k (keys %{$versions->{$v}}) {
-			put_file("$dir/vault/$v/$k", $versions->{$v}{$k});
+			# Written as raw bytes, since put_file encodes what it writes.
+			mkdir "$dir/vault"; mkdir "$dir/vault/$v";
+			open(my $fh, '>:raw', "$dir/vault/$v/$k") or die "cannot write the fake vault: $!";
+			print $fh $versions->{$v}{$k};
+			close($fh);
 		}
 	}
 	local %ENV = (%ENV,
@@ -120,12 +125,14 @@ sub move {
 		%env,
 	);
 	local $ENV{FAKE_SAFE_SAYS} = $env{FAKE_SAFE_SAYS} // 'fake-safe-diagnostic-quoting-a-value';
-	my $out = qx{cd "$dir" && bash -c 'source .helper; move_secrets_to_credhub "path:password" "password"' 2>&1};
+	local $ENV{FAKE_SRC} = $src;
+	my $out = qx{cd "$dir" && bash -c 'source .helper; move_secrets_to_credhub "\$FAKE_SRC" "password"' 2>&1};
 	my $rc = $? >> 8;
 	return {
 		rc => $rc, out => $out,
 		stored => (-f "$dir/credhub-value" ? slurp("$dir/credhub-value") : undef),
 		safe => (-f "$dir/safe-calls" ? slurp("$dir/safe-calls") : ''),
+		credhub => (-f "$dir/credhub-calls" ? slurp("$dir/credhub-calls") : ''),
 		vault => {map {my $v = $_; ($v => {map {($_ => slurp("$dir/vault/$v/$_"))} grep {-f "$dir/vault/$v/$_"} map {s{.*/}{}r} glob("$dir/vault/$v/*")})} grep {!/next/} map {s{.*/}{}r} glob("$dir/vault/*")},
 	};
 }
@@ -143,6 +150,36 @@ subtest 'a value is moved byte for byte, trailing newlines included' => sub {
 	is($r->{rc}, 0, 'the move succeeds') or diag $r->{out};
 	is($r->{stored}, $multiline, 'CredHub holds exactly the vault value');
 	like($r->{safe}, qr/^rm secret\/fake\/path\^1$/m, 'and then the vault original is removed');
+};
+
+# A shell value and a command argument cannot hold a NUL byte, and CredHub
+# stores text, so a value either would change is refused before anything
+# is written or removed.
+for my $case (
+	['a NUL byte', "fake-before\0fake-after", qr/holds a NUL byte/],
+	['bytes that are not UTF-8', "fake-latin1-\xff\xfe", qr/is not valid UTF-8/],
+) {
+	my ($what, $value, $why) = @$case;
+	subtest "a value with $what is refused before anything changes" => sub {
+		my $r = move({1 => {password => $value}}, FAKE_KV => 2);
+		isnt($r->{rc}, 0, 'the move fails');
+		ok(!defined($r->{stored}), 'nothing is written to CredHub');
+		unlike($r->{credhub}, qr/^set/m, 'credhub set is never run');
+		unlike($r->{safe}, qr/^rm /m, 'nothing is removed from vault');
+		is($r->{vault}{1}{password}, $value, 'which still holds the value exactly');
+		like($r->{out}, qr/cannot be moved to CredHub exactly, because/, 'the operator is told it was refused');
+		like($r->{out}, $why, 'and why');
+		like($r->{out}, qr/path:password/, 'naming the secret');
+		unlike($r->{out}, qr/fake-(?:before|after|latin1)/, 'without the value');
+	};
+}
+
+subtest 'a secret with no key is refused before anything changes' => sub {
+	my $r = move({1 => {password => 'fake-value'}}, FAKE_KV => 2, src => 'path');
+	isnt($r->{rc}, 0, 'the move fails');
+	ok(!defined($r->{stored}), 'nothing is written to CredHub');
+	unlike($r->{safe}, qr/^(?:get|rm) /m, 'and vault is neither read nor changed');
+	like($r->{out}, qr/names no key/, 'the operator is told to name the key');
 };
 
 subtest 'a value CredHub does not hold exactly is never deleted' => sub {

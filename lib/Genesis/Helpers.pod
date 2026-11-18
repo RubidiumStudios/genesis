@@ -1391,9 +1391,14 @@ traced, so the function turns off a hook's xtrace while it holds the value
 and turns it back on afterward. Nothing that safe or credhub print on
 stderr is kept, since a failed read or write can quote the value.
 
-The value travels byte for byte, trailing newlines included. Nothing is
-removed from Vault until CredHub is read back and shown to hold the same
-bytes, and Vault is read again and shown to still hold what was copied.
+The value travels byte for byte, trailing newlines included. A value the
+move cannot carry exactly is refused before anything is written or
+removed: one with a NUL byte, which no shell value or command argument can
+hold, and one that is not valid UTF-8, which CredHub cannot store as it
+is. So is a C<SRC_PATH> that names no key, since a CredHub value holds one
+key's value and a whole Vault record is a map of keys. Nothing is removed
+from Vault until CredHub is read back and shown to hold the same bytes,
+and Vault is read again and shown to still hold what was copied.
 
 The only delete it makes names the kv v2 version it copied, with
 C<safe rm SECRET^VERSION>, so a value written after the last read is a
@@ -1425,6 +1430,12 @@ secret will be stored.  Required.
 
 B<Errors:>
 
+Calls C<bail> with C<"[ERROR] Secret $SRC_PATH names no key"> when
+C<SRC_PATH> has no C<:KEY>, and with C<"[ERROR] Secret $SRC_PATH cannot be
+moved to CredHub exactly, because ..."> when its value holds a NUL byte or
+is not valid UTF-8. Either is before anything is stored or removed, and
+neither message holds the value.
+
 Calls C<bail> with C<"[ERROR] Failed to read secret $SRC_PATH from vault:
 safe exited RC"> if C<safe get> fails, before anything is stored or
 removed.
@@ -1452,8 +1463,9 @@ C<__genesis_vault_kv_version>, C<__genesis_vault_version>,
 C<__genesis_safe_read>, and C<__genesis_credhub_value> read a command's
 output exactly, tell a kv v2 mount from a kv v1 one (or fail when they
 cannot), find the newest version of a kv v2 secret (or fail when safe
-cannot list it), read Vault without keeping what safe says on stderr, and
-read a CredHub value exactly.
+cannot list it), read Vault without keeping what safe says on stderr and
+refuse a value the move cannot carry exactly, and read a CredHub value
+exactly, refusing one with a NUL byte.
 
 B<Examples:>
 
