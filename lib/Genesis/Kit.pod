@@ -1325,8 +1325,9 @@ code inside an C<eval> with C<$Genesis::BAIL_IS_PRIVATE> set, so a bail in
 the hook leaves the trace only its size, and then bails itself with a fixed
 message naming the hook and the kit and the kind of failure
 C<Genesis::failure_summary> finds. The message the hook died with, with its
-colors and any C<[FATAL]> prefix removed, is logged here as private detail,
-so only a terminal shows it.
+colors and any C<[FATAL]> prefix removed, is logged here as private detail
+at the error level, so only a terminal shows it, and it still does under
+C<--quiet>.
 
 B<Parameters:>
 
@@ -1419,15 +1420,18 @@ B<Examples:>
 
 =head2 _show_hook_stderr
 
-  Genesis::Kit::_show_hook_stderr($hook, $err);
+  Genesis::Kit::_show_hook_stderr($hook, $err, $failed);
 
 Shows what a hook listed in C<@Genesis::Kit::CAPTURED_STDERR_HOOKS> printed
 on stderr. Those are the C<blueprint>, C<features>, C<cloud-config>, and
 C<cpi-config> hooks, which run with no terminal and whose stdout Genesis
 parses, so C<run_hook> captures their stderr in memory. It is logged as
 private detail, so a terminal shows it as printed, a redirected stderr gets
-a note that it was withheld, and no log file gets it. A failed hook is
-described by C<Genesis::failure_summary> of both streams.
+a note that it was withheld, and no log file gets it. A failed hook's
+stderr is why it failed, so it is logged at the error level, which a
+terminal still shows under C<--quiet>, and anything else at the info
+level. The failure itself is described by C<Genesis::failure_summary> of
+both streams.
 
 B<Parameters:>
 
@@ -1441,6 +1445,10 @@ The hook's name.
 
 What the hook printed on stderr. Nothing is shown when it is empty or
 blank.
+
+=item C<$failed>
+
+True when the hook failed.
 
 =back
 

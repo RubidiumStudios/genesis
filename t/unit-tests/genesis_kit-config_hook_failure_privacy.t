@@ -59,6 +59,7 @@ my $note = qr/<\d+ bytes of detail withheld because this output is not a termina
 
 sub run_module_hook {
 	my ($hook, $tty, %opts) = @_;
+	my $level = delete($opts{level}) // 'INFO';
 	my $value = fake_secret("hook-$hook");
 	no warnings qw/redefine once/;
 	local *Genesis::Kit::has_hook = sub { 1 };
@@ -79,7 +80,7 @@ sub run_module_hook {
 	my ($log, $stderr) = capture_trace {
 		eval { bless({}, 'Genesis::Kit')->run_hook($hook, env => bless({}, 'FakeEnv'), %opts); 1 };
 		$error = $@;
-	};
+	} terminal_level => $level;
 	return {value => $value, error => $error // '', log => $log, stderr => $stderr};
 }
 
@@ -99,6 +100,9 @@ for my $hook (qw/cloud-config cpi-config runtime-config/) {
 		my $r = run_module_hook($hook, 1);
 		like($r->{stderr}, qr/could not read the api key \Q$r->{value}\E/, 'the terminal shows the kit\'s words');
 		unlike($r->{log}, qr/\Q$r->{value}\E/, 'and the trace still does not');
+
+		$r = run_module_hook($hook, 1, level => 'ERROR');
+		like($r->{stderr}, qr/could not read the api key \Q$r->{value}\E/, 'and so does one under --quiet');
 	};
 
 	for my $step (qw/init completed results/) {

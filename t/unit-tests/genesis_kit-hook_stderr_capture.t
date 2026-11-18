@@ -43,7 +43,7 @@ package FakeEnv {
 }
 
 sub run_fake_hook {
-	my ($hook, $end, $tty) = @_;
+	my ($hook, $end, $tty, $level) = @_;
 	my $value = fake_secret("hook-$hook");
 	no warnings qw/redefine once/;
 	local *Genesis::Kit::has_hook = sub { 1 };
@@ -65,7 +65,7 @@ sub run_fake_hook {
 	my ($log, $stderr) = capture_trace {
 		eval { bless({}, 'Genesis::Kit')->run_hook($hook, env => bless({}, 'FakeEnv'), %opts) };
 		$error = $@;
-	};
+	} terminal_level => ($level // 'INFO');
 	return {value => $value, error => $error // '', log => $log, stderr => $stderr};
 }
 
@@ -91,6 +91,15 @@ for my $hook (@hooks) {
 		my $r = run_fake_hook($hook, 'fail', 1);
 		like($r->{stderr}, qr/warning: using \Q$r->{value}\E/, 'the terminal shows what it printed');
 		unlike($r->{log}, qr/\Q$r->{value}\E/, 'and the log still does not hold it');
+	};
+
+	subtest "a failed $hook hook's stderr still reaches a terminal under --quiet" => sub {
+		my $r = run_fake_hook($hook, 'fail', 1, 'ERROR');
+		like($r->{stderr}, qr/warning: using \Q$r->{value}\E/, 'the terminal shows what it printed');
+		unlike($r->{log}, qr/\Q$r->{value}\E/, 'and the log still does not hold it');
+
+		$r = run_fake_hook($hook, 'fail', 0, 'ERROR');
+		unlike($r->{stderr}, qr/\Q$r->{value}\E/, 'a redirected stderr still does not get it');
 	};
 }
 

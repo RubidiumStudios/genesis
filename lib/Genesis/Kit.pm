@@ -455,7 +455,7 @@ EOF
 	);
 
 	exit $rc if $is_shell;
-	_show_hook_stderr($hook, $err) if $captured;
+	_show_hook_stderr($hook, $err, $rc != 0) if $captured;
 
 	# The hook's stdout is for Genesis to parse and can carry credential
 	# values, so a failure is described by how the hook ended alone.
@@ -572,11 +572,13 @@ sub _run_config_hook_module {
 #
 # A terminal shows it as the hook printed it.  Anywhere else, such as a CI
 # log, a note says how much was withheld, and a failed hook is described
-# by its kind of failure.
+# by its kind of failure.  A failed hook's stderr is why it failed, so it
+# is shown at the error level, which a terminal under --quiet still shows.
 sub _show_hook_stderr {
-	my ($hook, $err) = @_;
+	my ($hook, $err, $failed) = @_;
 	return unless defined($err) && $err =~ /\S/;
-	info({private => 1, raw => 1}, "%s", $err =~ s/\s+\z//r);
+	my $level = $failed ? 'error' : 'info';
+	Genesis::logger->$level({offset => 1, private => 1, raw => 1}, "%s", $err =~ s/\s+\z//r);
 	return 1;
 }
 
@@ -587,7 +589,8 @@ sub _show_config_failure {
 	my $text = Genesis::Term::decolorize("$died") =~ s/\A\s+//r =~ s/\s+\z//r;
 	$text =~ s/\A\[FATAL\] //;
 	return unless length($text);
-	info({private => 1, raw => 1}, "%s\n", $text);
+	# It is why the hook failed, so a terminal under --quiet still shows it.
+	error({private => 1, raw => 1}, "%s\n", $text);
 	return 1;
 }
 
