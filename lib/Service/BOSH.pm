@@ -1,6 +1,7 @@
 package Service::BOSH;
 
 use IO::Handle;
+use JSON::PP ();
 
 use Genesis qw/
 	trace debug info bail run slurp new_enough logger dump_var humanize_path dryrun
@@ -116,14 +117,16 @@ sub environment_variables {
 #
 # Much of what bosh prints carries credentials: `bosh manifest`, `bosh int`,
 # configs, variables, and the diff in a deploy transcript, and a failing
-# command can quote them on stderr.  Stdout is written to the trace only
-# for these read-only listings, and stderr never is; everything else
-# leaves a byte count.  `events` is left out because an event's context
-# can carry a task's error text.  A command that cannot be identified,
-# including a shell command that chains anything onto a listing or one
-# with an option the parser does not know, is private, so a misreading
-# errs on the safe side.
-our %TRACEABLE_OUTPUT = map {$_ => 1} qw(
+# command can quote them on stderr.  Even a read-only listing holds text
+# the director controls, such as a failed task's result in `bosh tasks`, so
+# no stdout and no stderr is traced verbatim; each leaves a byte count.
+# For these listings, the trace also gets what the parsed output measures,
+# its tables and how many rows each has.  `events` is left out because an
+# event's context can carry a task's error text.  A command that cannot be
+# identified, including a shell command that chains anything onto a
+# listing or one with an option the parser does not know, is not a listing,
+# so a misreading errs on the safe side.
+our %SUMMARIZED_LISTINGS = map {$_ => 1} qw(
 	deployments env errands instances locks releases stemcells tasks vms
 );
 
@@ -258,8 +261,8 @@ sub execute {
 	$opts->{env}{BOSH_NON_INTERACTIVE} = undef;
 	managed_environment($opts->{env});
 
-	# A caller that says otherwise is honoured; see %TRACEABLE_OUTPUT.
-	$opts->{public_output} //= 1 if $TRACEABLE_OUTPUT{_subcommand(@cmd)};
+	# See %SUMMARIZED_LISTINGS.
+	my $listing = $SUMMARIZED_LISTINGS{_subcommand(@cmd)} ? _subcommand(@cmd) : undef;
 
 	my $watch;
 
@@ -313,8 +316,34 @@ sub execute {
 			$results[1] // 'unknown',
 			$status->{interrupted} ? '; interrupted' : '');
 	}
+	_trace_listing_summary($listing, $results[0])
+		if $listing && !$watch && !$results[1] && defined($results[0]);
 	return !$results[1] if $passfail;
 	return wantarray ? @results : $results[1];
+}
+
+# }}}
+# _trace_listing_summary - trace what a listing's parsed output measures {{{
+#
+# Only what bosh itself names is kept: each table's content type, when it is
+# a plain word, and its count of rows.  Output that is not bosh's JSON is
+# measured in lines.  No value from a row is traced.
+sub _trace_listing_summary {
+	my ($listing, $out) = @_;
+	my $data = eval { JSON::PP->new->allow_nonref(0)->decode($out) };
+	if (ref($data) eq 'HASH' && ref($data->{Tables}) eq 'ARRAY') {
+		my @tables = map {
+			my $content = (ref($_) eq 'HASH' && defined($_->{Content}) && $_->{Content} =~ /\A[a-z][a-z_-]{0,31}\z/)
+				? $_->{Content} : 'a table';
+			my $rows = (ref($_) eq 'HASH' && ref($_->{Rows}) eq 'ARRAY') ? scalar(@{$_->{Rows}}) : 0;
+			sprintf("%s with %d row%s", $content, $rows, $rows == 1 ? '' : 's');
+		} @{$data->{Tables}};
+		trace("bosh %s listed %s", $listing, @tables ? join(', ', @tables) : 'no tables');
+	} else {
+		my $lines = () = $out =~ /^.*\S.*$/mg;
+		trace("bosh %s listed %d line%s", $listing, $lines, $lines == 1 ? '' : 's');
+	}
+	return;
 }
 
 # }}}

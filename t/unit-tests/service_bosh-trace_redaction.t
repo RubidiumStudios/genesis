@@ -1,10 +1,11 @@
 #!/usr/bin/env perl
 # Service::BOSH::execute keeps bosh output that can carry secrets out of
 # the trace.  `bosh manifest`, `bosh int`, configs, variables, and deploy
-# transcripts all print credentials, so stdout and stderr are traced
-# verbatim only for an allowlist of read-only listing commands, and every
-# other command, including any shell command that chains more onto a
-# listing, leaves a byte count.  bosh's own debug logging writes whole
+# transcripts all print credentials, and even a listing holds text the
+# director controls, so no stdout or stderr is traced verbatim.  Each
+# leaves a byte count, and a read-only listing adds what its parsed
+# output measures, but any shell command that chains more onto a listing
+# is not a listing.  bosh's own debug logging writes whole
 # director responses, so it is turned off for every command Genesis runs.
 # An interactive command's transcript is read from script(1)'s stdout, in
 # memory, and never written to disk or traced.  Off a terminal, as in a CI
@@ -115,13 +116,39 @@ for my $cmd (
 	['--environment=lab', '-d', 'cf', 'instances'], ['-dcf', 'vms'], ['--tty', '--no-color', 'tasks'],
 ) {
 	my $name = join(' ', @$cmd);
-	subtest "stdout of the listing `bosh $name` is traced, and its stderr is not" => sub {
-		my $log = capture_trace { director->execute(@$cmd) };
-		like($log, qr/\Q$out_secret\E/, 'the listing is traced');
-		unlike($log, qr/\Q$err_secret\E/, 'its stderr is not');
+	subtest "the listing `bosh $name` is traced by what it measures" => sub {
+		my $out;
+		my $log = capture_trace { ($out) = director->execute(@$cmd) };
+		like($out, qr/\Q$out_secret\E/, 'the caller gets the listing');
+		unlike($log, qr/\Q$out_secret\E/, 'the trace does not');
+		like($log, qr/\[\d+b of redacted data omitted from debug\]/, 'it gets a byte count');
+		like($log, qr/bosh \S+ listed 1 line/, 'and how many lines were listed');
+		unlike($log, qr/\Q$err_secret\E/, 'its stderr is not traced either');
 		like($log, qr/\[\d+b of redacted stderr omitted from debug\]/, 'which leaves its byte count');
 	};
 }
+
+subtest 'a JSON listing is traced as its tables and row counts' => sub {
+	# A failed task's result is text the director controls, and can quote
+	# what the task was handed.
+	put_file("$dir/bosh-tasks", 0755, <<'SH');
+#!/bin/bash
+cat <<JSON
+{"Tables":[{"Content":"tasks","Header":{"id":"ID","result":"Result"},"Rows":[
+ {"id":"12","state":"error","result":"failed: password $FAKE_STDOUT_VALUE rejected"},
+ {"id":"13","state":"done","result":"ok"}]},
+ {"Content":"$FAKE_STDOUT_VALUE","Rows":[]}],"Blocks":null,"Lines":["Succeeded"]}
+JSON
+SH
+	my $d = director;
+	Service::BOSH->set_command("$dir/bosh-tasks");
+	my $out;
+	my $log = capture_trace { ($out) = $d->execute('tasks', '--recent', '--json') };
+	like($out, qr/\Q$out_secret\E/, 'the caller gets the listing');
+	unlike($log, qr/\Q$out_secret\E/, 'the trace gets no value from it');
+	like($log, qr/bosh tasks listed tasks with 2 rows, a table with 0 rows/,
+		'only the tables bosh names, and their row counts');
+};
 
 for my $level (qw/debug info warn error/) {
 	subtest "BOSH_LOG_LEVEL=$level is turned off for the bosh Genesis runs" => sub {
@@ -144,7 +171,7 @@ subtest 'BOSH_LOG_LEVEL=none needs no warning' => sub {
 	local $ENV{BOSH_LOG_LEVEL} = 'none';
 	local $Service::BOSH::WARNED_LOGGING = 0;
 	my ($log, $stderr) = capture_trace { director->execute('env', '--json') };
-	like($log, qr/\Q$out_secret\E/, 'a listing is traced');
+	like($log, qr/bosh env listed/, 'a listing is traced by what it measures');
 	unlike($stderr, qr/BOSH_LOG_LEVEL/, 'and nothing is said about logging');
 };
 

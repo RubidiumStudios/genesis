@@ -316,13 +316,16 @@ C<script> always exits with the child's code.  C<deploy> and C<run_errand>
 in L<Service::BOSH::Director> depend on it.
 
 Much of what bosh prints carries credentials, so C<execute> keeps it out of
-the trace. Stdout is traced verbatim only for the read-only listings in
-C<%Service::BOSH::TRACEABLE_OUTPUT> (C<deployments>, C<env>, C<errands>,
-C<instances>, C<locks>, C<releases>, C<stemcells>, C<tasks>, and C<vms>).
-C<events> is not among them, since an event's context can carry a task's
-error text. Stderr is never traced, since a failing command can quote
-credentials there, and every other command, along with any command whose
-subcommand cannot be identified, leaves only a byte count for each stream.
+the trace. Even a read-only listing holds text the director controls, such
+as a failed task's result in C<bosh tasks>, so no stdout is traced
+verbatim, and each stream leaves a byte count. For the listings in
+C<%Service::BOSH::SUMMARIZED_LISTINGS> (C<deployments>, C<env>, C<errands>,
+C<instances>, C<locks>, C<releases>, C<stemcells>, C<tasks>, and C<vms>),
+a successful run also traces what its parsed output measures; see
+C<_trace_listing_summary>. C<events> is not among them, since an event's
+context can carry a task's error text. Stderr is never traced, since a
+failing command can quote credentials there, and a command whose
+subcommand cannot be identified is not a listing.
 A shell command that pipes, chains, quotes, or substitutes anything counts
 as unidentified, and so does a command with an option C<_subcommand> does
 not know. An interactive transcript is never traced, whatever the
@@ -524,6 +527,37 @@ B<Examples:>
   # Returns: result of execute
 
 =head1 INTERNAL FUNCTIONS
+
+=head2 _trace_listing_summary
+
+    Service::BOSH::_trace_listing_summary($listing, $out);
+
+Traces what a successful listing's output measures, in place of the
+output. For bosh's JSON, that is each table's C<Content>, when it is a
+plain lowercase word, or C<a table> otherwise, and its count of rows. Any
+other output is measured in lines that are not blank. No value from a row
+is traced.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$listing>
+
+The listing's subcommand, such as C<tasks>.
+
+=item C<$out>
+
+What bosh printed on stdout.
+
+=back
+
+B<Returns:> nothing.
+
+B<Examples:>
+
+    Service::BOSH::_trace_listing_summary('vms', $out);
+    # traces: bosh vms listed vms with 12 rows
 
 =head2 _subcommand
 
