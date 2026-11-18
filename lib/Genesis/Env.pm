@@ -4557,6 +4557,7 @@ sub _deploy_to_bosh {
 	# when stdout is a pipe.
 	push @bosh_opts, '-n'               if  $opts{'dry-run'};
 	push @bosh_opts, "--no-redact"      if  !$opts{redact};
+	$state->{unredacted_output} = $opts{redact} ? 0 : 1;
 	push @bosh_opts, '--skip-drain'     if grep {$_ eq ''} @{$opts{'skip-drain'}};
 	push @bosh_opts, "--skip-drain=$_"  for grep {$_} @{$opts{'skip-drain'} || []};
 	push @bosh_opts, "--$_=$opts{$_}"   for grep { defined $opts{$_} } qw/canaries max-in-flight/;
@@ -4587,7 +4588,10 @@ sub _post_deploy {
 	my $manifest_store = $self->top->config->get('manifest_store','hybrid');
 	mkfile_or_fail(
 		$self->deployment_cache_path_lookup('deploy_log'),
-		decode_utf8($state->{results}[0]//'No output received')
+		$self->_deploy_log_content(
+			defined($state->{results}[0]) ? decode_utf8($state->{results}[0]) : undef,
+			$state->{unredacted_output}
+		)
 	) unless $manifest_store eq 'repository';
 
 	# Update legacy manifest store
@@ -7585,6 +7589,22 @@ sub rejoin_deployment {
 # }}}
 
 # _cleanup_and_bail - cleanup the deployment cache and bail with a message {{{
+# _deploy_log_content - what a deploy's saved output log keeps {{{
+#
+# A deploy run with --no-redact shows the operator the manifest diff with
+# its values, so its saved transcript keeps only bosh's task output, which
+# starts at the first "Task N" line and carries no values.
+sub _deploy_log_content {
+	my ($self, $out, $unredacted) = @_;
+	return 'No output received' unless defined($out);
+	return $out unless $unredacted;
+	my $plain = decolorize($out) =~ s/\r//gr;
+	my $note = "[The manifest diff bosh showed was left out of this log, since the ".
+		"deploy ran with --no-redact and the diff held credential values.]\n";
+	return $plain =~ /^(Task \d+[ \t]*\n.*)\z/ms ? "$note\n$1" : $note;
+}
+
+# }}}
 # _show_create_env_differences - list what a create-env redeploy changes {{{
 #
 # The manifest and vars file of a create-env director hold its own
