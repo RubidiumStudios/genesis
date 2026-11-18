@@ -1,6 +1,7 @@
 package Service::BOSH;
 
-use File::Temp qw/tempfile/;
+use File::Temp qw/tempfile tempdir/;
+use File::Path qw/rmtree/;
 
 use Genesis qw/
 	trace debug bail run slurp new_enough logger dump_var humanize_path dryrun
@@ -165,14 +166,21 @@ sub _subcommand {
 	return '';
 }
 
-# _verbose_log_level - true if bosh will write debug logging with its output
+# _logging_settings - what the operator set for bosh's own debug logging
 #
-# Above its default of none, bosh logs whole director requests and
-# responses, tokens included.
-sub _verbose_log_level {
+# bosh's debug logging writes whole director requests and responses,
+# tokens included, to its output or to BOSH_LOG_PATH, so Genesis turns it
+# off for every bosh command it runs.  Returns the names of the settings
+# that would have turned it on, so the operator can be told once.
+our $WARNED_LOGGING = 0;
+sub _logging_settings {
 	my ($env) = @_;
-	my $level = (exists($env->{BOSH_LOG_LEVEL}) ? $env->{BOSH_LOG_LEVEL} : $ENV{BOSH_LOG_LEVEL}) // '';
-	return ($level ne '' && lc($level) ne 'none') ? 1 : 0;
+	my $get = sub { exists($env->{$_[0]}) ? $env->{$_[0]} : $ENV{$_[0]} };
+	my @set;
+	my $level = $get->('BOSH_LOG_LEVEL') // '';
+	push @set, 'BOSH_LOG_LEVEL' if $level ne '' && lc($level) ne 'none';
+	push @set, 'BOSH_LOG_PATH' if ($get->('BOSH_LOG_PATH') // '') ne '';
+	return @set;
 }
 
 # }}}
@@ -195,27 +203,23 @@ sub execute {
 	my $noninteractive = envset('BOSH_NON_INTERACTIVE') ? ' -n' : '';
 	$opts->{env}{BOSH_NON_INTERACTIVE} = undef;
 
-	# A caller that says otherwise is honoured; see %TRACEABLE_OUTPUT.
-	my $verbose = _verbose_log_level($opts->{env});
-	my $private = ($TRACEABLE_OUTPUT{_subcommand(@cmd)} && !$verbose) ? 0 : 1;
-	$opts->{public_output} //= 1 unless $private;
-
-	# Verbose bosh logging is the operator's own debugging switch, and it
-	# writes director requests and responses, tokens included, into the
-	# output.  An interactive command then shows it on the terminal only:
-	# it runs without the `script` wrapper, so no transcript of it is kept
-	# or handed back to be saved, and a warning says so each time.
-	my $live_only = $opts->{interactive} && $verbose;
-	if ($live_only) {
+	# bosh's debug logging writes director requests and responses, tokens
+	# included, to its output or to a log file, where a CI log or a saved
+	# transcript would keep them.  It is off for every command Genesis runs.
+	if (my @set = _logging_settings($opts->{env})) {
 		print STDERR Genesis::Term::csprintf(
-			"#Y{[WARNING]} BOSH_LOG_LEVEL=%s makes bosh print director requests and ".
-			"responses, tokens included.  They are shown on this terminal only, and ".
-			"no transcript of this bosh command is kept.\n",
-			$opts->{env}{BOSH_LOG_LEVEL} // $ENV{BOSH_LOG_LEVEL}
-		);
+			"#Y{[WARNING]} Ignoring %s for the bosh commands Genesis runs: bosh's debug ".
+			"logging writes director requests and responses, tokens included.\n",
+			join(' and ', @set)
+		) unless $WARNED_LOGGING++;
 	}
+	$opts->{env}{BOSH_LOG_LEVEL} = 'none';
+	$opts->{env}{BOSH_LOG_PATH} = undef;
 
-	my ($fh, $file);
+	# A caller that says otherwise is honoured; see %TRACEABLE_OUTPUT.
+	$opts->{public_output} //= 1 if $TRACEABLE_OUTPUT{_subcommand(@cmd)};
+
+	my ($file, $file_dir);
 
 	my $bosh = ref($self)->command();
 	if ($cmd[0] =~ m/^bosh(\s|$)/) {
@@ -235,9 +239,15 @@ sub execute {
 		unshift(@cmd, $bosh);
 
 		# Capture output if interactive using script command
-		if ($opts->{interactive} && $allow_script_wrapper && !$live_only) {
+		if ($opts->{interactive} && $allow_script_wrapper) {
 			my $OS = "$^O";
-			($fh, $file) = tempfile('bosh-output-XXXXXXXX', TMPDIR => 1, UNLINK => 1);
+			# The typescript holds everything bosh printed, so it goes in a
+			# directory only this user can enter, readable by this user alone,
+			# and both are removed as soon as it has been read.
+			$file_dir = tempdir('bosh-output-XXXXXXXX', TMPDIR => 1);
+			chmod(0700, $file_dir);
+			(undef, $file) = tempfile('typescript-XXXXXXXX', DIR => $file_dir);
+			chmod(0600, $file);
 
 			if ($OS eq 'darwin') {
 				unshift(@cmd, "script", "-q", "$file");
@@ -253,10 +263,15 @@ sub execute {
 	}
 
 	dump_var("bosh command" => [map {Genesis::traced_arg($_)} @cmd]);
-	my @results = run($opts, @cmd);
+	my @results = eval { run($opts, @cmd) };
+	if (my $died = $@) {
+		rmtree($file_dir) if $file_dir;
+		die $died;
+	}
 
 	if ($opts->{interactive} && $file) {
 		$results[0] = slurp($file);
+		rmtree($file_dir);
 		if ($results[0] =~ s/\nScript done.*\[COMMAND_EXIT_CODE="(.*)"]$//m) {
 			$results[1] = $1;  # Linux stores command exit code in the script output
 		}

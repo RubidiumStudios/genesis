@@ -267,7 +267,10 @@ any C<-n> flag are unshifted onto the argument list.
 When C<$opts-E<gt>{interactive}> is true and the command is not C<int>,
 output is captured via the C<script> command (using C<script -q> on macOS
 and C<script -qe -c> on Linux) so that interactive terminal output is
-available in C<$results[0]> after the command completes.
+available in C<$results[0]> after the command completes.  The typescript
+is written to a directory only the current user can enter, the file is
+readable by that user alone, and both are removed as soon as C<execute>
+has read it, even when the command dies.
 
 The Linux wrapper must keep C<-e>.  util-linux C<script> exits 0 without it,
 whatever bosh did, so C<run()> never fires an C<onfailure> message, and the
@@ -287,17 +290,15 @@ credentials there, and every other command, along with any command whose
 subcommand cannot be identified, leaves only a byte count for each stream.
 A shell command that pipes, chains, quotes, or substitutes anything counts
 as unidentified, and so does a command with an option C<_subcommand> does
-not know. When C<BOSH_LOG_LEVEL> is set to anything other than C<none>, bosh
-logs whole director requests and responses, so both streams are redacted
-whatever the command. An interactive transcript follows the same rule. A
-caller can still mark a call's output public with C<public_output>, as
-C<run> allows.
+not know. An interactive transcript follows the same rule. A caller can
+still mark a call's output public with C<public_output>, as C<run> allows.
 
-That verbose logging is the operator's own debugging switch. An
-interactive command run with it shows bosh's output on the terminal only:
-C<execute> prints a warning to stderr each time, runs bosh without the
-C<script> wrapper, and returns no transcript, so nothing it printed can be
-saved to a deployment log.
+bosh's own debug logging writes whole director requests and responses,
+tokens included, to its output or to the file C<BOSH_LOG_PATH> names.
+C<execute> therefore runs every bosh command with C<BOSH_LOG_LEVEL=none>
+and with C<BOSH_LOG_PATH> unset. When the operator has set either one,
+C<execute> prints a warning to stderr the first time, naming the settings
+it ignored.
 
 C<HTTPS_PROXY> and C<https_proxy> are cleared from the subprocess
 environment unless C<GENESIS_HONOR_ENV> is set. C<BOSH_NON_INTERACTIVE>
@@ -467,17 +468,18 @@ B<Examples:>
   Service::BOSH::_subcommand('-e', 'vms', 'manifest');    # Returns: 'manifest'
   Service::BOSH::_subcommand('deploy "$1" | jq .x', $f);  # Returns: ''
 
-=head2 _verbose_log_level
+=head2 _logging_settings
 
-  my $verbose = Service::BOSH::_verbose_log_level(\%env);
+  my @set = Service::BOSH::_logging_settings(\%env);
 
-Returns true if bosh will write debug logging along with its output, which
-is when C<BOSH_LOG_LEVEL> is set to anything other than an empty string or
-C<none> (case-insensitive). A C<BOSH_LOG_LEVEL> key in C<\%env>, the
-environment C<execute> is about to set, takes precedence over the calling
-process's environment.
+Names the settings that would turn on bosh's debug logging, which are
+C<BOSH_LOG_LEVEL> when it is set to anything other than an empty string or
+C<none> (case-insensitive), and C<BOSH_LOG_PATH> when it is set at all. A
+key in C<\%env>, the environment C<execute> is about to set, takes
+precedence over the calling process's environment. C<execute> uses the
+list to warn the operator, once per process, that it turned them off.
 
-B<Returns:> C<1> or C<0>.
+B<Returns:> a list of zero, one, or two setting names.
 
 =head1 OVERRIDE POINTS
 

@@ -4,10 +4,10 @@
 # transcripts all print credentials, so stdout and stderr are traced
 # verbatim only for an allowlist of read-only listing commands, and every
 # other command, including any shell command that chains more onto a
-# listing, leaves a byte count.  With BOSH_LOG_LEVEL above its default,
-# bosh writes whole director responses, so both streams are redacted, and
-# an interactive command shows them on the terminal without capturing a
-# transcript.
+# listing, leaves a byte count.  bosh's own debug logging writes whole
+# director responses, so it is turned off for every command Genesis runs,
+# and an interactive command's typescript lives in a private directory
+# only until Genesis has read it.
 use strict;
 use warnings;
 
@@ -17,6 +17,7 @@ use helper;
 use TraceCapture;
 use Test::More;
 use File::Temp qw/tempdir/;
+use File::Basename qw/dirname/;
 
 use Genesis;
 use Service::BOSH;
@@ -35,13 +36,24 @@ echo "debug response: $FAKE_STDERR_VALUE" >&2
 exit 0
 SH
 
-# A fake script(1) that keeps the typescript out of the TAP stream.
+# A fake script(1) that keeps the typescript out of the TAP stream, and
+# records where the typescript went and who could read it.
 mkdir "$dir/bin";
 put_file("$dir/bin/script", 0755, <<'SH');
 #!/bin/bash
 while [[ "$1" == -* ]]; do shift; done
 file="$1"; shift
+echo "$file" > "$FAKE_SCRIPT_RECORD"
+stat -f '%Lp' "$file" "$(dirname "$file")" >> "$FAKE_SCRIPT_RECORD" 2>/dev/null ||
+	stat -c '%a' "$file" "$(dirname "$file")" >> "$FAKE_SCRIPT_RECORD"
 "$@" > "$file" 2>&1
+SH
+$ENV{FAKE_SCRIPT_RECORD} = "$dir/script-record";
+
+# A fake bosh that reports the logging settings it was run with.
+put_file("$dir/bosh-logging", 0755, <<'SH');
+#!/bin/bash
+echo "level=${BOSH_LOG_LEVEL-unset} path=${BOSH_LOG_PATH-unset}"
 SH
 
 $ENV{FAKE_STDOUT_VALUE} = $out_secret;
@@ -96,22 +108,37 @@ for my $cmd (
 }
 
 for my $level (qw/debug info warn error/) {
-	subtest "BOSH_LOG_LEVEL=$level redacts stdout and stderr" => sub {
+	subtest "BOSH_LOG_LEVEL=$level is turned off for the bosh Genesis runs" => sub {
 		local $ENV{BOSH_LOG_LEVEL} = $level;
-		my $log = capture_trace { director->execute('env', '--json') };
-		unlike($log, qr/\Q$out_secret\E/, 'stdout is absent even for an allowlisted command');
-		unlike($log, qr/\Q$err_secret\E/, 'stderr is absent');
-		like($log, qr/\[\d+b of redacted stderr omitted from debug\]/, 'a byte count is kept');
+		local $ENV{BOSH_LOG_PATH} = "$dir/bosh-debug.log";
+		local $Service::BOSH::WARNED_LOGGING = 0;
+		my $d = director;
+		Service::BOSH->set_command("$dir/bosh-logging");
+		my ($out, $stderr);
+		(undef, $stderr) = capture_trace { ($out) = $d->execute('env') };
+		like($out, qr/^level=none path=unset$/m, 'bosh runs with its logging off and no log path');
+		like($stderr, qr/BOSH_LOG_LEVEL.*BOSH_LOG_PATH|BOSH_LOG_PATH.*BOSH_LOG_LEVEL/s, 'and the operator is told why');
+		(undef, $stderr) = capture_trace { $d->execute('env') };
+		unlike($stderr, qr/BOSH_LOG_LEVEL/, 'once');
+		ok(!-e "$dir/bosh-debug.log", 'no bosh debug log is written');
 	};
 }
 
-subtest 'BOSH_LOG_LEVEL=none is the default' => sub {
+subtest 'BOSH_LOG_LEVEL=none needs no warning' => sub {
 	local $ENV{BOSH_LOG_LEVEL} = 'none';
-	my $log = capture_trace { director->execute('env', '--json') };
+	local $Service::BOSH::WARNED_LOGGING = 0;
+	my ($log, $stderr) = capture_trace { director->execute('env', '--json') };
 	like($log, qr/\Q$out_secret\E/, 'a listing is traced');
+	unlike($stderr, qr/BOSH_LOG_LEVEL/, 'and nothing is said about logging');
 };
 
-subtest 'an interactive transcript is redacted' => sub {
+sub script_record {
+	my @lines = split /\n/, (-f $ENV{FAKE_SCRIPT_RECORD} ? slurp($ENV{FAKE_SCRIPT_RECORD}) : '');
+	unlink $ENV{FAKE_SCRIPT_RECORD};
+	return @lines;
+}
+
+subtest 'an interactive transcript is private and short-lived' => sub {
 	local $ENV{PATH} = "$dir/bin:$ENV{PATH}";
 	local $^O = 'darwin';
 	my ($log, @results);
@@ -119,20 +146,29 @@ subtest 'an interactive transcript is redacted' => sub {
 	like($results[0], qr/\Q$out_secret\E/, 'the caller still gets the transcript');
 	unlike($log, qr/\Q$out_secret\E/, 'the transcript is absent from the trace');
 	like($log, qr/\d+b of redacted bosh output omitted from debug/, 'a byte count is kept');
+	my ($file, $file_mode, $dir_mode) = script_record();
+	is($file_mode, '600', 'the typescript is readable by its owner alone');
+	is($dir_mode, '700', 'in a directory only its owner can enter');
+	ok(defined($file) && !-e $file, 'and it is gone once read');
+	ok(defined($file) && !-e dirname($file), 'along with its directory');
 };
 
-subtest 'verbose bosh logging is shown live and never captured' => sub {
+subtest 'verbose bosh logging is off for an interactive run, whatever stdout is' => sub {
 	local $ENV{PATH} = "$dir/bin:$ENV{PATH}";
 	local $ENV{BOSH_LOG_LEVEL} = 'debug';
+	local $Service::BOSH::WARNED_LOGGING = 0;
 	local $^O = 'darwin';
-	# bosh writes to the real terminal, which capture_trace captures at
-	# file descriptors 1 and 2.
+	# capture_trace points file descriptors 1 and 2 at files, as a CI log
+	# would.
+	my $d = director;
+	Service::BOSH->set_command("$dir/bosh-logging");
 	my ($log, $stderr, $stdout, @results);
-	($log, $stderr, $stdout) = capture_trace { @results = director->execute({interactive => 1}, 'deploy', 'manifest.yml') };
-	like($stdout.$stderr, qr/\Q$out_secret\E/, 'the operator still sees what bosh prints');
-	like($stderr, qr/BOSH_LOG_LEVEL/, 'with a warning that verbose logging is on');
-	unlike($results[0] // '', qr/\Q$out_secret\E|\Q$err_secret\E/, 'no transcript holding it is returned');
-	unlike($log, qr/\Q$out_secret\E|\Q$err_secret\E/, 'and the trace holds neither stream');
+	($log, $stderr, $stdout) = capture_trace { @results = $d->execute({interactive => 1}, 'deploy', 'manifest.yml') };
+	like($results[0], qr/level=none path=unset/, 'bosh ran with its logging off, under script');
+	like($stderr, qr/BOSH_LOG_LEVEL/, 'with a warning that it was turned off');
+	unlike($log, qr/level=/, 'and the transcript is not traced');
+	my ($file) = script_record();
+	ok(defined($file) && !-e $file, 'the typescript is gone');
 };
 
 done_testing;
