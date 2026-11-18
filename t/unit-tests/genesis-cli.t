@@ -28,4 +28,13 @@ subtest 'bin/genesis' => sub {
 
 };
 
+subtest 'the deployments aliases' => sub {
+	require_ok './bin/genesis';
+
+	is($Genesis::Commands::GENESIS_COMMANDS{deployments}, 'deployments', 'deployments is a command');
+	for my $alias (qw/deps hist history/) {
+		is($Genesis::Commands::GENESIS_COMMANDS{$alias}, 'deployments', "$alias is an alias of deployments");
+	}
+};
+
 done_testing;

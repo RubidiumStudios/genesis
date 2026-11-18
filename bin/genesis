@@ -942,7 +942,7 @@ define_command("info", {
 define_command("deployments", {
 	summary => "List the history of deployments for an environment.",
 	usage => "<env> deployments [<options...>]",
-	aliasies => ['deps','hist', 'history'],
+	aliases => ['deps','hist','history'],
 	description =>
 		"List the history of deployments for the given environment.  This requires ".
 		"that the deployment history is stored in exodus, by way of setting ".
