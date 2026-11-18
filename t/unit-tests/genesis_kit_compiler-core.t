@@ -612,6 +612,51 @@ EOF
     eq_or_diff($out, '', "validate() produces no output when only known top-level keys are present");
 };
 
+subtest 'validate() - requires_iaas, requires_scale and required_connectivity are accepted' => sub {
+    my ($kitdir, $cc) = init_kit_repo();
+    put_file("$kitdir/kit.yml", <<'EOF');
+name:        test
+version:     1.2.3
+author:      jhunt
+code:        https://www.genesisproject.io
+description: A kit that declares what its environments must provide
+
+genesis_version_min: 3.1.0
+
+requires_iaas: true
+requires_scale: true
+required_connectivity:
+  blueprint: [vault]
+EOF
+    commit_kit_changes($kitdir);
+
+    my $out = combined_from {
+        ok($cc->validate('test', '1.2.3'),
+            "validate() returns 1 when the requirement keys are used");
+    };
+    eq_or_diff($out, '', "validate() produces no output for the requirement keys");
+};
+
+subtest 'validate() - required_connectivity needs genesis_version_min 2.7.11' => sub {
+    my ($kitdir, $cc) = init_kit_repo();
+    put_file("$kitdir/kit.yml", <<'EOF');
+name:        test
+version:     1.2.3
+author:      jhunt
+code:        https://www.genesisproject.io
+required_connectivity:
+  blueprint: [vault]
+EOF
+    commit_kit_changes($kitdir);
+
+    my $out = combined_from {
+        ok(!$cc->validate('test', '1.2.3'),
+            "validate() returns 0 when required_connectivity has no minimum version");
+    };
+    like($out, qr/invalid top-level key: required_connectivity/,
+        "validate() reports required_connectivity as invalid without the minimum version");
+};
+
 subtest 'validate() - unknown top-level keys are rejected' => sub {
     my ($kitdir, $cc) = init_kit_repo();
     put_file("$kitdir/kit.yml", <<'EOF');

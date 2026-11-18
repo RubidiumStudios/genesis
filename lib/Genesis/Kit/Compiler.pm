@@ -83,6 +83,11 @@ sub validate {
 
 			push @valid_keys, "use_create_env" if new_enough($min_version, "2.8.0");
 
+			# Connectivity requirements arrived in v2.7.11, and the iaas and
+			# scale requirements in v3.1.0.
+			push @valid_keys, "required_connectivity" if new_enough($min_version, "2.7.11");
+			push @valid_keys, "requires_iaas", "requires_scale" if new_enough($min_version, "3.1.0");
+
 			# Validate services field
 			if (exists $meta->{services}) {
 				if (ref($meta->{services}) ne 'ARRAY') {
