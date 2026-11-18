@@ -355,6 +355,24 @@ YAML
 	unlike(join(' ', @paths), qr/fake-label/, 'no label the file chose is repeated');
 };
 
+# A list item's name can be all digits, and spruce reads such a component
+# as an index, so it is shown as the index it was walked by, never as
+# spelled.
+subtest 'a zero-padded component is shown as its index' => sub {
+	put_file("$dir/padded.yml", 0644, <<'YAML');
+---
+instance_groups:
+- name: one
+- name: two
+- name: three
+  jobs: (( grab nothing ))
+YAML
+	my $err = " - \$.instance_groups.0002.jobs: could not resolve\n";
+	is_deeply([Genesis::spruce_error_paths($err, "$dir/padded.yml")],
+		["\$.instance_groups.2.jobs (in $dir/padded.yml, line 6)"],
+		'the component is shown as 2, not as 0002');
+};
+
 subtest 'a failed merge names the checked paths spruce could not resolve' => sub {
 	my $marker = fake_secret('merge-path');
 	mkdir "$dir/spruce-bin";

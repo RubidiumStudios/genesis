@@ -1666,7 +1666,9 @@ vendored file can hold a credential as a key or as an item's name. So the
 path is shown by the keys BOSH's manifest schema owns, in
 C<%Genesis::_MANIFEST_OWNED_KEYS>, by list indexes, and by C<E<lt>keyE<gt>>
 for any other key. A named list item is shown by its index in that file,
-and below a free-form key in C<%Genesis::_FREE_FORM_KEYS>, such as
+and an index is shown as the number it was walked by, so a component of
+digits such as C<0002>, which a file could choose as a name, is shown as
+C<2>. Below a free-form key in C<%Genesis::_FREE_FORM_KEYS>, such as
 C<properties>, no key is shown at all. Each path is followed by the last
 of C<@merged_files> that holds it, since spruce merges later files over
 earlier ones, and the line C<_yaml_line_of> finds for it, so the operator

@@ -843,7 +843,9 @@ sub spruce_error_paths {
 				$node = $node->{$part};
 			} elsif (ref($node) eq 'ARRAY') {
 				if ($part =~ /\A\d+\z/ && $part < @$node) {
-					push @shown, $part;
+					# Shown as the index it was walked by, since a name of
+					# digits, such as 0002, is a label the file chose.
+					push @shown, $part + 0;
 					$node = $node->[$part];
 					next;
 				}
