@@ -68,6 +68,9 @@ sub new {
 
 our $MIN_SECRET_LENGTH = 6;
 
+# Why _open_log_file last refused or failed to open a log; see there.
+our ($LOG_REFUSED, $LOG_OPEN_ERROR);
+
 # The registry belongs to the package, not the logger object, so that a
 # credential can be registered before any logger exists -- creating one
 # here would skip the terminal setup Genesis::logger does on first use --
@@ -205,6 +208,7 @@ sub configure_log {
 			(my $file = $log) =~ s/^~/$ENV{HOME}/;
 			my $fh = _open_log_file($file, 'truncate');
 			close $fh if $fh;
+			$self->_refuse_log($log) if $LOG_REFUSED;
 		}
 		# TODO: time based truncation
 	}
@@ -644,23 +648,51 @@ sub apply_on_reuse {
 #
 # A trace holds command lines, vault paths, and environment names even
 # with every credential scrubbed, so a log file is created with mode 0600
-# whatever the umask.  One that already exists with group or other bits
-# set is narrowed to 0600 the first time this process opens it.
-my %narrowed;
+# whatever the umask.  Every open checks the file it actually opened,
+# through its descriptor, so a file put at the same path since the last
+# write is checked too.  A file with group or other bits is narrowed to
+# 0600 through the descriptor.  If it is not a regular file, belongs to
+# another user, or keeps its group or other bits, nothing is written and
+# nothing is truncated: this returns undef and sets $LOG_REFUSED to why.
+# Any other failure to open sets $LOG_OPEN_ERROR instead.
 sub _open_log_file {
 	my ($file, $how) = @_;
-	my $flags = O_WRONLY | O_CREAT | ($how eq 'truncate' ? O_TRUNC : O_APPEND);
-	sysopen(my $fh, $file, $flags, 0600) or return;
-	unless ($narrowed{$file}++) {
-		my $mode = (stat($fh))[2];
-		chmod(0600, $file) if defined($mode) && ($mode & 077);
+	($LOG_REFUSED, $LOG_OPEN_ERROR) = (undef, undef);
+	sysopen(my $fh, $file, O_WRONLY | O_CREAT | O_APPEND, 0600)
+		or do {$LOG_OPEN_ERROR = "$!"; return};
+	my @st = stat($fh);
+	my $problem = !@st             ? "it cannot be checked: $!"
+	            : !-f _            ? "it is not a regular file"
+	            : !_owner_ok($st[4]) ? "it is owned by another user"
+	            : undef;
+	if (!$problem && ($st[2] & 077)) {
+		_fchmod($fh, 0600);
+		my @now = stat($fh);
+		$problem = sprintf("its mode %04o could not be narrowed to 0600", $st[2] & 07777)
+			if !@now || ($now[2] & 077);
 	}
+	if ($problem) {
+		close $fh;
+		$LOG_REFUSED = $problem;
+		return;
+	}
+	_truncate($fh) if $how eq 'truncate';
 	binmode($fh, ':encoding(UTF-8)') if $how eq 'append';
 	return $fh;
 }
 
+# _refuse_log - stop writing a log that cannot be secured, and say so once
+sub _refuse_log {
+	my ($self, $log) = @_;
+	print STDERR "Genesis will not write to log $log: $LOG_REFUSED\n"
+		unless $self->{refused_logs}{$log}++;
+	return;
+}
+
 # }}}
 sub _truncate { CORE::truncate($_[0], 0) }
+sub _fchmod   { CORE::chmod($_[1], $_[0]) }
+sub _owner_ok { $_[0] == $> }
 sub _rename   { CORE::rename($_[0], $_[1]) }
 
 # Child-process safety: per-index GENESIS_ACTIVE_LOG_<N>.
@@ -980,6 +1012,7 @@ sub flush_logs {
 	# Process realized logs from templates (no need to do anything here, they're already configured)
 
 	for my $log (keys %{$self->{logs}}) {
+		next if $self->{refused_logs}{$log}; # see _open_log_file
 		my $config = $self->{logs}{$log};
 		for my $line_number ($config->{next_entry}..$last_line) {
 			my (
@@ -1109,8 +1142,12 @@ sub flush_logs {
 				} else {
 					my $file = $log;
 					$file =~ s/^~/$ENV{HOME}/;
-					$fh = _open_log_file($file, 'append')
-						or die "Could not open $log for writing logs: $!\n";
+					$fh = _open_log_file($file, 'append');
+					unless ($fh) {
+						die "Could not open $log for writing logs: $LOG_OPEN_ERROR\n" unless $LOG_REFUSED;
+						$self->_refuse_log($log);
+						last;
+					}
 
 					# Write command line as first entry if this is a new file
 					if ($ENV{GENESIS_FULL_CALL} && !$self->{command_logged}{$log} && -z $file) {

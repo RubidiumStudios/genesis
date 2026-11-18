@@ -326,8 +326,9 @@ When configuring a file target, if the target directory does not exist it
 is created automatically and a notice is printed to STDERR.
 
 A log file is created with mode C<0600>, readable by its owner alone,
-whatever the umask, and an existing one that group or others can read is
-narrowed to C<0600> the first time it is written. See C<_open_log_file>.
+whatever the umask, and one that group or others can read is narrowed to
+C<0600> each time it is opened. A log that cannot be secured is never
+written. See C<_open_log_file>.
 
 If the target has not been configured before, it is initialized with these
 defaults:
@@ -1783,12 +1784,29 @@ Opens a log file for writing, creating it with mode C<0600> if it does not
 exist. With C<append>, writes go to the end of the file through a UTF-8
 layer; with C<truncate>, the file is emptied. A trace holds command lines,
 vault paths, and environment names even with every credential scrubbed,
-so an existing file with any group or other permission bits set is
-narrowed to C<0600> the first time the process opens it. Archives that a
-rotation has already renamed keep the mode they had.
+so every open checks the file it actually opened, through the
+descriptor, which also covers a file that rotation or anything else put
+at the same path since the last write. A file with group or other
+permission bits is narrowed to C<0600> through the descriptor. If the
+file is not a regular file, belongs to another user, or still has group
+or other bits afterwards, it is closed without being truncated or
+written. Archives that a rotation has already renamed keep the mode they
+had.
 
-B<Returns:> The filehandle, or nothing if the file could not be opened,
-with C<$!> set.
+B<Returns:> The filehandle, or nothing. When the file could not be
+secured, C<$Genesis::Log::LOG_REFUSED> says why; when it could not be
+opened at all, C<$Genesis::Log::LOG_OPEN_ERROR> holds the error.
+
+=head2 _refuse_log
+
+  $logger->_refuse_log($log);
+
+Stops this logger writing C<$log>, after C<_open_log_file> refused it,
+and tells the operator on STDERR why, once per log. The message carries
+the reason and the path, never log content. C<flush_logs> skips a refused
+log from then on.
+
+B<Returns:> Nothing.
 
 =head2 _log_item_level_map
 
@@ -1919,6 +1937,25 @@ B<Examples:>
 
   _truncate('/var/log/genesis.log');
   # returns true; the file is emptied but not removed
+
+=head2 _fchmod
+
+  _fchmod($fh, 0600);
+
+One-line indirection over C<chmod> on an open filehandle, so the mode of
+the file actually opened is changed, not whatever is at its path.
+
+B<Returns:> The number of files changed, as C<chmod> does.
+
+=head2 _owner_ok
+
+  my $ok = _owner_ok($uid);
+
+True if C<$uid> is this process's effective user. A log file owned by
+anyone else is never written, since its owner can read it whatever its
+mode.
+
+B<Returns:> A boolean.
 
 =head2 _rename
 

@@ -1,7 +1,6 @@
 #!/usr/bin/env perl
 # Log files are created readable by their owner alone.  A trace holds
 # command lines, vault paths, and environment names even with every
-# credential scrubbed, so whatever the umask, a log file is created with
 # mode 0600, and an existing one that others can read is narrowed to 0600
 # the first time it is written.
 use strict;
@@ -93,6 +92,61 @@ subtest 'an existing last-trace that others can read is narrowed to 0600' => sub
 		Genesis::Log->new->trace("a line for the log");
 	};
 	is(mode_of("$home/.genesis/last-trace"), '0600', 'last-trace is readable by its owner alone');
+};
+
+subtest 'a log replaced by a readable file is narrowed again' => sub {
+	my $file = "$dir/replaced.log";
+	with_logger {
+		my $logger = shift;
+		$logger->configure_log($file, level => 'TRACE');
+		$logger->trace("a first line");
+		is(mode_of($file), '0600', 'the first file is narrowed');
+		# Rotation, or anything else, puts a new file at the same path.
+		unlink $file;
+		put_file($file, 0644, "a new file\n");
+		chmod 0644, $file;
+		$logger->trace("a second line");
+	};
+	is(mode_of($file), '0600', 'the replacement is narrowed too');
+};
+
+subtest 'a log whose mode cannot be narrowed is never written' => sub {
+	my $file = "$dir/stuck.log";
+	my $marker = "marker-".join('', map {sprintf('%x', int(rand(16)))} 1..16);
+	put_file($file, 0644, "an older line\n");
+	chmod 0644, $file;
+	no warnings 'redefine';
+	local *Genesis::Log::_fchmod = sub { 1 };  # reports success, changes nothing
+	my $stderr = '';
+	with_logger {
+		my $logger = shift;
+		local *STDERR;
+		open STDERR, '>', \$stderr;
+		$logger->configure_log($file, level => 'TRACE', lifespan => 'current');
+		$logger->trace("a line with %s", $marker);
+		$logger->trace("another line with %s", $marker);
+	};
+	is(Genesis::slurp($file), "an older line\n", 'the file is neither emptied nor written');
+	like($stderr, qr/will not write to log \Q$file\E/, 'the operator is told why');
+	is(scalar(() = $stderr =~ /will not write to log/g), 1, 'once');
+	unlike($stderr, qr/\Q$marker\E/, 'without the log content');
+};
+
+subtest 'a log owned by another user is never written' => sub {
+	my $file = "$dir/foreign.log";
+	put_file($file, 0600, "an older line\n");
+	no warnings 'redefine';
+	local *Genesis::Log::_owner_ok = sub { 0 };
+	my $stderr = '';
+	with_logger {
+		my $logger = shift;
+		local *STDERR;
+		open STDERR, '>', \$stderr;
+		$logger->configure_log($file, level => 'TRACE');
+		$logger->trace("a line for the log");
+	};
+	is(Genesis::slurp($file), "an older line\n", 'the file is not written');
+	like($stderr, qr/owned by another user/, 'the operator is told why');
 };
 
 done_testing;
