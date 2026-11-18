@@ -3685,10 +3685,11 @@ sub last_deployed_manifest {
 							map {('--prune',$_)} $self->prunable_keys
 						);
 						if ($rc) {
-							push(@errors,
-								"Manifest is not pruned, and could not be retroactively pruned: ".
-								($err//$pruned_data)
-							);
+							# What spruce printed can quote the manifest.
+							push(@errors, sprintf(
+								"Manifest is not pruned, and could not be retroactively pruned: spruce exited %d (%s)",
+								$rc, Genesis::failure_summary($err, $pruned_data)
+							));
 							last;
 						}
 						if ($file_sha1 ne sha1_hex($data)) { # Check if original data has been tampered with
