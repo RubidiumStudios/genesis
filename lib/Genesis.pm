@@ -1071,8 +1071,10 @@ sub run {
 		$opts{stderr} = '&'.$opts{stderr};
 	}
 
-	my $err_file = $opts{stderr} = workdir().sprintf("/run-%09d.stderr",rand(1000000000))
-		if (defined($opts{stderr}) && $opts{stderr} eq '0' && !$opts{interactive});
+	# stderr => 0 keeps stderr apart from the output.  Both are read from
+	# pipes into memory, so what a failed command printed, credentials
+	# included, is never written to a file.
+	my $capture_err = (defined($opts{stderr}) && $opts{stderr} eq '0' && !$opts{interactive}) ? 1 : 0;
 
 	my $prog = shift @args;
 	if ($prog !~ /\$\{?[\@0-9]/ && scalar(@args) > 0) {
@@ -1118,14 +1120,20 @@ sub run {
 	my $shell = $opts{shell} || '/bin/bash';
 	if (!$opts{interactive} && $opts{stderr}) {
 		# Wrap in `{ ;}` so 2> applies before any inner `<` runs.
-		# Without this, an input-redirect failure leaks to real
-		# STDERR AND bash never creates err_file -- so slurp()
-		# returns undef instead of bash's error message.
+		# Without this, an input-redirect failure leaks to the real
+		# STDERR instead of the redirect target.  (stderr => 0 needs no
+		# wrap: the shell's own stderr is already the capture pipe.)
 		# Newline (not `;`) separates the last statement from `}`
 		# so a trailing `&` (backgrounded command) parses cleanly.
 		# `{ CMD & ; }` is a bash syntax error; `{ CMD &\n}` is not.
 		$prog = "{ $prog\n} 2>$opts{stderr}";
 		$traced_prog = "{ $traced_prog\n} 2>$opts{stderr}";
+	} elsif ($capture_err) {
+		# The same group, with no redirect, so the shell stays the parent of
+		# what it runs, as it did when stderr went to a file: a command that
+		# is killed is then reported as the shell reports it.
+		$prog = "{ $prog\n}";
+		$traced_prog = "{ $traced_prog\n}";
 	}
 	pushd($opts{dir}) if ($opts{dir});
 
@@ -1163,14 +1171,16 @@ sub run {
 
 	my @cmd = ($shell, "-c", $prog, @cmd_args);
 	my $start_time = gettimeofday();
-	my $out;
+	my ($out, $err);
 
 	# Handle STDIN redirection if requested
 	set_stdin($opts{stdin}) if ($opts{stdin});
 
 	eval {
-		if ($opts{stream}) {
-			$out = _run_streaming(\%opts, @cmd);
+		if ($opts{stream} || $capture_err) {
+			($out, $err) = _run_piped(\%opts, $capture_err, @cmd);
+			# A streamed output is returned as printed, as with exact.
+			$out =~ s/\s+$// unless $opts{exact} || $opts{stream};
 		} elsif ($opts{interactive}) {
 			system @cmd;
 		} else {
@@ -1199,7 +1209,6 @@ sub run {
 my $duration = gettimeofday() - $start_time;
 qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',undef,1));
 
-	my $err = slurp($err_file) if ($err_file && -f $err_file);
 	my $rc = $exit_status >> 8;
 	my $signal = $exit_status & 127;
 	if ($signal) {
@@ -1272,43 +1281,88 @@ sub shell_command {
 	return {redact => $real, display => shell_quote(map {traced_arg($_)} @cmd)};
 }
 
-# _run_streaming - run a command, handing what it prints to a callback as it comes {{{
+# _run_piped - run a command, reading what it prints from pipes into memory {{{
 #
-# For run()'s stream option.  The output is kept in memory and returned
-# whole, and each chunk goes to $opts->{stream} as it arrives, so a caller
-# can show it live without any copy reaching a file.  INT, TERM, and HUP
-# are passed on to the command rather than ending Genesis, so that the
-# command, such as bosh waiting on a director task, decides how to stop;
-# the first one is handed to $opts->{on_signal}, so the caller knows the
-# run was interrupted however the command reports it.
-sub _run_streaming {
-	my ($opts, @cmd) = @_;
-	my $pid = open(my $pipe, '-|', @cmd)
-		or bail("Could not open pipe to run #C{%s}", $cmd[0]);
+# For run()'s stream option and for stderr => 0.  The output is kept in
+# memory and returned whole, and with $opts->{stream}, each chunk also goes
+# to that callback as it arrives, so a caller can show it live without any
+# copy reaching a file.  With $capture_err, stderr is read from a second
+# pipe at the same time, so neither stream can stall the other, and it is
+# returned apart; without it, stderr is the caller's.  While a streamed
+# command runs, INT, TERM, and HUP are passed on to it rather than ending
+# Genesis, so that the command, such as bosh waiting on a director task,
+# decides how to stop; the first one is handed to $opts->{on_signal}, so
+# the caller knows the run was interrupted however the command reports it.
+# $? holds the command's status on return.
+sub _run_piped {
+	my ($opts, $capture_err, @cmd) = @_;
+	require IO::Select;
+	require POSIX;
+	pipe(my $out_r, my $out_w) or bail("Could not open pipe to run #C{%s}", $cmd[0]);
+	my ($err_r, $err_w);
+	if ($capture_err) {
+		pipe($err_r, $err_w) or bail("Could not open pipe to run #C{%s}", $cmd[0]);
+	}
+	my $pid = fork();
+	bail("Could not open pipe to run #C{%s}", $cmd[0]) unless defined($pid);
+	unless ($pid) {
+		# dup2 onto descriptors 1 and 2 themselves: a caller can have
+		# STDOUT or STDERR open on something that is not a descriptor, such
+		# as a scalar, and reopening the handle would leave the command's
+		# own descriptors where they were.
+		close($out_r);
+		close($err_r) if $err_r;
+		POSIX::dup2(fileno($out_w), 1) // POSIX::_exit(127);
+		POSIX::dup2(fileno($err_w), 2) // POSIX::_exit(127) if $err_w;
+		close($out_w) if fileno($out_w) > 2;
+		close($err_w) if $err_w && fileno($err_w) > 2;
+		{ no warnings 'exec'; exec {$cmd[0]} @cmd; }
+		print STDERR "Could not run $cmd[0]: $!\n";
+		POSIX::_exit(127);
+	}
+	close($out_w);
+	close($err_w) if $err_w;
+
 	my $signal;
 	my $pass_on = sub {
 		my ($name) = @_;
 		return sub { $signal //= $name; kill($name, $pid) };
 	};
-	local $SIG{INT}  = $pass_on->('INT');
-	local $SIG{TERM} = $pass_on->('TERM');
-	local $SIG{HUP}  = $pass_on->('HUP');
-	my $out = '';
-	while (1) {
-		my $read = sysread($pipe, my $chunk, 65536);
-		if (!defined($read)) {
+	local $SIG{INT}  = $opts->{stream} ? $pass_on->('INT')  : $SIG{INT};
+	local $SIG{TERM} = $opts->{stream} ? $pass_on->('TERM') : $SIG{TERM};
+	local $SIG{HUP}  = $opts->{stream} ? $pass_on->('HUP')  : $SIG{HUP};
+
+	my ($out, $err) = ('', $capture_err ? '' : undef);
+	my $select = IO::Select->new($out_r, $err_r // ());
+	while ($select->count) {
+		my @ready = $select->can_read;
+		unless (@ready) {
 			next if $!{EINTR};
 			last;
 		}
-		last unless $read;
-		$out .= $chunk;
-		$opts->{stream}->($chunk);
+		for my $fh (@ready) {
+			my $read = sysread($fh, my $chunk, 65536);
+			if (!defined($read)) {
+				next if $!{EINTR};
+				$select->remove($fh);
+			} elsif (!$read) {
+				$select->remove($fh);
+			} elsif ($fh == $out_r) {
+				$out .= $chunk;
+				$opts->{stream}->($chunk) if $opts->{stream};
+			} else {
+				$err .= $chunk;
+			}
+		}
 	}
-	close($pipe);
+	close($out_r);
+	close($err_r) if $err_r;
+	my $waited;
+	do { $waited = waitpid($pid, 0) } while ($waited == -1 && $!{EINTR});
 	my $status = $?;
 	$opts->{on_signal}->($signal) if defined($signal) && $opts->{on_signal};
 	$? = $status;
-	return $out;
+	return ($out, $err);
 }
 
 # }}}

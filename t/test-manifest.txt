@@ -210,6 +210,7 @@ unit-tests/genesis_ci_propagation-propagate_envs.t  # env propagation
 unit-tests/genesis_env-propagation_git_results.t   # propagation diff and last SHA read git's output
 unit-tests/genesis_env-bosh_logs_help.t           # logs --help reaches stdout off a terminal with bosh's exit status
 unit-tests/genesis_commands-quiet_getopt.t        # option parsers report refused values by kind, never quoting them
+unit-tests/genesis_run-stderr_in_memory.t         # a command's stderr is captured through a pipe, never a file
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi

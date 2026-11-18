@@ -1327,7 +1327,7 @@ terminal. Captured output is undefined.
 
 A code reference. The command's output is read from a pipe, and each chunk
 is handed to the callback as it arrives, so a caller can show it live; see
-C<_run_streaming>. The whole output is also returned, untrimmed, as with
+C<_run_piped>. The whole output is also returned, untrimmed, as with
 C<exact>. Nothing is written to disk, and the output stays out of the trace
 unless C<public_output> is set. Takes precedence over C<interactive>.
 
@@ -1368,7 +1368,10 @@ The shell to use. Defaults to C</bin/bash>.
 Controls stderr disposition. The default (C<'&1'>) merges stderr into stdout.
 Pass C<undef> to let stderr reach the terminal unredirected. Pass C<0> to
 capture stderr separately (returned as the third list element, or as the
-scalar return value on non-zero exit).
+scalar return value on non-zero exit). The captured stderr is read from a
+pipe into memory, alongside the output, by C<_run_piped>, so nothing the
+command printed is ever written to a file; it is an empty string when the
+command printed nothing to stderr.
 
 Any B<other> value is used verbatim as the shell redirect target, so the
 command is run as C<< 2>$value >>. That allows an explicit destination:
@@ -4237,29 +4240,36 @@ C<public_stderr> is appended as it was printed.
 
 B<Returns:> The message string.
 
-=head2 _run_streaming
+=head2 _run_piped
 
-    my $out = _run_streaming(\%opts, @cmd);
+    my ($out, $err) = _run_piped(\%opts, $capture_err, @cmd);
 
-Internal to C<run>, for its C<stream> option. Opens a pipe from C<@cmd>,
-reads it until the command closes it, appends each chunk to the output, and
-hands the chunk to C<< $opts{stream} >>. A read interrupted by a signal is
-retried. While it reads, C<INT>, C<TERM>, and C<HUP> are passed on to the
-command with C<kill>, and the first one is recorded and handed to
-C<< $opts{on_signal} >>, if given, once the command has ended. C<$?> holds
-the command's status on return, for C<run> to read.
+Internal to C<run>, for its C<stream> option and for C<< stderr => 0 >>.
+Starts C<@cmd> with its stdout on a pipe and, when C<$capture_err> is true,
+its stderr on a second pipe, and reads both into memory as they fill, so
+neither stream can stall the other and nothing is written to disk. Each
+chunk of output is also handed to C<< $opts{stream} >>, if given. Without
+C<$capture_err>, the command's stderr is the caller's, and C<$err> is
+C<undef>. A read interrupted by a signal is retried. While a streamed
+command runs, C<INT>, C<TERM>, and C<HUP> are passed on to it with C<kill>,
+and the first one is recorded and handed to C<< $opts{on_signal} >>, if
+given, once the command has ended. C<$?> holds the command's status on
+return, for C<run> to read.
 
 B<Errors:>
 
-Dies with C<Could not open pipe to run ...> when the command cannot be
-started.
+Dies with C<Could not open pipe to run ...> when a pipe cannot be made or
+the command cannot be started.
 
 B<Examples:>
 
     # As run() calls it for {stream => ...}
-    my $out = _run_streaming({stream => sub {print $_[0]}, on_signal => sub {$sig = $_[0]}},
+    my ($out) = _run_piped({stream => sub {print $_[0]}, on_signal => sub {$sig = $_[0]}}, 0,
         '/bin/bash', '-c', 'bosh deploy "$@"', 'bash', $manifest);
     my $rc = $? >> 8;
+
+    # As run() calls it for {stderr => 0}
+    my ($out, $err) = _run_piped({}, 1, '/bin/bash', '-c', 'safe get "$1"', 'bash', $path);
 
 =head1 AUTHOR
 
