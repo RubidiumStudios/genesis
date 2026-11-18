@@ -394,6 +394,11 @@ EOF
 
 		unless ($hook_module) {
 			$hook_file = $self->path("hooks/$hook");
+			# A kit may ship only hooks/<name>.sh, which has_hook accepts
+			unless (-f $hook_file) {
+				my $resolved = $self->has_hook($hook);
+				$hook_file = $resolved if $resolved && $resolved !~ /\.pm$/;
+			}
 			if (envset('GENESIS_HOOK_XTRACE')) {
 				my $traced = _xtrace_hook_file($hook_file);
 				if ($traced) {
