@@ -442,7 +442,16 @@ sub initialized {
 sub query {
 	my $self = shift;
 	my $opts = ref($_[0]) eq "HASH" ? shift : {};
-	my @cmd = _redact_set_values(@_);
+	my @cmd = _redact_set_values(_split_safe_set_string(@_));
+
+	# What safe prints can be any secret in vault, so a query is private
+	# unless its caller asks for output or stderr to be traced.  A command
+	# string _split_safe_set_string could not split is kept out whole.
+	if (!ref($cmd[0]) && $cmd[0] =~ /^\s*safe\s+(?:\S+\s+)*?set\s/ && $cmd[0] =~ /=/) {
+		$opts->{redact} = 1;
+	}
+	$opts->{redact_output} //= 1;
+	$opts->{redact_stderr} //= 1;
 	unshift(@cmd, 'safe') unless $cmd[0] eq 'safe' || $cmd[0] =~ /^safe /;
 	$opts->{env} ||= {};
 	$opts->{env}{DEBUG} = ""; # safe DEBUG is disruptive
@@ -471,6 +480,12 @@ sub _redact_set_values {
 			if (@words) {
 				$sub = $words[0];
 				$at_start = 0;
+				# A string handed to safe as one argument, such as
+				# 'set path key=value', keeps the words before its first
+				# pair in view and the rest out.
+				if ($sub eq 'set' && @words > 1 && $arg !~ /\A\s*safe\s/ && $arg =~ /\A(.*?\s)(?=\S*=)/s) {
+					$arg = {redact => $arg, prefix => $1};
+				}
 			}
 			next;
 		}
@@ -482,6 +497,26 @@ sub _redact_set_values {
 		$arg = Genesis::redacted_arg($arg) if $sub eq 'set' && $arg =~ /=/;
 	}
 	return @cmd;
+}
+
+# }}}
+# _split_safe_set_string - turn a 'safe set ...' command string into words {{{
+#
+# A first argument starting with `safe` is run as a shell command line, so
+# any pair inside it would reach the trace as part of the command.  When
+# that line runs `set` and holds nothing a shell would expand, it is split
+# into words the way the shell would split it, so each pair becomes an
+# argument _redact_set_values can wrap.  A line that could expand is left
+# as it is, and query() keeps it out of the trace whole.
+sub _split_safe_set_string {
+	my @cmd = @_;
+	return @cmd unless @cmd && defined($cmd[0]) && !ref($cmd[0]);
+	return @cmd unless $cmd[0] =~ /^\s*safe\s+(?:\S+\s+)*?set\s/;
+	return @cmd if $cmd[0] =~ /[\$`;&|<>(){}*?\[\]~!#\n]/;
+	require Text::ParseWords;
+	my @words = Text::ParseWords::shellwords($cmd[0]);
+	return @cmd unless @words;
+	return (@words, @cmd[1..$#cmd]);
 }
 
 # }}}
@@ -895,10 +930,12 @@ sub _write_batch {
 	my ($self, $path, $batch, $written) = @_;
 	return unless @$batch;
 
-	my ($out,$rc) = $self->query('set', $path, @$batch);
+	# What safe prints on a failed write can echo the pairs it was given,
+	# so the error reports the exit status and a safe diagnostic only.
+	my ($out,$rc,$err) = $self->query('set', $path, @$batch);
 	bail(
-		"Could not write #C{%s} to vault at #M{%s}:\n%s",
-		$path,$self->{url},$out
+		"Could not write #C{%s} to vault at #M{%s}: safe exited %d (%s)",
+		$path,$self->{url},$rc,Genesis::failure_summary($out,$err)
 	) unless $rc == 0;
 
 	# Confirm everything written so far, not just this batch: a batch that

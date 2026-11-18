@@ -908,7 +908,17 @@ The value of every C<key=value> argument to C<safe set>, including a
 C<set> chained after another command with C<-->, is passed to C<run>
 wrapped, so the trace shows C<key=E<lt>redacted:N bytesE<gt>>. Every value
 is treated this way, not just ones that look secret. See
-C<_redact_set_values>.
+C<_redact_set_values>. A command line given as a string that starts with
+C<safe> and runs C<set> is split into words first, so its pairs are
+wrapped too; one the shell would expand is run as it is, with C<run>'s
+C<redact> option keeping it out of the trace whole. See
+C<_split_safe_set_string>.
+
+What safe prints can be any secret in vault, so a query is private by
+default: C<redact_output> and C<redact_stderr> default to true, and the
+trace shows a byte count in place of either stream. A caller that needs a
+stream traced passes C<redact_output =E<gt> 0> or C<redact_stderr =E<gt> 0>.
+The streams are returned to the caller either way.
 
 B<Parameters:>
 
@@ -3120,6 +3130,24 @@ B<Examples:>
 
   $vault->_write_pairs('secret/myapp', {user => 'admin', port => 8080});
 
+=head2 _split_safe_set_string
+
+  my @cmd = Service::Vault::_split_safe_set_string(@cmd);
+
+Private function (not a method). If C<$cmd[0]> is a command line starting
+with C<safe> that runs C<set>, and it holds nothing a shell would expand
+(no C<$>, backquote, glob, redirection, or command separator), returns it
+split into words with C<Text::ParseWords::shellwords>, which is how the
+shell would split it, followed by the rest of C<@cmd>. Anything else is
+returned as it is.
+
+B<Returns:> The command list.
+
+B<Examples:>
+
+  Service::Vault::_split_safe_set_string("safe set secret/x 'note=a b'");
+  # Returns: ('safe', 'set', 'secret/x', 'note=a b')
+
 =head2 _redact_set_values
 
   my @cmd = Service::Vault::_redact_set_values(@cmd);
@@ -3129,8 +3157,11 @@ argument of a C<safe set> wrapped by C<Genesis::redacted_arg>, so C<run>
 hands safe the value but traces C<key=E<lt>redacted:N bytesE<gt>>. The
 subcommand is the first word of the command, after any leading C<safe>,
 and again after each C<-->, so C<('rm', $path, '-f', '--', 'set', $path,
-@pairs)> has its pairs wrapped. Arguments of any other subcommand, and an
-argument already wrapped, are returned as they are.
+@pairs)> has its pairs wrapped. A first argument such as
+C<'set secret/x key=value'>, which safe receives as one argument, is
+wrapped whole with the words before its first pair as the prefix.
+Arguments of any other subcommand, and an argument already wrapped, are
+returned as they are.
 
 B<Returns:> The command list.
 
@@ -3151,6 +3182,10 @@ into C<%written>, which accumulates across every batch of a single
 C<_write_pairs> call, and the confirmation checks that whole accumulation
 rather than just this batch -- a batch that merged into a stale base drops
 its predecessors, not itself, so checking only the newest would not notice.
+
+If safe fails, this bails with the path, safe's exit status, and
+C<Genesis::failure_summary> of what it printed, never the output itself,
+which can echo the pairs it was given.
 
 B<Parameters:>
 

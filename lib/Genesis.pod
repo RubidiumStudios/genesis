@@ -1383,9 +1383,10 @@ Redirect stdin for the command.
 
 =item C<redact>
 
-If true, keeps everything about the command out of the trace: every
-argument is shown as C<E<lt>redacted:N bytesE<gt>>, and C<redact_output>,
-C<redact_stderr>, and C<redact_env> default to true.
+If true, keeps everything about the command out of the trace: the command
+line is shown as its first word and a byte count, every argument is shown
+as C<E<lt>redacted:N bytesE<gt>>, and C<redact_output>, C<redact_stderr>,
+and C<redact_env> default to true.
 
 =item C<redact_output>
 
@@ -1553,6 +1554,24 @@ B<Examples:>
 
   Genesis::traced_arg({redact => 'password=abcdef', prefix => 'password='});
   # Returns: 'password=<redacted:6 bytes>'
+
+=head2 failure_summary
+
+  my $diagnostic = Genesis::failure_summary($out, $err);
+
+Describes a failed command without repeating anything it printed. A
+command's own diagnostics can quote whatever it was handed, credentials
+included, so this returns only the fixed descriptions in
+C<@Genesis::FAILURE_DIAGNOSTICS> whose patterns the output or stderr
+matched, such as C<permission denied> or C<could not parse its input>,
+joined with C<; >. If none matched it returns C<no recognized diagnostic>.
+
+B<Returns:> A string.
+
+B<Examples:>
+
+  Genesis::failure_summary('', "Error: permission denied on secret/x:password=abc");
+  # Returns: 'permission denied'
 
 =head2 traced_endpoint
 

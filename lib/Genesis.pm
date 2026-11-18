@@ -673,6 +673,32 @@ sub traced_endpoint {
 	return sprintf("<redacted:%d bytes>", length($value));
 }
 
+# What failure_summary() may report about a failed command.  A command's
+# own diagnostics can quote whatever it was handed, credentials included,
+# so a failure is described only by which of these it matched.
+our @FAILURE_DIAGNOSTICS = (
+	[qr/permission denied|forbidden|\b403\b/i                                 => 'permission denied'],
+	[qr/\b401\b|unauthori[sz]ed|missing client token|token (?:is )?(?:expired|invalid)|invalid token|bad token/i => 'authentication failed'],
+	[qr/\b404\b|not found|no such|does not exist/i                            => 'not found'],
+	[qr/connection refused|no route to host|timed? ?out|could not resolve|no such host|network is unreachable/i => 'connection failed'],
+	[qr/x509|certificate|tls/i                                               => 'TLS certificate problem'],
+	[qr/\bsealed\b/i                                                          => 'vault is sealed'],
+	[qr/yaml|json|parse|syntax|unmarshal|malformed|unexpected/i              => 'could not parse its input'],
+	[qr/\$\(\(|operator|spruce|unresolved|could not find|cannot find/i          => 'could not resolve a reference'],
+);
+
+# failure_summary - a failed command's diagnostic that is safe to show
+#
+# Returns the fixed descriptions from @FAILURE_DIAGNOSTICS that the
+# command's output or stderr matched, joined with "; ", or "no recognized
+# diagnostic".  Nothing the command printed is returned.
+sub failure_summary {
+	my $text = join("\n", grep {defined} @_);
+	my %seen;
+	my @found = grep {!$seen{$_}++} map {$text =~ $_->[0] ? $_->[1] : ()} @FAILURE_DIAGNOSTICS;
+	return @found ? join('; ', @found) : 'no recognized diagnostic';
+}
+
 # Response headers whose values curl() may write to a trace.  Any other
 # header, such as Set-Cookie or a Location carrying a signed URL, is shown
 # by name only.
@@ -762,6 +788,11 @@ sub run {
 	if ($prog !~ /\$\{?[\@0-9]/ && scalar(@args) > 0) {
 		$prog .= ' "${@}"'; # old style of passing in args as array, need to wrap for shell call
 	}
+	# Under `redact`, a command line given as a string can hold the very
+	# values the caller wants kept out, so only its first word is shown.
+	my $traced_prog = $opts{redact}
+		? sprintf("%s <redacted:%d bytes>", ($prog =~ /\A\s*(\S+)/)[0] // '', length($prog))
+		: $prog;
 
 	local %ENV = %ENV; # To get local scope for duration of this call
 
@@ -804,6 +835,7 @@ sub run {
 		# so a trailing `&` (backgrounded command) parses cleanly.
 		# `{ CMD & ; }` is a bash syntax error; `{ CMD &\n}` is not.
 		$prog = "{ $prog\n} 2>$opts{stderr}";
+		$traced_prog = "{ $traced_prog\n} 2>$opts{stderr}";
 	}
 	pushd($opts{dir}) if ($opts{dir});
 
@@ -832,7 +864,7 @@ sub run {
 	}
 
 	$tracemsg .= csprintf("#M{From directory:} #C{%s}\n", Cwd::getcwd);
-	$tracemsg .= csprintf("#M{Executing:} `#C{%s}`%s", $prog, ($opts{interactive} ? " #Y{(interactively)}" : ''));
+	$tracemsg .= csprintf("#M{Executing:} `#C{%s}`%s", $traced_prog, ($opts{interactive} ? " #Y{(interactively)}" : ''));
 	if (@trace_args) {
 		$tracemsg .= csprintf("\n#M{ - with arguments:}");
 		$tracemsg .= csprintf("\n#M{%4s:} '#C{%s}'", $_, $trace_args[$_]) for (1..$#trace_args);
