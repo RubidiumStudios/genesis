@@ -143,7 +143,7 @@ ui:
 #### `suppress_warnings.oversized_secrets`
 - **Type:** boolean
 - **Default:** `false`
-- **Environment Variable:** `GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING`
+- **Environment Variable:** `GENESIS_SUPPRESS_OVERSIZED_SECRETS_WARNING` (the older misspelling, `GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING`, still works)
 - **Description:** Suppress warnings about oversized secrets in Vault/Credhub.
 
 #### `suppress_warnings.bosh_target`

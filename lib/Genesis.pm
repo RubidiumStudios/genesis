@@ -2839,7 +2839,7 @@ sub global_config_schema {
 		suppress_warnings => {
 			type   => 'hash',
 			schema => {
-				oversized_secrets => { type => 'boolean', default => 0 , envvar => 'GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING'},
+				oversized_secrets => { type => 'boolean', default => 0 , envvar => [qw(GENESIS_SUPPRESS_OVERSIZED_SECRETS_WARNING GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING)]},
 				bosh_target =>       { type => 'boolean', default => 0 , envvar => 'GENESIS_SUPPRESS_BOSH_TARGET_WARNING'},
 				deprecations =>      { type => 'boolean', default => 0 , envvar => 'GENESIS_SUPPRESS_DEPRECATIONS'},
 			}

@@ -581,7 +581,9 @@ both the I<set> and I<loaded> stores.
 =item C<envvar>
 
 The name of an environment variable whose value, if set, overrides all other
-sources for this key by injecting into the I<env> store.
+sources for this key by injecting into the I<env> store.  An array reference
+of names may be given instead, in order of preference, so that a renamed
+variable can keep honoring its old spelling.
 
 =item C<values>
 
@@ -885,6 +887,22 @@ B<Examples:>
     $cfg->_coerce_to_schema_type('ci.enabled', 'false');   # JSON::PP::false
     $cfg->_coerce_to_schema_type('count', '42');           # 42, not '42'
     $cfg->_coerce_to_schema_type('name', 'false');         # 'false' (string type)
+
+=head2 _set_envvar
+
+    my $name = _set_envvar($envvar);
+
+Returns the first of a schema's C<envvar> names that is set in the
+environment, or undef when none is.  Plain function, not a method.
+
+The C<$envvar> value is either a single name or an array reference of names
+in order of preference, so a renamed variable can keep honoring its old
+spelling.
+
+B<Examples:>
+
+    _set_envvar('HOME');                  # 'HOME'
+    _set_envvar([qw(NEW_NAME OLD_NAME)]); # 'OLD_NAME' when only it is set
 
 =head2 _is_required
 

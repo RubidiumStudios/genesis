@@ -196,7 +196,7 @@ Configure which warnings to suppress. This is a hash with its own schema for spe
 
 | Option | Type | Default | Environment Variable |
 |--------|------|---------|---------------------|
-| `oversized_secrets` | boolean | `false` | `GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING` |
+| `oversized_secrets` | boolean | `false` | `GENESIS_SUPPRESS_OVERSIZED_SECRETS_WARNING` (the older misspelling `GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING` still works) |
 | `bosh_target` | boolean | `false` | `GENESIS_SUPPRESS_BOSH_TARGET_WARNING` |
 
 **Example:**
@@ -378,7 +378,7 @@ Many configuration options can be overridden using environment variables. When a
 - `GENESIS_SPEC_CACHE_DIR`
 - `GENESIS_DEPLOYMENT_LOGS_PATH`
 - `GENESIS_DEPLOYMENT_ROOTS`
-- `GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING`
+- `GENESIS_SUPPRESS_OVERSIZED_SECRETS_WARNING` (the older misspelling `GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING` still works)
 - `GENESIS_SUPPRESS_BOSH_TARGET_WARNING`
 
 ## Configuration Validation

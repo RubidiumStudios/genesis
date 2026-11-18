@@ -285,6 +285,15 @@ sub replace {
 
 
 # }}}
+# _set_envvar - the first of a schema's envvar names that is set, if any {{{
+# The envvar may be a name or an array reference of names in order of
+# preference, so a renamed variable can keep honoring its old spelling.
+sub _set_envvar {
+	my ($envvar) = @_;
+	return undef unless defined($envvar);
+	return (grep {exists($ENV{$_})} ref($envvar) eq 'ARRAY' ? @$envvar : ($envvar))[0];
+}
+# }}}
 # validate - validate the configuration against a schema {{{
 sub validate {
 	my ($self, $schema) = @_;
@@ -293,9 +302,9 @@ sub validate {
 
 	# Ensure all required keys are present, and all defaults are set
 	for my $key (keys %$schema) {
-		if (exists($schema->{$key}{envvar}) and exists($ENV{$schema->{$key}{envvar}})) {
+		if (defined(my $envvar = _set_envvar($schema->{$key}{envvar}))) {
 			# Environment variables take precedence over configuration values.
-			$self->_update_source('env', $key, $ENV{$schema->{$key}{envvar}});
+			$self->_update_source('env', $key, $ENV{$envvar});
 		} elsif (exists($schema->{$key}{default}) and ! struct_has($self->{loaded_values}, $key) and ! struct_has($self->{set_values}, $key)) {
 			# Set default only if not loaded or explicitly set
 			$self->_update_source('default', $key, $schema->{$key}{default});
@@ -533,9 +542,9 @@ sub _validate_key {
 			# Ensure all required keys are present, and all defaults are set
 			for my $subkey (keys %{$schema->{schema}}) {
 				my $subschema = $schema->{schema}{$subkey};
-				if (exists($subschema->{envvar}) && exists($ENV{$subschema->{envvar}})) {
+				if (defined(my $envvar = _set_envvar($subschema->{envvar}))) {
 					# Environment variables take precedence over configuration values.
-					$self->_update_source('env', "$key.$subkey", $ENV{$subschema->{envvar}});
+					$self->_update_source('env', "$key.$subkey", $ENV{$envvar});
 				} elsif (exists($subschema->{default}) and ! exists($value->{$subkey})) {
 					# When the parent key was explicitly {} in loaded_values, apply
 					# defaults at loaded priority so they aren't blocked by

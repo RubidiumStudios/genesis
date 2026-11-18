@@ -147,6 +147,52 @@ subtest 'environment variable overrides' => sub {
 	is($config->get('bar'), 'original', "value without env var is unchanged");
 };
 
+subtest 'an envvar may list several names' => sub {
+	my $config_file = "$tmp/test-envvar-list.yml";
+	put_file($config_file, "---\nfoo: original\n");
+	my $schema = {foo => {type => 'string', envvar => [qw(TEST_NEW_NAME TEST_OLD_NAME)]}};
+
+	my $config = Genesis::Config->new($config_file);
+	$config->validate($schema);
+	is($config->get('foo'), 'original', "file value is used when no name is set");
+
+	{
+		local $ENV{TEST_OLD_NAME} = 'from_old';
+		my $config = Genesis::Config->new($config_file);
+		$config->validate($schema);
+		is($config->get('foo'), 'from_old', "the old name is still honored");
+		is($config->get_source('foo'), 'env', "and counts as an env source");
+	}
+	{
+		local $ENV{TEST_NEW_NAME} = 'from_new';
+		local $ENV{TEST_OLD_NAME} = 'from_old';
+		my $config = Genesis::Config->new($config_file);
+		$config->validate($schema);
+		is($config->get('foo'), 'from_new', "the first name listed wins when both are set");
+	}
+};
+
+subtest 'the oversized secrets warning can be suppressed by either spelling' => sub {
+	require Genesis;
+	my $config_file = "$tmp/test-suppress.yml";
+	put_file($config_file, "---\nsuppress_warnings:\n  oversized_secrets: false\n");
+	my $value = sub {
+		my $config = Genesis::Config->new($config_file);
+		$config->validate(Genesis::global_config_schema());
+		return $config->get('suppress_warnings.oversized_secrets');
+	};
+
+	ok(!$value->(), "not suppressed when neither variable is set");
+	{
+		local $ENV{GENESIS_SUPPRESS_OVERSIZED_SECRETS_WARNING} = 1;
+		ok($value->(), "the correctly spelled variable suppresses it");
+	}
+	{
+		local $ENV{GENESIS_SUPRESS_OVERSIZED_SECRETS_WARNING} = 1;
+		ok($value->(), "the old misspelled variable still suppresses it");
+	}
+};
+
 subtest 'schema defaults' => sub {
 	my $config_file = "$tmp/test4.yml";
 	put_file($config_file, "---\nfoo: bar\n");
