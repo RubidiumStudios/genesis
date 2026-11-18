@@ -149,9 +149,9 @@ subtest 'bosh --connect exports go to stdout and never to a log' => sub {
 		Genesis::Commands::Bosh::_print_connect_exports('fake-alias',
 			BOSH_CLIENT_SECRET => $secret, BOSH_CLIENT => 'admin', BOSH_PASSWORD => $short);
 	};
-	like($stdout, qr/^export BOSH_CLIENT_SECRET="\Q$secret\E"$/m, 'the operator gets the export');
-	like($stdout, qr/^export BOSH_PASSWORD="\Q$short\E"$/m, 'short values included');
-	unlike($log, qr/\Q$secret\E|BOSH_PASSWORD="\Q$short\E"/, 'the log never sees a value');
+	like($stdout, qr/^export BOSH_CLIENT_SECRET='\Q$secret\E'$/m, 'the operator gets the export');
+	like($stdout, qr/^export BOSH_PASSWORD='\Q$short\E'$/m, 'short values included');
+	unlike($log, qr/\Q$secret\E|BOSH_PASSWORD='\Q$short\E'/, 'the log never sees a value');
 	like($log, qr/BOSH_CLIENT_SECRET/, 'the log names what was exported');
 };
 

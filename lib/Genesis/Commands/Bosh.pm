@@ -72,12 +72,13 @@ sub bosh {
 #
 # The exports carry the director's credentials, so they are printed
 # straight to stdout, where the caller's `eval` reads them, and never pass
-# through the logger.  The log names the variables only.
+# through the logger.  The log names the variables only.  Each value is
+# single-quoted with shell_quote, so the caller's shell takes it as one
+# literal word and never expands a dollar sign or runs a backtick in it.
 sub _print_connect_exports {
 	my ($alias, %envs) = @_;
 	for (sort keys %envs) {
-		(my $escaped_value = $envs{$_}//"") =~ s/"/"\\""/g;
-		print STDOUT qq(export $_="$escaped_value"\n);
+		print STDOUT "export $_=".Genesis::shell_quote($envs{$_} // '')."\n";
 	}
 	info "Exported environmental variables for BOSH director %s: %s", $alias, join(', ', sort keys %envs);
 	return;

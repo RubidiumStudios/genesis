@@ -40,6 +40,7 @@ unit-tests/service_bosh-director-proxy_timeout.t  # status() reports a director 
 unit-tests/service_bosh-stemcell.t
 unit-tests/service_bosh-interactive_argv.t   # interactive bosh gets wrapped arguments as their values
 unit-tests/service_bosh-trace_redaction.t   # bosh output that can carry secrets stays out of the trace
+unit-tests/genesis_commands_bosh-connect_exports.t  # bosh --connect exports round-trip in the caller shell
 unit-tests/genesis_command_line-privacy.t    # operator arguments stay out of logs
 unit-tests/genesis_commands-private_output.t  # requested credentials skip log files
 unit-tests/genesis_env-create_env_diff_privacy.t # create-env diffs list paths only
