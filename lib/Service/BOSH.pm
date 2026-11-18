@@ -243,6 +243,10 @@ sub execute {
 
 	my $opts = (ref($cmd[0]) eq 'HASH') ? shift @cmd : {};
 
+	# passfail is answered here, from the exit code; given to run(), it
+	# would replace the exit code with a boolean that execute() never reads.
+	my $passfail = delete($opts->{passfail});
+
 	$env{BOSH_DEPLOYMENT} = delete($opts->{deployment}) || $self->{deployment}; # TODO: do we need this still?
 	$opts->{stderr} = 0 unless (defined($opts->{stderr}) || $opts->{interactive});
 
@@ -307,7 +311,7 @@ sub execute {
 			$results[1] // 'unknown',
 			$status->{interrupted} ? '; interrupted' : '');
 	}
-	return !$results[1] if $opts->{passfail};
+	return !$results[1] if $passfail;
 	return wantarray ? @results : $results[1];
 }
 

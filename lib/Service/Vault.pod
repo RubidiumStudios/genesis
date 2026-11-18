@@ -967,8 +967,8 @@ B<Examples:>
   die "Failed" unless $rc == 0;
 
   # With options
-  my ($out, $rc) = $vault->query({passfail => 1}, 'exists', 'secret/myapp');
-  # Returns: ('', 0, '') when the path exists
+  my $exists = $vault->query({passfail => 1}, 'exists', 'secret/myapp');
+  # Returns: 1 when the path exists, '' when it does not
 
 =head2 get
 

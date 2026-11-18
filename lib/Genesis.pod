@@ -1342,7 +1342,9 @@ when no signal came in.
 
 =item C<passfail>
 
-If true, returns C<1> (success) or C<0> (failure) rather than output.
+If true, returns C<1> (success) or C<''> (failure) rather than output,
+in place of the exit code too, so a caller that needs the output or the
+exit code must not set it.
 
 =item C<onfailure>
 

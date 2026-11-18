@@ -1559,7 +1559,7 @@ sub propagation_diff {
 
 	my $env_branch = $self->name;
 	my ($diff_out, $rc) = run(
-		{ passfail => 1 },
+		{ stderr => 0 },
 		'git', 'diff', '--name-only', "$env_branch..$target_sha", '--', @pathspec
 	);
 	return () if $rc || !$diff_out;
@@ -1572,7 +1572,7 @@ sub propagation_diff {
 sub last_propagated_sha {
 	my ($self) = @_;
 	my ($log, $rc) = run(
-		{ passfail => 1 },
+		{ stderr => 0 },
 		'git', 'log', '--format=%s', $self->name, '--', '.'
 	);
 	return undef if $rc || !$log;

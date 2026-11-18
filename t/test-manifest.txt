@@ -67,6 +67,7 @@ unit-tests/genesis_run-private_streams.t  # a child's streams reach no trace or 
 unit-tests/genesis_command_failures-privacy.t  # errors from failed safe, credhub, and secret commands quote nothing they printed
 unit-tests/genesis-spruce_diff_exit_codes.t   # spruce diff's exit code survives script(1); no diff on disk
 unit-tests/service_bosh-interactive_exit_codes.t  # interactive bosh and pty_command keep the exit code under script(1)
+unit-tests/service_bosh-execute_passfail.t        # execute passfail reports a failing bosh command as a failure
 unit-tests/genesis-tcp_listening_alarm.t      # tcp_listening leaves no alarm armed
 unit-tests/service_vault-core.t          # Service::Vault base class + None with MockWrapper
 unit-tests/service_vault-strongbox_intent.t  # tri-state strongbox read from ~/.saferc
@@ -206,6 +207,7 @@ unit-tests/genesis_ci_pipeline_descriptor-task-library.t  # shared task-library 
 unit-tests/genesis_ci_propagation-core.t            # propagation engine core
 unit-tests/genesis_ci_propagation-pr_idempotency.t  # PR idempotency
 unit-tests/genesis_ci_propagation-propagate_envs.t  # env propagation
+unit-tests/genesis_env-propagation_git_results.t   # propagation diff and last SHA read git's output
 
 # Genesis::Env extension tests
 unit-tests/genesis_env-cpi_config.t                       # cpi_config()/director-cpi

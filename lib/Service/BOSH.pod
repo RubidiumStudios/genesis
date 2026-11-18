@@ -358,6 +358,9 @@ Optional hash reference of execution options. Recognised keys:
 =item passfail
 
 If true, returns a boolean: C<1> on success (exit code 0), C<''> on failure.
+C<execute()> reads the answer from bosh's exit code itself and does not pass
+the option on to C<run()>, so an interactive command still records its exit
+code in L</last_interactive_status>.
 
 =item interactive
 
@@ -409,7 +412,7 @@ B<Examples:>
 
   # Check success/failure with passfail
   my $ok = $bosh->execute({passfail => 1}, 'deploy', $manifest);
-  # Returns: 1 on success
+  # Returns: 1 on success, '' when bosh exits non-zero
 
   # Interactive command with output capture
   my ($out, $rc) = $bosh->execute({interactive => 1}, 'deploy', $manifest);
@@ -642,7 +645,7 @@ that callers are aware of the current behaviour.
 
 =item execute-scalar-return (low)
 
-C<execute()> lines 176-177: in scalar context without the C<passfail>
+C<execute()>: in scalar context without the C<passfail>
 option, returns C<$results[1]>, which is the raw process exit code. A
 successful command returns C<0>, which is falsy in Perl. This is the
 inverse of the boolean C<passfail> return. Callers using scalar context
