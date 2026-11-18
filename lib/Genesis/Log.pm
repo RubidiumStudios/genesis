@@ -151,10 +151,19 @@ sub register_secret {
 # in it, so quotes, sub-delims, and an unescaped @ in a password are all
 # caught.  Text that only looks like an authority loses a little more
 # than it needs to, which is the safe way to be wrong.
+#
+# A URL's query and fragment are replaced as well, since a signed URL
+# carries its credential in the query and a token can ride in a fragment.
+# Each runs to the first whitespace or the first character a URL cannot
+# hold unescaped, such as a quote, an angle bracket, or the brace that
+# closes Genesis's colour markup.
+our $URL_CHARS = qr{[^\s"<>\\^`{|}]};
 sub scrub {
 	my ($self, $text) = @_;
 	return $text unless defined($text);
 	$text =~ s{\b([A-Za-z][A-Za-z0-9+.-]*://)[^\s/?\#]*\@}{$1<redacted:url-userinfo>\@}g;
+	$text =~ s{(\b[A-Za-z][A-Za-z0-9+.-]*://(?:(?!\#)$URL_CHARS)*)\#$URL_CHARS+}{$1#<redacted:url-fragment>}g;
+	$text =~ s{(\b[A-Za-z][A-Za-z0-9+.-]*://(?:(?![?\#])$URL_CHARS)*)\?(?:(?!\#)$URL_CHARS)+}{$1?<redacted:url-query>}g;
 	return $text unless %SECRETS;
 	$SECRET_PATTERN //= do {
 		my $alternatives = join('|',

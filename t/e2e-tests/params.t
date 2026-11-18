@@ -351,7 +351,7 @@ expect_ok "URL parsing - full", $cmd, [
   }
 ];
 expect_ok "URL parsing - bad url check 1 - no protocol", $cmd, [
-  "https://<redacted:url-userinfo>\@example.com:1234/files/1/description?lang=en&fmt=json#the-good-stuff is not a valid URL[\r\n]{1,2}>", sub {
+  "https://<redacted:url-userinfo>\@example.com:1234/files/1/description\\?<redacted:url-query>#<redacted:url-fragment> is not a valid URL[\r\n]{1,2}>", sub {
     fail "Valid url not correctly identified";
   }], [
   "URL #6[\r\n]{1,2}>", sub {
@@ -375,7 +375,7 @@ expect_ok "URL parsing - bad url check 3 - invalid characters", $cmd, [
   }
 ];
 expect_ok "URL parsing - finish up", $cmd, [
-  "https://my.dev.local:5555/endpoint\\?badquery='this is not[\r\n ]* allowed' is not a valid URL[\r\n]{1,2}>", sub {
+  "https://my.dev.local:5555/endpoint\\?<redacted:url-query> is not[\r\n ]* allowed' is not a valid URL[\r\n]{1,2}>", sub {
     $_[0]->send("https://github.com/starkandwayne/genesis/blob/master/t/param-asking.t#L345\n");
   }
 ];

@@ -84,9 +84,38 @@ subtest 'the scrubber parses the whole authority of a URL' => sub {
 		like($log, qr{https://<redacted:url-userinfo>\@vault\.example:8200/v1/sys/health'}, '... and the host and path are still shown');
 	}
 	my ($log) = capture_trace {
+		debug("mail ops\@example.com about https://vault.example:8200/ui");
+	};
+	like($log, qr{ops\@example\.com about https://vault\.example:8200/ui}, 'text with no userinfo is left alone');
+};
+
+subtest 'the scrubber drops the query and fragment of a URL' => sub {
+	# A signed URL carries its credential in the query, and a token can
+	# ride in a fragment, so neither reaches a log.  The host and path stay.
+	my $sig = fake_secret('query');
+	my $frag = fake_secret('fragment');
+	my ($log, $stderr) = capture_trace {
+		debug("proxy is https://proxy.example:3128/v1/sys?X-Signature=$sig&ok=1 now");
+		trace("open #C{https://vault.example/ui/#token=$frag} to look");
+		warning("fetch from s3://bucket/key?X-Amz-Signature=$sig#$frag");
 		debug("mail ops\@example.com about https://vault.example:8200/ui?from=a\@b");
 	};
-	like($log, qr{ops\@example\.com about https://vault\.example:8200/ui\?from=a\@b}, 'text with no userinfo is left alone');
+	unlike($log.$stderr, qr/\Q$sig\E|\Q$frag\E/, 'neither the query nor the fragment is in any log');
+	like($log, qr{https://proxy\.example:3128/v1/sys\?<redacted:url-query> now}, 'the host and path stay, and the query is marked');
+	like($log, qr{https://vault\.example/ui/\#<redacted:url-fragment> to look}, 'a fragment is marked, and the markup around it survives');
+	like($log, qr{ops\@example\.com about https://vault\.example:8200/ui\?<redacted:url-query>}, 'an at sign in a query is no userinfo');
+};
+
+subtest 'a rejected vault target is named by its endpoint' => sub {
+	my $token = fake_secret('signed');
+	my $error;
+	my ($log, $stderr) = capture_trace {
+		eval { Service::Vault::Remote->attach(url => "https://vault.example:8200/v1?token=$token") };
+		$error = $@;
+	};
+	like($error, qr{https://vault\.example:8200}, 'the error names the vault');
+	unlike($error.$log.$stderr, qr/\Q$token\E/, 'and not the query that carries the credential');
+	unlike($error, qr/<redacted:url-query>/, 'which it never had to scrub');
 };
 
 subtest 'a failed vault read names the vault by its endpoint' => sub {

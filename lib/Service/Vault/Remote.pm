@@ -167,8 +167,13 @@ sub attach {
 
 	bail "No vault target specified"
 		unless $url;
-	bail "Expecting vault target '$url' to be a url"
-		unless Service::Vault::_target_is_url($url);
+	# A target that fails the check can carry a credential, as userinfo, a
+	# signed query, or a fragment, so it is named by its endpoint alone.
+	bail(
+		"Expecting vault target #C{%s} to be a url of the form ".
+		"#C{http[s]://<host>[:<port>]}, with no userinfo, path, query, or fragment",
+		Genesis::traced_endpoint($url)
+	) unless Service::Vault::_target_is_url($url);
 
 	# Strongbox is deliberately absent from the filter.  It selects a
 	# seal-state sidecar, not a vault, so it must never be the reason a
