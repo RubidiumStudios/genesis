@@ -203,7 +203,8 @@ sub execute {
 				# argument list must be flattened with shell_quote: naive
 				# joining lets values containing shell metacharacters split
 				# into separate arguments or execute as injected commands.
-				@cmd = ('script', '-qe', $file, '-c', shell_quote(@cmd));
+				# shell_command carries wrapped arguments through as values.
+				@cmd = ('script', '-qe', $file, '-c', Genesis::shell_command(@cmd));
 			}
 		}
 	}

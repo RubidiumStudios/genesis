@@ -667,11 +667,11 @@ sub _traced_header {
 	return sprintf("%s: <redacted:%d bytes>", $name, length($value));
 }
 
-# _is_redacted_arg - true for a {redact => $value [, prefix => $p]} argument
+# _is_redacted_arg - true for a {redact => $value [, prefix|display => $p]} argument
 sub _is_redacted_arg {
 	my ($arg) = @_;
 	return 0 unless ref($arg) eq 'HASH' && exists($arg->{redact});
-	return (grep {$_ ne 'redact' && $_ ne 'prefix'} keys %$arg) ? 0 : 1;
+	return (grep {$_ ne 'redact' && $_ ne 'prefix' && $_ ne 'display'} keys %$arg) ? 0 : 1;
 }
 
 # redacted_arg - wrap a command argument so run() traces it redacted
@@ -689,6 +689,7 @@ sub redacted_arg {
 sub traced_arg {
 	my ($arg) = @_;
 	return $arg unless _is_redacted_arg($arg);
+	return $arg->{display} if defined($arg->{display});
 	my $value = $arg->{redact} // '';
 	my $prefix = $arg->{prefix} // '';
 	$prefix = '' unless substr($value, 0, length($prefix)) eq $prefix;
@@ -902,6 +903,20 @@ sub shell_quote {
 	return join(' ', map {(my $s = $_) =~ s/'/'\\''/g; "'$s'"} @_);
 }
 
+# shell_command - shell_quote an argument list that may hold wrapped arguments
+#
+# A command flattened into one shell string, as `script -c` needs, must
+# carry each wrapped argument's value, and its trace must not.  With no
+# wrapped arguments this is shell_quote; with any, it returns a wrapped
+# argument whose value is the real command and whose display form quotes
+# each wrapped argument's trace form instead.
+sub shell_command {
+	my @cmd = @_;
+	my $real = shell_quote(map {_is_redacted_arg($_) ? ($_->{redact} // '') : $_} @cmd);
+	return $real unless grep {_is_redacted_arg($_)} @cmd;
+	return {redact => $real, display => shell_quote(map {traced_arg($_)} @cmd)};
+}
+
 # Wrap the command in an OS-specific script call to fake being in a tty terminal.
 sub fake_tty {
 	my ($file, @cmd) = @_;
@@ -913,7 +928,7 @@ sub fake_tty {
 		# list must be flattened with shell_quote: naive joining lets values
 		# containing shell metacharacters split into separate arguments or
 		# execute as injected commands.
-		@cmd = ('script', '-qef', $file, '-c', shell_quote(@cmd));
+		@cmd = ('script', '-qef', $file, '-c', shell_command(@cmd));
 	}
 	return @cmd
 }

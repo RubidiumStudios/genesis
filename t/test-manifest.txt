@@ -38,6 +38,7 @@ unit-tests/service_bosh-director.t
 unit-tests/service_bosh-director-network_lock.t  # network claims lock: check-and-set on kv v2, read-back on kv v1
 unit-tests/service_bosh-director-proxy_timeout.t  # status() reports a director that hangs behind BOSH_ALL_PROXY as unreachable
 unit-tests/service_bosh-stemcell.t
+unit-tests/service_bosh-interactive_argv.t   # interactive bosh gets wrapped arguments as their values
 unit-tests/service_bosh-trace_redaction.t   # bosh output that can carry secrets stays out of the trace
 unit-tests/service_vault-trace_redaction.t  # vault and CredHub output that is a credential stays out of the trace
 unit-tests/genesis-run_exit_status_under_trace.t  # run() keeps the exit code when tracing is on
