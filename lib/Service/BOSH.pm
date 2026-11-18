@@ -111,6 +111,42 @@ sub environment_variables {
 }
 
 #}}}
+# Trace redaction for bosh output {{{
+#
+# Much of what bosh prints carries credentials: `bosh manifest`, `bosh int`,
+# configs, variables, and the diff in a deploy transcript.  Stdout is
+# written to the trace verbatim only for these read-only listings; every
+# other command leaves a byte count.  A command that cannot be identified
+# is redacted, so a misreading errs on the safe side.
+our %TRACEABLE_OUTPUT = map {$_ => 1} qw(
+	deployments env errands events instances locks releases stemcells tasks vms
+);
+
+# _subcommand - the bosh subcommand a command list runs, or '' if unknown
+sub _subcommand {
+	my (@cmd) = @_;
+	my @words = (@cmd && defined($cmd[0]) && !ref($cmd[0]) && $cmd[0] =~ /\s/)
+		? split(/\s+/, $cmd[0] =~ s/^\s+//r)
+		: @cmd;
+	shift @words if @words && defined($words[0]) && !ref($words[0]) && $words[0] =~ m{(?:^|/)bosh$};
+	for (@words) {
+		next if !defined($_) || ref($_) || /^-/;
+		return $_;
+	}
+	return '';
+}
+
+# _verbose_log_level - true if bosh will write debug logging with its output
+#
+# Above its default of none, bosh logs whole director requests and
+# responses, tokens included.
+sub _verbose_log_level {
+	my ($env) = @_;
+	my $level = (exists($env->{BOSH_LOG_LEVEL}) ? $env->{BOSH_LOG_LEVEL} : $ENV{BOSH_LOG_LEVEL}) // '';
+	return ($level ne '' && lc($level) ne 'none') ? 1 : 0;
+}
+
+# }}}
 # execute - execute a bosh command {{{
 sub execute {
 	my ($self, @cmd) = @_;
@@ -129,6 +165,12 @@ sub execute {
 	}
 	my $noninteractive = envset('BOSH_NON_INTERACTIVE') ? ' -n' : '';
 	$opts->{env}{BOSH_NON_INTERACTIVE} = undef;
+
+	# A caller that says otherwise is honoured; see %TRACEABLE_OUTPUT.
+	my $verbose = _verbose_log_level($opts->{env});
+	$opts->{redact_output} = ($TRACEABLE_OUTPUT{_subcommand(@cmd)} && !$verbose) ? 0 : 1
+		unless defined($opts->{redact_output});
+	$opts->{redact_stderr} = 1 if $verbose && !defined($opts->{redact_stderr});
 
 	my ($fh, $file);
 
@@ -176,7 +218,12 @@ sub execute {
 		}
 		$results[0] =~ s/^Script [^\n]+\n//m; # remove script header (linux)
 		$results[0] =~ s/^\^D[\x08]*//;       # remove macOS script ^D prefix + backspaces
-		logger->dump_var("bosh results" => \@results);
+		if ($opts->{redact_output}) {
+			trace("[%sb of redacted bosh output omitted from debug, exit code %s]",
+				length($results[0] // ''), $results[1] // 'unknown');
+		} else {
+			logger->dump_var("bosh results" => \@results);
+		}
 	}
 	return !$results[1] if $opts->{passfail};
 	return wantarray ? @results : $results[1];

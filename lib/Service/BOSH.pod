@@ -277,6 +277,17 @@ by a signal leaves a reason there instead of a code, so both read as
 success.  macOS C<script> always exits with the child's code.  C<deploy> and
 C<run_errand> in L<Service::BOSH::Director> depend on it.
 
+Much of what bosh prints carries credentials, so C<execute> keeps it out of
+the trace. Stdout is traced verbatim only for the read-only listings in
+C<%Service::BOSH::TRACEABLE_OUTPUT> (C<deployments>, C<env>, C<errands>,
+C<events>, C<instances>, C<locks>, C<releases>, C<stemcells>, C<tasks>, and
+C<vms>); every other command, and any command whose subcommand cannot be
+identified, leaves only a byte count. When C<BOSH_LOG_LEVEL> is set to
+anything other than C<none>, bosh logs whole director requests and
+responses, so stdout and stderr are both redacted whatever the command. An
+interactive transcript follows the same rule. A caller that sets
+C<redact_output> or C<redact_stderr> itself is honoured.
+
 C<HTTPS_PROXY> and C<https_proxy> are cleared from the subprocess
 environment unless C<GENESIS_HONOR_ENV> is set. C<BOSH_NON_INTERACTIVE>
 is always cleared from the subprocess environment; the C<-n> flag is
@@ -412,6 +423,36 @@ B<Examples:>
   # Custom execute flags
   $bosh->dryrun_of({execute => ['--dry-run', '--no-redact']}, 'deploy', $manifest);
   # Returns: result of execute
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _subcommand
+
+  my $subcommand = Service::BOSH::_subcommand(@cmd);
+
+Returns the bosh subcommand that a command list given to C<execute> runs,
+such as C<manifest> for C<('manifest')>, C<('bosh manifest')>, or
+C<('-n', 'manifest')>. A leading C<bosh> word and any word starting with
+C<-> are skipped. A command given as one string is split on whitespace.
+
+B<Returns:> The subcommand, or an empty string if none can be found.
+
+B<Examples:>
+
+  Service::BOSH::_subcommand('int', 'manifest.yml');      # Returns: 'int'
+  Service::BOSH::_subcommand('deploy "$1" | jq .x', $f);  # Returns: 'deploy'
+
+=head2 _verbose_log_level
+
+  my $verbose = Service::BOSH::_verbose_log_level(\%env);
+
+Returns true if bosh will write debug logging along with its output, which
+is when C<BOSH_LOG_LEVEL> is set to anything other than an empty string or
+C<none> (case-insensitive). A C<BOSH_LOG_LEVEL> key in C<\%env>, the
+environment C<execute> is about to set, takes precedence over the calling
+process's environment.
+
+B<Returns:> C<1> or C<0>.
 
 =head1 OVERRIDE POINTS
 
