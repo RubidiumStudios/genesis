@@ -391,7 +391,10 @@ says what a write would do. A read that fails, as where CredHub cannot be
 reached, reads as nothing held.
 
 B<Returns:> the value held before, or undef, and the action: C<new>,
-C<exists>, C<altered>, or, from a real write, C<failed>.
+C<exists>, C<altered>, or, from a real write, C<failed>. They are always
+those two, in that order. The value held before is asked of CredHub alone,
+because C<Service::Credhub::get> answers an error after the value in list
+context, and that error would otherwise sit where the action is read from.
 
 B<Examples:>
 

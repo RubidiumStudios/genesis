@@ -61,7 +61,11 @@ package EntombBuilder {
 }
 package EntombCredhub {
 	sub base         { '/lab-mgmt-bosh/lab-mgmt/' }
-	sub get          { undef }
+	# Answers as Service::Credhub::get does: the value alone in scalar
+	# context, and the value and then an error in list context.  A stand-in
+	# that answered one value in both hid a caller reading the error for
+	# what came after it.
+	sub get          { wantarray ? (undef, undef) : undef }
 	sub preload      { }
 	sub is_preloaded { 1 }
 }
@@ -334,6 +338,34 @@ subtest 'a CredHub failure after the first write leaves earlier writes in place 
 		['put_secret', $a_name, 'apple'], ['local_vault_set', '/secret/a', 'password', "(($a_name))"],
 		['put_secret', $b_name, 'bob'],   ['local_vault_set', '/secret/b', 'user', "(($b_name))"],
 	], 'after secret/a was written, which stays written, since entombment is not transactional');
+};
+
+# What an operator reads of the step: a line for each secret ending in what
+# was done to it, and a summary that counts them.  The lines ended in a
+# literal "#{}" and the summary counted nothing, on every deploy.
+subtest 'each secret is reported by what was done to it, and the summary counts them' => sub {
+	plan tests => 4;
+	my ($a_name) = entombed_as('a', 'password', 'apple');
+	no warnings 'redefine';
+	local *EntombHarness::put_secret = sub {
+		push @EVENTS, ['put_secret', @_[1,2]];
+		$_[1] eq $a_name ? 'exists' : 'new'
+	};
+	@EVENTS = ();
+	local *Service::Vault::query = safe_answers('{"secret/a":{"password":"apple"},"secret/b":{"user":"bob"}}');
+	my $progress = '';
+	{
+		open(local *STDERR, '>', \$progress) or die;
+		EntombHarness->new(test_vault(), 'secret/a:password', 'secret/b:user')->_entomb_secrets();
+	}
+	my $said = $progress =~ s/\e\[[0-9;]*[A-Za-z]|\r//gr =~ s/\s+/ /gr;
+
+	like($said, qr{\[1/2\] a:password .*?\.\.\.exists}, 'a secret CredHub already held reads as exists')
+		or diag($progress);
+	like($said, qr{\[2/2\] b:user .*?\.\.\.new}, 'and one it did not hold reads as new');
+	unlike($said, qr/#\{\}/, 'no line ends in an empty colour mark');
+	like($said, qr/2 of 2 secrets processed: 1 new, 1 already exist, 0 altered, 0 failed/,
+		'and the summary counts each by what was done');
 };
 
 # A credhub-based kit merges a manifest whose CredHub variables Genesis turns

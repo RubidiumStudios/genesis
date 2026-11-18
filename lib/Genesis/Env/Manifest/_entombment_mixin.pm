@@ -250,7 +250,9 @@ sub _entomb_secret {
 # _put_or_name - write one entombed value, or only say what a write would do {{{
 sub _put_or_name {
 	my ($self, $credhub, $cred_name, $value) = @_;
-	return ($credhub->get($cred_name), put_secret($credhub, $cred_name, $value))
+	# The client's get answers a value and then an error in list context,
+	# so the value is asked for alone.
+	return (scalar($credhub->get($cred_name)), put_secret($credhub, $cred_name, $value))
 		if $self->builder->writes_credhub;
 	# A read-only render may stand where CredHub cannot be reached at all.
 	my $existing = eval {$credhub->get($cred_name)};
