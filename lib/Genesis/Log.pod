@@ -325,6 +325,10 @@ created on first flush via C<expand_log_template>.
 When configuring a file target, if the target directory does not exist it
 is created automatically and a notice is printed to STDERR.
 
+A log file is created with mode C<0600>, readable by its owner alone,
+whatever the umask, and an existing one that group or others can read is
+narrowed to C<0600> the first time it is written. See C<_open_log_file>.
+
 If the target has not been configured before, it is initialized with these
 defaults:
 
@@ -1769,6 +1773,22 @@ C<new> calls it once, when it creates the logger, so a credential handed to
 Genesis or to a hook through the environment is scrubbed from the start.
 
 B<Returns:> The logger.
+
+=head2 _open_log_file
+
+  my $fh = Genesis::Log::_open_log_file($file, 'append');
+  my $fh = Genesis::Log::_open_log_file($file, 'truncate');
+
+Opens a log file for writing, creating it with mode C<0600> if it does not
+exist. With C<append>, writes go to the end of the file through a UTF-8
+layer; with C<truncate>, the file is emptied. A trace holds command lines,
+vault paths, and environment names even with every credential scrubbed,
+so an existing file with any group or other permission bits set is
+narrowed to C<0600> the first time the process opens it. Archives that a
+rotation has already renamed keep the mode they had.
+
+B<Returns:> The filehandle, or nothing if the file could not be opened,
+with C<$!> set.
 
 =head2 _log_item_level_map
 

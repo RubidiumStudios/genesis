@@ -104,6 +104,7 @@ unit-tests/genesis_log-routing.t
 unit-tests/genesis_log-convenience.t
 unit-tests/genesis_log-secret_scrub.t   # registered credentials are scrubbed from every log
 unit-tests/genesis_log-credential_registration.t   # director, CredHub, and vault credentials are registered when loaded
+unit-tests/genesis_log-file_mode.t   # log files are created readable by their owner alone
 unit-tests/genesis_manifest-trace_redaction.t   # merged and deployed manifests stay out of the trace
 unit-tests/genesis_secret-base.t
 unit-tests/genesis_secret_dhparams-core.t

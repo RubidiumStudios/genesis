@@ -12,6 +12,7 @@ use Genesis::State;
 use Genesis::Term;
 
 use POSIX qw/strftime/;
+use Fcntl qw/O_WRONLY O_CREAT O_APPEND O_TRUNC/;
 use Cwd ();
 use File::Basename qw/dirname/;
 use File::Spec;
@@ -202,9 +203,8 @@ sub configure_log {
 	unless ($log eq '<terminal>' || in_callback) {
 		if (($options{lifespan}//'') eq 'current') {
 			(my $file = $log) =~ s/^~/$ENV{HOME}/;
-			open my $fh, '>', $file;
-			truncate $fh, 0;
-			close $fh;
+			my $fh = _open_log_file($file, 'truncate');
+			close $fh if $fh;
 		}
 		# TODO: time based truncation
 	}
@@ -640,6 +640,26 @@ sub apply_on_reuse {
 }
 
 # Tiny indirections so tests can stub filesystem ops.
+# _open_log_file - open a log file readable by its owner alone {{{
+#
+# A trace holds command lines, vault paths, and environment names even
+# with every credential scrubbed, so a log file is created with mode 0600
+# whatever the umask.  One that already exists with group or other bits
+# set is narrowed to 0600 the first time this process opens it.
+my %narrowed;
+sub _open_log_file {
+	my ($file, $how) = @_;
+	my $flags = O_WRONLY | O_CREAT | ($how eq 'truncate' ? O_TRUNC : O_APPEND);
+	sysopen(my $fh, $file, $flags, 0600) or return;
+	unless ($narrowed{$file}++) {
+		my $mode = (stat($fh))[2];
+		chmod(0600, $file) if defined($mode) && ($mode & 077);
+	}
+	binmode($fh, ':encoding(UTF-8)') if $how eq 'append';
+	return $fh;
+}
+
+# }}}
 sub _truncate { CORE::truncate($_[0], 0) }
 sub _rename   { CORE::rename($_[0], $_[1]) }
 
@@ -1089,7 +1109,7 @@ sub flush_logs {
 				} else {
 					my $file = $log;
 					$file =~ s/^~/$ENV{HOME}/;
-					open $fh, '>>:encoding(UTF-8)', $file
+					$fh = _open_log_file($file, 'append')
 						or die "Could not open $log for writing logs: $!\n";
 
 					# Write command line as first entry if this is a new file
