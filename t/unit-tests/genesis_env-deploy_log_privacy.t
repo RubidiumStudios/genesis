@@ -6,7 +6,11 @@
 # only structured facts, which are the tasks bosh ran and how each ended,
 # the exit code, and the outcome, and it is readable by its owner alone.
 # The outcome tells a declined prompt, an EOF at the prompt, and Ctrl-C
-# apart, whatever else bosh printed.
+# apart, whatever else bosh printed.  Whether bosh was interrupted, and
+# which tasks it started without saying how they ended, come from the
+# status execute() records as bosh runs, so they do not rest on the
+# terminal echoing a ^C.  A task that may still be running keeps the
+# deployment cache, and the operator is told how to follow it.
 use strict;
 use warnings;
 
@@ -78,7 +82,10 @@ for my $case (
 	["${prompt}\r\nAsking for confirmation:\r\n  EOF\r\n\r\nExit code 1\r\n", 1, 'eof',
 		'User interrupted deployment at continue prompt.', 1],
 	["${prompt}y\r\n\r\nTask 99\r\n\r\nTask 99 | 12:00:00 | Updating instance\r\n^C\r\n", 130, 'interrupted',
-		'User interrupted deployment (Ctrl-C)', 0],
+		'User interrupted deployment (Ctrl-C) before bosh task 99 reported how it ended, so it may still be '.
+		'running on the director, and the deployment cache is kept.  '.
+		'Follow task 99 with `genesis fake-env bosh task 99`.', 0],
+	["${prompt}y\r\n\r\n^C\r\n", 130, 'interrupted', 'User interrupted deployment (Ctrl-C)', 0],
 	["Task 99\r\nTask 99 done\r\n\r\nSucceeded\r\n", 0, 'succeeded', 'Deployment succeeded.', 1],
 	["Task 99\r\nTask 99 error\r\n\r\nExit code 1\r\n", 1, 'failed', 'Deployment failed.', 1],
 	[undef, 1, 'failed', 'Deployment failed.', 1],
@@ -88,9 +95,53 @@ for my $case (
 		my %outcome = $env->_deploy_outcome($out, $rc);
 		is($outcome{kind}, $kind, 'the outcome is recognised');
 		is($outcome{message}, $message, 'and described');
-		is($outcome{cleanup_cache}, $cleanup, 'and the cache is kept for a rejoin only after Ctrl-C');
+		is($outcome{cleanup_cache}, $cleanup, 'and the cache is kept only when a deploy may still be running');
 	};
 }
+
+# What execute() saw as bosh ran, rather than what bosh printed last.
+my $updating = "${prompt}y\r\n\r\nTask 4321\r\n\r\nTask 4321 | 12:00:00 | Updating instance web/0\r\n";
+subtest 'an interrupt with a task still open keeps the cache and names the task' => sub {
+	# script(1) ends with 130 when bosh is stopped by SIGINT, and the
+	# terminal need not echo a ^C, so the transcript alone looks like any
+	# other failure.
+	my %outcome = $env->_deploy_outcome($updating, 130,
+		{rc => 130, interrupted => 1, tasks => [{id => 4321}]});
+	is($outcome{kind}, 'interrupted', 'the deploy is known to be interrupted');
+	is($outcome{cleanup_cache}, 0, 'the deployment cache is kept');
+	is_deeply($outcome{tasks}, [4321], 'the open task is named');
+	like($outcome{message}, qr/bosh task 4321 reported how it ended, so it may still be running/,
+		'the operator is told the task may still be running');
+	like($outcome{message}, qr/`genesis fake-env bosh task 4321`/, 'and how to follow it');
+};
+
+subtest 'bosh stopping with a task open is told apart from a failed task' => sub {
+	my %outcome = $env->_deploy_outcome($updating, 1,
+		{rc => 1, interrupted => 0, tasks => [{id => 4321}, {id => 4322, state => 'done'}]});
+	is($outcome{kind}, 'unfinished', 'a task with no final state leaves the deploy unfinished');
+	is($outcome{cleanup_cache}, 0, 'so the deployment cache is kept');
+	like($outcome{message}, qr/\Abosh stopped before bosh task 4321 reported/, 'and only the open task is named');
+	unlike($outcome{message}, qr/4322/, 'not the one that finished');
+
+	%outcome = $env->_deploy_outcome("Task 4321\r\nTask 4321 error\r\n", 1,
+		{rc => 1, interrupted => 0, tasks => [{id => 4321, state => 'error'}]});
+	is($outcome{kind}, 'failed', 'a task that ended in error is a failed deploy');
+	is($outcome{cleanup_cache}, 1, 'and the cache is cleaned up');
+};
+
+subtest 'an interrupt is taken from the status even when bosh printed nothing of it' => sub {
+	my %outcome = $env->_deploy_outcome("Task 7\r\nTask 7 done\r\n", 2,
+		{rc => 2, interrupted => 1, tasks => [{id => 7, state => 'done'}]});
+	is($outcome{kind}, 'interrupted', 'the deploy is interrupted');
+	is($outcome{message}, 'User interrupted deployment (Ctrl-C)', 'with no task to follow');
+	is($outcome{cleanup_cache}, 0, 'and the cache is kept for a rejoin');
+};
+
+subtest 'a status task id that is not a number is ignored' => sub {
+	my %outcome = $env->_deploy_outcome('', 1,
+		{rc => 1, interrupted => 0, tasks => [{id => fake_secret('task-id')}]});
+	is($outcome{kind}, 'failed', 'nothing but a task number is named');
+};
 
 subtest 'the saved log is readable by its owner alone' => sub {
 	my $dir = tempdir(CLEANUP => 1);

@@ -4493,6 +4493,9 @@ sub _deploy_create_env {
 	);
 
 	$state->{results} = \@results;
+	# How bosh ended, as it happened: the tasks it named and whether it was
+	# interrupted, which its transcript alone cannot always show.
+	$state->{bosh_status} = eval {$self->bosh->last_interactive_status};
 	return $state->{ok} = !$results[1];
 }
 
@@ -4570,6 +4573,9 @@ sub _deploy_to_bosh {
 	);
 
 	$state->{results} = \@results;
+	# How bosh ended, as it happened: the tasks it named and whether it was
+	# interrupted, which its transcript alone cannot always show.
+	$state->{bosh_status} = eval {$self->bosh->last_interactive_status};
 	return $state->{ok} = !$results[1];
 }
 
@@ -4582,7 +4588,7 @@ sub _post_deploy {
 	my $deployment_ok = $state->{ok};
 
 	$self->notify("#G{Deployment successful.}") if $deployment_ok;
-	my %outcome = $self->_deploy_outcome($state->{results}[0], $state->{results}[1]);
+	my %outcome = $self->_deploy_outcome($state->{results}[0], $state->{results}[1], $state->{bosh_status});
 
 	# Save deployment log
 	my $manifest_store = $self->top->config->get('manifest_store','hybrid');
@@ -7582,14 +7588,22 @@ sub rejoin_deployment {
 # }}}
 
 # _cleanup_and_bail - cleanup the deployment cache and bail with a message {{{
-# _deploy_outcome - how a deploy ended, from its exit code and transcript {{{
+# _deploy_outcome - how a deploy ended, from its exit code, status, and transcript {{{
 #
 # A declined prompt, an EOF at the prompt, and Ctrl-C all end bosh with a
-# failure, so the last lines of the transcript tell them apart.  Blank lines
-# and colour codes are ignored, so the classification holds however bosh
-# and the terminal laid the end of the run out.
+# failure, so the last lines of the transcript tell the first two apart.
+# Blank lines and colour codes are ignored, so the classification holds
+# however bosh and the terminal laid the end of the run out.
+#
+# Whether the deploy was interrupted, and which tasks bosh started without
+# reporting how they ended, come from $status, which execute() records as
+# the command runs, so they do not rest on the terminal echoing a ^C.  A
+# deploy without a status is read from its transcript for the same facts.
+# A task with no final state may still be running on the director, so the
+# deployment cache is kept and the operator is told how to follow it.
 sub _deploy_outcome {
-	my ($self, $out, $rc) = @_;
+	my ($self, $out, $rc, $status) = @_;
+	$status = {} unless ref($status) eq 'HASH';
 	return (kind => 'succeeded', message => 'Deployment succeeded.', cleanup_cache => 1)
 		if defined($rc) && $rc == 0;
 	my @lines = grep {/\S/} map {decolorize($_) =~ s/\r//gr} split(/\r?\n/, $out // '');
@@ -7598,10 +7612,40 @@ sub _deploy_outcome {
 		if $tail =~ /Continue\?[^\n]*: [^\n]*[nN]o?\n\s*Stopped\s*Exit code 1/sm;
 	return (kind => 'eof', message => 'User interrupted deployment at continue prompt.', cleanup_cache => 1)
 		if $tail =~ /Continue\?[^\n]*:\s*Asking for confirmation:\s*EOF\s*Exit code 1/sm;
-	# Ctrl-C after the prompt can leave the deployment running on the
-	# director, so the deployment cache is kept for a rejoin.
+
+	my @tasks;
+	if (ref($status->{tasks}) eq 'ARRAY') {
+		@tasks = grep {ref($_) eq 'HASH' && defined($_->{id}) && $_->{id} =~ /\A\d+\z/} @{$status->{tasks}};
+	} else {
+		my %state;
+		for (@lines) {
+			next unless /^Task (\d{1,12})(?: (done|error|cancelled|timeout))?\s*$/;
+			push(@tasks, $state{$1} = {id => $1}) unless $state{$1};
+			$state{$1}{state} //= $2;
+		}
+	}
+	my @open = map {$_->{id}} grep {!$_->{state}} @tasks;
+	my $interrupted = $status->{interrupted} || $tail =~ /\^C\s*$/m;
+	if (@open) {
+		my ($it, $s) = @open == 1 ? ('it', '') : ('they', 's');
+		return (
+			kind => ($interrupted ? 'interrupted' : 'unfinished'),
+			message => sprintf(
+				"%s before bosh task%s %s reported how %s ended, so %s may still be running on ".
+				"the director, and the deployment cache is kept.  %s",
+				$interrupted ? 'User interrupted deployment (Ctrl-C)' : 'bosh stopped',
+				$s, join(', ', @open), $it, $it,
+				join('  ', map {sprintf("Follow task %s with `genesis %s bosh task %s`.", $_, $self->name, $_)} @open)
+			),
+			cleanup_cache => 0,
+			tasks => [@open],
+		);
+	}
+	# Ctrl-C with no task outstanding can still have reached bosh after it
+	# asked the director for one, so the deployment cache is kept for a
+	# rejoin.
 	return (kind => 'interrupted', message => 'User interrupted deployment (Ctrl-C)', cleanup_cache => 0)
-		if $tail =~ /\^C\s*$/m;
+		if $interrupted;
 	return (kind => 'failed', message => 'Deployment failed.', cleanup_cache => 1);
 }
 
