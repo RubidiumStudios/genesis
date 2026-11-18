@@ -1232,7 +1232,7 @@ subtest '_check_cpi_config - a CPI config change is logged by its size' => sub {
 	no warnings qw(redefine once);
 	local *Genesis::Env::spruce_diff = sub { return ("cpis.0.properties.key\n  - $old\n  + $new\n", 1, undef) };
 	my $result;
-	my ($log, $stderr) = capture_trace { $result = Genesis::Env::_check_cpi_config(cpi_check_env()) };
+	my ($log, $stderr) = capture_trace { $result = Genesis::Env::_check_cpi_config(cpi_check_env()) } tty => 1;
 	is $result->{state}, 'changed', 'the change is found';
 	like $log, qr/required CPI config test-env\.aws\.cf is different from the one currently on the\s+BOSH\s+director\s+\(1\s+path\s+changed\)/,
 		'the log says how many paths changed';
@@ -1240,7 +1240,7 @@ subtest '_check_cpi_config - a CPI config change is logged by its size' => sub {
 	like $stderr, qr/\Q$new\E/, 'the terminal shows the diff';
 
 	local *Genesis::Env::spruce_diff = sub { return ("unable to parse data from new: yaml: $said", 2, undef) };
-	($log, $stderr) = capture_trace { $result = Genesis::Env::_check_cpi_config(cpi_check_env()) };
+	($log, $stderr) = capture_trace { $result = Genesis::Env::_check_cpi_config(cpi_check_env()) } tty => 1;
 	is $result->{state}, 'error', 'a failed comparison is an error';
 	unlike $result->{msg}.$log.$stderr, qr/\Q$said\E/, 'and nothing spruce said is kept';
 };

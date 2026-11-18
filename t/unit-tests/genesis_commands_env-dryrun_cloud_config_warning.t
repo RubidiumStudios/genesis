@@ -88,14 +88,14 @@ subtest 'a deploy shows cloud config changes on the terminal only' => sub {
 
 	my ($log, $stderr) = capture_trace {
 		Genesis::Commands::Env::_deploy_show_cloud_config_diff("$dir/old.yml", "$dir/new.yml", "azs.z1.key\n  - $old\n  + $new\n");
-	};
+	} tty => 1;
 	like($log, qr/found differences \(1 path changed\)/, 'the log says how many paths changed');
 	unlike($log, qr/\Q$_\E/, 'and holds no value from the diff') for ($old, $new);
 	like($stderr, qr/\Q$new\E/, 'the terminal shows the diff');
 
 	($log, $stderr) = capture_trace {
 		Genesis::Commands::Env::_deploy_show_missing_cloud_config('lab.cf', "$dir/new.yml");
-	};
+	} tty => 1;
 	like($log, qr/Cloud config lab\.cf missing\..*with 1 path added/s, 'a dry run logs a missing config by its size');
 	unlike($log, qr/\Q$new\E/, 'and not by its body');
 	like($stderr, qr/\Q$new\E/, 'which the terminal shows');

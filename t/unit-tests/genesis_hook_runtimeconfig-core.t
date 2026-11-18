@@ -793,7 +793,7 @@ subtest 'compare_configs - a runtime config change is logged by its size' => sub
 	no warnings 'redefine';
 	local *Genesis::Hook::RuntimeConfig::spruce_diff = sub { return ("addons.0.key\n  - $old\n  + $new\n", 1, undef) };
 	my $hook = compare_hook();
-	my ($log, $stderr) = capture_trace { $hook->compare_configs('dns', "releases: []\naddons:\n- key: $new\n", 'test-env-bosh.dns') };
+	my ($log, $stderr) = capture_trace { $hook->compare_configs('dns', "releases: []\naddons:\n- key: $new\n", 'test-env-bosh.dns') } tty => 1;
 	like($log, qr/found the following changes between existing and generated BOSH DNS runtime\s+config\s+\(1\s+path\s+added\)/,
 		'a change is logged by how many paths changed');
 	unlike($log, qr/\Q$_\E/, 'the log holds no value from the diff') for ($old, $new);
@@ -802,7 +802,7 @@ subtest 'compare_configs - a runtime config change is logged by its size' => sub
 	# Only where the body goes matters here, not how it is coloured.
 	local *Genesis::Hook::RuntimeConfig::render_markdown = sub {$_[0]};
 	$hook->{bosh} = mock 'Mock::RuntimeConfig::MissingBosh' => {alias => 'mock-bosh', has_config => 0};
-	($log, $stderr) = capture_trace { $hook->compare_configs('dns', "addons:\n- key: $body\n", 'test-env-bosh.dns') };
+	($log, $stderr) = capture_trace { $hook->compare_configs('dns', "addons:\n- key: $body\n", 'test-env-bosh.dns') } tty => 1;
 	like($log, qr/no existing BOSH DNS runtime config found, generated the following\s+\(1\s+path\s+added\)/,
 		'a new config is logged by its size');
 	unlike($log, qr/\Q$body\E/, 'not by its body');

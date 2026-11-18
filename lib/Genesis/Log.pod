@@ -1774,12 +1774,22 @@ used when capturing the call stack.
 
 The buffer entry includes: C<level>, C<label>, C<colors>, C<emoji>,
 C<priority>, C<timestamp>, C<contents>, C<pending>, C<reset>,
-C<show_stack>, C<stack>, C<raw>, C<private>, C<prefix>, and C<style>.
+C<show_stack>, C<stack>, C<raw>, C<private>, C<data>, C<prefix>, and
+C<style>.
 
 A C<private> entry is output an operator asked to see that can hold a
-credential, such as a looked-up exodus value or an unredacted manifest.
-The terminal shows it, and every log file gets
-C<E<lt>N bytes of output withheld from this logE<gt>> in its place.
+credential, such as a config diff, a looked-up exodus value, or an
+unredacted manifest. Every log file gets
+C<E<lt>N bytes of output withheld from this logE<gt>> in its place. The
+terminal sink shows it only when the handle it would be written to really
+is a terminal, as C<_is_terminal> decides. Redirected, as in CI, the handle
+is a file or a pipe that someone keeps, so it gets
+C<E<lt>N bytes of detail withheld because this output is not a terminalE<gt>>
+instead.
+
+A C<private> entry that is also C<data> is what a command was asked to
+print on stdout, such as the value C<genesis lookup> found, and it goes to
+stdout wherever stdout goes. Log files still never get it.
 
 Stack frames are captured for all entries whose level meets
 C<capture_stack_min_level> (ordinal 2, i.e., C<FATAL>/C<ERROR> and above),
@@ -1790,6 +1800,20 @@ B<Examples:>
   # Called by public methods; not normally called directly.
   $logger->_log('INFO', 'Hello %s', 'world');
   # Returns: nothing (appends buffer entry and flushes)
+
+=head2 _is_terminal
+
+  my $bool = Genesis::Log::_is_terminal(\*STDERR);
+
+Whether a handle the terminal sink writes to is a terminal, which decides
+whether a private entry is shown on it. Tests replace it to stand in for a
+terminal.
+
+B<Returns:> C<1> if C<$fh> is a terminal, and C<0> otherwise.
+
+B<Examples:>
+
+  Genesis::Log::_is_terminal(\*STDOUT);  # Returns: 0 when stdout is piped
 
 =head2 _register_env_secrets
 

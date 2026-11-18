@@ -168,6 +168,11 @@ EOF
 }
 
 # }}}
+# Bash hooks that run without a terminal and whose stdout Genesis parses.
+# Their stderr is captured in memory and shown only on a terminal.  The
+# runtime-config and terminate hooks can prompt, so theirs is left alone.
+our @CAPTURED_STDERR_HOOKS = qw/blueprint features cloud-config cpi-config/;
+
 sub run_hook {
 
 	# FIXME: run_hook should always return a scalar (simple or reference), not an array or hash.
@@ -431,14 +436,19 @@ EOF
 
 	$ENV{GENESIS_IS_HELPING_YOU} = 'yes';
 	my $interactive = ($is_shell || $is_edit || scalar($hook =~ m/^(addon|new|info|check|secrets|post-deploy|pre-deploy)$/)) ? 1 : 0;
+	# A hook whose stdout Genesis parses has its stderr kept in memory, too,
+	# since what it prints there can quote the values it handled.  It is
+	# shown afterward as private detail, which only a terminal displays.
+	my $captured = !$interactive && grep {$_ eq $hook} @CAPTURED_STDERR_HOOKS;
 	my ($out, $rc, $err) = run({
-			interactive => $interactive, stderr => undef, eval_var_args => $opts{eval_var_args}
+			interactive => $interactive, stderr => ($captured ? 0 : undef), eval_var_args => $opts{eval_var_args}
 		},
 		'cd "$1"; source .helper; hook=$2; shift 2; $hook "$@"',
 		$self->path, $hook_file, @args
 	);
 
 	exit $rc if $is_shell;
+	_show_hook_stderr($hook, $err) if $captured;
 
 	# The hook's stdout is for Genesis to parse and can carry credential
 	# values, so a failure is described by how the hook ended alone.
@@ -461,7 +471,7 @@ EOF
 	if ($hook eq 'blueprint') {
 		bail(
 			"Could not determine which YAML files to merge: 'blueprint' hook %s (%s)",
-			$ended, Genesis::failure_summary($out)
+			$ended, Genesis::failure_summary($out, $err)
 		) if ($rc != 0);
 
 		$out =~ s/^\s+//;
@@ -475,7 +485,7 @@ EOF
 	if (grep { $_ eq $hook}  qw/features/) {
 		bail(
 			"Could not run feature hook in kit %s: 'features' hook %s (%s)",
-			$self->id, $ended, Genesis::failure_summary($out)
+			$self->id, $ended, Genesis::failure_summary($out, $err)
 		) unless $rc == 0;
 		$out =~ s/^\s+//;
 		return [split(/\s+/, $out)];
@@ -507,10 +517,10 @@ EOF
 	);
 
 	if ($rc != 0) {
-		if (defined($out) && length($out)) {
+		if (grep {defined && length} ($out, $err)) {
 			bail(
 				"Could not run '%s' hook successfully: it %s (%s)",
-				$hook, $ended, Genesis::failure_summary($out)
+				$hook, $ended, Genesis::failure_summary($out, $err)
 			);
 		} else {
 			bail("Could not run '%s' hook successfully: it %s", $hook, $ended);
@@ -518,6 +528,20 @@ EOF
 	}
 	return 1;
 }
+
+# }}}
+# _show_hook_stderr - show what a captured hook printed on stderr, privately {{{
+#
+# A terminal shows it as the hook printed it.  Anywhere else, such as a CI
+# log, a note says how much was withheld, and a failed hook is described
+# by its kind of failure.
+sub _show_hook_stderr {
+	my ($hook, $err) = @_;
+	return unless defined($err) && $err =~ /\S/;
+	info({private => 1, raw => 1}, "%s", $err =~ s/\s+\z//r);
+	return 1;
+}
+
 
 # }}}
 # _hook_ended - how a Bash hook ended, for a failure message {{{

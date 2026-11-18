@@ -35,9 +35,9 @@ sub shows_privately {
 	like($log, qr/<\d+ bytes of output withheld from this log>/, "$what: the log says output was withheld");
 }
 
-subtest 'private output reaches stdout and not the log' => sub {
+subtest 'private data output reaches stdout and not the log' => sub {
 	my $value = fake_secret('private-output');
-	shows_privately('output', $value, sub { Genesis::output({raw => 1, private => 1}, $value) });
+	shows_privately('output', $value, sub { Genesis::output({raw => 1, private => 1, data => 1}, $value) });
 };
 
 no warnings qw/redefine once/;

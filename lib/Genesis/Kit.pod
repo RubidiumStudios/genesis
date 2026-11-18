@@ -1312,6 +1312,39 @@ B<Examples:>
   my $traced = Genesis::Kit::_xtrace_hook_file($kit->path('hooks/info'));
   # $traced is ".../hooks/info-trace"
 
+=head2 _show_hook_stderr
+
+  Genesis::Kit::_show_hook_stderr($hook, $err);
+
+Shows what a hook listed in C<@Genesis::Kit::CAPTURED_STDERR_HOOKS> printed
+on stderr. Those are the C<blueprint>, C<features>, C<cloud-config>, and
+C<cpi-config> hooks, which run with no terminal and whose stdout Genesis
+parses, so C<run_hook> captures their stderr in memory. It is logged as
+private detail, so a terminal shows it as printed, a redirected stderr gets
+a note that it was withheld, and no log file gets it. A failed hook is
+described by C<Genesis::failure_summary> of both streams.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$hook>
+
+The hook's name.
+
+=item C<$err>
+
+What the hook printed on stderr. Nothing is shown when it is empty or
+blank.
+
+=back
+
+B<Returns:> C<1> when something was shown, and nothing otherwise.
+
+B<Examples:>
+
+  Genesis::Kit::_show_hook_stderr('blueprint', "warning: feature x is deprecated\n");
+
 =head2 _hook_ended
 
   my $ended = Genesis::Kit::_hook_ended($rc);

@@ -429,6 +429,9 @@ subtest 'bosh_configs_compare - reports identical, different, and missing' => su
 		],
 		lookups => {'bosh-configs.runtime' => {dns => {}, ops => {}}},
 	);
+	# A config's body is shown only on a terminal.
+	no warnings 'redefine';
+	local *Genesis::Log::_is_terminal = sub { 1 };
 	my ($out, $err) = output_from { Genesis::Commands::Bosh::bosh_configs_compare($env, $director) };
 	my $all = $out.$err;
 	like($all, qr/cloud config test-env\.cf on parent is identical/, 'identical config reported');
@@ -490,7 +493,7 @@ subtest 'bosh-configs logs a config change by its size, never its text' => sub {
 		my $code = Genesis::Commands::Bosh->can("bosh_configs_$action");
 		my ($log, $stderr, $stdout) = capture_trace {
 			eval {$code->($env, $director, ($action eq 'upload' ? (yes => 1) : ()))};
-		};
+		} tty => 1;
 		my $terminal = $stderr.$stdout;
 		like($log, qr/runtime\s+config\s+test-env\.cf\.dns\s+on\s+parent\s+is\s+different\s+from\s+the\s+director's\s+copy\s+\(1\s+path\s+changed\)/,
 			"$action logs a changed config by how many paths changed");
@@ -1151,6 +1154,9 @@ subtest 'director config - compare shows the diff without a lock or an exodus wr
 	);
 	my $parent = make_director('lab-mgmt', {});
 	my $env = make_director_env(self_bosh => $self_bosh, parent => $parent);
+	# A config's body is shown only on a terminal.
+	no warnings 'redefine';
+	local *Genesis::Log::_is_terminal = sub { 1 };
 	my ($out, $err) = output_from {
 		Genesis::Commands::Bosh::bosh_configs_compare($env, $parent, name => 'lab-ocf.bosh.director')
 	};

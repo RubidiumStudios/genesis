@@ -992,7 +992,7 @@ sub _bosh_configs_print {
 	info("\n#Cu{%s config %s} #Ki{(%s)}", $config->{type}, $config->{name}, $source);
 	# Configs can carry credentials, such as a CPI's API key, so the content
 	# goes to stdout and never to a log file.
-	output({raw => 1, private => 1}, "%s", $content);
+	output({raw => 1, private => 1, data => 1}, "%s", $content);
 	return 1;
 }
 

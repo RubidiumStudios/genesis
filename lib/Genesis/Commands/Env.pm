@@ -912,7 +912,7 @@ sub manifest {
 	print STDERR "\n";
 	# Several manifest types are unredacted, so the manifest goes to stdout
 	# and never to a log file.
-	output {raw => 1, private => 1}, $content;
+	output {raw => 1, private => 1, data => 1}, $content;
 }
 
 # _derive_deploy_reason - build a default --reason from the pipeline commit range {{{

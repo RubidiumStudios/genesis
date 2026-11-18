@@ -114,7 +114,7 @@ sub information {
 		);
 		# Artifacts include create-env state and vars stores, which hold the
 		# director's credentials, so the content never reaches a log file.
-		output {raw => 1, private => 1}, $artifact_content;
+		output {raw => 1, private => 1, data => 1}, $artifact_content;
 		exit 0;
 	}
 
@@ -357,7 +357,7 @@ sub lookup {
 		# A looked-up value can be a credential, such as an exodus record's
 		# admin password, so it goes to stdout and never to a log file.
 		$v = encode_json($v) if ref($v);
-		output {raw => 1, private => 1}, $v;
+		output {raw => 1, private => 1, data => 1}, $v;
 	}
 	exit 0;
 }

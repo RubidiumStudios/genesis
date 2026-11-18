@@ -96,7 +96,7 @@ subtest 'addon help reaches the terminal, never a log' => sub {
 			my ($kit, $env) = @_;
 			bless({env => $env, label => 'list'}, 'Genesis::Hook::Addon')->help;
 		} FAKE_HELP_VALUE => $value;
-	};
+	} tty => 1;
 	like($stderr, qr/Fake help: password is \Q$value\E/, 'the operator sees the help text');
 	unlike($log, qr/\Q$value\E/, 'the log does not hold it');
 	like($log, qr/bytes of output withheld from this log/, 'only that it was withheld');

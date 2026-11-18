@@ -993,6 +993,7 @@ sub _log {
 		stack      => \@stack,
 		raw        => $options->{raw},
 		private    => $options->{private},
+		data       => $options->{data},
 		context    => $options->{context},
 
 		# Terminal specific options
@@ -1017,6 +1018,16 @@ sub trace_log_files {
 	return sort grep {
 		$_ ne '<terminal>' && ($self->{logs}{$_}{level_ord} // 0) >= $trace_ord
 	} keys %{$self->{logs} // {}};
+}
+
+# }}}
+# _is_terminal - whether a handle the terminal sink writes to is a terminal {{{
+#
+# Private entries are shown only on a real terminal, so this is the one
+# place that decides it.  Tests replace it to stand in for a terminal.
+sub _is_terminal {
+	my ($fh) = @_;
+	return -t $fh ? 1 : 0;
 }
 
 # }}}
@@ -1064,6 +1075,7 @@ sub flush_logs {
 			};
 
 			next unless meets_level($config->{level},$level);
+			my $data = $self->{buffer}[$line_number]{data};
 
 			# Per-target context filtering: skip this entry for this target
 			# if its context (e.g. 'deprecation') is suppressed.  Other
@@ -1158,6 +1170,16 @@ sub flush_logs {
 				# records only that it was withheld.
 				$content = sprintf("<%d bytes of output withheld from this log>", length($content))
 					if $private && $log ne '<terminal>';
+				# The terminal sink shows a private entry only when it really is
+				# a terminal.  Redirected, as in CI, it is a file or a pipe that
+				# someone keeps, so a one-line note stands in for the detail.  A
+				# data entry, which is what a command such as lookup was asked
+				# to print on stdout, still goes wherever stdout goes.
+				$content = sprintf(
+					"<%d bytes of detail withheld because this output is not a terminal>",
+					length($content)
+				) if $private && !$data && $log eq '<terminal>'
+				  && !_is_terminal($level eq 'OUTPUT' ? \*STDOUT : \*STDERR);
 				my ($pre_pad, $post_pad) = ("","");
 				($pre_pad, $content)  = $content =~ m/\A([\r\n]*)(.*)\z/s;
 				($content, $post_pad) = $content =~ m/\A(.*?)([\r\n]*)\z/s unless $pending;

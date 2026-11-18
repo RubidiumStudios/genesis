@@ -41,6 +41,12 @@ sub capture_trace(&;%) {
 		local $ENV{GENESIS_TRACE} = $opts{terminal_trace} ? 'y' : undef;
 		local $ENV{GENESIS_DEBUG} = undef;
 		local $ENV{QUIET} = undef;
+		# The terminal sink shows private detail only on a real terminal,
+		# and a capture writes to files, so a test that expects the detail
+		# there says tty => 1 to stand in for a terminal.
+		no warnings qw/redefine/;
+		local *Genesis::Log::_is_terminal = $opts{tty} ? sub { 1 } : \&Genesis::Log::_is_terminal;
+		use warnings qw/redefine/;
 		my $logger = Genesis::Log->new;
 		$logger->configure_log(level => ($opts{terminal_level} // 'INFO'));
 		$logger->configure_log($file, level => 'TRACE');
