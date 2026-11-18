@@ -241,7 +241,9 @@ sub execute {
 	my ($self, @cmd) = @_;
 	my %env = $self->environment_variables;
 
-	my $opts = (ref($cmd[0]) eq 'HASH') ? shift @cmd : {};
+	# The caller's hash is copied, since what follows changes it, and a
+	# caller can pass one hash to several calls.
+	my $opts = (ref($cmd[0]) eq 'HASH') ? {%{shift @cmd}} : {};
 
 	# passfail is answered here, from the exit code; given to run(), it
 	# would replace the exit code with a boolean that execute() never reads.
@@ -417,12 +419,12 @@ sub _interrupt_exit {
 # dryrun_of - execute a bosh command in dry-run mode {{{
 sub dryrun_of {
 	my ($self, @cmd) = @_;
-	my $opts;
+	my $opts = {};
 	my $execute = 0;
 	my $exec_msg = "";
 	my $interactive = undef;
 	if (ref($cmd[0]) eq 'HASH') {
-		$opts = shift @cmd;
+		$opts = {%{shift @cmd}}; # the caller's hash is left as it was
 		$execute = delete($opts->{execute}) || 0;
 		$interactive = delete($opts->{interactive});
 		if (defined($opts->{exec_msg})) {

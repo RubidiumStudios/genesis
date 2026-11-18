@@ -39,6 +39,25 @@ subtest 'passfail reports a failing bosh command as a failure' => sub {
 	ok(director->execute({passfail => 1}, 'deployments'), 'bosh exiting 0 is a success');
 };
 
+subtest 'one options hash serves repeated calls unchanged' => sub {
+	# A caller can keep its options in one hash and pass it to every call.
+	# execute() must not change that hash, or the second call no longer
+	# asks for passfail and returns the raw exit code, which is true for a
+	# failure in scalar context.
+	local $ENV{FAKE_BOSH_RC} = 3;
+	my $bosh = director;
+	my $opts = {passfail => 1, deployment => 'some-deployment', stderr => 0};
+	my %before = %$opts;
+	ok(!$bosh->execute($opts, 'deployments'), 'the first call reports the failure');
+	ok(!$bosh->execute($opts, 'deployments'), 'the second call with the same hash reports it too');
+	is_deeply($opts, \%before, 'and the hash the caller passed is unchanged');
+
+	my $dry = {execute => 1, interactive => 0, exec_msg => 'a check'};
+	my %dry_before = %$dry;
+	$bosh->dryrun_of($dry, 'deployments');
+	is_deeply($dry, \%dry_before, 'dryrun_of leaves its caller\'s hash unchanged too');
+};
+
 SKIP: {
 	chomp(my $script = `command -v script 2>/dev/null` // '');
 	skip 'script(1) is not installed', 1 unless $script;
