@@ -129,6 +129,15 @@ sub register_secret {
 		$SECRETS{$form} = $label;
 		$SECRET_PATTERN = undef;
 	}
+
+	# A multi-line credential, such as a private key, can be logged a line
+	# at a time, so each line long enough to scrub safely is registered on
+	# its own.  PEM armor lines say what the value is, not what it holds.
+	if ($value =~ /\n/) {
+		register_secret($_, $label)
+			for grep {length($_) >= $MIN_SECRET_LENGTH && !/\A-----(?:BEGIN|END) [A-Z0-9 ]+-----\z/}
+			    map {s/\r\z//r} split /\n/, $value;
+	}
 	return;
 }
 
@@ -1200,7 +1209,7 @@ sub flush_logs {
 
 				unless ( $show_stack eq 'none' || $show_stack eq 'invalid') {
 					for (@$stack) {
-						my $line = sprintf("#Ki{ %s:L%d%s}", $_->{file}, $_->{line}, $_->{sub} ? " (in $_->{sub})" : " (pid: $$)");
+						my $line = $self->scrub(sprintf("#Ki{ %s:L%d%s}", $_->{file}, $_->{line}, $_->{sub} ? " (in $_->{sub})" : " (pid: $$)"));
 						$out = wrap($line, $columns, $indent."#K\@{^-}");
 						print $fh csprintf("%s\n", $out);
 						last if $show_stack eq 'current';

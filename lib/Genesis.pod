@@ -3886,6 +3886,27 @@ optional C<prefix> key and no others.
 
 B<Returns:> C<1> or C<0>.
 
+=head2 _backtrace_arg
+
+  my $shown = Genesis::_backtrace_arg($arg);
+
+Genesis installs this as C<Carp::format_arg>, so a Carp backtrace, such as
+the one C<Carp::confess> or C<Carp::Always> adds in development mode,
+shows each caller's argument by its type or length rather than quoting it.
+A die anywhere below a call that was handed a credential would otherwise
+put the credential in the message, and from there in a log.
+
+B<Returns:> C<undef> for an undefined argument, the reference type for a
+reference, such as C<ARRAY> or C<Genesis::Env=HASH>, and
+C<E<lt>N bytesE<gt>> for anything else.
+
+B<Examples:>
+
+  Genesis::_backtrace_arg('s3cr3t');   # Returns: '<6 bytes>'
+  Genesis::_backtrace_arg([1]);        # Returns: 'ARRAY'
+
+B<Errors:> None.
+
 =head2 _changed_paths
 
   my @changes = Genesis::_changed_paths($old, $new, $path, $pattern);

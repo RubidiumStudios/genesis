@@ -54,6 +54,27 @@ BEGIN { # Enable development mode if GENESIS_DEV_MODE is set
 	}
 }
 
+# A Carp backtrace quotes each caller's arguments, and development mode
+# adds one to every die, Carp::Always included, so a die anywhere below a
+# call that was handed a credential would put it in the message.  Each
+# argument is shown by its type or length instead.
+require Carp;
+{
+	no warnings 'redefine';
+	*Carp::format_arg = \&_backtrace_arg;
+}
+sub _backtrace_arg {
+	my ($arg) = @_;
+	return 'undef' unless defined($arg);
+	if (ref($arg)) {
+		require Scalar::Util;
+		my $class = Scalar::Util::blessed($arg);
+		my $type = Scalar::Util::reftype($arg);
+		return defined($class) ? "$class=$type" : $type;
+	}
+	return sprintf('<%d bytes>', length($arg));
+}
+
 use constant {
 	EXODUS_TIME_FORMAT => "%Y-%m-%d %H:%M:%S %z",
 	EXODUS_TIME_FORMAT_SHORT => "%Y%m%d%H%M%S",

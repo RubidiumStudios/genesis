@@ -269,7 +269,7 @@ subtest 'a release that fails after a successful locked step stops the deploy' =
 	my $text = ($err // '') =~ s/\s+/ /gr;
 	like($text, qr{secret/exodus/parent/bosh/network-claim-lock}, 'the error names the lock path');
 	like($text, qr/may still be held/, 'and says the lock may still be held');
-	like($text, qr/the cloud config was uploaded/, 'and says what had already completed');
+	like($text, qr/The cloud config was uploaded before the release failed/, 'and says what had already completed');
 };
 
 subtest 'a held signal outranks a release failure' => sub {

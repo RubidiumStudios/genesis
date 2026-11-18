@@ -252,6 +252,12 @@ characters is matched only where no letter or digit touches it, since
 scrubbing it inside longer words would mangle the log. Empty values,
 undefined values, and references are ignored.
 
+A multi-line value, such as a private key, can be logged a line at a time,
+so each of its lines at least C<$Genesis::Log::MIN_SECRET_LENGTH> characters
+long is registered on its own as well. PEM armor lines, such as
+C<-----BEGIN RSA PRIVATE KEY----->, are left out, since they say what the
+value is and not what it holds.
+
 The registry belongs to the package rather than the logger object, so a
 value can be registered before any logger exists, and registering one never
 creates a logger (which would skip the terminal setup that
@@ -1500,7 +1506,8 @@ which can be a credential an operator passed through to bosh or credhub.
 Output style is applied per target: C<pointer>, C<plain>, C<fun>, or
 C<rfc-5424>. Stack frames are appended when the entry's C<show_stack>
 setting (or the target's C<show_stack> setting) indicates C<'current'>
-or C<'full'>.
+or C<'full'>. Each stack line is scrubbed as the entry's content is, since
+it names a file, which can sit under any directory.
 
 B<Errors:>
 
