@@ -794,19 +794,30 @@ sub _run_failure_message {
 }
 
 # }}}
-# spruce_error_paths - the paths a failed spruce merge named, checked {{{
+# spruce_error_paths - where a failed spruce merge's unresolved nodes are {{{
 #
 # Spruce names each node it could not resolve by its path, as in
-# " - $.properties.password: ...", and a path is safe to show only if it
-# is made of the merged files' own structure.  So a path is kept only when
-# it heads one of spruce's error lines and it can be walked, component by
-# component, through one of $files as parsed: a key of a mapping, a list
-# index, or the literal name of a list item.  Text that only looks like a
-# key, such as a line inside a block scalar, is not part of the structure,
-# and a name that is a spruce operator is not literal.  Anything else is
-# dropped whole, since the stream could hold a value shaped like a path.
-# Returns up to ten paths.
+# " - $.properties.password: ...", and a path counts only if it heads one
+# of spruce's error lines and it can be walked, component by component,
+# through one of $files as parsed: a key of a mapping, a list index, or the
+# literal name of a list item.  Text that only looks like a key, such as a
+# line inside a block scalar, is not part of the structure, and a name that
+# is a spruce operator is not literal.  Anything else is dropped whole.
+#
+# Even a walked path is made of labels the merged files chose, and a
+# generated or vendored file can hold a credential as a key or an item's
+# name.  So a path is shown by the labels BOSH's manifest schema owns, by
+# list indexes, and by <key> for any other key, and a named list item is
+# shown by its index in that file.  Below a free-form key such as
+# properties, no key is shown.  Each path is followed by the file that
+# holds it and the line its deepest located component is on, so the
+# operator can open it there.  Returns up to ten paths.
 our %_PARSED_SOURCES;
+our %_FREE_FORM_KEYS = map {($_ => 1)} qw(
+	properties env options tags cloud_properties consumes provides
+	meta params exodus
+);
+our %_MANIFEST_OWNED_KEYS = (%BOSH_CONFIG_FIELDS, map {($_ => 1)} qw(meta params exodus kit genesis));
 sub spruce_error_paths {
 	my ($text, @files) = @_;
 	my @docs;
@@ -817,30 +828,38 @@ sub spruce_error_paths {
 			my ($data, $rc) = eval {load_yaml_file($file)};
 			$_PARSED_SOURCES{$id} = (!$@ && !$rc && ref($data)) ? $data : undef;
 		}
-		push @docs, $_PARSED_SOURCES{$id} if defined($_PARSED_SOURCES{$id});
+		push @docs, [$file, $_PARSED_SOURCES{$id}] if defined($_PARSED_SOURCES{$id});
 	}
+	# The path as shown, or undef when it does not walk through $node.
 	my $walks = sub {
 		my ($node, @parts) = @_;
+		my ($free, @shown) = (0);
 		for my $part (@parts) {
 			if (ref($node) eq 'HASH') {
-				return 0 unless exists($node->{$part});
+				return undef unless exists($node->{$part});
+				my $owned = !$free && $_MANIFEST_OWNED_KEYS{$part};
+				push @shown, $owned ? $part : '<key>';
+				$free ||= !$owned || $_FREE_FORM_KEYS{$part};
 				$node = $node->{$part};
 			} elsif (ref($node) eq 'ARRAY') {
 				if ($part =~ /\A\d+\z/ && $part < @$node) {
+					push @shown, $part;
 					$node = $node->[$part];
 					next;
 				}
 				my ($named) = grep {
-					ref($_) eq 'HASH' && defined($_->{name}) && !ref($_->{name})
-						&& $_->{name} !~ /\A\s*\(\(/ && $_->{name} eq $part
-				} @$node;
-				return 0 unless $named;
-				$node = $named;
+					my $item = $node->[$_];
+					ref($item) eq 'HASH' && defined($item->{name}) && !ref($item->{name})
+						&& $item->{name} !~ /\A\s*\(\(/ && $item->{name} eq $part
+				} 0..$#$node;
+				return undef unless defined($named);
+				push @shown, $named;
+				$node = $node->[$named];
 			} else {
-				return 0;
+				return undef;
 			}
 		}
-		return 1;
+		return join('.', '$', @shown);
 	};
 	my (@paths, %seen);
 	for my $line (split /\n/, $text // '') {
@@ -849,11 +868,41 @@ sub spruce_error_paths {
 		next if $seen{$path}++;
 		my @parts = split(/\./, $path, -1);
 		next if grep {$_ eq ''} @parts;
-		next unless grep {$walks->($_, @parts)} @docs;
-		push @paths, "\$.$path";
+		# Spruce merges later files over earlier ones, so the last file
+		# that holds the path is the one to open.
+		my ($found) = grep {defined($_->[2])} map {[@$_[0,1], $walks->($_->[1], @parts)]} reverse @docs;
+		next unless $found;
+		my $where = sprintf("%s (in %s, line %d)",
+			$found->[2], $found->[0], _yaml_line_of($found->[0], @parts));
+		next if $seen{" $where"}++;
+		push @paths, $where;
 		last if @paths >= 10;
 	}
 	return @paths;
+}
+
+# }}}
+# _yaml_line_of - the line a path's deepest locatable component is on {{{
+#
+# A path that walked through the parsed file is looked for in its text,
+# each component on a later line than the one before, as a key or as the
+# name of a list item.  Indexes are not counted out, so the line found is
+# that of the deepest key or name located, or 1 when none is.
+sub _yaml_line_of {
+	my ($file, @parts) = @_;
+	my @lines = eval {split(/\n/, slurp($file))};
+	my ($at, $line) = (-1, 1);
+	for my $part (@parts) {
+		next if $part =~ /\A\d+\z/;
+		my $label = qr/(?:"\Q$part\E"|'\Q$part\E'|\Q$part\E)/;
+		my ($i) = grep {
+			$lines[$_] =~ /^\s*(?:-\s+)*$label\s*:(?:\s|$)/
+				|| $lines[$_] =~ /^\s*(?:-\s+)?name\s*:\s*$label\s*(?:#.*)?$/
+		} ($at + 1) .. $#lines;
+		last unless defined($i);
+		($at, $line) = ($i, $i + 1);
+	}
+	return $line;
 }
 
 # }}}

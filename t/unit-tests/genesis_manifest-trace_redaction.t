@@ -89,7 +89,8 @@ subtest 'a failed spruce merge still reports why' => sub {
 	capture_trace { eval { $provider->merge($manifest, ["$dir/broken.yml"], {}, {}); 1 } or $err = $@ };
 	like($err // '', qr/Unable to merge unredacted manifest for fake-env\/fake environment/, 'the failure is reported');
 	like($err // '', qr/spruce exited \d+ \(.*could not resolve a reference.*\)/, 'with the kind of failure');
-	like($err // '', qr/\$\.properties\.password/, 'and the path spruce could not resolve');
+	like($err // '', qr/\$\.properties\.<key> \(in \Q$dir\E\/broken\.yml, line 3\)/,
+		'and where the node spruce could not resolve is');
 };
 
 subtest 'an adaptive merge keeps its output out of the trace' => sub {

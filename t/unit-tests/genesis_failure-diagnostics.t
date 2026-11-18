@@ -296,8 +296,8 @@ YAML
 		"\$.instance_groups.web: not at the start of an error line\n",
 	);
 	my @paths = Genesis::spruce_error_paths($err, "$dir/paths.yml");
-	is_deeply(\@paths, ['$.instance_groups.web.jobs.router.properties.admin-password'],
-		'only the path made of the files\' own keys and names is kept');
+	is_deeply(\@paths, ["\$.instance_groups.0.jobs.0.properties.<key> (in $dir/paths.yml, line 7)"],
+		'only the path made of the files\' own keys and names is kept, by where it is');
 	unlike(join(' ', @paths), qr/fake-spruce-path/, 'a component the files do not hold is never repeated');
 };
 
@@ -321,8 +321,38 @@ YAML
 		" - \$.properties.password: secret secret/x:y not found\n",
 	);
 	is_deeply([Genesis::spruce_error_paths($err, "$dir/block.yml")],
-		['$.instance_groups.0.jobs', '$.properties.password'],
+		["\$.instance_groups.0.jobs (in $dir/block.yml, line 8)", "\$.properties.<key> (in $dir/block.yml, line 5)"],
 		'a key-shaped line in a block scalar, a key from elsewhere, and an operator name are dropped');
+};
+
+# A generated or vendored file can hold a credential as a key or as an
+# item's name, so only labels BOSH's manifest schema owns are shown, and
+# the file and line say where the rest are.
+subtest 'a label the merged files chose is shown by where it is, never by itself' => sub {
+	my ($key, $name) = (fake_secret('label-key'), fake_secret('label-name'));
+	put_file("$dir/labels.yml", 0644, <<"YAML");
+---
+instance_groups:
+- name: other
+- name: $name
+  jobs:
+  - name: router
+    properties:
+      $key:
+        nested: (( vault "secret/x:y" ))
+$key:
+  value: (( grab nothing ))
+YAML
+	my $err = join('',
+		" - \$.instance_groups.$name.jobs.router.properties.$key.nested: secret not found\n",
+		" - \$.$key.value: could not resolve\n",
+	);
+	my @paths = Genesis::spruce_error_paths($err, "$dir/labels.yml");
+	is_deeply(\@paths, [
+		"\$.instance_groups.1.jobs.0.properties.<key>.<key> (in $dir/labels.yml, line 9)",
+		"\$.<key>.<key> (in $dir/labels.yml, line 11)",
+	], 'item names become indexes, other keys become <key>, and each names its file and line');
+	unlike(join(' ', @paths), qr/fake-label/, 'no label the file chose is repeated');
 };
 
 subtest 'a failed merge names the checked paths spruce could not resolve' => sub {
@@ -346,7 +376,8 @@ EOS
 		eval { $provider->merge(FakeManifest->new(file => "$dir/merged.yml"), ["$dir/paths-source.yml"], {}, {}); 1 }
 			or $died = "$@";
 	};
-	like($died // '', qr/\$\.properties\.password/, 'the path made of the file\'s keys is named');
+	like($died // '', qr/\$\.properties\.<key> \(in \Q$dir\E\/paths-source\.yml, line 3\)/,
+		'the path made of the file\'s keys is named by where it is');
 	like($died // '', qr/not found/, 'with the kind of failure');
 	unlike(($died // '').$stderr.$log, qr/\Q$marker\E/, 'a path component the files do not hold is not');
 };

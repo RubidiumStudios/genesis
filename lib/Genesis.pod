@@ -1650,18 +1650,28 @@ B<Examples:>
 
   my @paths = Genesis::spruce_error_paths($err, @merged_files);
 
-Returns the paths a failed spruce merge named, such as
-C<$.properties.password>, once each is checked against the files that were
-merged. A path counts only when it heads one of spruce's error lines, in the
-form C< - $.path: message>, and it can be walked through one of
+Returns where the nodes a failed spruce merge could not resolve are, once
+each path spruce named is checked against the files that were merged. A
+path counts only when it heads one of spruce's error lines, in the form
+C< - $.path: message>, and it can be walked through one of
 C<@merged_files>, as C<spruce json> parses it, one component at a time.
 Each component must be a key of the mapping it reaches, an index of the
 list, or the literal C<name> of one of the list's items, and a name that
 is a spruce operator is not literal. Text that only looks like a key, such
 as a line inside a block scalar, is not part of the parsed structure. Any
-other path is dropped whole, because the stream could hold a value shaped
-like a path. A file is parsed once while it is unchanged, and at most ten
-paths are returned.
+other path is dropped whole.
+
+A walked path is still made of labels the files chose, and a generated or
+vendored file can hold a credential as a key or as an item's name. So the
+path is shown by the keys BOSH's manifest schema owns, in
+C<%Genesis::_MANIFEST_OWNED_KEYS>, by list indexes, and by C<E<lt>keyE<gt>>
+for any other key. A named list item is shown by its index in that file,
+and below a free-form key in C<%Genesis::_FREE_FORM_KEYS>, such as
+C<properties>, no key is shown at all. Each path is followed by the last
+of C<@merged_files> that holds it, since spruce merges later files over
+earlier ones, and the line C<_yaml_line_of> finds for it, so the operator
+can open the file there. A file is parsed once while it is unchanged, and
+at most ten paths are returned.
 
 B<Returns:> A list of strings.
 
@@ -1669,7 +1679,7 @@ B<Examples:>
 
   # base.yml holds properties: {password: (( vault "secret/x:y" ))}
   Genesis::spruce_error_paths(" - \$.properties.password: secret not found\n", 'base.yml');
-  # Returns: ('$.properties.password')
+  # Returns: ('$.properties.<key> (in base.yml, line 3)')
 
 =head2 passthrough_args
 
@@ -4051,6 +4061,24 @@ B<Examples:>
 
 These methods are internal to the implementation. They may change without
 notice and should not be called directly.
+
+=head2 _yaml_line_of
+
+  my $line = Genesis::_yaml_line_of($file, @components);
+
+Finds the line of C<$file> that a path's deepest locatable component is
+on. Each component is looked for on a later line than the one before it,
+as a key, quoted or not, or as the C<name> of a list item, and list indexes
+are skipped. The search stops at the first component it cannot find.
+
+B<Returns:> The line number of the deepest component found, or C<1> when
+none is.
+
+B<Examples:>
+
+  # base.yml is "---\nproperties:\n  password: x\n"
+  Genesis::_yaml_line_of('base.yml', 'properties', 'password');
+  # Returns: 3
 
 =head2 _is_redacted_arg
 
