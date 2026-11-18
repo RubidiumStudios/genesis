@@ -519,19 +519,20 @@ subtest 'Phase 3: Read operations' => sub {
 
 		no warnings 'redefine';
 		local *Service::Credhub::run = sub {
-			return ('', 1, 'some error');
+			return ('', 1, 'some error: permission denied');
 		};
 		use warnings 'redefine';
 
 		my $data = $ch->data('nonexistent');
 		is(ref($data), 'HASH', 'returns hashref on failure');
 		ok(defined($data->{error}), 'error key present');
-		like($data->{error}, qr/some error/, 'error contains stderr message');
+		like($data->{error}, qr/exited 1 \(permission denied\)/, 'error names the exit status and the kind of failure');
+		unlike($data->{error}, qr/some error/, 'error leaves out what credhub printed');
 	};
 
 	subtest 'data() — strips login warning from stderr' => sub {
 		my $ch = make_credhub();
-		my $warning_err = "WARNING: Two different login methods were detected. Please use one.\n\n\nActual error here";
+		my $warning_err = "WARNING: Two different login methods were detected. Please use one.\n\n\nActual error: credential not found";
 
 		no warnings 'redefine';
 		local *Service::Credhub::run = sub {
@@ -541,7 +542,7 @@ subtest 'Phase 3: Read operations' => sub {
 
 		my $data = $ch->data('test');
 		unlike($data->{error}, qr/WARNING.*login methods/, 'login warning stripped');
-		like($data->{error}, qr/Actual error here/, 'real error preserved');
+		like($data->{error}, qr/\(not found\)/, 'real error still classified');
 	};
 
 	subtest 'data() — passes correct args to run()' => sub {
@@ -655,7 +656,7 @@ subtest 'Phase 3: Read operations' => sub {
 
 		my ($val, $err) = $ch->get('nonexistent');
 		ok(!defined($val), 'value is undef on error');
-		like($err, qr/credential not found/, 'error propagated');
+		like($err, qr/exited 1 \(not found\)/, 'error propagated');
 	};
 
 	subtest 'has() — true via data()' => sub {

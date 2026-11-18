@@ -209,20 +209,20 @@ sub merge {
 			"%s manifest for %s/%s environment",
 			$manifest->type, $self->env->name, $self->env->type
 		);
-		# The merged manifest can be unredacted, so it stays out of the trace.
-		# run()'s onfailure would then hide spruce's errors too, so a failure
-		# is reported here with the output, which on failure is only those
-		# errors.
-		($out,my $rc) = run({
-				stderr => "&1",
+		# The merged manifest can be unredacted, and spruce's errors can quote
+		# a resolved value, so neither stream reaches the trace, and a failure
+		# reports the exit status, the known kinds of failure, and the paths
+		# spruce named.
+		($out,my $rc, my $err) = run({
+				stderr => 0,
 				redact_output => 1,
+				redact_stderr => 1,
 				env => $env_vars
 			},
 			'spruce', 'merge', @merge_opts, @$sources
 		);
-		bail({raw => 1}, "#R{%s} (run failed)%s",
-			"Unable to merge $descriptor",
-			defined($out) ? "\n\nSTDOUT:\n$out" : ''
+		bail({raw => 1}, "#R{%s}: spruce exited %d (%s)",
+			"Unable to merge $descriptor", $rc, Genesis::failure_summary($out, $err)
 		) if $rc;
 	}
 	popd;
@@ -317,12 +317,13 @@ sub get_subset {
 		} else {
 			bug("Invalid subset operator '$operator'")
 		}
-		my ($out, $rc, $err) = run(@cmd);
+		# The source can be an evaluated manifest, so neither stream is shown.
+		my ($out, $rc, $err) = run({stderr => 0, redact_output => 1, redact_stderr => 1}, @cmd);
 		popd;
 
 		bail (
-			"Could not get subset %s from %s manifest: %s",
-			$subset, $src_manifest->type, $err
+			"Could not get subset %s from %s manifest: exited %d (%s)",
+			$subset, $src_manifest->type, $rc, Genesis::failure_summary($out, $err)
 		) if $rc;
 		return (undef, $file);
 	}
@@ -548,7 +549,9 @@ sub _adaptive_merge {
 	my @files = (@_);
 
 	# The merged and unevaluated manifests stay out of the trace.
-	my ($out,$rc,$err) = run({stderr=>0, redact_output => 1, %opts}, 'spruce merge --multi-doc --go-patch "$@"', @files);
+	# The merged and unevaluated manifests, and spruce's errors, which can
+	# quote a resolved value, all stay out of the trace.
+	my ($out,$rc,$err) = run({stderr=>0, redact_output => 1, redact_stderr => 1, %opts}, 'spruce merge --multi-doc --go-patch "$@"', @files);
 	return (wantarray ? ($out,$err) : $out) unless $rc;
 
 	my $orig_errors = join("\n", grep {$_ !~ /^\s*$/} lines($err));
@@ -558,10 +561,15 @@ sub _adaptive_merge {
 		$contents .= "---\n" unless substr($content,0,3) eq "---";
 		$contents .= $content;
 	}
-	my $uneval = read_json_from(run(
-		{ onfailure => "Unable to merge files without evaluation", stderr => undef, redact_output => 1, %opts },
-		'spruce merge --multi-doc --go-patch --skip-eval "$@" | spruce json', @files
-	));
+	my ($uneval_json, $uneval_rc, $uneval_err) = run(
+		{ stderr => 0, redact_output => 1, redact_stderr => 1, %opts },
+		'set -o pipefail; spruce merge --multi-doc --go-patch --skip-eval "$@" | spruce json', @files
+	);
+	bail(
+		"Unable to merge files without evaluation: spruce exited %d (%s)",
+		$uneval_rc, Genesis::failure_summary($uneval_json, $uneval_err)
+	) if $uneval_rc;
+	my $uneval = read_json_from($uneval_json, 0, '');
 
 	my $attempt=0;
 	while ($attempt++ < 5 and $rc) {
@@ -620,17 +628,18 @@ sub _adaptive_merge {
 			}
 		}
 		my $premerge = mkfile_or_fail($self->env->workpath('premerge.yml'),$contents);
-		($out,$rc,$err) = run({stderr => 0, redact_output => 1, %opts }, 'spruce merge --multi-doc --go-patch "$1"', $premerge);
+		($out,$rc,$err) = run({stderr => 0, redact_output => 1, redact_stderr => 1, %opts }, 'spruce merge --multi-doc --go-patch "$1"', $premerge);
 	}
 
+	# spruce's errors can quote a resolved value, so the failure names the
+	# exit status, the known kinds of failure, and the paths spruce named.
 	bail(
-		"Could not merge %s environment files:\n\n".
-		"%s\n\n".
-		"Efforts were made to work around resolving the following errors, but if ".
-		"they caused the above errors, you may be able to partially resolve this ".
-		"issue by using #C{export GENESIS_UNEVALED_PARAMS=1}",
-		$self->env->name,
-		$orig_errors || $err
+		"Could not merge %s environment files: spruce exited %d (%s)\n\n".
+		"Efforts were made to work around resolving the original errors (%s), ".
+		"but if they caused the above errors, you may be able to partially ".
+		"resolve this issue by using #C{export GENESIS_UNEVALED_PARAMS=1}",
+		$self->env->name, $rc, Genesis::failure_summary($out, $err),
+		Genesis::failure_summary($orig_errors)
 	) if $rc;
 
 	return (wantarray ? ($out,$orig_errors) : $out)

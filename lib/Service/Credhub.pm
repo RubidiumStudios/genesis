@@ -91,6 +91,7 @@ sub preload {
 			env => $self->env(),
 			redact_env => 1,
 			redact_output => 1,
+			redact_stderr => 1,
 			stderr => 0
 		},
 		'credhub', 'export', '-j', '-p', $self->base
@@ -138,12 +139,17 @@ sub data {
 			env => $self->env(),
 			redact_env => 1,
 			redact_output => 1,
+			redact_stderr => 1,
 			stderr => 0
 		},
 		'credhub', 'get', '-j', '-n', $self->_full_path($path)
 	);
-	$err = decolorize($err) =~ s/\AWARNING: Two different login methods were detected.*?\n\n\n//sr;
-	return $rc ? {error => $err}: scalar(read_json_from($out,$rc,$err));
+	# What credhub prints on a failure can quote credential data, so the
+	# error names the exit status and the known kinds of failure only.
+	return {error => sprintf("credhub get exited %d (%s)", $rc, Genesis::failure_summary(
+		$out, decolorize($err // '') =~ s/\AWARNING: Two different login methods were detected.*?\n\n\n//sr
+	))} if $rc;
+	return scalar(read_json_from($out,$rc,$err));
 }
 
 sub set {
@@ -234,6 +240,7 @@ sub set {
 	my ($out,$rc, $err) =run({
 			env => $self->env(),
 			redact_output => 1,
+			redact_stderr => 1,
 			redact_env => 1,
 			stderr => 0
 		},
@@ -241,13 +248,11 @@ sub set {
 	);
 	return ($out, $rc, $err) if wantarray;
 
+	# credhub can echo the value it was given, so neither stream is shown.
 	bail(
-		"Could not create the Credhub %s value for path #c{%s}:%s%s\n\n[Exit Code: %s]",
+		"Could not create the Credhub %s value for path #c{%s}: credhub exited %d (%s)",
 		$type eq 'value' ? 'secret' : $type,
-		$path,
-		$out ? "\n\n#wui{STDOUT:}\n$out" : '',
-		$err ? "\n\n#rui{STDERR:}\n$err" : '',
-		$rc
+		$path, $rc, Genesis::failure_summary($out, $err)
 	) if $rc;
 	my $result = read_json_from($out, $rc, $err);
 	# Cache the value credhub returned — except when it's redacted.
@@ -332,15 +337,22 @@ sub query {
 	push @args, '-d', {redact => delete($params{_data})}
 		if defined $params{_data};
 	# TODO: extract uri-encoded query params out of %params
-	# The API's reply can be any credential, so it stays out of the trace.
-	return scalar(read_json_from(run({
+	# The API's reply can be any credential, so it stays out of the trace,
+	# and a failure reports the exit status and known kinds of failure only.
+	my ($out, $rc, $err) = run({
 			env => $self->env(),
 			redact_env => 1,
 			redact_output => 1,
+			redact_stderr => 1,
 			stderr => 0
 		},
 		'credhub', 'curl', '--path', "$path", @args
-	)));
+	);
+	bail(
+		"CredHub request to #C{%s} failed: credhub exited %d (%s)",
+		$path, $rc, Genesis::failure_summary($out, $err)
+	) if $rc;
+	return scalar(read_json_from($out, 0, ''));
 }
 
 sub _full_path {

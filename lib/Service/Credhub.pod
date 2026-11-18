@@ -442,7 +442,10 @@ The credential path relative to the base or absolute.
 
 B<Returns:> On success, a hash reference as decoded from the CredHub JSON
 response (contains a C<value> key). On failure, a hash reference
-C<{ error =E<gt> $err }> where C<$err> is the cleaned stderr output.
+C<{ error =E<gt> $err }>. What credhub prints on a failure can quote
+credential data, so C<$err> gives only its exit status and the kinds of
+failure that C<Genesis::failure_summary> recognized, such as
+C<credhub get exited 1 (not found)>.
 
 B<Examples:>
 
@@ -564,10 +567,11 @@ C<value>.
 Dies with C<"Unknown CredHub type: E<lt>typeE<gt> - expecting one of: certificate, rsa, ssh, user, password, json, or value">
 when an unsupported type string is given.
 
-Dies with C<"Could not create the Credhub %s value for path %s:...\n\n[Exit Code: %s]">
-in scalar context when C<credhub set> exits non-zero. C<%s> placeholders
-are the type (or C<"secret"> for type C<value>), the path, optional stdout
-and stderr sections, and the exit code.
+Dies with C<"Could not create the Credhub %s value for path %s: credhub
+exited %d (%s)"> in scalar context when C<credhub set> exits non-zero. The
+placeholders are the type (or C<"secret"> for type C<value>), the path, the
+exit status, and the C<Genesis::failure_summary> of what credhub printed.
+credhub can echo the value it was given, so neither stream is shown.
 
 B<Examples:>
 
@@ -769,6 +773,12 @@ the request (see the TODO in the source).
 =back
 
 B<Returns:> A hash reference containing the parsed JSON response body.
+
+B<Errors:>
+
+Dies with C<"CredHub request to %s failed: credhub exited %d (%s)"> when
+C<credhub curl> exits non-zero. The reply and stderr are never shown, and
+the last placeholder is the C<Genesis::failure_summary> of them.
 
 B<Examples:>
 

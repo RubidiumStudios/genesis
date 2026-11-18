@@ -1566,6 +1566,10 @@ C<@Genesis::FAILURE_DIAGNOSTICS> whose patterns the output or stderr
 matched, such as C<permission denied> or C<could not parse its input>,
 joined with C<; >. If none matched it returns C<no recognized diagnostic>.
 
+Spruce names each node it could not resolve by its path, such as
+C<$.properties.password>. A path is made of manifest keys and never of
+values, so up to ten of these are appended after C< at >.
+
 B<Returns:> A string.
 
 B<Examples:>
@@ -2448,6 +2452,11 @@ C<Math::BigInt> and a number with a fraction or an exponent as a
 C<Math::BigFloat>. Without it, such an integer comes back as a plain string
 of its digits, which can't be told from a JSON string. The safe export
 decoder in C<Service::Vault> asks for it so that it sees every number.
+
+It dies on input it can't parse. C<JSON::PP> quotes the input that follows
+the error, and that input can be vault or CredHub data, so the quote is
+replaced by its length, as in C<(before E<lt>12 bytesE<gt>)>, and the
+character offset is kept.
 
 B<Parameters:>
 

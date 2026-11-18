@@ -684,7 +684,7 @@ our @FAILURE_DIAGNOSTICS = (
 	[qr/x509|certificate|tls/i                                               => 'TLS certificate problem'],
 	[qr/\bsealed\b/i                                                          => 'vault is sealed'],
 	[qr/yaml|json|parse|syntax|unmarshal|malformed|unexpected/i              => 'could not parse its input'],
-	[qr/\$\(\(|operator|spruce|unresolved|could not find|cannot find/i          => 'could not resolve a reference'],
+	[qr/\$\(\(|operator|spruce|unresolved|unable to resolve|could not find|cannot find|could not be found/i          => 'could not resolve a reference'],
 );
 
 # failure_summary - a failed command's diagnostic that is safe to show
@@ -692,11 +692,20 @@ our @FAILURE_DIAGNOSTICS = (
 # Returns the fixed descriptions from @FAILURE_DIAGNOSTICS that the
 # command's output or stderr matched, joined with "; ", or "no recognized
 # diagnostic".  Nothing the command printed is returned.
+#
+# Spruce names each node it could not resolve by its path, such as
+# $.properties.password.  A path is made of manifest keys, never values,
+# so up to ten of them are listed as well.
 sub failure_summary {
 	my $text = join("\n", grep {defined} @_);
 	my %seen;
 	my @found = grep {!$seen{$_}++} map {$text =~ $_->[0] ? $_->[1] : ()} @FAILURE_DIAGNOSTICS;
-	return @found ? join('; ', @found) : 'no recognized diagnostic';
+	my %seen_path;
+	my @paths = grep {!$seen_path{$_}++} $text =~ /(?<![\w\$])(\$\.[A-Za-z0-9_.\[\]-]+[A-Za-z0-9_\]])/g;
+	splice(@paths, 10) if @paths > 10;
+	my $summary = @found ? join('; ', @found) : 'no recognized diagnostic';
+	$summary .= " at ".join(', ', @paths) if @paths;
+	return $summary;
 }
 
 # Response headers whose values curl() may write to a trace.  Any other
@@ -1393,7 +1402,12 @@ sub load_json {
 	my ($json, $opts) = @_;
 	my $decoder = JSON::PP->new->allow_nonref;
 	$decoder->allow_bignum if ($opts // {})->{allow_bignum};
-	return $decoder->decode($json);
+	# JSON::PP quotes the input that follows a parse error, and the input
+	# can be vault or CredHub data, so the error keeps the offset and
+	# drops the quote.
+	my $data = eval { $decoder->decode($json) };
+	die(($@ =~ s/\(before "(.*?)"\)(?= at |\z)/sprintf("(before <%d bytes>)", length($1))/esr)) if $@;
+	return $data;
 }
 
 sub load_json_file {
@@ -1409,7 +1423,7 @@ sub load_yaml_file {
 	my ($file) = @_;
 	# Manifests and vault data pass through here, so the converted copy
 	# stays out of the trace.
-	my ($out, $rc, $err) = run({ stderr => 0, redact_output => 1 }, 'spruce json < "$1"', $file);
+	my ($out, $rc, $err) = run({ stderr => 0, redact_output => 1, redact_stderr => 1 }, 'spruce json < "$1"', $file);
 	my $json = load_json($out) if $rc == 0;
 	return (wantarray) ? ($json,$rc,$err) : $json;
 }
