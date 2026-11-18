@@ -948,11 +948,15 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 
 	my $err = slurp($err_file) if ($err_file && -f $err_file);
 	my $rc = $exit_status >> 8;
-	if ($opts{exact} && (my $signal = $exit_status & 127)) {
+	my $signal = $exit_status & 127;
+	if ($signal) {
 		# A process killed by a signal has no exit code, so >> 8 reads it as
-		# 0 and whatever it printed before it died as a finished run.
+		# 0 and whatever it printed before it died as a finished run.  It is
+		# reported as a shell would, 128 plus the signal, whatever was
+		# captured.
 		$rc = 128 + $signal;
-		$err = join("\n", grep {defined && length} ($err // '') =~ s/\s+$//r, "killed by signal $signal");
+		$err = join("\n", grep {defined && length} ($err // '') =~ s/\s+$//r, "killed by signal $signal")
+			if defined($err) || $opts{exact};
 	}
 	if (defined($out)) {
 		if ($out =~ m/[\x00-\x08\x0b-\x0c\x0e\x1f\x7f-\xff]/) {
@@ -976,7 +980,8 @@ qtrace("command duration: %s", pretty_duration($duration, undef,undef,'','',unde
 		     defined($err) ? "\n\nSTDERR:\n".($opts{redact_stderr}?"<redacted>":$err) : '',
 		     defined($out) ? "\n\nSTDOUT:\n".($opts{redact_output}?"<redacted>":$out) : ''
 		) if ($opts{onfailure});
-		trace("command exited with status %x (rc %d)", $exit_status, $rc);
+		trace("command %s (rc %d)",
+			$signal ? "killed by signal $signal" : sprintf("exited with status %x", $exit_status), $rc);
 	} else {
 		trace("command exited #G{0}");
 	}
