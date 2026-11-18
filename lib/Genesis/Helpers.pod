@@ -1385,16 +1385,27 @@ B<Examples:>
 
 Reads a secret value from the Genesis Vault at
 C<$GENESIS_SECRETS_BASE/SRC_PATH> and stores it in CredHub at
-C</$GENESIS_CREDHUB_ROOT/DST_PATH>, then removes the source secret from
-Vault. The value is never traced, so the function turns off a hook's
-xtrace while it holds the value and turns it back on afterward.
+C</$GENESIS_CREDHUB_ROOT/DST_PATH>, then removes the copied value from
+Vault when that can be done without losing a newer one. The value is never
+traced, so the function turns off a hook's xtrace while it holds the value
+and turns it back on afterward. Nothing that safe or credhub print on
+stderr is kept, since a failed read or write can quote the value.
 
 The value travels byte for byte, trailing newlines included. Nothing is
 removed from Vault until CredHub is read back and shown to hold the same
 bytes, and Vault is read again and shown to still hold what was copied.
-On a kv v2 mount, the newest version is read by its number, and a secret
-whose only key is the one moved loses just that version; a secret with
-other keys loses only the moved key.
+
+The only delete it makes names the kv v2 version it copied, with
+C<safe rm SECRET^VERSION>, so a value written after the last read is a
+newer version that survives it. The function asks Vault which kv version
+the secret's mount is, and keeps the Vault copy, with a warning that says
+why, when no delete can be limited that way. That happens on a kv v1
+mount, which keeps no versions; when the mount or the secret's versions
+cannot be looked up, which is never taken to mean kv v1; and when the
+copied version holds other keys, since removing one key rewrites the
+others with no check-and-set. In each of those cases the copy still
+succeeds, and the warning asks the operator to remove the Vault copy once
+nothing else writes it.
 
 B<Parameters:>
 
@@ -1428,11 +1439,21 @@ not be read again while it was being copied.  Running the function again
 copies the current value.
 
 Calls C<bail> with C<"[ERROR] Copied secret $SRC_PATH to CredHub, but
-failed to remove it from vault: safe exited RC"> if C<safe rm> fails.
+failed to remove version N of it from vault: safe exited RC"> if
+C<safe rm> fails.
 
-The internal helpers C<__genesis_exact_value>, C<__genesis_vault_version>,
-and C<__genesis_credhub_value> read a command's output exactly, find the
-newest version of a kv v2 secret, and read a CredHub value exactly.
+Calls C<bail> after the delete if Vault then lists a version newer than
+the one copied, since that value was written during the move and CredHub
+holds the older one. The newer version stays in Vault, and running the
+function again copies it.
+
+The internal helpers C<__genesis_exact_value>,
+C<__genesis_vault_kv_version>, C<__genesis_vault_version>,
+C<__genesis_safe_read>, and C<__genesis_credhub_value> read a command's
+output exactly, tell a kv v2 mount from a kv v1 one (or fail when they
+cannot), find the newest version of a kv v2 secret (or fail when safe
+cannot list it), read Vault without keeping what safe says on stderr, and
+read a CredHub value exactly.
 
 B<Examples:>
 

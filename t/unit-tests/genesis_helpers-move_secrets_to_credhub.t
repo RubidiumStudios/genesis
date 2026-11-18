@@ -1,11 +1,14 @@
 #!/usr/bin/env perl
 # move_secrets_to_credhub copies a value from vault into CredHub and then
-# deletes the vault original, so the copy must be exact before anything
-# is deleted.  The value travels byte for byte, trailing newlines
-# included; CredHub is read back and compared before the delete; the
-# vault value is read again just before the delete and left in place if
-# it changed; and on a versioned (kv v2) mount, the version that was
-# copied is the one read and the one removed.
+# deletes the vault original, so the copy must be exact, and nothing that
+# might be newer than the copy may be deleted.  The value travels byte
+# for byte, trailing newlines included; CredHub is read back and compared
+# before any delete; the vault value is read again and left in place if it
+# changed; and the only delete is of the kv v2 version that was copied,
+# so a value written after the last read survives it.  Where no delete can
+# be limited that way -- a kv v1 mount, a mount or version lookup that
+# fails, a version holding other keys -- the vault copy is left in place
+# and the operator is told why.
 use strict;
 use warnings;
 
@@ -24,22 +27,41 @@ mkdir "$dir/bin";
 Genesis::Helpers->write("$dir/.helper");
 
 # A fake vault kept on disk: $dir/vault/<version>/<key> holds each value
-# exactly, and FAKE_KV=2 makes `safe versions` report the versions.  A
-# value in $dir/vault/next/<key> replaces the current one after the first
-# read, which is how a test changes the secret under the move.
+# exactly, and a deleted version is renamed <version>.deleted, as kv v2
+# keeps it listed.  FAKE_KV says what the mounts endpoint answers: 2 or 1
+# for a kv v2 or v1 mount, old for a vault from before kv v2 (404), and
+# fail for no answer.  FAKE_VERSIONS_FAIL makes `safe versions` fail.  A
+# value in $dir/vault/next/<key> becomes a new version after the first
+# read, or with FAKE_ROTATE_AT=rm just before a delete, after the last
+# read.  Every failure says FAKE_SAFE_SAYS on stderr.
 put_file("$dir/bin/safe", 0755, <<'SH');
 #!/bin/bash
 printf '%s\n' "$*" >> "$FAKE_DIR/safe-calls"
 vault="$FAKE_DIR/vault"
 latest() { ls "$vault" | grep -E '^[0-9]+$' | sort -n | tail -1; }
+newest() { ls "$vault" | sed -e 's/\.deleted$//' | grep -E '^[0-9]+$' | sort -n | tail -1; }
+rotate() {
+  [[ -d "$vault/next" ]] || return 0
+  new=$(( $(newest) + 1 )); cp -R "$vault/$(latest)" "$vault/$new"
+  cp "$vault/next/"* "$vault/$new/"; rm -rf "$vault/next"
+}
+fail() { echo >&2 "error: $FAKE_SAFE_SAYS"; exit 1; }
 case "$1" in
+  curl)
+    case "${FAKE_KV:-1}" in
+      1|2) printf 'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{"data":{"path":"secret/","type":"kv","options":{"version":"%s"}}}\n' "${FAKE_KV:-1}" ;;
+      old) printf 'HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n\r\n{"errors":[]}\n' ;;
+      *)   fail ;;
+    esac ;;
   versions)
-    [[ "${FAKE_KV:-1}" == 2 ]] || { echo >&2 "not a versioned mount"; exit 1; }
+    [[ -n "${FAKE_VERSIONS_FAIL:-}" ]] && fail
     printf 'version  status  created at\n'
-    for v in $(ls "$vault" | grep -E '^[0-9]+$' | sort -n); do
-      printf '%s        alive   17 Nov 26 10:00 EST\n' "$v"
+    for v in $(ls "$vault" | grep -E '^[0-9]+(\.deleted)?$' | sort -n); do
+      [[ $v == *.deleted ]] && st=deleted || st=alive
+      printf '%s        %s   17 Nov 26 10:00 EST\n' "${v%.deleted}" "$st"
     done ;;
   get)
+    [[ -n "${FAKE_GET_FAILS:-}" ]] && fail
     if [[ "$2" == --keys ]]; then
       spec="$3"; ver="$(latest)"
       [[ "$spec" == *^* ]] && ver="${spec##*^}"
@@ -47,13 +69,18 @@ case "$1" in
     fi
     spec="$2"; key="${spec##*:}"; path="${spec%:*}"; ver="$(latest)"
     [[ "$path" == *^* ]] && ver="${path##*^}"
-    [[ -f "$vault/$ver/$key" ]] || { echo >&2 "no such key"; exit 1; }
+    [[ -f "$vault/$ver/$key" ]] || fail
     cat "$vault/$ver/$key"; printf '\n'
-    if [[ -d "$vault/next" ]]; then
-      new=$(( $(latest) + 1 )); cp -R "$vault/$(latest)" "$vault/$new"
-      cp "$vault/next/"* "$vault/$new/"; rm -rf "$vault/next"
+    if [[ "${FAKE_ROTATE_AT:-read}" == read ]]; then rotate; fi ;;
+  rm)
+    [[ "${FAKE_ROTATE_AT:-read}" == rm ]] && rotate
+    spec="$2"
+    if [[ "$spec" == *^* ]]; then
+      ver="${spec##*^}"; [[ -d "$vault/$ver" ]] || fail
+      mv "$vault/$ver" "$vault/$ver.deleted"
+    else
+      echo >&2 "the fake supports only version deletes"; exit 2
     fi ;;
-  rm) exit 0 ;;
 esac
 SH
 
@@ -92,12 +119,14 @@ sub move {
 		GENESIS_SECRETS_BASE => 'secret/fake/', GENESIS_CREDHUB_ROOT => 'fake-bosh/fake',
 		%env,
 	);
+	local $ENV{FAKE_SAFE_SAYS} = $env{FAKE_SAFE_SAYS} // 'fake-safe-diagnostic-quoting-a-value';
 	my $out = qx{cd "$dir" && bash -c 'source .helper; move_secrets_to_credhub "path:password" "password"' 2>&1};
 	my $rc = $? >> 8;
 	return {
 		rc => $rc, out => $out,
 		stored => (-f "$dir/credhub-value" ? slurp("$dir/credhub-value") : undef),
 		safe => (-f "$dir/safe-calls" ? slurp("$dir/safe-calls") : ''),
+		vault => {map {my $v = $_; ($v => {map {($_ => slurp("$dir/vault/$v/$_"))} grep {-f "$dir/vault/$v/$_"} map {s{.*/}{}r} glob("$dir/vault/$v/*")})} grep {!/next/} map {s{.*/}{}r} glob("$dir/vault/*")},
 	};
 }
 
@@ -110,14 +139,14 @@ sub move_with_change {
 my $multiline = "fake-line-one\nfake-line-two\n\n";
 
 subtest 'a value is moved byte for byte, trailing newlines included' => sub {
-	my $r = move({1 => {password => $multiline}});
+	my $r = move({1 => {password => $multiline}}, FAKE_KV => 2);
 	is($r->{rc}, 0, 'the move succeeds') or diag $r->{out};
 	is($r->{stored}, $multiline, 'CredHub holds exactly the vault value');
-	like($r->{safe}, qr/^rm secret\/fake\/path:password$/m, 'and then the vault original is removed');
+	like($r->{safe}, qr/^rm secret\/fake\/path\^1$/m, 'and then the vault original is removed');
 };
 
 subtest 'a value CredHub does not hold exactly is never deleted' => sub {
-	my $r = move({1 => {password => $multiline}}, FAKE_CREDHUB_TRIMS => 1);
+	my $r = move({1 => {password => $multiline}}, FAKE_KV => 2, FAKE_CREDHUB_TRIMS => 1);
 	isnt($r->{rc}, 0, 'the move fails');
 	unlike($r->{safe}, qr/^rm /m, 'the vault original is kept');
 	like($r->{out}, qr/does not match/, 'the mismatch is reported');
@@ -126,7 +155,7 @@ subtest 'a value CredHub does not hold exactly is never deleted' => sub {
 
 subtest 'a value that changes in vault during the move is not deleted' => sub {
 	# The fake applies vault/next after the first read, as a rotation would.
-	my $r = move_with_change(1, 'fake-original-value', 'fake-rotated-value');
+	my $r = move_with_change(1, 'fake-original-value', 'fake-rotated-value', FAKE_KV => 2);
 	isnt($r->{rc}, 0, 'the move fails');
 	unlike($r->{safe}, qr/^rm /m, 'the changed vault value is kept');
 	like($r->{out}, qr/changed/, 'the change is reported');
@@ -142,10 +171,25 @@ subtest 'on a versioned mount, the copied version is the one read and removed' =
 	unlike($r->{safe}, qr/^rm secret\/fake\/path(?::password)?$/m, 'not the newest version, whatever it is by then');
 };
 
-subtest 'a versioned secret with other keys loses only this key' => sub {
-	my $r = move({3 => {password => 'fake-pw', username => 'fake-user'}}, FAKE_KV => 2);
-	is($r->{rc}, 0, 'the move succeeds') or diag $r->{out};
-	like($r->{safe}, qr/^rm secret\/fake\/path:password$/m, 'the key is removed, keeping the others');
+subtest 'a value rotated after the last read survives the delete' => sub {
+	# The rotation lands after every read and check, just before the
+	# delete, which is the last moment one can.
+	my $r = move_with_change(4, 'fake-v4-value', 'fake-v5-value', FAKE_KV => 2, FAKE_ROTATE_AT => 'rm');
+	like($r->{safe}, qr/^rm secret\/fake\/path\^4$/m, 'the delete names the copied version');
+	is($r->{vault}{5}{password}, 'fake-v5-value', 'so the rotated value is still in vault');
+	ok(!exists($r->{vault}{4}), 'and only the copied version is gone');
+	isnt($r->{rc}, 0, 'the move fails, since CredHub holds the older value');
+	like($r->{out}, qr/written again.*newer version 5 was kept/s, 'and says the newer version was kept');
+	unlike($r->{out}, qr/fake-v[45]-value/, 'without either value');
+};
+
+subtest 'a versioned secret with other keys is left in place' => sub {
+	my $r = move({3 => {password => 'fake-pw', username => 'fake-user'}}, FAKE_KV => 2, FAKE_ROTATE_AT => 'rm');
+	is($r->{rc}, 0, 'the copy succeeds') or diag $r->{out};
+	is($r->{stored}, 'fake-pw', 'CredHub holds the value');
+	unlike($r->{safe}, qr/^rm /m, 'nothing is removed from vault');
+	like($r->{out}, qr/left the vault copy in place: version 3 of\s+\S*secret\/fake\/path\S*\s+holds other keys/s, 'and the operator is told why');
+	unlike($r->{out}, qr/fake-(?:pw|user)/, 'without any value');
 };
 
 subtest 'a new version written during the move stops the delete' => sub {
@@ -153,6 +197,42 @@ subtest 'a new version written during the move stops the delete' => sub {
 	isnt($r->{rc}, 0, 'the move fails');
 	unlike($r->{safe}, qr/^rm /m, 'nothing is removed');
 	unlike($r->{out}, qr/fake-v[45]-value/, 'and neither value is printed');
+};
+
+subtest 'a kv v1 mount keeps the vault copy, and says why' => sub {
+	for my $kv (1, 'old') {
+		my $r = move({1 => {password => $multiline}}, FAKE_KV => $kv);
+		is($r->{rc}, 0, "the copy succeeds (mounts endpoint: $kv)") or diag $r->{out};
+		is($r->{stored}, $multiline, '... CredHub holds exactly the vault value');
+		unlike($r->{safe}, qr/^rm /m, '... nothing is removed, since kv v1 keeps no versions');
+		like($r->{out}, qr/left the vault copy in place: its vault mount is kv v1/, '... and the operator is told why');
+		unlike($r->{safe}, qr/^versions /m, '... without asking a v1 mount for versions');
+	}
+};
+
+subtest 'a failed mount lookup is not taken for kv v1' => sub {
+	my $r = move({1 => {password => 'fake-value'}}, FAKE_KV => 'fail');
+	is($r->{rc}, 0, 'the copy succeeds') or diag $r->{out};
+	unlike($r->{safe}, qr/^rm /m, 'nothing is removed');
+	like($r->{out}, qr/could not tell whether its vault mount keeps versions/, 'the operator is told the lookup failed');
+	unlike($r->{out}, qr/kv v1/, 'and not that the mount is kv v1');
+	unlike($r->{out}, qr/fake-safe-diagnostic/, 'nor anything safe said');
+};
+
+subtest 'a failed version lookup keeps the vault copy' => sub {
+	my $r = move({2 => {password => 'fake-value'}}, FAKE_KV => 2, FAKE_VERSIONS_FAIL => 1);
+	is($r->{rc}, 0, 'the copy succeeds') or diag $r->{out};
+	unlike($r->{safe}, qr/^rm /m, 'nothing is removed');
+	like($r->{out}, qr/could not list the versions/, 'the operator is told the version lookup failed');
+	unlike($r->{out}, qr/kv v1|fake-safe-diagnostic/, 'without calling it kv v1 or quoting safe');
+};
+
+subtest 'what safe says about a failed read is kept private' => sub {
+	my $r = move({1 => {password => 'fake-value'}}, FAKE_KV => 2, FAKE_GET_FAILS => 1);
+	isnt($r->{rc}, 0, 'the move fails');
+	like($r->{out}, qr/Failed to read secret .*safe exited 1/s, 'and says how safe ended');
+	unlike($r->{out}, qr/fake-safe-diagnostic/, 'not what it said');
+	ok(!defined($r->{stored}), 'and nothing reaches CredHub');
 };
 
 done_testing;

@@ -785,14 +785,54 @@ __genesis_exact_value() {
 }
 export -f __genesis_exact_value
 
-# __genesis_vault_version SECRET - the newest version of a kv v2 secret,
-# or nothing on a mount that keeps no versions.
+# __genesis_vault_kv_version SECRET - the kv version of the mount holding
+# SECRET: prints 2 or 1 and returns 0, or returns 1 when it cannot tell,
+# which is never taken for either.  It asks the endpoint the vault CLI
+# uses; a vault from before kv v2 has no such endpoint, and every kv mount
+# it has is a v1 one.  Nothing safe printed on stderr is kept.
+__genesis_vault_kv_version() {
+  safe curl GET "/sys/internal/ui/mounts/${1#/}" 2>/dev/null \
+    | /usr/bin/perl -MJSON::PP -0777 -e '
+        my $out = scalar(<STDIN>) // ""; $out =~ s/\A\s+//;
+        my ($status) = $out =~ m{\AHTTP/\d+(?:\.\d+)?[ \t]+(\d{3})} or exit 1;
+        if ($status == 404) {print "1\n"; exit 0}
+        exit 1 unless $status == 200;
+        my ($head, $body) = split(/\r?\n\r?\n/, $out, 2);
+        $body //= "";
+        if ($head =~ /^Transfer-Encoding:[ \t]*chunked[ \t]*\r?$/mi) {
+          my $joined = "";
+          while ($body =~ s/\A([0-9a-fA-F]+)[^\r\n]*\r?\n//) {
+            my $size = hex($1); last unless $size;
+            $joined .= substr($body, 0, $size, ""); $body =~ s/\A\r?\n//;
+          }
+          $body = $joined;
+        }
+        my $d = eval {JSON::PP->new->decode($body)};
+        my $m = ref($d) eq "HASH" && ref($d->{data}) eq "HASH" ? $d->{data} : undef;
+        exit 1 unless $m && defined($m->{path}) && ($m->{type} // "") =~ /\A(?:kv|generic)\z/;
+        my $o = ref($m->{options}) eq "HASH" ? $m->{options} : {};
+        print((($o->{version} // "1") eq "2" ? 2 : 1), "\n");'
+}
+export -f __genesis_vault_kv_version
+
+# __genesis_vault_version SECRET - the newest version of a kv v2 secret.
+# Returns 1, printing nothing, when safe cannot list the versions or lists
+# none, so a failed lookup is never read as an unversioned secret.
 __genesis_vault_version() {
-  safe versions "$1" 2>/dev/null \
+  local __out
+  __out="$(safe versions "$1" 2>/dev/null)" || return 1
+  printf '%s\n' "$__out" \
     | sed -e $'s/\x1b\\[[0-9;]*m//g' \
-    | awk '$1 ~ /^[0-9]+$/ && $1+0 > v+0 {v=$1} END {if (v+0 > 0) print v}'
+    | awk '$1 ~ /^[0-9]+$/ && $1+0 > v+0 {v=$1} END {if (v+0 > 0) print v; else exit 1}'
 }
 export -f __genesis_vault_version
+
+# __genesis_safe_read ARGS... - safe get, with what safe says on stderr
+# dropped, since a failed read can quote the value it was reading
+__genesis_safe_read() {
+  safe get "$@" 2>/dev/null
+}
+export -f __genesis_safe_read
 
 # __genesis_credhub_value NAME - print a CredHub value exactly as stored
 __genesis_credhub_value() {
@@ -808,16 +848,29 @@ move_secrets_to_credhub() {
   # The value passes through this function, so it is never traced, even
   # when the operator has asked for the hook's xtrace, and no message
   # below quotes it or anything safe or credhub printed.
-  local value check src="$1" dst="$2" rc __xtrace='' secret key='' version='' now from
+  local value check src="$1" dst="$2" rc __xtrace='' secret key='' kv='' version='' now from keys kept=''
   { [[ $- == *x* ]] && __xtrace=1 && set +x; } 2>/dev/null
   secret="${GENESIS_SECRETS_BASE}${src%%:*}"
   [[ "$src" == *:* ]] && key=":${src#*:}"
 
   # On a kv v2 mount, the newest version is read by its number, so the
-  # copy, the checks, and the delete are all about that one version.
-  version="$(__genesis_vault_version "$secret")"
+  # copy, the checks, and the delete are all about that one version.  A
+  # mount that cannot be identified, or versions that cannot be listed,
+  # leave the vault value where it is, since nothing could then limit a
+  # delete to the value that was copied.
+  if kv="$(__genesis_vault_kv_version "$secret")" ; then
+    if [[ $kv == 2 ]] ; then
+      version="$(__genesis_vault_version "$secret")" \
+        || kept="Genesis could not list the versions of #C{$secret} in vault, so it could not limit a delete to the version it copied"
+    else
+      kept="its vault mount is kv v1, which keeps no versions, so a delete could not be limited to the value that was copied, and a value written during the move would be lost"
+    fi
+  else
+    kv=''
+    kept="Genesis could not tell whether its vault mount keeps versions, so it could not limit a delete to the value it copied"
+  fi
   from="$secret${version:+^$version}$key"
-  __genesis_exact_value value safe get "$from" && rc=0 || rc=$?
+  __genesis_exact_value value __genesis_safe_read "$from" && rc=0 || rc=$?
   if [[ $rc -gt 0 ]] ; then
     [[ -n $__xtrace ]] && set -x
     bail "#R{[ERROR]} Failed to read secret #C{$1} from vault: safe exited $rc"
@@ -839,9 +892,13 @@ move_secrets_to_credhub() {
     bail "#R{[ERROR]} The value CredHub holds under #C{$2} does not match secret #C{$1} " \
          "(credhub read exited $rc), so the vault secret was left in place."
   fi
-  now="$(__genesis_vault_version "$secret")"
+  if [[ -n $version ]] ; then
+    now="$(__genesis_vault_version "$secret")" || now=''
+  else
+    now=''
+  fi
   check=''
-  __genesis_exact_value check safe get "$secret$key" && rc=0 || rc=$?
+  __genesis_exact_value check __genesis_safe_read "$secret$key" && rc=0 || rc=$?
   if [[ $rc -gt 0 || "$now" != "$version" || "$check" != "$value" ]] ; then
     value=''; check=''; [[ -n $__xtrace ]] && set -x
     bail "#R{[ERROR]} Secret #C{$1} changed in vault while it was being copied to CredHub " \
@@ -850,18 +907,38 @@ move_secrets_to_credhub() {
   fi
   value=''; check=''
 
-  # A versioned secret holding nothing but this key loses just the version
-  # that was copied; one holding other keys loses only this key.
-  if [[ -n $version && -n $key && "$(safe get --keys "$secret^$version" 2>/dev/null)" == "${key#:}" ]] ; then
-    from="$secret^$version"
-  else
-    from="$secret$key"
+  # Only a delete that names the copied version is safe: a value written
+  # after the last read is a newer version, and survives it.  safe can
+  # remove one key only by writing the others back with no check-and-set,
+  # and its check-and-set request would carry the other keys' values on
+  # the command line, so a version holding other keys is left whole.
+  if [[ -z $kept && -n $key ]] ; then
+    keys="$(safe get --keys "$secret^$version" 2>/dev/null)" && rc=0 || rc=$?
+    if [[ $rc -gt 0 ]] ; then
+      kept="Genesis could not list the keys of version $version of #C{$secret}, so it could not tell whether a delete would take other keys with it"
+    elif [[ "$keys" != "${key#:}" ]] ; then
+      kept="version $version of #C{$secret} holds other keys too, and vault offers no way to remove one key that a concurrent write could not race"
+    fi
   fi
-  safe rm "$from" >/dev/null 2>&1 && rc=0 || rc=$?
-  [[ -n $__xtrace ]] && set -x
+  if [[ -n $kept ]] ; then
+    [[ -n $__xtrace ]] && set -x
+    genesis_log @warning "Copied secret #C{$1} to CredHub under #C{$2}, and left the vault copy in place: $kept.  Remove it from vault once nothing else writes it." >&2
+    return 0
+  fi
+
+  safe rm "$secret^$version" >/dev/null 2>&1 && rc=0 || rc=$?
   if [[ $rc -gt 0 ]] ; then
-    bail "#R{[ERROR]} Copied secret #C{$1} to CredHub, but failed to remove it from vault: safe exited $rc"
+    [[ -n $__xtrace ]] && set -x
+    bail "#R{[ERROR]} Copied secret #C{$1} to CredHub, but failed to remove version $version of it from vault: safe exited $rc"
   fi
+  now="$(__genesis_vault_version "$secret")" || now=''
+  [[ -n $__xtrace ]] && set -x
+  if [[ -z $now ]] ; then
+    genesis_log @warning "Copied secret #C{$1} to CredHub under #C{$2} and removed version $version of it from vault, but could not list its versions afterwards to check that no newer one was written meanwhile." >&2
+  elif [[ $now -gt $version ]] ; then
+    bail "#R{[ERROR]} Secret #C{$1} was written again in vault while it was being moved: CredHub holds version $version, which was removed from vault, and the newer version $now was kept.  Run this again to copy the newer value."
+  fi
+  return 0
 }
 export -f move_secrets_to_credhub
 
