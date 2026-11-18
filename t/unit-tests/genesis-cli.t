@@ -37,4 +37,21 @@ subtest 'the deployments aliases' => sub {
 	}
 };
 
+subtest 'the deployments count option' => sub {
+	require_ok './bin/genesis';
+
+	# The count option answers to its correct spelling and to the old one.
+	require Getopt::Long;
+	my %specs = @{$Genesis::Commands::PROPS{deployments}{options}};
+	my ($spec) = grep {/\|n=i$/} keys %specs;
+	ok($spec, 'deployments has a count option');
+	for my $name (qw/recent resent n/) {
+		my %got;
+		my $parser = Getopt::Long::Parser->new(config => ['bundling_override', 'no_ignore_case']);
+		my $ok = $parser->getoptionsfromarray($name eq 'n' ? ['-n', '3'] : ["--$name", '3'], \%got, $spec);
+		ok($ok, $name eq 'n' ? "-n parses" : "--$name parses");
+		is((values %got)[0], 3, "and takes the count");
+	}
+};
+
 done_testing;

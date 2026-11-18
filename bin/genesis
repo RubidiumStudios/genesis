@@ -955,7 +955,7 @@ define_command("deployments", {
 			"List all deployments, not just the latest.",
 		"json|j" =>
 			"Output the deployments in json format.",
-		'resent|n=i' =>
+		'recent|resent|n=i' =>
 			"List the last n deployments.",
 		'details|d' =>
 			"Show the details of each deployment."
