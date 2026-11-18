@@ -7,6 +7,7 @@ use base 'Genesis::Base'; # for _memoize
 use Genesis;
 use Genesis::State;
 use Genesis::Helpers;
+use Genesis::Hook (); # load_failure, for kit modules that fail to load
 
 # Ignore redefinition warnings for Addon hooks
 $SIG{__WARN__} = sub {
@@ -240,7 +241,9 @@ sub run_hook {
 		my $args = $opts{args} || [];
 		my @want_help = delete_from_array($args, qr/^(?:-h|--help)$/);
 		push @want_help, 'list' if !$opts{script} || $opts{script} =~ /^(list|help)$/;
-		@args = @$args; # For bash addon hooks
+		# A bash addon gets the operator's arguments exactly, and any of them
+		# can be a credential, so each is wrapped to be traced as its size.
+		@args = map {ref($_) ? $_ : {redact => $_}} @$args;
 		%module_options = (
 			script => $opts{script},
 			args => $args,
@@ -404,7 +407,7 @@ EOF
 		eval {require $hook_file unless $hook_module->can('init')};
 		bail(
 			"Could not load Perl module %s to run hook %s in kit %s: %s",
-			$hook_file, $hook_name, $self->id, $@
+			$hook_file, $hook_name, $self->id, Genesis::Hook::load_failure($@)
 		) if $@;
 
 		# Don't cache hooks that have side effects, just ones that are idempotent

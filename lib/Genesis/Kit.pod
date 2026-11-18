@@ -452,7 +452,9 @@ Used with the C<addon> hook. The name of the addon script to execute.
 =item C<args>
 
 Used with the C<addon> and C<runtime-config> hooks. An arrayref of
-arguments to pass to the hook.
+arguments to pass to the hook. A bash addon gets each argument exactly,
+but since an operator can pass it a credential, each one is wrapped
+before C<run> sees it, so the trace shows it only by its size.
 
 =item C<purpose>
 
@@ -608,7 +610,8 @@ the kit identity string.
 
 The Perl hook module file could not be loaded via C<require>. The four
 C<%s> placeholders are: module file path, hook name, kit identity, and
-the Perl error from C<$@>.
+where the module died, from C<Genesis::Hook::load_failure>, which never
+repeats what the module said.
 
 =item C<"Could not run '%s' hook successfully!">
 

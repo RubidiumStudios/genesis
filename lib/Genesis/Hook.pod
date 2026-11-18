@@ -1262,7 +1262,9 @@ path and the second is the kit identifier.
 =item *
 
 C<"Failed to load hook module %s: %s"> -- raised if C<require> fails. The
-first C<%s> is the file path and the second is the Perl error string.
+first C<%s> is the file path and the second is C<load_failure>'s account of
+where the module died, never what it said, since a kit's module can die
+quoting the values it holds.
 
 =back
 
@@ -1270,6 +1272,29 @@ B<Examples:>
 
     my $pkg = Genesis::Hook->load_hook_module('hooks/blueprint.pm', $kit);
     # Returns: 'Genesis::Hook::Blueprint::my_kit'
+
+=head2 load_failure
+
+    my $why = Genesis::Hook::load_failure($@);
+
+Describes how a kit's Perl code died without repeating what it said. A kit's module can die quoting anything it holds, configuration and credential values included, and a die is logged wherever it is caught, so the description is where the die happened. That is the last C<at FILE line N> on the first non-blank line of the message, which is where Perl reports a die or a compile error, and FILE must name a file that exists or an C<(eval N)>, so words that only look like a location are never repeated. A die with an object names only the object's class, and Perl's refusal to retry a file that already failed to compile is described as such.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$err>
+
+The exception, usually C<$@>.
+
+=back
+
+B<Returns:> A phrase such as C<'it died at /kit/hooks/addon-x.pm line 12'>, C<'it died with a My::Error object'>, C<'it failed to load earlier in this run'>, or C<'it died, at no line Perl could name'>.
+
+B<Examples:>
+
+    eval {require $file};
+    bail("Could not load %s: %s", $file, Genesis::Hook::load_failure($@)) if $@;
 
 =head2 tempfile
 

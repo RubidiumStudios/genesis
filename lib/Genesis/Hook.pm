@@ -43,6 +43,32 @@ sub tempdir {
 	return $dir;
 }
 
+# load_failure - how a kit's Perl code died, without what it said {{{
+#
+# A kit's module can die quoting anything it holds, configuration and
+# credential values included, and a die is logged wherever it is caught.
+# So a failure is described by where it happened: the last "at FILE line
+# N" on the first line of the message, which is where Perl says a die or a
+# compile error came from.  FILE must name a file that exists, or an eval,
+# so that words in the message that only look like a location are never
+# repeated.  A die with an object names only its class.
+sub load_failure {
+	my ($err) = @_;
+	return "it died without saying why" unless defined($err) && length("$err");
+	return sprintf("it died with a %s object", ref($err)) if ref($err);
+	my $first = (grep {/\S/} split(/\n/, "$err"))[0] // '';
+	# Perl will not retry a file that already failed to compile.
+	return "it failed to load earlier in this run" if $first =~ /\AAttempt to reload .* aborted\.\z/;
+	my ($file, $line);
+	while ($first =~ /\bat (\S(?:.*?\S)?) line (\d+)\b/g) {
+		my ($at, $n) = ($1, $2);
+		($file, $line) = ($at, $n) if -e $at || $at =~ /\A\(eval \d+\)\z/;
+	}
+	return sprintf("it died at %s line %d", $file, $line) if defined($file);
+	return "it died, at no line Perl could name";
+}
+
+# }}}
 sub load_hook_module {
 	my ($class, $file, $kit) = @_;
 
@@ -58,7 +84,7 @@ sub load_hook_module {
 
 	if (!$INC{$module_path}) {
 		eval {require $file};
-		bail "Failed to load hook module %s: %s", $file, $@ if $@;
+		bail "Failed to load hook module %s: %s", $file, load_failure($@) if $@;
 		# Mark it as loaded in %INC to prevent reloading
 		$INC{$module_path} = $file;
 	}

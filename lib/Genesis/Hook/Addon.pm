@@ -33,9 +33,13 @@ sub help {
 			) unless $self->{file} =~ /hooks\/addon\.pm$/;
 			$addons{$_} = $cmd_details->{$_} for keys %$cmd_details;
 		} else {
-			info (
-				"\n#Gu{%s}\n[[  >>%s\n",
-				$self->{label}, join("\n[[  >>", split("\n",$self->cmd_details()))
+			# Help text is what the kit chose to print, and it can expand
+			# configuration values, so the terminal shows it and a log file
+			# records only that it was withheld.
+			info("\n#Gu{%s}", $self->{label});
+			info({private => 1},
+				"[[  >>%s\n",
+				join("\n[[  >>", split("\n",$self->cmd_details()))
 			);
 			return 1;
 		}
@@ -51,27 +55,36 @@ sub help {
 		my $cmd = $file =~ s{^.*hooks/addon-(.*?)(\.pm)?$}{$1}r;
 		if ($file !~ /\.pm$/) {
 			next if in_array($file.'.pm', @module_files); # prefer perl modules over other files
-			# run the help command on the bash script
-			my ($out, $rc, $err) = run({
-				interactive => 0, stderr => undef
+			# run the help command on the bash script; what it printed on
+			# either stream is kept from the log, so a failure is described
+			# by how the script ended.
+			my ($out, $rc) = run({
+				interactive => 0, stderr => 0
 			},
 			'cd "$1"; source .helper; hook=$2; shift 2; $hook "$@"',
 			$self->kit->path, $file, 'help'
 			);
-			trace("Failed to run addon help command for %s (rc: %s): %s", $file, $rc, $err) if $rc;;
+			trace("Addon %s gave no help: its help command %s", $file, Genesis::Kit::_hook_ended($rc)) if $rc;
 			$addons{$cmd} = $out unless $rc;
 		} else {
-			eval {
-				my $class = $self->load_hook_module($file, $self->kit);
-				next unless $class && $class->can('cmd_details');
+			# load_hook_module traces where a module that fails to load
+			# died, and a cmd_details that dies is described the same way.
+			my $class = eval {$self->load_hook_module($file, $self->kit)};
+			unless ($class) {
+				trace("Addon module %s gave no help: it could not be loaded", $file);
+				next;
+			}
+			next unless $class->can('cmd_details');
+			my $loaded = eval {
 				my ($cmd) = $file =~ m{addon-(.*)\.pm};
 				# FIXME: Initializing the subcommand addons with the current env is a hack,
 				# 			but it is needed to ensure that the addon's cmd_details method
 				# 			can access the environment variables and other context.
 				local $ENV{GENESIS_ADDON_SCRIPT} = $cmd;
 				$addons{"$cmd"} = $class->cmd_details() // 'No help available';
+				1;
 			};
-			trace("Failed to load addon module %s: %s", $file, $@) if $@;
+			trace("Addon module %s gave no help: %s", $file, Genesis::Hook::load_failure($@)) unless $loaded;
 		}
 	}
 
@@ -88,10 +101,8 @@ sub help {
 
 	foreach my $cmd (sort keys %addons) {
 		$label = $cmd =~ s/~/\|/r;
-		info(
-			"\n  #Gu{%s}\n[[    >>%s",
-			$label, join("\n[[    >>", split("\n",$addons{$cmd}))
-		);
+		info("\n  #Gu{%s}", $label);
+		info({private => 1}, "[[    >>%s", join("\n[[    >>", split("\n",$addons{$cmd})));
 	}
 	print STDERR "\n";
 	return $self->done(1);

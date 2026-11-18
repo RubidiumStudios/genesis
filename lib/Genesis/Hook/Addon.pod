@@ -165,6 +165,8 @@ After all sources are gathered, the combined set of commands and descriptions
 is printed to standard error in sorted order. If no addon subcommands are
 found, a message indicating the kit defines no addons is printed instead.
 
+Help text is whatever the kit chose to print, and it can expand configuration values, so it is private output. The terminal shows it, and a log file records each addon's name and only that its help text was withheld. A shell script whose help command fails is left out of the listing and traced by how it ended, such as C<exited 4>, with nothing it printed on either stream. A Perl module that fails to load, or whose C<cmd_details> dies, is left out and traced by where it died (see C<load_failure> in L<Genesis::Hook>), never by what it said.
+
 B<Parameters:>
 
 =over 4
