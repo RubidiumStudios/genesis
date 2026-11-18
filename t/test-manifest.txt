@@ -46,6 +46,7 @@ unit-tests/genesis_commands-private_output.t  # requested credentials skip log f
 unit-tests/genesis_env-create_env_diff_privacy.t # create-env diffs list paths only
 unit-tests/genesis_env-deploy_log_privacy.t  # saved deploy output omits unredacted diffs
 unit-tests/genesis_kit-hook_tracing.t  # hook xtrace and env dump keep values out
+unit-tests/genesis_kit-hook_failure_privacy.t  # failed hooks are described without their output
 unit-tests/genesis_helpers-move_secrets_to_credhub.t  # secret moves are exact and verified before delete
 unit-tests/trace_capture-harness.t  # capture_trace sees child fds, fresh registry
 unit-tests/genesis_failure-diagnostics.t     # failed credential commands report privately

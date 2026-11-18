@@ -615,10 +615,11 @@ the Perl error from C<$@>.
 A Perl module hook's C<perform> method returned a false value. C<%s>
 is the hook name.
 
-=item C<"Could not create new env #C{%s} (in %s): 'new' hook exited %d">
+=item C<"Could not create new env #C{%s} (in %s): 'new' hook %s">
 
 The C<new> hook exited with a non-zero exit code. The placeholders are the
-environment name, the deployment root path, and the exit code.
+environment name, the deployment root path, and how the hook ended, as
+L</_hook_ended> describes it.
 
 =item C<"Could not create new env #C{%s} (in %s): 'new' hook did not create #M{%1$s}">
 
@@ -626,33 +627,38 @@ The C<new> hook exited successfully but did not create the expected
 C<E<lt>env-nameE<gt>.yml> file. The placeholders are the environment name
 and the deployment root path.
 
-=item C<"Could not determine which YAML files to merge: 'blueprint' hook exited with %d:">
+=item C<"Could not determine which YAML files to merge: 'blueprint' hook %s (%s)">
 
-The C<blueprint> hook exited with a non-zero exit code. C<%d> is the exit
-code, followed by the hook's stdout output.
+The C<blueprint> hook exited with a non-zero exit code. The placeholders
+are how the hook ended, as L</_hook_ended> describes it, and the kind of
+failure C<Genesis::failure_summary> finds in its stdout. The stdout itself
+is not shown, since a hook can print credential values.
 
 =item C<"Could not determine which YAML files to merge: 'blueprint' specified no files">
 
 The C<blueprint> hook succeeded but produced no output.
 
-=item C<"Could not run feature hook in kit %s:">
+=item C<"Could not run feature hook in kit %s: 'features' hook %s (%s)">
 
-The C<features> hook exited non-zero. C<%s> is the kit identity.
+The C<features> hook exited non-zero. The placeholders are the kit
+identity, how the hook ended, and the kind of failure found in its stdout,
+which is not shown.
 
-=item C<"Cannot continue with deployment: 'pre-deploy' hook for #C{%s} environment exited %d.">
+=item C<"Cannot continue with deployment: 'pre-deploy' hook for #C{%s} environment %s.">
 
-The C<pre-deploy> hook failed. The placeholders are the environment name
-and the exit code.
+The C<pre-deploy> hook failed, or it or its shell was killed by a signal.
+The placeholders are the environment name and how the hook ended.
 
-=item C<"Could not run '%s' hook successfully - exited with %d:">
+=item C<"Could not run '%s' hook successfully: it %s (%s)">
 
-A bash hook exited non-zero and produced stdout output. C<%s> is the hook
-name and C<%d> is the exit code, followed by stdout.
+A bash hook exited non-zero and produced stdout. The placeholders are the
+hook name, how it ended, and the kind of failure found in its stdout,
+which is not shown.
 
-=item C<"Could not run '%s' hook successfully - exited with %d">
+=item C<"Could not run '%s' hook successfully: it %s">
 
-A bash hook exited non-zero without stdout. C<%s> is the hook name and
-C<%d> is the exit code.
+A bash hook exited non-zero without stdout. The placeholders are the hook
+name and how it ended.
 
 =back
 
@@ -1302,6 +1308,35 @@ B<Examples:>
   # with GENESIS_HOOK_XTRACE set
   my $traced = Genesis::Kit::_xtrace_hook_file($kit->path('hooks/info'));
   # $traced is ".../hooks/info-trace"
+
+=head2 _hook_ended
+
+  my $ended = Genesis::Kit::_hook_ended($rc);
+
+Describes how a Bash hook ended, for a failure message. A status from 129
+to 159 is what a shell reports for a command killed by a signal, and what
+C<run> reports for a shell that was killed itself, so it is named as that
+signal. Any other status is given as the exit code. A hook's stdout can
+carry credential values, so failure messages use this description and
+never quote what the hook printed.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$rc>
+
+The exit status C<run> returned.
+
+=back
+
+B<Returns:> A phrase such as C<exited 3>, C<ended with status 143, as it
+does when killed by signal 15>, or C<ended with no exit status>.
+
+B<Examples:>
+
+  Genesis::Kit::_hook_ended(3);    # "exited 3"
+  Genesis::Kit::_hook_ended(143);  # "ended with status 143, as it does when killed by signal 15"
 
 =head2 _deref_metadata
 

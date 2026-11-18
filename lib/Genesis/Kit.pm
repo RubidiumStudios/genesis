@@ -437,10 +437,14 @@ EOF
 
 	exit $rc if $is_shell;
 
+	# The hook's stdout is for Genesis to parse and can carry credential
+	# values, so a failure is described by how the hook ended alone.
+	my $ended = _hook_ended($rc);
+
 	if ($hook eq 'new') {
 		bail(
-			"Could not create new env #C{%s} (in %s): 'new' hook exited %d",
-			$ENV{GENESIS_ENVIRONMENT}, humanize_path($ENV{GENESIS_ROOT}), $rc,
+			"Could not create new env #C{%s} (in %s): 'new' hook %s",
+			$ENV{GENESIS_ENVIRONMENT}, humanize_path($ENV{GENESIS_ROOT}), $ended,
 		)	unless ($rc == 0);
 
 		bail(
@@ -453,9 +457,8 @@ EOF
 
 	if ($hook eq 'blueprint') {
 		bail(
-			"Could not determine which YAML files to merge: 'blueprint' hook exited with %d:".
-			"\n\n#u{stdout:}\n%s\n\n",
-			$rc, $out||"#i{No stdout provided}"
+			"Could not determine which YAML files to merge: 'blueprint' hook %s (%s)",
+			$ended, Genesis::failure_summary($out)
 		) if ($rc != 0);
 
 		$out =~ s/^\s+//;
@@ -468,9 +471,8 @@ EOF
 
 	if (grep { $_ eq $hook}  qw/features/) {
 		bail(
-			"Could not run feature hook in kit %s:".
-			"\n\n#u{stdout:}\n%s\n\n",
-			$self->id, $out||"#i{No stdout provided}"
+			"Could not run feature hook in kit %s: 'features' hook %s (%s)",
+			$self->id, $ended, Genesis::failure_summary($out)
 		) unless $rc == 0;
 		$out =~ s/^\s+//;
 		return [split(/\s+/, $out)];
@@ -478,8 +480,8 @@ EOF
 
 	if ($hook eq 'pre-deploy') {
 		bail(
-			"Cannot continue with deployment: 'pre-deploy' hook for #C{%s} environment exited %d.",
-			$ENV{GENESIS_ENVIRONMENT}, $rc,
+			"Cannot continue with deployment: 'pre-deploy' hook for #C{%s} environment %s.",
+			$ENV{GENESIS_ENVIRONMENT}, $ended,
 		) unless ($rc == 0);
 		my $contents;
 		my $fn = $opts{env}->workpath("data");
@@ -502,17 +504,30 @@ EOF
 	);
 
 	if ($rc != 0) {
-		if (defined($out)) {
+		if (defined($out) && length($out)) {
 			bail(
-				"Could not run '%s' hook successfully - exited with %d:".
-				"\n\n#u{stdout:}\n%s\n\n",
-				$hook, $rc, $out||"#i{No stdout provided}"
+				"Could not run '%s' hook successfully: it %s (%s)",
+				$hook, $ended, Genesis::failure_summary($out)
 			);
 		} else {
-			bail("Could not run '%s' hook successfully - exited with %d", $hook, $rc);
+			bail("Could not run '%s' hook successfully: it %s", $hook, $ended);
 		}
 	}
 	return 1;
+}
+
+# }}}
+# _hook_ended - how a Bash hook ended, for a failure message {{{
+#
+# A hook killed by a signal ends its shell with 128 plus the signal, and
+# run() reports a killed shell the same way, so a status in that range is
+# named as the signal it stands for.
+sub _hook_ended {
+	my ($rc) = @_;
+	return "ended with no exit status" unless defined($rc) && $rc =~ /^\d+$/;
+	return sprintf("ended with status %d, as it does when killed by signal %d", $rc, $rc - 128)
+		if $rc > 128 && $rc < 160;
+	return "exited $rc";
 }
 
 # }}}
