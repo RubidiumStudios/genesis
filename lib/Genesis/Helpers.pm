@@ -854,17 +854,27 @@ export -f __genesis_safe_read
 # with a NUL byte, and 2 when it cannot tell.  With "versions", it asks
 # for the newest two versions, prints the newest, and ends with 4 when
 # there are two.  What credhub says on stderr is only matched, to tell a
-# missing name apart, and never printed.
+# missing name apart, and never printed.  Its stdout and stderr are read
+# together, so a credhub that fills one pipe while Genesis waits on the
+# other cannot stall them both.
 __genesis_credhub_value() {
-  /usr/bin/perl -MIPC::Open3 -MSymbol=gensym -MJSON::PP -e '
+  /usr/bin/perl -MIPC::Open3 -MIO::Select -MSymbol=gensym -MJSON::PP -e '
     my ($name, $versions) = @ARGV;
     my @cmd = ("credhub", "get", "--name=$name", "--output-json");
     push @cmd, "--versions=2" if $versions;
     my ($in, $out, $err) = (undef, undef, gensym);
     my $pid = eval {open3($in, $out, $err, @cmd)} or exit 2;
     close($in);
-    my $json = do {local $/; <$out>} // "";
-    my $said = do {local $/; <$err>} // "";
+    my %got = (fileno($out) => "", fileno($err) => "");
+    my $ready = IO::Select->new($out, $err);
+    while ($ready->count) {
+      for my $fh ($ready->can_read) {
+        my $n = sysread($fh, my $chunk, 65536);
+        next if !defined($n) && $!{EINTR};
+        if ($n) { $got{fileno($fh)} .= $chunk } else { $ready->remove($fh) }
+      }
+    }
+    my ($json, $said) = @got{fileno($out), fileno($err)};
     waitpid($pid, 0);
     exit(($said =~ /does not exist/i) ? 1 : 2) if $?;
     my $d = eval {JSON::PP->new->utf8->decode($json)};

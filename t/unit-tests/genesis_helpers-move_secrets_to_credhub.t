@@ -18,6 +18,7 @@ use helper;
 use TraceCapture;
 use Test::More;
 use File::Temp qw/tempdir/;
+use POSIX ();
 
 use Genesis;
 use Genesis::Helpers;
@@ -90,11 +91,16 @@ SH
 # newest value, or with --versions=2 the newest two, and a name with no
 # value gets CredHub's "does not exist" answer.  FAKE_CREDHUB_RACE is a
 # value something else writes just before the fake's own write, and
-# FAKE_CREDHUB_GET_FAILS makes every read fail some other way.
+# FAKE_CREDHUB_GET_FAILS makes every read fail some other way.  With
+# FAKE_CREDHUB_NOISE, every read first writes more to stderr than a pipe
+# holds, as a CLI full of warnings could.
 put_file("$dir/bin/credhub", 0755, <<'SH');
 #!/bin/bash
 store="$FAKE_DIR/credhub-value"; count="$FAKE_DIR/credhub-count"
 cmd="$1"; shift
+if [[ -n "${FAKE_CREDHUB_NOISE:-}" && $cmd == get ]]; then
+  head -c 1048576 /dev/zero | tr '\0' 'n' >&2; echo >&2
+fi
 attached=''; value=''; versions=''
 for a in "$@"; do
   case "$a" in
@@ -123,6 +129,28 @@ case "$cmd" in
     ' "$versions" "$(cat "$count")" "${FAKE_CREDHUB_TYPE:-value}" < "$store" ;;
 esac
 SH
+
+# within - run a bash command in its own process group, with its output
+# kept, and kill the whole group if it has not ended within $secs seconds,
+# so a move that hangs fails its test instead of the run.
+sub within {
+	my ($secs, $cmd) = @_;
+	my $pid = fork() // die "cannot fork: $!";
+	if (!$pid) {
+		setpgrp(0, 0);
+		open(STDOUT, '>', "$dir/out") or exit 127;
+		open(STDERR, '>&', \*STDOUT) or exit 127;
+		exec('bash', '-c', $cmd) or exit 127;
+	}
+	my $deadline = time + $secs;
+	while (time < $deadline) {
+		return ($? >> 8, slurp("$dir/out"), 0) if waitpid($pid, POSIX::WNOHANG()) > 0;
+		select(undef, undef, undef, 0.1);
+	}
+	kill('KILL', -$pid);
+	waitpid($pid, 0);
+	return (undef, slurp("$dir/out"), 1);
+}
 
 # move - run move_secrets_to_credhub on fake/path:password with the vault
 # holding %$versions ({version => {key => value}}); returns what happened.
@@ -155,10 +183,9 @@ sub move {
 	);
 	local $ENV{FAKE_SAFE_SAYS} = $env{FAKE_SAFE_SAYS} // 'fake-safe-diagnostic-quoting-a-value';
 	local $ENV{FAKE_SRC} = $src;
-	my $out = qx{cd "$dir" && bash -c 'source .helper; move_secrets_to_credhub "\$FAKE_SRC" "password"' 2>&1};
-	my $rc = $? >> 8;
+	my ($rc, $out, $hung) = within(60, qq{cd "$dir" && source .helper && move_secrets_to_credhub "\$FAKE_SRC" "password"});
 	return {
-		rc => $rc, out => $out,
+		rc => $rc, out => $out, hung => $hung,
 		stored => (-f "$dir/credhub-value" ? slurp("$dir/credhub-value") : undef),
 		safe => (-f "$dir/safe-calls" ? slurp("$dir/safe-calls") : ''),
 		credhub => (-f "$dir/credhub-calls" ? slurp("$dir/credhub-calls") : ''),
@@ -216,6 +243,14 @@ subtest 'a value that starts with a hyphen is given to credhub attached' => sub 
 	is($r->{rc}, 0, 'the move succeeds') or diag $r->{out};
 	is($r->{stored}, '-fake-hyphen-value', 'CredHub holds the value exactly');
 	like($r->{credhub}, qr/^set value-attached$/m, 'it was passed as --value=, so it is never taken for an option');
+};
+
+subtest 'a CredHub read is not stalled by what credhub says on stderr' => sub {
+	my $r = move({1 => {password => 'fake-vault-value'}}, FAKE_KV => 2, holds => 'fake-vault-value', FAKE_CREDHUB_NOISE => 1);
+	ok(!$r->{hung}, 'the move does not hang');
+	is($r->{rc}, 0, 'it succeeds') or diag substr($r->{out} // '', -400);
+	like($r->{safe}, qr/^rm secret\/fake\/path\^1$/m, 'and the vault original is removed');
+	unlike($r->{out}, qr/nnnn/, 'without passing on what credhub said');
 };
 
 subtest 'a destination already holding the same value is a retry' => sub {

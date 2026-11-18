@@ -1484,7 +1484,9 @@ cannot list it), read Vault without keeping what safe says on stderr and
 refuse a value the move cannot carry exactly, and read a CredHub value
 exactly. That last tells a missing name from a failed read, refuses a
 value with a NUL byte or a credential of another type, and, when asked,
-says whether the name holds more than one version.
+says whether the name holds more than one version. It reads credhub's
+stdout and stderr together, so a credhub that fills one pipe while the
+other is being read cannot stall the move.
 
 B<Examples:>
 
