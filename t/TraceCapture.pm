@@ -31,6 +31,11 @@ sub capture_trace(&;%) {
 	{
 		no warnings 'once';
 		local $Genesis::Log::Logger = undef;
+		# Each capture starts with an empty credential registry, so a value
+		# a test expects to be scrubbed is one this capture registered, not
+		# one an earlier test left behind.
+		local %Genesis::Log::SECRETS = ();
+		local $Genesis::Log::SECRET_PATTERN = undef;
 		local $ENV{GENESIS_TRACE} = $opts{terminal_trace} ? 'y' : undef;
 		local $ENV{GENESIS_DEBUG} = undef;
 		local $ENV{QUIET} = undef;

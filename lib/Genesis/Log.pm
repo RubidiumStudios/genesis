@@ -73,7 +73,7 @@ our $MIN_SECRET_LENGTH = 6;
 # here would skip the terminal setup Genesis::logger does on first use --
 # and so that it outlives a logger being replaced.
 our %SECRETS;
-my $secret_pattern;
+our $SECRET_PATTERN;  # the compiled scrub pattern, rebuilt when %SECRETS changes
 
 # Credentials a caller can hand Genesis in its environment.  Registering a
 # name here only adds scrubbing; it never makes anything visible.
@@ -112,7 +112,7 @@ sub register_secret {
 	for my $form (grep {length($_) >= $MIN_SECRET_LENGTH} @forms) {
 		next if exists($SECRETS{$form});
 		$SECRETS{$form} = $label;
-		$secret_pattern = undef;
+		$SECRET_PATTERN = undef;
 	}
 	return;
 }
@@ -122,7 +122,7 @@ sub register_secret {
 sub scrub {
 	my ($self, $text) = @_;
 	return $text unless defined($text) && %SECRETS;
-	$secret_pattern //= do {
+	$SECRET_PATTERN //= do {
 		my $alternatives = join('|',
 			map {quotemeta}
 			sort {length($b) <=> length($a) || $a cmp $b}
@@ -130,7 +130,7 @@ sub scrub {
 		);
 		qr/($alternatives)/;
 	};
-	$text =~ s/$secret_pattern/<redacted:$SECRETS{$1}>/g;
+	$text =~ s/$SECRET_PATTERN/<redacted:$SECRETS{$1}>/g;
 	return $text;
 }
 

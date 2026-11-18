@@ -25,10 +25,28 @@ use Service::Credhub;
 
 my $dir = tempdir(CLEANUP => 1);
 mkdir "$dir/bin";
-# Each fake records nothing and prints nothing a test does not ask for.
-put_file("$dir/bin/$_", 0755, "#!/bin/bash\nexit 0\n") for qw/safe curl/;
-put_file("$dir/bin/credhub", 0755, "#!/bin/bash\necho '{}'\n");
+# Each fake appends the arguments it receives, one per line, to
+# $dir/argv-<name>, and `safe auth` also appends what it reads on stdin,
+# so a test can check the child got the value the trace leaves out.  The
+# fakes print nothing a test does not ask for.
+for my $name (qw/safe curl credhub bosh/) {
+	put_file("$dir/bin/$name", 0755, join("\n",
+		'#!/bin/bash',
+		qq(for a in "\$@"; do printf '%s\\n' "\$a"; done >> "$dir/argv-$name"),
+		($name eq 'safe'    ? (qq([[ \$1 == auth ]] && cat >> "$dir/argv-$name")) : ()),
+		($name eq 'credhub' ? ("echo '{}'") : ()),
+		'exit 0', ''));
+}
 $ENV{PATH} = "$dir/bin:$ENV{PATH}";
+
+# received - the arguments a fake has received since the last call
+sub received {
+	my ($name) = @_;
+	my $file = "$dir/argv-$name";
+	my $got = -f $file ? Genesis::slurp($file) : '';
+	unlink $file;
+	return $got;
+}
 
 subtest 'a wrapped argument reaches the command but not the trace' => sub {
 	my $value = fake_secret('wrapped');
@@ -57,13 +75,16 @@ subtest 'vault writes keep their values out of the trace' => sub {
 	no warnings 'redefine';
 	local *Service::Vault::_confirm_written = sub { 1 };
 	my $vault = bless({url => 'https://10.0.0.5', name => 'fake'}, 'Service::Vault');
+	received('safe');
 	my $log = capture_trace { $vault->set('secret/fake/path', admin_password => $value, other => 'shown-nowhere') };
+	like(received('safe'), qr/^admin_password=\Q$value\E$/m, 'safe receives the pair whole');
 	unlike($log, qr/\Q$value\E/, 'the value is absent from the trace');
 	like($log, qr/admin_password=<redacted:\d+ bytes>/, 'the key stays in view');
 	unlike($log, qr/shown-nowhere/, 'every value is redacted, not just ones that look secret');
 
 	my $chained = fake_secret('vault-set-chained');
 	$log = capture_trace { $vault->query('rm', 'secret/fake/path', '-f', '--', 'set', 'secret/fake/path', "token=$chained") };
+	like(received('safe'), qr/^token=\Q$chained\E$/m, 'safe receives the chained pair whole');
 	unlike($log, qr/\Q$chained\E/, 'a set chained after another command is redacted too');
 	like($log, qr/token=<redacted:\d+ bytes>/, 'with its key in view');
 };
@@ -101,7 +122,9 @@ subtest 'safe auth keeps its credentials out of the trace' => sub {
 	local $ENV{VAULT_ROLE_ID} = $value;
 	local $ENV{VAULT_SECRET_ID} = fake_secret('vault-secret-id');
 	my $vault = bless({url => 'https://10.0.0.5', name => 'fake'}, 'Service::Vault::Remote');
+	received('safe');
 	my $log = capture_trace { $vault->authenticate };
+	like(received('safe'), qr/^\Q$value\E$/m, 'safe auth reads the credential');
 	like($log, qr/safe auth/, 'the auth command is traced');
 	unlike($log, qr/\Q$value\E/, 'the credential is absent from the trace');
 };
@@ -120,11 +143,14 @@ subtest 'CredHub writes keep their values out of the trace' => sub {
 	) {
 		my ($type, $value) = @$case;
 		my ($secret) = grep {/^fake-/} values %$value;
+		received('credhub');
 		my $log = capture_trace { my @r = $credhub->set('fake/path', $value, $type) };
+		like(received('credhub'), qr/^\Q$secret\E$/m, "$type: credhub receives the value");
 		unlike($log, qr/\Q$secret\E/, "$type: the value is absent from the trace");
 	}
 	my $data = fake_secret('credhub-curl-data');
 	my $log = capture_trace { $credhub->query('/api/v1/data', _method => 'put', _data => qq({"value":"$data"})) };
+	like(received('credhub'), qr/^\Q{"value":"$data"}\E$/m, 'credhub curl receives the request body');
 	unlike($log, qr/\Q$data\E/, 'credhub curl: the request body is absent from the trace');
 };
 
@@ -133,9 +159,13 @@ subtest 'curl keeps credentials and headers out of the trace' => sub {
 	my $basic = fake_secret('curl-basic');
 	my $header = fake_secret('curl-header');
 	for my $creds ("Bearer $token", "user:$basic") {
+		received('curl');
 		my $log = capture_trace {
 			my @r = Genesis::curl('GET', 'https://example.invalid/x', {'X-Api-Key' => $header}, undef, 0, $creds)
 		};
+		my $got = received('curl');
+		like($got, qr/^X-Api-Key: \Q$header\E$/m, 'curl receives the header');
+		like($got, qr/\Q$token\E|\Q$basic\E/, 'curl receives the credentials');
 		unlike($log, qr/\Q$token\E|\Q$basic\E/, 'the credentials are absent from the trace');
 		unlike($log, qr/\Q$header\E/, 'a header value is absent from the trace');
 		like($log, qr/X-Api-Key: <redacted:\d+ bytes>/, 'the header name stays in view');
@@ -144,9 +174,10 @@ subtest 'curl keeps credentials and headers out of the trace' => sub {
 
 subtest 'the bosh command dump shows wrapped arguments redacted' => sub {
 	my $value = fake_secret('bosh-arg');
-	put_file("$dir/bin/bosh", 0755, "#!/bin/bash\nexit 0\n");
 	Service::BOSH->set_command("$dir/bin/bosh");
+	received('bosh');
 	my $log = capture_trace { bless({}, 'Service::BOSH')->execute('update-config', '--type=cloud', {redact => $value}) };
+	is(received('bosh'), "update-config\n--type=cloud\n$value\n", 'bosh receives the exact arguments');
 	unlike($log, qr/\Q$value\E/, 'the value is absent from the trace');
 };
 
