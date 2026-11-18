@@ -230,10 +230,12 @@ sub rebind {
 		# URL form: class-agnostic lookup -- accepts whatever
 		# vault kind sits at this URL in .saferc.
 		$vault = ($class->find(url => $ENV{GENESIS_TARGET_VAULT}))[0];
-		bail("Cannot rebind to vault at address '$ENV{GENESIS_TARGET_VAULT}` - not found in .saferc")
-			unless $vault;
-		trace "Rebinding to $ENV{GENESIS_TARGET_VAULT}: matches %s",
-			$vault->{name} || "<unnamed>";
+		bail(
+			"Cannot rebind to vault at address '%s' - not found in .saferc",
+			Genesis::traced_endpoint($ENV{GENESIS_TARGET_VAULT})
+		) unless $vault;
+		trace "Rebinding to %s: matches %s",
+			Genesis::traced_endpoint($ENV{GENESIS_TARGET_VAULT}), $vault->{name} || "<unnamed>";
 	} else {
 		# Legacy named-target path: match against the default vault.
 		my $default = $class->default;

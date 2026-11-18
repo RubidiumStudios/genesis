@@ -59,7 +59,9 @@ sub create {
 	              : exists($opts{no_strongbox}) ? ($opts{no_strongbox} ? 0 : 1)
 	              : undef;
 
-	my @cmd = ('safe', 'target', $url, $name);
+	# safe gets the whole URL, and the trace only where it points.
+	my $shown = Genesis::traced_endpoint($url);
+	my @cmd = ('safe', 'target', ($shown eq $url ? $url : {redact => $url, display => $shown}), $name);
 	push(@cmd, '-k') if $opts{skip_verify};
 	push(@cmd, '-n', $opts{namespace}) if $opts{namespace};
 	push(@cmd, $strongbox ? '--strongbox' : '--no-strongbox')
@@ -67,8 +69,8 @@ sub create {
 	my ($out,$rc,$err) = run({stderr => 0, env => {VAULT_ADDR => "", SAFE_TARGET => ""}}, @cmd);
 	run('safe','target',$default->{name}) if $default; # restore original system target if there was one
 	bail(
-		"Could not create new Safe target #C{%s} pointing at #M{%s}:\n %s",
-		$name, $url, $err
+		"Could not create new Safe target #C{%s} pointing at #M{%s}: safe exited %d (%s)",
+		$name, $shown, $rc, Genesis::failure_summary($out, $err)
 	) if $rc;
 	my $vault = $class->new($url, $name, !$opts{skip_verify}, $opts{namespace}, $strongbox, $opts{mount});
 	for (0..scalar(@all_vaults)-1) {

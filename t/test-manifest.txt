@@ -43,6 +43,7 @@ unit-tests/service_bosh-trace_redaction.t   # bosh output that can carry secrets
 unit-tests/genesis_commands_bosh-connect_exports.t  # bosh --connect exports round-trip in the caller shell
 unit-tests/genesis_command_line-privacy.t    # operator arguments stay out of logs
 unit-tests/genesis_cli-args_privacy.t        # hyphenated values and parse errors stay out of logs
+unit-tests/genesis-endpoint_privacy.t        # URL userinfo stays out of logs
 unit-tests/genesis_commands-private_output.t  # requested credentials skip log files
 unit-tests/genesis_env-create_env_diff_privacy.t # create-env diffs list paths only
 unit-tests/genesis_env-deploy_log_privacy.t  # saved deploy output omits unredacted diffs

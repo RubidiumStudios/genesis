@@ -269,7 +269,7 @@ Bails with C<"Cannot rebind to vault in callback due to missing environment vari
 
 =item *
 
-Bails with C<"Cannot rebind to vault at address '...' - not found in .saferc"> when the variable holds a URL with no matching target.
+Bails with C<"Cannot rebind to vault at address '...' - not found in .saferc"> when the variable holds a URL with no matching target. The address is shown by its scheme, host, and port only, from C<Genesis::traced_endpoint>, since a URL can carry a username and password.
 
 =back
 

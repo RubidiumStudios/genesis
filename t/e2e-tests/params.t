@@ -351,7 +351,7 @@ expect_ok "URL parsing - full", $cmd, [
   }
 ];
 expect_ok "URL parsing - bad url check 1 - no protocol", $cmd, [
-  "https://bob:mypass\@example.com:1234/files/1/description?lang=en&fmt=json#the-good-stuff is not a valid URL[\r\n]{1,2}>", sub {
+  "https://<redacted:url-userinfo>\@example.com:1234/files/1/description?lang=en&fmt=json#the-good-stuff is not a valid URL[\r\n]{1,2}>", sub {
     fail "Valid url not correctly identified";
   }], [
   "URL #6[\r\n]{1,2}>", sub {
@@ -365,12 +365,12 @@ expect_ok "URL parsing - bad url check 2 - ftp not allowed", $cmd, [
   }
 ];
 expect_ok "URL parsing - bad url check 2 - ftp not allowed", $cmd, [
-  "ftp://user:pass\@ftp.example.com is not a valid URL[\r\n]{1,2}>", sub {
+  "ftp://<redacted:url-userinfo>\@ftp.example.com is not a valid URL[\r\n]{1,2}>", sub {
     $_[0]->send("ftp://user:pass\@ftp.example.com\n");
   }
 ];
 expect_ok "URL parsing - bad url check 3 - invalid characters", $cmd, [
-  "ftp://user:pass\@ftp.example.com is not a valid URL[\r\n]{1,2}>", sub {
+  "ftp://<redacted:url-userinfo>\@ftp.example.com is not a valid URL[\r\n]{1,2}>", sub {
     $_[0]->send("https://my.dev.local:5555/endpoint?badquery='this is not allowed'\n");
   }
 ];

@@ -297,6 +297,11 @@ marker. Longer values are matched first, so a value that contains another
 is replaced whole. C<flush_logs> calls this on each line's content before
 wrapping it, since wrapping can break a value across lines.
 
+The userinfo of any URL, such as the C<user:password> in
+C<https://user:password@vault.example>, is replaced by
+C<E<lt>redacted:url-userinfoE<gt>> too, whether or not it was registered,
+since a URL can carry a credential Genesis never loaded as one.
+
 B<Parameters:>
 
 =over 4
@@ -314,6 +319,9 @@ B<Examples:>
   $logger->register_secret('s3cr3t-value', 'token');
   print $logger->scrub('token is s3cr3t-value');
   # Returns: 'token is <redacted:token>'
+
+  print $logger->scrub('at https://admin:pw@vault.example:8200');
+  # Returns: 'at https://<redacted:url-userinfo>@vault.example:8200'
 
 =head2 configure_log
 

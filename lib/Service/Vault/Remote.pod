@@ -60,7 +60,8 @@ for the process, available via C<< Service::Vault->current >>.
 Creates a new safe target pointing at C<$url> with alias C<$name> and
 returns a C<Service::Vault::Remote> object representing that target. The
 previous system safe target (if any) is restored after the new target is
-registered.
+registered. safe is handed the whole URL, and the trace shows only its
+scheme, host, and port.
 
 If a vault with the same C<$name> already exists in the internal cache, it
 is replaced by the newly created object.
@@ -126,11 +127,14 @@ B<Errors:>
 
 =over 4
 
-=item C<"Could not create new Safe target %s pointing at %s:\n %s">
+=item C<"Could not create new Safe target %s pointing at %s: safe exited %d (%s)">
 
 Raised if C<safe target> exits with a non-zero status. The first C<%s> is
-the target name, the second is the URL, and the third is the error output
-from safe.
+the target name, and the second is the URL's scheme, host, and port from
+C<Genesis::traced_endpoint>, since a URL can carry a username and
+password. Then come safe's exit status and the kind of failure from
+C<Genesis::failure_summary>, never what safe printed, which can quote the
+URL.
 
 =back
 

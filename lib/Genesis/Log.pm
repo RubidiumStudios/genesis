@@ -134,9 +134,15 @@ sub register_secret {
 
 # }}}
 # scrub - replace every registered value in a piece of text {{{
+#
+# It also replaces the userinfo of any URL, such as the user:password in
+# https://user:password@vault.example, which is a credential that need
+# not have been registered.
 sub scrub {
 	my ($self, $text) = @_;
-	return $text unless defined($text) && %SECRETS;
+	return $text unless defined($text);
+	$text =~ s{\b([A-Za-z][A-Za-z0-9+.-]*://)[^\s/?\#\@'"<>]+\@}{$1<redacted:url-userinfo>\@}g;
+	return $text unless %SECRETS;
 	$SECRET_PATTERN //= do {
 		my $alternatives = join('|',
 			map {length($_) >= $MIN_SECRET_LENGTH ? quotemeta($_) : '(?<![A-Za-z0-9])'.quotemeta($_).'(?![A-Za-z0-9])'}
