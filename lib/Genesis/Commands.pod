@@ -1335,6 +1335,48 @@ would parse options it could not then describe or store.
 
 =back
 
+=head2 get_options_quietly
+
+  my ($ok, @problems) = Genesis::Commands::get_options_quietly(\@args, \%opts, @spec);
+
+Runs C<GetOptionsFromArray> with the Getopt::Long configuration already in
+effect, capturing its warnings instead of letting them reach stderr.
+Getopt::Long quotes the value it refused, and a value can be a credential,
+so each warning is reduced by C<_option_warnings> to the kind of problem it
+was, naming only options in C<@spec>.  Used by option parsers outside the
+top-level one, such as C<Genesis::Hook::Addon::parse_options>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\@args>
+
+The words to parse.  Modified in place, as C<GetOptionsFromArray> does.
+
+=item C<\%opts>
+
+The hash the parsed values are stored in.
+
+=item C<@spec>
+
+Getopt::Long option specifications.
+
+=back
+
+B<Returns:> C<1> or C<0> for whether parsing succeeded, followed by the
+problems found, each in fixed words such as C<"an unknown option was given">
+or C<"option --count was given a value of the wrong type">.
+
+B<Examples:>
+
+  Getopt::Long::Configure(qw(no_ignore_case bundling no_pass_through));
+  my ($ok, @problems) = Genesis::Commands::get_options_quietly(
+      ['--count', 'abc'], \my %opts, 'count=i'
+  );
+  # Returns: (0, 'option --count was given a value of the wrong type')
+  # Nothing is printed to stderr.
+
 =head2 set_logging_state
 
   set_logging_state();

@@ -234,9 +234,14 @@ B<Errors:>
 
 =item *
 
-C<"Error parsing command line arguments"> -- raised via C<bail()> if
-C<GetOptionsFromArray> fails (e.g., a required option argument is missing or
-an option string is unrecognized by the parser).
+C<"Error parsing command line arguments for %s: %s."> -- raised via
+C<bail()> if C<GetOptionsFromArray> fails (e.g., a required option argument
+is missing or an option string is unrecognized by the parser). The first
+C<%s> is the hook's label and the second gives the kind of each problem in
+the top-level parser's words, from
+C<Genesis::Commands::get_options_quietly>. Getopt::Long's own warnings
+quote the value they refused, which can be a credential, so they are
+captured and never printed.
 
 =item *
 

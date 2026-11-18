@@ -321,22 +321,45 @@ subtest 'parse_options - short flags work via bundling' => sub {
 };
 
 subtest 'parse_options - unknown option dies' => sub {
-	plan tests => 2;
+	plan tests => 3;
 
-	# With no_pass_through, GetOptionsFromArray rejects unknown flags and
-	# returns false, causing bail("Error parsing command line arguments").
-	# GetOptionsFromArray writes "Unknown option: ..." to STDERR before we
-	# bail; capture it so it does not leak into the prove progress line,
-	# and assert on its content as part of the contract.
+	# GetOptionsFromArray rejects an unknown flag and returns false.  Its
+	# own warning is captured, since it can quote what it refused, and the
+	# refusal gives the kind of problem in the top-level parser's words.
 	my $hook = make_hook(args => ['--unknown-flag']);
 	my $stderr = stderr_from {
 		throws_ok {
 			$hook->parse_options(['verbose|v']);
-		} qr/Error parsing command line arguments/,
-			'parse_options() dies when GetOptionsFromArray rejects unknown option';
+		} qr/Error\s+parsing\s+command\s+line\s+arguments.*an\s+unknown\s+option\s+was\s+given/s,
+			'parse_options() dies with the kind of problem';
 	};
-	like($stderr, qr/Unknown option:\s*unknown-flag/,
-		'GetOptionsFromArray reports the rejected flag by name');
+	unlike($stderr, qr/Unknown option:/, "Getopt::Long's own warning is not printed");
+	unlike($@, qr/unknown-flag/, 'and the refused word is not repeated');
+};
+
+subtest 'parse_options - a refused option value is never quoted' => sub {
+	plan tests => 5;
+
+	# A value can come from vault, such as a token handed to an addon, and
+	# Getopt::Long quotes a value it refuses for a typed option.
+	my $secret = 'fake-addon-value-'.join('', map {sprintf('%02x', int(rand(256)))} 1..12);
+	my $hook = make_hook(args => ['--count', $secret]);
+	my $stderr = stderr_from {
+		throws_ok {
+			$hook->parse_options(['count=i']);
+		} qr/option\s+--count\s+was\s+given\s+a\s+value\s+of\s+the\s+wrong\s+type/,
+			'the refusal names the option and the kind of problem';
+	};
+	unlike($stderr, qr/\Q$secret\E/, 'the value is not on stderr');
+	unlike($@, qr/\Q$secret\E/, 'or in the error');
+
+	$hook = make_hook(args => ['--output']);
+	$stderr = stderr_from {
+		throws_ok {
+			$hook->parse_options(['output=s']);
+		} qr/option\s+--output\s+needs\s+a\s+value/, 'a missing value is named the same way';
+	};
+	is($stderr, '', 'and nothing else is printed');
 };
 
 subtest 'parse_options - a hyphenated operand is not quoted when refused' => sub {

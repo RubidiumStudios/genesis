@@ -493,6 +493,24 @@ sub _option_warnings {
 	} grep {defined && /\S/} @warnings;
 } # }}}
 
+# get_options_quietly - GetOptionsFromArray, its warnings reduced to fixed words {{{
+#
+# Getopt::Long warns with the value it refused, and a value can be a
+# credential, so its warnings are captured here rather than printed, and
+# each is reduced by _option_warnings to the kind of problem it was,
+# naming only options in @spec.  Returns whether parsing succeeded and
+# the problems found.
+sub get_options_quietly {
+	my ($args, $opts, @spec) = @_;
+	my @warnings;
+	my $ok = do {
+		local $SIG{__WARN__} = sub { push @warnings, @_ };
+		GetOptionsFromArray($args, $opts, @spec);
+	};
+	my %known = map {($_ => 1)} map {split /\|/, s/[=:!+].*$//r} grep {defined && !ref} @spec;
+	return ($ok ? 1 : 0, _option_warnings(\%known, @warnings));
+} # }}}
+
 sub _parse_two_pass { # {{{
 	my ($args, $specs, $order) = @_;
 

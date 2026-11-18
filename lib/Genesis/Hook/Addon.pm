@@ -108,14 +108,20 @@ sub help {
 	return $self->done(1);
 }
 
-use Getopt::Long qw(GetOptionsFromArray);
+use Getopt::Long ();
 sub parse_options {
 	my ($self, $opt_defn, %opts) = @_;
+	require Genesis::Commands;
 	Getopt::Long::Configure(
 		qw(no_ignore_case bundling no_pass_through auto_abbrev permute)
 	);
-	GetOptionsFromArray($self->{args}, \%opts, @$opt_defn)
-		or bail("Error parsing command line arguments");
+	# Getopt::Long quotes a value it refuses, and an addon's operands can
+	# be credentials, so its warnings become the top-level parser's words.
+	my ($ok, @problems) = Genesis::Commands::get_options_quietly($self->{args}, \%opts, @$opt_defn);
+	bail(
+		"Error parsing command line arguments for %s: %s.",
+		$self->label, @problems ? join("; ", @problems) : 'the options could not be parsed'
+	) unless $ok;
 	# Getopt::Long has already refused any unknown flag, so what is left
 	# looking like one followed a --, and is an operand that can be a
 	# credential: the refusal gives only its length.
