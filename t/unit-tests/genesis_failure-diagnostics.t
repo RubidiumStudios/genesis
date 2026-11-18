@@ -144,6 +144,27 @@ fails_privately('bosh delete-config', sub {
 	$director->delete_config('cloud', 'fake');
 });
 
+subtest 'a config the director refuses is described by its field and code' => sub {
+	my $marker = fake_secret('refused-config');
+	mkdir "$dir/validation-bin";
+	put_file("$dir/validation-bin/bosh", 0755, <<'EOS');
+#!/bin/bash
+printf 'Using environment ...\n\nUpdating config:\n'
+printf "  Director responded with non-successful status code '400' response '{\"code\":440001,\"description\":\"Required property 'azs' was not specified in object ({\\\\\"api_key\\\\\"=>\\\\\"%s\\\\\"})\"}'\n" "$FAKE_ERR" >&2
+exit 1
+EOS
+	local $ENV{FAKE_ERR} = $marker;
+	Service::BOSH->set_command("$dir/validation-bin/bosh");
+	my $died;
+	my ($log, $stderr) = capture_trace {
+		eval { $director->upload_config_from_file("$dir/cloud.yml", 'cloud', 'fake'); 1 } or $died = "$@";
+	};
+	Service::BOSH->set_command("$dir/bin/bosh");
+	like($died // '', qr/a required property is missing/, 'the kind of refusal is named');
+	like($died // '', qr/BOSH error code 440001; field azs/, 'with the director\'s code and the field it wanted');
+	unlike(($died // '').$stderr.$log, qr/\Q$marker\E/, 'and nothing from the config');
+};
+
 # Configs can carry credentials, such as a CPI's API key, so merging the
 # director's configs keeps them out of the trace whether it works or not.
 {
@@ -230,6 +251,31 @@ subtest 'failure_summary names a bosh task and HTTP status' => sub {
 	like($summary, qr/\bHTTP status 503\b/, 'an HTTP status line is read');
 	unlike(Genesis::failure_summary("status code '4011'"), qr/HTTP status/, 'only a three-digit status counts');
 	unlike(Genesis::failure_summary("password: Task 12345678901234"), qr/task \d/, 'and a task ID is a plausible number');
+};
+
+subtest 'failure_summary names a BOSH validation failure by kind, field, and code' => sub {
+	my $marker = fake_secret('config-value');
+	my $response = sub {
+		sprintf("Director responded with non-successful status code '400' response '{\"code\":%s,\"description\":\"%s\"}'\n", @_)
+	};
+	my $summary = Genesis::failure_summary($response->(440001,
+		"Required property 'azs' was not specified in object ({\\\"name\\\"=>\\\"$marker\\\", \\\"code\\\"=>1234})"));
+	like($summary, qr/a required property is missing/, 'a missing property is named as such');
+	like($summary, qr/\bfield azs\b/, 'with the field the director looked for');
+	like($summary, qr/\bBOSH error code 440001\b/, 'the director\'s error code');
+	like($summary, qr/\bHTTP status 400\b/, 'and the HTTP status');
+	unlike($summary, qr/\Q$marker\E|1234/, 'but nothing from the config');
+
+	$summary = Genesis::failure_summary($response->(40000,
+		"Property 'cloud_properties' value (\\\"$marker\\\") did not match the required type 'Hash'"));
+	like($summary, qr/a property has the wrong type/, 'a property of the wrong type is named as such');
+	like($summary, qr/\bfield cloud_properties\b/, 'with its field');
+	unlike($summary, qr/\Q$marker\E/, 'and not its value');
+
+	$summary = Genesis::failure_summary($response->(40001,
+		"Required property 'zz_not_a_field' was not specified in object ({})"));
+	like($summary, qr/a required property is missing/, 'a field BOSH does not define is still a missing property');
+	unlike($summary, qr/zz_not_a_field/, 'but is not named');
 };
 
 subtest 'spruce paths are named only when the merged files hold their keys' => sub {

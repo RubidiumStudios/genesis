@@ -702,6 +702,8 @@ sub traced_endpoint {
 # own diagnostics can quote whatever it was handed, credentials included,
 # so a failure is described only by which of these it matched.
 our @FAILURE_DIAGNOSTICS = (
+	[qr/Required property '[^'\n]*' was not specified/                         => 'a required property is missing'],
+	[qr/Property '[^'\n]*' value .* did not match the required type/           => 'a property has the wrong type'],
 	[qr/permission denied|forbidden|\b403\b/i                                 => 'permission denied'],
 	[qr/\b401\b|unauthori[sz]ed|missing client token|token (?:is )?(?:expired|invalid)|invalid token|bad token/i => 'authentication failed'],
 	[qr/\b404\b|not found|no such|does not exist|\bno secret exists\b/i                            => 'not found'],
@@ -713,11 +715,30 @@ our @FAILURE_DIAGNOSTICS = (
 	[qr/\$\(\(|operator|spruce|unresolved|unable to resolve|could not find|cannot find|could not be found/i          => 'could not resolve a reference'],
 );
 
+# The fields of BOSH's manifests and configs that failure_summary() may
+# name when the director says one is missing or has the wrong type.  The
+# director names the field it looked for, so a name from this list is its
+# own word, not the operator's.
+our %BOSH_CONFIG_FIELDS = map {($_ => 1)} qw(
+	name type version url sha1 os alias releases stemcells stemcell
+	instance_groups instances jobs release properties consumes provides
+	networks network static_ips default azs az vm_types vm_type
+	vm_extensions vm_resources disk_types disk_type persistent_disk
+	persistent_disk_type disk_size compilation workers
+	reuse_compilation_vms orphan_workers cloud_properties subnets range
+	gateway dns reserved static update canaries max_in_flight
+	canary_watch_time update_watch_time serial addons include exclude
+	variables options tags features cpis cpi migrated_from exec_path
+	lifecycle env
+);
+
 # failure_summary - a failed command's diagnostic that is safe to show
 #
 # Returns the fixed descriptions from @FAILURE_DIAGNOSTICS that the
 # command's output or stderr matched, joined with "; ", followed by a bosh
-# task ID and an HTTP status when the streams name them.  Nothing else the
+# task ID, an HTTP status, the director's numeric error code, and any field
+# in %BOSH_CONFIG_FIELDS the director said was missing or of the wrong
+# type, when the streams name them.  Nothing else the
 # command printed is returned, not even text shaped like a manifest path,
 # since a stream can carry anything.  When nothing matched, it says that
 # the command's own messages are withheld and why, so the operator knows
@@ -735,6 +756,12 @@ sub failure_summary {
 		if $text =~ /\bstatus code[: ]+'?([1-5]\d\d)(?!\d)/i
 		|| $text =~ /\bHTTP\/\d(?:\.\d)?\s+([1-5]\d\d)(?!\d)/
 		|| $text =~ /^Code: ([1-5]\d\d)\. Errors:/m;
+	# The director's error code heads the JSON body the bosh CLI quotes.
+	push @meta, "BOSH error code $1" if $text =~ /response '\{"code":\s*(\d{1,7})(?!\d)/;
+	my %field;
+	my @fields = grep {$BOSH_CONFIG_FIELDS{$_} && !$field{$_}++}
+		$text =~ /(?:Required property|Property) '([a-z][a-z0-9_]{0,63})' (?:was not specified|value )/g;
+	push @meta, sprintf("field%s %s", @fields == 1 ? '' : 's', join(', ', @fields)) if @fields;
 	return join('; ', @found, @meta) if @found;
 	return join('; ', @meta, 'no known kind of failure; its own messages are withheld, since they can quote credentials');
 }
