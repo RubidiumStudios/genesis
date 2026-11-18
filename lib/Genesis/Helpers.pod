@@ -1403,6 +1403,10 @@ secret will be stored.  Required.
 
 B<Errors:>
 
+Calls C<bail> with C<"[ERROR] Failed to read secret $SRC_PATH from vault:
+safe exited RC"> if C<safe get> fails, before anything is stored or
+removed.
+
 Calls C<bail> with C<"[ERROR] Failed to store secret $SRC_PATH under
 credhub path $DST_PATH: credhub exited RC"> if C<credhub set> fails. What
 credhub printed is left out, since it can echo the request.

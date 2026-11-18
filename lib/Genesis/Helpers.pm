@@ -772,7 +772,11 @@ move_secrets_to_credhub() {
   # when the operator has asked for the hook's xtrace.
   local value src="$1" dst="$2" rc __xtrace=''
   { [[ $- == *x* ]] && __xtrace=1 && set +x; } 2>/dev/null
-  value="$(safe get "${GENESIS_SECRETS_BASE}$src")"
+  value="$(safe get "${GENESIS_SECRETS_BASE}$src")" && rc=0 || rc=$?
+  if [[ $rc -gt 0 ]] ; then
+    [[ -n $__xtrace ]] && set -x
+    bail "#R{[ERROR]} Failed to read secret #C{$1} from vault: safe exited $rc"
+  fi
   result="$(credhub set -n "/$GENESIS_CREDHUB_ROOT/$dst" -t value -v "$value" 2>&1)" && rc=0 || rc=$?
   value=''
   [[ -n $__xtrace ]] && set -x

@@ -36,11 +36,13 @@ for my $name (qw/credhub bosh/) {
 put_file("$dir/bin/safe", 0755, join("\n",
 	'#!/bin/bash',
 	qq(for a in "\$@"; do printf '%s\\n' "\$a"; done >> "$dir/argv-safe"),
+	'[[ $1 == get && -n "${FAKE_SAFE_GET_FAILS:-}" ]] && exit 1',
 	'[[ $1 == get ]] && printf "%s\n" "$FAKE_VAULT_VALUE"',
 	'exit 0', ''));
 put_file("$dir/kit/hooks/info", 0755, <<'EOF_HOOK');
 #!/bin/bash
 set -eu
+[[ -n "${FAKE_NO_ERREXIT:-}" ]] && set +e
 echo "hook-stdout-marker"
 move_secrets_to_credhub "fake/path:password" "fake/password"
 bosh -d fake update-config --var "password=$FAKE_HOOK_TOKEN"
@@ -156,6 +158,14 @@ subtest 'GENESIS_HOOK_XTRACE warns and traces only to the terminal' => sub {
 	like($r->{traced_hook} // '', qr{BASH_XTRACEFD=.*/dev/tty|/dev/tty.*BASH_XTRACEFD}s,
 		'its trace goes to the controlling terminal, not to stderr');
 	like($r->{traced_hook} // '', qr/\A#!\/bin\/bash\n/, 'and the copy keeps the hook\'s interpreter line');
+};
+
+subtest 'a failed vault read moves nothing and deletes nothing' => sub {
+	my $r = run_info_hook(FAKE_NO_ERREXIT => 1, FAKE_SAFE_GET_FAILS => 1);
+	ok(!$r->{ok}, 'the hook fails');
+	is($r->{credhub}, '', 'credhub is not given an empty value');
+	unlike($r->{safe}, qr/^rm$/m, 'the vault secret is not removed');
+	like($r->{stderr}, qr/Failed to read secret.*fake\/path:password/s, 'the failed read is reported');
 };
 
 subtest 'a failed credhub set does not echo what credhub printed' => sub {
