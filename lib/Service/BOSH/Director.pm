@@ -1437,7 +1437,7 @@ sub run_on_instance {
 		my $err = '';
 		my ($out, $rc) = $self->execute(
 			{ interactive => 1 },
-			'ssh', $instance, '--command', $command
+			'ssh', $instance, '--command', {redact => $command}
 		);
 		return { stdout => $out, exit_code => $rc, instance => $instance, interactive => 1 };
 	}
@@ -1445,7 +1445,7 @@ sub run_on_instance {
 	# Non-interactive mode: use --json --results for structured output
 	my ($out, $rc, $err) = $self->execute(
 		{ interactive => 0, stderr => $opts{stderr} // 0 },
-		'ssh', $instance, '--command', $command, '--json', '--results'
+		'ssh', $instance, '--command', {redact => $command}, '--json', '--results'
 	);
 
 	my $json = read_json_from($out, 0, $err); # real rc is inside JSON
@@ -1472,7 +1472,7 @@ sub run_on_instances {
 		debug("No targets specified - running on all VMs in deployment");
 		my ($out, $rc, $err) = $self->execute(
 			{ interactive => 0, stderr => $opts{stderr} // 0 },
-			'ssh', '--command', $command, '--json', '--results'
+			'ssh', '--command', {redact => $command}, '--json', '--results'
 		);
 
 		my $json = read_json_from($out, $rc, $err);
@@ -1486,7 +1486,7 @@ sub run_on_instances {
 
 		my ($out, $rc, $err) = $self->execute(
 			{ interactive => 0, stderr => $opts{stderr} // 0 },
-			'ssh', $target, '--command', $command, '--json', '--results'
+			'ssh', $target, '--command', {redact => $command}, '--json', '--results'
 		);
 
 		my $json = read_json_from($out, $rc, $err);

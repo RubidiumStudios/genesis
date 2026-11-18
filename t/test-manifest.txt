@@ -41,6 +41,7 @@ unit-tests/service_bosh-director-proxy_timeout.t  # status() reports a director 
 unit-tests/service_bosh-stemcell.t
 unit-tests/service_bosh-interactive_argv.t   # interactive bosh gets wrapped arguments as their values
 unit-tests/service_bosh-trace_redaction.t   # bosh output stays out of the trace; off a terminal only tasks show
+unit-tests/service_bosh-remote_command_privacy.t # a command for an instance is traced by its size
 unit-tests/genesis_commands_bosh-connect_exports.t  # bosh --connect exports round-trip in the caller shell
 unit-tests/genesis_command_line-privacy.t    # operator arguments stay out of logs
 unit-tests/genesis_cli-args_privacy.t        # arguments show by place, not spelling; parse errors stay out

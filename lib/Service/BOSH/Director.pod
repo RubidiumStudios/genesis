@@ -89,7 +89,9 @@ write and read-back, which is not atomic.
 
 L</run_on_instance>, L</run_on_instances>, L</upload_to_instances>, and
 L</upload_to_instance> run shell commands or upload files to BOSH-managed
-VMs via C<bosh ssh> and C<bosh scp>.
+VMs via C<bosh ssh> and C<bosh scp>. A command line for an instance can
+carry a credential, so the C<--command> given to C<bosh ssh> reaches it
+exactly and is traced as its size alone.
 
 =back
 

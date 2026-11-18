@@ -244,7 +244,12 @@ sub broadcast {
 		info("\n" . ('=' x terminal_width()));
 		info("#g{Broadcasting to }#C{%s}#g{...}", $target);
 		info('-' x terminal_width());
-		my ($out, $rc, $err) = $bosh->execute({interactive => 1, passthrough => 1}, 'ssh', $target, '--', @extra_args);
+		# What follows -- is a command line for the instance, which can carry
+		# a credential, so each operand is traced as its size alone.
+		my ($out, $rc, $err) = $bosh->execute(
+			{interactive => 1, passthrough => 1},
+			'ssh', $target, '--', map {{redact => $_}} @extra_args
+		);
 		error("Failed to broadcast to %s: bosh exited %d", $target, $rc) if $rc;
 	}
 

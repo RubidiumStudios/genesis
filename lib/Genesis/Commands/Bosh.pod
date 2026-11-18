@@ -236,7 +236,9 @@ in sequence.
 Fetches the full VM list from the BOSH director (C<bosh vms --json>) and
 matches it against the C<--on> filter option.  If no filter is provided, the
 command is broadcast to all VMs in the deployment.  Each matching instance is
-targeted individually via C<bosh ssh>.
+targeted individually via C<bosh ssh>, with the command after its C<-->.
+That command line can carry a credential, so bosh gets each of its words
+exactly, and the trace shows each by its size alone.
 
 Target matching rules:
 
