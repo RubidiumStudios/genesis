@@ -694,7 +694,8 @@ our @FAILURE_DIAGNOSTICS = (
 # failure_summary - a failed command's diagnostic that is safe to show
 #
 # Returns the fixed descriptions from @FAILURE_DIAGNOSTICS that the
-# command's output or stderr matched, joined with "; ".  Nothing the
+# command's output or stderr matched, joined with "; ", followed by a bosh
+# task ID and an HTTP status when the streams name them.  Nothing else the
 # command printed is returned, not even text shaped like a manifest path,
 # since a stream can carry anything.  When nothing matched, it says that
 # the command's own messages are withheld and why, so the operator knows
@@ -704,8 +705,15 @@ sub failure_summary {
 	my $text = join("\n", grep {defined} @_);
 	my %seen;
 	my @found = grep {!$seen{$_}++} map {$text =~ $_->[0] ? $_->[1] : ()} @FAILURE_DIAGNOSTICS;
-	return join('; ', @found) if @found;
-	return 'no known kind of failure; its own messages are withheld, since they can quote credentials';
+	# Metadata is kept only as the number it was validated to be, so no
+	# text around it comes along.
+	my @meta;
+	push @meta, "task $1" if $text =~ /\btask[ ']+(\d{1,12})\b/i;
+	push @meta, "HTTP status $1"
+		if $text =~ /\bstatus code[: ]+'?([1-5]\d\d)(?!\d)/i
+		|| $text =~ /\bHTTP\/\d(?:\.\d)?\s+([1-5]\d\d)(?!\d)/;
+	return join('; ', @found, @meta) if @found;
+	return join('; ', @meta, 'no known kind of failure; its own messages are withheld, since they can quote credentials');
 }
 
 # _run_failure_message - what run() bails with for a failed onfailure call {{{

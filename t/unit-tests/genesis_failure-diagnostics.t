@@ -202,6 +202,27 @@ subtest 'failure_summary never repeats text from the stream' => sub {
 	like(Genesis::failure_summary("fake-unknown-text"), qr/withheld/, 'which says why there is no more detail');
 };
 
+subtest 'failure_summary names a bosh task and HTTP status' => sub {
+	my $marker = fake_secret('task-text');
+	my $summary = Genesis::failure_summary(
+		"Task 4417 | 10:01:02 | Error: $marker\n",
+		"Director responded with non-successful status code '401' response '$marker'\n",
+	);
+	like($summary, qr/authentication failed/, 'the kind of failure is named');
+	like($summary, qr/\btask 4417\b/, 'and the task');
+	like($summary, qr/\bHTTP status 401\b/, 'and the HTTP status');
+	unlike($summary, qr/\Q$marker\E/, 'but nothing else the stream held');
+
+	$summary = Genesis::failure_summary("Expected task '93' to succeed but state is 'error'\n$marker");
+	like($summary, qr/\btask 93\b/, 'a task named in quotes is found too');
+	like($summary, qr/withheld/, 'and the rest is still withheld');
+
+	$summary = Genesis::failure_summary("HTTP/1.1 503 Service Unavailable\n");
+	like($summary, qr/\bHTTP status 503\b/, 'an HTTP status line is read');
+	unlike(Genesis::failure_summary("status code '4011'"), qr/HTTP status/, 'only a three-digit status counts');
+	unlike(Genesis::failure_summary("password: Task 12345678901234"), qr/task \d/, 'and a task ID is a plausible number');
+};
+
 subtest 'spruce paths are named only when the merged files hold their keys' => sub {
 	my $marker = fake_secret('spruce-path');
 	put_file("$dir/paths.yml", 0644, <<'YAML');

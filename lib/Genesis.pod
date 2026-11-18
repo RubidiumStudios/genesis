@@ -1579,8 +1579,15 @@ joined with C<; >. If none matched, it says that the command's own messages
 are withheld because they can quote credentials, so an operator can tell a
 deliberately terse report from a missing one.
 
-Nothing taken from the streams is returned, not even text shaped like a
-manifest path, since a stream can hold a value of any shape. Use
+Two pieces of metadata follow the descriptions when the streams name them,
+because operators need them to look a failure up. A bosh task, as in
+C<Task 4417> or C<task '93'>, is given as C<task N> for an ID of up to twelve
+digits, and an HTTP status, as in C<status code '401'> or C<HTTP/1.1 503>, is
+given as C<HTTP status N> for a three-digit code from 100 to 599. Each is
+kept only as the number it was checked to be.
+
+Nothing else taken from the streams is returned, not even text shaped like
+a manifest path, since a stream can hold a value of any shape. Use
 C<spruce_error_paths> to name the paths of a failed merge.
 
 B<Returns:> A string.
@@ -1589,6 +1596,9 @@ B<Examples:>
 
   Genesis::failure_summary('', "Error: permission denied on secret/x:password=abc");
   # Returns: 'permission denied'
+
+  Genesis::failure_summary("Task 4417 | Error: ...", "status code '401'");
+  # Returns: 'authentication failed; task 4417; HTTP status 401'
 
 =head2 spruce_error_paths
 
