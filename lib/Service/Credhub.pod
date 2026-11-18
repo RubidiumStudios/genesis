@@ -57,9 +57,8 @@ The authentication environment hash (containing keys C<CREDHUB_SERVER>,
 C<CREDHUB_CLIENT>, C<CREDHUB_SECRET>, and C<CREDHUB_CA_CERT>) is passed to
 every C<credhub> CLI subprocess automatically.
 
-The environment variable C<GENESIS_SHOW_CREDHUB_SECRETS> controls redaction.
-When set, credential values are shown in plain text in command output;
-otherwise they are redacted.
+What the C<credhub> CLI prints is credential data, so it is never written
+to a trace or log file. The callers that need it get it as a return value.
 
 =head1 CLASS METHODS
 
@@ -292,9 +291,6 @@ credential names to their values. For composite credential types
 (e.g. C<certificate>, C<ssh>, C<user>), the cached value is a hash
 reference; for simple types (C<password>, C<value>), it is a scalar string.
 
-When C<GENESIS_SHOW_CREDHUB_SECRETS> is set in the environment, CredHub
-output is not redacted.
-
 B<Note:> C<preload()> uses the C<base()> accessor to normalise the base path
 prefix when building cache keys.
 
@@ -431,9 +427,6 @@ Fetches raw credential data from CredHub for the given path by running
 C<credhub get -j -n E<lt>full_pathE<gt>>. Strips CredHub's "two login methods"
 warning from stderr before reporting errors.
 
-When C<GENESIS_SHOW_CREDHUB_SECRETS> is set in the environment, CredHub
-output is not redacted.
-
 This is a low-level method. Most callers should use C<get> or C<has>
 instead.
 
@@ -509,9 +502,6 @@ interpretation.
 In scalar context, returns the credential ID string assigned by CredHub
 and dies on error. In list context, returns C<($out, $rc, $err)> from the
 C<credhub set> invocation without dying on non-zero exit.
-
-When C<GENESIS_SHOW_CREDHUB_SECRETS> is set in the environment, CredHub
-output is not redacted.
 
 B<Note:> On success, the in-memory cache (when populated) is updated with
 the new value so that a subsequent C<get()> on the same path returns the

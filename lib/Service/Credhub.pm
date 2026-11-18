@@ -90,7 +90,7 @@ sub preload {
 	my ($out,$rc,$err) = run({
 			env => $self->env(),
 			redact_env => 1,
-			redact_output => envset('GENESIS_SHOW_CREDHUB_SECRETS') ? 0 : 1,
+			redact_output => 1,
 			stderr => 0
 		},
 		'credhub', 'export', '-j', '-p', $self->base
@@ -137,7 +137,7 @@ sub data {
 	my ($out,$rc,$err) = run({
 			env => $self->env(),
 			redact_env => 1,
-			redact_output => envset('GENESIS_SHOW_CREDHUB_SECRETS') ? 0 : 1,
+			redact_output => 1,
 			stderr => 0
 		},
 		'credhub', 'get', '-j', '-n', $self->_full_path($path)
@@ -233,7 +233,7 @@ sub set {
 	unshift @args, "-n", $self->_full_path($path), "-t", $type;
 	my ($out,$rc, $err) =run({
 			env => $self->env(),
-			redact_output => envset('GENESIS_SHOW_CREDHUB_SECRETS') ? 0 : 1,
+			redact_output => 1,
 			redact_env => 1,
 			stderr => 0
 		},
