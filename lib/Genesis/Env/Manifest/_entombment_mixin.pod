@@ -227,8 +227,7 @@ when it is raised.
 
 C<"Failed to entomb one or more secrets into Credhub.  This may be due to a bug in Genesis, communication or authentication error with Credhub, or a value that Credhub can't support."> --
 raised via C<bail()> when a secret does not round-trip correctly. The message
-advises retrying without C<--entomb> (or with C<--no-entomb> when deploying)
-and points at the Genesis issue tracker.
+advises retrying without C<--entomb> and points at the Genesis issue tracker.
 
 =back
 

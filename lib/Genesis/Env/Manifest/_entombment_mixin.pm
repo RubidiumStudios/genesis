@@ -151,8 +151,7 @@ sub _entomb_secrets {
 			"Failed to entomb one or more secrets into Credhub.  This may be due ".
 			"to a bug in Genesis, communication or authentication error with ".
 			"Credhub, or a value that Credhub can't support.\n\n".
-			"Please try again without the --entomb option if used, or if deploying, ".
-			"use the --no-entomb option, if this persists.\n\n".
+			"Please try again without the --entomb option if used.\n\n".
 			"Please contact the Genesis team, or open a issue on ".
 			"#Bu{%s/issues/new}",
 			$Genesis::GITHUB

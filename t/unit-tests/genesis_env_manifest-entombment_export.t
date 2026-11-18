@@ -333,7 +333,7 @@ subtest 'entombment gives the same names for string values whether safe wrote fo
 };
 
 subtest 'a CredHub failure after the first write leaves earlier writes in place and fails the run' => sub {
-	plan tests => 2;
+	plan tests => 3;
 	my $b_name = (entombed_as('b', 'user', 'bob'))[0];
 	no warnings 'redefine';
 	local *EntombHarness::put_secret = sub {
@@ -343,6 +343,7 @@ subtest 'a CredHub failure after the first write leaves earlier writes in place 
 	throws_ok {
 		entomb(safe_answers('{"secret/a":{"password":"apple"},"secret/b":{"user":"bob"}}'), 'secret/a:password', 'secret/b:user')
 	} qr{Failed to entomb one or more secrets into Credhub}, 'the failed write fails the run';
+	unlike("$@", qr/--no-entomb/, 'and the advice does not offer an option no command accepts');
 	my ($a_name) = entombed_as('a', 'password', 'apple');
 	is_deeply(harnessed(), [
 		['local_vault'], ['credhub_target'], ['prime_credhub_cache'],
