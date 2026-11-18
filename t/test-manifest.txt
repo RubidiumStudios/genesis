@@ -154,6 +154,7 @@ unit-tests/genesis-bail_raised.t # T493: bail raises that error in an eval, and 
 unit-tests/service_vault-read_failure_states.t # T493: a failed vault read is raised in the state that names its cause
 unit-tests/genesis_commands_env-deploy_reading.t # T493: the deploy's pre-flight asks a failed read why, and keeps its state and code
 unit-tests/genesis_ci_walk-unreadable_exit_code.t # T493: the walk records the code a failed read earns beside its reason
+unit-tests/genesis_env-credhub_dependency_read.t # Genesis's own lookup of where CredHub is counts as no dependency read, however the director is named
 unit-tests/genesis_commands-git_forms.t  # the two git forms the declared floor puts off limits stay out of the tree
 unit-tests/pack-arguments.t                   # pack's argument validation and usage text
 unit-tests/genesis-cli.t                              # bin/genesis loads; cross-command definition sanity

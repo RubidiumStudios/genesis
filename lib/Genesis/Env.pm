@@ -3361,7 +3361,8 @@ sub credhub_connection_env {
 		}
 		$env{GENESIS_CREDHUB_EXODUS_SOURCE} = "$bosh_alias/$bosh_dep_type";
 		$env{GENESIS_CREDHUB_ROOT}=sprintf("/%s-%s/%s-%s", $bosh_alias, $bosh_dep_type, $self->name, $self->type);
-		$credhub_info = $bosh_vault->get("$bosh_exodus_mount/$bosh_alias/$bosh_dep_type");
+		$credhub_info = $self->_credhub_source_record(
+			$bosh_vault, $bosh_exodus_mount, "$bosh_alias/$bosh_dep_type");
 	} else {
 		$env{GENESIS_CREDHUB_EXODUS_SOURCE_OVERRIDE} =
 			(($credhub_src_key || "") eq 'genesis.credhub_env') ? $credhub_src : "";
@@ -3375,7 +3376,8 @@ sub credhub_connection_env {
 		}
 		$env{GENESIS_CREDHUB_EXODUS_SOURCE} = $credhub_src;
 		$env{GENESIS_CREDHUB_ROOT}=sprintf("/%s/%s-%s", $credhub_path, $self->name, $self->type);
-		$credhub_info = $self->exodus_lookup('.',undef,$credhub_src) if ($credhub_src);
+		$credhub_info = $self->_credhub_source_record(
+			$self->vault, $self->exodus_mount, $credhub_src) if ($credhub_src);
 	}
 
 	if ($credhub_info) {
@@ -3386,6 +3388,21 @@ sub credhub_connection_env {
 	}
 
 	return %env;
+}
+
+# }}}
+# _credhub_source_record - the exodus record CredHub's connection details are read from {{{
+sub _credhub_source_record {
+	my ($self, $vault, $mount, $slug) = @_;
+	# Genesis's own lookup of where CredHub is.  It is no dependency of the
+	# deployment's, so it is not noted as a dependency read.
+	(my $path = "$mount/$slug") =~ s{/{2,}}{/}g;
+	my $record = eval {$vault->read_flattened_secret($path)};
+	bail(
+		"Could not get %s exodus data from the Vault:\n\n%s",
+		$slug, scalar plain_error($@)
+	) if $@;
+	return defined($record) ? unflatten($record) : undef;
 }
 
 # }}}
