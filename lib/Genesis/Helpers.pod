@@ -701,7 +701,11 @@ C<GENESIS_BOSH_VERIFIED> to the current C<BOSH_ALIAS>.
 Otherwise (legacy path), falls back to the C<GENESIS_BOSH_COMMAND>
 executable, attempting to resolve BOSH credentials from the C<BOSH_ALIAS>
 exodus data if C<BOSH_ENVIRONMENT> or C<BOSH_CA_CERT> are not set, then
-validates connectivity via C<Service::BOSH::Director>.
+validates connectivity via C<Service::BOSH::Director>. It then runs the
+C<GENESIS_BOSH_COMMAND> executable through C<Service::BOSH::exec_managed>, the
+launcher that gives it the same managed environment as every bosh Genesis
+runs, so bosh's debug logging is off and C<BOSH_LOG_PATH> is unset whatever
+the hook inherited.  The arguments reach bosh exactly as given.
 
 =back
 

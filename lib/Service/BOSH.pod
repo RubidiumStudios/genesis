@@ -216,6 +216,29 @@ B<Examples:>
   my @stemcells = Service::BOSH->available_stemcells(env => $env);
   # Returns: list of stemcell objects matching the environment's IaaS and OS
 
+=head2 managed_environment
+
+  Service::BOSH::managed_environment(\%env);
+
+Settles the environment that every bosh command Genesis starts runs with. C<\%env> is the environment the command is about to get, in which an undef value unsets the variable, and it is changed in place.
+
+bosh's debug logging writes whole director requests and responses, tokens included, to its output or to the file C<BOSH_LOG_PATH> names, so C<BOSH_LOG_LEVEL> is set to C<none> and C<BOSH_LOG_PATH> is unset. When the operator had set either one, a warning naming them goes to stderr, once per process. C<HTTPS_PROXY> and C<https_proxy> are unset unless C<GENESIS_HONOR_ENV> is set, since bosh mishandles them.
+
+B<Returns:> C<\%env>.
+
+=head2 exec_managed
+
+  Service::BOSH::exec_managed($bosh, @args);
+
+Replaces the current process with a bosh command run in the environment C<managed_environment> settles. It is the launcher for the bosh a hook runs when there is no environment file to go through, which the bash C<bosh> helper calls as
+
+  /usr/bin/perl -I"$GENESIS_LIB" -MService::BOSH \
+    -e 'Service::BOSH::exec_managed(@ARGV)' -- ${GENESIS_BOSH_COMMAND} "$@"
+
+The arguments are the command and its arguments exactly as they are to be run, starting with the bosh executable, which is looked up on C<PATH> when it has no slash. Nothing is traced, and no shell reinterprets any argument.
+
+B<Returns:> Nothing on success, since the process becomes bosh. Exits 2 when given no command, and 127 after printing why to stderr when the command cannot be started.
+
 =head1 INSTANCE METHODS
 
 =head2 environment_variables
@@ -298,7 +321,8 @@ tokens included, to its output or to the file C<BOSH_LOG_PATH> names.
 C<execute> therefore runs every bosh command with C<BOSH_LOG_LEVEL=none>
 and with C<BOSH_LOG_PATH> unset. When the operator has set either one,
 C<execute> prints a warning to stderr the first time, naming the settings
-it ignored.
+it ignored. The settings come from C<managed_environment>, which hooks share through
+C<exec_managed>.
 
 C<HTTPS_PROXY> and C<https_proxy> are cleared from the subprocess
 environment unless C<GENESIS_HONOR_ENV> is set. C<BOSH_NON_INTERACTIVE>

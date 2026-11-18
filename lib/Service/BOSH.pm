@@ -184,6 +184,58 @@ sub _logging_settings {
 }
 
 # }}}
+# managed_environment - settle the environment every bosh Genesis starts gets {{{
+#
+# Takes the environment a bosh command is about to run with, as a hash in
+# which an undef value unsets the variable, and changes it in place.
+# bosh's debug logging writes director requests and responses, tokens
+# included, to its output or to a log file, where a CI log or a saved
+# transcript would keep them, so it is off for every bosh command Genesis
+# starts, hooks included.  bosh also mishandles HTTPS_PROXY, which is
+# dropped unless GENESIS_HONOR_ENV says to keep the caller's environment.
+sub managed_environment {
+	my ($env) = @_;
+	if (my @set = _logging_settings($env)) {
+		print STDERR Genesis::Term::csprintf(
+			"#Y{[WARNING]} Ignoring %s for the bosh commands Genesis runs: bosh's debug ".
+			"logging writes director requests and responses, tokens included.\n",
+			join(' and ', @set)
+		) unless $WARNED_LOGGING++;
+	}
+	$env->{BOSH_LOG_LEVEL} = 'none';
+	$env->{BOSH_LOG_PATH} = undef;
+	unless ($ENV{GENESIS_HONOR_ENV}) {
+		$env->{HTTPS_PROXY} = undef; # bosh dislikes this env var
+		$env->{https_proxy} = undef; # bosh dislikes this env var
+	}
+	return $env;
+}
+
+# }}}
+# exec_managed - replace this process with a bosh command in the managed environment {{{
+#
+# The launcher for bosh commands that Genesis does not run itself, such as
+# the bosh a hook calls when there is no environment file to go through.
+# The arguments are the command and its arguments exactly as they are to
+# be run, starting with the bosh executable; nothing is traced, and none
+# of them is reinterpreted by a shell.
+sub exec_managed {
+	my (@argv) = @_;
+	unless (@argv) {
+		print STDERR "Service::BOSH::exec_managed was given no command to run\n";
+		exit 2;
+	}
+	my %env = %ENV;
+	managed_environment(\%env);
+	for (keys %env) {
+		if (defined($env{$_})) {$ENV{$_} = $env{$_}} else {delete $ENV{$_}}
+	}
+	{ no warnings 'exec'; exec {$argv[0]} @argv; }
+	printf STDERR "Could not run %s: %s\n", $argv[0], $!;
+	exit 127;
+}
+
+# }}}
 # execute - execute a bosh command {{{
 sub execute {
 	my ($self, @cmd) = @_;
@@ -196,25 +248,9 @@ sub execute {
 
 	$env{$_} = $opts->{env}{$_} for (keys %{$opts->{env}||{}});
 	$opts->{env} = \%env;
-	unless ($ENV{GENESIS_HONOR_ENV}) {
-		$opts->{env}{HTTPS_PROXY} = undef; # bosh dislikes this env var
-		$opts->{env}{https_proxy} = undef; # bosh dislikes this env var
-	}
 	my $noninteractive = envset('BOSH_NON_INTERACTIVE') ? ' -n' : '';
 	$opts->{env}{BOSH_NON_INTERACTIVE} = undef;
-
-	# bosh's debug logging writes director requests and responses, tokens
-	# included, to its output or to a log file, where a CI log or a saved
-	# transcript would keep them.  It is off for every command Genesis runs.
-	if (my @set = _logging_settings($opts->{env})) {
-		print STDERR Genesis::Term::csprintf(
-			"#Y{[WARNING]} Ignoring %s for the bosh commands Genesis runs: bosh's debug ".
-			"logging writes director requests and responses, tokens included.\n",
-			join(' and ', @set)
-		) unless $WARNED_LOGGING++;
-	}
-	$opts->{env}{BOSH_LOG_LEVEL} = 'none';
-	$opts->{env}{BOSH_LOG_PATH} = undef;
+	managed_environment($opts->{env});
 
 	# A caller that says otherwise is honoured; see %TRACEABLE_OUTPUT.
 	$opts->{public_output} //= 1 if $TRACEABLE_OUTPUT{_subcommand(@cmd)};

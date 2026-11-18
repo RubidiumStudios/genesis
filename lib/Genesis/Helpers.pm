@@ -270,7 +270,12 @@ bosh() {
     fi
   fi
 
-  command ${GENESIS_BOSH_COMMAND} "$@"
+  # The same launcher Genesis uses turns bosh's debug logging off, since it
+  # writes director requests and tokens to BOSH_LOG_PATH or the output.
+  # GENESIS_BOSH_COMMAND is split into words as it always was; the rest of
+  # the arguments reach bosh exactly as given.
+  # shellcheck disable=SC2086
+  /usr/bin/perl -I"$GENESIS_LIB" -MService::BOSH -e 'Service::BOSH::exec_managed(@ARGV)' -- ${GENESIS_BOSH_COMMAND} "$@"
   return $?
 }
 export -f bosh
