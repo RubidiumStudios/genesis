@@ -915,6 +915,12 @@ wrapped too; one the shell would expand is run as it is, with C<run>'s
 C<redact> option keeping it out of the trace whole. See
 C<_split_safe_set_string>.
 
+Commands such as C<safe vault write> and C<safe vault login> take
+credentials as arguments, so the arguments of every command other than
+those that name paths, keys, and sizes are shown by their length, keeping
+the command words, the flags that cannot be an option's value, and the key
+of each C<key=value> in view. See C<_private_query_args>.
+
 What safe prints can be any secret in vault, so a query is private by
 default: C<redact_output> and C<redact_stderr> default to true, and the
 trace shows a byte count in place of either stream. A caller that needs a
@@ -3150,6 +3156,66 @@ B<Examples:>
 
   Service::Vault::_split_safe_set_string("safe set secret/x 'note=a b'");
   # Returns: ('safe', 'set', 'secret/x', 'note=a b')
+
+=head2 _private_query_args
+
+  my @cmd = Service::Vault::_private_query_args(\%opts, @cmd);
+
+Private function (not a method). Returns C<@cmd> with the arguments that
+can carry a credential wrapped for C<run>, so safe receives each one whole
+and the trace shows its length. Each command chained with C<--> is judged
+on its own, by its subcommand.
+
+=over 4
+
+=item * The arguments of a command named in C<%SAFE_PATH_COMMANDS>, such as
+C<get>, C<exists>, C<paths>, C<rm>, C<export>, C<x509>, C<gen>, and C<set>,
+are returned as they are, since they name paths, keys, and sizes.
+C<_redact_set_values> has already wrapped the values of C<set>.
+
+=item * C<curl> keeps its flags, its method, and its URI in view, and
+wraps anything after them, such as a request body.
+
+=item * Every other command, such as C<vault>, C<target>, and C<auth>, keeps
+the words in C<%SAFE_COMMAND_WORDS>, the flags in C<%SAFE_FLAG_WORDS>, and
+any other bare flag that does not follow a bare flag. A C<-flag=value> or
+C<key=value> keeps its C<-flag=> or C<key=> as the prefix, and every other
+argument is wrapped whole.
+
+=back
+
+An argument of several words, such as C<'vault write'>, is judged word by
+word. If any word would be hidden, the argument is wrapped with the words
+before it as the prefix. A first argument that starts with C<safe> is the
+program C<run> executes, so instead it sets C<redact> in C<\%opts>, which
+keeps the program out of the trace whole. A program that takes its values
+as C<$1> or C<"$@"> is code, and only its subcommand is read from it. An
+argument that is already wrapped is returned as it is.
+
+B<Parameters:>
+
+=over 4
+
+=item \%opts
+
+The options hash that C<query> passes to C<run>. C<redact> is set in it
+when the program itself holds a word that would be hidden.
+
+=item @cmd
+
+The command, as C<query> received it.
+
+=back
+
+B<Returns:> The command list.
+
+B<Examples:>
+
+  my @cmd = Service::Vault::_private_query_args({}, 'vault', 'write', 'auth/approle/login', 'role_id=abc');
+  # Returns: ('vault', 'write', {redact => 'auth/approle/login'},
+  #           {redact => 'role_id=abc', prefix => 'role_id='})
+
+B<Errors:> None.
 
 =head2 _redact_set_values
 

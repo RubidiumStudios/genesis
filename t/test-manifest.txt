@@ -55,6 +55,7 @@ unit-tests/genesis_failure-diagnostics.t     # failed credential commands report
 unit-tests/service_credhub-trace_privacy.t   # credhub output never reaches a log
 unit-tests/service_vault-query_privacy.t   # vault queries keep safe output and failed writes out of logs
 unit-tests/service_vault-read_failure_privacy.t  # failed vault reads and requests are described without safe output
+unit-tests/service_vault-query_args_privacy.t  # safe command arguments stay out of logs
 unit-tests/service_vault-trace_redaction.t  # vault and CredHub output that is a credential stays out of the trace
 unit-tests/genesis-run_exit_status_under_trace.t  # run() keeps the exit code when tracing is on
 unit-tests/genesis_run-signal_exit.t  # a signal-killed command fails in every capture mode

@@ -450,6 +450,10 @@ sub query {
 	if (!ref($cmd[0]) && $cmd[0] =~ /^\s*safe\s+(?:\S+\s+)*?set\s/ && $cmd[0] =~ /=/) {
 		$opts->{redact} = 1;
 	}
+	# Commands such as `safe vault write` and `safe vault login` take
+	# credentials as arguments, so only the arguments of commands that
+	# name paths and keys are traced as they are.
+	@cmd = _private_query_args($opts, @cmd);
 	$opts->{redact_output} //= 1;
 	$opts->{redact_stderr} //= 1;
 	unshift(@cmd, 'safe') unless $cmd[0] eq 'safe' || $cmd[0] =~ /^safe /;
@@ -458,6 +462,114 @@ sub query {
 	$opts->{env}{SAFE_TARGET} = $self->ref unless defined($opts->{env}{SAFE_TARGET});
 	$opts->{stderr} = 0 unless defined($opts->{stderr});
 	return run($opts, @cmd);
+}
+
+# }}}
+# _private_query_args - wrap the arguments a safe command can take credentials in {{{
+#
+# The arguments of safe's commands that name paths, keys, and sizes are
+# traced as they are, and `set` values have already been wrapped.  Every
+# other command, `vault`, `target`, and `auth` among them, keeps its
+# command words, the flags that cannot be an option's value, and the key
+# of each key=value in view, and the rest is shown by its length.  `curl`
+# keeps its method and URI.  Each command chained with -- is judged on its
+# own.  A command string that would show a hidden word is wrapped after
+# its last shown word, or, as the program run() executes, redacted whole.
+our %SAFE_PATH_COMMANDS = map {($_ => 1)} qw/
+	get exists check paths keys tree ls delete rm export versions cp mv copy
+	move gen ssh rsa dhparam uuid fmt x509 set ask prompt
+/;
+our %SAFE_COMMAND_WORDS = map {($_ => 1)} qw/
+	safe vault auth status token lookup lookup-self read write list delete
+	policy policies enable disable secrets kv login approle userpass github
+	ldap okta oidc role role-id secret-id unseal seal init target targets
+	version help curl
+/;
+our %SAFE_FLAG_WORDS = map {($_ => 1)} qw/
+	--json --data-only -f --force -k --keys -r -R -rf --no-clobber -q --quiet
+/;
+sub _private_query_args {
+	my ($opts, @cmd) = @_;
+	my ($sub, $after_flag, $curl_operands);
+	my $reset = sub { ($sub, $after_flag, $curl_operands) = (undef, 0, 0) };
+	$reset->();
+
+	# 'show', 'hide', or the prefix of the word that may be shown.
+	my $judge = sub {
+		my ($word) = @_;
+		unless (defined($sub)) {
+			$sub = $word unless $word eq 'safe';
+			return 'show';
+		}
+		return 'show' if $SAFE_PATH_COMMANDS{$sub};
+		my $af = $after_flag;
+		$after_flag = 0;
+		if ($sub eq 'curl') {
+			return 'show' if $SAFE_FLAG_WORDS{$word};
+			return 'hide' if $curl_operands++ >= 2;
+			return 'show' if $word =~ m{\A(?:[A-Z]+|/[\w/.:^-]*)\z};
+			return 'hide';
+		}
+		return 'hide' if $af;
+		return 'show' if $SAFE_COMMAND_WORDS{$word} || $SAFE_FLAG_WORDS{$word};
+		if ($word =~ /\A-{1,2}[A-Za-z][\w-]*\z/) {
+			$after_flag = 1;
+			return 'show';
+		}
+		return $1 if $word =~ /\A(-{1,2}[A-Za-z][\w-]*=)/ || $word =~ /\A([A-Za-z_][\w.-]*=)/;
+		return 'hide';
+	};
+
+	my @args;
+	for my $i (0..$#cmd) {
+		my $arg = $cmd[$i];
+		if (!defined($arg) || ref($arg)) {
+			push @args, $arg;
+			$after_flag = 0;
+			next;
+		}
+		if ($arg eq '--') {
+			push @args, $arg;
+			$reset->();
+			next;
+		}
+		my $program = $i == 0 && $arg =~ /\A\s*safe\s/;
+		my @words = split(' ', $arg);
+		if ($program && $arg =~ /\$\{?[\@0-9]/) {
+			# A shell template from the code, whose values come in as
+			# arguments: only its subcommand matters.
+			$sub = $words[1];
+			push @args, $arg;
+			next;
+		}
+		if (@words == 1 && $arg !~ /\s/) {
+			my $verdict = $judge->($arg);
+			push @args, $verdict eq 'show' ? $arg
+				: $verdict eq 'hide' ? {redact => $arg}
+				: {redact => $arg, prefix => $verdict};
+			next;
+		}
+		# A string of several words, such as 'vault write'.
+		my @shown;
+		my $hidden = 0;
+		for my $word (@words) {
+			my $verdict = $judge->($word);
+			if ($verdict eq 'show' && !$hidden) {
+				push @shown, $word;
+			} else {
+				$hidden = 1;
+			}
+		}
+		if (!$hidden) {
+			push @args, $arg;
+		} elsif ($program) {
+			$opts->{redact} = 1;
+			push @args, $arg;
+		} else {
+			push @args, {redact => $arg, prefix => @shown ? join(' ', @shown).' ' : ''};
+		}
+	}
+	return @args;
 }
 
 # }}}
