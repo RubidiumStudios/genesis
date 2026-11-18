@@ -375,6 +375,12 @@ Sets up the active command by recording the invoked name, resolving it to
 the canonical command name, parsing command-line options from C<@args>,
 and configuring the logging subsystem.
 
+It also rebuilds the C<GENESIS_FULL_CALL> log header now that the command
+is known. The header names the command and shows the options in
+C<_option_specs> where an option can stand. Every option value and every
+operand is shown only by its length, and so is every word from the first
+option the command does not know.
+
 B<Parameters:>
 
 =over 4
@@ -1559,6 +1565,26 @@ B<Examples:>
 
   _gate_pipeline_on_legacy_ci_yml();
   # no return value; bails if a legacy ci.yml blocks a pipeline command
+
+=head2 _option_specs
+
+  my ($base_spec, $opts_spec) = _option_specs();
+
+Builds the Getopt::Long specs that the current command takes, which
+C<parse_options> parses with and C<prepare_command> passes to
+C<Genesis::getopt_spec_words> for the log header. The first list holds
+the global options of the command's option group, plus C<-C> for a command
+that is not scoped to a repository. The second holds the command's own
+options and its current deprecated ones, without formatting marks.
+
+B<Returns:> Two array references.
+
+B<Examples:>
+
+  my ($base, $opts) = _option_specs();
+  # $opts might be ['dry-run|n', 'yes|y']
+
+B<Errors:> None.
 
 =head2 _option_warnings
 

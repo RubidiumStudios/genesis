@@ -79,7 +79,7 @@ subtest 'bosh passthrough operands stay out of the CLI traces' => sub {
 	my ($log, $terminal) = genesis('bosh', "--client-secret=$flag_value", $operand);
 	unlike($log, qr/\Q$flag_value\E|\Q$operand\E/, 'neither value is in the log');
 	unlike($terminal, qr/\Q$flag_value\E|\Q$operand\E/, 'nor on the terminal');
-	like($log, qr/--client-secret=<redacted:\d+ bytes>/, 'the flag is still named');
+	like($log, qr/'<redacted:\d+ bytes>'/, 'each is shown by length');
 };
 
 subtest 'a usage error leaves the operands out' => sub {
@@ -103,9 +103,11 @@ subtest 'the log header leaves the operands out' => sub {
 	my $call = do {local $/; <$fh>};
 	close $fh;
 	unlike($call, qr/\Q$operand\E/, 'the operand is absent from the command line a log header shows');
-	like($call, qr/ -w <redacted:\d+ bytes>$/, 'flags stay in view');
+	# Before the command is known, no word's place is, so every word is
+	# shown by length; prepare_command names the command and its options.
+	like($call, qr/(?: <redacted:\d+ bytes>){5}$/, 'every word is shown by length');
 	my $log = capture_trace { local $ENV{GENESIS_FULL_CALL} = $call; Genesis::info("anything") };
-	like($log, qr/^Command: .* -w <redacted:\d+ bytes>/, 'and the header is built from it');
+	like($log, qr/^Command: .*(?: <redacted:\d+ bytes>){5}$/m, 'and the header is built from it');
 };
 
 subtest 'credhub passthrough reaches credhub whole and the trace redacted' => sub {

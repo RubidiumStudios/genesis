@@ -243,9 +243,11 @@ sub known_commands { # list the known genesis commands specified by define_comma
 sub prepare_command { # {{{
 	($CALLED, my @args) = @_;
 	$COMMAND = $GENESIS_COMMANDS{$CALLED};
-	# The log header names the command now that it is known, and still
-	# shows only the length of each operand.
-	$ENV{GENESIS_FULL_CALL} = join(" ", $ENV{GENESIS_CALL_BIN} // 'genesis', $CALLED, Genesis::traced_cli_args(@args));
+	# The log header names the command now that it is known, and the
+	# options Genesis knows for it where they stand, and shows only the
+	# length of every operand and option value.
+	my $spec = $COMMAND && $PROPS{$COMMAND} ? Genesis::getopt_spec_words(map {@$_} _option_specs()) : {};
+	$ENV{GENESIS_FULL_CALL} = join(" ", $ENV{GENESIS_CALL_BIN} // 'genesis', $CALLED, Genesis::traced_cli_args($spec, @args));
 	trace "Preparing genesis command '$COMMAND'".($CALLED ne $COMMAND ? ' (called as $CALLED)':'');
 	parse_options(\@args);
 	set_logging_state();
@@ -365,21 +367,10 @@ sub parse_options { # {{{
 		}
 	}
 
-	my @base_spec = keys %{({map {@$_} @global_options[0..$PROPS{$COMMAND}{option_group}]})};
-
-	my @opts_spec = (
-		keys %{{ @{$PROPS{$COMMAND}{options} || []} }},
-		grep {/^[^\^]/} keys %{{ @{$PROPS{$COMMAND}{deprecated_options} || []} }} #ignore deprecated option references
-	);
+	my ($base_spec, $opts_spec) = _option_specs();
+	my @base_spec = @$base_spec;
+	my @opts_spec = @$opts_spec;
 	trace "Supported Options:".join("\n  ",(''),@base_spec,@opts_spec);
-
-	# Workaround - genesis helper always injects -C option, but many commands
-	# don't use -C (not repo/env scoped)  Inject it and ignore it for those with
-	# option_group < Genesis::Commands::REPO_OPTIONS
-	push @base_spec, "no_cwd|cwd|C=s" if $PROPS{$COMMAND}{option_group} < Genesis::Commands::REPO_OPTIONS;
-
-	# Clean out any special formatting noise
-	@opts_spec = map {$_ =~ s/^~//r} grep {$_ ne '-section-break-'} @opts_spec;
 
 	$COMMAND_OPTIONS->{color} = 1 unless exists $COMMAND_OPTIONS->{color};
 
@@ -440,7 +431,7 @@ sub parse_options { # {{{
 			command_usage(1, sprintf(
 				"Unknown option%s: %s",
 				@unknown > 1 ? 's' : '',
-				join(', ', Genesis::traced_cli_args(@unknown))
+				join(', ', Genesis::traced_cli_args({}, @unknown))
 			));
 		}
 	}
@@ -459,8 +450,30 @@ sub parse_options { # {{{
 		     : sprintf('<redacted:%d bytes>', length($v)))
 	} keys %$COMMAND_OPTIONS};
 	delete($COMMAND_OPTIONS->{no_cwd});
-	dump_var 'Received Arguments' => [Genesis::traced_cli_args(@COMMAND_ARGS)];
+	dump_var 'Received Arguments' => [Genesis::traced_cli_args({}, @COMMAND_ARGS)];
 	return;
+} # }}}
+
+# _option_specs - the Getopt::Long specs the current command takes {{{
+#
+# Returns the global specs for its option group and its own, current ones,
+# as two lists.
+sub _option_specs {
+	my @base_spec = keys %{({map {@$_} @global_options[0..$PROPS{$COMMAND}{option_group}]})};
+
+	my @opts_spec = (
+		keys %{{ @{$PROPS{$COMMAND}{options} || []} }},
+		grep {/^[^\^]/} keys %{{ @{$PROPS{$COMMAND}{deprecated_options} || []} }} #ignore deprecated option references
+	);
+
+	# Workaround - genesis helper always injects -C option, but many commands
+	# don't use -C (not repo/env scoped)  Inject it and ignore it for those with
+	# option_group < Genesis::Commands::REPO_OPTIONS
+	push @base_spec, "no_cwd|cwd|C=s" if $PROPS{$COMMAND}{option_group} < Genesis::Commands::REPO_OPTIONS;
+
+	# Clean out any special formatting noise
+	@opts_spec = map {$_ =~ s/^~//r} grep {$_ ne '-section-break-'} @opts_spec;
+	return (\@base_spec, \@opts_spec);
 } # }}}
 
 # _option_warnings - what kind of problem each Getopt::Long warning was {{{

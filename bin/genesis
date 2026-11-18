@@ -2639,7 +2639,7 @@ sub main {
 	if ($cmd) {
 		unshift(@args, "-C", $path) if $path;
 		trace("running command '$cmd'");
-		trace("arguments are [".join(', ', Genesis::traced_cli_args(@args))."]");
+		trace("arguments are [".join(', ', Genesis::traced_cli_args({options => ['-C']}, @args))."]");
 		if (has_command $cmd) {
 			# Set the command for logging purposes
 			$ENV{GENESIS_COMMAND} = $cmd;

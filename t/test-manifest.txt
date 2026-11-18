@@ -43,7 +43,7 @@ unit-tests/service_bosh-interactive_argv.t   # interactive bosh gets wrapped arg
 unit-tests/service_bosh-trace_redaction.t   # bosh output stays out of the trace; off a terminal only tasks show
 unit-tests/genesis_commands_bosh-connect_exports.t  # bosh --connect exports round-trip in the caller shell
 unit-tests/genesis_command_line-privacy.t    # operator arguments stay out of logs
-unit-tests/genesis_cli-args_privacy.t        # hyphenated values and parse errors stay out of logs
+unit-tests/genesis_cli-args_privacy.t        # arguments show by place, not spelling; parse errors stay out
 unit-tests/genesis-endpoint_privacy.t        # URL userinfo stays out of logs
 unit-tests/genesis_commands-private_output.t  # requested credentials skip log files
 unit-tests/genesis_env-create_env_diff_privacy.t # create-env diffs list paths only
@@ -59,7 +59,7 @@ unit-tests/genesis_failure-diagnostics.t     # failed credential commands report
 unit-tests/service_credhub-trace_privacy.t   # credhub output never reaches a log
 unit-tests/service_vault-query_privacy.t   # vault queries keep safe output and failed writes out of logs
 unit-tests/service_vault-read_failure_privacy.t  # failed vault reads and requests are described without safe output
-unit-tests/service_vault-query_args_privacy.t  # safe command arguments stay out of logs
+unit-tests/service_vault-query_args_privacy.t  # safe arguments show by place, not spelling
 unit-tests/service_vault-trace_redaction.t  # vault and CredHub output that is a credential stays out of the trace
 unit-tests/genesis-run_exit_status_under_trace.t  # run() keeps the exit code when tracing is on
 unit-tests/genesis_run-signal_exit.t  # a signal-killed command fails in every capture mode

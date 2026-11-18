@@ -58,6 +58,34 @@ for my $case (
 	};
 }
 
+# A credential can be spelled like a command word, a flag, a method, or a
+# path, so only the place an argument stands in decides whether it shows.
+for my $case (
+	['a command word in an operand\'s place', ['vault', 'write', 'secret/x', 'token'], 3],
+	['a known flag in an operand\'s place', ['target', '--json'], 1],
+	['an unknown option and what follows it', ['vault', 'write', '-bogus', 'secret/x', 'login'], [2,3,4]],
+	['a path in the method\'s place of curl', ['curl', '/v1/sys/token'], 1],
+	['an unknown vault subcommand', ['vault', 'token', 'status'], 2],
+	['every word after an unknown safe command', ['bogus', 'get'], [0,1]],
+) {
+	my ($what, $args, $hidden) = @$case;
+	subtest "$what is shown by length" => sub {
+		no warnings 'redefine';
+		my @got = Service::Vault::_private_query_args({}, @$args);
+		for my $i (ref($hidden) ? @$hidden : ($hidden)) {
+			is(ref($got[$i]), 'HASH', "argument $i is wrapped");
+			ok(!defined($got[$i]{prefix}) || $got[$i]{prefix} eq '', 'with nothing of it in view') if ref($got[$i]);
+		}
+	};
+}
+
+subtest 'known words in their own places stay in view' => sub {
+	my @got = map {Genesis::traced_arg($_)} Service::Vault::_private_query_args({},
+		'vault', 'token', 'lookup', '-format=json', '--', 'curl', '--data-only', 'GET', '/v1/sys/leader', '{"x":1}');
+	is(join(' ', @got), 'vault token lookup -format=<redacted:4 bytes> -- curl --data-only GET /v1/sys/leader <redacted:7 bytes>',
+		'commands, subcommands, options, the method, and the path show; values do not');
+};
+
 for my $args (
 	['get', 'secret/some/path:key'], ['exists', 'secret/some/path'], ['paths', '--keys', 'secret/some'],
 	['rm', '-rf', 'secret/some/path'], ['x509', 'validate', '-A', 'secret/some/ca'], ['export', 'secret/some'],

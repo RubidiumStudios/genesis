@@ -476,54 +476,114 @@ sub query {
 #
 # The arguments of safe's commands that name paths, keys, and sizes are
 # traced as they are, and `set` values have already been wrapped.  Every
-# other command, `vault`, `target`, and `auth` among them, keeps its
-# command words, the flags that cannot be an option's value, and the key
-# of each key=value in view, and the rest is shown by its length.  `curl`
-# keeps its method and URI.  Each command chained with -- is judged on its
-# own.  A command string that would show a hidden word is wrapped after
-# its last shown word, or, as the program run() executes, redacted whole.
+# other command's arguments are judged by the place each stands in, never
+# by how it is spelled, since a credential can be spelled like a command
+# word or a flag.  A known command word is shown only in a command's place,
+# and a known option only where an option can stand, with its value shown
+# by length.  `vault write` and `vault kv put` keep the key of each
+# key=value after the path, and `curl` keeps a known method and the path
+# that follows it.  A word in an option's place that is not known may take
+# the next word as its value, so it and every word after it in the command
+# are shown by length.  Each command chained with -- is judged on its own.
+# A command string that would show a hidden word is wrapped after its last
+# shown word, or, as the program run() executes, redacted whole.
 our %SAFE_PATH_COMMANDS = map {($_ => 1)} qw/
 	get exists check paths keys tree ls delete rm export versions cp mv copy
 	move gen ssh rsa dhparam uuid fmt x509 set ask prompt
 /;
-our %SAFE_COMMAND_WORDS = map {($_ => 1)} qw/
-	safe vault auth status token lookup lookup-self read write list delete
-	policy policies enable disable secrets kv login approle userpass github
-	ldap okta oidc role role-id secret-id unseal seal init target targets
-	version help curl
+our %SAFE_OTHER_COMMANDS = map {($_ => 1)} qw/
+	vault target targets auth login logout curl status version help init
+	unseal seal env renew
 /;
-our %SAFE_FLAG_WORDS = map {($_ => 1)} qw/
-	--json --data-only -f --force -k --keys -r -R -rf --no-clobber -q --quiet
+# vault's commands, with the subcommands of those that group them.
+our %VAULT_COMMANDS = (
+	(map {($_ => undef)} qw/status read write list delete login unseal seal version/),
+	token   => {map {($_ => 1)} qw/lookup lookup-self create renew revoke capabilities/},
+	policy  => {map {($_ => 1)} qw/list read write delete fmt/},
+	secrets => {map {($_ => 1)} qw/enable disable list move tune/},
+	kv      => {map {($_ => 1)} qw/get put patch list delete metadata enable-versioning/},
+	auth    => {map {($_ => 1)} qw/enable disable list tune/},
+);
+our %VAULT_VALUE_OPTIONS = map {($_ => 1)} qw/
+	-format -field -method -path -mount -namespace -address -ca-cert -ttl
+	-type -description -version -policy
 /;
+our %VAULT_FLAG_OPTIONS = map {($_ => 1)} qw/
+	-force -no-print -non-interactive -tls-skip-verify -detailed -recursive
+/;
+# The operands after the path of these vault commands are key=value pairs.
+our %VAULT_KEY_VALUE = map {($_ => 1)} ('write', 'kv put', 'kv patch');
+our %SAFE_AUTH_METHODS = map {($_ => 1)} qw/token ldap github okta userpass approle oidc/;
+our %HTTP_METHODS = map {($_ => 1)} qw/GET HEAD POST PUT PATCH DELETE LIST/;
 sub _private_query_args {
 	my ($opts, @cmd) = @_;
-	my ($sub, $after_flag, $curl_operands);
-	my $reset = sub { ($sub, $after_flag, $curl_operands) = (undef, 0, 0) };
+	my ($sub, $vault_cmd, $grouped, $operands, $value_next, $opaque);
+	my $reset = sub {
+		($sub, $vault_cmd, $grouped, $operands, $value_next, $opaque) = (undef, undef, 0, 0, 0, 0);
+	};
 	$reset->();
 
 	# 'show', 'hide', or the prefix of the word that may be shown.
 	my $judge = sub {
 		my ($word) = @_;
 		unless (defined($sub)) {
-			$sub = $word unless $word eq 'safe';
-			return 'show';
-		}
-		return 'show' if $SAFE_PATH_COMMANDS{$sub};
-		my $af = $after_flag;
-		$after_flag = 0;
-		if ($sub eq 'curl') {
-			return 'show' if $SAFE_FLAG_WORDS{$word};
-			return 'hide' if $curl_operands++ >= 2;
-			return 'show' if $word =~ m{\A(?:[A-Z]+|/[\w/.:^-]*)\z};
+			return 'show' if $word eq 'safe';
+			$sub = $word;
+			return 'show' if $SAFE_PATH_COMMANDS{$word} || $SAFE_OTHER_COMMANDS{$word};
+			$opaque = 1;
 			return 'hide';
 		}
-		return 'hide' if $af;
-		return 'show' if $SAFE_COMMAND_WORDS{$word} || $SAFE_FLAG_WORDS{$word};
-		if ($word =~ /\A-{1,2}[A-Za-z][\w-]*\z/) {
-			$after_flag = 1;
-			return 'show';
+		return 'hide' if $opaque;
+		return 'show' if $SAFE_PATH_COMMANDS{$sub};
+		if ($value_next) {
+			$value_next = 0;
+			return 'hide';
 		}
-		return $1 if $word =~ /\A(-{1,2}[A-Za-z][\w-]*=)/ || $word =~ /\A([A-Za-z_][\w.-]*=)/;
+		if ($sub eq 'curl') {
+			return 'show' if $word eq '--data-only';
+			if ($word =~ /\A-/) {
+				$opaque = 1;
+				return 'hide';
+			}
+			$operands++;
+			return 'show' if $operands == 1 && $HTTP_METHODS{$word};
+			return 'show' if $operands == 2;
+			return 'hide';
+		}
+		if ($sub eq 'auth') {
+			return 'show' if ++$operands == 1 && $SAFE_AUTH_METHODS{$word};
+			return 'hide';
+		}
+		return 'hide' unless $sub eq 'vault';
+
+		if ($word =~ /\A(--?)([A-Za-z][\w-]*)(=?)/) {
+			my ($dashes, $name, $eq) = ($1, "-$2", $3);
+			if ($VAULT_VALUE_OPTIONS{$name}) {
+				return "$dashes$2=" if $eq;
+				$value_next = 1 if $word eq "$dashes$2";
+				return 'show' if $value_next;
+			} elsif ($VAULT_FLAG_OPTIONS{$name} && $word eq "$dashes$2") {
+				return 'show';
+			}
+			$opaque = 1;
+			return 'hide';
+		}
+		unless (defined($vault_cmd)) {
+			$vault_cmd = exists($VAULT_COMMANDS{$word}) ? $word : '';
+			return 'show' if $vault_cmd ne '';
+			$opaque = 1;
+			return 'hide';
+		}
+		if (ref($VAULT_COMMANDS{$vault_cmd}) && !$grouped) {
+			$grouped = 1;
+			if ($VAULT_COMMANDS{$vault_cmd}{$word}) {
+				$vault_cmd .= " $word";
+				return 'show';
+			}
+			$opaque = 1;
+			return 'hide';
+		}
+		return $1 if ++$operands > 1 && $VAULT_KEY_VALUE{$vault_cmd} && $word =~ /\A([A-Za-z_][\w.-]*=)/;
 		return 'hide';
 	};
 
@@ -531,8 +591,17 @@ sub _private_query_args {
 	for my $i (0..$#cmd) {
 		my $arg = $cmd[$i];
 		if (!defined($arg) || ref($arg)) {
+			# A wrapped argument fills the place it stands in: an option's
+			# value, or an operand.  In a command's place, what follows can
+			# no longer be placed, so it is all wrapped.
 			push @args, $arg;
-			$after_flag = 0;
+			if ($value_next) {
+				$value_next = 0;
+			} elsif (!defined($sub) || ($sub eq 'vault' && !defined($vault_cmd))) {
+				$opaque = 1;
+			} else {
+				$operands++;
+			}
 			next;
 		}
 		if ($arg eq '--') {

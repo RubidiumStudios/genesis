@@ -8,15 +8,19 @@ use Genesis::State;
 use Genesis::Term;
 use Genesis::Commands;
 use Genesis::Top;
+use Service::BOSH;
 use Genesis::UI;
 use Genesis::Env::NetworkClaims;
 use JSON::PP;
 use IPv4;
 
 # bosh - provide a wrapper around the bosh command {{{
-# The bosh CLI's own commands and their aliases, and flags it is known to
-# take without a value, which a trace can show.  A flag that is not listed
-# may take a value, so the trace hides the word after it.
+# The bosh CLI's commands and their aliases, and the options its commands
+# take, split by whether they take a value, for passthrough_args.  A word
+# is shown only in the place it can stand in: a command first among the
+# operands, an option where an option can be.  An option that is not
+# listed may take the next word as its value, so it and everything after
+# it are shown by length.
 our @BOSH_COMMANDS = qw/
 	add-blob alias-env attach-disk blobs cancel-task cancel-tasks clean-up
 	cloud-check cloud-config config configs cpi-config create-env
@@ -35,10 +39,26 @@ our @BOSH_COMMANDS = qw/
 	update-runtime-config upload-blobs upload-release upload-stemcell
 	variables vendor-package vms
 	cck cc d dep ds e env envs es is int l r rs ss t ts uc ur vars
-	--json --tty --no-color -n --non-interactive --sha2 -v --version -h
-	--help --details --vitals --ps --failing --fix --recreate --dry-run
-	--no-redact --force
 /;
+our $BOSH_ARGS = {
+	commands => \@BOSH_COMMANDS,
+	flags => [keys(%Service::BOSH::BOSH_FLAG_OPTIONS), qw/
+		--details --vitals --ps --failing --fix --recreate --dry-run
+		--no-redact --force --skip-drain --recreate-persistent-disks
+		--converge --no-converge --hard --soft --all -a --recent -r
+		--follow -f --agent --system --keep-alive --when-changed
+		--download-logs --auto --report --results --recursive --rebase
+		--var-errs --var-errs-unused
+	/],
+	options => [keys(%Service::BOSH::BOSH_VALUE_OPTIONS), qw/
+		-v --var --var-file --vars-file -l --vars-env --vars-store -o
+		--ops-file --canaries --max-in-flight --type --name --num --job
+		--only --dir --logs-dir --instance -c --command --opts
+		--gw-host --gw-user --gw-private-key --gw-disable --gw-socks5
+		--resolution --sha1 --version --path --state --event --task
+		--before --after --object-type --object-name --action
+	/],
+};
 
 sub bosh {
 	append_options(redact => ! -t STDOUT);
@@ -66,7 +86,7 @@ sub bosh {
 		# only flags and bosh's own command names stay in view in the trace.
 		my ($out, $rc) = $bosh->execute(
 			{interactive => 1, passthrough => 1, dir => $ENV{GENESIS_ORIGINATING_DIR}},
-			Genesis::passthrough_args(\@BOSH_COMMANDS, @_)
+			Genesis::passthrough_args($BOSH_ARGS, @_)
 		);
 		exit $rc;
 	}

@@ -219,10 +219,10 @@ sub Init {
 	$ENV{GENESIS_ORIGINATING_DIR}= Cwd::getcwd;
 	$ENV{GENESIS_CALL_BIN}       = humanize_bin();
 	# The command line can carry a credential an operator passed through to
-	# bosh or credhub, and it heads every log, so it shows flags and only
-	# the length of every other argument.  prepare_command names the
-	# command once it is known.
-	$ENV{GENESIS_FULL_CALL}      = join(" ", $ENV{GENESIS_CALL_BIN}, traced_cli_args(@ARGV));
+	# bosh or credhub, and it heads every log.  The command and its options
+	# are not known yet, so it shows only the length of every argument, and
+	# prepare_command shows the command and its options once they are.
+	$ENV{GENESIS_FULL_CALL}      = join(" ", $ENV{GENESIS_CALL_BIN}, traced_cli_args({}, @ARGV));
 }
 
 sub deployment_roots_map {
@@ -839,52 +839,139 @@ sub traced_arg {
 
 # passthrough_args - wrap the operands of a command line handed to a CLI
 #
-# An operator can pass a credential to bosh or credhub as any operand, and
-# a credential can begin with a hyphen, so a flag is only shown where it
-# cannot be an option's value.  A word listed in $visible, such as the
-# CLI's command names and its flags that take no value, is always shown.
-# Any other bare flag (-n, --json) is shown unless it follows a bare flag
-# that is not listed, since it may then be that flag's value.  A
-# --flag=value keeps the flag as its prefix, a short flag with more after
-# it (-pVALUE) keeps its letter, and every other operand is wrapped whole,
-# so run() hands the child the same arguments and the trace shows each
-# one's length.  Every operand after a bare -- is wrapped, since none of
-# them is a flag.
+# An operator can pass a credential to bosh, credhub, or Genesis as any
+# operand, and a credential can be spelled like anything, a command name
+# and a flag included.  So whether a word is shown is decided by where it
+# stands, never by how it is spelled.  $spec names the CLI's commands, the
+# options it knows that take no value (flags), and those that take one:
+#
+#   {commands => [...], flags => [...], options => [...]}
+#
+# A name in both lists is taken to take a value, which hides more.  A known
+# command is shown in the command position, the first operand, and a known
+# flag or option is shown where an option can stand.  Every
+# option value is wrapped whole, and so is every other operand, so run()
+# hands the child the same arguments and the trace shows each one's
+# length.  A --option=value or -oVALUE that the spec knows keeps its option
+# as the prefix.  A word in an option's place that the spec does not know
+# may be an option that takes the next word as its value, so it is wrapped,
+# and so is every word after it; so is every word after a bare --.  A list
+# in place of $spec is read as the old form, its words starting with a
+# hyphen as flags and the others as commands.
 sub passthrough_args {
-	my $visible = ref($_[0]) eq 'ARRAY' ? shift : [];
-	my %visible = map {($_ => 1)} @$visible;
-	my ($may_be_value, $operands_only) = (0, 0);
-	my @args;
-	for (@_) {
-		my $after_flag = $may_be_value;
-		$may_be_value = 0;
-		if (_is_redacted_arg($_) || !defined($_)) {
-			push @args, $_;
-		} elsif ($operands_only) {
-			push @args, {redact => $_};
-		} elsif ($_ eq '--' && !$after_flag) {
-			push @args, $_;
-			$operands_only = 1;
-		} elsif ($visible{$_}) {
-			push @args, $_;
-		} elsif (!$after_flag && /\A(?:--[A-Za-z][\w-]*|-[A-Za-z])\z/) {
-			push @args, $_;
-			$may_be_value = 1;
-		} elsif (!$after_flag && /\A(--[A-Za-z][\w-]*=)/) {
-			push @args, {redact => $_, prefix => $1};
-		} elsif (!$after_flag && /\A(-[A-Za-z])./) {
-			push @args, {redact => $_, prefix => $1};
-		} else {
-			push @args, {redact => $_};
+	my $spec = ref($_[0]) eq 'HASH' ? shift
+		: ref($_[0]) eq 'ARRAY' ? do {
+			my $words = shift;
+			{commands => [grep {!/\A-/} @$words], flags => [grep {/\A-/} @$words]};
 		}
+		: {};
+	my %commands = map {($_ => 1)} @{$spec->{commands} || []};
+	my %options  = map {($_ => 1)} @{$spec->{options} || []};
+	my %flags    = map {($_ => 1)} grep {!$options{$_}} @{$spec->{flags} || []};
+
+	my ($command, $value_next, $opaque) = (undef, 0, 0);
+	my @args;
+	for my $arg (@_) {
+		if (!defined($arg) || _is_redacted_arg($arg)) {
+			push @args, $arg;
+			$value_next = 0;
+			next;
+		}
+		if ($opaque || $value_next) {
+			push @args, {redact => $arg};
+			$value_next = 0;
+			next;
+		}
+		if ($arg eq '--') {
+			push @args, $arg;
+			$opaque = 1;
+			next;
+		}
+		if ($arg =~ /\A(--[A-Za-z][\w-]*)(=?)/) {
+			my ($name, $eq) = ($1, $2);
+			if ($eq) {
+				# The value is attached, so the next word is not in doubt.
+				push @args, ($options{$name} || $flags{$name})
+					? {redact => $arg, prefix => "$name="} : {redact => $arg};
+			} elsif ($arg ne $name) {
+				push @args, {redact => $arg};
+				$opaque = 1;
+			} elsif ($flags{$name}) {
+				push @args, $arg;
+			} elsif ($options{$name}) {
+				push @args, $arg;
+				$value_next = 1;
+			} else {
+				push @args, {redact => $arg};
+				$opaque = 1;
+			}
+			next;
+		}
+		if ($arg =~ /\A-[A-Za-z]/) {
+			# A short option, or a bundle of them, whose last can take the
+			# rest of the word as its value.
+			my ($i, $shown) = (1, '-');
+			while ($i < length($arg)) {
+				my $short = '-'.substr($arg, $i, 1);
+				if ($flags{$short} && substr($arg, $i, 1) =~ /[A-Za-z]/) {
+					$shown .= substr($arg, $i++, 1);
+				} elsif ($options{$short}) {
+					$shown .= substr($arg, $i++, 1);
+					last;
+				} else {
+					$shown = undef;
+					last;
+				}
+			}
+			if (!defined($shown)) {
+				push @args, {redact => $arg};
+				$opaque = 1;
+			} elsif ($i < length($arg)) {
+				push @args, {redact => $arg, prefix => $shown};
+			} else {
+				push @args, $arg;
+				$value_next = 1 if $options{'-'.substr($arg, -1)};
+			}
+			next;
+		}
+		if (!defined($command)) {
+			$command = $commands{$arg} ? $arg : '';
+			if ($command ne '') {
+				push @args, $arg;
+				next;
+			}
+		}
+		push @args, {redact => $arg};
 	}
 	return @args;
 }
 
 # traced_cli_args - how a trace or log shows command-line arguments
 sub traced_cli_args {
-	my $visible = ref($_[0]) eq 'ARRAY' ? shift : [];
-	return map {traced_arg($_)} passthrough_args($visible, @_);
+	my $spec = ref($_[0]) eq 'HASH' || ref($_[0]) eq 'ARRAY' ? shift : {};
+	return map {traced_arg($_)} passthrough_args($spec, @_);
+}
+
+# getopt_spec_words - the flags and value options a Getopt::Long spec takes
+#
+# For passthrough_args.  'name|n=s' takes a value as --name or -n, as does
+# 'name:s', whose value is optional; 'name', 'name+', and 'name!' take none,
+# and 'name!' also takes --no-name and --noname.
+sub getopt_spec_words {
+	my (@flags, @options);
+	for my $spec (@_) {
+		next unless defined($spec) && $spec =~ /\A([\w|?-]+)([=:!+].*)?\z/;
+		my ($names, $type) = ($1, $2 // '');
+		my @names = map {length($_) == 1 ? "-$_" : "--$_"} grep {length} split(/\|/, $names);
+		if ($type =~ /\A[=:]/) {
+			push @options, @names;
+		} else {
+			push @flags, @names;
+			push @flags, map {("--no-$_", "--no$_")} grep {length($_) > 1} split(/\|/, $names)
+				if $type eq '!';
+		}
+	}
+	return {flags => \@flags, options => \@options};
 }
 
 # _traced_env_value - what run()'s trace shows for one environment value

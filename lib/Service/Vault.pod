@@ -3188,14 +3188,26 @@ C<get>, C<exists>, C<paths>, C<rm>, C<export>, C<x509>, C<gen>, and C<set>,
 are returned as they are, since they name paths, keys, and sizes.
 C<_redact_set_values> has already wrapped the values of C<set>.
 
-=item * C<curl> keeps its flags, its method, and its URI in view, and
-wraps anything after them, such as a request body.
+=item * C<curl> keeps C<--data-only>, a method named in C<%HTTP_METHODS>
+in the first operand's place, and the path in the second, and wraps
+anything after them, such as a request body.
 
-=item * Every other command, such as C<vault>, C<target>, and C<auth>, keeps
-the words in C<%SAFE_COMMAND_WORDS>, the flags in C<%SAFE_FLAG_WORDS>, and
-any other bare flag that does not follow a bare flag. A C<-flag=value> or
-C<key=value> keeps its C<-flag=> or C<key=> as the prefix, and every other
-argument is wrapped whole.
+=item * C<auth> keeps a method named in C<%SAFE_AUTH_METHODS> in its first
+operand's place, and wraps the rest.
+
+=item * C<vault> keeps a command named in C<%VAULT_COMMANDS> in the command's
+place, and the subcommand of a command that groups them, such as
+C<token lookup>, in the place after it. An option named in
+C<%VAULT_VALUE_OPTIONS> or C<%VAULT_FLAG_OPTIONS> is kept where an option
+can stand, and an option's value is wrapped, so a C<-format=json> keeps
+its C<-format=> as the prefix. The operands after the path of a command
+in C<%VAULT_KEY_VALUE>, such as C<write>, keep the C<key=> of each
+C<key=value>, and every other operand is wrapped whole.
+
+=item * A word in a command's or an option's place that is not known can be
+an option that takes the next word as its value, so it and every word
+after it are wrapped, up to the next C<-->. So are the arguments of every
+other command, such as C<target>, and of an unknown subcommand.
 
 =back
 

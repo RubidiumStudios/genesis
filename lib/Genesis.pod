@@ -1645,56 +1645,96 @@ B<Examples:>
 
 =head2 passthrough_args
 
-  my @args = Genesis::passthrough_args(\@visible_words, @operator_args);
+  my @args = Genesis::passthrough_args($spec, @operator_args);
 
 Wraps the arguments an operator passes through to another CLI, such as
 bosh or credhub, so that C<run()> hands the child every argument whole
-while the trace shows each one by its length. A credential can begin with
-a hyphen, so a flag is shown only where it cannot be an option's value.
+while the trace shows each one by its length. A credential can be spelled
+like anything, a command name or a flag included, so whether a word is
+shown is decided by the place it stands in, never by its spelling.
+
+C<$spec> describes the CLI as C<{commands =E<gt> [...], flags =E<gt>
+[...], options =E<gt> [...]}>, where C<flags> are the options that take
+no value and C<options> those that take one. A name in both lists is
+taken to take a value. In place of the hash, an array reference is read
+as the older form, with its words that start with a hyphen as flags and
+the rest as commands. Without either, nothing is known.
 
 =over 4
 
-=item * A word listed in the optional leading array reference, such as
-the CLI's command names and its flags that take no value, is returned as
-it is.
+=item * A known command is returned as it is when it is the first operand.
+Every other operand is wrapped as C<{redact =E<gt> $arg}>.
 
-=item * Any other bare flag, such as C<-n> or C<--json>, is returned as it
-is unless it follows a bare flag that is not listed, since it may then be
-that flag's value.
+=item * A known flag or option is returned as it is where an option can
+stand, and the word after a known option is wrapped as its value. A
+bundle of known short flags, such as C<-nq>, is returned as it is.
 
-=item * A C<--flag=value> is wrapped as C<{redact =E<gt> $arg, prefix
-=E<gt> '--flag='}>, and a short flag with more after it, such as
-C<-pVALUE>, as C<{redact =E<gt> $arg, prefix =E<gt> '-p'}>, so the flag
-stays in view. Neither is treated this way after an unlisted bare flag.
+=item * A known C<--option=value>, or a known short option with its value
+attached, such as C<-pVALUE>, is wrapped with the option as the prefix,
+such as C<{redact =E<gt> $arg, prefix =E<gt> '--option='}>. An unknown
+C<--option=value> is wrapped whole, and the words after it keep their
+places, since its value is attached.
+
+=item * Any other word that starts like an option is unknown, and it might
+take the next word as its value, so it and every word after it are
+wrapped.
 
 =item * A bare C<--> is returned as it is, and every argument after it is
-wrapped, since none of them is a flag.
+wrapped, since none of them is an option.
 
-=item * Every other argument is wrapped as C<{redact =E<gt> $arg}>, and an
-argument that is already wrapped is left alone.
+=item * An argument that is already wrapped is left alone, and fills the
+place it stands in.
 
 =back
 
 B<Returns:> The list of arguments, ready for C<run()>.
 
+B<Examples:>
+
+  Genesis::passthrough_args(
+    {commands => ['vms'], flags => ['--json'], options => ['-d']},
+    '-d', 'vms', 'vms', '--json', '--made-up', '--json');
+  # Returns: ('-d', {redact => 'vms'}, 'vms', '--json',
+  #           {redact => '--made-up'}, {redact => '--json'})
+
 =head2 traced_cli_args
 
-  my @shown = Genesis::traced_cli_args(\@visible_words, @args);
+  my @shown = Genesis::traced_cli_args($spec, @args);
 
 Returns how a trace or log shows a command line, which is the
-C<traced_arg> form of each argument C<passthrough_args> returns. Genesis
-uses it for the C<GENESIS_FULL_CALL> log header, the argument traces, and
-the usage error, since any operand can be a credential.
+C<traced_arg> form of each argument C<passthrough_args> returns for
+C<$spec>. Genesis uses it for the C<GENESIS_FULL_CALL> log header, the
+argument traces, and the usage error, since any operand can be a
+credential. Without a spec, every argument is shown by its length.
 
 B<Returns:> A list of strings.
 
 B<Examples:>
 
-  Genesis::traced_cli_args('set', '-w', 'abc', '--password=abc');
-  # Returns: ('<redacted:3 bytes>', '-w', '<redacted:3 bytes>', '--password=<redacted:3 bytes>')
+  Genesis::traced_cli_args($Service::Credhub::CREDHUB_ARGS,
+    'set', '-w', 'abc', '--password=abc');
+  # Returns: ('set', '-w', '<redacted:3 bytes>', '--password=<redacted:3 bytes>')
 
-  Genesis::traced_cli_args('--client-secret', '-abc', '-pabc');
-  # Returns: ('--client-secret', '<redacted:4 bytes>', '-p<redacted:3 bytes>')
+  Genesis::traced_cli_args({}, '--client-secret', '-abc');
+  # Returns: ('<redacted:15 bytes>', '<redacted:4 bytes>')
+
+=head2 getopt_spec_words
+
+  my $words = Genesis::getopt_spec_words(@getopt_long_specs);
+
+Reads Getopt::Long option specs into the C<flags> and C<options> lists of
+a C<passthrough_args> spec. A spec ending in C<=> or C<:> takes a value
+under each of its names, and any other takes none. A negatable C<!> spec
+also gives its C<--no-name> and C<--noname> forms as flags. A name of one
+letter takes one hyphen, and a longer one takes two.
+
+B<Returns:> A hash reference with C<flags> and C<options> array references.
+
+B<Examples:>
+
+  Genesis::getopt_spec_words('name|n=s', 'color!');
+  # Returns: {options => ['--name', '-n'],
+  #           flags   => ['--color', '--no-color', '--nocolor']}
 
 =head2 traced_endpoint
 

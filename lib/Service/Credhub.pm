@@ -354,18 +354,32 @@ sub _full_path {
 	return $self->base . $path;
 }
 
-# The credhub CLI's own commands, and flags it is known to take without a
-# value, which a trace can show as they are.  A flag that is not listed
-# may take a value, so the trace hides the word after it.
+# The credhub CLI's commands and their aliases, and the options its
+# commands take, split by whether they take a value, for passthrough_args.
+# A word is shown only in the place it can stand in, and an option that is
+# not listed may take the next word as its value, so it and everything
+# after it are shown by length.
 our @CREDHUB_COMMANDS = qw/
 	api login logout get set generate regenerate bulk-regenerate delete find
 	export import interpolate curl get-permission set-permission
 	delete-permission update-permission version help
 	a l o g s n r d f e i
-	-j --output-json -q --quiet --skip-tls-validation -h --help --version
-	--include-special --exclude-number --exclude-upper --exclude-lower
-	--self-sign --is-ca --no-overwrite
 /;
+our $CREDHUB_ARGS = {
+	commands => \@CREDHUB_COMMANDS,
+	flags => [qw/
+		-j --output-json -q --quiet --skip-tls-validation -h --help --version
+		--include-special --exclude-number --exclude-upper --exclude-lower
+		--self-sign --is-ca --no-overwrite --sso
+	/],
+	options => [qw/
+		-n --name -t --type -w --password -v --value -u --username -p
+		--private --public --path -c --certificate --common-name -r --root
+		-m --ca --ca-name -k --key-length -l --length -s --server
+		--client-name --client-secret --ca-cert -d --duration -a --actor
+		-o --operations -f --file
+	/],
+};
 
 sub execute {
 	my ($self,$cmd,@args) = @_;
@@ -377,7 +391,7 @@ sub execute {
 			redact_env => 1,
 			stderr => 0
 		},
-		'credhub', Genesis::passthrough_args(\@CREDHUB_COMMANDS, $cmd, @args)
+		'credhub', Genesis::passthrough_args($CREDHUB_ARGS, $cmd, @args)
 	);
 }
 
