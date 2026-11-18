@@ -1030,7 +1030,12 @@ sub spruce_diff {
 	$second = $process_arg->($second, "second");
 
 	my $out_file = "$scratchdir/out.diff";
-	my (undef,$rc,$err) = run({redact => 1}, fake_tty($out_file, "spruce", "diff", $first, $second));
+	# The diff shows values from both manifests, so script(1)'s copy of it
+	# stays out of the trace.
+	my (undef,$rc,$err) = run(
+		{redact_output => 1, redact_stderr => 1},
+		fake_tty($out_file, "spruce", "diff", $first, $second)
+	);
 	my $out = slurp($out_file);
 
 	# util-linux script(1) records the command's exit code in a "Script done"
@@ -1269,7 +1274,9 @@ sub load_json_file {
 
 sub load_yaml_file {
 	my ($file) = @_;
-	my ($out, $rc, $err) = run({ stderr => 0 }, 'spruce json < "$1"', $file);
+	# Manifests and vault data pass through here, so the converted copy
+	# stays out of the trace.
+	my ($out, $rc, $err) = run({ stderr => 0, redact_output => 1 }, 'spruce json < "$1"', $file);
 	my $json = load_json($out) if $rc == 0;
 	return (wantarray) ? ($json,$rc,$err) : $json;
 }
@@ -1321,7 +1328,8 @@ sub to_yaml {
 	my $json = JSON::PP->new->allow_nonref->encode($data);
 	my $tmp = tmpfile(template => 'to_yaml_XXXXXXXXXX', ext => '.json');
 	mkfile_or_fail($tmp, 0644, $json);
-	my ($out,$rc,$err) = run({ stderr => 0 }, qw/spruce merge --skip-eval/, $tmp);
+	# As in load_yaml_file, the converted copy stays out of the trace.
+	my ($out,$rc,$err) = run({ stderr => 0, redact_output => 1 }, qw/spruce merge --skip-eval/, $tmp);
 	bail("Error converting data to YAML: $err") if $rc;
 	return $out if $out;
 }

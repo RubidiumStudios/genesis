@@ -183,9 +183,11 @@ sub merge {
 			map {$options{$_} ? [$_,$options{$_}] : [$_,"#i{<null>}"]}
 			keys %options
 		),
+		# The merge environment carries CREDHUB_SECRET, so values are shown
+		# only for the keys run() would show; see Genesis::_traced_env_value.
 		join("\n",
 			map {"  $_->[0]: $_->[1]"}
-			map {$env_vars->{$_} ? [$_,$env_vars->{$_}] : [$_,"#i{<null>}"]}
+			map {$env_vars->{$_} ? [$_,Genesis::_traced_env_value($_, $env_vars->{$_})] : [$_,"#i{<null>}"]}
 			keys %$env_vars
 		)
 	);
@@ -207,16 +209,21 @@ sub merge {
 			"%s manifest for %s/%s environment",
 			$manifest->type, $self->env->name, $self->env->type
 		);
-		($out,my $rc,my $err) = run({
-				onfailure => "Unable to merge $descriptor",
+		# The merged manifest can be unredacted, so it stays out of the trace.
+		# run()'s onfailure would then hide spruce's errors too, so a failure
+		# is reported here with the output, which on failure is only those
+		# errors.
+		($out,my $rc) = run({
 				stderr => "&1",
+				redact_output => 1,
 				env => $env_vars
 			},
 			'spruce', 'merge', @merge_opts, @$sources
 		);
-		if ($rc) {
-			$errors = $err;
-		}
+		bail({raw => 1}, "#R{%s} (run failed)%s",
+			"Unable to merge $descriptor",
+			defined($out) ? "\n\nSTDOUT:\n$out" : ''
+		) if $rc;
 	}
 	popd;
 	$out =~ s/\s*\z//ms; # no terminating blank lines
@@ -540,7 +547,8 @@ sub _adaptive_merge {
 	my %opts = ref($_[0]) eq 'HASH' ? %{shift()} : ();
 	my @files = (@_);
 
-	my ($out,$rc,$err) = run({stderr=>0, %opts}, 'spruce merge --multi-doc --go-patch "$@"', @files);
+	# The merged and unevaluated manifests stay out of the trace.
+	my ($out,$rc,$err) = run({stderr=>0, redact_output => 1, %opts}, 'spruce merge --multi-doc --go-patch "$@"', @files);
 	return (wantarray ? ($out,$err) : $out) unless $rc;
 
 	my $orig_errors = join("\n", grep {$_ !~ /^\s*$/} lines($err));
@@ -551,7 +559,7 @@ sub _adaptive_merge {
 		$contents .= $content;
 	}
 	my $uneval = read_json_from(run(
-		{ onfailure => "Unable to merge files without evaluation", stderr => undef, %opts },
+		{ onfailure => "Unable to merge files without evaluation", stderr => undef, redact_output => 1, %opts },
 		'spruce merge --multi-doc --go-patch --skip-eval "$@" | spruce json', @files
 	));
 
@@ -612,7 +620,7 @@ sub _adaptive_merge {
 			}
 		}
 		my $premerge = mkfile_or_fail($self->env->workpath('premerge.yml'),$contents);
-		($out,$rc,$err) = run({stderr => 0, %opts }, 'spruce merge --multi-doc --go-patch "$1"', $premerge);
+		($out,$rc,$err) = run({stderr => 0, redact_output => 1, %opts }, 'spruce merge --multi-doc --go-patch "$1"', $premerge);
 	}
 
 	bail(

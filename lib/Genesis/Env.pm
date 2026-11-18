@@ -3676,9 +3676,12 @@ sub last_deployed_manifest {
 					my $is_pruned = ! grep {/^genesis:/} split /\n/, $data;
 					if ($pruned && !$is_pruned) {
 						my $file_sha1 = sha1_hex($data);
+						# The deployed manifest goes in as an argument and comes
+						# back out, and both stay out of the trace.
 						my ($pruned_data, $rc, $err) = run(
+							{redact_output => 1},
 							'fin=$1; shift 1; echo "$fin" | spruce merge "$@" -',
-							$data,
+							{redact => $data},
 							map {('--prune',$_)} $self->prunable_keys
 						);
 						if ($rc) {
@@ -3837,15 +3840,45 @@ sub last_deployed_manifest {
 		trace "Errors: ".join("\n",@errors);
 	}
 	if (wantarray) {
-		trace 'Compound Results: '.Dumper($results);
+		trace 'Compound Results: '.Dumper(_lookup_results_for_trace($results, $just_return));
 		return %$results if ref($results) eq 'HASH';
 		return @$results if ref($results) eq 'ARRAY';
 		return ($results);
 	} else {
-		trace 'Scalar Results: '.Dumper($results);
+		trace 'Scalar Results: '.Dumper(_lookup_results_for_trace($results, $just_return, 1));
 		return $results;
 	}
 }
+
+# _lookup_results_for_trace - last_deployed_manifest results, contents sized {{{
+#
+# A deployed manifest and its create-env state, store, and vars files carry
+# the director's own credentials, so the trace gets their sizes in their
+# place.  Everything else -- sources, digests, paths, errors -- is kept.
+sub _lookup_results_for_trace {
+	my ($results, $just, $scalar) = @_;
+	my $sized = sub {
+		my $data = shift;
+		return $data unless defined($data);
+		my $bytes = ref($data) ? length(JSON::PP->new->canonical->encode($data)) : length($data);
+		return "<redacted:$bytes bytes>";
+	};
+	return $sized->($results) if $scalar && ($just//'') eq 'contents';
+	if (ref($results) eq 'ARRAY') {
+		my @copy = @$results;
+		$copy[0] = $sized->($copy[0]) if ($just//'') eq 'contents';
+		return \@copy;
+	}
+	return $results unless ref($results) eq 'HASH';
+	my %copy = %$results;
+	for my $key (keys %copy) {
+		next unless ref($copy{$key}) eq 'HASH' && exists($copy{$key}{data});
+		$copy{$key} = {%{$copy{$key}}, data => $sized->($copy{$key}{data})};
+	}
+	return \%copy;
+}
+
+# }}}
 
 # }}}
 # vars_file - create yml file and return path for bosh variables {{{
@@ -3859,7 +3892,9 @@ sub vars_file {
 	));
 
 	return unless scalar(keys %{$manifest->data});
-	dump_var "BOSH Variables File" => $manifest->file, "Contents" => $manifest->data;
+	# The variables are the director's credentials, so only their names go
+	# to the trace.
+	dump_var "BOSH Variables File" => $manifest->file, "Variables" => [sort keys %{$manifest->data}];
 	if ($file) {
 		save_to_yaml_file($manifest->data, $file);
 	} else {
