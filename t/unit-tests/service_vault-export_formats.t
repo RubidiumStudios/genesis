@@ -382,11 +382,11 @@ subtest 'get_path dies when the export exits nonzero' => sub {
 	no warnings 'redefine';
 	local *Service::Vault::query = safe_answers('', 2, $REFUSED);
 	use warnings 'redefine';
-	throws_ok { $v->get_path('/secret/myapp') } qr{Could not read secret/myapp from vault at https://vault\.example\.com:8200: .*Code: 403}s,
+	throws_ok { $v->get_path('/secret/myapp') } qr{Could not read secret/myapp from vault at https://vault\.example\.com:8200: .*HTTP status 403}s,
 		'a refused export dies naming the path and the reason, rather than reading as empty';
 
 	local *Service::Vault::query = safe_answers('', 1, $UNREACHED);
-	throws_ok { $v->get_path('/secret/myapp') } qr{Could not read secret/myapp .*connection refused}s,
+	throws_ok { $v->get_path('/secret/myapp') } qr{Could not read secret/myapp .*connection failed}s,
 		'and so does an unreachable vault';
 };
 
@@ -417,10 +417,10 @@ subtest 'the pipeline readers stop on a nonzero export exit instead of falling b
 	local *Service::Vault::query = safe_answers('', 2, $REFUSED);
 	use warnings 'redefine';
 	throws_ok { Genesis::Commands::Env::_assert_prior_env_deployed($env, 'prior-env') }
-		qr{Could not read \Q$PRIOR_DEPLOYS\E from vault.*Code: 403}s,
+		qr{Could not read \Q$PRIOR_DEPLOYS\E from vault.*HTTP status 403}s,
 		'the prior-env check names the unreadable path, not a missing deploy';
 	throws_ok { Genesis::Commands::Env::_get_source_sha_for_pull($env, 'prior-env', Mock->new(sha => 'control-head')) }
-		qr{Could not read \Q$PRIOR_DEPLOYS\E from vault.*Code: 403}s,
+		qr{Could not read \Q$PRIOR_DEPLOYS\E from vault.*HTTP status 403}s,
 		'the pull source lookup stops rather than falling back to control HEAD';
 };
 
@@ -463,13 +463,13 @@ subtest 'store_data dies on a refused export and stays quiet for a fresh env' =>
 	plan tests => 7;
 	my $store = vault_store(safe_answers('', 1, $REFUSED), env => ExportMockExistingEnv->new);
 	my $out = combined_from {
-		throws_ok { $store->store_data } qr{Could not read secret/myapp from vault.*Code: 403}s,
+		throws_ok { $store->store_data } qr{Could not read secret/myapp from vault.*HTTP status 403}s,
 			'a refused export dies naming the path, rather than reading as no secrets';
 	};
 	ok(!exists $store->{__data}, 'and caches nothing');
 
 	$store = vault_store(safe_answers('', 1, $UNREACHED));
-	throws_ok { $store->store_data } qr{Could not read secret/myapp from vault.*connection refused}s,
+	throws_ok { $store->store_data } qr{Could not read secret/myapp from vault.*connection failed}s,
 		'an unreachable vault dies even for a fresh env';
 
 	my $data;
@@ -520,8 +520,8 @@ subtest 'read_flattened_secret tells a missing secret from a refused read' => su
 		'a destroyed latest version' => "!! version 3 of secret `secret/myapp` has been destroyed\n",
 	);
 	my %failed = (
-		'a 403'                => [$REFUSED,   qr{Could not read secret/myapp from vault at https://vault\.example\.com:8200: .*Code: 403}s],
-		'an unreachable vault' => [$UNREACHED, qr{Could not read secret/myapp from vault.*connection refused}s],
+		'a 403'                => [$REFUSED,   qr{Could not read secret/myapp from vault at https://vault\.example\.com:8200: .*HTTP status 403}s],
+		'an unreachable vault' => [$UNREACHED, qr{Could not read secret/myapp from vault.*connection failed}s],
 		'a refusal ahead of the absent line' => ["!! permission denied\n".absent('secret/myapp'), qr{Could not read secret/myapp.*permission denied}s],
 	);
 	plan tests => 1 + keys(%absent) + keys(%failed);
@@ -582,7 +582,7 @@ subtest 'a safe killed by a signal after naming an absent secret is a failed rea
 	# Killed, so run has no signal to note.  safe exits 1 for every error it
 	# reports, absence included, so only that status can mean nothing stored.
 	my ($reason, @absent) = Service::Vault::read_failure(137, absent('secret/x')."Killed");
-	like($reason, qr/no secret exists/, 'read_failure gives what safe said as the reason for a status of 137');
+	like($reason, qr/^safe exited 137 \(not found\)$/, 'read_failure gives the status and the kind of failure for a status of 137');
 	is_deeply(\@absent, [], 'and names no path as holding nothing');
 	is_deeply([Service::Vault::read_failure(1, absent('secret/x'))], [undef, 'secret/x'],
 		'while the same line with safe\'s own error status names the path');
@@ -592,7 +592,7 @@ subtest 'a safe killed by a signal after naming an absent secret is a failed rea
 		"printf '%s' '".absent('secret/myapp')."' >&2",
 		'kill -KILL $$',
 	)).":$ENV{PATH}";
-	throws_ok { $v->read_flattened_secret('secret/myapp') } qr{Could not read secret/myapp from vault.*no secret exists}s,
+	throws_ok { $v->read_flattened_secret('secret/myapp') } qr{Could not read secret/myapp from vault.*safe exited 137 \(not found\)}s,
 		'a safe killed after it said the secret was absent dies rather than reading as nothing stored';
 };
 
@@ -912,10 +912,10 @@ subtest 'the pipeline readers report a failed second read' => sub {
 	use warnings 'redefine';
 	my $env = pipeline_env(test_vault());
 	throws_ok { Genesis::Commands::Env::_assert_prior_env_deployed($env, 'prior-env') }
-		qr{Could not read \Q$deploy\E from vault.*Code: 403}s,
+		qr{Could not read \Q$deploy\E from vault.*HTTP status 403}s,
 		'the prior-env check names the deployment it could not read again, not a missing deploy';
 	throws_ok { Genesis::Commands::Env::_get_source_sha_for_pull($env, 'prior-env', Mock->new(sha => 'control-head')) }
-		qr{Could not read \Q$deploy\E from vault.*Code: 403}s,
+		qr{Could not read \Q$deploy\E from vault.*HTTP status 403}s,
 		'and the pull source lookup stops rather than falling back to control HEAD';
 };
 

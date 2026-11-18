@@ -176,8 +176,8 @@ sub set_default {
 	my ($class, $vault) = @_;
 	my ($out, $rc, $err) = run({env => {VAULT_ADDR => "", SAFE_TARGET => ""}},"safe", "target", $vault->name);
 	bail(
-		"Could not set default vault to #C{%s}:\n%s",
-		$vault->name, $err
+		"Could not set default vault to #C{%s}: safe exited %d (%s)",
+		$vault->name, $rc, Genesis::failure_summary($out, $err)
 	) unless $rc == 0;
 	return $vault;
 }
@@ -567,7 +567,7 @@ sub get_path_strict {
 		$self->query({stderr => 0, redact_output => 1, exact => 1}, 'export', $path)
 	);
 	if ($rc || $err) {
-		my ($reason) = read_failure($rc, $err);
+		my ($reason) = $rc ? read_failure($rc, $err) : ($err);
 		return undef unless defined($reason);
 		bail_read_failure($self->{url}, $path, $reason, "export $path");
 	}
@@ -590,6 +590,8 @@ sub read_failure {
 	# status means safe did not finish: a safe killed by a signal leaves 128
 	# plus the signal, whether run notes the signal or the shell running safe
 	# exits with it, and whatever it said about absent paths settles nothing.
+	# What safe said can quote a value, so the reason is how safe ended and
+	# the kind of failure it reported, never its words.
 	my $reason = ($err // '') =~ s/\s+$//r;
 	my @absent;
 	my $others = $reason =~ s{
@@ -598,7 +600,10 @@ sub read_failure {
 	}{push(@absent, $1 // $2); ''}gerx;
 	my $refused = $others =~ /\b403\b|permission denied|forbidden/i;
 	return (undef, @absent) if ($rc // 0) == 1 && @absent && !$refused;
-	return (length($reason) ? $reason : "safe exited with code ".($rc // 0));
+	return "safe was killed by signal $1" if $reason =~ /(?:^|\n)killed by signal (\d+)\z/;
+	return sprintf("safe exited %d (%s)", $rc // 0, Genesis::failure_summary($reason))
+		if length($reason);
+	return sprintf("safe exited %d", $rc // 0);
 }
 # }}}
 # bail_read_failure - stop on a read that safe did not finish, saying how to see why {{{
@@ -634,10 +639,10 @@ sub read_flattened_secret {
 	unless ($rc) {
 		if (defined($yaml) && length($yaml)) {
 			my ($json, $yrc, $yerr) = eval {load_yaml($yaml)};
-			if (my $parse_error = $@) {
-				$err = $parse_error =~ s/\s+$//r;
-			} elsif ($yrc) {
-				$err = ($yerr // '') =~ s/\s+$//r || "its output could not be parsed as YAML";
+			# A parser's error can quote the line it stopped at, so neither
+			# its words nor safe's output are kept.
+			if ($@ || $yrc) {
+				$err = "its output could not be parsed as YAML";
 			} elsif (ref($json) ne 'HASH') {
 				$err = sprintf("it printed a %s rather than a map of keys", ref($json) ? lc(ref($json)) : defined($json) ? 'string' : 'empty document');
 			} else {
@@ -654,8 +659,9 @@ sub read_flattened_secret {
 	# for an empty secret.
 	if ($opts{lenient} && ($rc || !(defined($yaml) && length($yaml)))) {
 		debug(
-			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}: %s\nexit code: %s",
-			$path, $self->{url}, $err // '', $rc
+			"#R{[ERROR]} Could not read all key/value pairs from #C{%s} in vault at #M{%s}: %s",
+			$path, $self->{url}, $rc ? (read_failure($rc, $err))[0] // 'safe named it as holding nothing'
+				: $err // 'safe printed nothing'
 		);
 		return undef;
 	}
@@ -1052,8 +1058,8 @@ sub clear {
 		($out,$rc,$err) = $self->query('rm', '-f', $path);
 	}
 	bail(
-		"Could not clear #C{%s} in vault at #M{%s}:\n%s",
-		$path,$self->{url},$out.$err
+		"Could not clear #C{%s} in vault at #M{%s}: safe exited %d (%s)",
+		$path, $self->{url}, $rc, Genesis::failure_summary($out, $err)
 	) unless $rc == 0;
 	$self->_confirm_cleared($path);
 	return 1;
@@ -1368,8 +1374,10 @@ sub kv_write {
 		: $data;
 	my ($status, $reply, $reason) = $self->_kv_curl('POST', _kv_data_uri($mount, $path), $payload);
 	unless ($status >= 200 && $status < 300) {
-		return 0 if defined($cas) && $status == 400
-			&& $reason =~ /check-and-set parameter did not match/i;
+		return 0 if defined($cas) && $status == 400 && ref($reply) eq 'HASH'
+			&& grep {defined($_) && !ref($_) && /check-and-set parameter did not match/i} @{
+				ref($reply->{errors}) eq 'ARRAY' ? $reply->{errors} : []
+			};
 		bail(
 			"Could not write #C{%s} to the vault at #M{%s}: %s\n\n".
 			"Likely causes are that the vault is sealed or cannot be reached, or that ".
@@ -1439,10 +1447,9 @@ sub _kv_curl {
 	unless (defined($status)) {
 		# Nothing came back from the vault, so the request never reached it
 		# or never got an answer; safe says why on stderr.
-		$err = ($err // '') =~ s/\e\[[0-9;]*m//gr;
-		my $reason = $err =~ /\S/ ? ($err =~ s/^\s*!!\s*//r =~ s/\s+$//r =~ s/\s+/ /gr)
-			: $rc ? "safe exited with code $rc and printed no response"
-			: "safe printed no response";
+		# What safe said can quote a value, so only its kind is given.
+		my $reason = $rc ? "safe exited $rc and printed no response" : "safe printed no response";
+		$reason .= sprintf(" (%s)", Genesis::failure_summary($err)) if ($err // '') =~ /\S/;
 		return (0, undef, $reason);
 	}
 
@@ -1450,11 +1457,12 @@ sub _kv_curl {
 	$reply = undef unless ref($reply) eq 'HASH';
 	return ($status, $reply, '') if $status >= 200 && $status < 300;
 
+	# vault's errors can quote the payload it could not use, so the reason
+	# is the request, its status, and the kind of failure they report.
 	my @errors = $reply && ref($reply->{errors}) eq 'ARRAY'
-		? grep {defined($_) && /\S/} @{$reply->{errors}} : ();
-	my $reason = @errors
-		? join('; ', map {s/\s+/ /gr =~ s/^ | $//gr} @errors)
-		: "$method /$uri: $status $status_text" =~ s/\s+$//r;
+		? grep {defined($_) && !ref($_) && /\S/} @{$reply->{errors}} : ();
+	my $reason = sprintf("%s /%s: HTTP status %d", $method, $uri, $status);
+	$reason .= sprintf(" (%s)", Genesis::failure_summary(@errors) =~ s/; HTTP status \d+//r) if @errors;
 	return ($status, $reply, $reason);
 }
 

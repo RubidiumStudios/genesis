@@ -1667,7 +1667,7 @@ subtest 'the deployment history stops on a nonzero export exit instead of readin
 	use warnings 'redefine';
 
 	my $mgr = Genesis::Env::DeploymentManager->new($env);
-	throws_ok { $mgr->current_state } qr{Could not read secret/exodus/test-env/deployments from vault.*Code: 403}s,
+	throws_ok { $mgr->current_state } qr{Could not read secret/exodus/test-env/deployments from vault.*permission denied; HTTP status 403}s,
 		'current_state names the unreadable history rather than reporting undeployed';
 	ok(!defined $mgr->{__all_deployments}, 'and caches no history');
 

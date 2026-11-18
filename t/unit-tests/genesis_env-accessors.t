@@ -1169,7 +1169,7 @@ EOF
 }
 
 subtest 'exodus_lookup bails when the exodus secret cannot be read' => sub {
-	plan tests => 4;
+	plan tests => 6;
 	my $env = exodus_env();
 	require Service::Vault;
 	my $vault = Service::Vault->new('https://vault.example.com:8200', 'test-vault', 1, '', undef, '/secret/');
@@ -1181,20 +1181,26 @@ subtest 'exodus_lookup bails when the exodus secret cannot be read' => sub {
 	{
 		local $ENV{PATH} = fake_safe_path(q{printf 'Error making API request.\n\nCode: 403. Errors:\n\n* 1 error occurred:\n\t* permission denied\n' >&2; exit 1});
 		throws_ok { $env->exodus_lookup('dated', 'never') }
-			qr{Could\s+not\s+get\s+\S+\s+exodus\s+data\s+from\s+the\s+Vault:.*Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*Code: 403}s,
+			qr{Could\s+not\s+get\s+\S+\s+exodus\s+data\s+from\s+the\s+Vault:.*Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*permission\s+denied;\s+HTTP\s+status\s+403\)}s,
 			'a refused read of a plain key bails naming the path, rather than returning the default';
 		throws_ok { $env->exodus_lookup('/deployments:x', 'never') }
-			qr{Could\s+not\s+get\s+\S+\s+exodus\s+data\s+from\s+the\s+Vault:.*Could\s+not\s+read\s+/?\Q$root\E/deployments\s+from\s+vault.*Code: 403}s,
+			qr{Could\s+not\s+get\s+\S+\s+exodus\s+data\s+from\s+the\s+Vault:.*Could\s+not\s+read\s+/?\Q$root\E/deployments\s+from\s+vault.*permission\s+denied;\s+HTTP\s+status\s+403\)}s,
 			'and so does a refused read of an extended key';
+		throws_ok { $env->exodus_lookup('dated', 'never') }
+			qr{^(?!.*(?:Error\s+making|Code:\s+403))}s,
+			'without repeating what safe printed';
 	}
 	{
 		local $ENV{PATH} = fake_safe_path(q{printf '!! dial tcp 10.0.0.1:8200: connect: connection refused\n' >&2; exit 1});
 		throws_ok { $env->exodus_lookup('dated', 'never') }
-			qr{Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*connection\s+refused}s,
+			qr{Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*\(connection\s+failed\)}s,
 			'an unreachable vault bails for a plain key';
 		throws_ok { $env->exodus_lookup('/deployments:x', 'never') }
-			qr{Could\s+not\s+read\s+/?\Q$root\E/deployments\s+from\s+vault.*connection\s+refused}s,
+			qr{Could\s+not\s+read\s+/?\Q$root\E/deployments\s+from\s+vault.*\(connection\s+failed\)}s,
 			'and for an extended key';
+		throws_ok { $env->exodus_lookup('dated', 'never') }
+			qr{^(?!.*(?:dial\s+tcp|10\.0\.0\.1))}s,
+			'without repeating what safe printed';
 	}
 };
 
@@ -1240,7 +1246,7 @@ subtest 'a successful terminate stops when the exodus secret cannot be read' => 
 		q{printf 'Error making API request.\n\nCode: 403. Errors:\n\n* 1 error occurred:\n\t* permission denied\n' >&2; exit 1},
 	));
 	throws_ok { quietly { $env->update_deployment_exodus('terminate', 'success', quiet => 1) } }
-		qr{Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*Code: 403}s,
+		qr{Could\s+not\s+read\s+/?\Q$root\E\s+from\s+vault.*permission\s+denied;\s+HTTP\s+status\s+403\)}s,
 		'the refused read is raised, naming the exodus path';
 	my @calls = -f $calls ? split("\n", get_file($calls)) : ();
 	ok(scalar(@calls), 'after safe was asked for the exodus secret');

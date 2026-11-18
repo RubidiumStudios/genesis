@@ -440,20 +440,20 @@ subtest 'get_path_strict - tells a failed read from a path with nothing stored' 
 		},
 		'a sealed vault' => {
 			stderr => "!! Vault is sealed\n",
-			error  => qr/Could not read secret\/myapp.*Vault is sealed.*safe vault status/s,
+			error  => qr/Could not read secret\/myapp.*vault is sealed.*safe vault status/s,
 		},
 		'a connection refused' => {
 			stderr => "!! dial tcp 10.0.0.1:8200: connect: connection refused\n",
-			error  => qr/Could not read secret\/myapp.*connection refused/s,
+			error  => qr/Could not read secret\/myapp.*connection failed/s,
 		},
 		'no stderr at all' => {
 			stderr => '',
-			error  => qr/Could not read secret\/myapp.*safe exited with code 1/s,
+			error  => qr/Could not read secret\/myapp.*safe exited 1/s,
 		},
 		'a refusal followed by the absent-secret line' => {
 			# A token that can list the path but not read it
 			stderr => "!! permission denied reading secret/myapp\n!! no secret exists at path `secret/myapp`\n",
-			error  => qr/Could not read secret\/myapp.*permission denied.*no secret exists/s,
+			error  => qr/Could not read secret\/myapp.*permission denied/s,
 		},
 	);
 	plan tests => 3 + keys %cases;
@@ -502,11 +502,11 @@ subtest 'get_path_strict - an env name that holds 403 is not a refusal' => sub {
 	local *Service::Vault::query = sub {
 		return ('', 1, "Error making API request.\nCode: 403. Errors:\n* permission denied\n!! no secret exists at path `$path`\n");
 	};
-	throws_ok { $v->get_path_strict("/$path") } qr/Could not read \Q$path\E.*Code: 403/s,
+	throws_ok { $v->get_path_strict("/$path") } qr/Could not read \Q$path\E.*HTTP status 403/s,
 		'a real 403 on a path with 403 in it still dies';
 
 	local *Service::Vault::query = sub { return ('', 1, "!! Forbidden reading `$path`\n!! no secret exists at path `$path`\n") };
-	throws_ok { $v->get_path_strict("/$path") } qr/Could not read \Q$path\E.*Forbidden/s,
+	throws_ok { $v->get_path_strict("/$path") } qr/Could not read \Q$path\E.*permission denied/s,
 		'and so does a forbidden refusal ahead of the absent-secret line';
 };
 
@@ -605,8 +605,8 @@ subtest 'get_path_strict() dies when the read fails, naming the path and the err
 	my $v = make_vault();
 	my %cases = (
 		'an unreachable vault' => [['', 1, "!! Transport Error: dial tcp 10.0.0.1:8200: connect: connection refused\n"],
-			qr/Could not read secret\/x from vault at https:\/\/vault\.example\.com:8200: !! Transport Error: dial tcp 10\.0\.0\.1:8200/],
-		'a failure that says nothing' => [['', 2, ''], qr/Could not read secret\/x from vault.*safe exited with code 2/],
+			qr/Could not read secret\/x from vault at https:\/\/vault\.example\.com:8200: safe exited 1 \(connection failed\)/],
+		'a failure that says nothing' => [['', 2, ''], qr/Could not read secret\/x from vault.*safe exited 2/],
 		'an unparseable export' => [['not json', 0, ''], qr/Could not read secret\/x from vault/],
 	);
 	for my $case (sort keys %cases) {

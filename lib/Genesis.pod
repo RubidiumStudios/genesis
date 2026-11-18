@@ -1582,7 +1582,7 @@ deliberately terse report from a missing one.
 Two pieces of metadata follow the descriptions when the streams name them,
 because operators need them to look a failure up. A bosh task, as in
 C<Task 4417> or C<task '93'>, is given as C<task N> for an ID of up to twelve
-digits, and an HTTP status, as in C<status code '401'> or C<HTTP/1.1 503>, is
+digits, and an HTTP status, as in C<status code '401'>, C<HTTP/1.1 503>, or the C<Code: 403. Errors:> line of a vault API error, is
 given as C<HTTP status N> for a three-digit code from 100 to 599. Each is
 kept only as the number it was checked to be.
 

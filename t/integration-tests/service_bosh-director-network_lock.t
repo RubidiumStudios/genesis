@@ -100,7 +100,7 @@ subtest 'kv_read and kv_write against kv v1' => sub {
 	is_deeply($vault->kv_read($path), {data => undef, version => undef, kv_version => 1}, 'a missing secret has no data');
 	is($vault->kv_write($path, {a => 1}), 1, 'a plain write succeeds');
 	is_deeply($vault->kv_read($path)->{data}, {a => 1}, 'and reads back');
-	throws_ok { $vault->kv_write($path, {}) } qr/Could not write.*missing data fields/s,
+	throws_ok { $vault->kv_write($path, {}) } qr/Could not write.*HTTP status 400.*no data was given/s,
 		'kv v1 refuses a record with no fields, which is why a released lock is deleted there';
 	throws_ok { $vault->kv_write($path, {a => 2}, cas => 0) } qr/kv v1 has no check-and-set/,
 		'a check-and-set write is refused before anything is sent';

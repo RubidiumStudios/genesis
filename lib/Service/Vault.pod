@@ -455,9 +455,10 @@ B<Returns:> The C<$vault> object passed in.
 
 B<Errors:>
 
-Dies with C<"Could not set default vault to #C{%s}:\n%s"> if the C<safe target>
-command fails. C<%s> is the vault name; the second C<%s> is the error output
-from safe.
+Dies with C<"Could not set default vault to #C{%s}: safe exited %d (%s)"> if
+the C<safe target> command fails. The placeholders are the vault name, the
+exit code, and the kind of failure C<Genesis::failure_summary> finds in what
+safe printed, which is not shown.
 
 B<Examples:>
 
@@ -1195,9 +1196,9 @@ B<Errors:>
 
 Raised (via C<bail()>) when C<safe export> fails for any reason other than
 the path having nothing stored, or when its output cannot be parsed as JSON.
-The placeholders are the path, the vault URL, and the reason, which is the
-text C<safe> wrote to stderr, or C<safe exited with code N> when it wrote
-none, with C<killed by signal N> added when a signal stopped it. The message
+The placeholders are the path, the vault URL, and the reason
+L</read_failure> gives, which names how C<safe> ended and the kind of
+failure it reported, never its words. The message
 comes from L</bail_read_failure>, which goes on to name the likely causes (a
 token without read on the path, a sealed vault, or an unreachable vault) and
 to say to run C<safe export> on the path and C<safe vault status>. The text
@@ -1241,9 +1242,10 @@ When the read ended because C<safe> said the paths it read hold nothing, the
 reason is C<undef> and the paths C<safe> named follow it, as C<safe> wrote
 them. The messages that count are C<no secret exists at path `PATH`> and
 C<version N of secret `PATH` has been deleted> or C<destroyed>. Anything
-else is a failure, and the reason is the text C<safe> wrote to stderr with
-trailing whitespace removed, or C<safe exited with code N> when it wrote
-none.
+else is a failure. What C<safe> wrote can quote a value, so the reason is
+C<safe was killed by signal N> when C<run> noted a signal, and otherwise
+C<safe exited N> followed by the kind of failure C<Genesis::failure_summary>
+finds in what it wrote, such as C<permission denied; HTTP status 403>.
 
 A refusal anywhere in the output, meaning C<403>, C<permission denied>, or
 C<forbidden> outside the quoted paths, makes the read a failure even with an
@@ -1287,13 +1289,13 @@ B<Examples:>
   # Returns: (undef, 'secret/x')
 
   my ($reason) = Service::Vault::read_failure(1, "Code: 403. Errors:\n* permission denied\n");
-  # Returns: ("Code: 403. Errors:\n* permission denied")
+  # Returns: ("safe exited 1 (permission denied; HTTP status 403)")
 
   my ($reason) = Service::Vault::read_failure(137, "!! no secret exists at path `secret/x`\nkilled by signal 9");
-  # Returns: ("!! no secret exists at path `secret/x`\nkilled by signal 9")
+  # Returns: ("safe was killed by signal 9")
 
   my ($reason) = Service::Vault::read_failure(137, "!! no secret exists at path `secret/x`\nKilled");
-  # Returns: ("!! no secret exists at path `secret/x`\nKilled")
+  # Returns: ("safe exited 137 (not found)")
 
 =head2 bail_read_failure
 
@@ -1414,7 +1416,8 @@ secret literally.
 =item C<lenient =E<gt> 1>
 
 Optional. A read that C<safe> did not finish returns C<undef> after a debug
-log, as nothing stored does, rather than dying. That covers a nonzero exit,
+log that gives the reason L</read_failure> would, as nothing stored does,
+rather than dying. That covers a nonzero exit,
 a refusal, a signal, and a C<safe> that exited zero having printed nothing,
 which C<safe> has done for failures it reported only on stderr. Output that
 C<safe> did print on a clean exit is still checked, so a list or a string
@@ -1867,9 +1870,9 @@ exist (non-recursive only).
 
 B<Errors:>
 
-Dies with C<"Could not clear #C{%s} in vault at #M{%s}:\n%s"> if the
-removal fails. The placeholders are the path, vault URL, and combined
-stdout/stderr.
+Dies with C<"Could not clear #C{%s} in vault at #M{%s}: safe exited %d (%s)">
+if the removal fails. The placeholders are the path, the vault URL, the exit
+code, and the kind of failure found in what safe printed, which is not shown.
 
 May also die from the read-back confirmation; see L</_confirm_cleared>.
 
@@ -3598,13 +3601,17 @@ Optional.  A hashref, sent as the JSON body.
 B<Returns:> A three-element list of the status (the vault's status, or
 C<0> when no response came back), the decoded JSON reply or C<undef>, and
 a one-line reason.  The reason is empty for a 2xx status.  Otherwise it is
-taken from the reply's C<errors>, or from the status line, or, when no
-response came back, from safe's stderr or exit code.
+the method, the path, and C<HTTP status N>, followed by the kind of failure
+C<Genesis::failure_summary> finds in the reply's C<errors>.  vault's errors
+can quote the payload it was sent, so they are never part of the reason.
+When no response came back, the reason gives safe's exit code and the kind
+of failure found in its stderr.  A caller that has to recognise a particular
+error, as L</kv_write> does a check-and-set mismatch, reads the reply.
 
 B<Examples:>
 
   my ($status, $reply, $reason) = $self->_kv_curl('GET', 'secret/data/x');
-  # Returns: (404, { errors => [] }, 'GET /secret/data/x: 404 Not Found')
+  # Returns: (403, { errors => ['permission denied'] }, 'GET /secret/data/x: HTTP status 403 (permission denied)')
 
 =head2 _kv_http_response
 

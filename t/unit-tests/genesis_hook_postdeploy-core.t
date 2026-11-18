@@ -882,7 +882,7 @@ subtest 'update_director_network_config - a failed strict read reports once, wit
 	is(scalar(() = $raw =~ /\[FATAL\]/g), 1, 'it carries one [FATAL] prefix');
 	is(scalar(() = $err =~ /likely causes|usually means/gi), 1, 'and one paragraph of likely causes');
 	like($err, qr/while storing the director network details in exodus/, 'it still names the step');
-	like($err, qr/Could not read secret\/exodus\/lab-ocf\/bosh\/network from vault at https:\/\/v:8200: !! permission denied reading/,
+	like($err, qr/Could not read secret\/exodus\/lab-ocf\/bosh\/network from vault at https:\/\/v:8200: safe exited \d+ \(permission denied\)/,
 		'and the path, the vault, and safe\'s reason');
 	like($err, qr/safe export secret\/exodus\/lab-ocf\/bosh\/network.*safe vault status|safe vault status.*safe export secret\/exodus\/lab-ocf\/bosh\/network/,
 		'and the checks to run');

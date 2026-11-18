@@ -683,10 +683,11 @@ sub traced_endpoint {
 our @FAILURE_DIAGNOSTICS = (
 	[qr/permission denied|forbidden|\b403\b/i                                 => 'permission denied'],
 	[qr/\b401\b|unauthori[sz]ed|missing client token|token (?:is )?(?:expired|invalid)|invalid token|bad token/i => 'authentication failed'],
-	[qr/\b404\b|not found|no such|does not exist/i                            => 'not found'],
+	[qr/\b404\b|not found|no such|does not exist|\bno secret exists\b/i                            => 'not found'],
 	[qr/connection refused|no route to host|timed? ?out|could not resolve|no such host|network is unreachable/i => 'connection failed'],
 	[qr/x509|certificate|tls/i                                               => 'TLS certificate problem'],
 	[qr/\bsealed\b/i                                                          => 'vault is sealed'],
+	[qr/missing data fields/i                                                 => 'no data was given'],
 	[qr/yaml|json|parse|syntax|unmarshal|malformed|unexpected/i              => 'could not parse its input'],
 	[qr/\$\(\(|operator|spruce|unresolved|unable to resolve|could not find|cannot find|could not be found/i          => 'could not resolve a reference'],
 );
@@ -711,7 +712,8 @@ sub failure_summary {
 	push @meta, "task $1" if $text =~ /\btask[ ']+(\d{1,12})\b/i;
 	push @meta, "HTTP status $1"
 		if $text =~ /\bstatus code[: ]+'?([1-5]\d\d)(?!\d)/i
-		|| $text =~ /\bHTTP\/\d(?:\.\d)?\s+([1-5]\d\d)(?!\d)/;
+		|| $text =~ /\bHTTP\/\d(?:\.\d)?\s+([1-5]\d\d)(?!\d)/
+		|| $text =~ /^Code: ([1-5]\d\d)\. Errors:/m;
 	return join('; ', @found, @meta) if @found;
 	return join('; ', @meta, 'no known kind of failure; its own messages are withheld, since they can quote credentials');
 }

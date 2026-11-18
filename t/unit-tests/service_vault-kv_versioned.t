@@ -137,7 +137,7 @@ for my $safe ('1.24', '1.19') {
 	subtest "safe $safe: kv_mount refuses a path it cannot place" => sub {
 		my $v = make_vault();
 		stub_curl($v, $UI => [403, {errors => ["1 error occurred:\n\t* permission denied\n\n"]}]);
-		throws_ok { $v->kv_mount($PATH) } qr/Could not tell which kv mount.*permission denied.*Likely causes/s,
+		throws_ok { $v->kv_mount($PATH) } qr/Could not tell which kv mount.*permission\s+denied.*Likely causes/s,
 			'a refusal says what failed, why, and what to check';
 
 		my $cubby = make_vault();
@@ -171,15 +171,15 @@ for my $safe ('1.24', '1.19') {
 			'a deleted latest version has no data, but keeps its version for the next check-and-set');
 
 		$reply = [503, {errors => ['Vault is sealed']}];
-		throws_ok { $v->kv_read($PATH) } qr/Could not read.*Vault is sealed.*Likely causes/s,
+		throws_ok { $v->kv_read($PATH) } qr/Could not read.*vault is\s+sealed.*Likely causes/s,
 			'a sealed vault is a failure, not an absent secret';
 
 		$reply = [403, {errors => ["1 error occurred:\n\t* permission denied\n\n"]}];
-		throws_ok { $v->kv_read($PATH) } qr/Could not read.*permission denied/s,
+		throws_ok { $v->kv_read($PATH) } qr/Could not read.*permission\s+denied/s,
 			'a refused read is a failure, not an absent secret';
 
 		$reply = {fail => "Get \"https://vault.example.com:8200/v1/x\": dial tcp: connection refused"};
-		throws_ok { $v->kv_read($PATH) } qr/Could not read.*connection refused/s,
+		throws_ok { $v->kv_read($PATH) } qr/Could not read.*connection failed/s,
 			'an unreachable vault is a failure, not an absent secret';
 	};
 
@@ -196,10 +196,10 @@ for my $safe ('1.24', '1.19') {
 			'a written secret has its data, and kv v1 keeps no version');
 
 		$reply = [403, {errors => ['permission denied']}];
-		throws_ok { $v->kv_read($PATH) } qr/Could not read.*permission denied/s,
+		throws_ok { $v->kv_read($PATH) } qr/Could not read.*permission\s+denied/s,
 			'a refused read is a failure, not a missing secret';
 		$reply = [503, {errors => ['Vault is sealed']}];
-		throws_ok { $v->kv_read($PATH) } qr/Could not read.*Vault is sealed/s,
+		throws_ok { $v->kv_read($PATH) } qr/Could not read.*vault is\s+sealed/s,
 			'and so is a sealed vault';
 	};
 
@@ -222,11 +222,11 @@ for my $safe ('1.24', '1.19') {
 
 		$reply = [403, {errors => ["1 error occurred:\n\t* permission denied\n\n"]}];
 		throws_ok { $v->kv_write($PATH, {at => 'now'}, cas => 3) }
-			qr/Could not write.*permission denied.*secret\/data\/exodus\/lab\/bosh\/network-claim-lock/s,
+			qr/Could not write.*permission\s+denied.*secret\/data\/exodus\/lab\/bosh\/network-claim-lock/s,
 			'a refused write dies, naming the data path a policy has to grant';
 
 		$reply = [400, {errors => ['invalid request']}];
-		throws_ok { $v->kv_write($PATH, {at => 'now'}, cas => 3) } qr/Could not write.*invalid request/s,
+		throws_ok { $v->kv_write($PATH, {at => 'now'}, cas => 3) } qr/Could not write.*HTTP status 400/s,
 			'a 400 that is not a check-and-set mismatch is still a failure';
 
 		throws_ok { $v->kv_write($PATH, {at => 'now'}, cas => 'x') } qr/not a whole number/,
@@ -243,7 +243,7 @@ for my $safe ('1.24', '1.19') {
 			'a check-and-set write is refused as a programming error';
 
 		$reply = [403, {errors => ['permission denied']}];
-		throws_ok { $v->kv_write($PATH, {at => 'now'}) } qr/Could not write.*permission denied/s,
+		throws_ok { $v->kv_write($PATH, {at => 'now'}) } qr/Could not write.*permission\s+denied/s,
 			'a refused write is a failure';
 	};
 
@@ -255,11 +255,11 @@ for my $safe ('1.24', '1.19') {
 		is($v->{__calls}[-1]{method}, 'DELETE', 'and was sent as a DELETE');
 
 		$reply = [403, {errors => ['permission denied']}];
-		throws_ok { $v->kv_delete($PATH) } qr/Could not delete.*permission denied.*Likely causes/s,
+		throws_ok { $v->kv_delete($PATH) } qr/Could not delete.*permission\s+denied.*Likely causes/s,
 			'a refused delete is a failure naming the reason';
 
 		$reply = {fail => 'dial tcp: connection refused'};
-		throws_ok { $v->kv_delete($PATH) } qr/Could not delete.*connection refused/s,
+		throws_ok { $v->kv_delete($PATH) } qr/Could not delete.*connection failed/s,
 			'and so is an unreachable vault';
 
 		my $v2 = make_vault();

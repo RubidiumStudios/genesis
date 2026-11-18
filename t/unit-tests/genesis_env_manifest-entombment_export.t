@@ -136,7 +136,7 @@ subtest 'the fallback reports a refused read' => sub {
 	plan tests => 2;
 	throws_ok {
 		entomb(safe_answers($EXPORT_A, 'secret/ab' => ['', 1, $REFUSED]), 'secret/a:password', 'secret/ab:password')
-	} qr{Could not read secret/ab from vault at https://vault\.example\.com:8200:\s.*Code: 403.*permission denied}s,
+	} qr{Could not read secret/ab from vault at https://vault\.example\.com:8200:\s.*safe exited 1 \(permission denied; HTTP status 403\)}s,
 		'a refused read stops entombment, naming the path and the reason, rather than reading as an empty secret';
 	ok(!grep({$_->[0] eq 'put_secret'} @EVENTS), 'and nothing reaches CredHub');
 };

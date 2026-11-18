@@ -202,6 +202,15 @@ subtest 'failure_summary never repeats text from the stream' => sub {
 	like(Genesis::failure_summary("fake-unknown-text"), qr/withheld/, 'which says why there is no more detail');
 };
 
+subtest 'failure_summary names a write that held no data' => sub {
+	my $summary = Genesis::failure_summary(
+		"POST /secret/x: HTTP status 400\n",
+		"{\"errors\":[\"missing data fields\"]}\n",
+	);
+	like($summary, qr/\bno data was given\b/, 'a kv v1 refusal of an empty record is named');
+	unlike($summary, qr/withheld/, 'so the report is not left empty');
+};
+
 subtest 'failure_summary names a bosh task and HTTP status' => sub {
 	my $marker = fake_secret('task-text');
 	my $summary = Genesis::failure_summary(
