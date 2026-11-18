@@ -761,28 +761,58 @@ sub _run_failure_message {
 #
 # Spruce names each node it could not resolve by its path, as in
 # " - $.properties.password: ...", and a path is safe to show only if it
-# is made of the merged files' own keys.  So a path is kept only when it
-# heads one of spruce's error lines, and every component is a key or a
-# literal `name:` in one of $files, or a list index.  Anything else is
+# is made of the merged files' own structure.  So a path is kept only when
+# it heads one of spruce's error lines and it can be walked, component by
+# component, through one of $files as parsed: a key of a mapping, a list
+# index, or the literal name of a list item.  Text that only looks like a
+# key, such as a line inside a block scalar, is not part of the structure,
+# and a name that is a spruce operator is not literal.  Anything else is
 # dropped whole, since the stream could hold a value shaped like a path.
 # Returns up to ten paths.
+our %_PARSED_SOURCES;
 sub spruce_error_paths {
 	my ($text, @files) = @_;
-	my %known;
+	my @docs;
 	for my $file (grep {defined && -f} @files) {
-		my $yaml = slurp($file) // next;
-		for my $line (split /\n/, $yaml) {
-			next if $line =~ /^\s*#/;
-			$known{$+} = 1 while $line =~ /(?:^|[\s{,\-])(?:"([^"\n]+)"|'([^'\n]+)'|([A-Za-z0-9_][A-Za-z0-9_.\-]*))\s*:(?=\s|$)/g;
-			$known{$+} = 1 if $line =~ /^\s*(?:-\s+)*name\s*:\s+(?:"([^"]+)"|'([^']+)'|([^\s"'#(&*!|>{\[][^\s#]*))\s*(?:#.*)?$/;
+		my @st = stat($file);
+		my $id = join(':', $file, @st[1,7,9]);
+		unless (exists($_PARSED_SOURCES{$id})) {
+			my ($data, $rc) = eval {load_yaml_file($file)};
+			$_PARSED_SOURCES{$id} = (!$@ && !$rc && ref($data)) ? $data : undef;
 		}
+		push @docs, $_PARSED_SOURCES{$id} if defined($_PARSED_SOURCES{$id});
 	}
+	my $walks = sub {
+		my ($node, @parts) = @_;
+		for my $part (@parts) {
+			if (ref($node) eq 'HASH') {
+				return 0 unless exists($node->{$part});
+				$node = $node->{$part};
+			} elsif (ref($node) eq 'ARRAY') {
+				if ($part =~ /\A\d+\z/ && $part < @$node) {
+					$node = $node->[$part];
+					next;
+				}
+				my ($named) = grep {
+					ref($_) eq 'HASH' && defined($_->{name}) && !ref($_->{name})
+						&& $_->{name} !~ /\A\s*\(\(/ && $_->{name} eq $part
+				} @$node;
+				return 0 unless $named;
+				$node = $named;
+			} else {
+				return 0;
+			}
+		}
+		return 1;
+	};
 	my (@paths, %seen);
 	for my $line (split /\n/, $text // '') {
 		next unless $line =~ /^\s*-\s+\$\.([^\s:]+):(?:\s|$)/;
 		my $path = $1;
 		next if $seen{$path}++;
-		next if grep {!($known{$_} || /\A\d+\z/)} split(/\./, $path, -1);
+		my @parts = split(/\./, $path, -1);
+		next if grep {$_ eq ''} @parts;
+		next unless grep {$walks->($_, @parts)} @docs;
 		push @paths, "\$.$path";
 		last if @paths >= 10;
 	}
@@ -1413,27 +1443,90 @@ sub curl {
 #
 # Lists each path added, removed, or changed, as "+ path", "- path", or
 # "~ path", and never a value, so it can describe a change to data that
-# holds credentials.  A list is matched by name only where the BOSH
-# manifest schema says its items are named, as instance groups, jobs,
-# networks, and releases are, since a name anywhere else, such as a user's
-# under properties, can come from vault.  Any other list is matched by
-# position.  Booleans and numbers are compared by value, so a redeploy of
-# the same manifest shows no change.
+# holds credentials.  The data is an evaluated or archived manifest, so
+# any key or name in it can have come from vault or a parameter, and a
+# path is labeled only by keys the BOSH manifest schema owns and by list
+# positions.  A list the schema names items in, such as instance groups,
+# jobs, networks, and releases, is matched by name, so a reordered list is
+# not a change, and its items are labeled by position: their place in the
+# new data, or in the old for one that was removed.  Below a key the
+# schema does not own, such as properties, every change is counted under
+# the last owned path, as "~ path (2 paths changed, 1 path added)".
+# Booleans and numbers are compared by value, so a redeploy of the same
+# manifest shows no change.
 our %NAMED_LISTS = map {($_ => 1)} qw(
 	releases stemcells instance_groups addons variables networks
 	resource_pools disk_pools vm_types vm_extensions disk_types azs jobs
 	instance_groups.*.jobs instance_groups.*.networks addons.*.jobs
 	jobs.*.templates jobs.*.networks
 );
+my @UPDATE_KEYS = qw(
+	canaries max_in_flight canary_watch_time update_watch_time serial
+	vm_strategy initial_deploy_az_update_strategy
+);
+our %SCHEMA_KEYS = map {my ($at, @keys) = @$_; ($at => {map {($_ => 1)} @keys})} (
+	['', qw(
+		name director_uuid releases stemcells instance_groups update variables
+		addons features tags properties networks resource_pools disk_pools jobs
+		cloud_provider compilation azs vm_types vm_extensions disk_types
+	)],
+	['releases.*',                  qw(name version url sha1 stemcell exported_from)],
+	['releases.*.stemcell',         qw(os version)],
+	['stemcells.*',                 qw(alias os version name)],
+	['update',                      @UPDATE_KEYS],
+	['instance_groups.*',           qw(
+		name azs instances jobs vm_type vm_resources vm_extensions stemcell
+		networks persistent_disk persistent_disk_type persistent_disks update
+		migrated_from lifecycle properties env
+	)],
+	['instance_groups.*.update',    @UPDATE_KEYS],
+	['instance_groups.*.jobs.*',    qw(name release properties consumes provides custom_provider_definitions)],
+	['instance_groups.*.networks.*', qw(name static_ips default)],
+	['variables.*',                 qw(name type options consumes update_mode)],
+	['addons.*',                    qw(name jobs include exclude properties)],
+	['addons.*.jobs.*',             qw(name release properties)],
+	['features',                    qw(
+		use_dns_addresses use_short_dns_addresses use_link_dns_names
+		randomize_az_placement converge_variables use_tmpfs_config
+	)],
+	['resource_pools.*',            qw(name network stemcell cloud_properties env)],
+	['resource_pools.*.stemcell',   qw(url sha1)],
+	['disk_pools.*',                qw(name disk_size cloud_properties)],
+	['networks.*',                  qw(name type subnets dns cloud_properties)],
+	['networks.*.subnets.*',        qw(range gateway dns reserved static az azs cloud_properties)],
+	['jobs.*',                      qw(name instances templates resource_pool persistent_disk_pool networks properties)],
+	['jobs.*.templates.*',          qw(name release properties)],
+	['jobs.*.networks.*',           qw(name static_ips default)],
+	['cloud_provider',              qw(template mbus properties ssh_tunnel cert)],
+	['cloud_provider.template',     qw(name release)],
+);
 sub changed_paths {
 	my ($old, $new, $path) = @_;
-	return _changed_paths($old, $new, $path, undef);
+	my (@lines, %open, @order);
+	for my $change (_changed_paths($old, $new, $path, '', 1)) {
+		my ($sign, $at, $owned) = @$change;
+		if ($owned) {
+			push @lines, "$sign $at";
+			next;
+		}
+		push @order, $at unless $open{$at};
+		$open{$at}{$sign}++;
+	}
+	for my $at (@order) {
+		my $n = $open{$at};
+		push @lines, sprintf("~ %s (%s)", $at, join(', ', map {
+			my ($sign, $verb) = @$_;
+			$n->{$sign} ? sprintf("%d path%s %s", $n->{$sign}, $n->{$sign} == 1 ? '' : 's', $verb) : ()
+		} (['~', 'changed'], ['+', 'added'], ['-', 'removed'])));
+	}
+	return @lines;
 }
 
+# _changed_paths - each change as [sign, shown path, whether its own path is shown]
 sub _changed_paths {
-	my ($old, $new, $path, $pattern) = @_;
+	my ($old, $new, $path, $pattern, $owned) = @_;
 	my $at = sub { defined($path) ? "$path.$_[0]" : $_[0] };
-	my $like = sub { defined($pattern) ? "$pattern.$_[0]" : $_[0] };
+	my $like = sub { $pattern eq '' ? $_[0] : "$pattern.$_[0]" };
 	my $named = sub {
 		my ($list) = @_;
 		return 0 unless @$list;
@@ -1443,30 +1536,41 @@ sub _changed_paths {
 		}
 		return 1;
 	};
-	my (%old, %new, $item);
+	# Each key: [its value in old, its value in new, its label, its pattern]
+	my (%old, %new, %label, $item);
 	if (ref($old) eq 'HASH' && ref($new) eq 'HASH') {
 		%old = %$old;
 		%new = %$new;
+		%label = map {($_ => $_)} keys %{{%old, %new}};
 	} elsif (ref($old) eq 'ARRAY' && ref($new) eq 'ARRAY') {
 		$item = 1;
-		if ($NAMED_LISTS{$pattern // ''} && $named->($old) && $named->($new)) {
+		if ($NAMED_LISTS{$pattern} && $named->($old) && $named->($new)) {
 			%old = map {($_->{name} => $_)} @$old;
 			%new = map {($_->{name} => $_)} @$new;
+			%label = map {($old->[$_]{name} => $_)} 0..$#$old;
+			%label = (%label, map {($new->[$_]{name} => $_)} 0..$#$new);
 		} else {
 			%old = map {($_ => $old->[$_])} 0..$#$old;
 			%new = map {($_ => $new->[$_])} 0..$#$new;
+			%label = map {($_ => $_)} keys %{{%old, %new}};
 		}
 	} else {
-		return _same_value($old, $new) ? () : ("~ ".($path // '.'));
+		return _same_value($old, $new) ? () : (['~', $path // '.', $owned]);
 	}
 	my @changes;
-	for my $key (sort {($a =~ /\A\d+\z/ && $b =~ /\A\d+\z/) ? $a <=> $b : $a cmp $b} keys %{{%old, %new}}) {
+	for my $key (sort {
+		my ($x, $y) = ($label{$a}, $label{$b});
+		(($x =~ /\A\d+\z/ && $y =~ /\A\d+\z/) ? $x <=> $y : $x cmp $y) || (exists($new{$a}) <=> exists($new{$b}))
+	} keys %label) {
+		my $mine = $owned && ($item || ($SCHEMA_KEYS{$pattern} || {})->{$key});
+		my $shown = $mine ? $at->($label{$key}) : ($path // '.');
 		if (!exists($new{$key})) {
-			push @changes, "- ".$at->($key);
+			push @changes, ['-', $shown, $mine];
 		} elsif (!exists($old{$key})) {
-			push @changes, "+ ".$at->($key);
+			push @changes, ['+', $shown, $mine];
 		} else {
-			push @changes, _changed_paths($old{$key}, $new{$key}, $at->($key), $like->($item ? '*' : $key));
+			push @changes, _changed_paths($old{$key}, $new{$key}, $mine ? $shown : $path,
+				$like->($item ? '*' : $key), $mine);
 		}
 	}
 	return @changes;
@@ -1493,7 +1597,7 @@ sub change_counts {
 		push @sides, $data // {};
 	}
 	my %n = map {($_ => 0)} ('~', '+', '-');
-	$n{substr($_, 0, 1)}++ for changed_paths(@sides);
+	$n{$_->[0]}++ for _changed_paths(@sides, undef, '', 1);
 	my @parts = map {
 		my ($sign, $verb) = @$_;
 		$n{$sign} ? sprintf("%d path%s %s", $n{$sign}, $n{$sign} == 1 ? '' : 's', $verb) : ()

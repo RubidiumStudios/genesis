@@ -7712,8 +7712,10 @@ sub _save_deploy_log {
 #
 # The manifest and vars file of a create-env director hold its own
 # credentials, and a rotated password would show as both its old and new
-# value, so the comparison names the paths that were added, removed, or
-# changed, and never a value.
+# value, so the comparison never shows a value.  Any key or name in them
+# can have come from vault, so the manifest's changes are named by the
+# keys the BOSH manifest schema owns and by list positions, and the vars
+# file's are counted.
 sub _show_create_env_differences {
 	my ($self, $last_manifest, $manifest, $last_vars, $vars, $source) = @_;
 	info("\n[[  - >>comparing against the last deployed manifest...");
@@ -7731,11 +7733,12 @@ sub _show_create_env_differences {
 	my @changes = changed_paths(
 		$load->($last_manifest, 'last deployed manifest'), $load->($manifest, 'current manifest')
 	);
-	my @var_changes = (defined($vars) && -f $vars) ? changed_paths(
+	my $var_changes = (defined($vars) && -f $vars) ? Genesis::change_counts(
 		$load->($last_vars, 'last deployed vars file'), $load->($vars, 'current vars file')
-	) : ();
+	) : undef;
+	undef $var_changes if ($var_changes // '') eq 'no paths changed';
 
-	if (!@changes && !@var_changes) {
+	if (!@changes && !defined($var_changes)) {
 		info(
 			"[[  - >>#G{no differences found between last deployed and current manifest or bosh variables.}"
 		);
@@ -7746,11 +7749,12 @@ sub _show_create_env_differences {
 		join("\n", map {"      $_"} @changes)
 	) if @changes;
 	info(
-		"[[  - >>#y{found differences between last deployed and current bosh variables at these paths:}\n\n%s\n",
-		join("\n", map {"      $_"} @var_changes)
-	) if @var_changes;
+		"[[  - >>#y{found differences between last deployed and current bosh variables:} %s\n",
+		$var_changes
+	) if defined($var_changes);
 	info(
-		"[[  - >>#i{Values are not shown, since the manifest and variables hold the director's credentials.}"
+		"[[  - >>#i{Values, and names the BOSH manifest schema does not own, are not shown, since the manifest ".
+		"and variables hold the director's credentials.}"
 	);
 	warning(
 		"\n#y{NOTE}: values from vault have been redacted, so changes to them are not listed."

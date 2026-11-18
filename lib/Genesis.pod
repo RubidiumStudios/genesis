@@ -1630,10 +1630,15 @@ B<Examples:>
 Returns the paths a failed spruce merge named, such as
 C<$.properties.password>, once each is checked against the files that were
 merged. A path counts only when it heads one of spruce's error lines, in the
-form C< - $.path: message>, and every component of it is a key, or the
-literal value of a C<name:> key, in one of C<@merged_files>, or a list index.
-Any other path is dropped whole, because the stream could hold a value
-shaped like a path. At most ten paths are returned.
+form C< - $.path: message>, and it can be walked through one of
+C<@merged_files>, as C<spruce json> parses it, one component at a time.
+Each component must be a key of the mapping it reaches, an index of the
+list, or the literal C<name> of one of the list's items, and a name that
+is a spruce operator is not literal. Text that only looks like a key, such
+as a line inside a block scalar, is not part of the parsed structure. Any
+other path is dropped whole, because the stream could hold a value shaped
+like a path. A file is parsed once while it is unchanged, and at most ten
+paths are returned.
 
 B<Returns:> A list of strings.
 
@@ -2119,15 +2124,24 @@ B<Examples:>
 Lists the paths that differ between two data structures, as C<+ path> for
 an added path, C<- path> for a removed one, and C<~ path> for a changed
 one, and never shows a value. A create-env redeploy uses it to describe a
-change to a manifest or vars file that holds the director's credentials.
-Path segments are joined with C<.>.
+change to a manifest that holds the director's credentials. Path segments
+are joined with C<.>.
 
-A list is matched by name only where the BOSH manifest schema names its
-items, as listed in C<%Genesis::NAMED_LISTS>, such as C<instance_groups>,
-C<releases>, and the C<jobs> and C<networks> of an instance group, and only
-when every item has a distinct C<name>. A name anywhere else, such as a
-user's under C<properties>, can come from vault, so any other list is
-matched by position.
+The data is an evaluated or archived manifest, so any key or name in it
+can have come from vault or a parameter. A path is labeled only by keys
+the BOSH manifest schema owns, as listed by schema path in
+C<%Genesis::SCHEMA_KEYS>, and by list positions. Below a key the schema
+does not own, such as C<properties>, C<env>, or C<cloud_properties>, the
+changes are counted under the last owned path, as C<~ properties (2 paths
+changed, 1 path added)>. A top-level key the schema does not own is
+counted under C<.>.
+
+A list whose items the schema names, as listed in C<%Genesis::NAMED_LISTS>,
+such as C<instance_groups>, C<releases>, and the C<jobs> and C<networks> of
+an instance group, is matched by name when every item has a distinct
+C<name>, so a reordered list is not a change. Its items are still labeled
+by position, which is their place in the new data, or in the old data for
+an item that was removed. Any other list is matched by position.
 
 Scalars are compared as JSON decoded them. Two booleans or two numbers are
 the same when their values are, so C<1> and C<1.0> match, and a value that
@@ -2138,12 +2152,13 @@ B<Returns:> A list of strings, empty when the two are the same.
 
 B<Examples:>
 
-  changed_paths({a => 1, b => {c => 'x'}}, {a => 1, b => {c => 'y'}, d => 2});
-  # Returns: ('~ b.c', '+ d')
+  changed_paths({update => {canaries => 1}, properties => {x => 1}},
+                {update => {canaries => 2}, properties => {x => 2, y => 1}});
+  # Returns: ('~ update.canaries', '~ properties (1 path changed, 1 path added)')
 
   changed_paths({instance_groups => [{name => 'bosh', instances => 1}]},
                 {instance_groups => [{name => 'bosh', instances => 2}]});
-  # Returns: ('~ instance_groups.bosh.instances')
+  # Returns: ('~ instance_groups.0.instances')
 
 =head2 change_counts
 
@@ -4046,19 +4061,24 @@ B<Errors:> None.
 
 =head2 _changed_paths
 
-  my @changes = Genesis::_changed_paths($old, $new, $path, $pattern);
+  my @changes = Genesis::_changed_paths($old, $new, $path, $pattern, $owned);
 
-The recursion behind C<changed_paths>. C<$path> is where C<$old> and C<$new>
-sit, with list items named or numbered, and C<$pattern> is the same path
-with each list item written as C<*>, which C<%Genesis::NAMED_LISTS> is
-checked against.
+The recursion behind C<changed_paths> and C<change_counts>. C<$path> is
+the shown path where C<$old> and C<$new> sit, or C<undef> at the top.
+C<$pattern> is the schema path with each list item written as C<*>, or
+C<''> at the top, which C<%Genesis::NAMED_LISTS> and
+C<%Genesis::SCHEMA_KEYS> are checked against. C<$owned> is true while
+every key on the way down is one the schema owns. Below a key it does not
+own, each change keeps the last owned path as its shown path.
 
-B<Returns:> A list of strings, as C<changed_paths> returns.
+B<Returns:> A list of C<[$sign, $shown_path, $owned]> array references, one
+for each path added (C<+>), removed (C<->), or changed (C<~>).
 
 B<Examples:>
 
-  Genesis::_changed_paths([{name => 'a', x => 1}], [{name => 'a', x => 2}], 'jobs', 'jobs');
-  # Returns: ('~ jobs.a.x')
+  Genesis::_changed_paths([{name => 'a', name2 => 1}], [{name => 'a', name2 => 2}],
+                          'jobs', 'jobs', 1);
+  # Returns: (['~', 'jobs.0', ''])
 
 B<Errors:> None.
 

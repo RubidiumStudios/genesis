@@ -255,11 +255,40 @@ YAML
 	unlike(join(' ', @paths), qr/fake-spruce-path/, 'a component the files do not hold is never repeated');
 };
 
+subtest 'spruce paths are walked through the files\' structure, not their text' => sub {
+	my $marker = fake_secret('block-scalar');
+	put_file("$dir/block.yml", 0644, <<"YAML");
+---
+properties:
+  script: |
+    $marker: inside a block scalar
+  password: (( vault "secret/x:y" ))
+instance_groups:
+- name: (( grab params.name ))
+  jobs: []
+YAML
+	my $err = join('',
+		" - \$.properties.$marker: could not resolve\n",
+		" - \$.properties.instance_groups: could not resolve\n",
+		" - \$.instance_groups.(( grab params.name )).jobs: could not resolve\n",
+		" - \$.instance_groups.0.jobs: could not resolve\n",
+		" - \$.properties.password: secret secret/x:y not found\n",
+	);
+	is_deeply([Genesis::spruce_error_paths($err, "$dir/block.yml")],
+		['$.instance_groups.0.jobs', '$.properties.password'],
+		'a key-shaped line in a block scalar, a key from elsewhere, and an operator name are dropped');
+};
+
 subtest 'a failed merge names the checked paths spruce could not resolve' => sub {
 	my $marker = fake_secret('merge-path');
 	mkdir "$dir/spruce-bin";
-	put_file("$dir/spruce-bin/spruce", 0755, <<'EOS');
+	# spruce json reads the source files to check the paths, so it is
+	# handed to the real spruce.
+	chomp(my $real = `command -v spruce`);
+	put_file("$dir/spruce-bin/spruce", 0755, <<"EOS".<<'EOS');
 #!/bin/bash
+[[ \$1 == json ]] && exec '$real' "\$@"
+EOS
 printf '2 error(s) detected:\n - $.properties.password: secret secret/x:y not found\n - $.properties.%s: %s\n' "$FAKE_ERR" "$FAKE_ERR" >&2
 exit 2
 EOS
