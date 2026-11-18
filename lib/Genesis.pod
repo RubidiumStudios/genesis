@@ -4069,9 +4069,15 @@ notice and should not be called directly.
   my $line = Genesis::_yaml_line_of($file, @components);
 
 Finds the line of C<$file> that a path's deepest locatable component is
-on. Each component is looked for on a later line than the one before it,
-as a key, quoted or not, or as the C<name> of a list item, and list indexes
-are skipped. The search stops at the first component it cannot find.
+on. C<@components> are the keys and list indexes C<spruce_error_paths>
+walked the path by, with a named item already turned into its index. The
+file's block structure is walked the same way, by indentation, with
+L</_yaml_line_shape> describing each line. A key, quoted or not, is looked
+for only among the keys of the block the path has reached, and an index
+counts out that block's list items, so a key that an earlier item also
+holds is never taken for the one the path names. Flow collections, such
+as C<[a, b]>, are not walked into, and the search stops at the first
+component it cannot find.
 
 B<Returns:> The line number of the deepest component found, or C<1> when
 none is.
@@ -4081,6 +4087,30 @@ B<Examples:>
   # base.yml is "---\nproperties:\n  password: x\n"
   Genesis::_yaml_line_of('base.yml', 'properties', 'password');
   # Returns: 3
+
+  # groups.yml holds two instance groups, each with jobs, and the second
+  # one's jobs key is on line 9
+  Genesis::_yaml_line_of('groups.yml', 'instance_groups', 1, 'jobs');
+  # Returns: 9
+
+=head2 _yaml_line_shape
+
+  my $shape = Genesis::_yaml_line_shape($text);
+
+Describes where one line of a YAML file has its list dash and its key, for
+L</_yaml_line_of>. A line of only list dashes, as in C<- - name: x>, has
+its content start after the dashes.
+
+B<Returns:> Nothing for a blank line, a comment, or a document marker.
+Otherwise a hash reference with C<indent>, the number of leading spaces,
+C<col>, the column the content starts at once any dashes are passed,
+C<dash>, the column of the first dash when the line has one, and C<key>,
+unquoted, when the content starts with a key.
+
+B<Examples:>
+
+  Genesis::_yaml_line_shape("  - name: web");
+  # Returns: {indent => 2, col => 4, dash => 2, key => 'name'}
 
 =head2 _is_redacted_arg
 

@@ -355,6 +355,35 @@ YAML
 	unlike(join(' ', @paths), qr/fake-label/, 'no label the file chose is repeated');
 };
 
+# A path's line is found by walking the file's own structure, list items
+# counted out by index, so a key that also appears in an earlier item is
+# not taken for the one the path names.
+subtest 'a path into a later list item is located in that item' => sub {
+	put_file("$dir/groups.yml", 0644, <<'YAML');
+---
+instance_groups:
+- name: one
+  jobs:
+  - name: a
+    properties:
+      secret: (( vault "secret/a:b" ))
+- name: two
+  jobs:
+  - name: b
+    properties:
+      secret: (( vault "secret/c:d" ))
+- name: three
+YAML
+	my $err = join('',
+		" - \$.instance_groups.1.jobs: could not resolve\n",
+		" - \$.instance_groups.two.jobs.b.properties.secret: secret not found\n",
+	);
+	is_deeply([Genesis::spruce_error_paths($err, "$dir/groups.yml")], [
+		"\$.instance_groups.1.jobs (in $dir/groups.yml, line 9)",
+		"\$.instance_groups.1.jobs.0.properties.<key> (in $dir/groups.yml, line 12)",
+	], 'each line is the one in the second instance group');
+};
+
 # A list item's name can be all digits, and spruce reads such a component
 # as an index, so it is shown as the index it was walked by, never as
 # spelled.

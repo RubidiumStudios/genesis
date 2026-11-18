@@ -830,15 +830,17 @@ sub spruce_error_paths {
 		}
 		push @docs, [$file, $_PARSED_SOURCES{$id}] if defined($_PARSED_SOURCES{$id});
 	}
-	# The path as shown, or undef when it does not walk through $node.
+	# The path as shown and the keys and indexes it was walked by, or
+	# nothing when it does not walk through $node.
 	my $walks = sub {
 		my ($node, @parts) = @_;
-		my ($free, @shown) = (0);
+		my ($free, @shown, @walked) = (0);
 		for my $part (@parts) {
 			if (ref($node) eq 'HASH') {
-				return undef unless exists($node->{$part});
+				return unless exists($node->{$part});
 				my $owned = !$free && $_MANIFEST_OWNED_KEYS{$part};
 				push @shown, $owned ? $part : '<key>';
+				push @walked, $part;
 				$free ||= !$owned || $_FREE_FORM_KEYS{$part};
 				$node = $node->{$part};
 			} elsif (ref($node) eq 'ARRAY') {
@@ -846,6 +848,7 @@ sub spruce_error_paths {
 					# Shown as the index it was walked by, since a name of
 					# digits, such as 0002, is a label the file chose.
 					push @shown, $part + 0;
+					push @walked, $part + 0;
 					$node = $node->[$part];
 					next;
 				}
@@ -854,14 +857,15 @@ sub spruce_error_paths {
 					ref($item) eq 'HASH' && defined($item->{name}) && !ref($item->{name})
 						&& $item->{name} !~ /\A\s*\(\(/ && $item->{name} eq $part
 				} 0..$#$node;
-				return undef unless defined($named);
+				return unless defined($named);
 				push @shown, $named;
+				push @walked, $named;
 				$node = $node->[$named];
 			} else {
-				return undef;
+				return;
 			}
 		}
-		return join('.', '$', @shown);
+		return [join('.', '$', @shown), @walked];
 	};
 	my (@paths, %seen);
 	for my $line (split /\n/, $text // '') {
@@ -874,8 +878,9 @@ sub spruce_error_paths {
 		# that holds the path is the one to open.
 		my ($found) = grep {defined($_->[2])} map {[@$_[0,1], $walks->($_->[1], @parts)]} reverse @docs;
 		next unless $found;
+		my ($shown, @walked) = @{$found->[2]};
 		my $where = sprintf("%s (in %s, line %d)",
-			$found->[2], $found->[0], _yaml_line_of($found->[0], @parts));
+			$shown, $found->[0], _yaml_line_of($found->[0], @walked));
 		next if $seen{" $where"}++;
 		push @paths, $where;
 		last if @paths >= 10;
@@ -884,27 +889,76 @@ sub spruce_error_paths {
 }
 
 # }}}
-# _yaml_line_of - the line a path's deepest locatable component is on {{{
+# _yaml_line_of - the line a walked path's deepest located component is on {{{
 #
-# A path that walked through the parsed file is looked for in its text,
-# each component on a later line than the one before, as a key or as the
-# name of a list item.  Indexes are not counted out, so the line found is
-# that of the deepest key or name located, or 1 when none is.
+# @parts are the keys and list indexes the path was walked by.  The file's
+# block structure is walked the same way, by indentation: a key is looked
+# for only among the keys of the block the path has reached, and an index
+# counts out that block's list items, so a key that an earlier item also
+# holds is never taken for the one the path names.  Flow collections are
+# not walked into, so the line found is that of the deepest component
+# located, or 1 when none is.
 sub _yaml_line_of {
 	my ($file, @parts) = @_;
 	my @lines = eval {split(/\n/, slurp($file))};
-	my ($at, $line) = (-1, 1);
+	my @shape = map {scalar(_yaml_line_shape($_))} @lines;
+	my ($lo, $hi, $line) = (0, scalar(@lines), 1);
 	for my $part (@parts) {
-		next if $part =~ /\A\d+\z/;
-		my $label = qr/(?:"\Q$part\E"|'\Q$part\E'|\Q$part\E)/;
-		my ($i) = grep {
-			$lines[$_] =~ /^\s*(?:-\s+)*$label\s*:(?:\s|$)/
-				|| $lines[$_] =~ /^\s*(?:-\s+)?name\s*:\s*$label\s*(?:#.*)?$/
-		} ($at + 1) .. $#lines;
-		last unless defined($i);
-		($at, $line) = ($i, $i + 1);
+		# A list item whose dash stands alone has its keys on the lines
+		# after it, so a key is looked for from the first line with one.
+		my $index = $part =~ /\A\d+\z/;
+		my ($first) = grep {$shape[$_] && ($index || defined($shape[$_]{key}))} $lo .. $hi - 1;
+		last unless defined($first);
+		my ($at, $col);
+		if ($index) {
+			# The block's list items are the lines whose dash is where its
+			# first item's dash is.
+			$col = $shape[$first]{dash};
+			last unless defined($col);
+			my @items = grep {$shape[$_] && ($shape[$_]{dash} // -1) == $col} $lo .. $hi - 1;
+			last unless $part < @items;
+			$at = $items[$part];
+		} else {
+			# The block's keys are the lines whose key is where its first
+			# line's is.
+			$col = $shape[$first]{col};
+			($at) = grep {
+				$shape[$_] && $shape[$_]{col} == $col && ($shape[$_]{key} // '') eq $part
+			} $lo .. $hi - 1;
+			last unless defined($at);
+		}
+		# What the component holds runs to the next line that is not
+		# indented past it: one at its column, unless it continues a list
+		# under a key at that column, or one to the left of it.
+		my ($end) = grep {
+			$shape[$_] && ($shape[$_]{indent} < $col
+				|| ($shape[$_]{indent} == $col && ($index || !defined($shape[$_]{dash}))))
+		} $at + 1 .. $hi - 1;
+		($lo, $hi, $line) = ($index ? $at : $at + 1, $end // $hi, $at + 1);
 	}
 	return $line;
+}
+
+# _yaml_line_shape - where a YAML line's dash and key sit, for _yaml_line_of
+#
+# Returns nothing for a blank line, a comment, or a document marker, and
+# otherwise its indent, the column its content starts at once any list
+# dashes are passed, the column of its first dash, if it has one, and its
+# key, unquoted, if it starts with one.
+sub _yaml_line_shape {
+	my ($text) = @_;
+	return if $text =~ /^\s*(?:#.*)?$/ || $text =~ /^(?:---|\.\.\.)(?:\s|$)/;
+	my ($indent, $dashes, $rest) = $text =~ /^( *)((?:-(?: +|$))*)(.*)$/;
+	my %shape = (indent => length($indent), col => length($indent) + length($dashes));
+	$shape{dash} = length($indent) if length($dashes);
+	if ($rest =~ /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s"'#\[\{][^#]*?)\s*:(?:\s|$)/) {
+		my $key = $1;
+		$key = $key =~ /^"/ ? substr($key, 1, -1) =~ s/\\(.)/$1/gr
+		     : $key =~ /^'/ ? substr($key, 1, -1) =~ s/''/'/gr
+		     : $key;
+		$shape{key} = $key;
+	}
+	return \%shape;
 }
 
 # }}}
