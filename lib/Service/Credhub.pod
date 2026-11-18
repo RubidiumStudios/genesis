@@ -803,9 +803,10 @@ redacted from logs. Stderr is suppressed.
 
 The operator can pass a credential as any argument, so the arguments are
 handed to C<run()> through C<Genesis::passthrough_args>. credhub receives
-each one whole, and the trace shows only flags and the credhub command
-names in C<@Service::Credhub::CREDHUB_COMMANDS>, with every other argument
-shown by its length.
+each one whole. The trace shows the credhub command names and no-value
+flags listed in C<@Service::Credhub::CREDHUB_COMMANDS>, and any other flag
+that cannot be an option's value, with every other argument shown by its
+length.
 
 B<Parameters:>
 

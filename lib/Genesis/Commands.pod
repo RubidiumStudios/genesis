@@ -1273,7 +1273,10 @@ C<-C> injected by the genesis helper wrapper.
 Applies Getopt::Long configuration flags based on the command's
 C<option_passthrough> and C<option_require_order> properties.
 
-On parse failure, calls C<command_usage(1, ...)> with the error messages.
+On parse failure, calls C<command_usage(1, ...)> with what kind of problem
+each Getopt::Long warning reported, from C<_option_warnings>. The warnings
+themselves quote the value that was refused, which can be a credential, so
+neither the usage message nor the debug log repeats them.
 
 Extracts and side-effects two options from the parsed hash before
 returning:
@@ -1556,6 +1559,58 @@ B<Examples:>
 
   _gate_pipeline_on_legacy_ci_yml();
   # no return value; bails if a legacy ci.yml blocks a pipeline command
+
+=head2 _option_warnings
+
+  my @problems = _option_warnings(\%known_options, @warnings);
+
+Describes each warning Getopt::Long gave while parsing a command line by
+the kind of problem it reported, without repeating the warning. Getopt::Long
+quotes the value it refused, and that value can be a credential.
+
+=over 4
+
+=item * An unknown option becomes C<an unknown option was given>, since the
+unknown word might be a hyphenated value rather than an option.
+
+=item * A value of the wrong type becomes C<option --name was given a value
+of the wrong type>.
+
+=item * A missing value becomes C<option --name needs a value>.
+
+=item * A value given to a flag becomes C<option --name takes no value>.
+
+=item * Anything else becomes C<the options could not be parsed>.
+
+=back
+
+An option is named, with one hyphen for a single letter and two otherwise,
+only when it is a key of C<%known_options>. Otherwise the phrase says
+C<an option> in its place.
+
+B<Parameters:>
+
+=over 4
+
+=item C<\%known_options>
+
+A hash reference whose keys are every name and alias of the options the
+command accepts, without hyphens.
+
+=item C<@warnings>
+
+The warnings Getopt::Long gave. Blank ones are skipped.
+
+=back
+
+B<Returns:> One phrase for each warning.
+
+B<Examples:>
+
+  _option_warnings({count => 1}, "Value \"x\" invalid for option count (number expected)\n");
+  # Returns: ('option --count was given a value of the wrong type')
+
+B<Errors:> None.
 
 =head2 _parse_two_pass
 

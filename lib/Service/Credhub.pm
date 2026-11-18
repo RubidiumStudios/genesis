@@ -362,12 +362,17 @@ sub _full_path {
 	return $self->base . $path;
 }
 
-# The credhub CLI's own commands, which a trace can show as they are.
+# The credhub CLI's own commands, and flags it is known to take without a
+# value, which a trace can show as they are.  A flag that is not listed
+# may take a value, so the trace hides the word after it.
 our @CREDHUB_COMMANDS = qw/
 	api login logout get set generate regenerate bulk-regenerate delete find
 	export import interpolate curl get-permission set-permission
 	delete-permission update-permission version help
 	a l o g s n r d f e i
+	-j --output-json -q --quiet --skip-tls-validation -h --help --version
+	--include-special --exclude-number --exclude-upper --exclude-lower
+	--self-sign --is-ca --no-overwrite
 /;
 
 sub execute {

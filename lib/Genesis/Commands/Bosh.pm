@@ -14,7 +14,9 @@ use JSON::PP;
 use IPv4;
 
 # bosh - provide a wrapper around the bosh command {{{
-# The bosh CLI's own commands and their aliases, which a trace can show.
+# The bosh CLI's own commands and their aliases, and flags it is known to
+# take without a value, which a trace can show.  A flag that is not listed
+# may take a value, so the trace hides the word after it.
 our @BOSH_COMMANDS = qw/
 	add-blob alias-env attach-disk blobs cancel-task cancel-tasks clean-up
 	cloud-check cloud-config config configs cpi-config create-env
@@ -33,6 +35,9 @@ our @BOSH_COMMANDS = qw/
 	update-runtime-config upload-blobs upload-release upload-stemcell
 	variables vendor-package vms
 	cck cc d dep ds e env envs es is int l r rs ss t ts uc ur vars
+	--json --tty --no-color -n --non-interactive --sha2 -v --version -h
+	--help --details --vitals --ps --failing --fix --recreate --dry-run
+	--no-redact --force
 /;
 
 sub bosh {

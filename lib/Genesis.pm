@@ -818,22 +818,46 @@ sub traced_arg {
 
 # passthrough_args - wrap the operands of a command line handed to a CLI
 #
-# An operator can pass a credential to bosh or credhub as any operand, so
-# only a bare flag such as -n or --json, and a word listed in $visible,
-# such as the CLI's command names, stay as they are.  A --flag=value has
-# its value wrapped with the flag kept as the prefix, and every other
-# operand is wrapped whole, so run() hands the child the same arguments
-# and the trace shows each one's length.
+# An operator can pass a credential to bosh or credhub as any operand, and
+# a credential can begin with a hyphen, so a flag is only shown where it
+# cannot be an option's value.  A word listed in $visible, such as the
+# CLI's command names and its flags that take no value, is always shown.
+# Any other bare flag (-n, --json) is shown unless it follows a bare flag
+# that is not listed, since it may then be that flag's value.  A
+# --flag=value keeps the flag as its prefix, a short flag with more after
+# it (-pVALUE) keeps its letter, and every other operand is wrapped whole,
+# so run() hands the child the same arguments and the trace shows each
+# one's length.  Every operand after a bare -- is wrapped, since none of
+# them is a flag.
 sub passthrough_args {
 	my $visible = ref($_[0]) eq 'ARRAY' ? shift : [];
 	my %visible = map {($_ => 1)} @$visible;
-	return map {
-		  _is_redacted_arg($_)                         ? $_
-		: !defined($_)                                 ? $_
-		: /\A-{1,2}[A-Za-z][\w-]*\z/ || $visible{$_}     ? $_
-		: /\A(-{1,2}[A-Za-z][\w-]*=)/                   ? {redact => $_, prefix => $1}
-		:                                                {redact => $_}
-	} @_;
+	my ($may_be_value, $operands_only) = (0, 0);
+	my @args;
+	for (@_) {
+		my $after_flag = $may_be_value;
+		$may_be_value = 0;
+		if (_is_redacted_arg($_) || !defined($_)) {
+			push @args, $_;
+		} elsif ($operands_only) {
+			push @args, {redact => $_};
+		} elsif ($_ eq '--' && !$after_flag) {
+			push @args, $_;
+			$operands_only = 1;
+		} elsif ($visible{$_}) {
+			push @args, $_;
+		} elsif (!$after_flag && /\A(?:--[A-Za-z][\w-]*|-[A-Za-z])\z/) {
+			push @args, $_;
+			$may_be_value = 1;
+		} elsif (!$after_flag && /\A(--[A-Za-z][\w-]*=)/) {
+			push @args, {redact => $_, prefix => $1};
+		} elsif (!$after_flag && /\A(-[A-Za-z])./) {
+			push @args, {redact => $_, prefix => $1};
+		} else {
+			push @args, {redact => $_};
+		}
+	}
+	return @args;
 }
 
 # traced_cli_args - how a trace or log shows command-line arguments

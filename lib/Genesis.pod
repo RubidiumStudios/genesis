@@ -1626,13 +1626,31 @@ B<Examples:>
 
 Wraps the arguments an operator passes through to another CLI, such as
 bosh or credhub, so that C<run()> hands the child every argument whole
-while the trace shows each one by its length. A bare flag such as C<-n>
-or C<--json>, and any word listed in the optional leading array
-reference, such as the CLI's command names, are returned as they are. A
-C<--flag=value> is wrapped as C<{redact =E<gt> $arg, prefix =E<gt>
-'--flag='}>, so the flag stays in view. Every other argument is wrapped as
-C<{redact =E<gt> $arg}>, and an argument that is already wrapped is left
-alone.
+while the trace shows each one by its length. A credential can begin with
+a hyphen, so a flag is shown only where it cannot be an option's value.
+
+=over 4
+
+=item * A word listed in the optional leading array reference, such as
+the CLI's command names and its flags that take no value, is returned as
+it is.
+
+=item * Any other bare flag, such as C<-n> or C<--json>, is returned as it
+is unless it follows a bare flag that is not listed, since it may then be
+that flag's value.
+
+=item * A C<--flag=value> is wrapped as C<{redact =E<gt> $arg, prefix
+=E<gt> '--flag='}>, and a short flag with more after it, such as
+C<-pVALUE>, as C<{redact =E<gt> $arg, prefix =E<gt> '-p'}>, so the flag
+stays in view. Neither is treated this way after an unlisted bare flag.
+
+=item * A bare C<--> is returned as it is, and every argument after it is
+wrapped, since none of them is a flag.
+
+=item * Every other argument is wrapped as C<{redact =E<gt> $arg}>, and an
+argument that is already wrapped is left alone.
+
+=back
 
 B<Returns:> The list of arguments, ready for C<run()>.
 
@@ -1651,6 +1669,9 @@ B<Examples:>
 
   Genesis::traced_cli_args('set', '-w', 'abc', '--password=abc');
   # Returns: ('<redacted:3 bytes>', '-w', '<redacted:3 bytes>', '--password=<redacted:3 bytes>')
+
+  Genesis::traced_cli_args('--client-secret', '-abc', '-pabc');
+  # Returns: ('--client-secret', '<redacted:4 bytes>', '-p<redacted:3 bytes>')
 
 =head2 traced_endpoint
 

@@ -53,10 +53,10 @@ Supports two modes of operation:
 Executes C<bosh @bosh_args> interactively against the environment's BOSH
 director.  Exit code propagates directly to the shell.  An operator can
 pass a credential as any argument, so the arguments go through
-C<Genesis::passthrough_args>: bosh receives each one whole, and the trace
-shows only flags and the bosh command names in
-C<@Genesis::Commands::Bosh::BOSH_COMMANDS>, with every other argument shown
-by its length.
+C<Genesis::passthrough_args>. bosh receives each one whole. The trace
+shows the bosh command names and no-value flags listed in
+C<@Genesis::Commands::Bosh::BOSH_COMMANDS>, and any other flag that cannot
+be an option's value, with every other argument shown by its length.
 
 =item C<--connect> mode
 

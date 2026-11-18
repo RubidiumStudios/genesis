@@ -408,11 +408,13 @@ sub parse_options { # {{{
 
 	unless ($parsing_ok) {
 		set_logging_state();
-		debug(
-			"[[Option Parsing Warning: >>%s",
-			join("", @option_warnings)
-		);
-		command_usage(1, join("\n", map {chomp; $_} @option_warnings) || "Error parsing options");
+		# Getopt::Long quotes the value it rejected, which can be a
+		# credential, so its warnings are reduced to what kind of problem
+		# each was, naming only options Genesis knows.
+		my %known = map {($_ => 1)} map {split /\|/, s/[=:!+].*$//r} (@base_spec, @opts_spec);
+		my @problems = _option_warnings(\%known, @option_warnings);
+		debug("[[Option Parsing Warning: >>%s", join("; ", @problems));
+		command_usage(1, @problems ? ucfirst(join("; ", @problems)).'.' : "Error parsing options");
 	}
 
 	shift @$args if ($args->[0]||'') eq '--';
@@ -459,6 +461,23 @@ sub parse_options { # {{{
 	delete($COMMAND_OPTIONS->{no_cwd});
 	dump_var 'Received Arguments' => [Genesis::traced_cli_args(@COMMAND_ARGS)];
 	return;
+} # }}}
+
+# _option_warnings - what kind of problem each Getopt::Long warning was {{{
+sub _option_warnings {
+	my ($known, @warnings) = @_;
+	my $named = sub {
+		my ($name, $known_text, $unknown_text) = @_;
+		return $unknown_text unless defined($name) && $known->{$name};
+		return sprintf($known_text, (length($name) > 1 ? '--' : '-').$name);
+	};
+	return map {
+		  /\AUnknown option: /                                ? 'an unknown option was given'
+		: /\AValue .* invalid for option (\S+) /              ? $named->($1, 'option %s was given a value of the wrong type', 'an option was given a value of the wrong type')
+		: /\AOption (\S+) requires an argument/               ? $named->($1, 'option %s needs a value', 'an option needs a value')
+		: /\AOption (\S+) does not take an argument/          ? $named->($1, 'option %s takes no value', 'an option takes no value')
+		:                                                       'the options could not be parsed'
+	} grep {defined && /\S/} @warnings;
 } # }}}
 
 sub _parse_two_pass { # {{{
