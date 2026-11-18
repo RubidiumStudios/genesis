@@ -19,11 +19,12 @@ use File::Temp qw/tempdir/;
 use Genesis;
 use Genesis::Env::ManifestProvider;
 use Service::Credhub;
+use Service::BOSH::Director;
 
 my $dir = tempdir(CLEANUP => 1);
 mkdir "$dir/bin";
 mkdir "$dir/work";
-for my $name (qw/spruce credhub/) {
+for my $name (qw/spruce credhub bosh/) {
 	put_file("$dir/bin/$name", 0755, <<"EOS");
 #!/bin/bash
 printf 'stdout: \$.properties.password: %s\\n' "\$FAKE_OUT"
@@ -101,6 +102,46 @@ fails_privately('credhub get', sub {
 fails_privately('credhub curl', sub {
 	$credhub->query('/api/v1/data');
 });
+
+my $director = do {
+	Service::BOSH->set_command("$dir/bin/bosh");
+	Service::BOSH::Director->new('fake',
+		url => 'https://127.0.0.1:25555', ca_cert => 'ca', client => 'admin',
+		secret => 'not-under-test', exodus_vault => 'none');
+};
+put_file("$dir/cloud.yml", 0644, "---\nazs: []\n");
+
+fails_privately('bosh update-config', sub {
+	$director->upload_config_from_file("$dir/cloud.yml", 'cloud', 'fake');
+});
+
+fails_privately('bosh delete-config', sub {
+	$director->delete_config('cloud', 'fake');
+});
+
+# Configs can carry credentials, such as a CPI's API key, so merging the
+# director's configs keeps them out of the trace whether it works or not.
+{
+	no warnings qw/redefine once/;
+	my $contents = {};
+	local *Service::BOSH::Director::config_names_of = sub { qw/first second/ };
+	local *Service::BOSH::Director::get_config = sub { $contents->{$_[2]} };
+
+	subtest 'merging configs keeps them out of the trace' => sub {
+		my $key = fake_secret('config-api-key');
+		$contents = {first => "---\nazs:\n- name: z1\n  cloud_properties: {api_key: $key}\n", second => "---\nvm_types: []\n"};
+		delete $director->{_config_assembly_cache};
+		my $log = capture_trace { $director->download_configs("$dir/assembled.yml", 'cloud') };
+		like(Genesis::slurp("$dir/assembled.yml"), qr/\Q$key\E/, 'the caller still gets the merged config');
+		unlike($log, qr/\Q$key\E/, 'the config is absent from the trace');
+	};
+
+	$contents = {first => "---\nazs: []\n", second => "---\nvm_types: []\n"};
+	fails_privately('config merge', sub {
+		delete $director->{_config_assembly_cache};
+		$director->download_configs("$dir/assembled.yml", 'cloud');
+	});
+}
 
 subtest 'a parse error does not quote the input' => sub {
 	my $marker = fake_secret('parse');

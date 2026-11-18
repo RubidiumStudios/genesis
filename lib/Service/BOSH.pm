@@ -114,10 +114,12 @@ sub environment_variables {
 # Trace redaction for bosh output {{{
 #
 # Much of what bosh prints carries credentials: `bosh manifest`, `bosh int`,
-# configs, variables, and the diff in a deploy transcript.  Stdout is
-# written to the trace verbatim only for these read-only listings; every
-# other command leaves a byte count.  A command that cannot be identified
-# is redacted, so a misreading errs on the safe side.
+# configs, variables, and the diff in a deploy transcript, and a failing
+# command can quote them on stderr.  Stdout and stderr are written to the
+# trace verbatim only for these read-only listings; every other command
+# leaves a byte count.  A command that cannot be identified, including a
+# shell command that chains anything onto a listing, is redacted, so a
+# misreading errs on the safe side.
 our %TRACEABLE_OUTPUT = map {$_ => 1} qw(
 	deployments env errands events instances locks releases stemcells tasks vms
 );
@@ -125,6 +127,9 @@ our %TRACEABLE_OUTPUT = map {$_ => 1} qw(
 # _subcommand - the bosh subcommand a command list runs, or '' if unknown
 sub _subcommand {
 	my (@cmd) = @_;
+	# A shell command can pipe, chain, or substitute more output onto the
+	# listing it starts with, so it can't be identified.
+	return '' if @cmd && defined($cmd[0]) && !ref($cmd[0]) && $cmd[0] =~ /[|;&\$`<>()\n]/;
 	my @words = (@cmd && defined($cmd[0]) && !ref($cmd[0]) && $cmd[0] =~ /\s/)
 		? split(/\s+/, $cmd[0] =~ s/^\s+//r)
 		: @cmd;
@@ -168,9 +173,24 @@ sub execute {
 
 	# A caller that says otherwise is honoured; see %TRACEABLE_OUTPUT.
 	my $verbose = _verbose_log_level($opts->{env});
-	$opts->{redact_output} = ($TRACEABLE_OUTPUT{_subcommand(@cmd)} && !$verbose) ? 0 : 1
-		unless defined($opts->{redact_output});
-	$opts->{redact_stderr} = 1 if $verbose && !defined($opts->{redact_stderr});
+	my $private = ($TRACEABLE_OUTPUT{_subcommand(@cmd)} && !$verbose) ? 0 : 1;
+	$opts->{redact_output} = $private unless defined($opts->{redact_output});
+	$opts->{redact_stderr} = 1 if ($private || $verbose) && !defined($opts->{redact_stderr});
+
+	# Verbose bosh logging is the operator's own debugging switch, and it
+	# writes director requests and responses, tokens included, into the
+	# output.  An interactive command then shows it on the terminal only:
+	# it runs without the `script` wrapper, so no transcript of it is kept
+	# or handed back to be saved, and a warning says so each time.
+	my $live_only = $opts->{interactive} && $verbose;
+	if ($live_only) {
+		print STDERR Genesis::Term::csprintf(
+			"#Y{[WARNING]} BOSH_LOG_LEVEL=%s makes bosh print director requests and ".
+			"responses, tokens included.  They are shown on this terminal only, and ".
+			"no transcript of this bosh command is kept.\n",
+			$opts->{env}{BOSH_LOG_LEVEL} // $ENV{BOSH_LOG_LEVEL}
+		);
+	}
 
 	my ($fh, $file);
 
@@ -192,7 +212,7 @@ sub execute {
 		unshift(@cmd, $bosh);
 
 		# Capture output if interactive using script command
-		if ($opts->{interactive} && $allow_script_wrapper) {
+		if ($opts->{interactive} && $allow_script_wrapper && !$live_only) {
 			my $OS = "$^O";
 			($fh, $file) = tempfile('bosh-output-XXXXXXXX', TMPDIR => 1, UNLINK => 1);
 

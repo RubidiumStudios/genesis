@@ -597,12 +597,18 @@ sub download_configs {
 		}
 		$assembled = to_yaml({cpis => \@all_cpis});
 	} elsif (@config_contents > 1) {
+		# Configs can carry credentials, such as a CPI's API key, so the
+		# contents, the merged result, and spruce's errors stay out of the
+		# trace, and a failure names the exit status and kind of failure.
 		my ($out, $rc, $err) = run(
-			{interactive => 0, stderr=>0},
+			{interactive => 0, stderr=>0, redact_output => 1, redact_stderr => 1},
 			'spruce merge --multi-doc --go-patch --fallback-append <(echo "$1")',
-			join("\n---\n", @config_contents)
+			{redact => join("\n---\n", @config_contents)}
 		);
-		bail("Failed to converge the active $type configurations: $err") if $rc;
+		bail(
+			"Failed to converge the active %s configurations: spruce exited %d (%s)",
+			$type, $rc, Genesis::failure_summary($out, $err)
+		) if $rc;
 		$assembled = $out;
 	} else {
 		$assembled = $config_contents[0];
@@ -657,9 +663,10 @@ sub upload_config_from_file {
 		: ('update-config', "--type=$type", "--name=$name", $path);
 	push @commands, '-n' unless $confirm;
 	my ($out, $rc, $err) = $self->execute({interactive => $confirm}, @commands);
+	# bosh can quote the config it was given, so neither stream is shown.
 	bail(
-		"Failed to upload %s configuration to '#M{%s}' BOSH director: %s",
-		$name, $self->alias, $err
+		"Failed to upload %s configuration to '#M{%s}' BOSH director: bosh exited %d (%s)",
+		$name, $self->alias, $rc, Genesis::failure_summary($out, $err)
 	) if $rc && !wantarray;
 	return wantarray ? ($out, $rc, $err) : $rc ? 0 : 1;
 }
@@ -671,8 +678,8 @@ sub delete_config {
 	push @commands, '-n' unless $confirm;
 	my ($out, $rc, $err) = $self->execute({interactive => $confirm}, @commands);
 	bail(
-		"Failed to delete %s configuration from '#M{%s}' BOSH director: %s",
-		$name, $self->alias, $err
+		"Failed to delete %s configuration from '#M{%s}' BOSH director: bosh exited %d (%s)",
+		$name, $self->alias, $rc, Genesis::failure_summary($out, $err)
 	) if $rc;
 	return 1;
 }

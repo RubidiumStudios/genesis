@@ -1,10 +1,13 @@
 #!/usr/bin/env perl
 # Service::BOSH::execute keeps bosh output that can carry secrets out of
 # the trace.  `bosh manifest`, `bosh int`, configs, variables, and deploy
-# transcripts all print credentials, so stdout is traced verbatim only for
-# an allowlist of read-only listing commands, and every other command
-# leaves a byte count.  With BOSH_LOG_LEVEL above its default, bosh writes
-# whole director responses, so both stdout and stderr are redacted.
+# transcripts all print credentials, so stdout and stderr are traced
+# verbatim only for an allowlist of read-only listing commands, and every
+# other command, including any shell command that chains more onto a
+# listing, leaves a byte count.  With BOSH_LOG_LEVEL above its default,
+# bosh writes whole director responses, so both streams are redacted, and
+# an interactive command shows them on the terminal without capturing a
+# transcript.
 use strict;
 use warnings;
 
@@ -57,19 +60,23 @@ for my $cmd (
 	['manifest'], ['int', 'manifest.yml'], ['config', '--type=cloud', '--name=default'],
 	['configs'], ['cloud-config'], ['runtime-config'], ['variables'],
 	['bosh manifest'], ['manifest "$@" | cat'], ['-n', 'manifest'],
+	['env --json; bosh manifest'], ['env --json | cat'], ['env --json && bosh manifest'],
+	['env $(bosh manifest)'],
 ) {
 	my $name = join(' ', @$cmd);
 	subtest "stdout of `bosh $name` is redacted" => sub {
 		my $log = capture_trace { director->execute(@$cmd) };
 		unlike($log, qr/\Q$out_secret\E/, 'the output is absent');
 		like($log, qr/\[\d+b of redacted data omitted from debug\]/, 'a byte count is kept');
-		like($log, qr/\Q$err_secret\E/, 'stderr at the default log level is still traced');
+		unlike($log, qr/\Q$err_secret\E/, 'stderr is absent too');
+		like($log, qr/\[\d+b of redacted stderr omitted from debug\]/, 'with its byte count');
 	};
 }
 
 subtest 'stdout of an allowlisted listing command is still traced' => sub {
 	my $log = capture_trace { director->execute('env', '--json') };
 	like($log, qr/\Q$out_secret\E/, 'the output of bosh env is traced');
+	like($log, qr/\Q$err_secret\E/, 'and so is its stderr');
 };
 
 for my $level (qw/debug info warn error/) {
@@ -101,6 +108,26 @@ subtest 'an interactive transcript is redacted' => sub {
 	like($results[0], qr/\Q$out_secret\E/, 'the caller still gets the transcript');
 	unlike($log, qr/\Q$out_secret\E/, 'the transcript is absent from the trace');
 	like($log, qr/\d+b of redacted bosh output omitted from debug/, 'a byte count is kept');
+};
+
+subtest 'verbose bosh logging is shown live and never captured' => sub {
+	local $ENV{PATH} = "$dir/bin:$ENV{PATH}";
+	local $ENV{BOSH_LOG_LEVEL} = 'debug';
+	local $^O = 'darwin';
+	# bosh writes to the real terminal, so fd 1 and 2 go to a file here.
+	open(my $saved_out, '>&', \*STDOUT) or die "cannot save stdout: $!";
+	open(my $saved_err, '>&', \*STDERR) or die "cannot save stderr: $!";
+	open(STDOUT, '>', "$dir/terminal") or die "cannot redirect stdout: $!";
+	open(STDERR, '>>', "$dir/terminal") or die "cannot redirect stderr: $!";
+	my ($log, $warned, @results);
+	($log, $warned) = capture_trace { @results = director->execute({interactive => 1}, 'deploy', 'manifest.yml') };
+	open(STDOUT, '>&', $saved_out);
+	open(STDERR, '>&', $saved_err);
+	my $terminal = Genesis::slurp("$dir/terminal");
+	like($terminal, qr/\Q$out_secret\E/, 'the operator still sees what bosh prints');
+	like($warned, qr/BOSH_LOG_LEVEL/, 'with a warning that verbose logging is on');
+	unlike($results[0] // '', qr/\Q$out_secret\E|\Q$err_secret\E/, 'no transcript holding it is returned');
+	unlike($log, qr/\Q$out_secret\E|\Q$err_secret\E/, 'and the trace holds neither stream');
 };
 
 done_testing;

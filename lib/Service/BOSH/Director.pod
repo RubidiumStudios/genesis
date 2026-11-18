@@ -1125,9 +1125,12 @@ when assembling C<cpi> configs. C<%s> is the director alias. BOSH will
 refuse to deploy until the duplicate is resolved, by deleting the
 redundant config or renaming the cpi entry.
 
-Dies with C<"Failed to converge the active $type configurations: $err"> when
-C<spruce merge> fails while merging multiple non-cpi configs. C<$type> is
-the config type and C<$err> is the error output.
+Dies with C<"Failed to converge the active %s configurations: spruce exited
+%d (%s)"> when C<spruce merge> fails while merging multiple non-cpi
+configs. The placeholders are the config type, the exit status, and the
+C<Genesis::failure_summary> of spruce's output. Configs can carry
+credentials, so the contents, the merged result, and spruce's own errors
+stay out of the trace.
 
 B<Examples:>
 
@@ -1243,9 +1246,11 @@ In scalar context, C<1> on success or C<0> on failure.
 
 B<Errors:>
 
-Dies with C<"Failed to upload %s configuration to '#M{%s}' BOSH director: %s">
-in scalar context when the upload fails. C<%s> placeholders are the config
-name, director alias, and error output.
+Dies with C<"Failed to upload %s configuration to '#M{%s}' BOSH director:
+bosh exited %d (%s)"> in scalar context when the upload fails. The
+placeholders are the config name, the director alias, the exit status, and
+the C<Genesis::failure_summary> of bosh's output, since bosh can quote the
+config it was given.
 
 B<Examples:>
 
@@ -1289,9 +1294,10 @@ B<Returns:> C<1> on success.
 
 B<Errors:>
 
-Dies with C<"Failed to delete %s configuration from '#M{%s}' BOSH director: %s">
-when the delete command fails. C<%s> placeholders are the config name,
-director alias, and error output.
+Dies with C<"Failed to delete %s configuration from '#M{%s}' BOSH director:
+bosh exited %d (%s)"> when the delete command fails. The placeholders are
+the config name, the director alias, the exit status, and the
+C<Genesis::failure_summary> of bosh's output.
 
 B<Examples:>
 
