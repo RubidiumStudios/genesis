@@ -138,8 +138,8 @@ subtest 'absent local manifest skips the check' => sub {
 # _deploy_create_env - the check runs against the real deploy path
 #
 # These drive _deploy_create_env itself, with last_deployed_manifest stubbed
-# to describe files on disk and spruce_diff stubbed to stop the deploy once it
-# is past the integrity check.  By default the manifest comes from exodus, as
+# to describe files on disk and _show_create_env_differences stubbed to stop
+# the deploy once it is past the integrity check.  By default the manifest comes from exodus, as
 # it does for a hybrid manifest store without deployment archives.  The
 # downloaded copy lands in a work directory, while the state file and the
 # manifest that was committed with it stay in the repository.  Unless a test
@@ -193,7 +193,7 @@ sub run_create_env_check {
 	local *Genesis::Env::in_controlling_terminal = sub { $opts{terminal} ? 1 : 0 };
 	local *Genesis::Env::prompt_for_boolean = sub { 1 };
 	local *Genesis::Env::warning = sub { push @warnings, join('', @_) };
-	local *Genesis::Env::spruce_diff = sub { die "REACHED DIFF\n" };
+	local *Genesis::Env::_show_create_env_differences = sub { die "REACHED DIFF\n" };
 	local *Genesis::Env::_cleanup_and_bail = sub { shift; die "CLEANUP BAIL: @_\n" };
 
 	my $err = do { local $@; eval { $env->_deploy_create_env(noprompt => 1) }; $@ } // '';

@@ -112,7 +112,9 @@ sub information {
 			$deployment->timestamp,
 			$target_msg
 		);
-		output {raw => 1}, $artifact_content;
+		# Artifacts include create-env state and vars stores, which hold the
+		# director's credentials, so the content never reaches a log file.
+		output {raw => 1, private => 1}, $artifact_content;
 		exit 0;
 	}
 
@@ -352,8 +354,10 @@ sub lookup {
 	if (get_options->{defined}) {
 		exit(ref($v) eq "NotFound" ? 4 : 0);
 	} elsif (defined($v)) {
+		# A looked-up value can be a credential, such as an exodus record's
+		# admin password, so it goes to stdout and never to a log file.
 		$v = encode_json($v) if ref($v);
-		output {raw => 1}, $v;
+		output {raw => 1, private => 1}, $v;
 	}
 	exit 0;
 }

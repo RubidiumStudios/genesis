@@ -4422,46 +4422,11 @@ sub _deploy_create_env {
 		      || $recovered->{state}
 		      || $alternative_state_file;
 
-		info("\n[[  - >>comparing against the last deployed manifest...");
-		my ($out, $rc, $err) = spruce_diff(
-				{file => $last_manifest_path, label => 'last-deployed'},
-				{file => $state->{manifest_path}, label => 'current'}
+		$self->_show_create_env_differences(
+			$last_manifest_path, $state->{manifest_path},
+			$last_manifest->{vars}{path}, $state->{vars_path},
+			$last_manifest->{manifest}{source}
 		);
-
-		my ($vars_out, $vars_rc, $vars_err) = ('',0,'');
-		if ($state->{vars_path} && -f $state->{vars_path}) {
-			($vars_out, $vars_rc, $vars_err) = spruce_diff(
-				{file => $last_manifest->{vars}{path}, label => 'last-deployed-vars'},
-				{file => $state->{vars_path}, label => 'current-vars'}
-			);
-		}
-
-		$self->_cleanup_and_bail(
-			"Failed to diff the last deployed manifest with the current manifest: %s",
-			$err//$out
-		) if $rc > 1;
-		$self->_cleanup_and_bail(
-			"Failed to diff the last deployed vars file with the current vars file: %s",
-			$vars_err//$vars_out
-		) if ($vars_rc > 1);
-
-		if (!$out && !$vars_out) {
-			info(
-				"[[  - >>#G{no differences found between last deployed and current manifest or bosh variables.}"
-			);
-		} else {
-			info(
-				"[[  - >>#y{found differences between last deployed and current manifest:}\n\n%s",
-				$out,
-			) if $out;
-			info(
-				"[[  - >>#y{found differences between last deployed and current bosh variables:}\n\n%s",
-				$vars_out
-			) if $vars_out;
-			warning(
-				"\n#y{NOTE}: values from vault have been redacted, so differences are not shown."
-			) if $last_manifest->{manifest}{source} eq 'repository';
-		}
 	} else {
 		info "[[  - >>no previous deployment of this environment found in the deployment archive.";
 	}
@@ -7620,6 +7585,57 @@ sub rejoin_deployment {
 # }}}
 
 # _cleanup_and_bail - cleanup the deployment cache and bail with a message {{{
+# _show_create_env_differences - list what a create-env redeploy changes {{{
+#
+# The manifest and vars file of a create-env director hold its own
+# credentials, and a rotated password would show as both its old and new
+# value, so the comparison names the paths that were added, removed, or
+# changed, and never a value.
+sub _show_create_env_differences {
+	my ($self, $last_manifest, $manifest, $last_vars, $vars, $source) = @_;
+	info("\n[[  - >>comparing against the last deployed manifest...");
+
+	my $load = sub {
+		my ($file, $what) = @_;
+		return {} unless defined($file) && -f $file;
+		my ($data, $rc, $err) = load_yaml_file($file);
+		$self->_cleanup_and_bail(
+			"Failed to read the %s for comparison: spruce exited %d (%s)",
+			$what, $rc, Genesis::failure_summary($err)
+		) if $rc;
+		return $data;
+	};
+	my @changes = changed_paths(
+		$load->($last_manifest, 'last deployed manifest'), $load->($manifest, 'current manifest')
+	);
+	my @var_changes = (defined($vars) && -f $vars) ? changed_paths(
+		$load->($last_vars, 'last deployed vars file'), $load->($vars, 'current vars file')
+	) : ();
+
+	if (!@changes && !@var_changes) {
+		info(
+			"[[  - >>#G{no differences found between last deployed and current manifest or bosh variables.}"
+		);
+		return 1;
+	}
+	info(
+		"[[  - >>#y{found differences between last deployed and current manifest at these paths:}\n\n%s\n",
+		join("\n", map {"      $_"} @changes)
+	) if @changes;
+	info(
+		"[[  - >>#y{found differences between last deployed and current bosh variables at these paths:}\n\n%s\n",
+		join("\n", map {"      $_"} @var_changes)
+	) if @var_changes;
+	info(
+		"[[  - >>#i{Values are not shown, since the manifest and variables hold the director's credentials.}"
+	);
+	warning(
+		"\n#y{NOTE}: values from vault have been redacted, so changes to them are not listed."
+	) if ($source // '') eq 'repository';
+	return 1;
+}
+
+# }}}
 sub _cleanup_and_bail {
 	my $self = shift;
 	$self->deployment_cache_cleanup;

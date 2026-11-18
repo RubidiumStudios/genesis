@@ -1930,6 +1930,25 @@ B<Examples:>
     # Returns: (200, '200 OK', '{"status":"ok"}', ...)
     bail("API error: $line") unless $st == 200;
 
+=head2 changed_paths
+
+  my @changes = changed_paths($old_data, $new_data);
+
+Lists the paths that differ between two data structures, as C<+ path> for
+an added path, C<- path> for a removed one, and C<~ path> for a changed
+one, and never shows a value. A create-env redeploy uses it to describe a
+change to a manifest or vars file that holds the director's credentials.
+Path segments are joined with C<.>. A list whose items are all hashes with
+a distinct C<name> is matched by name, the way spruce names instance
+groups, and any other list is matched by position.
+
+B<Returns:> A list of strings, empty when the two are the same.
+
+B<Examples:>
+
+  changed_paths({a => 1, b => {c => 'x'}}, {a => 1, b => {c => 'y'}, d => 2});
+  # Returns: ('~ b.c', '+ d')
+
 =head2 spruce_diff
 
     my ($diff, $rc, $err) = spruce_diff($first, $second);

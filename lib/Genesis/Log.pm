@@ -964,6 +964,7 @@ sub _log {
 		show_stack => $options->{show_stack},
 		stack      => \@stack,
 		raw        => $options->{raw},
+		private    => $options->{private},
 		context    => $options->{context},
 
 		# Terminal specific options
@@ -1029,9 +1030,9 @@ sub flush_logs {
 		my $config = $self->{logs}{$log};
 		for my $line_number ($config->{next_entry}..$last_line) {
 			my (
-					$level, $ts,      $label, $colors, $emoji, $priority, $contents, $show_stack, $stack, $pending, $reset, $raw, $term_prefix, $term_style
+					$level, $ts,      $label, $colors, $emoji, $priority, $contents, $show_stack, $stack, $pending, $reset, $raw, $private, $term_prefix, $term_style
 			)	= @{@{$self->{buffer}}[$line_number]}{
-				qw/level   timestamp label   colors   emoji   priority   contents   show_stack   stack   pending   reset   raw   prefix        style/
+				qw/level   timestamp label   colors   emoji   priority   contents   show_stack   stack   pending   reset   raw   private   prefix        style/
 			};
 
 			next unless meets_level($config->{level},$level);
@@ -1124,6 +1125,11 @@ sub flush_logs {
 				# operator asked to see.
 				$content = $self->scrub($content)
 					unless $log eq '<terminal>' && ($level eq 'OUTPUT' || $level eq 'INFO');
+				# A private entry is what an operator asked to see, such as a
+				# looked-up credential: the terminal shows it, and a log file
+				# records only that it was withheld.
+				$content = sprintf("<%d bytes of output withheld from this log>", length($content))
+					if $private && $log ne '<terminal>';
 				my ($pre_pad, $post_pad) = ("","");
 				($pre_pad, $content)  = $content =~ m/\A([\r\n]*)(.*)\z/s;
 				($content, $post_pad) = $content =~ m/\A(.*?)([\r\n]*)\z/s unless $pending;

@@ -905,7 +905,9 @@ sub manifest {
 		->manifest_provider->$type(notify=>1,subset=>$subset);
 	my $content = slurp($manifest->file) =~ s/\s*\z//msr;
 	print STDERR "\n";
-	output {raw => 1}, $content;
+	# Several manifest types are unredacted, so the manifest goes to stdout
+	# and never to a log file.
+	output {raw => 1, private => 1}, $content;
 }
 
 # _derive_deploy_reason - build a default --reason from the pipeline commit range {{{

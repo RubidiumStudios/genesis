@@ -1759,7 +1759,12 @@ used when capturing the call stack.
 
 The buffer entry includes: C<level>, C<label>, C<colors>, C<emoji>,
 C<priority>, C<timestamp>, C<contents>, C<pending>, C<reset>,
-C<show_stack>, C<stack>, C<raw>, C<prefix>, and C<style>.
+C<show_stack>, C<stack>, C<raw>, C<private>, C<prefix>, and C<style>.
+
+A C<private> entry is output an operator asked to see that can hold a
+credential, such as a looked-up exodus value or an unredacted manifest.
+The terminal shows it, and every log file gets
+C<E<lt>N bytes of output withheld from this logE<gt>> in its place.
 
 Stack frames are captured for all entries whose level meets
 C<capture_stack_min_level> (ordinal 2, i.e., C<FATAL>/C<ERROR> and above),

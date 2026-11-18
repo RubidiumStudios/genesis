@@ -97,7 +97,7 @@ our @EXPORT = qw/
 	ordify
 	count_nouns
 
-	spruce_diff
+	spruce_diff changed_paths
 
 	run lines curl fake_tty shell_quote
 	read_json_from
@@ -1146,6 +1146,56 @@ sub curl {
 # output holds spruce's error.  Always use this instead of running
 # `spruce diff` under fake_tty directly, because it strips script(1)'s
 # header and trailer and reads the exit code the trailer records.
+# changed_paths - the paths that differ between two data structures {{{
+#
+# Lists each path added, removed, or changed, as "+ path", "- path", or
+# "~ path", and never a value, so it can describe a change to data that
+# holds credentials.  A list whose items are all hashes with a name is
+# matched by name, the way spruce names instance groups; any other list is
+# matched by position.
+sub changed_paths {
+	my ($old, $new, $path) = @_;
+	my $at = sub { defined($path) ? "$path.$_[0]" : $_[0] };
+	my $named = sub {
+		my ($list) = @_;
+		return 0 unless @$list;
+		my %seen;
+		for (@$list) {
+			return 0 unless ref($_) eq 'HASH' && defined($_->{name}) && !ref($_->{name}) && !$seen{$_->{name}}++;
+		}
+		return 1;
+	};
+	my (%old, %new);
+	if (ref($old) eq 'HASH' && ref($new) eq 'HASH') {
+		%old = %$old;
+		%new = %$new;
+	} elsif (ref($old) eq 'ARRAY' && ref($new) eq 'ARRAY') {
+		if ($named->($old) && $named->($new)) {
+			%old = map {($_->{name} => $_)} @$old;
+			%new = map {($_->{name} => $_)} @$new;
+		} else {
+			%old = map {($_ => $old->[$_])} 0..$#$old;
+			%new = map {($_ => $new->[$_])} 0..$#$new;
+		}
+	} else {
+		my $same = (!defined($old) && !defined($new))
+			|| (defined($old) && defined($new) && !ref($old) && !ref($new) && "$old" eq "$new");
+		return $same ? () : ("~ ".($path // '.'));
+	}
+	my @changes;
+	for my $key (sort {($a =~ /\A\d+\z/ && $b =~ /\A\d+\z/) ? $a <=> $b : $a cmp $b} keys %{{%old, %new}}) {
+		if (!exists($new{$key})) {
+			push @changes, "- ".$at->($key);
+		} elsif (!exists($old{$key})) {
+			push @changes, "+ ".$at->($key);
+		} else {
+			push @changes, changed_paths($old{$key}, $new{$key}, $at->($key));
+		}
+	}
+	return @changes;
+}
+
+# }}}
 sub spruce_diff {
 	my ($first, $second) = @_;
 	bug("spruce diff requires two files") unless @_ == 2;
