@@ -4492,11 +4492,7 @@ sub _deploy_create_env {
 		store => $self->kit->secrets_store eq 'credhub' ? $store_path : undef,
 	);
 
-	$state->{results} = \@results;
-	# How bosh ended, as it happened: the tasks it named and whether it was
-	# interrupted, which its transcript alone cannot always show.
-	$state->{bosh_status} = eval {$self->bosh->last_interactive_status};
-	return $state->{ok} = !$results[1];
+	return $self->_record_deploy_result(@results);
 }
 
 # }}}
@@ -4572,11 +4568,25 @@ sub _deploy_to_bosh {
 		flags     => \@bosh_opts
 	);
 
+	return $self->_record_deploy_result(@results);
+}
+
+# }}}
+# _record_deploy_result - how the deploy bosh just ran ended {{{
+#
+# The exit code alone does not decide it.  How bosh ended as it happened,
+# meaning the tasks it named and whether Genesis caught a signal, comes
+# from the status execute() recorded, which the transcript cannot always
+# show, and a deploy that was interrupted or left a task open has not
+# succeeded, whatever bosh exited with.  The one outcome drives everything
+# after the deploy.
+sub _record_deploy_result {
+	my ($self, @results) = @_;
+	my $state = $self->{deployment_state};
 	$state->{results} = \@results;
-	# How bosh ended, as it happened: the tasks it named and whether it was
-	# interrupted, which its transcript alone cannot always show.
 	$state->{bosh_status} = eval {$self->bosh->last_interactive_status};
-	return $state->{ok} = !$results[1];
+	$state->{outcome} = {$self->_deploy_outcome($results[0], $results[1], $state->{bosh_status})};
+	return $state->{ok} = ($state->{outcome}{kind} eq 'succeeded') ? 1 : 0;
 }
 
 # }}}
@@ -4585,10 +4595,13 @@ sub _post_deploy {
 	my ($self, %opts) = @_;
 	my $noprompt = delete($opts{noprompt});
 	my $state = $self->{deployment_state};
-	my $deployment_ok = $state->{ok};
+	my %outcome = %{$state->{outcome} || {$self->_deploy_outcome($state->{results}[0], $state->{results}[1], $state->{bosh_status})}};
+	my $deployment_ok = $state->{ok} = ($outcome{kind} eq 'succeeded') ? 1 : 0;
+	# Hooks and reactions are told a deploy that did not succeed failed,
+	# even when bosh itself exited zero.
+	my $deploy_rc = $deployment_ok ? 0 : ($state->{results}[1] || 1);
 
 	$self->notify("#G{Deployment successful.}") if $deployment_ok;
-	my %outcome = $self->_deploy_outcome($state->{results}[0], $state->{results}[1], $state->{bosh_status});
 
 	# Save deployment log
 	my $manifest_store = $self->top->config->get('manifest_store','hybrid');
@@ -4624,7 +4637,7 @@ sub _post_deploy {
 	if (!$deployment_ok) {
 		# Reactions on failure: GENESIS_DEPLOY_RC != 0 lets scripts skip.
 		if ($self->_reactions && !$state->{disable_reactions}) {
-			$state->{reaction_vars}{GENESIS_DEPLOY_RC} = ($state->{results}[1]);
+			$state->{reaction_vars}{GENESIS_DEPLOY_RC} = $deploy_rc;
 			$self->_process_reactions('post-deploy', $state->{reaction_vars}) or warning(
 				"Environment post-deploy reaction failed!  Manual intervention may be needed."
 			);
@@ -4632,7 +4645,7 @@ sub _post_deploy {
 
 		if (!$opts{"dry-run"} && $self->has_hook('post-deploy')) {
 			# Call post-deploy hook with the pre-deploy data in case of cleanup on failure
-			$self->run_hook('post-deploy', rc => $state->{results}[1], interactive => !$noprompt, data => $state->{predeploy_data});
+			$self->run_hook('post-deploy', rc => $deploy_rc, interactive => !$noprompt, data => $state->{predeploy_data});
 		}
 		my $msg = $outcome{message};
 		my $cleanup_cache = $outcome{cleanup_cache};
@@ -4683,7 +4696,7 @@ sub _post_deploy {
 
 	# Reactions on success: run AFTER exodus so `genesis bosh --self` works.
 	if ($self->_reactions && !$state->{disable_reactions}) {
-		$state->{reaction_vars}{GENESIS_DEPLOY_RC} = ($state->{results}[1]);
+		$state->{reaction_vars}{GENESIS_DEPLOY_RC} = $deploy_rc;
 		$self->_process_reactions('post-deploy', $state->{reaction_vars}) or warning(
 			"Environment post-deploy reaction failed!  Manual intervention may be needed."
 		);
@@ -4796,7 +4809,7 @@ sub _post_deploy {
 	# Run post-deploy hook
 	$self->run_hook(
 		'post-deploy',
-		rc => $state->{results}[1],
+		rc => $deploy_rc,
 		data => $state->{predeploy_data},
 		interactive => !$noprompt,
 		flags => $opt_flags,
@@ -7594,7 +7607,7 @@ sub rejoin_deployment {
 #
 # A declined prompt, an EOF at the prompt, and Ctrl-C all end bosh with a
 # failure, so the last lines of the transcript tell the first two apart.
-# Blank lines and colour codes are ignored, so the classification holds
+# Blank lines and color codes are ignored, so the classification holds
 # however bosh and the terminal laid the end of the run out.
 #
 # Whether the deploy was interrupted, and which tasks bosh started without
@@ -7606,8 +7619,6 @@ sub rejoin_deployment {
 sub _deploy_outcome {
 	my ($self, $out, $rc, $status) = @_;
 	$status = {} unless ref($status) eq 'HASH';
-	return (kind => 'succeeded', message => 'Deployment succeeded.', cleanup_cache => 1)
-		if defined($rc) && $rc == 0;
 	my @lines = grep {/\S/} map {decolorize($_) =~ s/\r//gr} split(/\r?\n/, $out // '');
 	my $tail = join("\n", @lines > 5 ? @lines[-5..-1] : @lines);
 	return (kind => 'declined', message => 'User canceled deployment when prompted to continue.', cleanup_cache => 1)
@@ -7627,7 +7638,13 @@ sub _deploy_outcome {
 		}
 	}
 	my @open = map {$_->{id}} grep {!$_->{state}} @tasks;
-	my $interrupted = $status->{interrupted} || $tail =~ /\^C\s*$/m;
+	my $exited_zero = defined($rc) && $rc =~ /\A-?\d+\z/ && $rc == 0;
+	# A zero exit is a success only when no signal was caught and no task
+	# was left open; bosh can exit zero after Ctrl-C reached Genesis.
+	my $interrupted = $status->{interrupted} || defined($status->{signal})
+		|| (!$exited_zero && $tail =~ /\^C\s*$/m);
+	return (kind => 'succeeded', message => 'Deployment succeeded.', cleanup_cache => 1)
+		if $exited_zero && !$interrupted && !@open;
 	if (@open) {
 		my ($it, $s) = @open == 1 ? ('it', '') : ('they', 's');
 		return (
