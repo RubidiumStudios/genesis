@@ -1461,7 +1461,8 @@ sub _confirm_kv_version {
 # token_info - return the token information for the active user token {{{
 sub token_info {
 	my $self = shift;
-	my ($out,$rc, $err) = $self->query('vault', 'token', 'lookup', '-format=json');
+	# The lookup returns the token itself as its id.
+	my ($out,$rc, $err) = $self->query({redact_output => 1}, 'vault', 'token', 'lookup', '-format=json');
 	return read_json_from($out) if $rc == 0;
 	debug(
 		"#R{[ERROR]} Could not get token information from vault at #M{%s}",
@@ -1482,9 +1483,11 @@ sub user {
 sub env {
 	my $self = shift;
 	unless (defined $self->{_env}) {
+		# The output holds the vault token, so it stays out of the trace.
 		$self->{_env} = read_json_from(
 			run({
 					stderr =>'/dev/null',
+					redact_output => 1,
 					env => {SAFE_TARGET => $self->ref }
 				},'safe', 'env', '--json')
 		);

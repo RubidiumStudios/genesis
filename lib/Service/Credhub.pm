@@ -332,9 +332,11 @@ sub query {
 	push @args, '-d', delete($params{_data})
 		if defined $params{_data};
 	# TODO: extract uri-encoded query params out of %params
+	# The API's reply can be any credential, so it stays out of the trace.
 	return scalar(read_json_from(run({
 			env => $self->env(),
 			redact_env => 1,
+			redact_output => 1,
 			stderr => 0
 		},
 		'credhub', 'curl', '--path', "$path", @args
