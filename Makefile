@@ -1,4 +1,4 @@
-.PHONY: sanity-test compile-check pod-gate pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets test-ci unit-tests integration-tests e2e-tests test-all test-manifest release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage
+.PHONY: sanity-test compile-check pod-gate pod-check pod-check-syntax pod-check-quiet test test-quick test-fail-fast test-secrets unit-tests integration-tests e2e-tests test-all release dev-release clean coverage pod-validate-ai pod-validate-changed test-deps test-deps-coverage
 
 # Test manifest-based execution
 TEST_MANIFEST ?= t/test-manifest.txt
