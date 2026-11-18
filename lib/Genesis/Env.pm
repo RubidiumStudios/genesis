@@ -4557,7 +4557,6 @@ sub _deploy_to_bosh {
 	# when stdout is a pipe.
 	push @bosh_opts, '-n'               if  $opts{'dry-run'};
 	push @bosh_opts, "--no-redact"      if  !$opts{redact};
-	$state->{unredacted_output} = $opts{redact} ? 0 : 1;
 	push @bosh_opts, '--skip-drain'     if grep {$_ eq ''} @{$opts{'skip-drain'}};
 	push @bosh_opts, "--skip-drain=$_"  for grep {$_} @{$opts{'skip-drain'} || []};
 	push @bosh_opts, "--$_=$opts{$_}"   for grep { defined $opts{$_} } qw/canaries max-in-flight/;
@@ -4583,15 +4582,13 @@ sub _post_deploy {
 	my $deployment_ok = $state->{ok};
 
 	$self->notify("#G{Deployment successful.}") if $deployment_ok;
+	my %outcome = $self->_deploy_outcome($state->{results}[0], $state->{results}[1]);
 
 	# Save deployment log
 	my $manifest_store = $self->top->config->get('manifest_store','hybrid');
-	mkfile_or_fail(
+	$self->_save_deploy_log(
 		$self->deployment_cache_path_lookup('deploy_log'),
-		$self->_deploy_log_content(
-			defined($state->{results}[0]) ? decode_utf8($state->{results}[0]) : undef,
-			$state->{unredacted_output}
-		)
+		$state->{results}[0], $state->{results}[1], $outcome{message}
 	) unless $manifest_store eq 'repository';
 
 	# Update legacy manifest store
@@ -4631,22 +4628,8 @@ sub _post_deploy {
 			# Call post-deploy hook with the pre-deploy data in case of cleanup on failure
 			$self->run_hook('post-deploy', rc => $state->{results}[1], interactive => !$noprompt, data => $state->{predeploy_data});
 		}
-		$state->{results}[0] //= '';
-		my $last_bits_of_output = join "\n", map {decolorize($_)} (split(/\r?\n/,$state->{results}[0]))[-5..-1];
-		my $msg;
-		my $cleanup_cache = 1;
-		if ($last_bits_of_output =~ /Continue\?[^\n]*: [^\n]*[nN]o?\r?\n\s*Stopped\s*Exit code 1/sm) {
-			$msg = "User canceled deployment when prompted to continue.";
-		} elsif ($last_bits_of_output =~ /Continue\?[^\n]*:\s*Asking for confirmation:\s*  EOF\s*Exit code 1/sm) {
-			$msg = "User interrupted deployment at continue prompt.";
-		} elsif ($last_bits_of_output =~ qr{\^C$}m) {
-			# This may leave the deployment detached if pressed after the confirmation prompt, so
-			# once we have deployment recovery working, we'll need to handle this state differently.
-			$msg = "User interrupted deployment (Ctrl-C)";
-			$cleanup_cache = 0; # Don't clean up the cache, as we may want to rejoin the deployment
-		} else {
-			$msg = "Deployment failed.";
-		}
+		my $msg = $outcome{message};
+		my $cleanup_cache = $outcome{cleanup_cache};
 		$self->_create_deployment_audit_log(
 			'deploy'      => Genesis::Env::Deployment::action_failed,
 			reason        => $opts{reason},
@@ -7593,19 +7576,85 @@ sub rejoin_deployment {
 # }}}
 
 # _cleanup_and_bail - cleanup the deployment cache and bail with a message {{{
+# _deploy_outcome - how a deploy ended, from its exit code and transcript {{{
+#
+# A declined prompt, an EOF at the prompt, and Ctrl-C all end bosh with a
+# failure, so the last lines of the transcript tell them apart.  Blank lines
+# and colour codes are ignored, so the classification holds however bosh
+# and the terminal laid the end of the run out.
+sub _deploy_outcome {
+	my ($self, $out, $rc) = @_;
+	return (kind => 'succeeded', message => 'Deployment succeeded.', cleanup_cache => 1)
+		if defined($rc) && $rc == 0;
+	my @lines = grep {/\S/} map {decolorize($_) =~ s/\r//gr} split(/\r?\n/, $out // '');
+	my $tail = join("\n", @lines > 5 ? @lines[-5..-1] : @lines);
+	return (kind => 'declined', message => 'User canceled deployment when prompted to continue.', cleanup_cache => 1)
+		if $tail =~ /Continue\?[^\n]*: [^\n]*[nN]o?\n\s*Stopped\s*Exit code 1/sm;
+	return (kind => 'eof', message => 'User interrupted deployment at continue prompt.', cleanup_cache => 1)
+		if $tail =~ /Continue\?[^\n]*:\s*Asking for confirmation:\s*EOF\s*Exit code 1/sm;
+	# Ctrl-C after the prompt can leave the deployment running on the
+	# director, so the deployment cache is kept for a rejoin.
+	return (kind => 'interrupted', message => 'User interrupted deployment (Ctrl-C)', cleanup_cache => 0)
+		if $tail =~ /\^C\s*$/m;
+	return (kind => 'failed', message => 'Deployment failed.', cleanup_cache => 1);
+}
+
+# }}}
 # _deploy_log_content - what a deploy's saved output log keeps {{{
 #
-# A deploy run with --no-redact shows the operator the manifest diff with
-# its values, so its saved transcript keeps only bosh's task output, which
-# starts at the first "Task N" line and carries no values.
+# The transcript can carry credentials, in the manifest diff of a deploy
+# run with --no-redact and in any task's error text, so the saved log is
+# built from fixed text and validated fields alone: the tasks bosh ran, the
+# times and final state it reported for each, the exit code, and the
+# outcome.
+my $BOSH_TIME = qr/[A-Z][a-z]{2} [A-Z][a-z]{2} +\d{1,2} \d\d:\d\d:\d\d [A-Z]{1,5} \d{4}/;
 sub _deploy_log_content {
-	my ($self, $out, $unredacted) = @_;
-	return 'No output received' unless defined($out);
-	return $out unless $unredacted;
-	my $plain = decolorize($out) =~ s/\r//gr;
-	my $note = "[The manifest diff bosh showed was left out of this log, since the ".
-		"deploy ran with --no-redact and the diff held credential values.]\n";
-	return $plain =~ /^(Task \d+[ \t]*\n.*)\z/ms ? "$note\n$1" : $note;
+	my ($self, $out, $rc, $outcome) = @_;
+	my @log;
+	if (!defined($out)) {
+		push @log, 'No output received.';
+	} else {
+		my (%tasks, @order);
+		my $task = sub { push @order, $_[0] unless $tasks{$_[0]}; $tasks{$_[0]} ||= {} };
+		for my $line (split /\n/, decolorize($out) =~ s/\r//gr) {
+			$line =~ s/\s+\z//;
+			if ($line =~ /^Task (\d{1,12})$/) {
+				$task->($1);
+			} elsif ($line =~ /^Task (\d{1,12}) (Started|Finished) +($BOSH_TIME)$/) {
+				$task->($1)->{lc $2} = $3;
+			} elsif ($line =~ /^Task (\d{1,12}) Duration (\d{2,}:\d\d:\d\d)$/) {
+				$task->($1)->{duration} = $2;
+			} elsif ($line =~ /^Task (\d{1,12}) (done|error|cancelled|timeout)$/) {
+				$task->($1)->{state} = $2;
+			}
+		}
+		push @log, 'No bosh tasks were reported.' unless @order;
+		for my $id (@order) {
+			my $t = $tasks{$id};
+			push @log, sprintf("Task %s: %s", $id, $t->{state} // 'no final state reported');
+			push @log, sprintf("Task %s %s: %s", $id, $_, $t->{$_}) for grep {$t->{$_}} qw/started finished duration/;
+		}
+	}
+	push @log, sprintf("bosh exit code: %s", defined($rc) && $rc =~ /^\d+$/ ? $rc : 'unknown');
+	push @log, sprintf("Outcome: %s", $outcome // 'unknown');
+	push @log, '', "[Only the tasks bosh ran and how the deploy ended are kept here, since ".
+		"bosh's own output can carry credential values.]";
+	return join("\n", @log)."\n";
+}
+
+# }}}
+# _save_deploy_log - write a deploy's output log, readable by its owner {{{
+sub _save_deploy_log {
+	my ($self, $path, $out, $rc, $outcome) = @_;
+	my $content = $self->_deploy_log_content(
+		defined($out) ? decode_utf8($out) : undef, $rc, $outcome
+	);
+	my $mask = umask(077);
+	my $ok = eval { mkfile_or_fail($path, 0600, $content); 1 };
+	my $died = $@;
+	umask($mask);
+	die $died unless $ok;
+	return $path;
 }
 
 # }}}
