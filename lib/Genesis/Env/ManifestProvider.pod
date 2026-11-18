@@ -366,11 +366,12 @@ error), C<$warnings> is a string of warnings from spruce in adaptive mode
 (or C<undef>), and C<$errors> is a string of error output if the merge failed
 (or C<undef> on success).
 
-B<Errors:> Spruce's own merge failures come back in C<$errors> rather than
-raising -- callers are expected to read them and decide. Bails only when
-the spruce invocation itself cannot be completed, naming the manifest type
-and environment; that is a broken toolchain rather than a bad manifest, and
-there is nothing for the caller to recover from.
+B<Errors:> Bails with C<"Unable to merge %s: spruce exited %d (%s)"> when a
+full merge fails, naming the manifest type and environment, spruce's exit
+code, and C<Genesis::failure_summary> of what spruce printed. The paths
+spruce could not resolve follow, once C<Genesis::spruce_error_paths> shows
+them to be made of the merged files' keys. Spruce's own message is never
+repeated, since it can quote a resolved credential.
 
 B<Examples:>
 
@@ -428,9 +429,11 @@ if the subset plan exists but contains none of the recognized operators
 Dies with C<"Too many selections specified for subset '%s' in manifest %s">
 if the subset plan specifies more than one operator.
 
-Dies with C<"Could not get subset %s from %s manifest: %s"> if the
-file-mode subset extraction command fails. The placeholders are the subset
-name, the source manifest type, and the error output.
+Dies with C<"Could not get subset %s from %s manifest: exited %d (%s)"> if
+the file-mode subset extraction command fails. The placeholders are the
+subset name, the source manifest type, the exit code, and
+C<Genesis::failure_summary> of what the command printed, which never
+repeats it.
 
 B<Examples:>
 
@@ -748,22 +751,28 @@ argument after C<$self> is not a hash reference, no options hash is consumed.
 The remaining arguments are a list of absolute file paths to merge.
 
 In list context, returns C<($merged_yaml, $warnings_string)>. In scalar
-context, returns only C<$merged_yaml>. The C<$warnings_string> contains spruce
-stderr output: on the early-success path it is the stderr from the successful
-merge (which may be empty or contain warnings); on the retry path it contains
-the original error output collected before retry attempts began.
+context, returns only C<$merged_yaml>. Spruce's stderr can quote a resolved
+value, so it is never handed back: C<$warnings_string> is C<undef> when the
+first merge succeeds, and on the retry path it is
+C<Genesis::failure_summary> of the original errors, a fixed description.
+
+Paths taken from spruce's errors reach the trace only once
+C<Genesis::spruce_error_paths> shows them to be made of the merged files'
+keys; any other path is traced as its length.
 
 B<Errors:>
 
-Dies with C<"Internal error: Could not find line causing error '$err_msg' during adaptive merge.">
+Dies with C<"Internal error: Could not find the line causing a spruce error at %s during adaptive merge.">
 if a failing spruce error path cannot be traced back to a source location
-in the merged content. C<$err_msg> is the spruce error message text.
+in the merged content. C<%s> is the checked path, or its length when it is
+not made of the merged files' keys. Spruce's message is never quoted.
 
-Dies with C<"Could not merge %s environment files:\n\n%s\n\n..."> if all
-retry attempts are exhausted and the merge still fails. C<%s> is the
-environment name and C<%s> is the original or final error output. The
-message also suggests C<export GENESIS_UNEVALED_PARAMS=1> as a partial
-workaround.
+Dies with C<"Could not merge %s environment files: spruce exited %d (%s)%s...">
+if all retry attempts are exhausted and the merge still fails. The
+placeholders are the environment name, spruce's exit code, the
+C<Genesis::failure_summary> of the final errors, and the checked paths spruce
+could not resolve. The message also describes the original errors and
+suggests C<export GENESIS_UNEVALED_PARAMS=1> as a partial workaround.
 
 B<Examples:>
 
@@ -772,6 +781,16 @@ B<Examples:>
       $init_file, $kit_file, $env_file
   );
   # Returns: ($merged_yaml_string, $warnings_string_or_undef)
+
+=head2 _failure_paths
+
+  my $text = Genesis::Env::ManifestProvider::_failure_paths($err, @files);
+
+Returns message text listing the paths a failed merge could not resolve,
+as C<Genesis::spruce_error_paths> checks them against C<@files>, or an empty
+string when none passes the check.
+
+B<Returns:> A string.
 
 =head1 AUTHOR
 

@@ -694,24 +694,53 @@ our @FAILURE_DIAGNOSTICS = (
 # failure_summary - a failed command's diagnostic that is safe to show
 #
 # Returns the fixed descriptions from @FAILURE_DIAGNOSTICS that the
-# command's output or stderr matched, joined with "; ", or "no recognized
-# diagnostic".  Nothing the command printed is returned.
-#
-# Spruce names each node it could not resolve by its path, such as
-# $.properties.password.  A path is made of manifest keys, never values,
-# so up to ten of them are listed as well.
+# command's output or stderr matched, joined with "; ".  Nothing the
+# command printed is returned, not even text shaped like a manifest path,
+# since a stream can carry anything.  When nothing matched, it says that
+# the command's own messages are withheld and why, so the operator knows
+# the terse report is deliberate.  spruce_error_paths() can add the paths
+# of a failed merge, once they are checked against the merged files.
 sub failure_summary {
 	my $text = join("\n", grep {defined} @_);
 	my %seen;
 	my @found = grep {!$seen{$_}++} map {$text =~ $_->[0] ? $_->[1] : ()} @FAILURE_DIAGNOSTICS;
-	my %seen_path;
-	my @paths = grep {!$seen_path{$_}++} $text =~ /(?<![\w\$])(\$\.[A-Za-z0-9_.\[\]-]+[A-Za-z0-9_\]])/g;
-	splice(@paths, 10) if @paths > 10;
-	my $summary = @found ? join('; ', @found) : 'no recognized diagnostic';
-	$summary .= " at ".join(', ', @paths) if @paths;
-	return $summary;
+	return join('; ', @found) if @found;
+	return 'no known kind of failure; its own messages are withheld, since they can quote credentials';
 }
 
+# spruce_error_paths - the paths a failed spruce merge named, checked {{{
+#
+# Spruce names each node it could not resolve by its path, as in
+# " - $.properties.password: ...", and a path is safe to show only if it
+# is made of the merged files' own keys.  So a path is kept only when it
+# heads one of spruce's error lines, and every component is a key or a
+# literal `name:` in one of $files, or a list index.  Anything else is
+# dropped whole, since the stream could hold a value shaped like a path.
+# Returns up to ten paths.
+sub spruce_error_paths {
+	my ($text, @files) = @_;
+	my %known;
+	for my $file (grep {defined && -f} @files) {
+		my $yaml = slurp($file) // next;
+		for my $line (split /\n/, $yaml) {
+			next if $line =~ /^\s*#/;
+			$known{$+} = 1 while $line =~ /(?:^|[\s{,\-])(?:"([^"\n]+)"|'([^'\n]+)'|([A-Za-z0-9_][A-Za-z0-9_.\-]*))\s*:(?=\s|$)/g;
+			$known{$+} = 1 if $line =~ /^\s*(?:-\s+)*name\s*:\s+(?:"([^"]+)"|'([^']+)'|([^\s"'#(&*!|>{\[][^\s#]*))\s*(?:#.*)?$/;
+		}
+	}
+	my (@paths, %seen);
+	for my $line (split /\n/, $text // '') {
+		next unless $line =~ /^\s*-\s+\$\.([^\s:]+):(?:\s|$)/;
+		my $path = $1;
+		next if $seen{$path}++;
+		next if grep {!($known{$_} || /\A\d+\z/)} split(/\./, $path, -1);
+		push @paths, "\$.$path";
+		last if @paths >= 10;
+	}
+	return @paths;
+}
+
+# }}}
 # Response headers whose values curl() may write to a trace.  Any other
 # header, such as Set-Cookie or a Location carrying a signed URL, is shown
 # by name only.
@@ -1483,15 +1512,36 @@ sub time_exec {
 
 # Data handling
 
+# What load_json() may say about why JSON could not be parsed.  JSON::PP
+# quotes the input after the point of failure, and the input can be vault
+# or CredHub data, so its message is matched against these and never kept.
+our @JSON_PARSE_FAILURES = (
+	[qr/^unexpected end of/                                => 'the input ended early'],
+	[qr/^malformed JSON string/                            => 'not a JSON value'],
+	[qr/^garbage after JSON/                               => 'unexpected text after the JSON value'],
+	[qr/^'(?:true|false|null)' expected/                   => 'expected a literal'],
+	[qr/^(?:, or [\]}]|':'|'"'|\[|\{) expected|^unexpected/  => 'malformed structure'],
+	[qr/^malformed number/                                 => 'malformed number'],
+	[qr/^illegal backslash escape|^missing high|^missing low|^surrogate/ => 'malformed escape in a string'],
+	[qr/^invalid character|^malformed UTF-8|^Wide character|^illegal|^invalid/ => 'invalid character'],
+	[qr/^json text or perl structure exceeds maximum nesting/ => 'nested too deeply'],
+);
+
 sub load_json {
 	my ($json, $opts) = @_;
 	my $decoder = JSON::PP->new->allow_nonref;
 	$decoder->allow_bignum if ($opts // {})->{allow_bignum};
-	# JSON::PP quotes the input that follows a parse error, and the input
-	# can be vault or CredHub data, so the error keeps the offset and
-	# drops the quote.
 	my $data = eval { $decoder->decode($json) };
-	die(($@ =~ s/\(before "(.*?)"\)(?= at |\z)/sprintf("(before <%d bytes>)", length($1))/esr)) if $@;
+	if (my $err = $@) {
+		# Only the offset is taken from the parser's message, and only when
+		# it is a number; the rest of the error is fixed text.
+		my ($offset) = $err =~ /\bat character offset (\d+)\b/;
+		my ($kind) = map {$_->[1]} grep {$err =~ $_->[0]} @JSON_PARSE_FAILURES;
+		die sprintf("Could not parse JSON (%s)%s of %d bytes of input\n",
+			$kind // 'unrecognized parse error',
+			defined($offset) ? " at character offset $offset" : '',
+			length($json // ''));
+	}
 	return $data;
 }
 

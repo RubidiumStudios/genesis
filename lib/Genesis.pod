@@ -1564,11 +1564,13 @@ command's own diagnostics can quote whatever it was handed, credentials
 included, so this returns only the fixed descriptions in
 C<@Genesis::FAILURE_DIAGNOSTICS> whose patterns the output or stderr
 matched, such as C<permission denied> or C<could not parse its input>,
-joined with C<; >. If none matched it returns C<no recognized diagnostic>.
+joined with C<; >. If none matched, it says that the command's own messages
+are withheld because they can quote credentials, so an operator can tell a
+deliberately terse report from a missing one.
 
-Spruce names each node it could not resolve by its path, such as
-C<$.properties.password>. A path is made of manifest keys and never of
-values, so up to ten of these are appended after C< at >.
+Nothing taken from the streams is returned, not even text shaped like a
+manifest path, since a stream can hold a value of any shape. Use
+C<spruce_error_paths> to name the paths of a failed merge.
 
 B<Returns:> A string.
 
@@ -1576,6 +1578,26 @@ B<Examples:>
 
   Genesis::failure_summary('', "Error: permission denied on secret/x:password=abc");
   # Returns: 'permission denied'
+
+=head2 spruce_error_paths
+
+  my @paths = Genesis::spruce_error_paths($err, @merged_files);
+
+Returns the paths a failed spruce merge named, such as
+C<$.properties.password>, once each is checked against the files that were
+merged. A path counts only when it heads one of spruce's error lines, in the
+form C< - $.path: message>, and every component of it is a key, or the
+literal value of a C<name:> key, in one of C<@merged_files>, or a list index.
+Any other path is dropped whole, because the stream could hold a value
+shaped like a path. At most ten paths are returned.
+
+B<Returns:> A list of strings.
+
+B<Examples:>
+
+  # base.yml holds properties: {password: (( vault "secret/x:y" ))}
+  Genesis::spruce_error_paths(" - \$.properties.password: secret not found\n", 'base.yml');
+  # Returns: ('$.properties.password')
 
 =head2 passthrough_args
 
@@ -2505,9 +2527,12 @@ of its digits, which can't be told from a JSON string. The safe export
 decoder in C<Service::Vault> asks for it so that it sees every number.
 
 It dies on input it can't parse. C<JSON::PP> quotes the input that follows
-the error, and that input can be vault or CredHub data, so the quote is
-replaced by its length, as in C<(before E<lt>12 bytesE<gt>)>, and the
-character offset is kept.
+the error, and that input can be vault or CredHub data, so the error is
+built from fixed text alone: a kind of failure from
+C<@Genesis::JSON_PARSE_FAILURES>, the character offset when the parser gave
+one as a number, and the length of the input, as in C<Could not parse JSON
+(expected a literal) at character offset 13 of 135 bytes of input>. Nothing
+else from the parser's message is kept.
 
 B<Parameters:>
 
@@ -2526,7 +2551,17 @@ objects.
 =back
 
 B<Returns:> The decoded Perl value (hash ref, array ref, scalar, etc.).
-It dies with C<JSON::PP>'s error when the text does not decode.
+
+B<Errors:>
+
+=over 4
+
+=item C<Could not parse JSON (%s)%s of %d bytes of input>
+
+Dies with this when the text does not decode, naming the kind of failure,
+the character offset where it has one, and the input's length.
+
+=back
 
 B<Examples:>
 

@@ -221,8 +221,9 @@ sub merge {
 			},
 			'spruce', 'merge', @merge_opts, @$sources
 		);
-		bail({raw => 1}, "#R{%s}: spruce exited %d (%s)",
-			"Unable to merge $descriptor", $rc, Genesis::failure_summary($out, $err)
+		bail({raw => 1}, "#R{%s}: spruce exited %d (%s)%s",
+			"Unable to merge $descriptor", $rc, Genesis::failure_summary($out, $err),
+			_failure_paths($err, @$sources)
 		) if $rc;
 	}
 	popd;
@@ -327,6 +328,18 @@ sub get_subset {
 		) if $rc;
 		return (undef, $file);
 	}
+}
+
+# }}}
+# _failure_paths - the checked paths a failed merge named, as message text {{{
+#
+# See Genesis::spruce_error_paths: only paths made of the merged files' own
+# keys are shown.
+sub _failure_paths {
+	my ($err, @files) = @_;
+	my @paths = Genesis::spruce_error_paths($err, @files);
+	return '' unless @paths;
+	return "\n\nSpruce could not resolve:\n".join("\n", map {"  - $_"} @paths);
 }
 
 # }}}
@@ -552,9 +565,18 @@ sub _adaptive_merge {
 	# The merged and unevaluated manifests, and spruce's errors, which can
 	# quote a resolved value, all stay out of the trace.
 	my ($out,$rc,$err) = run({stderr=>0, redact_output => 1, redact_stderr => 1, %opts}, 'spruce merge --multi-doc --go-patch "$@"', @files);
-	return (wantarray ? ($out,$err) : $out) unless $rc;
+	# What spruce printed alongside a successful merge is not handed on.
+	return (wantarray ? ($out, undef) : $out) unless $rc;
 
 	my $orig_errors = join("\n", grep {$_ !~ /^\s*$/} lines($err));
+
+	# A path taken from spruce's errors is traced only once it is shown to
+	# be made of the merged files' keys; see Genesis::spruce_error_paths.
+	my $checked = sub {
+		my $path = shift;
+		my ($ok) = Genesis::spruce_error_paths(" - \$.$path: x", @files);
+		return $ok // sprintf('<unchecked path:%d bytes>', length($path // ''));
+	};
 	my $contents = '';
 	for my $content (map {slurp($_)} @files) {
 		$contents .= "\n" unless substr($contents,-1,1) eq "\n";
@@ -580,11 +602,11 @@ sub _adaptive_merge {
 			my $orig_err_path = $err_path;
 			my $replaced = 0;
 			WANDER: while (! $val) {
-				trace "[adaptive_merge] Couldn't find direct dereference error, backtracing $err_path";
+				trace "[adaptive_merge] Couldn't find direct dereference error, backtracing %s", $checked->($err_path);
 				unless ($err_path =~ s/.[^\.]+$//) {
 					if ($err_details->[1] =~ /^secret (.*) not found/) {
 						my $err_vault_path = $1;
-						trace "[adaptive_merge] vault path $err_vault_path not found in merged manifest, looking in original content";
+						trace "[adaptive_merge] vault path not found in merged manifest, looking in original content";
 						my $key = $err_details->[0] =~ s/.*\.([^\.]+)$/$1/r;
 						my $vault_base = $self->env->secrets_base =~ s/\/$//r;
 						my ($source_line, $src_vault_path) = $contents =~ m/($key: \(\(\s*vault (.*?)\s*\)\))/;
@@ -600,7 +622,10 @@ sub _adaptive_merge {
 							}
 						}
 					}
-					bug "Internal error: Could not find line causing error '$err_msg' during adaptive merge."
+					# spruce's message can quote a resolved value, so the bug
+					# names only the path, and only once it is checked.
+					bug("Internal error: Could not find the line causing a spruce error%s during adaptive merge.",
+						" at ".$checked->($orig_err_path));
 				}
 				$val = struct_lookup($uneval, $err_path) || next;
 				if (ref($val) eq "HASH") {
@@ -623,7 +648,8 @@ sub _adaptive_merge {
 					awssecret base64
 					/);
 				(my $replacement = $val) =~ s/\(\( *($spruce_ops) /(( defer $1 /;
-				trace "[adaptive_merge] Resolving $orig_err_path" . ($err_path ne $orig_err_path ? (" => ". $err_path) : "");
+				trace "[adaptive_merge] Resolving %s%s", $checked->($orig_err_path),
+					($err_path ne $orig_err_path ? " => ".$checked->($err_path) : "");
 				$contents =~ s/\Q$val\E/$replacement/sg;
 			}
 		}
@@ -632,17 +658,18 @@ sub _adaptive_merge {
 	}
 
 	# spruce's errors can quote a resolved value, so the failure names the
-	# exit status, the known kinds of failure, and the paths spruce named.
+	# exit status, the known kinds of failure, and the checked paths.
 	bail(
-		"Could not merge %s environment files: spruce exited %d (%s)\n\n".
+		"Could not merge %s environment files: spruce exited %d (%s)%s\n\n".
 		"Efforts were made to work around resolving the original errors (%s), ".
 		"but if they caused the above errors, you may be able to partially ".
 		"resolve this issue by using #C{export GENESIS_UNEVALED_PARAMS=1}",
 		$self->env->name, $rc, Genesis::failure_summary($out, $err),
-		Genesis::failure_summary($orig_errors)
+		_failure_paths($err, @files), Genesis::failure_summary($orig_errors)
 	) if $rc;
 
-	return (wantarray ? ($out,$orig_errors) : $out)
+	# What spruce said about the original errors is described, not repeated.
+	return (wantarray ? ($out, Genesis::failure_summary($orig_errors)) : $out)
 }
 
 # }}}

@@ -180,4 +180,70 @@ subtest 'a parse error does not quote the input' => sub {
 	like($died // '', qr/offset|character/i, 'it still says where parsing failed');
 };
 
+subtest 'a parse error keeps no input even when it looks like the delimiter' => sub {
+	my $marker = fake_secret('delimiter');
+	my $died;
+	eval { Genesis::load_json(qq[{"password": $marker") at $marker-tail}]); 1 } or $died = "$@";
+	ok(defined($died), 'the bad input is refused');
+	# The test helper loads Carp::Always, whose backtrace quotes arguments;
+	# the message is everything before it.
+	$died = (split /\n/, $died // '')[0];
+	unlike($died // '', qr/fake-delimiter/, 'no part of the input is kept');
+	like($died // '', qr/character offset \d+/, 'it says where parsing failed');
+	like($died // '', qr/\(expected a literal\)/, 'and what kind of failure it was');
+};
+
+subtest 'failure_summary never repeats text from the stream' => sub {
+	my $marker = fake_secret('pathlike');
+	my $summary = Genesis::failure_summary(" - \$.$marker: permission denied\n\$.a.$marker\n");
+	unlike($summary, qr/fake-pathlike/, 'a value shaped like a path is not repeated');
+	like($summary, qr/permission denied/, 'the kind of failure is still named');
+	unlike(Genesis::failure_summary("fake-unknown-text"), qr/fake-unknown-text/, 'nor is unrecognized text');
+	like(Genesis::failure_summary("fake-unknown-text"), qr/withheld/, 'which says why there is no more detail');
+};
+
+subtest 'spruce paths are named only when the merged files hold their keys' => sub {
+	my $marker = fake_secret('spruce-path');
+	put_file("$dir/paths.yml", 0644, <<'YAML');
+---
+instance_groups:
+- name: web
+  jobs:
+  - name: router
+    properties:
+      "admin-password": (( vault "secret/x:y" ))
+YAML
+	my $err = join('',
+		"2 error(s) detected:\n",
+		" - \$.instance_groups.web.jobs.router.properties.admin-password: secret secret/x:y not found\n",
+		" - \$.instance_groups.$marker.properties: could not resolve\n",
+		"\$.instance_groups.web: not at the start of an error line\n",
+	);
+	my @paths = Genesis::spruce_error_paths($err, "$dir/paths.yml");
+	is_deeply(\@paths, ['$.instance_groups.web.jobs.router.properties.admin-password'],
+		'only the path made of the files\' own keys and names is kept');
+	unlike(join(' ', @paths), qr/fake-spruce-path/, 'a component the files do not hold is never repeated');
+};
+
+subtest 'a failed merge names the checked paths spruce could not resolve' => sub {
+	my $marker = fake_secret('merge-path');
+	mkdir "$dir/spruce-bin";
+	put_file("$dir/spruce-bin/spruce", 0755, <<'EOS');
+#!/bin/bash
+printf '2 error(s) detected:\n - $.properties.password: secret secret/x:y not found\n - $.properties.%s: %s\n' "$FAKE_ERR" "$FAKE_ERR" >&2
+exit 2
+EOS
+	put_file("$dir/paths-source.yml", 0644, "---\nproperties:\n  password: (( vault \"secret/x:y\" ))\n");
+	local $ENV{FAKE_ERR} = $marker;
+	local $ENV{PATH} = "$dir/spruce-bin:$ENV{PATH}";
+	my $died;
+	my ($log, $stderr) = capture_trace {
+		eval { $provider->merge(FakeManifest->new(file => "$dir/merged.yml"), ["$dir/paths-source.yml"], {}, {}); 1 }
+			or $died = "$@";
+	};
+	like($died // '', qr/\$\.properties\.password/, 'the path made of the file\'s keys is named');
+	like($died // '', qr/not found/, 'with the kind of failure');
+	unlike(($died // '').$stderr.$log, qr/\Q$marker\E/, 'a path component the files do not hold is not');
+};
+
 done_testing;
