@@ -215,7 +215,9 @@ sub attach {
 				);
 				@targets = Service::Vault->find(%filter);
 			} else {
-				bail "Safe target for #M{%s} not found.  Please run\n\n".
+				# A vault this machine cannot reach (D163, D175).
+				bail {exitcode => Genesis::Exit::UNAVAILABLE},
+						 "Safe target for #M{%s} not found.  Please run\n\n".
 						 "  #G{safe target <name> \"%s\"%s}\n\n".
 						 "then authenticate against it using the correct auth method before ".
 						 "re-attempting this command.",

@@ -476,7 +476,7 @@ subtest 'attach() - no match with no_vault returns undef' => sub {
 # attach() - no match, no no_vault throws
 # -------------------------------------------------------------------------
 subtest 'attach() - no match without no_vault throws' => sub {
-	plan tests => 1;
+	plan tests => 2;
 
 	no warnings 'redefine';
 	local *Service::Vault::find = sub { () };
@@ -488,6 +488,17 @@ subtest 'attach() - no match without no_vault throws' => sub {
 		} qr/Safe target for.*not found/i,
 			'attach() throws when no match found and no_vault not set';
 	};
+
+	# T507 (D175): the vault cannot be reached from this machine, which is
+	# the cause the code names.  Raised again, since throws_ok keeps the
+	# error to itself.
+	my $refusal;
+	quietly {
+		eval {Service::Vault::Remote->attach(url => 'https://missing.example.com:8200'); 1}
+			or $refusal = $@;
+	};
+	is(eval {Genesis::raised($refusal)->exitcode}, Genesis::Exit::UNAVAILABLE,
+		'and the refusal carries UNAVAILABLE');
 };
 
 # -------------------------------------------------------------------------

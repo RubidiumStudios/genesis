@@ -250,9 +250,8 @@ subtest 'a repository whose vault this machine cannot find says so' => sub {
 
 	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 	my $said = unfolded($err);
-	# The code is whatever the vault's own refusal exits with, which is 1
-	# today and is not this row's to rule on.
-	isnt($exit, 0, 'the run refuses');
+	# D175: a vault this machine cannot reach, as D163 codes one.
+	is($exit, Genesis::Exit::UNAVAILABLE, 'the run refuses as a vault it cannot reach');
 	like($said, qr/Safe target for \Q$url\E not found/,
 		'naming the vault it has no target for') or diag($said);
 	like($said, qr/safe target <name> "\Q$url\E"/, 'and the command that makes one');

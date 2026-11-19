@@ -349,7 +349,9 @@ Includes a listing of the similar targets with their differing properties.
 Raised when no target matches, no similar targets exist, and no environment
 credentials are set to permit auto-provisioning. The first two C<%s> are
 the URL, and the third C<%s> is C<""> when C<verify> is true or C<" -k">
-otherwise.
+otherwise. It carries C<Genesis::Exit::UNAVAILABLE> (69), the code of a
+vault this machine cannot reach, so a command that meets it exits by its
+cause. The other refusals here carry no code of their own.
 
 =item C<"Multiple safe targets found for %s:\n%s\n\nYour ~/.saferc file cannot have more than one target for the given url, namespace, insecure or strongbox combination.  ...">
 
