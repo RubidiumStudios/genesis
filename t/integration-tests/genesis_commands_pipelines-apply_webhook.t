@@ -148,7 +148,9 @@ subtest 'a dry run says what it would write and writes nothing' => sub {
 	is($exit, 0, 'the dry run succeeds') or return diag($said);
 	like($said, qr/would generate/i, 'it would generate the token');
 	like($said, qr/would create/i, 'and create the hook');
-	unlike($said, qr/missing\s+webhook\.token/, 'the secret check counting the token as coming');
+	unlike($said, qr/missing\s+webhook\.token/, 'the secret check not counting the token missing');
+	like($said, qr/pending\s+webhook\.token, which this apply would generate/,
+		'but pending, with what this apply would do to write it');
 	is(token_of($h), undef, 'no token is written');
 	is(scalar(our_hooks($h)), 0, 'and no hook made');
 };

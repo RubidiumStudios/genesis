@@ -1527,7 +1527,7 @@ sub _check_pipeline_secrets {
 			next;
 		}
 		if (my $coming = ($opts{coming} || {})->{$ref}) {
-			info("  #G{coming}      %s, which this apply %s", $ref, $coming);
+			info("  #G{pending}     %s, which this apply %s", $ref, $coming);
 			next;
 		}
 		my @paths = _concourse_secret_paths($store, $name);

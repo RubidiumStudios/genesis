@@ -136,7 +136,7 @@ subtest 'a dry run says what it would copy and writes nothing' => sub {
 	my ($exit, $said) = apply($h, '--dry-run');
 	is($exit, 0, 'the dry run succeeds') or return diag($said);
 	like($said, qr/would copy\s+bosh\/mgmt-dry\b/, 'saying it would copy');
-	like($said, qr/coming\s+bosh\/mgmt-dry\.url/, 'and the check counts it coming');
+	like($said, qr/pending\s+bosh\/mgmt-dry\.url/, 'and the check counts it pending');
 	my $path = copied_to($said, 'mgmt-dry');
 	ok(!$path || !%{vault_get($h, $path)}, 'and nothing is written');
 };

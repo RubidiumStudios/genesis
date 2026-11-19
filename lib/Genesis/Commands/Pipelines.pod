@@ -1796,7 +1796,7 @@ B<Examples:>
 
 The webhook token's reference as the compiled pipeline spells it,
 C<WEBHOOK_TOKEN_REF> with its path and key joined by a dot, so the secret check
-can count it as coming when this apply will write it (D145).
+can count it as pending when this apply will write it (D145).
 
 B<Returns:> the reference.
 
@@ -1851,7 +1851,7 @@ reads the token at the pipeline scope through C<pipeline_secrets_vault>: one tha
 is there is left and answered; one that is not, or every one under C<rotate>, is
 replaced by a new one from L</_random_token> and written. A dry run writes nothing
 and answers what it would do instead, which the secret check then counts as
-coming. With C<skip_vault>, or a store not reachable and authenticated, it reports
+pending. With C<skip_vault>, or a store not reachable and authenticated, it reports
 the token unverified and answers nothing. No value is printed.
 
 B<Parameters:> the repository handle, and C<dry_run>, C<skip_vault> and C<rotate>.
@@ -1882,7 +1882,7 @@ whatever an owner published at the team scope or the shared path.
 It writes only where a value differs, reporting the director copied, updated or
 in place, and never a value. A dry run writes nothing and says what it would
 copy, answering the references it would write so the secret check counts them
-coming. A director whose record cannot be read is reported not copied with the
+pending. A director whose record cannot be read is reported not copied with the
 reason, and nothing is answered for it, so the check finds its references
 missing. With C<skip_vault>, or a store not reachable and authenticated, it
 reports the directors unverified and copies nothing.
@@ -2143,7 +2143,7 @@ Concourse, it does nothing.
 
 B<Parameters:> the repository handle, the compiled C<pipeline.yml> text, and
 C<dry_run>, C<skip_vault>, C<missing_ok> and C<coming>, a hash of reference to
-what this apply will do to write it, which is reported as coming rather than
+what this apply will do to write it, which is reported as C<pending> rather than
 looked up (the webhook token a dry run would generate, D145).
 
 B<Returns:> nothing.
