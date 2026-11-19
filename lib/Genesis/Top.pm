@@ -1876,6 +1876,19 @@ sub pipeline_secrets_vault {
 }
 
 # }}}
+# pipeline_identity - the name and email a pipeline task commits under (D172) {{{
+sub pipeline_identity {
+	my ($self) = @_;
+	my $written = $self->_shape->config->get('pipeline.source_control.identity');
+	$written = {} unless ref($written) eq 'HASH';
+	# What a v2 pipeline committed as, for each half left unsaid.
+	my %default = (name => 'Concourse Bot', email => 'concourse@pipeline');
+	return {map {
+		($_ => (defined $written->{$_} && length $written->{$_}) ? $written->{$_} : $default{$_})
+	} sort keys %default};
+}
+
+# }}}
 # pipeline_vault - the vault a pipeline task writes exodus through, or undef (D169) {{{
 sub pipeline_vault {
 	my ($self) = @_;
@@ -3155,13 +3168,13 @@ sub _pipeline_config_schema {
 					# The token propagate opens pull requests with, where the
 					# clone's own credential is not one (contract f8).
 					api_token => {type => 'string', description => 'Vault reference, as <path>:<key> or ((path.key)), to the GitHub token propagate opens pull requests with'},
+					# Optional; pipeline_identity answers what is left unsaid (D172).
 					identity => {
 						type        => 'hash',
-						required    => \&_automated_provider_configured,
 						description => 'The name and email a pipeline task commits under',
 						schema => {
-							name  => {type => 'string', required => 1, description => 'Committer name'},
-							email => {type => 'string', required => 1, description => 'Committer email'},
+							name  => {type => 'string', description => 'Committer name (Concourse Bot where unset)'},
+							email => {type => 'string', description => 'Committer email (concourse@pipeline where unset)'},
 						}
 					},
 				}

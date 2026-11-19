@@ -196,7 +196,9 @@ sub _source_control_model {
 		default_branch => $sc->{control_branch},
 		root           => length($prefix) ? $prefix : '.',
 		(defined $sc->{auth}     ? (auth          => $sc->{auth})     : ()),
-		(defined $sc->{identity} ? (commit_author => $sc->{identity}) : ()),
+		# The identity as its owner resolves it, each half defaulted (D172).
+		($self->{top}            ? (commit_author => $self->{top}->pipeline_identity)
+		: defined $sc->{identity} ? (commit_author => $sc->{identity}) : ()),
 		(defined $sc->{api_token}
 			? (api_token => {secret_ref => $sc->{api_token}}) : ()),
 	};

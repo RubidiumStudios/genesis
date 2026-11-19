@@ -84,13 +84,14 @@ subtest 'the block declares three tiers and refuses runtime state' => sub {
 	my $top = load_control("pipeline:\n  enabled: true");
 	my $sc  = $top->_repo_config_schema->{pipeline}{schema}{source_control}{schema};
 	is_deeply [sort grep {!$sc->{$_}{required} && !$sc->{$_}{retired}} keys %$sc],
-		[qw/api_token control_branch control_requires_pr pr_prefix repository uri/],
+		[qw/api_token control_branch control_requires_pr identity pr_prefix repository uri/],
 		'the overridable and defaulted fields are the five the design names, '.
-		'and the api_token contract f8 adds, with no remote among them (D118)';
+		'the api_token contract f8 adds, and the identity D172 defaults, '.
+		'with no remote among them (D118)';
 	ok $sc->{remote}{retired}, 'remote is declared only to be refused as retired (T411)';
 	is_deeply [sort grep {$sc->{$_}{required}} keys %$sc],
-		[qw/auth identity/],
-		'auth and identity are the required pair';
+		[qw/auth/],
+		'auth is the one key required, the identity having a default (D172)';
 
 	# Required under an automated provider, tolerated as absent under manual.
 	lives_ok {load_control(join("\n", 'pipeline:', '  enabled: true',

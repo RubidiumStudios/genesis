@@ -2173,6 +2173,29 @@ B<Examples:>
 
     $top->pipeline_secrets_vault->has('/concourse/main/github', 'token');
 
+=head2 pipeline_identity
+
+    my $identity = $top->pipeline_identity;
+
+The name and email a pipeline task commits under, as control holds them
+(D172). C<pipeline.source_control.identity> is optional, and each half
+left unsaid is what a v2 pipeline committed as: C<Concourse Bot> and
+C<concourse@pipeline>. L<Genesis::CI::Compiler::Parser/parse> hands the
+compiler this in place of the block as written.
+
+B<Returns:> a hash reference of C<name> and C<email>, both always there.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $top->pipeline_identity;
+    # {name => 'Concourse Bot', email => 'concourse@pipeline'}, with no identity written
+
+    # identity: {name: Genesis CI}
+    $top->pipeline_identity;
+    # {name => 'Genesis CI', email => 'concourse@pipeline'}
+
 =head2 pipeline_vault
 
     my $vault = $top->pipeline_vault;

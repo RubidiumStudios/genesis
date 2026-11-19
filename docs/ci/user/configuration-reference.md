@@ -130,7 +130,7 @@ pipeline:
 
 `api_token` is the `path:key` of the GitHub token propagate opens pull requests with. It is needed wherever an environment sets `require_pr` and the clone credential is SSH, because GitHub's API takes no SSH key; with HTTPS auth the clone credential's password serves. It must belong to an automation account, because GitHub does not let a pull request's author approve it.
 
-`identity` is the name and email every pipeline task commits under. It is required; there is no default.
+`identity` is the name and email every pipeline task commits under. It is optional: a task given none commits as `Concourse Bot <concourse@pipeline>`, as a v2 pipeline did, and a block that names one of the two takes the default for the other.
 
 `control_branch` is `control`, and a different name is a break-glass setting only. `control_requires_pr` makes `genesis pipeline-apply` require a pull request on control too. `pr_prefix`, `pr/` by default, prefixes each pull request branch.
 

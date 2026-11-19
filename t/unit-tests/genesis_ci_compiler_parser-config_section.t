@@ -46,6 +46,9 @@ use_ok 'Genesis::CI::Compiler::Parser';
 	# The vault block as its owner resolves it (D169).  This stand-in has
 	# no secrets_provider to read into it, so it is the block as written.
 	sub pipeline_vault { ($_[0]->pipeline_section || {})->{vault} }
+	# The identity as its owner resolves it (D172), which for this stand-in
+	# is the one written.
+	sub pipeline_identity { (($_[0]->pipeline_section || {})->{source_control} || {})->{identity} }
 	sub pipeline_unredacted { (($_[0]->pipeline_section || {})->{unredacted}) ? 1 : 0 }
 	sub type   { $_[0]->{type} }
 	sub path {
