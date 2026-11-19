@@ -150,6 +150,50 @@ subtest 'clearing the vault is refused under a pipeline' => sub {
 	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
 };
 
+# T509: every writer records the Genesis that wrote, through the one save
+# they share.  Clearing the vault never did, the stamp having sat in the
+# branch that sets one.
+subtest 'a writer records the Genesis that wrote' => sub {
+	plan tests => 3;
+
+	local $Genesis::VERSION = '3.2.9';
+
+	# No pipeline, so the vault may be cleared (D174), and last written by
+	# an older Genesis.
+	my $repo = sub {
+		scrub_git_env();
+		my $dir = workdir($_[0]);
+		mkdir_or_fail("$dir/.genesis");
+		mkfile_or_fail("$dir/.genesis/config", <<'EOF');
+---
+creator_version: 3.1.0
+deployment_type: test-kit
+secrets_provider:
+  alias: old-target
+  url: https://old.example.com
+updater_version: 3.1.0
+version: 3
+EOF
+		run({dir => $dir}, 'git', 'init', '-q');
+		run({dir => $dir}, 'git', 'remote', 'add', 'origin',
+			'https://github.com/genesis/test-kit-deployments.git');
+		return $dir;
+	};
+	my $stamp = sub {load_yaml(slurp("$_[0]/.genesis/config"))->{updater_version}};
+
+	my $cleared = $repo->('writer-stamp-clear');
+	write_with { loaded_top($cleared)->set_vault(clear => 1) };
+	is($stamp->($cleared), '3.2.9', 'clearing the vault records it');
+
+	my $pointed = $repo->('writer-stamp-point');
+	write_with { loaded_top($pointed)->set_vault(vault => new_vault()) };
+	is($stamp->($pointed), '3.2.9', 'so does pointing at another');
+
+	my $kits = $repo->('writer-stamp-kits');
+	write_with { loaded_top($kits)->set_kit_provider() };
+	is($stamp->($kits), '3.2.9', 'and so does setting the kit provider');
+};
+
 # T506: genesis secrets-provider changes the secrets_provider block and the
 # updater's version, and nothing else the file holds.  The file is read back
 # from disk, since what the next command loads is what matters.

@@ -827,9 +827,7 @@ sub set_kit_provider {
 		} else {
 			$self->config->set('kit_provider', $self->kit_provider->config);
 		}
-		$self->config->set('updater_version', $Genesis::VERSION) if $self->config->exists();
-		$self->_validate_config_to_save;
-		$self->config->save;
+		$self->_save_config;
 		info "done.";
 	};
 	return $@;
@@ -970,12 +968,10 @@ sub set_vault {
 		my $strongbox = $self->_strongbox_for_config($new_vault);
 		$provider{strongbox} = $strongbox if defined($strongbox);
 		$self->config->set('secrets_provider', \%provider);
-		$self->config->set('updater_version', $Genesis::VERSION) if $self->config->exists();
 	} else {
 		$self->config->clear('secrets_provider');
 	}
-	$self->_validate_config_to_save;
-	$self->config->save;
+	$self->_save_config;
 	return;
 }
 
@@ -2862,6 +2858,17 @@ sub _validate_config_to_save {
 		humanize_path($self->path('.genesis/config'))
 	);
 	return $self->_validate_config;
+}
+
+# }}}
+# _save_config - stamp, judge and write what a writer has changed {{{
+sub _save_config {
+	my ($self) = @_;
+	# Which Genesis last wrote the file, for every writer alike.
+	$self->config->set('updater_version', $Genesis::VERSION) if $self->config->exists();
+	$self->_validate_config_to_save;
+	$self->config->save;
+	return;
 }
 
 # }}}

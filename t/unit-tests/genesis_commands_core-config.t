@@ -177,6 +177,56 @@ subtest 'config --set persists a value' => sub {
 		"writes the new value to .genesis/config");
 };
 
+# T509: updater_version says which Genesis last wrote the file, and genesis
+# config wrote it without saying so.  The stamp was each writer's own to
+# remember, and this one never did, so a repository edited through it for
+# months still named the build that last changed its kit provider or vault.
+subtest 'a config write records the Genesis that made it' => sub {
+	plan tests => 5;
+
+	local $Genesis::VERSION = '3.2.9';
+
+	# A repository last written by an older Genesis.
+	my $stamped = sub {
+		my $dir = config_repo($_[0], enabled => 0);
+		(my $body = slurp("$dir/.genesis/config")) =~ s/^version: 3$/updater_version: 3.1.0\nversion: 3/m;
+		mkfile_or_fail("$dir/.genesis/config", $body);
+		return $dir;
+	};
+	my $config = sub {
+		my ($dir, @args) = @_;
+		pushd $dir;
+		prepare_command('config', @args);
+		build_command_environment;
+		my ($code) = run_config();
+		popd;
+		return $code;
+	};
+
+	my $set = $stamped->('config-stamp-set');
+	$config->($set, '--set', 'manifest_store', 'repository');
+	like(slurp("$set/.genesis/config"), qr/^updater_version: 3\.2\.9$/m,
+		'--set records the running Genesis');
+
+	my $unset = $stamped->('config-stamp-unset');
+	$config->($unset, '--unset', 'manifest_store');
+	like(slurp("$unset/.genesis/config"), qr/^updater_version: 3\.2\.9$/m,
+		'--unset does too');
+
+	# A refused run writes nothing, and the stamp is part of nothing.
+	my $refused = $stamped->('config-stamp-refused');
+	my $before  = slurp("$refused/.genesis/config");
+	my $code    = $config->($refused, '--set', 'manifest_store', 'nowhere');
+	isnt($code, 0, 'a value the schema refuses is refused');
+	is(slurp("$refused/.genesis/config"), $before, 'and the file keeps the stamp it had');
+
+	# A read is not a write.
+	my $read = $stamped->('config-stamp-read');
+	$config->($read, 'manifest_store');
+	like(slurp("$read/.genesis/config"), qr/^updater_version: 3\.1\.0$/m,
+		'and a read leaves the stamp alone');
+};
+
 subtest 'config --set version writes the number, as Genesis does' => sub {
 	plan tests => 1;
 

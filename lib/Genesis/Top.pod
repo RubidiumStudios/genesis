@@ -463,10 +463,9 @@ C<Genesis::Kit::Provider::GenesisCommunity> instance, the C<kit_provider>
 key is cleared from the config (restoring the default). Otherwise the
 provider configuration is written and saved.
 
-Both branches (GenesisCommunity and custom provider) set C<updater_version>
-(when the config file exists on disk), judge the result with
-L</_validate_config_to_save>, and save the config to disk only if the
-next load would accept it. A refusal leaves the file as it was and comes
+Both branches (GenesisCommunity and custom provider) save through
+L</_save_config>, which sets C<updater_version>, judges the result, and
+writes the config to disk only if the next load would accept it. A refusal leaves the file as it was and comes
 back as the returned error.
 
 B<Parameters:>
@@ -4313,6 +4312,38 @@ B<Examples:>
     $top->config->set('pipeline.enabled', 1);
     $top->_validate_config_to_save;   # refuses if the next load would
     $top->config->save;
+
+=head2 _save_config
+
+    $top->config->set('kit_provider', $provider);
+    $top->_save_config;
+
+The one way a writer puts its changes on disk: it stamps
+C<updater_version> with the running Genesis, judges the result through
+L</_validate_config_to_save>, and saves. C<genesis config>,
+L</set_vault> and L</set_kit_provider> all end here.
+
+The stamp used to be each writer's own to set. C<genesis config> never
+set it, and L</set_vault> set it where it pointed at a vault and not where
+it cleared one, so a file written through either still named whichever
+Genesis had last changed something else. With the stamp in the save, a
+writer cannot leave it out.
+
+The stamp is set before the judgement, so a refused save writes nothing,
+the stamp included. It is not set for a file that is not yet on disk,
+which L</create> writes with a C<creator_version> of its own.
+
+B<Parameters:> None.
+
+B<Returns:> Nothing.
+
+B<Errors:> Every refusal of L</_validate_config_to_save>, at
+C<Genesis::Exit::CONFIG>, with the file left as it was.
+
+B<Examples:>
+
+    $top->config->clear('secrets_provider');
+    $top->_save_config;   # updater_version is this Genesis's version
 
 =head2 _refuse_config
 

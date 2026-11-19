@@ -73,8 +73,7 @@ sub config {
 		}
 		$config->clear($_) for grep {$config->has($_)} @{$removals || []};
 
-		$top->_validate_config_to_save;
-		$config->save;
+		$top->_save_config;
 		return 0;
 	}
 
