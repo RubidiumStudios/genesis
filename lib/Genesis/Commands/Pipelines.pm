@@ -122,21 +122,22 @@ sub apply {
 
 	# The webhook token the pipeline references, ahead of the check that
 	# would otherwise find it missing (D145).
-	my ($webhook_token, %coming);
+	# Neither says anything of its own: the secret check below reports what
+	# each did, on the lines of the secrets it did it to.
+	my ($webhook_token, %written, @directors);
 	if ($platform eq 'concourse') {
-		($webhook_token, my $would) = _apply_webhook_token($top,
+		($webhook_token, my $did) = _apply_webhook_token($top,
 			dry_run    => $dry_run,
 			skip_vault => $opts->{'skip-vault'},
 			rotate     => $opts->{'rotate-webhook-token'},
 		);
-		$coming{_webhook_reference()} = $would if $would;
+		$written{_webhook_reference()} = $did if $did;
 
 		# The credentials each director's config checks read (D149).
-		my %would_copy = _apply_director_credentials($top, $result->{ast},
+		@directors = _apply_director_credentials($top, $result->{ast},
 			dry_run    => $dry_run,
 			skip_vault => $opts->{'skip-vault'},
 		);
-		@coming{keys %would_copy} = values %would_copy;
 	}
 
 	# Every secret it references, where Concourse will read it, before
@@ -145,7 +146,8 @@ sub apply {
 		dry_run    => $dry_run,
 		skip_vault => $opts->{'skip-vault'},
 		missing_ok => $opts->{'missing-secrets-ok'},
-		coming     => \%coming,
+		written    => \%written,
+		directors  => \@directors,
 	) if $platform eq 'concourse';
 
 	_apply_init_branches($top, $git, dry_run => $dry_run);
@@ -1572,29 +1574,51 @@ sub _check_pipeline_secrets {
 
 	info("\n#G{Checking the pipeline's secrets} where Concourse reads them, %s",
 		$store->{url} ? "in #C{$store->{url}}" : "in the repository's vault");
+	# One status column for every line, whatever was read or written.
+	my $line = sub {
+		my ($colour, $word, $what) = @_;
+		info("  #%s{%s}%s %s", $colour, $word, ' ' x (11 - length $word), $what);
+	};
+	# What the apply itself did to a secret is said on that secret's line,
+	# with the word for it, where a block of its own once said it first.
+	my $acted = sub {
+		my ($did, $what) = @_;
+		$line->($did->{word} eq 'not copied' ? 'R' : 'G', $did->{word},
+			$what . ($did->{at} ? " at #C{$did->{at}}" : '') . ($did->{note} // ''));
+	};
+	# A director's credentials are one secret of several keys, reported
+	# once beneath the rest and so left out of the list of references.
+	my @directors = @{$opts{directors} || []};
+	my %grouped   = map {($_ => 1)} map {@{$_->{refs} || []}} @directors;
+
 	my @missing;
 	for my $ref (sort keys %used) {
+		next if $grouped{$ref};
 		my ($name, $key) = _split_reference($ref);
 		unless (defined $name) {
 			info("  #Ki{not checked} %s, from a var source of its own", $ref);
 			next;
 		}
 		if ($why) {
-			info("  #Y{unverified}  %s (%s)", $ref, $why);
+			$line->('Y', 'unverified', "$ref ($why)");
 			next;
 		}
-		if (my $coming = ($opts{coming} || {})->{$ref}) {
-			info("  #G{pending}     %s, which this apply %s", $ref, $coming);
+		if (my $did = ($opts{written} || {})->{$ref}) {
+			$acted->($did, $ref);
 			next;
 		}
 		my @paths = _concourse_secret_paths($store, $name);
 		if (my ($found) = grep {$vault->has($_, $key)} @paths) {
-			info("  #G{found}       %s at #C{%s}", $ref, $found);
+			$line->('G', 'found', "$ref at #C{$found}");
 		} else {
-			info("  #R{missing}     %s, used by %s; Concourse reads %s",
-				$ref, join(', ', @{$used{$ref}}), join(', then ', map {"#C{$_}"} @paths));
+			$line->('R', 'missing', sprintf("%s, used by %s; Concourse reads %s",
+				$ref, join(', ', @{$used{$ref}}), join(', then ', map {"#C{$_}"} @paths)));
 			push @missing, $ref;
 		}
+	}
+	if (@directors) {
+		info("\n  #G{BOSH director credentials}, copied from each director's exodus record");
+		$acted->($_, $_->{name}) for @directors;
 	}
 	return unless @missing && !$opts{dry_run} && !$opts{missing_ok};
 
@@ -1640,32 +1664,23 @@ sub _apply_webhook_token {
 	return () unless $top->pipeline_webhooks;
 	my $path = _webhook_store_path($top) or return ();
 
-	info("\n#G{The webhook token} at #C{%s:token}", $path);
-	if ($opts{skip_vault}) {
-		info("  #Yi{unverified}, because #C{--skip-vault} was given");
-		return ();
-	}
+	# Nothing is said here: what was done is the secret check's to report,
+	# on the token's own line, and a store not read is unverified there.
+	return () if $opts{skip_vault};
 	my $vault  = eval {$top->pipeline_secrets_vault};
 	my $status = $vault ? (eval {$vault->status} // 'unreachable') : 'unreachable';
-	if ($status ne 'ok') {
-		warning("  #Y{unverified}, because the store is %s", $status);
-		return ();
-	}
+	return () if $status ne 'ok';
 
 	my $have = $vault->has($path, 'token') ? $vault->get($path, 'token') : undef;
-	if (defined $have && length $have && !$opts{rotate}) {
-		info("  #Ki{already in place}");
-		return ($have);
-	}
+	return ($have) if defined $have && length $have && !$opts{rotate};
+
 	my $verb = (defined $have && length $have) ? 'rotate' : 'generate';
-	if ($opts{dry_run}) {
-		info("  #Yi{would %s} it", $verb);
-		return (undef, "would $verb");
-	}
+	return (undef, {word => 'pending', at => $path, note => ", which this apply would $verb"})
+		if $opts{dry_run};
+
 	my $token = _random_token();
 	$vault->set($path, token => $token);
-	info("  #G{%s}", $verb eq 'rotate' ? 'rotated' : 'generated');
-	return ($token);
+	return ($token, {word => $verb eq 'rotate' ? 'rotated' : 'generated', at => $path});
 }
 
 # }}}
@@ -1683,45 +1698,42 @@ sub _apply_director_credentials {
 	my $directors = Genesis::CI::Compiler::PipelineDescriptor->new(ast => $ast)->tracked_directors;
 	return () unless %$directors;
 
-	info("\n#G{The BOSH directors' credentials} the config checks read, from each director's exodus record");
-	if ($opts{skip_vault}) {
-		info("  #Yi{unverified}, because #C{--skip-vault} was given");
-		return ();
-	}
+	# Nothing is said here: each director is one line of the secret check,
+	# and a store not read leaves its references unverified there.
+	return () if $opts{skip_vault};
 	my $vault  = eval {$top->pipeline_secrets_vault};
 	my $status = $vault ? (eval {$vault->status} // 'unreachable') : 'unreachable';
-	if ($status ne 'ok') {
-		warning("  #Y{unverified}, because the store is %s", $status);
-		return ();
-	}
+	return () if $status ne 'ok';
 
-	my %coming;
+	my @did;
 	for my $director (sort keys %$directors) {
 		my $name = "bosh/$director";
 		my $path = "$store->{path_prefix}/$store->{team}/$store->{pipeline}/$name";
 		my ($record, $from, $why) = _director_record($top, $directors->{$director}[0]);
 		if ($why) {
-			warning("  #R{not copied}  %s: %s", $name, $why);
+			# Its references stay in the check's own list, found or missing.
+			push @did, {name => $name, word => 'not copied', note => ": $why"};
 			next;
 		}
 
 		my %want = map {($_->[0] => $record->{$_->[1]})} @DIRECTOR_KEYS;
+		my %line = (name => $name, at => $path, refs => [map {"$name.$_"} sort keys %want]);
 		my $have = $vault->has($path) ? ($vault->get($path) // {}) : {};
 		unless (grep {($have->{$_} // '') ne $want{$_}} keys %want) {
-			info("  #Ki{in place}    %s at #C{%s}", $name, $path);
+			push @did, {%line, word => 'found'};
 			next;
 		}
 		my $verb = %$have ? 'update' : 'copy';
 		if ($opts{dry_run}) {
-			info("  #Yi{would %s}  %s from #C{%s} to #C{%s}", $verb, $name, $from, $path);
-			$coming{"$name.$_"} = "would $verb" for keys %want;
+			push @did, {%line, word => 'pending',
+				note => sprintf(", which this apply would %s from #C{%s}", $verb, $from)};
 			next;
 		}
 		$vault->set($path, %want);
-		info("  #G{%s}  %s from #C{%s} to #C{%s}",
-			$verb eq 'copy' ? 'copied' : 'updated', $name, $from, $path);
+		push @did, {%line, word => $verb eq 'copy' ? 'copied' : 'updated',
+			note => sprintf(", from #C{%s}", $from)};
 	}
-	return %coming;
+	return @did;
 }
 
 # }}}
