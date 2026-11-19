@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pipeline Accounts and Permissions</title>
+<style>
+  @page { size: Letter; margin: 0.8in 0.85in; }
+  :root { --ink: #1c2229; --muted: #5a6570; --rule: #c9d0d6; --accent: #1f5f8b; --warn: #8a4b08; --warnbg: #fff6e8; --codebg: #f3f5f7; }
+  body { font: 10.5pt/1.45 "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); background: #fff; max-width: 7in; margin: 0 auto; }
+  h1 { font-size: 20pt; line-height: 1.2; margin: 0 0 4pt; }
+  .meta { color: var(--muted); font-size: 9pt; margin-bottom: 18pt; border-bottom: 1px solid var(--rule); padding-bottom: 8pt; }
+  h2 { font-size: 13.5pt; color: var(--accent); margin: 20pt 0 6pt; border-bottom: 1px solid var(--rule); padding-bottom: 2pt; page-break-after: avoid; }
+  h3 { font-size: 11pt; margin: 14pt 0 4pt; page-break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt 1.2em; padding: 0; }
+  li { margin-bottom: 3pt; }
+  code { font: 9.2pt/1.35 Menlo, Consolas, monospace; background: var(--codebg); padding: 0 3px; border-radius: 2px; }
+  pre { font: 8.8pt/1.35 Menlo, Consolas, monospace; background: var(--codebg); border: 1px solid var(--rule); border-radius: 3px; padding: 7pt 9pt; margin: 4pt 0 10pt; white-space: pre-wrap; page-break-inside: avoid; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 4pt 0 10pt; font-size: 9.3pt; page-break-inside: avoid; }
+  th, td { border: 1px solid var(--rule); padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #eef1f4; font-weight: 600; }
+  .callout { background: var(--warnbg); border-left: 4px solid var(--warn); padding: 6pt 10pt; margin: 8pt 0 10pt; page-break-inside: avoid; }
+  .callout strong { color: var(--warn); }
+  .small { font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Pipeline Accounts and Permissions</h1>
+<div class="meta">Genesis operator guide &middot; applies to Genesis 3.2.x and later with a v3 <code>pipeline</code> configuration on the Concourse provider and a GitHub-hosted deployment repository &middot; audience: operators setting up a deployment repository's pipeline, and the repository and vault owners who grant it access</div>
+
+<h2>1. Summary</h2>
+<p>A pipeline acts on four systems: the GitHub repository, the deployment vault, Concourse, and the services Concourse talks to on its behalf (the shuttle's object store, the locker, Slack). Each needs an identity with just enough access, and each identity's secret is stored where Concourse can resolve it. This guide lists every identity, where its credential lives, and the GitHub and vault permissions it needs, and it says what to do where a client will not let the pipeline's people set branch rules themselves.</p>
+<div class="callout"><strong>The pipeline acts on GitHub as an automation account.</strong> Everything the pipeline does on GitHub should use a dedicated automation (machine) account, never an operator's personal account. That covers cloning and pushing over HTTPS, and opening and reading pull requests. This is the common and recommended practice, for four reasons:
+<ul>
+  <li>The pipeline keeps working when a person leaves or changes role.</li>
+  <li>Its pushes and pull requests are attributed to the pipeline, not to a person.</li>
+  <li>Its access can be scoped to the repositories it serves.</li>
+  <li>Where an environment sets <code>genesis.pipeline.require_pr</code>, GitHub does not let the author of a pull request approve it. A pull request opened with a person's own token cannot be approved by that person, so there it is a requirement, not a preference.</li>
+</ul>
+Operators keep their own logins for what they run at a terminal, such as <code>genesis pipeline-apply</code>.</div>
+
+<h2>2. The identities</h2>
+<table>
+  <tr><th>Identity</th><th>Used by</th><th>For</th><th>Kind</th></tr>
+  <tr><td>Operator</td><td>a person, at a terminal</td><td><code>genesis pipeline-apply</code>: cutting branches, setting branch rules, writing the applied record, setting the pipeline; and propagation or deploys by hand</td><td>their own git, GitHub, vault and <code>fly</code> logins</td></tr>
+  <tr><td>Clone credential</td><td>every pipeline task</td><td>cloning, and pushing deployment and pull request branches</td><td>an SSH deploy key with write access, or the automation account's HTTPS username and token</td></tr>
+  <tr><td>Automation account</td><td>the <code>propagate</code> task, and every task cloning over HTTPS</td><td>opening, updating and reading the review state of pull requests; with HTTPS auth, cloning and pushing too</td><td>a dedicated machine account's GitHub token, never a person's; its pull request use is needed only with <code>require_pr</code></td></tr>
+  <tr><td>Reviewers</td><td>people</td><td>approving and merging pull requests into deployment branches</td><td>GitHub users with write access, other than the automation account</td></tr>
+  <tr><td>Repository admin</td><td>a person, once and on change</td><td>branch rules, where the operator may not set them (section 6)</td><td>a GitHub user with the admin role</td></tr>
+  <tr><td>Vault AppRole</td><td>every pipeline task</td><td>reading secrets, generating missing ones, writing deploy records</td><td>an AppRole on the deployment vault</td></tr>
+  <tr><td>Shuttle user</td><td>Concourse</td><td>the deployment events and redeploy queues</td><td>S3 access key and secret</td></tr>
+  <tr><td>Locker user</td><td>Concourse</td><td>the deploy and director locks</td><td>username and password</td></tr>
+  <tr><td>Slack webhook</td><td>Concourse</td><td>notifications, where <code>pipeline.notifications.slack</code> is set</td><td>a webhook URL</td></tr>
+  <tr><td>Webhook token</td><td>GitHub's push hook, and the <code>propagate</code> task</td><td>asking Concourse to check a branch the moment it moves, where <code>pipeline.provider.git.webhooks</code> is on</td><td>a random token <code>pipeline-apply</code> generates and keeps; nobody sets it by hand</td></tr>
+</table>
+
+<h2>3. Where credentials are stored</h2>
+<p>The pipeline carries no secret. <code>.genesis/config</code> names each one by a vault reference, and the compiled pipeline turns that into a Concourse variable, <code>((path.key))</code>, which Concourse resolves from <em>its own</em> credential store at run time. That store is the vault Concourse is configured with, which is usually not the deployment vault. Concourse looks a variable up under the team's path, first per pipeline, then per team, and then under a shared path where the Concourse administrator has configured one:</p>
+<pre><code>/concourse/&lt;team&gt;/&lt;pipeline&gt;/&lt;path&gt;   then   /concourse/&lt;team&gt;/&lt;path&gt;   then   the shared path, if any</code></pre>
+<table>
+  <tr><th>Credential</th><th><code>.genesis/config</code> key</th><th>Example value</th><th>Stored at (team <code>main</code>)</th><th>Keys</th></tr>
+  <tr><td>Clone credential, SSH</td><td><code>pipeline.source_control.auth</code></td><td><code>{type: ssh, path: git}</code></td><td><code>concourse/main/git</code></td><td><code>private_key</code></td></tr>
+  <tr><td>Clone credential, HTTPS</td><td><code>pipeline.source_control.auth</code></td><td><code>{type: https, path: git}</code></td><td><code>concourse/main/git</code></td><td><code>username</code>, <code>password</code></td></tr>
+  <tr><td>Automation account token</td><td><code>pipeline.source_control.api_token</code></td><td><code>github:token</code></td><td><code>concourse/main/github</code></td><td><code>token</code></td></tr>
+  <tr><td>Vault AppRole</td><td><code>pipeline.vault.auth</code></td><td><code>{type: approle, path: vault/approle}</code></td><td><code>concourse/main/vault/approle</code></td><td><code>role_id</code>, <code>secret_id</code></td></tr>
+  <tr><td>Shuttle</td><td><code>pipeline.shuttle.auth</code></td><td><code>shuttle</code></td><td><code>concourse/main/shuttle</code></td><td><code>access_key_id</code>, <code>secret_access_key</code></td></tr>
+  <tr><td>Locker</td><td><code>pipeline.locker.password</code></td><td><code>((locker/api.password))</code></td><td><code>concourse/main/locker/api</code> or shared</td><td><code>password</code></td></tr>
+  <tr><td>Slack</td><td><code>pipeline.notifications.slack.webhook</code></td><td><code>slack:webhook</code></td><td><code>concourse/main/slack</code> or shared</td><td><code>webhook</code></td></tr>
+  <tr><td>Webhook token</td><td><code>pipeline.provider.git.webhooks</code></td><td><code>true</code> (no reference: the apply keeps it)</td><td><code>concourse/main/&lt;pipeline&gt;/webhook</code>, the pipeline's own scope</td><td><code>token</code></td></tr>
+  <tr><td>BOSH director, for its config checks</td><td><code>genesis.pipeline.track_bosh_configs</code> in an environment file</td><td><code>[cloud]</code> (no reference: the apply copies it from the director's exodus record)</td><td><code>concourse/main/&lt;pipeline&gt;/bosh/&lt;bosh_env&gt;</code>, the pipeline's own scope</td><td><code>url</code>, <code>ca_cert</code>, <code>client</code>, <code>client_secret</code></td></tr>
+</table>
+<p>Where Concourse's store is not the repository's own vault, <code>pipeline.provider.secrets_store</code> in <code>.genesis/config</code> names it by URL, with its <code>path_prefix</code> and, where the Concourse administrator configured one, its <code>shared_path</code>; each operator reaches it through their own <code>safe</code> target for that URL. Publish the credentials the pipelines share, such as the locker's, the shuttle's and the AppRole, at the team scope, <code>&lt;path_prefix&gt;/&lt;team&gt;/</code>. A shared path works too, where the Concourse administrator has configured one, but the team scope is the recommendation. Before it sets anything, <code>genesis pipeline-apply</code> looks up every reference the compiled pipeline uses where Concourse would, reports each as found, missing or unverified, and refuses on a missing one unless given <code>--missing-secrets-ok</code>.</p>
+<p>With HTTPS auth, the clone credential's password is a GitHub token, and propagate uses it to open pull requests too, so <code>api_token</code> is not needed. It must then carry the pull request permissions in section 4, and it must belong to the automation account. With SSH auth, <code>api_token</code> is required wherever an environment sets <code>require_pr</code>, because GitHub's API takes no SSH key, and <code>genesis pipeline-apply</code> refuses to compile the pipeline without it.</p>
+<p>When storing a secret with <code>safe</code>, silence both of its output streams, since <code>safe set</code> echoes the value:</p>
+<pre><code>safe -T &lt;concourse-vault&gt; set concourse/main/github token="$(pbpaste)" &gt;/dev/null 2&gt;&amp;1; echo "rc=$?"</code></pre>
+<p class="small">A rotated credential needs nothing reapplied: Concourse reads it again at the next build that uses it. A token that expires stops propagation with a 401 from GitHub, naming the host.</p>
+
+<h2>4. GitHub permissions</h2>
+<table>
+  <tr><th>Identity</th><th>Fine-grained token permissions, on this repository only</th><th>Or, as a role</th></tr>
+  <tr><td>Clone credential, HTTPS</td><td>Contents: read and write; and, where it also opens pull requests, Pull requests: read and write</td><td>Write</td></tr>
+  <tr><td>Clone credential, SSH</td><td>a deploy key with <em>Allow write access</em></td><td>&ndash;</td></tr>
+  <tr><td>Automation account</td><td>Contents: read and write; Pull requests: read and write (Metadata: read is added by GitHub)</td><td>Write, as a collaborator or through a team</td></tr>
+  <tr><td>Operator, for <code>pipeline-apply</code></td><td>Administration: read and write (to set the branch rulesets); Contents: read; and, where <code>pipeline.provider.git.webhooks</code> is on, Webhooks: read and write (to keep the push hook; Administration does not include it). As a classic token, <code>repo</code> and <code>admin:repo_hook</code></td><td>Admin</td></tr>
+  <tr><td>Reviewers</td><td>&ndash;</td><td>Write, and not the automation account</td></tr>
+</table>
+<ul>
+  <li><strong>Fine-grained tokens</strong> are created under the resource owner of the repository, the organization, not the person's own account, with <em>Only select repositories</em> naming the deployment repository. Where the organization requires approval, a new token answers as though the repository did not exist (HTTP 404) until an owner approves it under the organization's Settings &rarr; Personal access tokens &rarr; Pending requests.</li>
+  <li><strong>The operator's GitHub token</strong> is read from <code>GITHUB_AUTH_TOKEN</code> in their shell when they run <code>genesis pipeline-apply</code>. Without it, the apply does everything else and says <em>skipped the branch protection, because GITHUB_AUTH_TOKEN is not set</em>. With a token that lacks admin, it warns, names each branch it could not protect and the rules it needed, and carries on. With <code>webhooks</code> on and a token that lacks Webhooks, it reports the hook unverified and prints the URL to configure by hand, the token named but not shown; past GitHub's twenty push hooks per repository it reports GitHub's refusal, and the branches' fallback poll does the work. The operator's own vault access must also let them write <code>concourse/&lt;team&gt;/&lt;pipeline&gt;/webhook</code>, where the apply keeps the token, and <code>concourse/&lt;team&gt;/&lt;pipeline&gt;/bosh/*</code>, where it copies each tracked director's credentials, and read those directors' exodus records in the deployment vault.</li>
+  <li><strong>Other rules in the repository</strong> must not stop the pipeline's own pushes. A repository-wide or organization ruleset that requires pull requests on every branch, or restricts who may push, will refuse the clone credential's pushes to deployment branches and to <code>pr/</code> branches unless the automation account or deploy key is on its bypass list.</li>
+  <li><strong>The automation account's token</strong> is best created as a fine-grained token by the automation account itself, under the organization, so its access ends with the account rather than with a person. Where the organization uses a GitHub App for automation instead, the App's installation token serves the same role.</li>
+</ul>
+
+<h2>5. The branch rules the apply sets</h2>
+<p>One GitHub ruleset per branch, named <code>genesis-&lt;branch&gt;</code>, active, targeting that branch alone. A re-run of the apply sends nothing where the rules it would send already stand, and replaces a ruleset of that name, rather than adding another, where they differ. After a replacement, check that any bypass list an owner added is still in place.</p>
+<table>
+  <tr><th>Branch</th><th>Rules</th></tr>
+  <tr><td>control</td><td>block force pushes; require linear history; and, where <code>pipeline.source_control.control_requires_pr</code> is true, require a pull request with one approving review, merged by squash or rebase</td></tr>
+  <tr><td>each deployment branch, <code>&lt;env&gt;/&lt;type&gt;</code></td><td>block force pushes; require linear history</td></tr>
+  <tr><td>a deployment branch whose environment sets <code>require_pr</code></td><td>as above, and require a pull request with one approving review, merged by rebase only, so the marker in each commit survives the merge</td></tr>
+</table>
+<p>The pull request rule keeps an approval standing across the rebuild a later propagate pushes (it does not dismiss stale reviews), and it requires no code owner review, no approval of the last push and no resolution of threads.</p>
+
+<h2>6. Where the operator may not set branch rules</h2>
+<p>Some clients do not allow the people who run the pipeline to administer the repository. The pipeline still works without its branch rules, but nothing on GitHub then stops a force push to control or a deployment branch, or a merge into a pull request environment's branch without review. Have a repository owner set them by hand:</p>
+<ol>
+  <li>Run the apply without admin, either without <code>GITHUB_AUTH_TOKEN</code> or with a token that lacks Administration. It applies everything else, and with a token it lists, per branch, the rules it could not set.</li>
+  <li>Send the owner the branch list and section 5's rules for each. For each branch, the owner opens the repository's Settings &rarr; Rules &rarr; Rulesets &rarr; New ruleset &rarr; New branch ruleset, names it <code>genesis-&lt;branch&gt;</code>, sets <em>Enforcement status</em> to Active, adds the branch as a target by its full name, and enables <em>Block force pushes</em> and <em>Require linear history</em>; and for a pull request branch, <em>Require a pull request before merging</em> with 1 required approval and <em>Allowed merge methods</em> set to Rebase (Squash and Rebase for control).</li>
+  <li>Use exactly those names, so a later apply run by someone with admin recognises the rulesets as its own and replaces them rather than adding a second set beside them.</li>
+</ol>
+<p class="small">Branches are added by the apply when an environment is added, and an environment that later sets <code>require_pr</code> needs its pull request rule added, so the owner's step repeats with those changes.</p>
+
+<h2>7. Vault permissions</h2>
+<p>The pipeline's tasks log in to the deployment vault with the AppRole. Its policy needs, on a KV v2 mount named <code>secret</code>:</p>
+<pre><code>path "secret/data/*"                       { capabilities = ["read", "list"] }
+path "secret/metadata/*"                   { capabilities = ["read", "list"] }
+path "secret/data/&lt;secrets base&gt;/*"        { capabilities = ["create", "read", "update", "list"] }
+path "secret/data/exodus/*"                { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/exodus/*"            { capabilities = ["read", "delete", "list"] }</code></pre>
+<ul>
+  <li>Read everywhere the manifests read secrets from.</li>
+  <li>Create and update under each environment's secrets base, because a pipeline deploy generates missing secrets and rotates expiring ones (<code>deploy -F</code>). A secret only a person can supply is never written; the deploy refuses and names it.</li>
+  <li>Full access under <code>exodus</code>, where each deploy writes its record and replaces older ones; <code>delete</code> on the metadata is what lets it prune.</li>
+</ul>
+<p>Store the AppRole's <code>role_id</code> and a <code>secret_id</code> in Concourse's vault at the path <code>pipeline.vault.auth</code> names. A new <code>secret_id</code> is needed only where the role was recreated or its secret id expired; a policy change takes effect at the next login. The operator's own vault login writes the applied record during <code>pipeline-apply</code>.</p>
+
+<h2>8. Setup checklist</h2>
+<ol>
+  <li>Create or choose the automation account, a machine account rather than a person's; give it Write on the repository; create its fine-grained token (section 4) and have an owner approve it if required.</li>
+  <li>Create the clone credential: a deploy key with write access, or the automation account's HTTPS token. Not an operator's personal token.</li>
+  <li>Create the AppRole and its policy on the deployment vault (section 7).</li>
+  <li>Store every credential in Concourse's vault at the paths section 3 lists.</li>
+  <li>Set the matching keys in <code>.genesis/config</code>, commit and push control.</li>
+  <li>Run <code>genesis pipeline-apply</code> with an admin token in <code>GITHUB_AUTH_TOKEN</code>, or without one and follow section 6.</li>
+  <li>Check the rulesets under the repository's Settings &rarr; Rules, and that reviewers can approve a pull request the pipeline opens.</li>
+</ol>
+
+</body>
+</html>

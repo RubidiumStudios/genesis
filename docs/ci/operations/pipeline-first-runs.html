@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New Pipeline: Expected First Runs</title>
+<style>
+  @page { size: Letter; margin: 0.8in 0.85in; }
+  :root { --ink: #1c2229; --muted: #5a6570; --rule: #c9d0d6; --accent: #1f5f8b; --warn: #8a4b08; --warnbg: #fff6e8; --codebg: #f3f5f7; }
+  body { font: 10.5pt/1.45 "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); max-width: 7in; margin: 0 auto; }
+  h1 { font-size: 20pt; line-height: 1.2; margin: 0 0 4pt; }
+  .meta { color: var(--muted); font-size: 9pt; margin-bottom: 18pt; border-bottom: 1px solid var(--rule); padding-bottom: 8pt; }
+  h2 { font-size: 13.5pt; color: var(--accent); margin: 20pt 0 6pt; border-bottom: 1px solid var(--rule); padding-bottom: 2pt; page-break-after: avoid; }
+  h3 { font-size: 11pt; margin: 14pt 0 4pt; page-break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt 1.2em; padding: 0; }
+  li { margin-bottom: 3pt; }
+  code { font: 9.2pt/1.35 Menlo, Consolas, monospace; background: var(--codebg); padding: 0 3px; border-radius: 2px; }
+  pre { font: 8.8pt/1.35 Menlo, Consolas, monospace; background: var(--codebg); border: 1px solid var(--rule); border-radius: 3px; padding: 7pt 9pt; margin: 4pt 0 10pt; white-space: pre-wrap; page-break-inside: avoid; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 4pt 0 10pt; font-size: 9.5pt; page-break-inside: avoid; }
+  th, td { border: 1px solid var(--rule); padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #eef1f4; font-weight: 600; }
+  td code { white-space: nowrap; }
+  .callout { background: var(--warnbg); border-left: 4px solid var(--warn); padding: 6pt 10pt; margin: 8pt 0 10pt; page-break-inside: avoid; }
+  .callout strong { color: var(--warn); }
+  .small { font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>New Pipeline: Expected First Runs</h1>
+<div class="meta">Genesis operator note &middot; applies to Genesis 3.2.x and later with a v3 <code>pipeline</code> configuration on the Concourse provider &middot; audience: operators publishing a deployment repository's pipeline with <code>genesis pipeline-apply</code></div>
+
+<h2>1. Summary</h2>
+<p>Until each environment has deployed once through a newly published pipeline, two of the pipeline's jobs behave in ways that look like faults and are not. Both clear by themselves after that first deploy.</p>
+<p><strong>The redeploy.</strong> A published pipeline has a <code>redeploy-&lt;env&gt;</code> job for every environment, beside its <code>deploy-&lt;env&gt;</code> job. A redeploy deploys again exactly the commit that last deployed successfully, which is how secrets, configs or stemcells changed outside git reach a running deployment without new content from propagation.</p>
+<div class="callout"><strong>The first redeploy runs on its own when the pipeline is published.</strong> Each <code>redeploy-&lt;env&gt;</code> job starts once, by itself, as soon as Concourse first checks the job's request queue. No one pressed anything.</div>
+<div class="callout"><strong>That run fails, and so does every redeploy until the environment has deployed once through the pipeline.</strong> A redeploy refuses unless the last successful deploy was made with Genesis 3.2.x or later from the environment's own deployment branch, which is what a pipeline deploy does. Nothing is deployed, nothing on the director changes, and the refusal says why.</div>
+<p>After one successful deploy of an environment from its deployment branch, through the pipeline's <code>deploy-&lt;env&gt;</code> job, including an environment set to <code>genesis.pipeline.manual</code> whose deploy is started by hand, that environment's redeploy works. Sections 2 to 4 explain this. They apply only where the pipeline has redeploy jobs: <code>pipeline.redeploy.enabled: false</code> in <code>.genesis/config</code> emits none, and then there is no first redeploy to expect.</p>
+<p><strong>The chained deploy.</strong> An environment that names another as its <code>genesis.pipeline.prior_env</code> follows it: it takes only what its predecessor has deployed.</p>
+<div class="callout"><strong>A chained environment's deploy waits until its predecessor has deployed once through the pipeline.</strong> Until then, <code>deploy-&lt;env&gt;</code> for the follower does not start, even when pressed: its build stays pending. Nothing fails, and nothing is deployed.</div>
+<p>Section 5 explains this.</p>
+
+<h2>2. Why the first redeploy runs</h2>
+<p>The redeploy job is triggered by a request queue, a shuttle resource named <code>redeploy_&lt;env&gt;-&lt;type&gt;</code>, so that the job's own button, and in time other pipelines and the CLI, can ask for a redeploy. Concourse runs a job only when every resource it reads has a version, so the queue is given a starting version (its <em>seed</em>) to keep the button usable before anyone has written a request. Concourse starts a build whenever a triggering resource shows a version the job has not run on yet, and the seed is such a version. So the first check after publishing runs the job once.</p>
+<p>This is a property of how Concourse schedules jobs, not a choice made per environment, and it cannot be turned off without losing the redeploy's trigger. The run is made harmless instead, by the refusal in section 3.</p>
+
+<h2>3. Why the redeploy refuses</h2>
+<p>A redeploy takes the commit named in the environment's last successful deploy record and checks it out. It stands only on a recorded commit that is on the environment's deployment branch, <code>&lt;env&gt;/&lt;type&gt;</code>, and refuses everything else, because anything else is not a redeploy of what that branch delivered. On a newly published pipeline every environment is in one of two states, and both refuse:</p>
+<h3>3.1 No deploy recorded</h3>
+<p>The environment has never deployed successfully, or its newest record names no commit, which an older record format can.</p>
+<pre><code>Refusing to target the deployed commit for &lt;env&gt;.
+
+No successful deploy recorded in /secret/exodus/&lt;env&gt;/&lt;type&gt;/deployments
+names a commit, so there is nothing on &lt;env&gt;/&lt;type&gt; to deploy again, and
+its tip may carry content that has never been deployed.</code></pre>
+<h3>3.2 Last deployed before the pipeline</h3>
+<p>The last deploy ran from the repository's old branch, which is every environment migrating to the pipeline. The commit may still exist elsewhere in the repository; it is refused all the same, because it is not on the deployment branch.</p>
+<pre><code>Refusing to target the deployed commit for &lt;env&gt;.
+
+The deployed commit &lt;sha&gt;, named by /secret/exodus/&lt;env&gt;/&lt;type&gt;/deployments,
+is not on &lt;env&gt;/&lt;type&gt;: it was deployed from another branch, before this
+pipeline delivered to &lt;env&gt;/&lt;type&gt;, or the branch has been rewritten since,
+and only a commit on the deployment branch can be stood on.</code></pre>
+<p>Both exit with code 78 (configuration). The deploy branch's tip is never used in their place, since it may carry changes that have not been deployed yet, and deploying them is the <code>deploy-&lt;env&gt;</code> job's work, not the redeploy's.</p>
+<p>Where Slack is configured, the failure posts as usual, with a link to the build:</p>
+<pre><code>&lt;pipeline&gt;: Concourse redeploy of &lt;env&gt;-&lt;type&gt; failed (redeploy-&lt;env&gt; #1)</code></pre>
+<p>The run takes and releases the environment's deployment locks like any redeploy, so a deploy started at the same moment waits for it, briefly, and then proceeds.</p>
+
+<h2>4. What to do</h2>
+
+<h3>4.1 After publishing</h3>
+<p>Nothing. Expect one failed <code>redeploy-&lt;env&gt;</code> build per environment, numbered <code>#1</code>, and leave it. Open it only to confirm the refusal is one of the two in section 3; any other failure is a real problem and should be read as one.</p>
+
+<h3>4.2 Enable the redeploy for an environment</h3>
+<ol>
+  <li>Deploy the environment through the pipeline once, with its <code>deploy-&lt;env&gt;</code> job. For an environment set to <code>genesis.pipeline.manual: true</code>, that is pressing the job's button after its <code>notify-&lt;env&gt;</code> job has posted the pending changes. The deploy records the deployment-branch commit it stood on.</li>
+  <li>Confirm the record, without deploying anything. This reads the environment as deployed and refuses with the messages of section 3 if the record is not yet usable:
+<pre><code>genesis &lt;env&gt; info --as-deployed</code></pre></li>
+  <li>From then on, <code>redeploy-&lt;env&gt;</code>'s button redeploys that commit.</li>
+</ol>
+<p>The same holds for a deploy with Genesis 3.2.x or later run by hand while standing on the environment's deployment branch, since it records that branch's commit too. A deploy made from any other branch does not count.</p>
+
+<h2>5. A chained deploy waits for its predecessor</h2>
+<p>When an environment sets <code>genesis.pipeline.prior_env</code>, its predecessor's deploy job draws a line to its own deploy job in the pipeline view, left to right in the order changes travel. The line is the <code>&lt;prior&gt;-&lt;type&gt;_deployed</code> event: the predecessor's <code>deploy-&lt;prior&gt;</code> writes it on success, and the follower's <code>deploy-&lt;env&gt;</code> reads it with <code>passed: [deploy-&lt;prior&gt;]</code>. Concourse draws a line between two jobs only for <code>passed</code>.</p>
+<p>The same <code>passed</code> is also a rule Concourse enforces: the follower's deploy runs only on an event that came out of a successful <code>deploy-&lt;prior&gt;</code> build. A new pipeline's event resource holds only its starting version, its seed, which no deploy wrote. So until the predecessor has deployed once through the pipeline, the follower's deploy has no input it may use, and a build of it, pressed or triggered, stays pending, waiting for a suitable set of input versions. It does not fail, and it starts on its own, without another press, once the predecessor's deploy succeeds.</p>
+<p>This only matches what the chain already means. Propagation holds the follower's changes until its predecessor has deployed them, and reports the follower as <em>held, awaiting deployment</em> meanwhile, so in ordinary use there is nothing for the follower to deploy before its predecessor has deployed.</p>
+<p>Two things are not affected:</p>
+<ul>
+  <li><code>propagate</code>, which also reads the predecessor's <code>_deployed</code>, to deliver the follower's changes when the predecessor deploys. It reads it without <code>passed</code>, so a new pipeline's first propagation, which the predecessor's first deploy depends on, never waits.</li>
+  <li><code>redeploy-&lt;env&gt;</code> for the follower, which reads no event of its predecessor. It is governed by sections 2 to 4.</li>
+</ul>
+
+<h3>5.1 What to do</h3>
+<p>Deploy the predecessor through the pipeline first, as section 4.2 describes. The follower's pending deploy, if one was pressed, then starts.</p>
+<p>Where the follower must deploy before its predecessor ever has, deploy it by hand with Genesis 3.2.x or later, standing on its deployment branch <code>&lt;env&gt;/&lt;type&gt;</code>. The pipeline's deploy job cannot do it, by design.</p>
+
+<h2>6. Caveats</h2>
+<div class="callout"><strong>Changing the shuttle settings starts a redeploy again, and makes a chained deploy wait again.</strong> Concourse treats a resource whose settings changed as a new resource, with a new seed and none of the old one's history. After a change to <code>pipeline.shuttle</code> (bucket, endpoint, credentials) is applied, and after the shuttle credentials are rotated in the vault Concourse reads them from, since Concourse compares the settings with the credentials filled in:
+<ul style="margin:4pt 0 4pt 1.2em">
+  <li>expect each <code>redeploy-&lt;env&gt;</code> job to run once more. For an environment that has already deployed through the pipeline that run is a real redeploy of its deployed commit, and it succeeds.</li>
+  <li>expect each chained environment's deploy to wait again, as in section 5, until its predecessor next deploys through the pipeline.</li>
+  <li>expect <code>propagate</code> to run once. It delivers whatever is due, and nothing where nothing is.</li>
+</ul>
+Pause the redeploy jobs first if a redeploy is unwanted:
+<pre style="margin:6pt 0 0"><code>fly -t &lt;target&gt; pause-job -j &lt;pipeline&gt;/redeploy-&lt;env&gt;</code></pre></div>
+<p>Re-running <code>genesis pipeline-apply</code> with no change, or with changes to anything other than the shuttle, does none of this: each event resource keeps its versions.</p>
+
+<h2>7. Reference</h2>
+<table>
+  <tr><th>Name</th><th>Kind</th><th>What it is</th></tr>
+  <tr><td><code>&lt;env&gt;/&lt;type&gt;</code></td><td>git branch</td><td>the environment's deployment branch, which propagation delivers to and every deploy stands on</td></tr>
+  <tr><td><code>deploy-&lt;env&gt;</code></td><td>Concourse job</td><td>deploys the tip of <code>&lt;env&gt;/&lt;type&gt;</code>, the content propagation delivered; started by hand where <code>genesis.pipeline.manual</code> is set</td></tr>
+  <tr><td><code>notify-&lt;env&gt;</code></td><td>Concourse job</td><td>for a manual environment, posts to Slack what a deploy of the branch would change, and that the deploy awaits a button press</td></tr>
+  <tr><td><code>redeploy-&lt;env&gt;</code></td><td>Concourse job</td><td>runs <code>genesis &lt;env&gt; deploy --redeploy</code>: deploys again the commit the last successful deploy recorded</td></tr>
+  <tr><td><code>redeploy_&lt;env&gt;-&lt;type&gt;</code></td><td>Concourse resource (shuttle)</td><td>the redeploy's request queue and its trigger; its seed is what starts the first run</td></tr>
+  <tr><td><code>&lt;env&gt;-&lt;type&gt;_deployed</code>, <code>_redeployed</code></td><td>Concourse resources (shuttle)</td><td>the events <code>deploy-&lt;env&gt;</code> and <code>redeploy-&lt;env&gt;</code> write on success; a follower's deploy reads its predecessor's <code>_deployed</code> with <code>passed</code>, and <code>propagate</code> triggers on it</td></tr>
+  <tr><td><code>propagate</code></td><td>Concourse job</td><td>delivers control's changes to each environment's deployment branch, and a follower's when its predecessor deploys</td></tr>
+  <tr><td><code>passed</code></td><td>Concourse <code>get</code> setting</td><td>limits a job's input to versions that came out of the named jobs; it is also what draws a line between jobs</td></tr>
+  <tr><td><code>genesis.pipeline.prior_env</code></td><td>configuration key, environment file</td><td>names the environment this one follows, whose deployed changes it takes</td></tr>
+  <tr><td><code>pipeline.shuttle</code></td><td>configuration key, <code>.genesis/config</code></td><td>the bucket, endpoint and credentials every shuttle resource uses</td></tr>
+  <tr><td><code>genesis.pipeline.manual</code></td><td>configuration key, environment file</td><td>makes the environment's deploy wait for a button press rather than trigger on delivery</td></tr>
+  <tr><td><code>/secret/exodus/&lt;env&gt;/&lt;type&gt;/deployments</code></td><td>vault path</td><td>the deploy records; a redeploy reads <code>git.commit</code> from the newest successful one</td></tr>
+</table>
+<p class="small">The deploy record path shown is the default; a repository that sets its own exodus mount or secrets base has the same layout under it.</p>
+
+</body>
+</html>

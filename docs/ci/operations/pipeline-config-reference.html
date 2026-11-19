@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Genesis v3 pipeline configuration reference</title>
+<style>
+  @page {
+    size: letter landscape;
+    margin: 0.4in 0.4in 0.55in 0.4in;
+    @bottom-left {
+      content: "Genesis v3 pipeline configuration reference \00B7  3.2.0 pipeline build 3d2fcd89 \00B7  2026-11-13";
+      font: 7pt "Helvetica Neue", Helvetica, Arial, sans-serif;
+      color: #555;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font: 7pt "Helvetica Neue", Helvetica, Arial, sans-serif;
+      color: #555;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    font: 7.5pt/1.26 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #111;
+    margin: 0;
+  }
+  h1 { font-size: 15pt; margin: 0 0 2pt; }
+  .meta { font-size: 8pt; color: #333; margin: 0 0 6pt; }
+  h2 {
+    font-size: 10.5pt; margin: 9pt 0 3pt; padding-bottom: 1.5pt;
+    border-bottom: 1.2pt solid #222; break-after: avoid;
+  }
+  h3 { font-size: 8.4pt; margin: 6pt 0 2pt; break-after: avoid; }
+  p { margin: 0 0 3pt; }
+  ul { margin: 0 0 3pt; padding-left: 12pt; }
+  li { margin: 0 0 1pt; }
+  code, pre {
+    font-family: Menlo, "SF Mono", Consolas, monospace;
+    font-size: 6.7pt;
+  }
+  code { overflow-wrap: anywhere; }
+  pre {
+    margin: 0 0 3pt; padding: 3pt 5pt; background: #f3f3f3;
+    border: 0.5pt solid #ccc; line-height: 1.25; white-space: pre-wrap;
+    break-inside: avoid;
+  }
+  table {
+    width: 100%; border-collapse: collapse; table-layout: fixed;
+    margin: 0 0 5pt;
+  }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; }
+  th, td {
+    border: 0.5pt solid #aaa; padding: 1.4pt 3pt; vertical-align: top;
+    text-align: left; overflow-wrap: anywhere;
+  }
+  th { background: #e3e3e3; font-size: 7.3pt; }
+  tr.g { break-after: avoid; }
+  tr.g td { background: #f1f1f1; border-top: 1pt solid #555; }
+  table.keys col.c1 { width: 23%; }
+  table.keys col.c2 { width: 7.5%; }
+  table.keys col.c3 { width: 12%; }
+  table.keys col.c4 { width: 15.5%; }
+  table.keys col.c5 { width: 8%; }
+  table.keys col.c6 { width: 34%; }
+  table.ret col.c1 { width: 27%; }
+  table.ret col.c2 { width: 16%; }
+  table.ret col.c3 { width: 57%; }
+  table.sec col.c1 { width: 30%; }
+  table.sec col.c2 { width: 27%; }
+  table.sec col.c3 { width: 43%; }
+  .cols { display: flex; gap: 14pt; }
+  .cols > div { flex: 1 1 0; min-width: 0; }
+  .cols.ex > div { flex: 0.85 1 0; }
+  .cols.ex > div.wide { flex: 1.3 1 0; }
+  .note { font-size: 7.6pt; color: #222; }
+  .keep { break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<h1>Genesis v3 pipeline configuration reference</h1>
+<p class="meta">Operators' reference sheet for the repository-level and environment-level pipeline keys.
+Describes Genesis 3.2.0 pipeline build <code>3d2fcd89</code>. Dated 2026-11-13.
+Every key, default and allowed value is taken from the schema and validation code of that build.</p>
+
+<h2>How to set the keys</h2>
+<div class="cols">
+<div>
+<ul>
+  <li><strong>Repository keys</strong> live under <code>pipeline:</code> in <code>.genesis/config</code>, which must be configuration version 3. The file is generated. Change it only with <code>genesis config --set &lt;key&gt; &lt;value&gt;</code> and <code>genesis config --unset &lt;key&gt;</code>, never by hand.</li>
+  <li><code>--set</code> and <code>--unset</code> repeat, so several keys can change in one run. <code>--set-from-file &lt;key&gt; &lt;file&gt;</code> sets a key from a file (a collection is read as YAML or JSON). Bare arguments only read: <code>genesis config pipeline.provider.type</code>.</li>
+  <li>The command validates the configuration it would write and writes nothing if that configuration does not load. Set keys that depend on each other in the same run, and set <code>pipeline.enabled</code> last.</li>
+  <li>A <code>pipeline</code> section on a version 2 file is refused. Migrate with <code>genesis config --set version 3</code>; the pipeline keys can be set in the same run.</li>
+  <li>With <code>--set</code>, a boolean given as <code>false</code>, <code>no</code>, <code>off</code>, <code>0</code> or an empty string is false, and any other text is true.</li>
+</ul>
+</div>
+<div>
+<ul>
+  <li><strong>Environment keys</strong> live in the environment's own YAML file, under <code>genesis.pipeline</code>. Edit the file and commit it on the <code>control</code> branch (or on a feature branch merged into it).</li>
+  <li>The block is read merged through the environment's file hierarchy, so a key in a shared file is inherited by every environment beneath it, and the nearer file wins.</li>
+  <li><strong>The pipeline's shape is read from <code>control</code>.</strong> The <code>pipeline</code> section and every environment's keys take effect from the control branch, committed and pushed. <code>genesis pipeline-apply</code> runs from <code>control</code>, in step with the remote. The previews (<code>genesis pipeline-describe</code>, <code>genesis pipeline-graph</code>, <code>genesis pipeline-apply --dry-run</code>) read the working tree.</li>
+  <li><code>pipeline.source_control.repository</code>, <code>uri</code> and <code>control_branch</code> are read from the working tree's own <code>.genesis/config</code>, because they say where control is.</li>
+  <li>Validation runs at configuration load, for every command. The checks beyond the schema run only when <code>pipeline.enabled</code> is true. A key the schema does not declare is refused by name.</li>
+</ul>
+</div>
+</div>
+<pre>genesis config --set pipeline.provider.type concourse --set pipeline.provider.url https://ci.example.com --set pipeline.provider.team main
+genesis config --set pipeline.source_control.auth.type ssh --set pipeline.source_control.auth.path git
+genesis config --unset pipeline.provider.public
+genesis config --set pipeline.enabled true</pre>
+
+<h2>Repository keys: <code>pipeline</code> in <code>.genesis/config</code></h2>
+<p class="note"><strong>Required column.</strong> <em>Yes</em>: required whenever the enclosing block is written. <em>When enabled</em>: required when <code>pipeline.enabled</code> is true. <em>If automated</em>: you must write it when <code>pipeline.enabled</code> is true and <code>pipeline.provider.type</code> is not <code>manual</code>; nothing fills it in for you. <em>No</em>: optional.
+<strong>Default column.</strong> A dash means the schema declares no default.
+<strong>Vault references</strong> are written as a secret path, or as <code>&lt;path&gt;:&lt;key&gt;</code>.</p>
+
+<table class="keys">
+<colgroup><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"></colgroup>
+<thead><tr><th>Key</th><th>Type</th><th>Default</th><th>Allowed values</th><th>Required</th><th>What it does</th></tr></thead>
+<tbody>
+<tr class="g"><td colspan="6"><strong>Top level</strong></td></tr>
+<tr><td><code>pipeline.enabled</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Whether this repository has a pipeline. Every pipeline command and every check beyond the schema turns on with it.</td></tr>
+<tr><td><code>pipeline.name</code></td><td>string</td><td>the value of <code>deployment_type</code></td><td>any non-empty string</td><td>No</td><td>The pipeline's name in its provider. Under Concourse it is also the pipeline scope of the secrets store.</td></tr>
+<tr><td><code>pipeline.exodus_mount</code></td><td>string</td><td><code>/secret/exodus/</code></td><td>a vault mount</td><td>No</td><td>The vault mount the pipeline's records live under. Every environment's <code>genesis.exodus_mount</code> must resolve to it.</td></tr>
+<tr><td><code>pipeline.recreate_on_deploy</code></td><td>enum</td><td><code>never</code></td><td><code>never</code>, <code>redeploy-only</code>, <code>always</code></td><td>No</td><td>Which runs pass <code>--recreate</code> to the BOSH deploy.</td></tr>
+<tr><td><code>pipeline.unredacted</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Whether the pipeline's deploys print their manifest diffs unredacted. Reaches the deploy as <code>CI_NO_REDACT</code>.</td></tr>
+
+<tr class="g"><td colspan="6"><strong><code>pipeline.provider</code></strong>:the automation that owns the pipeline. The keys allowed depend on <code>type</code>; a key the chosen type does not declare is refused as unknown.</td></tr>
+<tr><td><code>pipeline.provider.type</code></td><td>enum</td><td><code>manual</code></td><td><code>manual</code>, <code>concourse</code></td><td>No</td><td>Selects the provider. <code>manual</code> sets no pipeline and declares no other provider key.</td></tr>
+
+<tr class="g"><td colspan="6"><strong><code>pipeline.provider</code> with <code>type: concourse</code></strong></td></tr>
+<tr><td><code>pipeline.provider.url</code></td><td>string</td><td>&ndash;</td><td>must begin <code>http://</code> or <code>https://</code></td><td>When enabled</td><td>Concourse API URL, used by fly login.</td></tr>
+<tr><td><code>pipeline.provider.team</code></td><td>string</td><td>&ndash;</td><td>any string</td><td>When enabled</td><td>Concourse team name.</td></tr>
+<tr><td><code>pipeline.provider.insecure</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Skip TLS certificate verification.</td></tr>
+<tr><td><code>pipeline.provider.public</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Make build logs publicly viewable.</td></tr>
+<tr><td><code>pipeline.provider.pause_after_set</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Leave the pipeline paused after <code>fly set-pipeline</code>.</td></tr>
+<tr><td><code>pipeline.provider.group_commits</code></td><td>boolean</td><td><code>true</code></td><td><code>true</code> only; <code>false</code> is refused</td><td>No</td><td>Deploy the tip of what arrived rather than each commit in turn.</td></tr>
+<tr><td><code>pipeline.provider.min_fly_version</code></td><td>semver</td><td>&ndash;</td><td>a semantic version</td><td>No</td><td>Lowest fly version this pipeline may be set with.</td></tr>
+<tr><td><code>pipeline.provider.fly_bin_path</code></td><td>string</td><td>&ndash; (<code>fly</code> on the path)</td><td>a path or command name</td><td>No</td><td>The fly CLI this pipeline is set with. <code>GENESIS_FLY_BIN</code> overrides it.</td></tr>
+<tr><td><code>pipeline.provider.task.image</code></td><td>string</td><td><code>genesiscommunity/<wbr>concourse</code></td><td>an image repository</td><td>No</td><td>The image every emitted task runs in.</td></tr>
+<tr><td><code>pipeline.provider.task.version</code></td><td>string</td><td><code>latest</code></td><td>an image tag</td><td>No</td><td>Task image tag.</td></tr>
+<tr><td><code>pipeline.provider.task.privileged</code></td><td>list of strings</td><td>&ndash;</td><td>environment names</td><td>No</td><td>Environments whose deploy task runs privileged.</td></tr>
+<tr><td><code>pipeline.provider.git.webhooks</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Webhook tokens on every git resource, propagate's check requests, and the GitHub hook.</td></tr>
+<tr><td><code>pipeline.provider.git.check_every</code></td><td>string</td><td>&ndash; (Concourse's default, 1m)</td><td>a Concourse duration such as <code>30s</code>, <code>5m</code>, <code>1h</code>, or <code>never</code></td><td>No</td><td>Every deployment branch's polling interval.</td></tr>
+<tr><td><code>pipeline.provider.git.<wbr>control_check_every</code></td><td>string</td><td>&ndash; (Concourse's default, 1m)</td><td>a Concourse duration, or <code>never</code></td><td>No</td><td>The control branch's polling interval.</td></tr>
+<tr><td><code>pipeline.provider.secrets_store.url</code></td><td>string</td><td>&ndash; (the environment's own vault)</td><td>a URL</td><td>No</td><td>URL of the store Concourse resolves the pipeline's <code>((...))</code> references from.</td></tr>
+<tr><td><code>pipeline.provider.secrets_store.<wbr>namespace</code></td><td>string</td><td>&ndash;</td><td>any string</td><td>No</td><td>The store's vault namespace, if any.</td></tr>
+<tr><td><code>pipeline.provider.secrets_store.<wbr>path_prefix</code></td><td>string</td><td><code>/concourse</code></td><td>a vault path</td><td>No</td><td>Concourse's <code>--vault-path-prefix</code>.</td></tr>
+<tr><td><code>pipeline.provider.secrets_store.<wbr>shared_path</code></td><td>string</td><td><code>shared</code></td><td>a vault path under <code>path_prefix</code>; <code>""</code> for none</td><td>No</td><td>Concourse's <code>--vault-shared-path</code>. The default is what the Genesis Concourse kit sets; it must match the server's own.</td></tr>
+<tr><td><code>pipeline.provider.secrets_store.<wbr>insecure</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Skip verifying the store's TLS certificate.</td></tr>
+
+
+<tr class="g"><td colspan="6"><strong><code>pipeline.source_control</code></strong>:what the pipeline needs to know about the repository. Block required: <em>If automated</em>.</td></tr>
+<tr><td><code>pipeline.source_control.repository</code></td><td>string</td><td>&ndash; (derived from the clone's remotes)</td><td><code>owner/repo</code> (github.com), or the repository's https or ssh URL</td><td>No</td><td>The repository the pipeline lives in.</td></tr>
+<tr><td><code>pipeline.source_control.uri</code></td><td>string</td><td>&ndash; (composed from the repository)</td><td>a clone URL</td><td>No</td><td>The URL CI clones from, where it cannot be composed from the repository.</td></tr>
+<tr><td><code>pipeline.source_control.control_branch</code></td><td>string</td><td><code>control</code></td><td>any non-empty branch name</td><td>No</td><td>The control branch's name.</td></tr>
+<tr><td><code>pipeline.source_control.pr_prefix</code></td><td>string</td><td><code>pr/</code></td><td>any non-empty string</td><td>No</td><td>The pull request branch prefix. The branch is <code>&lt;pr_prefix&gt;&lt;env&gt;/&lt;deployment_type&gt;</code>.</td></tr>
+<tr><td><code>pipeline.source_control.<wbr>control_requires_pr</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>When true, <code>genesis pipeline-apply</code> protects control so that it takes changes by pull request, and a command that commits on control expects a feature branch.</td></tr>
+<tr><td><code>pipeline.source_control.auth</code></td><td>credential block</td><td>&ndash;</td><td>see the keys below</td><td>If automated</td><td>The clone credential, as a type and its vault paths.</td></tr>
+<tr><td><code>pipeline.source_control.auth.type</code></td><td>enum</td><td>&ndash;</td><td><code>ssh</code>, <code>https</code></td><td>Yes</td><td>The kind of credential. <code>ssh</code> takes <code>private_key</code>; <code>https</code> takes <code>username</code> and <code>password</code>.</td></tr>
+<tr><td><code>pipeline.source_control.auth.path</code></td><td>string</td><td>&ndash;</td><td>a secret path, with no <code>:key</code></td><td>Yes, or give each component</td><td>The secret holding every component under its own name. Keys expected in it: <code>private_key</code> for <code>ssh</code>; <code>username</code> and <code>password</code> for <code>https</code>.</td></tr>
+<tr><td><code>pipeline.source_control.auth.private_key</code></td><td>string</td><td><code>&lt;path&gt;:private_key</code></td><td><code>&lt;path&gt;:&lt;key&gt;</code> only</td><td>No</td><td><code>ssh</code> only. Where the private key is held, in place of <code>path</code>'s.</td></tr>
+<tr><td><code>pipeline.source_control.auth.username</code><br><code>pipeline.source_control.auth.password</code></td><td>string</td><td><code>&lt;path&gt;:username</code>, <code>&lt;path&gt;:password</code></td><td><code>&lt;path&gt;:&lt;key&gt;</code> only</td><td>No</td><td><code>https</code> only. Where each is held, in place of <code>path</code>'s.</td></tr>
+<tr><td><code>pipeline.source_control.api_token</code></td><td>string</td><td>&ndash;</td><td><code>&lt;path&gt;:&lt;key&gt;</code> only</td><td>No (see right)</td><td>Reference to the GitHub token propagate opens pull requests with; the key is whichever one the reference names. The compile is refused where an environment sets <code>require_pr</code>, the clone credential is <code>ssh</code>, and this key is unset; with <code>https</code> the clone password serves.</td></tr>
+<tr><td><code>pipeline.source_control.identity</code></td><td>block</td><td>&ndash;</td><td>see the keys below</td><td>No</td><td>The name and email a pipeline task commits under.</td></tr>
+<tr><td><code>pipeline.source_control.identity.name</code><br><code>pipeline.source_control.identity.email</code></td><td>string</td><td><code>Concourse Bot</code><br><code>concourse@pipeline</code></td><td>any string</td><td>No</td><td>Committer name and committer email. Each defaults on its own, to what a v2 pipeline committed as.</td></tr>
+
+<tr class="g"><td colspan="6"><strong><code>pipeline.vault</code></strong>:how a pipeline task logs in to the deployment vault it writes exodus through. Where that vault is comes from <code>secrets_provider</code>, in the same file, with its namespace, its TLS setting (<code>insecure</code>) and whether it runs without strongbox (<code>strongbox: false</code>). The block holds <code>auth</code> and nothing else. Block required: <em>If automated</em>.</td></tr>
+<tr><td><code>pipeline.vault.auth</code></td><td>credential block</td><td>&ndash;</td><td>see the keys below</td><td>If automated</td><td>The task credential, as a type and its vault paths.</td></tr>
+<tr><td><code>pipeline.vault.auth.type</code></td><td>enum</td><td>&ndash;</td><td><code>approle</code>, <code>token</code></td><td>Yes</td><td>The kind of credential. <code>approle</code> takes <code>role_id</code> and <code>secret_id</code>; <code>token</code> takes <code>token</code>.</td></tr>
+<tr><td><code>pipeline.vault.auth.path</code></td><td>string</td><td>&ndash;</td><td>a secret path, with no <code>:key</code></td><td>Yes, or give each component</td><td>The secret holding every component under its own name. Keys expected in it: <code>role_id</code> and <code>secret_id</code> for <code>approle</code>; <code>token</code> for <code>token</code>.</td></tr>
+<tr><td><code>pipeline.vault.auth.role_id</code><br><code>pipeline.vault.auth.secret_id</code></td><td>string</td><td><code>&lt;path&gt;:role_id</code>, <code>&lt;path&gt;:secret_id</code></td><td><code>&lt;path&gt;:&lt;key&gt;</code> only</td><td>No</td><td><code>approle</code> only. Where each is held, in place of <code>path</code>'s.</td></tr>
+<tr><td><code>pipeline.vault.auth.token</code></td><td>string</td><td><code>&lt;path&gt;:token</code></td><td><code>&lt;path&gt;:&lt;key&gt;</code> only</td><td>No</td><td><code>token</code> only. Where the token is held, in place of <code>path</code>'s.</td></tr>
+
+<tr class="g"><td colspan="6"><strong><code>pipeline.locker</code></strong>:the locker behind the two mandatory deploy locks. Block required: <em>If automated</em>.</td></tr>
+<tr><td><code>pipeline.locker.url</code></td><td>string</td><td>&ndash;</td><td>a URL</td><td>Yes</td><td>Locker URL.</td></tr>
+<tr><td><code>pipeline.locker.username</code></td><td>string</td><td>&ndash;</td><td>any string, or <code>((path.key))</code></td><td>No</td><td>Locker username. Written into the pipeline as given.</td></tr>
+<tr><td><code>pipeline.locker.password</code></td><td>string</td><td>&ndash;</td><td><code>((path.key))</code> only</td><td>No</td><td>Locker password. Written into the pipeline as given, so name the secret in Concourse's own form. <code>&lt;path&gt;:&lt;key&gt;</code> is not translated here and would be sent as the password itself.</td></tr>
+<tr><td><code>pipeline.locker.ca_cert</code></td><td>string</td><td>&ndash;</td><td>any string</td><td>No</td><td>CA certificate for the locker.</td></tr>
+<tr><td><code>pipeline.locker.skip_ssl_validation</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Skip TLS verification.</td></tr>
+
+<tr class="g"><td colspan="6"><strong><code>pipeline.shuttle</code></strong>:the object store behind every deployment's queue and event. Block required: <em>If automated</em>.</td></tr>
+<tr><td><code>pipeline.shuttle.backend</code></td><td>enum</td><td>&ndash;</td><td><code>s3</code></td><td>Yes</td><td>Selects the backend and the keys it reads. <code>s3</code> is the only backend.</td></tr>
+<tr><td><code>pipeline.shuttle.bucket</code></td><td>string</td><td>&ndash;</td><td>a bucket name</td><td>Yes</td><td>The bucket the resources live in.</td></tr>
+<tr><td><code>pipeline.shuttle.region</code></td><td>string</td><td>&ndash;</td><td>any string</td><td>No</td><td>The bucket region.</td></tr>
+<tr><td><code>pipeline.shuttle.endpoint</code></td><td>string</td><td>&ndash;</td><td>a URL</td><td>No</td><td>A non-default endpoint.</td></tr>
+<tr><td><code>pipeline.shuttle.auth</code></td><td>string, or block</td><td>&ndash;</td><td>a secret path, with no <code>:key</code>; or a block of <code>path</code> and the two keys below</td><td>No</td><td>The store's credential. As a path, the secret holding <code>access_key_id</code> and <code>secret_access_key</code> under those names. It has no <code>type</code>.</td></tr>
+<tr><td><code>pipeline.shuttle.auth.<wbr>access_key_id</code><br><code>pipeline.shuttle.auth.<wbr>secret_access_key</code></td><td>string</td><td><code>&lt;path&gt;:access_key_id</code>, <code>&lt;path&gt;:secret_access_key</code></td><td><code>&lt;path&gt;:&lt;key&gt;</code> or <code>((path.key))</code></td><td>No</td><td>Where each key is held, in place of <code>path</code>'s, for a credential stored under other names.</td></tr>
+<tr><td><code>pipeline.shuttle.tls_skip_verify</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Skip verifying the store's TLS certificate.</td></tr>
+<tr><td><code>pipeline.shuttle.image</code></td><td>string</td><td><code>klaue/shuttle-resource</code></td><td>an image repository</td><td>No</td><td>The resource image.</td></tr>
+<tr><td><code>pipeline.shuttle.image_tag</code></td><td>string</td><td><code>latest</code></td><td>an image tag</td><td>No</td><td>The resource image tag.</td></tr>
+
+<tr class="g"><td colspan="6"><strong><code>pipeline.registry</code></strong>:the image registry the pipeline pulls through. Optional block.</td></tr>
+<tr><td><code>pipeline.registry.uri</code></td><td>string</td><td>&ndash;</td><td>a registry prefix</td><td>Yes</td><td>The prefix every image the compiler names by default is pulled through.</td></tr>
+<tr><td><code>pipeline.registry.auth</code></td><td>credential block</td><td>&ndash;</td><td>see the keys below</td><td>No</td><td>The credential the registry is pulled with, as a type and its vault paths.</td></tr>
+<tr><td><code>pipeline.registry.auth.type</code></td><td>enum</td><td>&ndash;</td><td><code>basic</code></td><td>Yes</td><td>The kind of credential. <code>basic</code> takes <code>username</code> and <code>password</code>.</td></tr>
+<tr><td><code>pipeline.registry.auth.path</code></td><td>string</td><td>&ndash;</td><td>a secret path, with no <code>:key</code></td><td>Yes, or give each component</td><td>The secret holding every component under its own name. Keys expected in it: <code>username</code> and <code>password</code> for <code>basic</code>.</td></tr>
+<tr><td><code>pipeline.registry.auth.username</code><br><code>pipeline.registry.auth.password</code></td><td>string</td><td><code>&lt;path&gt;:username</code>, <code>&lt;path&gt;:password</code></td><td><code>&lt;path&gt;:&lt;key&gt;</code> only</td><td>No</td><td>Where each is held, in place of <code>path</code>'s.</td></tr>
+
+<tr class="g"><td colspan="6"><strong><code>pipeline.redeploy</code></strong>:whether the pipeline has redeploy jobs, and where they sit. Optional block.</td></tr>
+<tr><td><code>pipeline.redeploy.enabled</code></td><td>boolean</td><td><code>true</code></td><td>true, false</td><td>No</td><td>Emit each environment's redeploy job, queue and event. When false, an environment's <code>genesis.pipeline.redeploy_cron</code> is refused.</td></tr>
+<tr><td><code>pipeline.redeploy.style</code></td><td>enum</td><td><code>inline</code></td><td><code>inline</code>, <code>grouped</code></td><td>No</td><td>Beside each deploy, or all in one redeploys group.</td></tr>
+
+<tr class="g"><td colspan="6"><strong><code>pipeline.notifications</code></strong>:how the pipeline notifies, and where. Optional block, and the repository's alone: no environment overrides it.</td></tr>
+<tr><td><code>pipeline.notifications.style</code></td><td>enum</td><td><code>inline</code></td><td><code>inline</code>, <code>parallel</code>, <code>grouped</code></td><td>No</td><td>Whether a manual deploy waits on its notify job, or the notify jobs sit apart.</td></tr>
+<tr><td><code>pipeline.notifications.slack.webhook</code></td><td>string</td><td>&ndash;</td><td><code>&lt;path&gt;:&lt;key&gt;</code>, or <code>((path.key))</code></td><td>Yes (when <code>slack</code> is written)</td><td>Reference to the webhook URL; the key is whichever one the reference names. A value that starts with <code>((</code> is written into the pipeline as given.</td></tr>
+<tr><td><code>pipeline.notifications.slack.channel</code></td><td>string</td><td>&ndash;</td><td>any string</td><td>No</td><td>The channel posted to, for a legacy webhook.</td></tr>
+<tr><td><code>pipeline.notifications.slack.username</code></td><td>string</td><td>&ndash;</td><td>any string</td><td>No</td><td>The name posted as, for a legacy webhook.</td></tr>
+<tr><td><code>pipeline.notifications.slack.icon</code></td><td>string</td><td>&ndash;</td><td>a URL</td><td>No</td><td>The icon URL posted with, for a legacy webhook.</td></tr>
+<tr><td><code>pipeline.notifications.slack.<wbr>mentions_on_failure</code></td><td>any</td><td>&ndash;</td><td>not checked by the schema; read as a list of handles</td><td>No</td><td>Handles prefixed to a failure message.</td></tr>
+<tr><td><code>pipeline.notifications.email</code></td><td>any</td><td>&ndash;</td><td>not checked by the schema</td><td>No</td><td>Email entries. Accepted; this build's documentation states it is not emitted.</td></tr>
+</tbody>
+</table>
+
+<h3>Other <code>.genesis/config</code> keys the pipeline checks</h3>
+<table class="keys">
+<colgroup><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"></colgroup>
+<thead><tr><th>Key</th><th>Type</th><th>Default</th><th>Allowed values</th><th>Required</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td><code>version</code></td><td>literal</td><td>&ndash;</td><td><code>3</code></td><td>Yes</td><td>Configuration schema version. The <code>pipeline</code> section belongs to version 3.</td></tr>
+<tr><td><code>deployment_type</code></td><td>string</td><td>&ndash;</td><td>a git ref component: matches <code>^[A-Za-z0-9][A-Za-z0-9._-]*$</code>, no trailing dot, no <code>..</code>, no <code>.lock</code> suffix</td><td>Yes</td><td>Names the branch <code>&lt;env&gt;/&lt;deployment_type&gt;</code> for every environment, and is the default for <code>pipeline.name</code>.</td></tr>
+<tr><td><code>manifest_store</code></td><td>enum</td><td><code>exodus</code></td><td>under a pipeline, <code>exodus</code> only (<code>repository</code> and <code>hybrid</code> are refused)</td><td>No</td><td>Where manifests are stored. The pipeline's records live in exodus.</td></tr>
+<tr><td><code>minimum_version</code></td><td>semver</td><td>&ndash;</td><td>with each environment's <code>genesis.min_version</code>, must give a floor of 3.1.0 or later</td><td>See <code>genesis.<wbr>min_version</code></td><td>Minimum Genesis version required for this repository.</td></tr>
+
+<tr class="g"><td colspan="6"><strong><code>secrets_provider</code></strong>:the repository's vault. Written by <code>genesis secrets-provider &lt;safe-target&gt;</code>, which leaves every other key as it was. Block required: <em>When enabled</em>, under every provider, <code>manual</code> included. A repository without it reads whichever vault <code>safe</code> targets on each machine, which a pipeline's records and tasks cannot rest on, so the load refuses it.</td></tr>
+<tr><td><code>secrets_provider.url</code></td><td>string</td><td>&ndash;</td><td>a URL</td><td>Yes</td><td>The vault every operator and every pipeline task uses. A task's <code>VAULT_ADDR</code> is this.</td></tr>
+<tr><td><code>secrets_provider.namespace</code></td><td>string</td><td>&ndash;</td><td>any string</td><td>No</td><td>The vault namespace, if any. A task's <code>VAULT_NAMESPACE</code>.</td></tr>
+<tr><td><code>secrets_provider.insecure</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Do not verify the vault's TLS certificate. A task then skips verification too.</td></tr>
+<tr><td><code>secrets_provider.strongbox</code></td><td>boolean</td><td>&ndash; (not stated)</td><td>true, false</td><td>No</td><td>Whether the vault runs strongbox. Where false, a task runs without it. A re-point keeps the recorded value when the new target does not say.</td></tr>
+<tr><td><code>secrets_provider.alias</code></td><td>string</td><td>&ndash;</td><td>a safe target name</td><td>No</td><td>The safe target's name on the machine that recorded it. Each operator's own target is found by the URL.</td></tr>
+</tbody>
+</table>
+
+<h2 style="break-before: page">Environment keys: the environment file on <code>control</code></h2>
+<p class="note">No key in <code>genesis.pipeline</code> has a schema default and none is required. Each key below marked <em>shape</em> must resolve from the environment's own files: a value that still contains <code>((</code> (a credhub variable, a vault value, or an unresolved reference) is refused, naming the file that sets it. Where a list of strings is declared, a single string is accepted and read as a list of one.</p>
+
+<table class="keys">
+<colgroup><col class="c1"><col class="c2"><col class="c3"><col class="c4"><col class="c5"><col class="c6"></colgroup>
+<thead><tr><th>Key</th><th>Type</th><th>Default</th><th>Allowed values</th><th>Required</th><th>What it does</th></tr></thead>
+<tbody>
+<tr class="g"><td colspan="6"><strong><code>genesis.pipeline</code></strong>:the environment's pipeline settings</td></tr>
+<tr><td><code>genesis.pipeline.prior_env</code></td><td>string (shape)</td><td>&ndash;</td><td>the name of another environment of this pipeline; the chain must not loop</td><td>No</td><td>The topology edge: the environment this one follows. An environment without it follows nothing.</td></tr>
+<tr><td><code>genesis.pipeline.require_pr</code></td><td>boolean (shape)</td><td>&ndash; (direct)</td><td>true, false</td><td>No</td><td>Propagate through a pull request rather than directly.</td></tr>
+<tr><td><code>genesis.pipeline.manual</code></td><td>boolean (shape)</td><td>&ndash; (automatic)</td><td>true, false</td><td>No</td><td>The deploy job waits for a human trigger. Refused unless the provider declares the <code>optional_git_triggers</code> capability: <code>concourse</code> does; <code>manual</code> does not.</td></tr>
+<tr><td><code>genesis.pipeline.provider.tag</code></td><td>string, or list of strings</td><td>&ndash;</td><td>non-empty strings</td><td>No</td><td><code>concourse</code> only; under another provider the key is refused as unknown. The Concourse worker tag, or tags, whose workers reach this environment's network.</td></tr>
+<tr><td><code>genesis.pipeline.redeploy_cron</code></td><td>list of strings (shape)</td><td>&ndash;</td><td>crontab expressions, in UTC</td><td>No</td><td>Crontab expressions that trigger the redeploy job. Refused unless the provider declares <code>scheduled_jobs</code> (<code>concourse</code> only), and refused when <code>pipeline.redeploy.enabled</code> is false. This build's documentation states that no schedule is emitted yet.</td></tr>
+<tr><td><code>genesis.pipeline.track_dependencies</code></td><td>list of strings (shape)</td><td>&ndash;</td><td>each entry a deployment type, or an <code>&lt;env&gt;/&lt;type&gt;</code> pair</td><td>No</td><td>Deployments whose exodus records this one reads. A bare type means that type at this environment.</td></tr>
+<tr><td><code>genesis.pipeline.track_additional_files</code></td><td>list of strings (shape)</td><td>&ndash;</td><td>paths relative to the deployment root, with no leading <code>/</code> or <code>~</code> and no <code>..</code>; <code>&lt;env&gt;</code> and globs expand</td><td>No</td><td>Extra paths for the propagation set.</td></tr>
+<tr><td><code>genesis.pipeline.track_bosh_configs</code></td><td>boolean, or list (shape)</td><td>&ndash;</td><td><code>true</code> (cloud and runtime), or a list; the compiler reads <code>cloud</code>, <code>runtime</code> and <code>cpi</code> and drops other entries</td><td>No</td><td>The director's BOSH config types a Classic environment watches, notifying on a change. Refused on an environment with the <code>ocfp</code> kit feature unless <code>genesis.manage-cloud-configs</code> is false.</td></tr>
+
+<tr class="g"><td colspan="6"><strong>Other environment keys the pipeline reads</strong></td></tr>
+<tr><td><code>genesis.env</code></td><td>string</td><td>&ndash;</td><td>the file's own name, written literally</td><td>Yes</td><td>A <code>*.yml</code> file at the deployment root is an environment of the pipeline only when it declares <code>genesis.env</code> equal to its own name.</td></tr>
+<tr><td><code>genesis.bosh_env</code></td><td>string (shape)</td><td>the environment's own name (none for a BOSH director)</td><td>a director, named as for a deploy by hand</td><td>No</td><td>The director the environment deploys to. The director's lock pool is named from it, <code>&lt;bosh_env&gt;-bosh</code>. An environment that uses create-env takes no director pool.</td></tr>
+<tr><td><code>genesis.exodus_mount</code></td><td>string</td><td>the secrets mount followed by <code>exodus/</code></td><td>must resolve to <code>pipeline.exodus_mount</code></td><td>No</td><td>The environment's exodus mount. Checked on every environment that carries a <code>genesis.pipeline</code> block.</td></tr>
+<tr><td><code>genesis.secrets_mount</code></td><td>string</td><td><code>/secret/</code></td><td>a vault mount</td><td>No</td><td>Gives the exodus mount where <code>genesis.exodus_mount</code> is unset.</td></tr>
+<tr><td><code>genesis.min_version</code><br>(also read: <code>genesis.minimum_version</code>)</td><td>version</td><td>&ndash;</td><td>the higher of this and the repository's <code>minimum_version</code> must be 3.1.0 or later</td><td>One of the two must be set</td><td>The environment's Genesis floor. A floor below 3.1.0, or none declared at all, is refused under a pipeline.</td></tr>
+<tr><td><code>genesis.manage-cloud-configs</code></td><td>boolean</td><td>&ndash;</td><td>true, false</td><td>No</td><td>Read with <code>kit.features</code>: on an environment whose features include <code>ocfp</code>, <code>track_bosh_configs</code> is refused unless this key is false.</td></tr>
+<tr><td><code>kit.features</code></td><td>list of strings</td><td>&ndash;</td><td>kit feature names</td><td>No</td><td>An entry <code>ocfp</code> marks the environment as OCFP for the <code>track_bosh_configs</code> check.</td></tr>
+
+<tr class="g"><td colspan="6"><strong>The rest of the <code>genesis</code> block</strong>:read for any environment, with a pipeline or without. None is required.</td></tr>
+<tr><td><code>genesis.inherits</code></td><td>list of strings</td><td>&ndash;</td><td>names of other environment files, without <code>.yml</code></td><td>No</td><td>Files merged in beneath this one, beside the ones its hyphenated name already gives it. Must be a list.</td></tr>
+<tr><td><code>genesis.use_create_env</code></td><td>boolean</td><td>the kit's answer</td><td><code>yes</code>, <code>no</code>, <code>true</code>, <code>false</code>, <code>1</code>, <code>0</code></td><td>No</td><td>Deploy with <code>bosh create-env</code>, not through a director. Such an environment holds no director lock, and is neither vaultified nor entombed.</td></tr>
+<tr><td><code>genesis.credhub_env</code></td><td>string</td><td><code>genesis.bosh_env</code>, else the environment's own name</td><td>an environment, named as <code>bosh_env</code> is</td><td>No</td><td>The environment whose director's CredHub holds this one's entombed secrets.</td></tr>
+<tr><td><code>genesis.vaultify</code></td><td>boolean</td><td><code>true</code></td><td>true, false</td><td>No</td><td>Rewrite the kit's CredHub variables as vault references, so Genesis generates, checks and rotates them in the vault. False leaves them for the director's CredHub to generate.</td></tr>
+<tr><td><code>genesis.entomb</code></td><td>boolean</td><td><code>true</code></td><td>true, false</td><td>No</td><td>At deploy, put each secret the manifest reads from the vault into the director's CredHub, and send BOSH a manifest that names them there, so the manifest BOSH stores holds no secret value. False sends the values in the manifest.</td></tr>
+<tr><td><code>genesis.vault</code></td><td>string</td><td>the repository's <code>secrets_provider</code></td><td><code>http(s)://host[:port][/namespace]</code>, then optionally <code>as &lt;alias&gt;</code>, <code>[no-]verify</code>, <code>[no-]strongbox</code>, as one string</td><td>No</td><td>A vault for this environment's own secrets, in place of the repository's.</td></tr>
+<tr><td><code>genesis.secrets_path</code></td><td>string</td><td>the environment's name with <code>-</code> as <code>/</code>, then <code>/&lt;deployment_type&gt;</code></td><td>a path under the secrets mount</td><td>No</td><td>Where this environment's secrets are kept under <code>genesis.secrets_mount</code>. <code>params.vault_prefix</code> and <code>params.vault</code> are still read.</td></tr>
+<tr><td><code>genesis.root_ca_path</code></td><td>string</td><td>&ndash;</td><td>a vault path</td><td>No</td><td>A root CA certificate held in the vault, which signs the certificates Genesis generates for this environment that name no signer of their own.</td></tr>
+<tr><td><code>genesis.ci_mount</code></td><td>string</td><td>with a pipeline, <code>&lt;path_prefix&gt;/&lt;team&gt;/</code> of the provider's secrets store; otherwise <code>&lt;secrets_mount&gt;ci/</code></td><td>a vault path</td><td>No</td><td>Where CI secrets are kept.</td></tr>
+<tr><td><code>genesis.ci_base</code></td><td>string</td><td><code>&lt;ci_mount&gt;&lt;pipeline&gt;/&lt;env&gt;/</code></td><td>a vault path</td><td>No</td><td>This environment's own path for CI secrets.</td></tr>
+<tr><td><code>genesis.ocfp_config_mount</code></td><td>string</td><td><code>&lt;secrets_mount&gt;config/</code></td><td>a vault path</td><td>No</td><td>Where an OCFP environment's configuration data is kept.</td></tr>
+<tr><td><code>genesis.unseal_vault_after_deploy</code></td><td>boolean</td><td>worked out from the kit and its addresses</td><td>true, false</td><td>No</td><td>Says outright whether deploying this environment can seal the vault Genesis itself is using. Where it can, the deploy needs the unseal keys at <code>&lt;secrets_mount&gt;vault/seal/keys</code> before it starts, and unseals the vault afterwards.</td></tr>
+<tr><td><code>genesis.reactions</code></td><td>map</td><td>&ndash;</td><td>keys <code>pre-deploy</code> and <code>post-deploy</code>, each a list of maps holding one <code>script</code> or one <code>addon</code></td><td>No</td><td>Scripts or kit addons run around a deploy. Any other key is refused.</td></tr>
+<tr><td><code>genesis.ops_dir</code></td><td>string</td><td><code>ops</code></td><td>a directory under the deployment root</td><td>No</td><td>Where a name in <code>kit.features</code> that is no kit feature is looked for as <code>&lt;name&gt;.yml</code>.</td></tr>
+</tbody>
+</table>
+
+<h2 style="break-before: page">Retired and refused keys</h2>
+<p class="note">Each key below is declared only so that it can be refused by name, and its refusal says what replaced it. Any other undeclared key is refused as <code>unknown configuration key</code>, listing the keys expected.</p>
+<table class="ret">
+<colgroup><col class="c1"><col class="c2"><col class="c3"></colgroup>
+<thead><tr><th>Retired key</th><th>Where it was written</th><th>What replaced it</th></tr></thead>
+<tbody>
+<tr><td><code>ci</code> (the whole block)</td><td><code>.genesis/config</code></td><td>The <code>pipeline</code> block in the same file. Set its keys there, then remove the old block with <code>genesis config --unset ci</code>.</td></tr>
+<tr><td><code>pipeline.source_control.remote</code></td><td><code>.genesis/config</code></td><td>Nothing is configured: the pipeline finds its remote by the repository it points at. Remove the key, and set <code>pipeline.source_control.repository</code> wherever the clone's remotes do not settle it. To keep a named remote in one clone, pin it there with <code>git config genesis.remote &lt;remote&gt;</code>.</td></tr>
+<tr><td><code>pipeline.source_control.auth.vault</code></td><td><code>.genesis/config</code></td><td><code>pipeline.source_control.auth.path</code>, naming the vault secret that holds the credential, or each component as <code>&lt;path&gt;:&lt;key&gt;</code>.</td></tr>
+<tr><td><code>pipeline.vault.url</code><br><code>pipeline.vault.namespace</code><br><code>pipeline.vault.options</code></td><td><code>.genesis/config</code></td><td>Nothing in the block: a task logs in to the repository's own vault. Where it is, is <code>secrets_provider.url</code>; its namespace is <code>secrets_provider.namespace</code>; TLS follows <code>secrets_provider.insecure</code> and strongbox follows <code>secrets_provider.strongbox</code>. Remove the keys with <code>genesis config --unset</code>.</td></tr>
+<tr><td><code>pipeline.provider.target</code></td><td><code>.genesis/config</code> (<code>concourse</code>)</td><td><code>pipeline.provider.url</code> and <code>pipeline.provider.team</code>. Each operator's fly target is then the one <code>--target</code> names for a run, else the one the clone pins with <code>git config genesis.fly-target &lt;target&gt;</code>, else the one <code>~/.flyrc</code> target whose URL and team are the configuration's.</td></tr>
+<tr><td><code>pipeline.provider.tagged</code></td><td><code>.genesis/config</code> (<code>concourse</code>)</td><td><code>genesis.pipeline.provider.tag</code> in each environment. Where the old key was true, set <code>genesis.pipeline.provider.tag: &lt;env&gt;</code> in each environment to keep the tags it gave.</td></tr>
+<tr><td><code>genesis.pipeline.locks</code></td><td>environment file</td><td>Nothing: both deploy locks are mandatory, backed by <code>pipeline.locker</code> in <code>.genesis/config</code>. Remove it.</td></tr>
+<tr><td><code>genesis.pipeline.status_signal</code><br><code>genesis.pipeline.signal_prefix</code></td><td>environment file</td><td>Signalling is <code>pipeline.shuttle</code> in <code>.genesis/config</code>. Remove them.</td></tr>
+<tr><td><code>genesis.pipeline.required_files</code></td><td>environment file</td><td><code>genesis.pipeline.track_additional_files</code>, with the same paths.</td></tr>
+<tr><td><code>genesis.pipeline.redeploy</code><br><code>genesis.pipeline.redeploy_cron_start</code><br><code>genesis.pipeline.redeploy_cron_stop</code></td><td>environment file</td><td><code>genesis.pipeline.redeploy_cron</code>: one crontab expression or a list of them, in UTC.</td></tr>
+<tr><td><code>genesis.pipeline.notifications</code></td><td>environment file</td><td>Notifications are the repository's settings, in <code>pipeline.notifications</code> of <code>.genesis/config</code>. Remove it.</td></tr>
+</tbody>
+</table>
+<p class="note">Refused values: <code>pipeline.shuttle.backend</code> set to anything but <code>s3</code> (<code>file</code> and <code>gcs</code> included), and <code>pipeline.provider.group_commits: false</code>. A legacy <code>ci.yml</code> whose top-level key is <code>pipeline:</code> is not read as configuration; beside an enabled version 3 pipeline it produces a warning asking for its removal.</p>
+
+<h2>Checks made at load, beyond the schema</h2>
+<p class="note">These run for every command once <code>pipeline.enabled</code> is true. A refusal about an environment key names the key, the environment, and the file that sets it.</p>
+<div class="cols">
+<div>
+<ul>
+  <li><code>deployment_type</code> must be a git ref component.</li>
+  <li>Every shape key must resolve from the environment's own files.</li>
+  <li>A key gated by a capability is refused where the provider does not declare it: <code>genesis.pipeline.manual</code> (<code>optional_git_triggers</code>) and <code>genesis.pipeline.redeploy_cron</code> (<code>scheduled_jobs</code>).</li>
+  <li><code>genesis.pipeline.redeploy_cron</code> is refused when <code>pipeline.redeploy.enabled</code> is false.</li>
+  <li><code>manifest_store</code> must be <code>exodus</code>, and every environment's Genesis floor must be 3.1.0 or later.</li>
+</ul>
+</div>
+<div>
+<ul>
+  <li>Every environment with a <code>genesis.pipeline</code> block must resolve <code>genesis.exodus_mount</code> to <code>pipeline.exodus_mount</code>.</li>
+  <li>The override file, <code>.genesis/pipeline-overrides-&lt;provider type&gt;.yml</code>, must be a YAML map. See the next section.</li>
+  <li>Every environment file must parse as YAML.</li>
+  <li><code>genesis.pipeline.prior_env</code> must name an environment of the pipeline, and the chain must not form a cycle. This is checked where the topology is read from control.</li>
+  <li><code>genesis.pipeline.track_bosh_configs</code> is refused on an OCFP environment that manages its own cloud configs.</li>
+</ul>
+</div>
+</div>
+
+<div class="keep">
+<h2>Extending the pipeline with an override file</h2>
+<p class="note">For a change to the compiled pipeline that no configuration key expresses: an extra resource, job or group, or a different value on something Genesis emits.</p>
+<div class="cols">
+<div>
+<ul>
+  <li><strong>One file per provider type</strong>, beside <code>.genesis/config</code>: <code>.genesis/pipeline-overrides-&lt;provider type&gt;.yml</code>. Under Concourse that is <code>.genesis/pipeline-overrides-concourse.yml</code>. There is no key for it in the <code>pipeline</code> section and no override directory. The <code>manual</code> provider emits no pipeline, so it reads none.</li>
+  <li><strong>How it is applied.</strong> After the pipeline is compiled, the file is merged over it with <code>spruce merge</code>, as written. Maps merge key by key. A list entry that has a <code>name</code> merges into the emitted entry of that name, and an entry with a new name is added. spruce's operators can be used.</li>
+  <li><strong>When it takes effect.</strong> At <code>genesis pipeline-apply</code>, so run the apply after changing the file. <code>genesis pipeline-apply --dry-run</code> prints the pipeline with the override merged, and is where the names Genesis emits can be read.</li>
+</ul>
+</div>
+<div>
+<ul>
+  <li><strong>Where it lives.</strong> In the repository, committed on <code>control</code> with the rest of the pipeline's definition.</li>
+  <li><strong>What is checked.</strong> At load the file must be a YAML map. A merge that fails refuses the apply and sets nothing.</li>
+  <li><strong>Migrating from v2.</strong> Anything a <code>ci.yml</code> carried outside its <code>pipeline:</code> key, which v2 merged over the generated pipeline, moves to this file.</li>
+</ul>
+<pre># .genesis/pipeline-overrides-concourse.yml
+resources:
+- name: nightly          # a new name, so it is added
+  type: time
+  source: {interval: 24h}
+jobs:
+- name: nightly-report   # a new job beside the emitted ones
+  plan:
+  - get: nightly
+    trigger: true</pre>
+</div>
+</div>
+</div>
+
+<div class="keep">
+<h2>Secrets the pipeline expects in the vault</h2>
+<p class="note">Under Concourse, each vault reference in <code>.genesis/config</code> is compiled to <code>((path.key))</code>, which Concourse resolves from its secrets store. A secret <code>&lt;name&gt;</code> is looked for at <code>&lt;path_prefix&gt;/&lt;team&gt;/&lt;pipeline&gt;/&lt;name&gt;</code>, then <code>&lt;path_prefix&gt;/&lt;team&gt;/&lt;name&gt;</code>, then <code>&lt;path_prefix&gt;/&lt;shared_path&gt;/&lt;name&gt;</code>, which is <code>/concourse/shared/&lt;name&gt;</code> by default and is skipped where <code>shared_path</code> is <code>""</code>. <code>&lt;path_prefix&gt;</code> is <code>pipeline.provider.secrets_store.path_prefix</code> (default <code>/concourse</code>), <code>&lt;team&gt;</code> is <code>pipeline.provider.team</code>, and <code>&lt;pipeline&gt;</code> is <code>pipeline.name</code> or else <code>deployment_type</code>. <code>genesis pipeline-apply</code> checks every reference and refuses when one is missing, unless <code>--missing-secrets-ok</code> is given.</p>
+<p class="note"><strong>How a reference is written.</strong> The form differs by key. A credential block's <code>path</code>, and <code>pipeline.shuttle.auth</code> written as a path, take a secret path with no key. A credential block's component keys, the shuttle's two among them, and <code>pipeline.source_control.api_token</code> take <code>&lt;path&gt;:&lt;key&gt;</code>, and nothing else in this build: a value written as <code>((path.key))</code> is wrapped a second time and does not resolve. From build <code>94e35c72</code> on, those keys take either form, and a value that starts with <code>((</code> is written into the pipeline as given. <code>pipeline.notifications.slack.webhook</code> takes either in both. The <code>pipeline.locker</code> keys are written into the pipeline as given, so a secret there is named as <code>((path.key))</code>. Every path is relative to the store, as <code>&lt;name&gt;</code> above, and is compiled unquoted, so a path holding a dot does not resolve.</p>
+<table class="sec">
+<colgroup><col class="c1"><col class="c2"><col class="c3"></colgroup>
+<thead><tr><th>Secret</th><th>Keys expected in it</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>The secret named by <code>pipeline.source_control.auth.path</code></td><td><code>ssh</code>: <code>private_key</code><br><code>https</code>: <code>username</code>, <code>password</code></td><td>A component key in the block (<code>&lt;path&gt;:&lt;key&gt;</code>) moves that component elsewhere.</td></tr>
+<tr><td>The secret named by <code>pipeline.vault.auth.path</code></td><td><code>approle</code>: <code>role_id</code>, <code>secret_id</code><br><code>token</code>: <code>token</code></td><td>As above.</td></tr>
+<tr><td>The secret named by <code>pipeline.registry.auth.path</code></td><td><code>basic</code>: <code>username</code>, <code>password</code></td><td>Only where <code>pipeline.registry.auth</code> is written.</td></tr>
+<tr><td>The secret named by <code>pipeline.shuttle.auth</code></td><td><code>access_key_id</code>, <code>secret_access_key</code></td><td>Only where <code>pipeline.shuttle.auth</code> is written.</td></tr>
+<tr><td>The reference in <code>pipeline.source_control.api_token</code></td><td>the key named in <code>&lt;path&gt;:&lt;key&gt;</code></td><td>The GitHub token propagate opens pull requests with.</td></tr>
+<tr><td>The reference in <code>pipeline.notifications.slack.webhook</code></td><td>the key named in the reference</td><td>The Slack webhook URL.</td></tr>
+<tr><td><code>&lt;path_prefix&gt;/&lt;team&gt;/&lt;pipeline&gt;/webhook</code></td><td><code>token</code></td><td>Only with <code>pipeline.provider.git.webhooks</code>. <code>genesis pipeline-apply</code> generates it, or keeps the one in place.</td></tr>
+<tr><td><code>&lt;path_prefix&gt;/&lt;team&gt;/&lt;pipeline&gt;/bosh/&lt;bosh_env&gt;</code></td><td><code>url</code>, <code>ca_cert</code>, <code>client</code>, <code>client_secret</code></td><td>Only for a director whose BOSH configs an environment tracks. <code>genesis pipeline-apply</code> copies them from the director's exodus record.</td></tr>
+</tbody>
+</table>
+<p class="note">Genesis itself writes the pipeline's applied record at <code>&lt;pipeline.exodus_mount&gt;_pipelines/&lt;deployment_type&gt;</code>, for example <code>/secret/exodus/_pipelines/bosh</code>. It is not set by hand.</p>
+</div>
+
+<div class="keep">
+<h2>Worked examples</h2>
+<p class="note">Both examples use the deployment type <code>bosh</code> and a chain of three environments, <code>lab</code>, then <code>staging</code>, then <code>prod</code>. Each shows the <code>pipeline:</code> block as it stands in <code>.genesis/config</code> once set with <code>genesis config --set</code>, and the matching fragment of each environment file on <code>control</code>. Outside the block, the load also needs <code>version: 3</code>, <code>manifest_store: exodus</code> (the default), a Genesis floor of 3.1.0 or later, and the repository's vault in <code>secrets_provider</code>, shown beneath each block. In either example, <code>source_control.repository</code> can be left out where the clone's remotes settle which repository the pipeline lives in; the manual provider requires nothing beyond the lines shown.</p>
+<div class="cols ex">
+<div>
+<h3>Manual provider</h3>
+<pre>pipeline:
+  enabled: true
+  provider:
+    type: manual
+secrets_provider:            # genesis secrets-provider &lt;target&gt;
+  url: https://vault.example.com</pre>
+<pre># lab.yml
+genesis:
+  env: lab
+
+# staging.yml
+genesis:
+  env: staging
+  pipeline:
+    prior_env: lab
+
+# prod.yml
+genesis:
+  env: prod
+  pipeline:
+    prior_env: staging</pre>
+<p class="note">Under the manual provider, <code>genesis.pipeline.manual</code> and <code>genesis.pipeline.redeploy_cron</code> are refused, and no <code>pipeline.provider</code> key other than <code>type</code> is accepted.</p>
+</div>
+<div class="wide">
+<h3>Concourse provider</h3>
+<pre>pipeline:
+  enabled: true
+  provider:
+    type: concourse
+    url:  https://ci.example.com
+    team: main
+  source_control:
+    repository: example-org/bosh-deployments
+    auth:
+      type: ssh
+      path: git              # holds private_key
+    identity:                # optional
+      name:  Genesis CI
+      email: ci@example.com
+  vault:                     # the vault itself is secrets_provider's
+    auth:
+      type: approle
+      path: vault/approle    # holds role_id, secret_id
+  locker:
+    url: https://locker.example.com
+  shuttle:
+    backend: s3
+    bucket:  genesis-pipelines
+    auth:    shuttle         # holds access_key_id, secret_access_key
+secrets_provider:            # genesis secrets-provider &lt;target&gt;
+  url: https://vault.example.com</pre>
+</div>
+<div>
+<h3>Concourse environment fragments</h3>
+<pre># lab.yml
+genesis:
+  env: lab
+
+# staging.yml
+genesis:
+  env: staging
+  pipeline:
+    prior_env: lab
+
+# prod.yml
+genesis:
+  env: prod
+  pipeline:
+    prior_env: staging
+    manual: true    # waits for a person</pre>
+<p class="note">Required by the schema: <code>secrets_provider.url</code> (set with <code>genesis secrets-provider</code>, and under the manual provider too), <code>provider.url</code>, <code>provider.team</code>, <code>source_control.auth</code>, <code>vault.auth</code>, <code>locker.url</code>, <code>shuttle.backend</code>, <code>shuttle.bucket</code>. The other lines are optional.</p>
+<p class="note">With <code>require_pr: true</code> on an environment, also set <code>pipeline.source_control.api_token</code>: the clone credential here is <code>ssh</code>.</p>
+</div>
+</div>
+</div>
+
+</body>
+</html>

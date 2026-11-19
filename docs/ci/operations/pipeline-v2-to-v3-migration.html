@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pipeline Migration: v2 to v3</title>
+<style>
+  @page { size: Letter; margin: 0.8in 0.85in; }
+  :root { --ink: #1c2229; --muted: #5a6570; --rule: #c9d0d6; --accent: #1f5f8b; --warn: #8a4b08; --warnbg: #fff6e8; --codebg: #f3f5f7; }
+  body { font: 10.5pt/1.45 "Helvetica Neue", Helvetica, Arial, sans-serif; color: var(--ink); background: #fff; max-width: 7in; margin: 0 auto; }
+  h1 { font-size: 20pt; line-height: 1.2; margin: 0 0 4pt; }
+  .meta { color: var(--muted); font-size: 9pt; margin-bottom: 18pt; border-bottom: 1px solid var(--rule); padding-bottom: 8pt; }
+  h2 { font-size: 13.5pt; color: var(--accent); margin: 20pt 0 6pt; border-bottom: 1px solid var(--rule); padding-bottom: 2pt; page-break-after: avoid; }
+  h3 { font-size: 11pt; margin: 14pt 0 4pt; page-break-after: avoid; }
+  p { margin: 0 0 7pt; }
+  ul, ol { margin: 0 0 8pt 1.2em; padding: 0; }
+  li { margin-bottom: 3pt; }
+  code { font: 9.2pt/1.35 Menlo, Consolas, monospace; background: var(--codebg); padding: 0 3px; border-radius: 2px; }
+  pre { font: 8.8pt/1.35 Menlo, Consolas, monospace; background: var(--codebg); border: 1px solid var(--rule); border-radius: 3px; padding: 7pt 9pt; margin: 4pt 0 10pt; white-space: pre-wrap; page-break-inside: avoid; }
+  pre code { background: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 4pt 0 10pt; font-size: 9.3pt; }
+  tr { page-break-inside: avoid; }
+  th, td { border: 1px solid var(--rule); padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #eef1f4; font-weight: 600; }
+  .callout { background: var(--warnbg); border-left: 4px solid var(--warn); padding: 6pt 10pt; margin: 8pt 0 10pt; page-break-inside: avoid; }
+  .callout strong { color: var(--warn); }
+  .small { font-size: 9pt; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Pipeline Migration: v2 to v3</h1>
+<div class="meta">Genesis operator guide &middot; applies to Genesis 3.2.x and later, moving a deployment repository from a v2 pipeline (<code>ci.yml</code>, <code>genesis repipe</code>) to a v3 <code>pipeline</code> configuration on the Concourse provider with a GitHub-hosted repository &middot; audience: operators migrating a repository's pipeline &middot; companions: <em>Pipeline Accounts and Permissions</em> and <em>New Pipeline: Expected First Runs</em></div>
+
+<h2>1. Summary</h2>
+<p>A v3 pipeline is generated from <code>.genesis/config</code> and the environment files, and set with <code>genesis pipeline-apply</code>. It replaces the v2 model, in which every job watched the default branch through path filters, with <em>branch propagation</em>:</p>
+<ul>
+  <li>Changes are committed to one branch, <code>control</code>.</li>
+  <li>A <code>propagate</code> job delivers each change to a branch per environment, <code>&lt;env&gt;/&lt;type&gt;</code>, once the environment before it has deployed it.</li>
+  <li>Each environment's deploy reads its own branch.</li>
+</ul>
+<p>Nothing migrates automatically. This guide is the cutover by hand:</p>
+<ul>
+  <li>the order to do it in (section 3);</li>
+  <li>where every <code>ci.yml</code> setting goes (sections 4 and 5);</li>
+  <li>the secrets the new pipeline reads, and where (section 6);</li>
+  <li>what was renamed (section 7);</li>
+  <li>what tools outside the pipeline must change (section 8);</li>
+  <li>what behaves differently (section 9);</li>
+  <li>what isn't available yet (section 10).</li>
+</ul>
+<div class="callout"><strong>Genesis never retires the v2 pipeline.</strong> Pause it before you start, and apply v3 paused beside it under a different name where the names would collide. Deleting the v2 pipeline is your decision, made by hand once v3 has proved itself.</div>
+
+<h2>2. Before you start</h2>
+<ul>
+  <li><strong>Genesis 3.2.x embedded</strong> in the deployment root (<code>genesis embed</code>). Every pipeline task runs the root's own <code>.genesis/bin/genesis</code>, and the compile refuses without it.</li>
+  <li><strong>A task image with git 2.34.1 or later.</strong> The default is <code>genesiscommunity/concourse:latest</code>.</li>
+  <li><strong>A <code>safe</code> other than 1.26.0</strong>, on your machine and in the task image. That one release exports secrets in a form Genesis doesn't read, and Genesis refuses its output by name. Use 1.26.1 or later. The deployment vault's mount can be KV version 1 or 2.</li>
+  <li><strong>Manifests kept in exodus</strong> (<code>manifest_store: exodus</code>), and every kit at 3.1.0 or later. The load refuses older ones.</li>
+  <li><strong>Names that are valid git ref components</strong> for every environment and for the deployment type, because each becomes a branch name.</li>
+  <li><strong>One exodus mount.</strong> Every environment's <code>genesis.exodus_mount</code> must resolve to the pipeline's <code>pipeline.exodus_mount</code> (default <code>/secret/exodus/</code>).</li>
+  <li><strong>The services v3 requires</strong>, which v2 left optional:
+    <ul>
+      <li>a locker: locks are mandatory, with no opt-out;</li>
+      <li>an S3 bucket for the shuttle, which carries deployment events and redeploy requests.</li>
+    </ul></li>
+  <li><strong>The accounts</strong> in <em>Pipeline Accounts and Permissions</em>:
+    <ul>
+      <li>an automation account for GitHub;</li>
+      <li>an AppRole on the deployment vault;</li>
+      <li>your own admin GitHub token for the apply.</li>
+    </ul></li>
+</ul>
+
+<h2>3. The cutover</h2>
+<ol>
+  <li><strong>Pause the v2 pipeline.</strong> Pause every job, or the whole pipeline with <code>fly -t &lt;target&gt; pause-pipeline -p &lt;v2-name&gt;</code>. Once a v3 Genesis is embedded, a v2 task fails: the commands its tasks ran are retired. Leave it paused; don't destroy it yet.</li>
+  <li><strong>Make <code>control</code>.</strong> Cut it from the current default branch, keeping its history, and make it the repository's default branch on GitHub:
+<pre><code>git switch -c control origin/&lt;default-branch&gt;
+git push -u origin control</code></pre>
+  History isn't carried into the deployment branches. Each deployment branch's first delivery is a single commit squashing control's applicable files. The branch must be named <code>control</code>: a different name, through <code>pipeline.source_control.control_branch</code>, isn't supported yet.</li>
+  <li><strong>Clear old environment-named branches.</strong> Delete a branch named for an environment alone (<code>lab</code>), or rename it to the new form (<code>git branch -m lab lab/&lt;type&gt;</code>). Every clone then runs <code>git fetch --prune</code> once.</li>
+  <li><strong>Write the configuration</strong> on <code>control</code>, with <code>genesis config</code> only. <code>.genesis/config</code> is generated, so don't edit it by hand. The order matters:
+<pre><code>genesis config --set version 3
+genesis config --set pipeline.name &lt;name&gt;        # see the callout below
+genesis config --set pipeline.provider.type concourse
+...                                              # section 4; enabled still false
+genesis config --set pipeline.enabled true       # last
+git rm ci.yml</code></pre>
+  One <code>genesis config</code> run can't both unset and set the same key; use two runs. Then add the <code>genesis.pipeline</code> keys to the environment files (section 5), and commit.</li>
+  <li><strong>Publish the secrets</strong> the pipeline will read (section 6), at the team scope of Concourse's vault.</li>
+  <li><strong>Preview.</strong> Each of these reads your working tree, says in a banner how it differs from <code>control</code> on the remote, and changes nothing:
+    <ul>
+      <li><code>genesis pipeline-describe</code> and <code>genesis pipeline-graph</code> show the environments and their order;</li>
+      <li><code>genesis pipeline-apply --dry-run</code> prints the pipeline and runs the secret check;</li>
+      <li><code>genesis pipeline-diff</code> compares the pipeline with the one Concourse has.</li>
+    </ul></li>
+  <li><strong>Push <code>control</code></strong>; the apply refuses a <code>control</code> the remote doesn't have.</li>
+  <li><strong>Apply, paused:</strong>
+<pre><code>GITHUB_AUTH_TOKEN=&lt;your admin token&gt; genesis pipeline-apply --paused</code></pre>
+  The apply does five things:
+    <ul>
+      <li>creates each <code>&lt;env&gt;/&lt;type&gt;</code> branch;</li>
+      <li>sets the branch rulesets;</li>
+      <li>writes the webhook token and the director credentials it owns (section 6);</li>
+      <li>checks every other secret;</li>
+      <li>records what it applied, and sets the pipeline, paused.</li>
+    </ul>
+  Run the apply and any push as separate commands, and check the apply's exit status before you push.</li>
+  <li><strong>Review, then unpause</strong> the new pipeline in Concourse. Expect what <em>New Pipeline: Expected First Runs</em> describes:
+    <ul>
+      <li><code>propagate</code> makes each environment's first delivery;</li>
+      <li>deploys run in order, a manual environment's when you start it;</li>
+      <li>each <code>redeploy-&lt;env&gt;</code> fails its first run on purpose;</li>
+      <li>a chained deploy stays pending until its predecessor has deployed once.</li>
+    </ul></li>
+  <li><strong>Retire v2 when you're ready.</strong> Once every environment has deployed through v3, destroy the v2 pipeline by hand (<code>fly -t &lt;target&gt; destroy-pipeline -p &lt;v2-name&gt;</code>), and remove any GitHub webhook that pointed at it.</li>
+</ol>
+<div class="callout"><strong>Pipeline names.</strong> <code>pipeline.name</code> defaults to the deployment type. If it would equal the v2 pipeline's name, choose another, for example <code>&lt;type&gt;-v3</code>. Applying v3 under the v2 name would overwrite the v2 pipeline, which this cutover forbids.</div>
+
+<h2>4. Repository settings: <code>ci.yml</code> to <code>.genesis/config</code></h2>
+<p>A <code>ci.yml</code> is refused by every pipeline command until it's removed. In <code>.genesis/config</code>, a key Genesis doesn't know is refused by name, and a retired key is refused naming its replacement. Set each key below with <code>genesis config --set &lt;key&gt; &lt;value&gt;</code>.</p>
+<table>
+  <tr><th>v2 <code>ci.yml</code></th><th>v3 <code>.genesis/config</code></th><th>Notes</th></tr>
+  <tr><td><code>pipeline.name</code></td><td><code>pipeline.name</code></td><td>Defaults to the deployment type. See section 3's callout.</td></tr>
+  <tr><td>(Concourse URL and team, from your fly target)</td><td><code>pipeline.provider.url</code>, <code>pipeline.provider.team</code></td><td>Both required. Each operator's own fly target is found by URL and team, or given with <code>--target</code>.</td></tr>
+  <tr><td><code>git.uri</code>, <code>owner</code>, <code>repo</code>, <code>host</code></td><td><code>pipeline.source_control.repository</code></td><td><code>owner/repo</code>, or a URL. It can be left unset where the clone's remotes leave no doubt.</td></tr>
+  <tr><td><code>git.branch</code></td><td>none</td><td>The pipeline's branch is always <code>control</code>.</td></tr>
+  <tr><td><code>git.private_key</code></td><td><code>pipeline.source_control.auth: {type: ssh, path: &lt;p&gt;}</code></td><td>Read as <code>((&lt;p&gt;.private_key))</code>.</td></tr>
+  <tr><td><code>git.username</code>, <code>git.password</code></td><td><code>pipeline.source_control.auth: {type: https, path: &lt;p&gt;}</code></td><td>Read as <code>((&lt;p&gt;.username))</code> and <code>((&lt;p&gt;.password))</code>. Use the automation account's token, not a person's.</td></tr>
+  <tr><td>(none)</td><td><code>pipeline.source_control.api_token</code></td><td>The token propagate opens pull requests with. Required with SSH auth wherever an environment sets <code>require_pr</code>; with HTTPS auth the clone's password serves.</td></tr>
+  <tr><td><code>git.commits.user_name</code>, <code>user_email</code></td><td><code>pipeline.source_control.identity.name</code>, <code>.email</code></td><td>Optional. Where either is left out, a task commits as <code>Concourse Bot &lt;concourse@pipeline&gt;</code>, as a v2 pipeline did.</td></tr>
+  <tr><td><code>git.config</code> (resource options such as <code>check_every</code>, <code>webhook_token</code>)</td><td><code>pipeline.provider.git</code>: <code>webhooks</code>, <code>check_every</code>, <code>control_check_every</code></td><td><ul><li>The options aren't passed through.</li><li><code>check_every</code> sets the deployment branches' polling; <code>1h</code> is recommended with webhooks on. <code>control_check_every</code> sets control's.</li><li><code>webhooks: true</code> has the apply keep a token and a GitHub hook.</li></ul></td></tr>
+  <tr><td><code>git.version_depth</code></td><td>none</td><td>A deploy takes its branch's tip.</td></tr>
+  <tr><td><code>git.root</code></td><td>none</td><td>The root is where <code>.genesis/config</code> sits.</td></tr>
+  <tr><td><code>vault.url</code></td><td>none</td><td>The tasks log in to the repository's own vault, which <code>secrets_provider.url</code> already names in the same file. <code>pipeline.vault.url</code> is refused at load. A repository whose <code>.genesis/config</code> has no <code>secrets_provider</code> (legacy mode, where each machine's <code>safe</code> target decides the vault) has to record one before its pipeline is enabled: run <code>genesis secrets-provider &lt;safe-target&gt;</code>, which changes that block and nothing else. With <code>pipeline.enabled: true</code> and no <code>secrets_provider.url</code>, every command refuses at load, under the manual provider too.</td></tr>
+  <tr><td><code>vault.role</code>, <code>vault.secret</code></td><td><code>pipeline.vault.auth: {type: approle, path: &lt;p&gt;}</code></td><td>Keys <code>role_id</code> and <code>secret_id</code>. Where yours are stored under other names, override per component, for example <code>role_id: &lt;p&gt;:approle_id</code>.</td></tr>
+  <tr><td><code>vault.verify</code>, <code>no-strongbox</code>, <code>namespace</code></td><td>none</td><td>A task takes <code>secrets_provider</code>'s <code>insecure</code>, <code>strongbox</code> and <code>namespace</code>, the settings an operator's own run uses. <code>pipeline.vault</code> holds <code>auth</code> alone; <code>namespace</code> and <code>options</code> under it are refused at load.</td></tr>
+  <tr><td><code>boshes.&lt;env&gt;.*</code> (director URL, CA, credentials, alias)</td><td>none</td><td>Tasks reach each director through Genesis and the vault AppRole. The director is the environment file's <code>genesis.bosh_env</code>. Only BOSH config tracking uses director credentials, and the apply copies those (section 6).</td></tr>
+  <tr><td><code>layouts</code></td><td><code>genesis.pipeline.prior_env</code> and <code>genesis.pipeline.manual</code> in the environment files</td><td>Section 5. One pipeline per deployment root; several named layouts in one file have no counterpart.</td></tr>
+  <tr><td><code>slack.webhook</code>, <code>channel</code>, <code>username</code>, <code>icon</code></td><td><code>pipeline.notifications.slack.webhook</code> (a <code>path:key</code>), <code>.channel</code>, <code>.username</code>, <code>.icon</code>, <code>.mentions_on_failure</code></td><td>A Slack app's webhook ignores <code>channel</code>, <code>username</code> and <code>icon</code>.</td></tr>
+  <tr><td><code>notifications: inline | parallel | grouped</code></td><td><code>pipeline.notifications.style</code></td><td>Same meanings. <code>email</code> is not emitted.</td></tr>
+  <tr><td><code>registry.uri</code>, <code>username</code>, <code>password</code></td><td><code>pipeline.registry.uri</code>, <code>pipeline.registry.auth: {type: basic, path: &lt;p&gt;}</code></td><td>The <code>uri</code> prefixes only the images Genesis names by default. A task image you name is taken as written, so write it in full, host included.</td></tr>
+  <tr><td><code>task.image</code>, <code>version</code>, <code>privileged</code></td><td><code>pipeline.provider.task.image</code>, <code>.version</code>, <code>.privileged</code></td><td></td></tr>
+  <tr><td><code>locker.*</code></td><td><code>pipeline.locker.url</code>, <code>username</code>, <code>password</code>, <code>ca_cert</code>, <code>skip_ssl_validation</code></td><td>Required. <code>password</code> is written in Concourse's own form, for example <code>((locker/api.password))</code>. TLS is verified unless you say otherwise; see the callout below.</td></tr>
+  <tr><td>(none)</td><td><code>pipeline.shuttle</code>: <code>backend: s3</code>, <code>bucket</code>, <code>region</code>, <code>endpoint</code>, <code>auth</code>, <code>tls_skip_verify</code></td><td>Required. <code>auth</code> is a path holding <code>access_key_id</code> and <code>secret_access_key</code>, or a block naming each as <code>&lt;path&gt;:&lt;key&gt;</code> where they are stored under other names (section 6).</td></tr>
+  <tr><td><code>public</code></td><td><code>pipeline.provider.public</code></td><td>False by default: build logs are private unless you set it.</td></tr>
+  <tr><td><code>tagged: true</code></td><td><code>genesis.pipeline.provider.tag</code> per environment (section 5)</td><td><code>tagged</code> is refused as retired.</td></tr>
+  <tr><td><code>unredacted</code></td><td><code>pipeline.unredacted</code></td><td></td></tr>
+  <tr><td><code>ocfp</code></td><td>none</td><td>OCFP is read from each environment's <code>kit.features</code>.</td></tr>
+  <tr><td><code>debug</code>, <code>require-passed-caches</code></td><td>none</td><td>The v2 cache resources are gone.</td></tr>
+  <tr><td><code>groups</code></td><td>none</td><td>Groups are fixed (section 7).</td></tr>
+  <tr><td><code>errands</code>, <code>auto-update</code></td><td>none yet</td><td>Section 10.</td></tr>
+  <tr><td>top-level <code>jobs:</code>, <code>resources:</code>, <code>groups:</code> merged over the pipeline</td><td><code>.genesis/pipeline-overrides-concourse.yml</code></td><td>Merged as written. Review it first: an entry keyed to a v2 name now adds a new object rather than changing one.</td></tr>
+</table>
+<div class="callout"><strong>The locker's TLS default changed.</strong> v2 skipped certificate verification for the locker unless <code>ci.yml</code> said otherwise. v3 verifies it unless <code>pipeline.locker.skip_ssl_validation</code> is <code>true</code>. A repository whose <code>ci.yml</code> named neither <code>skip_ssl_validation</code> nor <code>ca_cert</code> was relying on the v2 default. Set <code>pipeline.locker.ca_cert</code>, or <code>skip_ssl_validation: true</code>, or every lock step fails its TLS handshake.</div>
+<p class="small">New in v3, with nothing to map from:</p>
+<ul class="small">
+  <li><code>pipeline.redeploy.enabled</code> and <code>.style</code>: the redeploy jobs, on by default.</li>
+  <li><code>pipeline.recreate_on_deploy</code>.</li>
+  <li><code>pipeline.exodus_mount</code>.</li>
+  <li><code>pipeline.source_control.control_requires_pr</code> and <code>pr_prefix</code>.</li>
+  <li><code>pipeline.provider.secrets_store</code>, where Concourse's vault is not the repository's (section 6).</li>
+  <li><code>pipeline.provider.pause_after_set</code>, <code>insecure</code>, <code>min_fly_version</code>, <code>fly_bin_path</code>.</li>
+  <li><code>pipeline.provider.group_commits</code>, which only accepts <code>true</code>.</li>
+</ul>
+
+<h2>5. Environment settings: <code>layouts</code> to <code>genesis.pipeline</code></h2>
+<p>Each environment's place in the pipeline lives in its own file, under <code>genesis.pipeline</code>. These keys are read merged, so one set in a site file applies to every environment beneath it. They must resolve from the files alone: no <code>(( vault ))</code> or credhub values.</p>
+<table>
+  <tr><th>v2 layout</th><th>v3, in the environment file</th></tr>
+  <tr><td><code>A -&gt; B</code></td><td>in B's file: <code>genesis.pipeline.prior_env: A</code></td></tr>
+  <tr><td><code>auto &lt;pattern&gt;</code>, for the environments it matched</td><td>nothing: an environment deploys automatically unless marked manual</td></tr>
+  <tr><td>every environment the <code>auto</code> pattern did <em>not</em> match</td><td><code>genesis.pipeline.manual: true</code></td></tr>
+  <tr><td><code>tagged: true</code></td><td><code>genesis.pipeline.provider.tag: &lt;worker tag&gt;</code> (a string or a list); the environment's own name keeps the old effect</td></tr>
+</table>
+<div class="callout"><strong>Manual is now opt-in.</strong> In v2 an environment was manual unless an <code>auto</code> pattern matched it. In v3 it's automatic unless it sets <code>manual: true</code>. Miss this, and a tier that was manual starts deploying on its own.</div>
+<p>Other per-environment keys:</p>
+<ul>
+  <li><code>require_pr</code>: deliveries arrive as a pull request into the environment's branch, which a reviewer approves and merges.</li>
+  <li><code>track_bosh_configs</code>: watch the director's configs (section 9); Classic environments only.</li>
+  <li><code>track_additional_files</code>: replaces <code>required_files</code>.</li>
+  <li><code>track_dependencies</code>, <code>redeploy_cron</code>: accepted, but nothing acts on them yet (section 10).</li>
+  <li>The director is <code>genesis.bosh_env</code>, as before. It also names the director's lock.</li>
+</ul>
+<p class="small">Retired keys are refused naming their replacement. This covers <code>locks</code>, <code>status_signal</code>, <code>signal_prefix</code>, <code>required_files</code>, <code>redeploy</code>, <code>redeploy_cron_start</code> and <code>redeploy_cron_stop</code>. The per-environment <code>notifications</code> override loads but is not honoured yet, so leave it unset.</p>
+
+<h2>6. Secrets</h2>
+<p>The pipeline carries no secret. Each is a Concourse variable, <code>((path.key))</code>, which Concourse resolves from its own vault in this order:</p>
+<pre><code>&lt;path_prefix&gt;/&lt;team&gt;/&lt;pipeline&gt;/&lt;path&gt;   then   &lt;path_prefix&gt;/&lt;team&gt;/&lt;path&gt;   then   &lt;path_prefix&gt;/&lt;shared_path&gt;/&lt;path&gt;</code></pre>
+<p><code>path_prefix</code> is <code>/concourse</code> and <code>shared_path</code> is <code>shared</code>, so the third place is <code>/concourse/shared</code>, unless <code>pipeline.provider.secrets_store</code> says otherwise. That block also names Concourse's vault by URL where it isn't the repository's own.</p>
+<div class="callout"><strong>The shared path must match Concourse's own.</strong> <code>shared</code> is what the Genesis Concourse kit sets <code>--vault-shared-path</code> to. Genesis can't read the server's setting, so on a Concourse run with another shared path, set <code>shared_path</code> to it, and on one run with none, set <code>shared_path: ""</code>. Otherwise the apply's check reports a secret found where Concourse never looks.</div>
+<p>The inventory below is every secret a v3 pipeline can read. The path in each row is the one you name in <code>.genesis/config</code>; Concourse looks for it under the scopes above.</p>
+
+<h3>Common to the team's pipelines: you publish these</h3>
+<p>Publish each once, at the <strong>team</strong> scope (<code>&lt;path_prefix&gt;/&lt;team&gt;/&lt;path&gt;</code>), or at the shared path where several teams use the same one. Every pipeline of the team then finds it.</p>
+<table>
+  <tr><th>Secret, and what it is for</th><th>Named in <code>.genesis/config</code> by</th><th>Keys at that path</th><th>Who writes it</th></tr>
+  <tr><td><strong>Clone credential.</strong> Every git resource and the <code>propagate</code> job clone and push with it.</td><td><code>pipeline.source_control.auth.path</code></td><td><code>private_key</code>, or <code>username</code> and <code>password</code></td><td>you</td></tr>
+  <tr><td><strong>Pull request token.</strong> <code>propagate</code> opens and updates pull requests with it.</td><td><code>pipeline.source_control.api_token</code></td><td>as named, for example <code>token</code></td><td>you, from the automation account</td></tr>
+  <tr><td><strong>Vault AppRole.</strong> Every task logs in to the deployment vault with it.</td><td><code>pipeline.vault.auth.path</code></td><td><code>role_id</code>, <code>secret_id</code></td><td>the vault owner</td></tr>
+  <tr><td><strong>Shuttle.</strong> Deployment events and redeploy requests are read and written in the S3 bucket with it.</td><td><code>pipeline.shuttle.auth</code>, as a path or as a block naming each key</td><td><code>access_key_id</code>, <code>secret_access_key</code>, or the keys the block names</td><td>the bucket owner</td></tr>
+  <tr><td><strong>Locker.</strong> Every deploy and redeploy takes its locks with it.</td><td><code>pipeline.locker.password</code></td><td>as written, for example <code>password</code></td><td>the locker owner</td></tr>
+  <tr><td><strong>Slack webhook.</strong> Notifications are posted to it.</td><td><code>pipeline.notifications.slack.webhook</code></td><td>as named, for example <code>webhook</code></td><td>you</td></tr>
+  <tr><td><strong>Registry.</strong> Task images are pulled with it, where the registry needs a login.</td><td><code>pipeline.registry.auth.path</code></td><td><code>username</code>, <code>password</code></td><td>the registry owner</td></tr>
+</table>
+
+<h3>One per pipeline: the apply writes these</h3>
+<p>Both live at the <strong>pipeline</strong> scope (<code>&lt;path_prefix&gt;/&lt;team&gt;/&lt;pipeline&gt;/&lt;path&gt;</code>). You never publish them.</p>
+<table>
+  <tr><th>Secret, and what it is for</th><th>Asked for by</th><th>Path and keys</th><th>How the apply keeps it</th></tr>
+  <tr><td><strong>Webhook token.</strong> GitHub's push hook presents it so Concourse checks <code>control</code> at once.</td><td><code>pipeline.provider.git.webhooks: true</code></td><td><code>webhook</code>, key <code>token</code></td><td>Generated once and kept. <code>--rotate-webhook-token</code> replaces it.</td></tr>
+  <tr><td><strong>BOSH director credentials,</strong> one set per tracked director. The config checks read the director's cloud, runtime and CPI configs with them.</td><td><code>genesis.pipeline.track_bosh_configs</code> in an environment file</td><td><code>bosh/&lt;bosh_env&gt;</code>, keys <code>url</code>, <code>ca_cert</code>, <code>client</code>, <code>client_secret</code></td><td>Copied from the director's exodus record, only where they differ. Run the apply again after the director's credentials rotate.</td></tr>
+</table>
+
+<h3>How a secret is named</h3>
+<ul>
+  <li><strong>A credential block</strong> (<code>source_control.auth</code>, <code>vault.auth</code>, <code>registry.auth</code>, <code>shuttle.auth</code>) names a <code>path</code>, and each of its keys is read from that path under its own name. The shuttle's may be written as the path alone.</li>
+  <li><strong>One value</strong> (<code>api_token</code>, the Slack webhook, or one key of a credential block stored under another name) is written as <code>&lt;path&gt;:&lt;key&gt;</code>, or in Concourse's own form, <code>((path.key))</code>. The two mean the same.</li>
+  <li><strong>The locker's keys</strong> are written into the pipeline as given, so its password is written only in Concourse's form.</li>
+</ul>
+<ul>
+  <li><strong>Keys v2 stored under other names can stay.</strong> Name each where it is held, in place of the path:
+<pre><code>pipeline.shuttle.auth.access_key_id      management-bucket:aws_access_key_id
+pipeline.shuttle.auth.secret_access_key  management-bucket:aws_secret_access_key
+pipeline.vault.auth.role_id              &lt;path&gt;:approle_id</code></pre>
+  Each is set with <code>genesis config --set &lt;key&gt; &lt;value&gt;</code>.</li>
+  <li><strong>The apply's secret check.</strong> Before it sets anything, <code>pipeline-apply</code> looks every reference up where Concourse would and reports it as found, missing, or unverified (when it can't read the store). It never prints a value. A missing reference refuses the apply unless you give <code>--missing-secrets-ok</code>.</li>
+  <li><strong>Access the apply needs.</strong> The operator running it needs write access to the pipeline scope, and read access to the tracked directors' exodus records in the deployment vault.</li>
+  <li><strong>Silence <code>safe set</code></strong> when you publish a secret by hand, because it echoes the value:</li>
+</ul>
+<pre><code>safe -T &lt;concourse-vault&gt; set concourse/&lt;team&gt;/github token="$(pbpaste)" &gt;/dev/null 2&gt;&amp;1; echo "rc=$?"</code></pre>
+<p class="small">A v2 webhook secret shared by every git resource is replaced by the pipeline's own token. A v2 pipeline's per-director credentials are no longer referenced except through the apply's copy.</p>
+
+<h2>7. Names: jobs, resources and groups</h2>
+<table>
+  <tr><th>v2</th><th>v3</th></tr>
+  <tr><td>job <code>&lt;env&gt;-&lt;type&gt;</code></td><td><code>deploy-&lt;env&gt;</code></td></tr>
+  <tr><td>job <code>notify-&lt;env&gt;-&lt;type&gt;-changes</code></td><td><code>notify-&lt;env&gt;</code>, for manual environments where Slack is set; it posts what deploying would change</td></tr>
+  <tr><td>a redeploy job added by hand</td><td><code>redeploy-&lt;env&gt;</code>, built in, on by default</td></tr>
+  <tr><td>job <code>update-genesis-assets</code></td><td>none yet</td></tr>
+  <tr><td>(none)</td><td><code>propagate</code>, the one job that delivers changes</td></tr>
+  <tr><td>(none)</td><td><code>notify-&lt;bosh_env&gt;-bosh-configs</code>, one per tracked director</td></tr>
+  <tr><td>resource <code>git</code></td><td><code>control-branch</code></td></tr>
+  <tr><td>resources <code>&lt;env&gt;-changes</code> and <code>&lt;env&gt;-cache</code></td><td><code>&lt;env&gt;-branch</code>, the environment's own branch, unfiltered</td></tr>
+  <tr><td>resource <code>&lt;env&gt;-deployment-lock</code></td><td><code>&lt;env&gt;-&lt;type&gt;-lock</code>, with the same lock name</td></tr>
+  <tr><td>resource <code>&lt;env&gt;-bosh-lock</code> (locked by director URL)</td><td><code>&lt;bosh_env&gt;-bosh-lock</code> (locked by director name); none for a create-env deployment</td></tr>
+  <tr><td>resources <code>&lt;env&gt;-cloud-config</code>, <code>&lt;env&gt;-runtime-config</code></td><td><code>&lt;bosh_env&gt;-bosh-&lt;cloud|runtime|cpi&gt;-config</code>, one per director and type</td></tr>
+  <tr><td>a shuttle resource added by hand for redeploy requests</td><td><code>redeploy_&lt;env&gt;-&lt;type&gt;</code>, plus the events <code>&lt;env&gt;-&lt;type&gt;_deployed</code> and <code>&lt;env&gt;-&lt;type&gt;_redeployed</code></td></tr>
+  <tr><td>groups <code>&lt;name&gt;</code>, <code>notifications</code>, <code>genesis-updates</code>, and any added by hand</td><td><code>&lt;pipeline.name&gt;</code> (the deployments), <code>notifications</code> (style <code>grouped</code>), <code>redeploys</code> (where <code>pipeline.redeploy.style</code> is <code>grouped</code>), and <code>propagation</code>, last</td></tr>
+</table>
+
+<h2>8. Tools outside the pipeline</h2>
+<ul>
+  <li><strong>Redeploy requests.</strong> Anything that asked for a redeploy by writing to a v2 shuttle path, such as another pipeline or a secret-rotation job, now writes to the shuttle bucket at <code>&lt;env&gt;-&lt;type&gt;/redeploy</code>. Readers of deployment events read <code>&lt;env&gt;-&lt;type&gt;/deployed</code> and <code>/redeployed</code>.</li>
+  <li><strong>Pipeline overrides and scripts</strong> keyed to v2 names (<code>&lt;env&gt;-&lt;type&gt;</code> jobs, <code>-changes</code>, <code>-cache</code>, <code>git</code>) match nothing in v3. Rename them using section 7.</li>
+  <li><strong>GitHub webhooks.</strong> The apply manages only the hook that calls its own pipeline. Remove a v2 pipeline's hook by hand when you retire it.</li>
+  <li><strong>Commands.</strong>
+    <ul>
+      <li><code>genesis repipe</code> (and <code>genesis push</code>), <code>genesis graph</code> and <code>genesis describe</code> are retired in 3.2. Each refuses, whatever it is given, and names its replacement: <code>pipeline-apply</code>, <code>pipeline-graph</code> and <code>pipeline-describe</code>. Update any script that calls them.</li>
+      <li>The commands a v2 task ran (<code>ci-pipeline-deploy</code>, <code>ci-show-changes</code>, <code>ci-generate-cache</code>) are retired.</li>
+    </ul></li>
+  <li><strong>Deploying by hand.</strong> While the pipeline is enabled, <code>genesis &lt;env&gt; deploy</code> and <code>propagate</code> refuse at a terminal without <code>--force</code>, since a hand deploy takes none of the pipeline's locks. <code>--dry-run</code> is always allowed.</li>
+  <li><strong>Scripts that read an exit status.</strong> A Genesis command that fails no longer exits 1 for everything. Section 9 lists the codes; a wrapper that tests for exactly 1 needs changing.</li>
+  <li><strong>An older Genesis against the same director.</strong> Don't run one while 3.2 deploys there; section 9 says why, under the network claims lock.</li>
+</ul>
+
+<h2>9. What behaves differently</h2>
+<ul>
+  <li><strong>Delivery by branch.</strong>
+    <ul>
+      <li>You commit to <code>control</code>. <code>propagate</code> delivers each control commit to every environment it touches.</li>
+      <li>A delivery mirrors the environment's files: its hierarchy, <code>.genesis/config</code>, kits, <code>ops/</code>, the embedded Genesis, and its <code>track_additional_files</code>.</li>
+      <li>A deploy reads its own branch's tip and writes nothing back to git. Manifests live in exodus.</li>
+    </ul></li>
+  <li><strong>Holds.</strong>
+    <ul>
+      <li>A change waits until the environment before it has deployed it.</li>
+      <li>A control commit with a <code>Genesis-Stage: &lt;reason&gt;</code> trailer is held until it's released.</li>
+      <li>Every environment starts uncertified and holds those after it until it deploys once through the pipeline. Nothing deployed before the migration counts.</li>
+    </ul></li>
+  <li><strong>Pull request environments.</strong>
+    <ul>
+      <li>With <code>require_pr</code>, each delivery opens or updates <code>pr/&lt;env&gt;/&lt;type&gt;</code> as one commit, merged by rebase only.</li>
+      <li>A reviewer needs Write and must not be the automation account.</li>
+      <li>One Slack message per run lists the pull requests.</li>
+      <li>A merge waits for the branch's next poll.</li>
+    </ul></li>
+  <li><strong>Manual environments.</strong> Their deploy never triggers on its own. Their notify job posts what deploying would change, and a deploy started by hand names who started it.</li>
+  <li><strong>Locks are always on.</strong>
+    <ul>
+      <li>A deploy or redeploy holds its own deployment's lock.</li>
+      <li>A director's deploy also holds that director's lock against the deployments on it.</li>
+      <li>A lost worker can strand a lock; release it with the locker's own tools.</li>
+    </ul></li>
+  <li><strong>Redeploys.</strong> <code>redeploy-&lt;env&gt;</code> runs <code>deploy --redeploy</code> on request, by its button or from the shuttle queue. Nothing triggers it automatically yet.</li>
+  <li><strong>BOSH config tracking only notifies.</strong>
+    <ul>
+      <li>One check per director and config type, and one Slack notice per director when a config changes.</li>
+      <li>The first check after an apply sends one notice.</li>
+      <li>It triggers no deploy or redeploy.</li>
+      <li>An OCFP environment, which uploads its own configs, refuses the key.</li>
+    </ul></li>
+  <li><strong>Worker tags</strong> go only on the steps that need an environment's network: its deploy, redeploy and notify tasks, and its director's config checks. Untagged workers must reach GitHub, the vault, the locker, S3, Slack and Concourse itself.</li>
+  <li><strong>Webhooks.</strong> With <code>webhooks</code> on, a push to <code>control</code> is checked at once, and <code>propagate</code> asks Concourse to check each branch it pushes. Other moves wait for the poll. GitHub allows twenty push hooks per repository.</li>
+  <li><strong>The apply is repeatable.</strong> It reports each write as new, changed or already in place.</li>
+  <li><strong>Previews read your working tree; the apply reads <code>control</code>.</strong>
+    <ul>
+      <li><code>pipeline-describe</code>, <code>pipeline-graph</code>, <code>pipeline-diff</code> and <code>pipeline-apply --dry-run</code> read the working tree, so a change can be checked before it is committed. A banner lists every way the tree differs from <code>control</code> on the remote, and <code>--from &lt;ref&gt;</code> previews a commit instead.</li>
+      <li>A real apply runs only from <code>control</code>, committed and pushed.</li>
+    </ul></li>
+  <li><strong>Slack messages</strong> begin with an emoji naming their kind and link to their build.</li>
+  <li><strong>Build logs are private</strong> unless <code>pipeline.provider.public</code> is set.</li>
+  <li><strong>Removing an environment.</strong>
+    <ul>
+      <li>Deleting an environment's file from <code>control</code> leaves its branch, its ruleset, any open pull request and its vault records behind. <code>pipeline-apply</code> lists each such environment as an orphan, with what it left.</li>
+      <li><code>pipeline-apply --cleanup-orphans</code> removes those traces, after asking. It removes nothing where it couldn't read an orphan's vault records, since they are among the traces.</li>
+      <li>Neither tears the deployment down. Where an orphan is still deployed, the apply says so: restore its file from its branch and run <code>genesis &lt;env&gt; terminate</code>.</li>
+    </ul></li>
+  <li><strong>The network claims lock.</strong> A deploy that writes a director's network claims takes a lock in the vault, which 3.2 keeps in a secret of its own. An older Genesis keeps it elsewhere and doesn't see the new one. 3.2 refuses while an older Genesis holds a fresh lock, but the reverse isn't true, so don't run an older Genesis against a director while 3.2 deploys there.</li>
+</ul>
+
+<h3>When the vault can't be read</h3>
+<p>Genesis reads records from the vault to decide what to do: what an environment last deployed, whether a hold stands, what the pipeline was applied from. In 3.2 a read that fails is never taken for a record that isn't there.</p>
+<ul>
+  <li><strong>A command stops</strong> on a record it couldn't read, names the path and what the vault said, and says what it had done by then. A deploy stops before it deploys. A secrets command stops before it changes anything.</li>
+  <li><strong>A report keeps the row.</strong> <code>pipeline-status</code> prints every environment, puts the reason on the row it couldn't read, and exits non-zero. A <code>propagate</code> run fails that one environment, holds those after it, and delivers to the rest.</li>
+  <li><strong>The exit status names the cause,</strong> so a wrapper can tell what to do next:</li>
+</ul>
+<table>
+  <tr><th>Exit</th><th>Cause</th><th>What helps</th></tr>
+  <tr><td><code>77</code></td><td>The vault refused the read: the token has no access to the path, or has expired.</td><td>Authenticate again, or have the policy extended. A retry alone does not.</td></tr>
+  <tr><td><code>69</code></td><td>The vault gave no usable answer: sealed, unreachable, or an answer Genesis couldn't read.</td><td>A retry, once the vault answers.</td></tr>
+  <tr><td><code>65</code></td><td>The record was read and isn't a valid one, or the repository's state is not what the command needs.</td><td>Look at what the message names, and repair it.</td></tr>
+  <tr><td><code>78</code></td><td>The configuration is wrong or incomplete.</td><td>Fix the configuration.</td></tr>
+  <tr><td><code>75</code></td><td>A fault the next run may clear, such as a failed push.</td><td>Run it again.</td></tr>
+  <tr><td><code>130</code></td><td>You declined, or interrupted it.</td><td></td></tr>
+</table>
+<p>A <code>propagate</code> run with more than one failed environment exits the most serious of their causes, in the order 78, 77, 65, 69, 75. In <code>pipeline-status --json</code>, a row that couldn't be read carries the same code as <code>exit_code</code>, beside its <code>error</code>.</p>
+
+<h2>10. Not available yet</h2>
+<ul>
+  <li><strong>Automatic redeploys:</strong>
+    <ul>
+      <li>on a schedule (<code>redeploy_cron</code> loads but schedules nothing);</li>
+      <li>when a dependency deploys (<code>track_dependencies</code> is recorded only);</li>
+      <li>when a stemcell or a director's config changes.</li>
+    </ul></li>
+  <li><strong>Automatic kit and Genesis updates</strong> (v2's <code>update-genesis-assets</code>).</li>
+  <li><strong>An <code>all</code> group.</strong></li>
+  <li><strong>Errands and tasks</strong> run after a deploy.</li>
+  <li><strong>A director's deploy refreshing</strong> the credential copies of the pipelines that track it. Until then, re-run <code>pipeline-apply</code> after a director's credentials rotate.</li>
+  <li><strong>A watcher</strong> that checks a deployment branch when a pull request merges, instead of waiting for the poll.</li>
+  <li><strong>The apply using the pipeline's own GitHub token</strong> for the hook. It uses yours.</li>
+  <li><strong>A per-environment polling interval</strong>, and per-environment notification settings.</li>
+</ul>
+
+<h2>11. Checklist</h2>
+<ol>
+  <li>v2 pipeline paused.</li>
+  <li><code>control</code> cut from the default branch, pushed, and made GitHub's default.</li>
+  <li>Old environment-named branches deleted or renamed.</li>
+  <li><code>genesis config</code>: <code>version 3</code>, the pipeline block (section 4), <code>pipeline.enabled true</code> last.</li>
+  <li><code>ci.yml</code> removed.</li>
+  <li>Environment files: <code>prior_env</code>, <code>manual</code> on every formerly non-<code>auto</code> environment, tags, and tracking (section 5).</li>
+  <li>Genesis 3.2.x embedded.</li>
+  <li>Secrets published at the team scope, with v2 key names changed where needed (section 6).</li>
+  <li>Locker TLS settled: <code>ca_cert</code> or <code>skip_ssl_validation: true</code> set where v2 relied on its default (section 4).</li>
+  <li><code>safe</code> is not 1.26.0, on your machine and in the task image.</li>
+  <li><code>pipeline.name</code> differs from the v2 pipeline's.</li>
+  <li>Previews clean, and <code>pipeline-apply --dry-run</code> finding every secret.</li>
+  <li><code>control</code> pushed.</li>
+  <li><code>genesis pipeline-apply --paused</code> run with an admin <code>GITHUB_AUTH_TOKEN</code>, and its exit status checked.</li>
+  <li>The new pipeline reviewed and unpaused, and its first runs as <em>Expected First Runs</em> describes.</li>
+  <li>Tools outside the pipeline updated (section 8).</li>
+  <li>When every environment has deployed through v3: the v2 pipeline destroyed and its webhook removed, by hand.</li>
+</ol>
+
+</body>
+</html>

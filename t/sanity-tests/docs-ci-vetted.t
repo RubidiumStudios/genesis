@@ -28,7 +28,11 @@ sub slurp {
 # which is a green that proves nothing, so the list is read once here and an
 # empty one fails and ends this file.  A bail would end the whole run over
 # one file's working directory.
-my @PAGES = sort grep {length} split /\n/, qx(git ls-files docs/ci);
+#
+# A PDF under docs/ci is a rendering of the HTML page beside it, and is
+# compressed bytes in which a rule's pattern can stand by chance, so the
+# rules are read against the page's source and the rendering is left out.
+my @PAGES = sort grep {length && !/\.pdf\z/} split /\n/, qx(git ls-files docs/ci);
 unless (@PAGES) {
 	# The exit carries no status of its own, because Test::Builder sets one
 	# from the failing row.

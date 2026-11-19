@@ -17,6 +17,17 @@ If you are an operator who wants to set up automated deployment pipelines for yo
 | [CLI Commands](user/cli-commands.md) | `genesis propagate` and the `pipeline-*` commands |
 | [Branches and Commands](user/branches-and-commands.md) | Which branch each command expects, the conditions a feature branch has to meet, and the two flags that target the deployed commit |
 
+### Operations Notes
+
+These are written to be printed or handed to an operations team. Each is an HTML page with a PDF rendering of it beside it.
+
+| Document | What It Covers |
+|----------|----------------|
+| [Pipeline Configuration Reference](operations/pipeline-config-reference.html) ([PDF](operations/pipeline-config-reference.pdf)) | Every key an operator sets for a pipeline, in `.genesis/config` and in the environment file, on one sheet: its type, default, allowed values, and when it is required |
+| [Pipeline Migration: v2 to v3](operations/pipeline-v2-to-v3-migration.html) ([PDF](operations/pipeline-v2-to-v3-migration.pdf)) | The cutover from a `ci.yml` pipeline, key by key and secret by secret |
+| [Pipeline Accounts and Permissions](operations/pipeline-accounts-and-permissions.html) ([PDF](operations/pipeline-accounts-and-permissions.pdf)) | The identities a pipeline acts as, where their credentials are stored, and what each must be allowed to do |
+| [New Pipeline: Expected First Runs](operations/pipeline-first-runs.html) ([PDF](operations/pipeline-first-runs.pdf)) | What a newly applied pipeline does on its first runs, and which refusals are expected |
+
 ## For Developers
 
 If you are contributing to the Genesis CI compiler or writing a new CI platform provider, start here:
