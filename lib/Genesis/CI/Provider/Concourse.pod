@@ -176,7 +176,8 @@ L</_check_interval_rule($value)>.
 
 C<secrets_store> names the store Concourse resolves the pipeline's C<((...))>
 references from, by C<url> (unset, the environment's own vault), C<namespace>,
-C<path_prefix> (default C</concourse>), C<shared_path> and C<insecure> (D141). An
+C<path_prefix> (default C</concourse>), C<shared_path> (default C<shared>, under
+the prefix; empty where Concourse has none, D170) and C<insecure> (D141). An
 absent block is the defaults, the repository's vault under C</concourse>, since
 Concourse always resolves through a credential manager, so every Concourse
 repository's CI paths follow Concourse's lookup order and the block is written

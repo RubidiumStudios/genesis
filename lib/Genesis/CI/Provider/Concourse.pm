@@ -369,7 +369,7 @@ sub provider_options_schema {
 				url         => {type => 'string', description => "The store's URL; unset, the environment's own vault"},
 				namespace   => {type => 'string', description => 'The vault namespace, if any'},
 				path_prefix => {type => 'string', default => '/concourse', description => "Concourse's --vault-path-prefix"},
-				shared_path => {type => 'string', description => "Concourse's --vault-shared-path, if set"},
+				shared_path => {type => 'string', default => 'shared', description => "Concourse's --vault-shared-path, under the prefix; empty where it has none"},
 				insecure    => {type => 'boolean', default => Genesis::Config::FALSE, description => "Skip verifying the store's TLS certificate"},
 			},
 		},

@@ -156,6 +156,7 @@ unit-tests/genesis_commands_env-deploy_reading.t # T493: the deploy's pre-flight
 unit-tests/genesis_ci_walk-unreadable_exit_code.t # T493: the walk records the code a failed read earns beside its reason
 unit-tests/genesis_env-credhub_dependency_read.t # Genesis's own lookup of where CredHub is counts as no dependency read, however the director is named
 unit-tests/genesis_top-pipeline_vault.t # T500: pipeline.vault holding auth alone is complete; its connection is the repository's secrets_provider
+unit-tests/genesis_top-pipeline_shared_path.t # T501: Concourse's shared path defaults to shared, under the store's prefix
 unit-tests/genesis_commands-git_forms.t  # the two git forms the declared floor puts off limits stay out of the tree
 unit-tests/pack-arguments.t                   # pack's argument validation and usage text
 unit-tests/genesis-cli.t                              # bin/genesis loads; cross-command definition sanity

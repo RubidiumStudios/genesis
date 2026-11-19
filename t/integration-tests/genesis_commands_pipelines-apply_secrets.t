@@ -66,6 +66,32 @@ subtest 'a secret found nowhere refuses the apply' => sub {
 	unlike($fly, qr/set-pipeline/, 'before the pipeline is set');
 };
 
+# D170: the shared path is looked at without being named, as "shared" under
+# the store's prefix, which is what the Genesis Concourse kit runs with.
+subtest 'a secret held at the shared path alone is found there' => sub {
+	my $h = make_harness(envs => ['qa'], provider => 'concourse');
+	# The clone key alone is taken from the team scope, so the other secret
+	# the pipeline references is still where it was.
+	Genesis::run({env => {SAFE_TARGET => $h->fixture_vault}, stderr => 0},
+		Harness::Propagation::_real_safe(), 'rm', '-f', $Harness::Propagation::PIPELINE_SECRET);
+	$h->_write_record('concourse/shared/secret/ci/git', private_key => 'harness-shared-key');
+	my ($exit, $said, $fly) = apply($h, '-y');
+	is($exit, 0, 'the apply succeeds') or diag($said);
+	like($said, qr{found\s+\Q$REF\E.*/concourse/shared/secret/ci/git}, 'the reference is found at the shared path');
+	unlike($said, qr/harness-shared-key/, 'and its value is never printed');
+	like($fly, qr/set-pipeline/, 'and the pipeline is set');
+	Genesis::run({env => {SAFE_TARGET => $h->{vault_target}}, stderr => 0},
+		Harness::Propagation::_real_safe(), 'rm', '-f', 'concourse/shared/secret/ci/git');
+};
+
+subtest 'a secret found nowhere names the shared path among where Concourse reads' => sub {
+	my $h = make_harness(envs => ['qa'], provider => 'concourse');
+	$h->forget_pipeline_secrets;
+	my ($exit, $said) = apply($h, '--dry-run');
+	like($said, qr{/concourse/main/secret/ci/git, then /concourse/shared/secret/ci/git},
+		'after the team scope');
+};
+
 subtest '--missing-secrets-ok applies anyway' => sub {
 	my $h = make_harness(envs => ['qa'], provider => 'concourse');
 	$h->forget_pipeline_secrets;

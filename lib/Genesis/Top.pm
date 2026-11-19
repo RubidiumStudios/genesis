@@ -1844,6 +1844,9 @@ sub pipeline_secrets_store {
 	return {
 		%$store,
 		path_prefix => $prefix,
+		# "shared" unless the store says otherwise; an empty value says
+		# Concourse has no shared path (D170).
+		shared_path => $store->{shared_path} // 'shared',
 		team        => $config->get('pipeline.provider.team'),
 		pipeline    => $self->pipeline_name // $self->type,
 	};

@@ -2125,6 +2125,10 @@ credential manager (D141, noted 2026-11-05). It is undef under any other provide
 or with the pipeline disabled, which is what keeps the CI paths at their old
 defaults there.
 
+C<shared_path> is C<shared> where the store names none, which is what the
+Genesis Concourse kit runs Concourse with, and the empty value where the
+store says there is none (D170).
+
 B<Returns:> a hash reference of C<url>, C<namespace>, C<path_prefix>,
 C<shared_path>, C<insecure>, C<team> and C<pipeline>, or undef.
 

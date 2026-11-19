@@ -2198,7 +2198,9 @@ B<Examples:>
 
 Where Concourse looks for a secret, in its order: the pipeline scope,
 C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/E<lt>pipelineE<gt>/name>, then the team scope,
-C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/name>, then the shared path where the store names one.
+C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/name>, then the shared path,
+C<E<lt>path_prefixE<gt>/E<lt>shared_pathE<gt>/name>, which is C<shared> unless the store
+says otherwise and is left out where the store gives it as empty (D170).
 
 B<Parameters:> the store, as C<Genesis::Top-E<gt>pipeline_secrets_store> gives it, and
 the secret's path.
