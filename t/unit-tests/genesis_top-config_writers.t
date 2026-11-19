@@ -20,7 +20,7 @@ use Test::Exit;
 
 # Explicit import: Genesis also exports workdir(), which would shadow the
 # helper's and break every fixture below.
-use Genesis qw/mkfile_or_fail mkdir_or_fail slurp run/;
+use Genesis qw/mkfile_or_fail mkdir_or_fail slurp run load_yaml/;
 use Genesis::Exit;
 
 use_ok 'Genesis::Config';
@@ -148,6 +148,91 @@ subtest 'clearing the vault is refused under a pipeline' => sub {
 	is($code, Genesis::Exit::CONFIG, 'the save is refused at the configuration exit');
 	like($err, qr/secrets_provider: .*names none/s, 'naming the vault the pipeline needs');
 	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
+};
+
+# T506: genesis secrets-provider changes the secrets_provider block and the
+# updater's version, and nothing else the file holds.  The file is read back
+# from disk, since what the next command loads is what matters.
+subtest 'a re-point leaves every key outside the block as it was' => sub {
+	plan tests => 4;
+
+	scrub_git_env();
+	my $dir = workdir('writer-repoint-keeps');
+	mkdir_or_fail("$dir/.genesis");
+	mkfile_or_fail("$dir/.genesis/config", <<'EOF');
+---
+creator_version: 3.1.0
+deployment_type: test-kit
+manifest_store: exodus
+minimum_version: 3.1.0
+kit_provider:
+  type: github
+  organization: example-org
+  domain: github.example.com
+deployment_change_reason_required_size: 12
+confirm_release_overrides: outdated
+pipeline:
+  enabled: true
+  name: test-kit
+  exodus_mount: /secret/exodus/
+  provider:
+    type: concourse
+    url: https://ci.example.com
+    team: main
+    secrets_store:
+      path_prefix: /concourse
+      shared_path: common
+  source_control:
+    repository: example-org/test-kit-deployments
+    control_branch: trunk
+    auth:
+      type: ssh
+      path: ci/git
+    identity:
+      name: Genesis CI
+  vault:
+    auth:
+      type: approle
+      path: ci/vault
+      secret_id: ci/other:sid
+  locker:
+    url: https://locker.example.com
+  shuttle:
+    backend: s3
+    bucket: pipes
+    auth:
+      access_key_id: bucket:aws_access_key_id
+      secret_access_key: bucket:aws_secret_access_key
+  notifications:
+    slack:
+      webhook: ci/slack:webhook
+      channel: '#deploys'
+secrets_provider:
+  alias: old-target
+  url: https://old.example.com
+  insecure: true
+  namespace: ops
+  strongbox: false
+version: 3
+EOF
+	run({dir => $dir}, 'git', 'init', '-q');
+	run({dir => $dir}, 'git', 'remote', 'add', 'origin',
+		'https://github.com/example-org/test-kit-deployments.git');
+
+	my $before = load_yaml(slurp("$dir/.genesis/config"));
+	my $top = loaded_top($dir);
+	my ($code, $err) = write_with { $top->set_vault(vault => new_vault()) };
+	is($code, undef, 'the re-point is saved') or diag($err);
+
+	my $after = load_yaml(slurp("$dir/.genesis/config"));
+	is($after->{secrets_provider}{url}, 'https://new.example.com', 'the block names the new vault');
+
+	my %changed = map {($_ => 1)} qw/secrets_provider updater_version/;
+	is_deeply([sort grep {!$changed{$_}} keys %$after], [sort grep {!$changed{$_}} keys %$before],
+		'no top-level key is gained or lost');
+	is_deeply({map {($_ => $after->{$_})} grep {!$changed{$_}} keys %$after},
+		{map {($_ => $before->{$_})} grep {!$changed{$_}} keys %$before},
+		'and every other value is as it was, the nested ones included');
 };
 
 # A new repository's configuration as Genesis::Top->create leaves it, before
