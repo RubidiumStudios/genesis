@@ -66,7 +66,11 @@ subtest 'a skipped vault is never dialled' => sub {
 	for my $argv (['pipeline-apply', '--dry-run', '--skip-vault'],
 	              ['pipeline-jobs'], ['pipeline-pause'], ['pipeline-diff']) {
 		my ($out, $err, $exit) = run_genesis($h, @$argv);
-		unlike(unfolded($out, $err), qr/127\.0\.0\.1:9/, "`genesis @$argv` never dials the vault");
+		# A compiled task is sent to the repository's vault (D169), so the
+		# pipeline names the address as its VAULT_ADDR.  That is where a
+		# task goes, not a dial, and any other mention is one.
+		(my $said = unfolded($out, $err)) =~ s/VAULT_ADDR: "?http:\/\/127\.0\.0\.1:9"?//g;
+		unlike($said, qr/127\.0\.0\.1:9/, "`genesis @$argv` never dials the vault");
 	}
 };
 

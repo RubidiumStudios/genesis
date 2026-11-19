@@ -134,9 +134,26 @@ subtest 'a writer judges the repository it would save by its rule' => sub {
 	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
 };
 
+# T505 (D174): a repository with a pipeline names its vault, so the writer
+# that would take the name away is refused as any writer's result is.
+subtest 'clearing the vault is refused under a pipeline' => sub {
+	plan tests => 3;
+
+	my $dir = writer_repo('writer-clear-vault');
+	my $before = slurp("$dir/.genesis/config");
+	my $top = loaded_top($dir);
+
+	my ($code, $err) = write_with { $top->set_vault(clear => 1) };
+
+	is($code, Genesis::Exit::CONFIG, 'the save is refused at the configuration exit');
+	like($err, qr/secrets_provider: .*names none/s, 'naming the vault the pipeline needs');
+	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
+};
+
 # A new repository's configuration as Genesis::Top->create leaves it, before
 # genesis init --with-ci writes the pipeline section, in a clone that has no
-# remote yet, which is how init leaves it.
+# remote yet, which is how init leaves it.  It names its vault, as init
+# leaves one that was given a vault, and --with-ci is given no other (D174).
 sub scaffold_repo {
 	my ($name) = @_;
 	scrub_git_env();
@@ -147,6 +164,9 @@ sub scaffold_repo {
 creator_version: 3.2.0
 deployment_type: test-kit
 manifest_store: exodus
+secrets_provider:
+  alias: a-target
+  url: https://vault.example.com
 version: 3
 EOF
 	run({dir => $dir}, 'git', 'init', '-q');

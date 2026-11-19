@@ -73,6 +73,27 @@ our @EXPORT = qw/
 	stale_set_delivery stage_unrelated modify_unrelated
 /;
 
+# $REPOSITORY_VAULT_URL, $FIXTURE_VAULT_ENV - the vault a harness's repository names {{{
+#
+# A repository with a pipeline names its vault in secrets_provider (D174),
+# and its tasks are sent there (D169).
+#
+# A harness built with no vault names $REPOSITORY_VAULT_URL, which nothing
+# ever dials.  One with a vault names the fixture's, whose port differs from
+# run to run, while the commit that carries the configuration is kept in the
+# fixture cache.  So it names the variable that holds the address, which
+# Genesis reads a secrets_provider value beginning with $ as, and
+# fixture_vault sets the variable as the vault starts.
+our $REPOSITORY_VAULT_URL = 'https://vault.example.com';
+our $FIXTURE_VAULT_ENV    = 'GENESIS_HARNESS_VAULT_URL';
+
+# repository_vault_url - what this harness's repository names as its vault
+sub repository_vault_url {
+	my ($self) = @_;
+	return $self->{vault_off} ? $REPOSITORY_VAULT_URL : "\$$FIXTURE_VAULT_ENV";
+}
+
+# }}}
 # $DEFAULT_EXODUS_MOUNT - the exodus mount a harness clears and owns {{{
 #
 # The vault fixture clears this subtree whole as it attaches, so a row may
@@ -817,6 +838,10 @@ sub make_harness {
 	run({dir => $base, onfailure => "Failed to build R"},
 		'git', 'init', '-q', '--bare', $self->{r});
 
+	# Known before control is seeded, since a harness with no vault names
+	# one in its configuration for its pipeline's tasks to be sent to.
+	$self->{vault_off} = 1 if defined $opts{vault} && !$opts{vault};
+
 	$self->_clone('a');
 	$self->_clone('b');
 	$self->_seed_control;
@@ -825,7 +850,6 @@ sub make_harness {
 	# record read, or a command run.  A harness built for its repositories
 	# alone, as most unit tests build one, then starts no server.  Asked for,
 	# it starts now; refused, a command runs with none.
-	$self->{vault_off} = 1 if defined $opts{vault} && !$opts{vault};
 	$self->fixture_vault if $opts{vault};
 	$self->github_double if $opts{github};
 
@@ -1045,10 +1069,12 @@ sub _seed_pipeline_section {
 			=> 'ci@genesis.example.com');
 		my %blocks = automation_blocks();
 		for my $block (sort keys %blocks) {
-			$config->set("pipeline.$block.$_" => $blocks{$block}{$_})
-				for sort keys %{$blocks{$block}};
+			my %keys = automation_block_keys($blocks{$block});
+			$config->set("pipeline.$block.$_" => $keys{$_}) for sort keys %keys;
 		}
 	}
+	# A repository with a pipeline names its vault, under any provider (D174).
+	$config->set('secrets_provider.url' => $self->repository_vault_url);
 
 	$config->set("pipeline.source_control.$_" => $sc{$_})
 		for grep {defined $sc{$_}} sort keys %sc;
@@ -2569,6 +2595,10 @@ sub _yaml_pair {
 # in, so the wrapper reaches a spawned command through run_genesis and the
 # parent's own path is left exactly as it was.
 our $PIPELINE_SECRET = 'concourse/main/secret/ci/git';
+# The secret the harness's pipeline.vault.auth names, and where the vault
+# holds it, at Concourse's team scope beside the clone key.
+our $VAULT_CREDENTIAL_PATH = 'secret/ci/vault';
+our $VAULT_CREDENTIAL      = "concourse/main/$VAULT_CREDENTIAL_PATH";
 
 sub fixture_vault {
 	my ($self) = @_;
@@ -2577,6 +2607,9 @@ sub fixture_vault {
 	my $target = helper::vault_start('genesis-propagation-harness');
 	$self->{vault_target} = $target;
 	$self->{vault_url}    = $helper::VAULT_URL{$target};
+	# What the repository's secrets_provider.url names (D174).  Every
+	# harness in a file shares the one vault, so it is set for the process.
+	$ENV{$FIXTURE_VAULT_ENV} = $self->{vault_url};
 
 	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
 		_real_safe(), 'rm', '-rf', $self->exodus_mount);
@@ -2590,6 +2623,10 @@ sub fixture_vault {
 		_real_safe(), 'vault', 'secrets', 'enable', '-path=concourse', 'kv');
 	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
 		_real_safe(), 'set', $PIPELINE_SECRET, 'private_key=harness-clone-key');
+	# And the credential its tasks log in to the vault with (D173).
+	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
+		_real_safe(), 'set', $VAULT_CREDENTIAL,
+		'role_id=harness-role-id', 'secret_id=harness-secret-id');
 
 	$self->{vault_log}    = "$self->{tmp}/vault-reads.log";
 	$self->{vault_refuse} = "$self->{tmp}/vault-refused-writes";
@@ -2673,7 +2710,7 @@ sub forget_pipeline_secrets {
 	my ($self) = @_;
 	my $target = $self->fixture_vault;
 	run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
-		_real_safe(), 'rm', '-f', $PIPELINE_SECRET);
+		_real_safe(), 'rm', '-f', $_) for $PIPELINE_SECRET, $VAULT_CREDENTIAL;
 	return $self;
 }
 
@@ -3994,6 +4031,8 @@ sub _run_env {
 	my %env = (
 		GENESIS_TOPDIR => $helper::TOPDIR,
 		SAFE_TARGET    => $self->{vault_target},
+		# What the repository's secrets_provider.url names (D174).
+		$FIXTURE_VAULT_ENV => $self->{vault_url},
 	);
 	$env{GENESIS_PIPELINE_TASK} = $opts{pipeline_task} if $opts{pipeline_task};
 	$env{PATH} = join(':', $self->_path_prefix(%opts), $ENV{PATH});
@@ -5059,6 +5098,14 @@ sub load_with {
 		? $opts{minimum_version}
 		: $DEFAULT_MINIMUM_VERSION;
 
+	# The repository names its vault, as one with a pipeline has to (D174),
+	# unless the body names its own or the row is about a repository that
+	# names none.  The root is opened below with no vault, so the address is
+	# the one nothing dials, whatever vault the harness has.
+	my @repository_vault = (($opts{repository_vault} // 1)
+			&& $body !~ /^secrets_provider:/m)
+		? ('secrets_provider:', "  url: $REPOSITORY_VAULT_URL") : ();
+
 	$h->commit_on_control(files => {
 		'.genesis/config' => join("\n",
 			'---', 'deployment_type: ' . ($opts{deployment_type} // 'bosh'),
@@ -5066,7 +5113,7 @@ sub load_with {
 			'creator_version: 3.2.0',
 			(defined($floor) && length($floor)
 				? ("minimum_version: $floor") : ()),
-			$body, ''),
+			$body, @repository_vault, ''),
 		'.load-count' => sprintf("%d\n", ++$h->{loads}),
 	});
 	$h->_publish_control;
@@ -5172,12 +5219,32 @@ sub _automation_preamble {
 # and the line form is for a file that writes it as text.  The lines come back
 # indented to sit under a `pipeline:` key, without that key, so a caller puts
 # them beside whatever else its own pipeline block holds.
+#
+# The vault's block is its credential and nothing else (D169, D173), so the
+# block nests one level, and both forms follow it: the line form indents
+# the nested keys, and automation_block_keys gives each value under its
+# dotted key for a caller that sets them one at a time.  The secret the
+# credential names is one fixture_vault sets, beside the clone key, so a
+# real apply's secret check finds it.
+#
+# Where the vault is, is the repository's to say, through secrets_provider,
+# which is a top-level key and so no part of these blocks.  Every builder
+# writes it beside them, as repository_vault_url answers it (D174).
 sub automation_blocks {
 	return (
 		shuttle => {backend => 's3', bucket => 'pipes'},
-		vault   => {url     => 'https://vault.example.com'},
+		vault   => {auth    => {type => 'approle', path => $VAULT_CREDENTIAL_PATH}},
 		locker  => {url     => 'https://locker.example.com'},
 	);
+}
+
+# automation_block_keys - one block's values, each under its dotted key
+sub automation_block_keys {
+	my ($block, $prefix) = @_;
+	return map {
+		my $key = defined $prefix ? "$prefix.$_" : $_;
+		ref($block->{$_}) eq 'HASH' ? automation_block_keys($block->{$_}, $key) : ($key => $block->{$_})
+	} sort keys %$block;
 }
 
 # without names blocks to leave out, because a row that proves what the schema
@@ -5189,12 +5256,23 @@ sub automation_block_lines {
 	my %without = map {($_ => 1)} @{$opts{without} || []};
 	my %blocks  = automation_blocks();
 
+	# A value is written on its key's line, and a nested block under its
+	# key, a level in.  The values sort before the nested blocks, so a
+	# block reads its own keys first.
+	my $render;
+	$render = sub {
+		my ($hash, $indent) = @_;
+		return map {
+			ref($hash->{$_}) eq 'HASH'
+				? ("$indent$_:", $render->($hash->{$_}, "$indent  "))
+				: sprintf('%s%s: %s', $indent, $_, $hash->{$_})
+		} sort {(ref($hash->{$a}) ? 1 : 0) <=> (ref($hash->{$b}) ? 1 : 0) || $a cmp $b} keys %$hash;
+	};
+
 	my @lines;
 	for my $block (qw/shuttle vault locker/) {
 		next if $without{$block};
-		push @lines, "  $block:";
-		push @lines, sprintf('    %s: %s', $_, $blocks{$block}{$_})
-			for sort keys %{$blocks{$block}};
+		push @lines, "  $block:", $render->($blocks{$block}, '    ');
 	}
 	return @lines;
 }
@@ -5777,11 +5855,14 @@ sub automated {
 		$opts{identity_email} // 'ci@genesis.example.com', commit => 0);
 	my $path;
 	for my $block (sort keys %blocks) {
-		for my $key (sort keys %{$blocks{$block}}) {
+		my %keys = automation_block_keys($blocks{$block});
+		for my $key (sort keys %keys) {
 			$path = $h->set_repo_config("pipeline.$block.$key",
-				$blocks{$block}{$key}, commit => 0);
+				$keys{$key}, commit => 0);
 		}
 	}
+	# A repository with a pipeline names its vault (D174).
+	$path = $h->set_repo_config('secrets_provider.url', $h->repository_vault_url, commit => 0);
 
 	# One commit for the whole shape, because the keys are all one file and a
 	# commit apiece would say nothing a reader of the log wants.  It is made
@@ -5806,7 +5887,18 @@ sub top_for {
 	require Genesis::Top;
 	my $root = $opts{root} // $h->{root};
 	_write_whole_config($h, $opts{config}, root => $root) if $opts{config};
-	return Genesis::Top->new(join('/', grep {length} $h->a, $root));
+	# A harness with no vault running opens its root with none: one built
+	# without, whose repository names an address no row is to dial (D174),
+	# and one whose vault nothing has started yet, whose repository names a
+	# variable not yet set.
+	my $vaultless = $h->{vault_off} || !$h->{vault_target};
+	my $top = Genesis::Top->new(join('/', grep {length} $h->a, $root),
+		($vaultless ? (no_vault => 1) : ()));
+	# A root that looks for its vault reads its configuration to find it,
+	# so one opened with none is made to read it too.  A row may move the
+	# working tree before it first asks the Top anything.
+	$top->config if $vaultless;
+	return $top;
 }
 
 # }}}
@@ -5827,6 +5919,15 @@ sub _write_whole_config {
 		unless exists $whole{minimum_version};
 	delete $whole{minimum_version} unless defined $whole{minimum_version}
 		&& length $whole{minimum_version};
+
+	# A configuration with a pipeline names its vault (D174), as the one
+	# make_harness left did, unless the row names a secrets_provider key of
+	# its own, one set to undef included, which writes none.
+	if (grep {/^secrets_provider(\.|$)/} keys %whole) {
+		delete $whole{$_} for grep {/^secrets_provider(\.|$)/ && !defined $whole{$_}} keys %whole;
+	} elsif ($whole{'pipeline.enabled'}) {
+		$whole{'secrets_provider.url'} = $h->repository_vault_url;
+	}
 
 	unlink "$h->{a}/$path";
 	require Genesis::Config;
@@ -5998,6 +6099,7 @@ sub _restore_harness {
 	if ($h->{vault_target}) {
 		my $target = helper::vault_start($h->{vault_target});
 		$h->{vault_url} = $helper::VAULT_URL{$target};
+		$ENV{$FIXTURE_VAULT_ENV} = $h->{vault_url};
 		run({env => {SAFE_TARGET => $target}, passfail => 1, stderr => 0},
 			_real_safe(), 'rm', '-rf', $h->{mount});
 		if (defined $state->{records} && $state->{records} =~ /\S/) {

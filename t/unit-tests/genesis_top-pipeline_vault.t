@@ -1,15 +1,16 @@
 #!perl
-# Proves T500: pipeline.vault says how a pipeline task logs in to the
-# deployment vault, and where that vault is comes from the repository's own
-# secrets_provider, in the same file (D169).
+# Proves T500 and T504: pipeline.vault says how a pipeline task logs in to
+# the deployment vault and nothing else, and where that vault is, is the
+# repository's own to say (D169, D173).
 #
 # pipeline.vault.url was required, so a repository named its vault twice,
-# once for its operators and once for its tasks, and nothing checked that
-# the two agreed.  A block holding auth alone was refused.
+# once for its operators in secrets_provider and once for its tasks, though
+# the two reach one endpoint, and nothing checked that they agreed.  A block
+# holding auth alone was refused.
 #
-# The rows read three things: that such a block loads, what the block is
-# once the repository's vault is read into it, and that the compiler is
-# handed that and not the block as written.
+# The rows read four things: that such a block loads, that the keys which
+# named the vault are refused by name, what a task is sent to, and that the
+# compiler is handed that.
 use strict;
 use warnings;
 use utf8;
@@ -26,7 +27,7 @@ provide_rc();
 use_ok 'Genesis::Top';
 use_ok 'Genesis::CI::Compiler::Parser';
 
-$ENV{GENESIS_OUTPUT_COLUMNS} = 80;
+$ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
 my $h = make_harness(envs => ['qa'], pipeline => 0, vault => 0);
@@ -42,7 +43,6 @@ sub config_with {
 		'    url: https://ci.example.com', '    team: main',
 		'  source_control:', '    repository: team/bosh',
 		'    auth:', '      type: ssh', '      path: secret/ci/git',
-		'    identity:', '      name: Genesis', '      email: ci@example.com',
 		automation_block_lines(without => ['vault']),
 		'  vault:', @{$opts{vault}});
 	push @lines, 'secrets_provider:', @{$opts{repository}} if $opts{repository};
@@ -68,7 +68,7 @@ subtest 'a block holding auth alone is a complete one' => sub {
 	ok(!exists $vault->{options}, 'and nothing said about TLS or strongbox where the repository says nothing');
 };
 
-subtest 'the rest of the connection comes from the repository\'s vault too' => sub {
+subtest 'the rest of the connection is the repository\'s vault\'s too' => sub {
 	plan tests => 3;
 
 	my $vault = vault_of(
@@ -81,49 +81,54 @@ subtest 'the rest of the connection comes from the repository\'s vault too' => s
 	ok($vault->{options}{no_strongbox}, 'and no strongbox, where the repository says it runs without');
 };
 
-subtest 'what the block does say wins' => sub {
+# A task and an operator reach one endpoint, so the block has nothing to
+# say of where it is, and a key that says it is refused with where that is
+# said now.
+subtest 'a key that names the vault is refused, with where that is said' => sub {
 	plan tests => 4;
 
-	my $vault = vault_of(
-		vault      => [@AUTH, '    url: https://vault.internal:8200', '    namespace: tasks',
-			'    options:', '      tls_verify: true', '      no_strongbox: false'],
-		repository => ['  url: https://vault.example.com:8200',
-			'  namespace: ops', '  insecure: true', '  strongbox: false']);
-	is($vault->{url}, 'https://vault.internal:8200', 'its own url');
-	is($vault->{namespace}, 'tasks', 'its own namespace');
-	ok($vault->{options}{tls_verify}, 'its own answer on TLS');
-	ok(!$vault->{options}{no_strongbox}, 'and its own answer on strongbox');
+	my @repository = ('  url: https://vault.example.com:8200');
+	my %retired = (
+		'url'       => [['    url: https://vault.internal:8200'], qr/secrets_provider\.url/],
+		'namespace' => [['    namespace: tasks'],                 qr/secrets_provider\.namespace/],
+		'options'   => [['    options:', '      tls_verify: false'],
+		                qr/secrets_provider\.insecure.*secrets_provider\.strongbox/s],
+	);
+	for my $key (sort keys %retired) {
+		my ($lines, $said_by) = @{$retired{$key}};
+		throws_ok {load_with($h, config_with(vault => [@AUTH, @$lines], repository => \@repository))}
+			qr/pipeline\.vault\.$key: is no longer read\..*$said_by/s,
+			"$key is refused by name, naming the key that says it";
+	}
+	throws_ok {load_with($h, config_with(vault => [@AUTH, '    url: https://vault.internal:8200'],
+			repository => \@repository))}
+		qr/pipeline\.vault holds auth alone/,
+		'and each refusal says what the block holds';
 };
 
-# An options block written for strongbox alone turned TLS verification off,
-# since an unset tls_verify under a written block read as false.
-subtest 'an options block that says nothing of TLS takes the repository\'s answer' => sub {
+# T504 (D173): the credential is the one thing the block says, and a task
+# cannot log in to the vault without it.
+subtest 'the credential is required under an automated provider' => sub {
 	plan tests => 2;
 
-	my @strongbox_only = (@AUTH, '    options:', '      no_strongbox: true');
-	my $vault = vault_of(
-		vault      => \@strongbox_only,
-		repository => ['  url: https://vault.example.com:8200']);
-	ok($vault->{options}{tls_verify}, 'which is to verify, where the repository does not say insecure');
+	throws_ok {load_with($h, join("\n", 'pipeline:', '  enabled: true',
+			'  provider:', '    type: concourse',
+			'    url: https://ci.example.com', '    team: main',
+			'  source_control:', '    repository: team/bosh',
+			'    auth:', '      type: ssh', '      path: secret/ci/git',
+			automation_block_lines(without => ['vault']),
+			'  vault: {}',
+			'secrets_provider:', '  url: https://vault.example.com:8200'))}
+		qr/pipeline\.vault: missing required key auth/,
+		'a block that names no auth is refused by name';
 
-	$vault = vault_of(
-		vault      => \@strongbox_only,
-		repository => ['  url: https://vault.example.com:8200', '  insecure: true']);
-	ok(defined $vault->{options}{tls_verify} && !$vault->{options}{tls_verify},
-		'and not to, where it does');
+	lives_ok {load_with($h, join("\n", 'pipeline:', '  enabled: true',
+		'  provider:', '    type: manual',
+		'  vault: {}'))}
+		'and tolerated under the manual provider, where no task logs in';
 };
 
-subtest 'where neither names a url the load refuses' => sub {
-	plan tests => 2;
-
-	throws_ok {load_with($h, config_with(vault => \@AUTH))}
-		qr/pipeline\.vault: missing required key url/,
-		'a block with no url and no repository vault is refused by name';
-	lives_ok {load_with($h, config_with(vault => [@AUTH, '    url: https://vault.internal:8200']))}
-		'and a block naming its own url needs no repository vault';
-};
-
-subtest 'the compiler is handed the block with the repository\'s vault read into it' => sub {
+subtest 'the compiler is handed the repository\'s vault' => sub {
 	plan tests => 2;
 
 	my $top = load_with($h, config_with(
@@ -135,6 +140,34 @@ subtest 'the compiler is handed the block with the repository\'s vault read into
 	ok(defined $parsed->{integrations}{vault}{options}{tls_verify}
 			&& !$parsed->{integrations}{vault}{options}{tls_verify},
 		'and its TLS setting the repository\'s');
+};
+
+# T505 (D174): a repository that names no vault reads whichever one safe
+# targets on the machine a command runs on, which a pipeline's records and
+# its tasks cannot rest on, so a pipeline is refused there at load.
+subtest 'a pipeline whose repository names no vault is refused at load' => sub {
+	plan tests => 5;
+
+	throws_ok {load_with($h, config_with(vault => \@AUTH), repository_vault => 0)}
+		qr/secrets_provider: .*names none/s,
+		'under an automated provider, naming the key';
+	throws_ok {load_with($h, config_with(vault => \@AUTH), repository_vault => 0)}
+		qr/genesis secrets-provider <target>/,
+		'and the command that records it';
+
+	throws_ok {load_with($h, join("\n", 'pipeline:', '  enabled: true',
+			'  provider:', '    type: manual'), repository_vault => 0)}
+		qr/secrets_provider: .*names none/s,
+		'under the manual provider too, whose records live in the same vault';
+
+	throws_ok {load_with($h, join("\n", 'pipeline:', '  enabled: true',
+			'  provider:', '    type: manual',
+			'secrets_provider:', '  alias: somewhere'))}
+		qr/secrets_provider: .*names none|secrets_provider: missing required key url/s,
+		'a block that names no url names no vault';
+
+	lives_ok {load_with($h, join("\n", 'pipeline:', '  enabled: false'), repository_vault => 0)}
+		'and a repository with no pipeline loads in legacy mode, as it did';
 };
 
 done_testing;

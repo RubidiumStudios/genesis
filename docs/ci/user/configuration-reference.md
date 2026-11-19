@@ -179,23 +179,21 @@ vault:
     path: vault/approle            # role_id and secret_id
 ```
 
-That is a complete block. Where the vault is comes from the repository's own `secrets_provider`, in the same file: its `url`, its `namespace`, whether TLS is verified (`insecure`), and whether the vault runs without strongbox (`strongbox: false`).
+That is the whole block, and `auth` is required. A task logs in to the repository's own vault, the one its operators use, so where it is, is said once, by `secrets_provider` in the same file: its `url`, its `namespace`, whether TLS is verified (`insecure`), and whether the vault runs without strongbox (`strongbox: false`).
 
-A task that reaches the vault by another address than an operator does says so here, and what the block says wins:
+`pipeline.vault.url`, `namespace` and `options` are retired, and each is refused by name with the `secrets_provider` key that says it now.
 
-```yaml
-vault:
-  url:       https://vault.internal.example.com
-  namespace: my-namespace          # Vault Enterprise only
-  auth:
-    type: approle
-    path: vault/approle
-  options:
-    tls_verify:   true
-    no_strongbox: false
+A repository with a pipeline has to name its vault. One with `pipeline.enabled: true` and no `secrets_provider.url` is refused when it is loaded, under the manual provider as under an automated one. Record the vault with:
+
+```
+genesis secrets-provider <safe-target>
 ```
 
-A block that names no `url`, in a repository whose `secrets_provider` names none, is refused.
+That writes `secrets_provider` into `.genesis/config` and leaves every other key as it was.
+
+Without it a repository is in legacy mode, where each command reads whichever vault `safe` targets on the machine it runs on. That is one operator's `~/.saferc`, not the repository, so two operators could run the same commit against two vaults, and a pipeline task, which has no `~/.saferc`, would have none. The pipeline's records, its holds and exodus all live in this vault, so it is said once, in the file every operator and every task reads.
+
+For the same reason `genesis init --with-ci` cannot be combined with `--skip-vault`, and `genesis secrets-provider --clear` is refused while the pipeline is enabled.
 
 The AppRole's policy and where its credentials are stored are in the operator's guide, *Pipeline Accounts and Permissions*.
 

@@ -64,7 +64,9 @@ EOF
 			print $fh "$_\n" for automation_block_lines(),
 				'  source_control:', '    repository: acme/test-kit-deployments',
 				'    auth:', '      type: ssh', '      path: secret/ci/git',
-				'    identity:', '      name: Genesis CI', '      email: ci@example.com';
+				'    identity:', '      name: Genesis CI', '      email: ci@example.com',
+				# A repository with a pipeline names its vault (D174).
+				'secrets_provider:', '  url: https://vault.example.com';
 		}
 		close $fh;
 	}

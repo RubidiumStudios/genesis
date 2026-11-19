@@ -612,7 +612,10 @@ sub _validate_integrations_section {
 	unless ($integrations->{vault}) {
 		$self->_error("'integrations.vault' is required (set ci.integrations.vault or ci.vault)");
 	} elsif (!$integrations->{vault}{url}) {
-		$self->_error("'integrations.vault.url' is required");
+		# The url is the repository's vault's, which pipeline.vault no
+		# longer names for itself (D169).
+		$self->_error("the pipeline's tasks have no vault to log in to: ".
+			"the repository names none.  Set secrets_provider.url in .genesis/config");
 	}
 
 	# Source control is required

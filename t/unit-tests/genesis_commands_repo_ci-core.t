@@ -69,7 +69,9 @@ sub make_v3_repo {
 				: "$indent$_: $hash->{$_}\n"
 		} sort keys %$hash);
 	};
-	$content .= "pipeline:\n" . $render->($opts{pipeline}, '  ') if $opts{pipeline};
+	# A repository with a pipeline names its vault (D174).
+	$content .= "pipeline:\n" . $render->($opts{pipeline}, '  ')
+		. "secrets_provider:\n  url: https://vault.example.com\n" if $opts{pipeline};
 	mkfile_or_fail("$genesis_dir/config", $content);
 
 	# An enabled pipeline derives its remote and its repository from git, so

@@ -40,7 +40,9 @@ subtest 'genesis config --unset repairs what the load refuses' => sub {
 			# Copy A is cloned from a bare repository at a filesystem path,
 			# so the origin URL carries no GitHub owner/repo pair and the
 			# source-control block cannot derive one.
-			'  source_control:', '    repository: genesis/bosh-deployments', ''),
+			'  source_control:', '    repository: genesis/bosh-deployments',
+			# A repository with a pipeline names its vault (D174).
+			'secrets_provider:', '  url: ' . $h->repository_vault_url, ''),
 	});
 
 	my ($out, $err, $exit) = run_genesis($h, {restore => 0}, 'config', '--unset', 'ci');

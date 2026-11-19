@@ -71,8 +71,12 @@ subtest 'Stage 1 rows over a default doomsday root' => sub {
 	like($env{GIT_PRIVATE_KEY} // '', qr/^\(\(secret\/ci\/git\.private_key\)\)$/, 'f3: the git credential is a reference');
 	is_deeply([@env{qw/GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL/}], ['Genesis CI', 'ci@genesis.example.com'],
 		'f4: the commit identity is the configured one');
-	ok(!exists $env{VAULT_ROLE_ID} && !exists $env{VAULT_AUTH_TOKEN},
-		'f5: no vault credential where pipeline.vault declares no auth');
+	is($env{VAULT_ADDR}, $Harness::Propagation::REPOSITORY_VAULT_URL,
+		"f5: VAULT_ADDR is the repository's vault, which secrets_provider names");
+	is_deeply([@env{qw/VAULT_ROLE_ID VAULT_SECRET_ID/}],
+		['((secret/ci/vault.role_id))', '((secret/ci/vault.secret_id))'],
+		'f5: approle auth gives the role and secret as references');
+	ok(!exists $env{VAULT_AUTH_TOKEN}, 'f5: and no token');
 	ok(!exists $env{CURRENT_ENV} && !exists $env{GIT_BRANCH}, 'f7: no CURRENT_ENV or GIT_BRANCH');
 	is($env{CI_NO_REDACT}, 0, 'f9: CI_NO_REDACT is 0 by default');
 };
@@ -84,9 +88,10 @@ subtest 'Stage 1 rows the configuration changes' => sub {
 			'pipeline.unredacted'         => 'true',
 			'pipeline.provider.task.image'   => 'example/task',
 			'pipeline.provider.task.version' => '1.2',
+			# The path is the harness's own, secret/ci/vault; the type alone
+			# is changed.
 			'pipeline.vault.auth.type'    => 'token',
-			'pipeline.vault.auth.path'    => 'secret/ci/vault',
-			'pipeline.vault.options.tls_verify' => 'false',
+			'secrets_provider.insecure'   => 'true',
 		},
 		pipeline => {manual => 'true'},
 	);
@@ -107,8 +112,8 @@ subtest 'Stage 1 rows the configuration changes' => sub {
 	is($env{VAULT_AUTH_TOKEN}, '((secret/ci/vault.token))', 'f5: token auth gives VAULT_AUTH_TOKEN');
 	ok(!exists $env{VAULT_TOKEN} && !exists $env{VAULT_ROLE_ID} && !exists $env{VAULT_SECRET_ID},
 		'f5: and no other vault credential');
-	# A boolean set as text, as genesis config --set writes it, is still false.
-	is($env{VAULT_SKIP_VERIFY}, 'true', 'f5: tls_verify false skips verification');
+	# TLS is the repository's vault's to say (D169).
+	is($env{VAULT_SKIP_VERIFY}, 'true', 'f5: an insecure repository vault skips verification');
 	is($env{CI_NO_REDACT}, 1, 'f9: pipeline.unredacted sets CI_NO_REDACT');
 };
 

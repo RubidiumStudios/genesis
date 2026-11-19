@@ -1896,32 +1896,30 @@ sub pipeline_vault {
 	my $block  = $config->get('pipeline.vault');
 	return undef unless ref($block) eq 'HASH';
 
-	# Where the vault is comes from the repository's own, in the same file.
-	# What the block says of it wins.
+	# The block says how a task logs in.  Where the vault is, is the
+	# repository's to say, since a task and an operator reach one endpoint,
+	# and a repository with a pipeline names it (D174).
 	my $repository = $config->get('secrets_provider');
 	$repository = {} unless ref($repository) eq 'HASH';
+	my %at = (
+		url          => $repository->{url},
+		namespace    => $repository->{namespace},
+		insecure     => $repository->{insecure} ? 1 : 0,
+		no_strongbox => (defined $repository->{strongbox} && !$repository->{strongbox}) ? 1 : 0,
+	);
 
-	my %vault = %$block;
-	for my $key (qw/url namespace/) {
-		$vault{$key} = $repository->{$key}
-			if !(defined $vault{$key} && length $vault{$key})
-			&& defined $repository->{$key} && length $repository->{$key};
-	}
-
-	# Each option the block leaves unsaid takes the repository's answer.  A
-	# block that says nothing at all of either, beside a repository that
-	# says nothing either, carries no options, and a task verifies TLS.
-	my %options = %{ref($block->{options}) eq 'HASH' ? $block->{options} : {}};
-	$options{tls_verify} = $repository->{insecure} ? 0 : 1
-		if !defined $options{tls_verify}
-		&& ($repository->{insecure} || exists $block->{options});
-	$options{no_strongbox} = 1
-		if !defined $options{no_strongbox}
-		&& defined $repository->{strongbox} && !$repository->{strongbox};
-	delete $vault{options};
-	$vault{options} = \%options if %options;
-
-	return \%vault;
+	# A task verifies TLS and expects strongbox unless the repository says
+	# otherwise, so an option is carried only where it does.
+	my %options = (
+		($at{insecure}     ? (tls_verify   => 0) : ()),
+		($at{no_strongbox} ? (no_strongbox => 1) : ()),
+	);
+	return {
+		(defined $block->{auth} ? (auth => $block->{auth}) : ()),
+		(defined $at{url} && length $at{url} ? (url => $at{url}) : ()),
+		(defined $at{namespace} && length $at{namespace} ? (namespace => $at{namespace}) : ()),
+		(%options ? (options => \%options) : ()),
+	};
 }
 
 # }}}
@@ -3210,18 +3208,19 @@ sub _pipeline_config_schema {
 				required    => \&_automated_provider_configured,
 				description => 'How a pipeline task logs in to the vault it writes exodus through',
 				schema => {
-					url       => {type => 'string', required => \&_repository_names_no_vault, description => "Vault URL, where it is not the repository's secrets_provider.url"},
-					namespace => {type => 'string', description => "Vault namespace, where it is not the repository's"},
-					auth      => _credential_schema(vault => 'The task credential, as a type and its vault paths'),
-					# Typed, so a value set as text reads as the boolean it names.
-					options   => {
-						type        => 'hash',
-						description => 'How a task reaches the vault',
-						schema      => {
-							tls_verify   => {type => 'boolean', description => "Verify the vault's TLS certificate"},
-							no_strongbox => {type => 'boolean', description => 'The vault runs without strongbox'},
-						},
+					# The one thing the block says (D173).
+					auth      => {
+						%{_credential_schema(vault => 'The task credential, as a type and its vault paths')},
+						required => \&_automated_provider_configured,
 					},
+					# Declared only to be refused: a task and an operator reach
+					# one endpoint, which secrets_provider names (D169).
+					url       => {type => 'any', retired => 1, description => 'Retired: the vault is the one secrets_provider names',
+						check => sub {_retired_vault_key('#C{secrets_provider.url}')}},
+					namespace => {type => 'any', retired => 1, description => 'Retired: the namespace is secrets_provider.namespace',
+						check => sub {_retired_vault_key('#C{secrets_provider.namespace}')}},
+					options   => {type => 'any', retired => 1, description => 'Retired: TLS and strongbox follow secrets_provider',
+						check => sub {_retired_vault_key('#C{secrets_provider.insecure} for TLS and #C{secrets_provider.strongbox} for strongbox')}},
 				}
 			},
 
@@ -3488,11 +3487,15 @@ sub _automated_provider_configured {
 }
 
 # }}}
-# _repository_names_no_vault - true where secrets_provider gives no url for pipeline.vault to take (D169) {{{
-sub _repository_names_no_vault {
-	my ($siblings, $config) = @_;
-	my $url = $config ? $config->get('secrets_provider.url') : undef;
-	return (defined $url && length $url) ? 0 : 1;
+# _retired_vault_key - a pipeline.vault key that named the vault is refused, with where that is said now (D169) {{{
+sub _retired_vault_key {
+	my ($said_by) = @_;
+	return sprintf(
+		"is no longer read.  A pipeline task logs in to the repository's own ".
+		"vault, the one its operators use, so this is said once, by %s.  ".
+		"Remove the key; #C{pipeline.vault} holds #C{auth} alone.",
+		$said_by
+	);
 }
 
 # }}}
@@ -3657,6 +3660,23 @@ sub _ref_component_errors {
 }
 
 # }}}
+# _validate_repository_vault - a repository with a pipeline names its vault (D174) {{{
+sub _validate_repository_vault {
+	my ($self) = @_;
+
+	my $url = $self->config->get('secrets_provider.url');
+	return 1 if defined $url && length $url;
+
+	$self->_refuse_config(
+		"#R{secrets_provider}: a repository with a pipeline has to name its ".
+		"vault, and this one names none, so each command reads whichever ".
+		"vault #C{safe} targets on the machine it runs on.  Record the vault ".
+		"with #C{genesis secrets-provider <target>}."
+	);
+	return 1;
+}
+
+# }}}
 # _validate_slug_components - both halves of the deployment slug {{{
 sub _validate_slug_components {
 	my ($self) = @_;
@@ -3717,6 +3737,7 @@ sub _validate_pipeline_config {
 
 	return 1 unless $self->config->get('pipeline.enabled');
 
+	$self->_validate_repository_vault;
 	$self->_validate_slug_components;
 	$self->_validate_shape_values;      # before anything reads the shape
 	$self->_validate_capability_gates;

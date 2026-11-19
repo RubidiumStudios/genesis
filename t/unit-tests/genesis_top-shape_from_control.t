@@ -39,11 +39,14 @@ sub set_config_key {
 	run({dir => $h->a}, 'git', 'commit', '-q', '-am', "set $key");
 }
 
+# Every root here is opened with no vault.  The harness is built without
+# one, its repository names an address nothing is to dial (D174), and the
+# shape is read from git alone.
 sub top_in {
 	my ($h) = @_;
 	require Genesis::Top;
 	local %ENV = %ENV;
-	return Genesis::Top->new($h->a);
+	return Genesis::Top->new($h->a, no_vault => 1);
 }
 
 subtest 'a feature branch does not move the shape' => sub {
@@ -148,7 +151,7 @@ subtest "control without this deployment's root has no pipeline for it" => sub {
 	push_from($h, 'a', $h->control);
 	stand_on($h, 'feature/keeps-bosh');
 
-	my $top = do {local %ENV = %ENV; Genesis::Top->new($h->a . '/bosh')};
+	my $top = do {local %ENV = %ENV; Genesis::Top->new($h->a . '/bosh', no_vault => 1)};
 	is($top->pipeline_enabled, 0,
 		"the branch's root declares a pipeline, and control has no root for it");
 	is_deeply($top->pipeline_topology->{order}, [],
@@ -168,7 +171,7 @@ subtest "an environment on control's dev kit is in the shape" => sub {
 		"---\nkit:\n  name: dev\ngenesis:\n  env: qa\n  pipeline:\n".
 		"    prior_env: lab\n"}, message => 'qa on the dev kit', push => 1);
 
-	my $top = do {local %ENV = %ENV; Genesis::Top->new($h->a)};
+	my $top = do {local %ENV = %ENV; Genesis::Top->new($h->a, no_vault => 1)};
 	is_deeply([sort @{$top->pipeline_topology->{order}}], [qw/lab qa/],
 		'qa, naming the dev kit and no version, is in the pipeline');
 };
@@ -280,7 +283,7 @@ subtest "control's tree is written from its blobs, byte for byte" => sub {
 			goto &$real;
 		};
 		my $top = do {local %ENV = %ENV;
-			Genesis::Top->new($root ? $h->a . "/$root" : $h->a)};
+			Genesis::Top->new($root ? $h->a . "/$root" : $h->a, no_vault => 1)};
 		$top->pipeline_topology;
 		my $where = $root ? "under $root/" : 'at the root';
 

@@ -79,7 +79,7 @@ require './bin/genesis';
 # ---------------------------------------------------------------------------
 
 subtest 'validate phase' => sub {
-	plan tests => 15;
+	plan tests => 16;
 
 	require Genesis::Commands::Repo;
 	delete $ENV{GENESIS_IGNORE_EVAL};       # let bail() die instead of exit
@@ -128,11 +128,20 @@ subtest 'validate phase' => sub {
 	lives_ok { run_validate() }
 		'valid: link-dev-kit + skip-vault';
 
-	# Valid: with-ci (manual provider only, no provider type needed)
-	prepare_command('repo-init', '-l', $vt_devkit, '--skip-vault', '--with-ci', 'my-bosh');
+	# Valid: with-ci (manual provider only, no provider type needed).  It is
+	# given a vault, since a repository with a pipeline names one (D174); the
+	# validate phase takes the target's name and resolves nothing.
+	prepare_command('repo-init', '-l', $vt_devkit, '--vault', 'my-vault', '--with-ci', 'my-bosh');
 	build_command_environment;
 	lives_ok { run_validate() }
 		'valid: --with-ci enables manual provider';
+
+	# Invalid: --with-ci and --skip-vault together (D174)
+	prepare_command('repo-init', '-l', $vt_devkit, '--skip-vault', '--with-ci', 'my-bosh');
+	build_command_environment;
+	throws_ok { run_validate() }
+		qr/Cannot specify both --with-ci and --skip-vault.*name its vault/s,
+		'invalid: --with-ci + --skip-vault rejected, saying why';
 
 	# Valid: name derived from link-dev-kit basename when positional omitted
 	prepare_command('repo-init', '-l', $vt_devkit, '--skip-vault');
@@ -251,7 +260,7 @@ subtest 'the control-branch refusal names an unborn branch' => sub {
 		"name: validate-unborn-devkit\nversion: 0.0.1\n");
 
 	pushd($unborn);
-	prepare_command('repo-init', '-l', $ub_devkit, '--skip-vault',
+	prepare_command('repo-init', '-l', $ub_devkit, '--vault', 'my-vault',
 		'--with-ci', 'my-bosh');
 	build_command_environment;
 
@@ -290,7 +299,7 @@ subtest 'the control-branch refusal names an unborn control' => sub {
 		"name: validate-unborn-control-devkit\nversion: 0.0.1\n");
 
 	pushd($unborn);
-	prepare_command('repo-init', '-l', $uc_devkit, '--skip-vault',
+	prepare_command('repo-init', '-l', $uc_devkit, '--vault', 'my-vault',
 		'--with-ci', 'my-bosh');
 	build_command_environment;
 
@@ -518,9 +527,12 @@ subtest 'execute phase' => sub {
 
 	# ----- --with-ci sets up the manual provider scaffolding -----
 
+	# A repository with a pipeline names its vault (D174), so this one is
+	# given a real target, which the execute phase resolves and records.
+	my $wc_vault = helper::vault_start();
 	my $wc = workdir('execute-with-ci');
 	pushd($wc);
-	prepare_command('repo-init', '-l', $devkit, '--skip-vault', '--with-ci', 'bosh');
+	prepare_command('repo-init', '-l', $devkit, '--vault', $wc_vault, '--with-ci', 'bosh');
 	build_command_environment;
 	run_validate();
 	my ($rwc) = run_execute();

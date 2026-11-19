@@ -234,22 +234,28 @@ subtest 'an applied record the vault errors on refuses the run' => sub {
 		'and nothing was delivered');
 };
 
-subtest 'a repository with no vault to read says so' => sub {
-	# Two rows, and one for the run's own restoration assertion.
-	plan tests => 3;
+subtest 'a repository whose vault this machine cannot find says so' => sub {
+	# Three rows, and one for the run's own restoration assertion.
+	plan tests => 4;
 
-	# With no secrets_provider.url configured the repository reads safe's
-	# current target, and with that target gone there is no vault at all.
-	# The operator is told that, rather than handed a Perl error about a
-	# method called on nothing.
+	# A repository with a pipeline names its vault (D174), so the case this
+	# row stood for, one that named none and read safe's current target, is
+	# refused at load and cannot reach a run.  What is left of it is a
+	# machine with no safe target for the vault the repository names.  The
+	# operator is told that, with the command that makes one, rather than
+	# handed a Perl error about a method called on nothing.
 	my $h = two_stage();
+	my $url = $h->{vault_url};
 	teardown_vault($h->{vault_target});
 
 	my (undef, $err, $exit) = run_genesis($h, {answers => ['y']}, 'propagate');
 	my $said = unfolded($err);
-	is($exit, Genesis::Exit::UNAVAILABLE, 'the run refuses');
-	like($said, qr/no vault is available for this repository/,
-		'saying there is no vault to read') or diag($said);
+	# The code is whatever the vault's own refusal exits with, which is 1
+	# today and is not this row's to rule on.
+	isnt($exit, 0, 'the run refuses');
+	like($said, qr/Safe target for \Q$url\E not found/,
+		'naming the vault it has no target for') or diag($said);
+	like($said, qr/safe target <name> "\Q$url\E"/, 'and the command that makes one');
 };
 
 subtest 'a pipeline never applied refuses the run and not the report' => sub {

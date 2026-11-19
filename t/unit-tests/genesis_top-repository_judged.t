@@ -49,6 +49,8 @@ pipeline:
     type: manual
 $extra  source_control:
     repository: $opts{repository}
+secrets_provider:
+  url: https://vault.example.com
 version: 3
 EOF
 	run({dir => $dir}, 'git', 'init', '-q') unless ($opts{git} // 'bare') eq 'none';

@@ -29,7 +29,9 @@ $ENV{GENESIS_OUTPUT_COLUMNS} = 999;
 $ENV{NOCOLOR} = 1;
 
 # A version 3 repository with a manual pipeline, and the lines given written
-# into its pipeline block as they stand.
+# into its pipeline block as they stand.  It names its vault, as a
+# repository with a pipeline has to (D174), and every row opens it with no
+# vault, the address being one nothing is to dial.
 sub repo {
 	my ($name, @pipeline) = @_;
 	scrub_git_env();
@@ -47,6 +49,8 @@ pipeline:
     type: manual
 $extra  source_control:
     repository: genesis/test-kit-deployments
+secrets_provider:
+  url: https://vault.example.com
 version: 3
 EOF
 	run({dir => $dir}, 'git', 'init', '-q');
@@ -63,12 +67,14 @@ sub refused (&) {
 	return ($code, $err);
 }
 
-my @vault = ('vault:', '  url: https://vault.example.com');
+# The vault block holds its credential alone, where the vault is being the
+# repository's to say (D169), so each row's lines follow the key itself.
+my @vault = ('vault:');
 
 subtest 'a vault credential with no type is refused' => sub {
 	plan tests => 2;
 	my $dir = repo('no-type', @vault, '  auth:', '    path: secret/ci/a');
-	my ($code, $err) = refused {Genesis::Top->new($dir)};
+	my ($code, $err) = refused {Genesis::Top->new($dir, no_vault => 1)->config};
 	is($code, Genesis::Exit::CONFIG, 'at CONFIG');
 	like($err, qr/pipeline\.vault\.auth: missing required key type/, 'naming the type');
 };
@@ -77,7 +83,7 @@ subtest 'a type with a component neither path nor its own reference gives is ref
 	plan tests => 2;
 	my $dir = repo('no-component', @vault, '  auth:', '    type: approle',
 		'    role_id: secret/ci/a:role');
-	my ($code, $err) = refused {Genesis::Top->new($dir)};
+	my ($code, $err) = refused {Genesis::Top->new($dir, no_vault => 1)->config};
 	is($code, Genesis::Exit::CONFIG, 'at CONFIG');
 	like($err, qr/pipeline\.vault\.auth: the approle credential needs secret_id/,
 		'naming the missing component');
@@ -87,18 +93,18 @@ subtest 'path alone, or every component explicitly, loads' => sub {
 	plan tests => 2;
 	my $by_path = repo('by-path', @vault, '  auth:', '    type: approle',
 		'    path: secret/ci/a');
-	ok(eval {Genesis::Top->new($by_path); 1}, 'type and path load') or diag($@);
+	ok(eval {Genesis::Top->new($by_path, no_vault => 1)->config; 1}, 'type and path load') or diag($@);
 
 	my $explicit = repo('explicit', @vault, '  auth:', '    type: approle',
 		'    role_id: secret/ci/a:role', '    secret_id: secret/ci/b:sid');
-	ok(eval {Genesis::Top->new($explicit); 1}, 'type and both components load') or diag($@);
+	ok(eval {Genesis::Top->new($explicit, no_vault => 1)->config; 1}, 'type and both components load') or diag($@);
 };
 
 subtest "a component the type does not take is refused" => sub {
 	plan tests => 2;
 	my $dir = repo('foreign', @vault, '  auth:', '    type: token',
 		'    path: secret/ci/a', '    role_id: secret/ci/a:role');
-	my ($code, $err) = refused {Genesis::Top->new($dir)};
+	my ($code, $err) = refused {Genesis::Top->new($dir, no_vault => 1)->config};
 	is($code, Genesis::Exit::CONFIG, 'at CONFIG');
 	like($err, qr/role_id is not a component of the token credential/,
 		'naming the stray component and the type');
@@ -125,7 +131,7 @@ pipeline:
 version: 3
 EOF
 
-	my ($code, $err) = refused {Genesis::Top->new($dir)};
+	my ($code, $err) = refused {Genesis::Top->new($dir, no_vault => 1)->config};
 	is($code, Genesis::Exit::CONFIG, 'at CONFIG');
 	like($err, qr/pipeline\.source_control\.auth\.vault: retired.*\bpath\b/,
 		'naming path as what replaces it');
@@ -135,7 +141,7 @@ subtest 'a save that would leave a component out is refused' => sub {
 	plan tests => 2;
 	my $dir = repo('save', @vault, '  auth:', '    type: approle',
 		'    path: secret/ci/a');
-	my $top = Genesis::Top->new($dir, repair_config => 1);
+	my $top = Genesis::Top->new($dir, repair_config => 1, no_vault => 1);
 	# set merges into a hash it finds, so the block is cleared first.
 	$top->config->clear('pipeline.vault.auth');
 	$top->config->set('pipeline.vault.auth.type', 'approle');

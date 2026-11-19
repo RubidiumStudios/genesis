@@ -361,9 +361,12 @@ subtest 'the automation blocks answer in both forms' => sub {
 		'the hash form names the three blocks the schema requires');
 	is($blocks{shuttle}{backend}, 's3', 'and carries a backend for the shuttle');
 
+	# The vault's block is the credential the schema requires of an
+	# automation and nothing else (D169, D173), nested under its own key.
 	my @lines = automation_block_lines();
 	is_deeply(\@lines, ['  shuttle:', '    backend: s3', '    bucket: pipes',
-		'  vault:', '    url: https://vault.example.com',
+		'  vault:',
+		'    auth:', '      path: secret/ci/vault', '      type: approle',
 		'  locker:', '    url: https://locker.example.com'],
 		'the line form says the same thing, ready to sit under a pipeline key');
 
@@ -387,7 +390,8 @@ subtest 'the shuttle shape writes the backend block a row hands it' => sub {
 		'      email: ci@genesis.example.com',
 		'  provider:', '    type: concourse',
 		'    url: https://ci.example.com', '    team: main');
-	my @rest = ('  vault:', '    url: https://vault.example.com',
+	my @rest = ('  vault:',
+		'    auth:', '      path: secret/ci/vault', '      type: approle',
 		'  locker:', '    url: https://locker.example.com');
 
 	is_deeply([split(/\n/, shuttle('gcs', 'bucket: sig'))],

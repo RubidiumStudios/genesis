@@ -578,7 +578,8 @@ subtest 'a pipeline outside a git checkout is refused by name' => sub {
 		'pipeline:', '  enabled: true',
 		'  source_control:',
 		'    control_branch: trunk',
-		'    repository: team/bosh', ''));
+		'    repository: team/bosh',
+		'secrets_provider:', '  url: https://vault.example.com', ''));
 
 	my $top = Genesis::Top->new($dir, no_vault => 1);
 

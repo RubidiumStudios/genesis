@@ -122,6 +122,10 @@ sub _repo_init_validate {
 	) if $opts{vault} && $opts{'skip-vault'};
 
 	my $with_ci = $opts{'with-ci'};
+	bail(
+		"Cannot specify both --with-ci and --skip-vault: a repository with a ".
+		"pipeline has to name its vault."
+	) if $with_ci && $opts{'skip-vault'};
 
 	# --- 3. Gather data: validate local sources, detect git repo ---
 
@@ -301,6 +305,11 @@ sub _repo_init_validate {
 		my $vault = _select_vault_target();
 		$vault_target = $vault->{name} if $vault;
 	}
+	bail(
+		"A repository with a pipeline has to name its vault, and none was ".
+		"chosen.  Give one with #C{--vault <target>}, or create the ".
+		"repository without #C{--with-ci}."
+	) if $with_ci && !$vault_target;
 
 	# --with-ci just sets a flag; provider details come later via
 	# `genesis repo config ci`.  No provider object needed at init time.

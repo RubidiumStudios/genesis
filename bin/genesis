@@ -1461,7 +1461,8 @@ define_command("repo-init", {
 			'skip-vault' =>
 				"Defer vault configuration.  The repo will be created without a ".
 				"secrets provider.  You must configure one via #C{genesis secrets-provider} ".
-				"before creating environments.",
+				"before creating environments.  Cannot be combined with ".
+				"#C{--with-ci}: a repository with a pipeline has to name its vault.",
 
 			'with-ci' =>
 				"Enable CI pipeline support.  Sets up the control branch and ".

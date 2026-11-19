@@ -46,6 +46,8 @@ pipeline:
   enabled: $enabled
   provider:
     type: manual
+secrets_provider:
+  url: https://vault.example.com
 version: 3
 EOF
 
@@ -793,6 +795,8 @@ pipeline:
   enabled: $enabled
   provider:
     type: manual
+secrets_provider:
+  url: https://vault.example.com
 version: 3
 CFG
 	return $dir;
@@ -863,6 +867,8 @@ pipeline:
   provider:
     nonesuch: x
     type: manual
+secrets_provider:
+  url: https://vault.example.com
 version: 3
 CFG
 	pushd $dir;
@@ -947,9 +953,13 @@ ${url}    team: main
     backend: s3
     bucket: pipes
   vault:
-    url: https://vault.example.com
+    auth:
+      type: approle
+      path: secret/ci/vault
   locker:
     url: https://locker.example.com
+secrets_provider:
+  url: https://vault.example.com
 version: 3
 CFG
 	return $dir;
@@ -1004,7 +1014,8 @@ subtest 'a committed fly target is refused, with what replaces it (T369)' => sub
 # A version 2 repository: no pipeline section on disk, and the older ci.yml
 # beside it.  The load injects a v3-shaped pipeline default so the rest of
 # Genesis sees a uniform shape, and that injected key is one the version 2
-# schema never declares.
+# schema never declares.  It names its vault, as init leaves a repository
+# it was given one for, so a row that turns its pipeline on has one (D174).
 sub v2_repo {
 	my ($name) = @_;
 
@@ -1019,6 +1030,8 @@ sub v2_repo {
 creator_version: 3.2.0
 deployment_type: test-kit
 manifest_store: exodus
+secrets_provider:
+  url: https://vault.example.com
 version: 2
 CFG
 	mkfile_or_fail("$dir/ci.yml", <<'CI');

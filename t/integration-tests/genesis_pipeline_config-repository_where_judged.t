@@ -31,6 +31,9 @@ sub pipeline_config {
 		($opts{repository}
 			? ('  source_control:', "    repository: $opts{repository}")
 			: ()),
+		# A repository with a pipeline names its vault (D174), as the one
+		# make_harness left did.
+		'secrets_provider:', '  url: ' . $h->repository_vault_url,
 		'');
 }
 
@@ -98,8 +101,10 @@ subtest 'a new repository can be rehearsed straight after init' => sub {
 	my %env = (GENESIS_TOPDIR => $helper::TOPDIR, NOCOLOR => 1);
 	my $genesis = "$helper::TOPDIR/bin/genesis";
 
+	# With a vault, since a repository with a pipeline names one (D174).
+	my $vault = helper::vault_start();
 	my (undef, $rc) = run({dir => $parent, env => \%env, stderr => 0, passfail => 0},
-		$genesis, 'init', '--with-ci', '--skip-vault', 'rehearsal');
+		$genesis, 'init', '--with-ci', '--vault', $vault, 'rehearsal');
 	is $rc, 0, 'genesis init --with-ci makes a repository with the pipeline on';
 
 	my ($dir) = grep {-d} map {"$parent/$_"} ('rehearsal-deployments', 'rehearsal');
@@ -109,8 +114,7 @@ subtest 'a new repository can be rehearsed straight after init' => sub {
 	is $rc, 0, 'the repository is named with no remote to check it against'
 		or diag $err;
 
-	# --skip-vault, because init was given it and the vault is not this row's
-	# subject.
+	# --skip-vault, because the vault is not this row's subject.
 	($out, $rc, $err) = run({dir => $dir, env => \%env, stderr => 0, passfail => 0},
 		$genesis, 'pipeline-apply', '--dry-run', '--skip-vault');
 	is $rc, 0, 'and the dry run goes through, with no remote ever added'

@@ -155,7 +155,7 @@ unit-tests/service_vault-read_failure_states.t # T493: a failed vault read is ra
 unit-tests/genesis_commands_env-deploy_reading.t # T493: the deploy's pre-flight asks a failed read why, and keeps its state and code
 unit-tests/genesis_ci_walk-unreadable_exit_code.t # T493: the walk records the code a failed read earns beside its reason
 unit-tests/genesis_env-credhub_dependency_read.t # Genesis's own lookup of where CredHub is counts as no dependency read, however the director is named
-unit-tests/genesis_top-pipeline_vault.t # T500: pipeline.vault holding auth alone is complete; its connection is the repository's secrets_provider
+unit-tests/genesis_top-pipeline_vault.t # T500, T504: pipeline.vault holds auth alone, which is required; where the vault is, is the repository's to say
 unit-tests/genesis_top-pipeline_identity.t # T503: the committer identity is optional, and defaults to what v2 committed as
 unit-tests/genesis_top-pipeline_shared_path.t # T501: Concourse's shared path defaults to shared, under the store's prefix
 unit-tests/genesis_ci_shuttle_s3-auth.t # T502: pipeline.shuttle.auth is a path, or each key where it is held

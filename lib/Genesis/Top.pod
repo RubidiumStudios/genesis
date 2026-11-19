@@ -2200,48 +2200,56 @@ B<Examples:>
 
     my $vault = $top->pipeline_vault;
 
-The vault a pipeline task writes exodus through, as control holds it
-(D169). C<pipeline.vault> says how a task logs in, and where the vault is
-comes from the repository's own C<secrets_provider>, in the same file. This
-answers the block with the repository's vault read into what it leaves
-unsaid, and is what L<Genesis::CI::Compiler::Parser/parse> hands the
-compiler.
+The vault a pipeline task writes exodus through (D169). C<pipeline.vault>
+says how a task logs in, with its C<auth>, and nothing else. Where the vault
+is, is the repository's own to say, since a task and an operator reach one
+endpoint. This answers the two together, and is what
+L<Genesis::CI::Compiler::Parser/parse> hands the compiler.
 
 =over 4
 
 =item *
 
-C<url> and C<namespace> are C<secrets_provider>'s where the block names
-none.
+C<auth> is the block's, as control holds it.
 
 =item *
 
-C<options.tls_verify> is false where C<secrets_provider.insecure> is true
-and the block does not say. Where the block writes C<options> and says
-nothing of TLS, it is the repository's answer, which is to verify unless
-the repository says insecure.
+C<url> and C<namespace> are C<secrets_provider>'s, in the same file.
+
+=item *
+
+C<options.tls_verify> is false where C<secrets_provider.insecure> is true.
 
 =item *
 
 C<options.no_strongbox> is true where C<secrets_provider.strongbox> is
-false and the block does not say.
+false.
 
 =back
 
-What the block does say wins in each case, for a task that reaches the vault
-by another address than an operator does. A block that says nothing of TLS
-or strongbox, beside a repository that says nothing either, carries no
-C<options>, and a task verifies TLS.
+A repository with a pipeline names its vault, the load refusing one that
+does not (D174, L</_validate_repository_vault>), so there is always a
+C<url> to answer and nothing is taken from the vault a run happens to be
+attached to.
+
+A repository that says nothing of TLS or strongbox carries no C<options>,
+and a task verifies TLS.
 
 This is not L</pipeline_secrets_vault>, which is the provider's own vault,
 where Concourse resolves the pipeline's references.
 
-B<Returns:> a hash reference of C<url>, C<namespace>, C<auth> and
+B<Returns:> a hash reference of C<auth>, C<url>, C<namespace> and
 C<options>, each where there is one, or undef where the configuration
 carries no C<pipeline.vault>.
 
-B<Errors:> None. The load refuses a block that names no C<url> beside a
-repository that names none, under an automated provider.
+B<Errors:> None. The load refuses C<pipeline.vault.url>, C<namespace> and
+C<options> by name, since each said what C<secrets_provider> says
+(L</_retired_vault_key>).
+
+B<Limitations:> A C<secrets_provider.url> written as C<$NAME>, which
+L<Service::Vault::Remote/attach> reads from the environment, is answered as
+written and not resolved, so a compiled task carries the variable's name
+as its C<VAULT_ADDR>.
 
 B<Examples:>
 
@@ -4919,43 +4927,40 @@ B<Examples:>
     # returns 1 where pipeline.provider.type is concourse
     # returns 0 where the pipeline is off, or the provider is manual
 
-=head2 _repository_names_no_vault
+=head2 _retired_vault_key
 
-    my $bool = _repository_names_no_vault($siblings, $config);
+    my $problem = _retired_vault_key($said_by);
 
-Whether the repository's C<secrets_provider> gives no C<url>. It is the
-predicate the C<required> flag of C<pipeline.vault.url> reads (D169): the
-block takes its vault from the repository's own, so it has to name one only
-where the repository names none.
+What the load says of a C<pipeline.vault> key that named the vault:
+C<url>, C<namespace> or C<options> (D169). A pipeline task logs in to the
+repository's own vault, the one its operators use, so where it is, is said
+once, by C<secrets_provider>, and C<pipeline.vault> holds C<auth> alone.
+Each of the three is declared in the schema only to be refused with this.
 
-Plain function, not a method: C<Genesis::Config> calls it through the
-C<required> flag rather than through an object.
+Plain function, not a method: the schema's C<check> for each key calls it.
 
 B<Parameters:>
 
 =over 4
 
-=item C<$siblings>
+=item C<$said_by>
 
-Hash reference of the values beside the key being judged. Unused here,
-because C<secrets_provider> sits elsewhere in the configuration.
-
-=item C<$config>
-
-The C<Genesis::Config> being validated, which the predicate reads
-C<secrets_provider.url> from.
+The C<secrets_provider> key, or keys, that say what the retired key said,
+with their colour markup, as the refusal names them.
 
 =back
 
-B<Returns:> 1 where the repository names no vault, 0 where it names one.
+B<Returns:> the refusal's text, which the load reports after the key's
+name.
 
 B<Errors:> None.
 
 B<Examples:>
 
-    my $bool = _repository_names_no_vault({}, $config);
-    # returns 0 where secrets_provider.url is set
-    # returns 1 where there is no secrets_provider, or it has no url
+    _retired_vault_key('#C{secrets_provider.url}');
+    # "is no longer read.  A pipeline task logs in to the repository's own
+    #  vault, ... said once, by secrets_provider.url.  Remove the key;
+    #  pipeline.vault holds auth alone."
 
 =head2 _source_control
 
@@ -5264,6 +5269,49 @@ B<Examples:>
     my $why = _ref_component_errors('-bosh');
     # returns 'it must match ^[A-Za-z0-9][A-Za-z0-9._-]*$'
 
+=head2 _validate_repository_vault
+
+    $top->_validate_repository_vault();
+
+Refuses, at C<Genesis::Exit::CONFIG>, a repository with a pipeline whose
+configuration names no C<secrets_provider.url> (D174).
+
+Such a repository is in legacy mode: each command reads whichever vault
+C<safe> targets on the machine it runs on. That is one user's
+F<~/.saferc>, unversioned and changed by unrelated work, where
+C<secrets_provider> is a commit on control that every operator and every
+task reads alike. A pipeline's applied record, its environments' records,
+its holds and exodus are all read from the repository's vault, so they
+cannot rest on which machine ran last, and a pipeline task has no
+F<~/.saferc> at all: it makes its target from C<secrets_provider.url> in
+the tree it checked out.
+
+The rule holds under every provider, the manual one included, whose
+records live in the same vault. It is checked first of the pipeline's
+checks, and joins the load's one refusal where the schema found problems
+too (T411).
+
+It does not read C<pipeline.enabled> itself, because
+L</_validate_pipeline_config> is its only caller and has already returned
+where the section is off. A repository with no pipeline stays free to run
+in legacy mode.
+
+B<Parameters:> None.
+
+B<Returns:> 1.
+
+B<Errors:> Refuses through L</_refuse_config>, naming C<secrets_provider>
+and C<genesis secrets-provider E<lt>targetE<gt>> as what records it. A
+writer's save is judged the same way, so C<genesis secrets-provider
+--clear> is refused under a pipeline and writes nothing.
+
+B<Examples:>
+
+    # pipeline.enabled is true and the file has no secrets_provider
+    $top->_validate_repository_vault;
+    # refuses: secrets_provider: a repository with a pipeline has to
+    # name its vault, and this one names none ...
+
 =head2 _validate_slug_components
 
     $top->_validate_slug_components();
@@ -5412,8 +5460,10 @@ after C<< Genesis::Config::validate >>, so that a repository meets the same
 refusal in the same words whichever command loaded it.
 
 A section that is off is left alone. Otherwise the checks run in this
-order. Both halves of the deployment slug are checked as git ref components
-by L</_validate_slug_components>, first, because they name the branches
+order. First, L</_validate_repository_vault> refuses a repository that
+names no vault (D174), since every record the rest reads lives in it. Both
+halves of the deployment slug are checked as git ref components
+by L</_validate_slug_components>, next, because they name the branches
 everything else here is about. Then every key that shapes the pipeline is
 checked by L</_validate_shape_values> to have resolved from the
 environment's own files, before anything reads the shape. The source

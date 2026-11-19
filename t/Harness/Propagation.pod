@@ -200,6 +200,21 @@ through the harness, as one that calls C<Genesis::Top-E<gt>new> on a copy
 does, since Genesis connects to the vault as it loads.  C<vault =E<gt> 0>
 keeps C<run_genesis> from starting one, so a command runs with none.
 
+A repository with a pipeline names its vault in C<secrets_provider.url>
+(D174), and its tasks are sent there (D169), so every harness whose
+pipeline section is written names one.  C<repository_vault_url> answers
+what.  A harness built with C<vault =E<gt> 0> names
+C<$REPOSITORY_VAULT_URL>, an address no row dials.  One with a vault names
+the fixture's, and names it as C<$GENESIS_HARNESS_VAULT_URL>, the variable
+C<$FIXTURE_VAULT_ENV> holds the name of: the vault's port differs from run
+to run while the fixture cache keeps the commit that carries the
+configuration, and Genesis reads a C<secrets_provider> value that begins
+with C<$> from the environment.  C<fixture_vault> sets the variable for the
+process as the vault starts, and C<run_genesis> and C<run_task> hand it to
+the command they run.  A compiled pipeline of such a harness therefore
+carries the variable's name as its C<VAULT_ADDR>, so a row that reads the
+address builds its harness with C<vault =E<gt> 0>.
+
 C<embed =E<gt> 1> writes an executable stub at C<.genesis/bin/genesis> and
 commits it with the deployment root, which is where C<Genesis::Top::embed>
 puts the running genesis for CI to call.  A row that asserts the eighth kind
@@ -953,7 +968,10 @@ It also enables a C<concourse> KV mount, as a real store has, and sets the one
 secret the harness's own pipeline references, the clone key, at Concourse's team
 scope, C<concourse/main/secret/ci/git>, so a real apply's secret check (D142)
 finds it as it would on a site that had set it. L</forget_pipeline_secrets($h)>
-removes it for a row that proves the refusal.
+removes it for a row that proves the refusal.  Beside it, at
+C<concourse/main/secret/ci/vault>, goes the credential the harness's
+C<pipeline.vault.auth> names, a C<role_id> and a C<secret_id> (D173), which
+C<forget_pipeline_secrets> removes with the clone key.
 
 A recording C<safe> is laid down beside the target, in the directory
 C<run_genesis> puts first on the path of the command under test, and that
@@ -1887,6 +1905,12 @@ rather than for the one shape that carries no floor at all, which is a
 development build's.  A row that is about the floor names the value it wants,
 and passing C<undef> writes no floor.
 
+C<secrets_provider.url> is written beside the block, as
+C<$REPOSITORY_VAULT_URL>, unless the body names a C<secrets_provider> of
+its own, since a repository with a pipeline names its vault (D174) and the
+root is opened here with none.  C<repository_vault =E<gt> 0> leaves it out,
+for a row about a repository that names no vault.
+
 =head2 automated_config($type, @lines)
 
 Answers the pipeline block of an automated provider of that type, as text,
@@ -1933,6 +1957,17 @@ provider, which are the shuttle, the vault, and the locker, as a list of key
 and hashref pairs, for a file that builds its configuration as a structure.
 It does not answer the C<pipeline:> key itself, so a caller puts the blocks
 beside whatever else its own pipeline block holds.
+
+The vault's block is its credential alone, C<auth> with a C<type> and a
+C<path> (D169, D173), so it nests one level where the other two are flat.
+Where the vault is, is C<secrets_provider>'s to say, a top-level key and so
+no part of these blocks.
+
+=head2 automation_block_keys($block)
+
+Answers one block's values, each under its dotted key, for a caller that
+sets them one at a time through C<Genesis::Config>.  A nested block, as the
+vault's is, comes back flattened: C<auth.type> and C<auth.path>.
 
 =head2 automation_block_lines(%opts)
 
@@ -2292,6 +2327,17 @@ A C<Genesis::Top> for the harness's deployment root, or for the root C<root>
 names.  Its C<config> option writes the whole C<.genesis/config> on control
 first, replacing what was there, so a row can build the shape with no provider
 key at all rather than editing one key of the file C<make_harness> left.
+
+A harness with no vault running has its root opened with none: one built
+with C<vault =E<gt> 0>, whose configuration names an address (D174) that no
+row is to dial, and one whose vault nothing has started yet, whose
+configuration names a variable not yet set.  Such a root has its
+configuration read as it is opened, as a root that looks for its vault
+does, since a row may move the working tree before it first asks.  A
+C<config> that turns C<pipeline.enabled> on and names no C<secrets_provider>
+key is given C<secrets_provider.url>, as C<repository_vault_url> answers it;
+one that names the key keeps what it named, and naming it with C<undef>
+writes none.
 
 A configuration that says nothing about C<minimum_version> is given the same
 floor C<load_with> defaults to, which is C<3.2.0>, because a fixture that

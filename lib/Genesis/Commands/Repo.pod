@@ -397,6 +397,18 @@ C<"Cannot specify both --vault and --skip-vault.">
 
 =item *
 
+C<"Cannot specify both --with-ci and --skip-vault: a repository with a pipeline has to name its vault."> --
+a pipeline's records and its tasks rest on a vault the repository names
+(D174), so a repository is not scaffolded with one and no vault.
+
+=item *
+
+C<"A repository with a pipeline has to name its vault, and none was chosen."> --
+followed by the two ways on. Raised under C<--with-ci> where the vault was
+left to the prompt and none was picked.
+
+=item *
+
 C<"Local compiled kit file '%s' not found."> -- the C<--kit> value looks like
 a local archive path, but no such file exists.
 
