@@ -3352,7 +3352,7 @@ sub _pipeline_env_keys_schema {
 		schema => {
 			prior_env  => {type => 'string',  description => 'The topology edge, the environment this one follows'},
 			require_pr => {type => 'boolean', description => 'Propagate through a pull request rather than directly'},
-			manual     => {type => 'boolean', description => "The deploy job waits for a human trigger"},
+			manual     => {type => 'boolean', description => "The deploy job waits for a human trigger, which it does unless this is false"},
 
 			# What the configured provider lets an environment set (D139).
 			provider => {

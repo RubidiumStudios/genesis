@@ -186,6 +186,13 @@ which is what nearly every row runs against now that the C<.genesis/config>
 schema declares the key.  A row that wants the section switched off, or wants
 no section at all, says which it wants.
 
+C<automatic =E<gt> 1> writes C<genesis.pipeline.manual: false> on every
+environment file the harness writes, so each environment's deploy starts
+when its branch moves.  It is off by default, an environment being manual
+unless its file says otherwise (D176), and it is for an automated provider
+alone, the key being refused under the manual one.  A row that hands
+C<write_env_file> a C<manual> of its own keeps what it handed.
+
 C<mode> writes nothing into C<.genesis/config>, because whether a delivery
 goes through a pull request is a per-environment question and there is no
 repository-wide key for it.  A harness declared as C<mode =E<gt> 'pr'> gets

@@ -585,7 +585,7 @@ subtest 'ASTBuilder - build_from_env_files: entrypoint with no pipeline block is
 	is $edges->[0]{from}, 'lab',    "edge from: lab";
 	is $edges->[0]{to},   'nonprod', "edge to: nonprod";
 	is $nodes->{lab}{require_pr}, 0, "lab require_pr defaults to 0";
-	is $nodes->{lab}{manual},     0, "lab manual defaults to 0";
+	is $nodes->{lab}{manual},     1, "lab manual defaults to 1, the safe default (D176)";
 };
 
 subtest 'ASTBuilder - build_from_env_files: no locks key turns the director lock off' => sub {
@@ -685,7 +685,9 @@ subtest 'ASTBuilder - legacy nodes enriched with gate flags from env files' => s
 subtest 'ASTBuilder + PipelineDescriptor - end-to-end env-file mermaid gates' => sub {
 	# The build loads each environment with its kit for its lock pools.
 	my $h = make_harness(envs => [qw/lab prod/], pipeline => 0, vault => 0, kit => 't/src/ops-blueprint');
-	$h->write_env_file('lab',  pipeline => {require_pr => 'false'});
+	# lab says it carries no gate at all, a manual one included, since an
+	# environment that says nothing of manual is manual (D176).
+	$h->write_env_file('lab',  pipeline => {require_pr => 'false', manual => 'false'});
 	$h->write_env_file('prod', pipeline => {prior_env  => 'lab',
 	                                        require_pr => 'true',
 	                                        manual     => 'true'});

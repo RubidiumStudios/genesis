@@ -51,7 +51,7 @@ subtest 'Stage 1 rows over a default doomsday root' => sub {
 
 	my @gets = grep {$_->{get}} plan_steps($jb);
 	my ($bget) = grep {$_->{get} eq ($br->{name} // '')} @gets;
-	is($bget && $bget->{trigger}, 1, 'c1: it triggers on its branch, manual being unset');
+	is($bget && $bget->{trigger}, 0, 'c1: it waits for a person, manual being unset (D176)');
 	ok($bget && !exists $bget->{passed}, 'c2: with no passed constraint');
 	is(scalar(grep {$_->{trigger} && $_ != ($bget // {})} @gets), 0, 'c3: and on nothing else');
 
@@ -93,7 +93,7 @@ subtest 'Stage 1 rows the configuration changes' => sub {
 			'pipeline.vault.auth.type'    => 'token',
 			'secrets_provider.insecure'   => 'true',
 		},
-		pipeline => {manual => 'true'},
+		pipeline => {manual => 'false'},
 	);
 	my ($p, $why) = dry_pipeline($h);
 	ok($p, 'the dry apply prints a pipeline') or return diag($why);
@@ -104,7 +104,7 @@ subtest 'Stage 1 rows the configuration changes' => sub {
 	my %env  = %{$task->{config}{params} || {}};
 	my ($bget) = grep {$_->{get} && $_->{get} eq ($br->{name} // '')} plan_steps($jb);
 
-	is($bget && $bget->{trigger}, 0, 'c1: manual turns the branch trigger off');
+	is($bget && $bget->{trigger}, 1, 'c1: manual: false lets its branch trigger it (D176)');
 	ok(!grep({$_ eq '--recreate'} @{$task->{config}{run}{args} || []}),
 		'e2: no --recreate under recreate_on_deploy always, the deploy reading the key itself');
 	is_deeply($task->{config}{image_resource}{source}, {repository => 'example/task', tag => '1.2'},

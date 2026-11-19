@@ -243,7 +243,7 @@ genesis config --set pipeline.enabled true</pre>
 <tr class="g"><td colspan="6"><strong><code>genesis.pipeline</code></strong>:the environment's pipeline settings</td></tr>
 <tr><td><code>genesis.pipeline.prior_env</code></td><td>string (shape)</td><td>&ndash;</td><td>the name of another environment of this pipeline; the chain must not loop</td><td>No</td><td>The topology edge: the environment this one follows. An environment without it follows nothing.</td></tr>
 <tr><td><code>genesis.pipeline.require_pr</code></td><td>boolean (shape)</td><td>&ndash; (direct)</td><td>true, false</td><td>No</td><td>Propagate through a pull request rather than directly.</td></tr>
-<tr><td><code>genesis.pipeline.manual</code></td><td>boolean (shape)</td><td>&ndash; (automatic)</td><td>true, false</td><td>No</td><td>The deploy job waits for a human trigger. Refused unless the provider declares the <code>optional_git_triggers</code> capability: <code>concourse</code> does; <code>manual</code> does not.</td></tr>
+<tr><td><code>genesis.pipeline.manual</code></td><td>boolean (shape)</td><td><code>true</code> (manual)</td><td>true, false</td><td>No</td><td>The deploy job waits for a person to start it, which it does unless this is <code>false</code>. Set <code>false</code> to let the environment deploy when its branch moves. Refused unless the provider declares the <code>optional_git_triggers</code> capability: <code>concourse</code> does; <code>manual</code> does not.</td></tr>
 <tr><td><code>genesis.pipeline.provider.tag</code></td><td>string, or list of strings</td><td>&ndash;</td><td>non-empty strings</td><td>No</td><td><code>concourse</code> only; under another provider the key is refused as unknown. The Concourse worker tag, or tags, whose workers reach this environment's network.</td></tr>
 <tr><td><code>genesis.pipeline.redeploy_cron</code></td><td>list of strings (shape)</td><td>&ndash;</td><td>crontab expressions, in UTC</td><td>No</td><td>Crontab expressions that trigger the redeploy job. Refused unless the provider declares <code>scheduled_jobs</code> (<code>concourse</code> only), and refused when <code>pipeline.redeploy.enabled</code> is false. This build's documentation states that no schedule is emitted yet.</td></tr>
 <tr><td><code>genesis.pipeline.track_dependencies</code></td><td>list of strings (shape)</td><td>&ndash;</td><td>each entry a deployment type, or an <code>&lt;env&gt;/&lt;type&gt;</code> pair</td><td>No</td><td>Deployments whose exodus records this one reads. A bare type means that type at this environment.</td></tr>
@@ -436,19 +436,22 @@ secrets_provider:            # genesis secrets-provider &lt;target&gt;
 <pre># lab.yml
 genesis:
   env: lab
+  pipeline:
+    manual: false   # deploys when its branch moves
 
 # staging.yml
 genesis:
   env: staging
   pipeline:
     prior_env: lab
+    manual: false
 
 # prod.yml
 genesis:
   env: prod
   pipeline:
-    prior_env: staging
-    manual: true    # waits for a person</pre>
+    prior_env: staging   # waits for a person</pre>
+<p class="note">An environment that says nothing of <code>manual</code> waits for a person, as <code>prod</code> does here.</p>
 <p class="note">Required by the schema: <code>secrets_provider.url</code> (set with <code>genesis secrets-provider</code>, and under the manual provider too), <code>provider.url</code>, <code>provider.team</code>, <code>source_control.auth</code>, <code>vault.auth</code>, <code>locker.url</code>, <code>shuttle.backend</code>, <code>shuttle.bucket</code>. The other lines are optional.</p>
 <p class="note">With <code>require_pr: true</code> on an environment, also set <code>pipeline.source_control.api_token</code>: the clone credential here is <code>ssh</code>.</p>
 </div>

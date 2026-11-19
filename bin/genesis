@@ -293,9 +293,11 @@ define_command("create", {
 			"Require a pull-request gate before this environment deploys.  ".
 			"Only used when a CI provider is configured in #C{.genesis/config}.",
 
-		"manual" =>
-			"Require a manual CI trigger before this environment deploys.  ".
-			"Only used when a CI provider is configured in #C{.genesis/config}.",
+		"manual!" =>
+			"Whether this environment's deploy waits for a manual CI trigger.  ".
+			"It does unless told otherwise: #C{--no-manual} writes ".
+			"#C{manual: false}, which lets the environment deploy when its ".
+			"branch moves.  Only used under a provider that sets a pipeline.",
 
 		"no-commit" =>
 			"Stage the new environment file but skip the git commit.  ".

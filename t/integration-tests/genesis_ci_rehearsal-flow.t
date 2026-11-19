@@ -26,7 +26,11 @@ $ENV{NOCOLOR} = 1;
 # and the pipeline its dry apply prints, recorded as applied.
 sub fixture {
 	my (%o) = @_;
+	# Automatic, since the flow this file rehearses is the one where each
+	# deploy starts when its branch moves, and an environment is manual
+	# unless its file says otherwise (D176).
 	my $h = ready_harness(envs => $o{envs}, chained => $o{chained}, provider => 'concourse',
+		automatic => 1,
 		type => 'doomsday', embed => 'real', bosh => {envs => $o{envs}});
 	compilable_pipeline($h);
 	push_from($h, 'a', $h->control);

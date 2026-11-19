@@ -2844,10 +2844,12 @@ sub _describe_topology {
 		my ($env, $indent) = @_;
 		my $node = $nodes->{$env};
 		my @flags;
-		# An automated provider deploys an environment on its branch unless it
-		# is manual (contract c1); under the manual provider nothing does.
+		# Under an automated provider an environment waits for a person unless
+		# its file says manual: false (contract c1, D176).  Under the manual
+		# provider nothing deploys on its own and the key is refused, so
+		# there is nothing to say of it.
 		push @flags, $node->{manual} ? '#Y{manual}' : '#G{automatic}'
-			if $node->{manual} || $provider_type ne 'manual';
+			if $provider_type ne 'manual';
 		push @flags, '#M{require_pr}' if $node->{require_pr};
 		my $flag_str = @flags ? '  (' . join(', ', @flags) . ')' : '';
 		output "%s#C{%s}%s", $indent, $env, $flag_str;

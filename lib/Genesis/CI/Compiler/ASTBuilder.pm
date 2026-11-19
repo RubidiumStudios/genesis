@@ -454,16 +454,18 @@ sub build_from_env_files {
 		if ($rd && $rd !~ /^(manual|cron)$/) {
 			$rd = _truthy($rd) ? 'manual' : '';
 		}
+		# Manual unless the file says otherwise, the safe default (D176).
+		my $manual = _manual($data->{manual});
 		$nodes{$env} = {
 			stage_name          => $env,
 			target_name         => $env,
 			alias               => $env,
 			genesis_env         => $env,
 			branch              => $top->branch_for($env),
-			auto                => _truthy($data->{manual}) ? 0 : 1,
+			auto                => $manual ? 0 : 1,
 			type                => 'deployment',
 			require_pr          => _truthy($data->{require_pr}),
-			manual              => _truthy($data->{manual}),
+			manual              => $manual,
 			redeploy            => $rd,
 			redeploy_cron_start => $data->{redeploy_cron_start} || '',
 			redeploy_cron_stop  => $data->{redeploy_cron_stop}  || '',
@@ -612,6 +614,14 @@ sub _truthy {
 	return 0 unless defined $v && $v ne '';
 	return 0 if $v =~ /^(false|no|0)$/i;
 	return 1;
+}
+
+# }}}
+# _manual - whether an environment waits for a person, from its manual key (D176) {{{
+sub _manual {
+	my ($v) = @_;
+	return 1 unless defined $v;
+	return $v =~ /^(false|no|0)$/i ? 0 : 1;
 }
 
 # }}}

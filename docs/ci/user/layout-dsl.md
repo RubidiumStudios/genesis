@@ -19,29 +19,28 @@ The key is read merged, so it can be set once in a site file that several enviro
 
 An environment has one predecessor. A layout that fed one environment from two others, `sandbox-a -> staging` and `sandbox-b -> staging`, has no direct translation. Pick the one that should gate it, or make the two a chain.
 
-## `auto` becomes the absence of `manual`
+## `auto` becomes `manual: false`
 
-The defaults are reversed:
+The default is the same in both:
 
 - **In v2**, an environment was manual unless an `auto` pattern matched it.
-- **In v3**, an environment deploys automatically unless its file sets `manual: true`.
+- **In v3**, an environment is manual unless its file sets `manual: false`.
 
 So:
 
-- **Matched by `auto`:** set nothing.
-- **Not matched by `auto`:** set `genesis.pipeline.manual: true`.
+- **Matched by `auto`:** set `genesis.pipeline.manual: false`.
+- **Not matched by `auto`:** set nothing.
 
 ```yaml
-# production.yml
+# sandbox.yml
 genesis:
   pipeline:
-    prior_env: staging
-    manual: true
+    manual: false
 ```
 
-A glob such as `auto *-sandbox` has no counterpart; mark each environment it did not match. A site file shared by every production environment is a good place for `manual: true`.
+A glob such as `auto *-sandbox` has no counterpart; mark each environment it matched. A site file shared by every sandbox environment is a good place for `manual: false`.
 
-Miss this step and a tier that was manual starts deploying on its own.
+Miss this step and a tier that deployed on its own waits for a person, which costs a click and nothing else.
 
 ## Several layouts
 

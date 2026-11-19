@@ -52,7 +52,34 @@ subtest 'the manual gate is a declared boolean' => sub {
 
 	my $top = load_env_with({});
 	is $top->_merged_env_params('qa')->{genesis}{pipeline}{manual}, undef,
-		'an absent key leaves the deploy job auto-triggering';
+		'an absent key is read as absent, with no default written into the block';
+};
+
+# T508 (D176): the safe default.  An environment waits for a person unless
+# its file says it need not, so one added with nothing said of it does not
+# deploy the moment its branch moves.
+subtest 'an environment is manual unless its file says it is not' => sub {
+	plan tests => 8;
+
+	# Each write differs from the one before it, a write of the same file
+	# being a commit with nothing in it.
+	my $node = sub {load_env_with({@_})->pipeline_topology->{nodes}{qa}};
+
+	ok($node->(manual => 'true')->{manual}, 'true is manual');
+
+	my $unsaid = $node->();
+	ok($unsaid->{manual}, 'an absent key is manual');
+	ok(!$unsaid->{auto}, 'and so not automatic');
+
+	for my $no ('false', 'no', 0) {
+		my $said = $node->(manual => $no);
+		ok(!$said->{manual}, "$no is not manual");
+		ok($said->{auto}, 'and false is what makes it automatic') if $no eq 'false';
+	}
+
+	# The block is there for another key, and says nothing of this one.
+	ok($node->(require_pr => 'true')->{manual},
+		'a block that says nothing of the key is manual too');
 };
 
 subtest 'the redeploy keys are declared in their settled form' => sub {

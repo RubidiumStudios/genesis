@@ -169,11 +169,11 @@ git rm ci.yml</code></pre>
 <table>
   <tr><th>v2 layout</th><th>v3, in the environment file</th></tr>
   <tr><td><code>A -&gt; B</code></td><td>in B's file: <code>genesis.pipeline.prior_env: A</code></td></tr>
-  <tr><td><code>auto &lt;pattern&gt;</code>, for the environments it matched</td><td>nothing: an environment deploys automatically unless marked manual</td></tr>
-  <tr><td>every environment the <code>auto</code> pattern did <em>not</em> match</td><td><code>genesis.pipeline.manual: true</code></td></tr>
+  <tr><td><code>auto &lt;pattern&gt;</code>, for the environments it matched</td><td><code>genesis.pipeline.manual: false</code></td></tr>
+  <tr><td>every environment the <code>auto</code> pattern did <em>not</em> match</td><td>nothing: an environment waits for a person unless it says <code>manual: false</code></td></tr>
   <tr><td><code>tagged: true</code></td><td><code>genesis.pipeline.provider.tag: &lt;worker tag&gt;</code> (a string or a list); the environment's own name keeps the old effect</td></tr>
 </table>
-<div class="callout"><strong>Manual is now opt-in.</strong> In v2 an environment was manual unless an <code>auto</code> pattern matched it. In v3 it's automatic unless it sets <code>manual: true</code>. Miss this, and a tier that was manual starts deploying on its own.</div>
+<div class="callout"><strong>Manual is still the default.</strong> In v2 an environment was manual unless an <code>auto</code> pattern matched it. In v3 it's manual unless its file sets <code>manual: false</code>. Miss this, and a tier that deployed on its own waits for a person to press its button, which is the safe way to be wrong.</div>
 <p>Other per-environment keys:</p>
 <ul>
   <li><code>require_pr</code>: deliveries arrive as a pull request into the environment's branch, which a reviewer approves and merges.</li>
@@ -361,7 +361,7 @@ pipeline.vault.auth.role_id              &lt;path&gt;:approle_id</code></pre>
   <li>Old environment-named branches deleted or renamed.</li>
   <li><code>genesis config</code>: <code>version 3</code>, the pipeline block (section 4), <code>pipeline.enabled true</code> last.</li>
   <li><code>ci.yml</code> removed.</li>
-  <li>Environment files: <code>prior_env</code>, <code>manual</code> on every formerly non-<code>auto</code> environment, tags, and tracking (section 5).</li>
+  <li>Environment files: <code>prior_env</code>, <code>manual: false</code> on every formerly <code>auto</code> environment, tags, and tracking (section 5).</li>
   <li>Genesis 3.2.x embedded.</li>
   <li>Secrets published at the team scope, with v2 key names changed where needed (section 6).</li>
   <li>Locker TLS settled: <code>ca_cert</code> or <code>skip_ssl_validation: true</code> set where v2 relied on its default (section 4).</li>

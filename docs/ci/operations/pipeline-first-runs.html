@@ -36,7 +36,7 @@
 <p><strong>The redeploy.</strong> A published pipeline has a <code>redeploy-&lt;env&gt;</code> job for every environment, beside its <code>deploy-&lt;env&gt;</code> job. A redeploy deploys again exactly the commit that last deployed successfully, which is how secrets, configs or stemcells changed outside git reach a running deployment without new content from propagation.</p>
 <div class="callout"><strong>The first redeploy runs on its own when the pipeline is published.</strong> Each <code>redeploy-&lt;env&gt;</code> job starts once, by itself, as soon as Concourse first checks the job's request queue. No one pressed anything.</div>
 <div class="callout"><strong>That run fails, and so does every redeploy until the environment has deployed once through the pipeline.</strong> A redeploy refuses unless the last successful deploy was made with Genesis 3.2.x or later from the environment's own deployment branch, which is what a pipeline deploy does. Nothing is deployed, nothing on the director changes, and the refusal says why.</div>
-<p>After one successful deploy of an environment from its deployment branch, through the pipeline's <code>deploy-&lt;env&gt;</code> job, including an environment set to <code>genesis.pipeline.manual</code> whose deploy is started by hand, that environment's redeploy works. Sections 2 to 4 explain this. They apply only where the pipeline has redeploy jobs: <code>pipeline.redeploy.enabled: false</code> in <code>.genesis/config</code> emits none, and then there is no first redeploy to expect.</p>
+<p>After one successful deploy of an environment from its deployment branch, through the pipeline's <code>deploy-&lt;env&gt;</code> job, including a manual environment, whose deploy is started by hand, that environment's redeploy works. Sections 2 to 4 explain this. They apply only where the pipeline has redeploy jobs: <code>pipeline.redeploy.enabled: false</code> in <code>.genesis/config</code> emits none, and then there is no first redeploy to expect.</p>
 <p><strong>The chained deploy.</strong> An environment that names another as its <code>genesis.pipeline.prior_env</code> follows it: it takes only what its predecessor has deployed.</p>
 <div class="callout"><strong>A chained environment's deploy waits until its predecessor has deployed once through the pipeline.</strong> Until then, <code>deploy-&lt;env&gt;</code> for the follower does not start, even when pressed: its build stays pending. Nothing fails, and nothing is deployed.</div>
 <p>Section 5 explains this.</p>
@@ -74,7 +74,7 @@ and only a commit on the deployment branch can be stood on.</code></pre>
 
 <h3>4.2 Enable the redeploy for an environment</h3>
 <ol>
-  <li>Deploy the environment through the pipeline once, with its <code>deploy-&lt;env&gt;</code> job. For an environment set to <code>genesis.pipeline.manual: true</code>, that is pressing the job's button after its <code>notify-&lt;env&gt;</code> job has posted the pending changes. The deploy records the deployment-branch commit it stood on.</li>
+  <li>Deploy the environment through the pipeline once, with its <code>deploy-&lt;env&gt;</code> job. For a manual environment, which is every one whose file does not set <code>genesis.pipeline.manual: false</code>, that is pressing the job's button after its <code>notify-&lt;env&gt;</code> job has posted the pending changes. The deploy records the deployment-branch commit it stood on.</li>
   <li>Confirm the record, without deploying anything. This reads the environment as deployed and refuses with the messages of section 3 if the record is not yet usable:
 <pre><code>genesis &lt;env&gt; info --as-deployed</code></pre></li>
   <li>From then on, <code>redeploy-&lt;env&gt;</code>'s button redeploys that commit.</li>
@@ -110,7 +110,7 @@ Pause the redeploy jobs first if a redeploy is unwanted:
 <table>
   <tr><th>Name</th><th>Kind</th><th>What it is</th></tr>
   <tr><td><code>&lt;env&gt;/&lt;type&gt;</code></td><td>git branch</td><td>the environment's deployment branch, which propagation delivers to and every deploy stands on</td></tr>
-  <tr><td><code>deploy-&lt;env&gt;</code></td><td>Concourse job</td><td>deploys the tip of <code>&lt;env&gt;/&lt;type&gt;</code>, the content propagation delivered; started by hand where <code>genesis.pipeline.manual</code> is set</td></tr>
+  <tr><td><code>deploy-&lt;env&gt;</code></td><td>Concourse job</td><td>deploys the tip of <code>&lt;env&gt;/&lt;type&gt;</code>, the content propagation delivered; started by hand unless the environment sets <code>genesis.pipeline.manual: false</code></td></tr>
   <tr><td><code>notify-&lt;env&gt;</code></td><td>Concourse job</td><td>for a manual environment, posts to Slack what a deploy of the branch would change, and that the deploy awaits a button press</td></tr>
   <tr><td><code>redeploy-&lt;env&gt;</code></td><td>Concourse job</td><td>runs <code>genesis &lt;env&gt; deploy --redeploy</code>: deploys again the commit the last successful deploy recorded</td></tr>
   <tr><td><code>redeploy_&lt;env&gt;-&lt;type&gt;</code></td><td>Concourse resource (shuttle)</td><td>the redeploy's request queue and its trigger; its seed is what starts the first run</td></tr>
@@ -119,7 +119,7 @@ Pause the redeploy jobs first if a redeploy is unwanted:
   <tr><td><code>passed</code></td><td>Concourse <code>get</code> setting</td><td>limits a job's input to versions that came out of the named jobs; it is also what draws a line between jobs</td></tr>
   <tr><td><code>genesis.pipeline.prior_env</code></td><td>configuration key, environment file</td><td>names the environment this one follows, whose deployed changes it takes</td></tr>
   <tr><td><code>pipeline.shuttle</code></td><td>configuration key, <code>.genesis/config</code></td><td>the bucket, endpoint and credentials every shuttle resource uses</td></tr>
-  <tr><td><code>genesis.pipeline.manual</code></td><td>configuration key, environment file</td><td>makes the environment's deploy wait for a button press rather than trigger on delivery</td></tr>
+  <tr><td><code>genesis.pipeline.manual</code></td><td>configuration key, environment file</td><td>set to <code>false</code>, lets the environment's deploy trigger on delivery; otherwise it waits for a button press, which is the default</td></tr>
   <tr><td><code>/secret/exodus/&lt;env&gt;/&lt;type&gt;/deployments</code></td><td>vault path</td><td>the deploy records; a redeploy reads <code>git.commit</code> from the newest successful one</td></tr>
 </table>
 <p class="small">The deploy record path shown is the default; a repository that sets its own exodus mount or secrets base has the same layout under it.</p>

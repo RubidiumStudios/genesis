@@ -199,7 +199,8 @@ subtest 'T420: parallel and grouped leave the deploy ungated' => sub {
 };
 
 subtest 'T420: an automatic environment gets the deploy messages alone' => sub {
-	my $h = contract_harness(config => {%SLACK});
+	# Automatic is what the file has to say now, manual being the default (D176).
+	my $h = contract_harness(config => {%SLACK}, pipeline => {manual => 'false'});
 	my ($p, $why) = dry_pipeline($h);
 	ok($p, 'the dry apply prints a pipeline') or return diag($why);
 	is_deeply([pipeline_faults($p)], [], 'fly would accept it');
@@ -314,7 +315,7 @@ subtest 'T466: deploy and redeploy announce their start' => sub {
 
 	# An automatic deploy, which the pipeline starts as often as a person,
 	# names nobody, in its start or its outcome.
-	my $auto = contract_harness(config => {%SLACK});
+	my $auto = contract_harness(config => {%SLACK}, pipeline => {manual => 'false'});
 	my ($ap, $awhy) = dry_pipeline($auto);
 	ok($ap, 'an automatic environment compiles') or return diag($awhy);
 	my $aplan = ((pipeline_job($ap, $DEPLOY) || {})->{plan} || [{}])->[0];

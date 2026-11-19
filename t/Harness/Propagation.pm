@@ -821,6 +821,12 @@ sub make_harness {
 		# environments stand beside one another is what most rows want and
 		# an edge nobody asked for changes every DAG the suite builds.
 		chained   => $opts{chained} // 0,
+		# An automatic harness writes manual: false on each environment
+		# file, so its deploys start when their branches move.  It is off
+		# by default, because an environment is manual unless its file
+		# says otherwise (D176), and it is for an automated provider alone,
+		# the key being refused under the manual one.
+		automatic => $opts{automatic} // 0,
 		# A fanned harness hangs every other environment off the one this
 		# names, which is the shape a deploy that spawns one child for
 		# several branches needs.  It is exclusive with chained, because an
@@ -2398,6 +2404,10 @@ sub write_env_file {
 	my %params   = %{$opts{params}   || {}};
 	$pipeline{require_pr} = 'true'
 		if $self->{mode} eq 'pr' && !$opts{site};
+	# An automatic harness's environments each say they need not wait, unless
+	# the row says what this one's key is.
+	$pipeline{manual} = 'false'
+		if $self->{automatic} && !$opts{site} && !exists $pipeline{manual};
 	# One file carries one pipeline key, so entries handed in under genesis
 	# fold into the pipeline block wherever a row fills both, and the pipeline
 	# option wins a key the two of them name together.  Anything other than a
@@ -5810,9 +5820,11 @@ sub _due {
 # fall out of step with the one the shapes here write.
 sub env_body {
 	my ($self, $env, $n) = @_;
-	my $pipeline = $self->{mode} eq 'pr'
-		? "  pipeline:\n    require_pr: true\n"
-		: '';
+	my @keys = (
+		($self->{automatic}    ? "    manual: false\n"    : ()),
+		($self->{mode} eq 'pr' ? "    require_pr: true\n" : ()),
+	);
+	my $pipeline = @keys ? join('', "  pipeline:\n", @keys) : '';
 	return "---\nkit:\n  name:    dev\n  version: latest\n  features: []\n"
 	     . "genesis:\n  env: $env\n" . $pipeline . "n: $n\n";
 }

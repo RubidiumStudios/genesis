@@ -22,7 +22,9 @@ sub progression {
 	my $h = make_harness(envs => ['qa', 'prod'], chained => 1, provider => $provider, vault => 0);
 	unless ($provider eq 'manual') {
 		compilable_pipeline($h);
-		write_env_file($h, 'prod', pipeline => {prior_env => 'qa', manual => 'true'});
+		# qa says it need not wait.  prod, as the chained harness seeded
+		# it, says nothing of it, which is manual (D176).
+		write_env_file($h, 'qa', pipeline => {manual => 'false'});
 	}
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-describe');
 	is($exit, 0, "the $provider describe succeeds") or diag($err);

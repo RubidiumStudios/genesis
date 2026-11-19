@@ -164,23 +164,35 @@ sub create {
 			);
 		}
 
+		# An environment is manual unless its file says otherwise (D176), so
+		# the key is written where the operator said something: false, which
+		# is what lets it deploy on its own, or true where they asked for it
+		# by flag.  It is neither asked nor written where the provider cannot
+		# honour it, since the load refuses the key there by name.
 		my $manual;
-		if (exists $cli_opts{manual}) {
-			$manual = $cli_opts{manual} ? 1 : 0;
+		require Genesis::CI::Provider;
+		require Genesis::CI::ProviderRegistry;
+		my $triggers = Genesis::CI::Provider->declared_capabilities(
+			Genesis::CI::ProviderRegistry->provider_class($provider)
+		)->{optional_git_triggers};
+		if (!$triggers) {
+			# Nothing deploys on its own under this provider.
+		} elsif (defined $cli_opts{manual}) {
+			$manual = $cli_opts{manual} ? 'true' : 'false';
 		} elsif ($interactive) {
-			$manual = prompt_for_boolean(
+			$manual = 'false' unless prompt_for_boolean(
 				"Require a manual CI trigger before this environment deploys? [y|n]",
-				"n",
+				"y",
 			);
 		}
 
 		# Write pipeline: section when there is something to record.
-		# An environment with no prior_env can still carry manual: true.
-		if (length($prior_env // '') || $require_pr || $manual) {
+		# An environment with no prior_env can still carry a manual key.
+		if (length($prior_env // '') || $require_pr || defined $manual) {
 			my $pipeline_yaml = "  pipeline:\n";
 			$pipeline_yaml .= "    prior_env:    $prior_env\n" if length($prior_env // '');
 			$pipeline_yaml .= "    require_pr:   true\n"       if $require_pr;
-			$pipeline_yaml .= "    manual:       true\n"       if $manual;
+			$pipeline_yaml .= "    manual:       $manual\n"    if defined $manual;
 
 			my $file     = $env->path($env->file);
 			my $contents = slurp($file);

@@ -82,7 +82,9 @@ subtest 'the flag-carrying pipeline surface' => sub {
 		},
 		'create' => {
 			class   => Genesis::Commands::PRE_DEPLOY,
-			options => [qw/prior-env=s require-pr manual no-commit reason=s/],
+			# manual is negatable: an environment is manual unless told
+			# otherwise (D176), so --no-manual is the half that says something.
+			options => [qw/prior-env=s require-pr manual! no-commit reason=s/],
 			# Green on arrival, and a guard rather than a proof: a step that
 			# gave genesis new a flag to skip the control refresh would put
 			# the ancestry check back on a stale tracking ref.

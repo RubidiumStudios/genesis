@@ -33,7 +33,7 @@ These keys are retired and refused, each naming its replacement: `locks`, `statu
 
 ### `manual`
 
-An environment deploys automatically unless it sets `manual: true`. Its deploy job then takes `trigger: false` on its deployment branch's `get`: the pipeline fetches each delivery and waits for a person to start the job. Where Slack is configured, its notify job posts what deploying the delivery would change. The Mermaid graph labels the environment `MANUAL`, and `genesis pipeline-status` reads the key.
+An environment's deploy waits for a person unless its file sets `manual: false`. That is the safe default: an environment added with nothing said of it does not deploy the moment its branch moves. A manual environment's deploy job takes `trigger: false` on its deployment branch's `get`: the pipeline fetches each delivery and waits for a person to start the job. With `manual: false` the job starts on each delivery. Where Slack is configured, its notify job posts what deploying the delivery would change. The Mermaid graph labels the environment `MANUAL`, and `genesis pipeline-status` reads the key.
 
 An environment whose deploy waits for a person certifies nothing until that person acts, so the environments after it stay held meanwhile. `genesis pipeline-status` prints the reason as `awaiting its trigger` beside the environment that holds them.
 

@@ -231,7 +231,7 @@ In outline:
 The topology does not come across as a `layout` string at all. Each environment's place in it goes into that environment's own file:
 
 - `genesis.pipeline.prior_env` names the environment before it.
-- `genesis.pipeline.manual: true` marks every environment the layout's `auto` pattern did not match, because a v3 environment deploys automatically unless it says otherwise.
+- `genesis.pipeline.manual: false` marks every environment the layout's `auto` pattern matched, because a v3 environment waits for a person unless it says otherwise, as a v2 one did.
 
 Give the v3 pipeline a different `pipeline.name` where it would take the v2 pipeline's, and apply it with `--paused` beside the paused v2 one.
 

@@ -77,13 +77,13 @@ genesis:
   env: staging
   pipeline:
     prior_env: sandbox
-    manual: true
+    manual: false
     require_pr: true
     track_additional_files:
       - ops/shared.yml
 ```
 
-`prior_env` is the topology edge, naming the environment this one follows. An environment with no `prior_env` takes control's commits without waiting on an ancestor. An environment deploys automatically unless it sets `manual: true`. The rest of the keys are covered in the [Configuration Reference](configuration-reference.md), and a key whose ability your provider does not declare is refused at configuration load naming both the key and the capability.
+`prior_env` is the topology edge, naming the environment this one follows. An environment with no `prior_env` takes control's commits without waiting on an ancestor. An environment's deploy waits for a person unless it sets `manual: false`, as this one does. The rest of the keys are covered in the [Configuration Reference](configuration-reference.md), and a key whose ability your provider does not declare is refused at configuration load naming both the key and the capability.
 
 ## Applying the Pipeline
 
