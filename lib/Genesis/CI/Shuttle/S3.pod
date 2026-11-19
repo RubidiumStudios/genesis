@@ -15,18 +15,50 @@ Genesis::CI::Shuttle::S3 - the keys an S3 shuttle block reads
     #       endpoint: https://minio.internal
     #       auth:     secret/ci/s3
 
+    my $held = Genesis::CI::Shuttle::S3->auth_components('secret/ci/s3');
+    # {access_key_id     => 'secret/ci/s3:access_key_id',
+    #  secret_access_key => 'secret/ci/s3:secret_access_key'}
+
 =head1 DESCRIPTION
 
 The backend L<Genesis::CI::Shuttle> dispatches to, selected by
 C<backend: s3> under C<pipeline.shuttle>. It declares the keys the S3
-shuttle resource reads and inherits its validation from the base, having no
-rule a declaration cannot state.
+shuttle resource reads and inherits its validation from the base.
 
 The region and the endpoint are declared here rather than on the block
-because S3 is the backend that reads them. C<auth> is the vault reference
-to this backend's credentials, and the configuration surface calls it by
-that name too. How one reference becomes the access key and the secret key
-the emitted resource takes is the emitter's question and not this file's.
+because S3 is the backend that reads them.
+
+=head2 The credential
+
+C<auth> is this backend's credential, and it is written as the other
+credentials of a pipeline are (D171): as a path, or with each key where it
+is held.
+
+=over 4
+
+=item A path
+
+C<auth: secret/ci/s3>, or C<auth: {path: secret/ci/s3}>. The two keys,
+C<access_key_id> and C<secret_access_key>, are read from that secret under
+those names.
+
+=item Each key on its own
+
+C<auth: {access_key_id: E<lt>pathE<gt>:E<lt>keyE<gt>, secret_access_key: E<lt>pathE<gt>:E<lt>keyE<gt>}>,
+for a credential stored under other names, such as C<aws_access_key_id>.
+Each may be written in Concourse's own form, C<((path.key))>, too. A key
+that is not given is read from C<path>.
+
+=back
+
+It has no C<type>, where the other credential blocks have one: the backend
+already says S3, and S3 has the one kind of credential.
+
+=head1 LIMITATIONS
+
+S3 is the one backend, so L<Genesis::CI::Compiler::PipelineDescriptor>
+asks this class for the credential's keys by name and not through the
+shuttle's backend.
 
 =head1 CLASS METHODS
 
@@ -38,8 +70,106 @@ The seven keys an S3 shuttle block may carry: C<bucket>, which is required,
 C<region>, C<endpoint>, and C<auth>; C<tls_skip_verify>, false by default,
 for a store whose certificate cannot be verified (contract a9); and C<image>
 and C<image_tag>, which default to the shuttle resource at C<latest>.
+C<auth> is checked by L</_auth_rule($auth)>.
 
 B<Returns:> a hash reference of key name to schema entry.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    my $declared = Genesis::CI::Shuttle::S3->options_schema;
+    # $declared->{bucket}{required} is 1
+
+=head2 auth_components($auth)
+
+    my $held = Genesis::CI::Shuttle::S3->auth_components($auth);
+
+Where each key of the credential is held, as the vault reference the
+compiler emits for it.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$auth>
+
+The C<auth> of a shuttle block: a path, or a block of C<path> and the two
+keys.
+
+=back
+
+B<Returns:> a hash reference of C<access_key_id> and C<secret_access_key>,
+each a C<E<lt>pathE<gt>:E<lt>keyE<gt>> or the reference it was given as. An empty one
+where C<$auth> is undefined or empty, which is a shuttle with no
+credential.
+
+B<Errors:> None. A block that cannot give both keys is refused when the
+configuration loads, by L</_auth_rule($auth)>.
+
+B<Examples:>
+
+    Genesis::CI::Shuttle::S3->auth_components({
+        access_key_id     => 'management-bucket:aws_access_key_id',
+        secret_access_key => 'management-bucket:aws_secret_access_key',
+    });
+    # each as given
+
+    Genesis::CI::Shuttle::S3->auth_components({path => 's3', secret_access_key => 'other:secret'});
+    # {access_key_id => 's3:access_key_id', secret_access_key => 'other:secret'}
+
+=head1 INTERNAL FUNCTIONS
+
+=head2 _auth_rule($auth)
+
+    my $problem = Genesis::CI::Shuttle::S3::_auth_rule($auth);
+
+The schema's check on C<auth>: it is a path, or a block that can give both
+keys and carries nothing else.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$auth>
+
+The value written for C<auth>.
+
+=back
+
+B<Returns:> C<undef> where it is a path or such a block, and otherwise
+what is wrong with it, as the text the load reports after
+C<pipeline.shuttle.auth:>.
+
+B<Errors:> None raised. The problems it answers:
+
+=over 4
+
+=item *
+
+C<"is empty; ..."> for an empty path.
+
+=item *
+
+C<"is neither a path nor a block naming one; ..."> for a list or another
+value.
+
+=item *
+
+C<"%s is not part of the credential, which takes ..."> for a block carrying
+a key other than C<path> and the two.
+
+=item *
+
+C<"needs %s: ..."> for a block that names no C<path> and lacks a key.
+
+=back
+
+B<Examples:>
+
+    Genesis::CI::Shuttle::S3::_auth_rule('secret/ci/s3');             # undef
+    Genesis::CI::Shuttle::S3::_auth_rule({access_key_id => 'a:b'});
+    # 'needs secret_access_key: name the secret holding it with #C{path}, or give each as <path>:<key>'
 
 =head1 SEE ALSO
 

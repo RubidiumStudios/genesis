@@ -124,4 +124,20 @@ subtest 'a9: the configured shuttle source' => sub {
 		'a18: the configured image');
 };
 
+# D171: the credential is a path, or each key where it is held, so one
+# stored under other names is used as it stands.
+subtest 'a9: the shuttle credential with each key where it is held' => sub {
+	my $h = contract_harness(config => {
+		'pipeline.shuttle.auth.access_key_id'     => 'management-bucket:aws_access_key_id',
+		'pipeline.shuttle.auth.secret_access_key' => 'management-bucket:aws_secret_access_key',
+	});
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'the dry apply prints a pipeline') or return diag($why);
+
+	my $src = (pipeline_resource($p, $RAN) || {})->{source} || {};
+	is($src->{access_key_id}, '((management-bucket.aws_access_key_id))', 'the key id from the key it names');
+	is($src->{secret_access_key}, '((management-bucket.aws_secret_access_key))', 'and the secret from its own');
+	ok(!exists $src->{auth}, 'and no auth key reaches the resource');
+};
+
 done_testing;

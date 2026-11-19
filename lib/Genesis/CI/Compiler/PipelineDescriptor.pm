@@ -573,14 +573,17 @@ sub _shuttle_resource {
 	my ($self, $ast, $dn, $stream, $name, $icon) = @_;
 	my $shuttle = $ast->integrations->{shuttle} or return;
 	return unless $dn;
+	# Where each key of the credential is held is the backend's to say, and
+	# s3 is the one backend (D23, D171).
+	require Genesis::CI::Shuttle::S3;
+	my $held = Genesis::CI::Shuttle::S3->auth_components($shuttle->{auth});
 	my %source = (
 		bucket       => $shuttle->{bucket},
 		path         => "$dn/$stream",
 		seed_version => JSON::PP::true,
 		(map {defined $shuttle->{$_} ? ($_ => $shuttle->{$_}) : ()} qw/region endpoint/),
 		($shuttle->{tls_skip_verify} ? (tls_skip_verify => JSON::PP::true) : ()),
-		($shuttle->{auth} ? (map {($_ => _unwrap_ref({secret_ref => "$shuttle->{auth}:$_"}))}
-			qw/access_key_id secret_access_key/) : ()),
+		(map {($_ => _unwrap_ref({secret_ref => $held->{$_}}))} sort keys %$held),
 	);
 	return { name => $name, type => 'shuttle', icon => $icon, source => \%source };
 }

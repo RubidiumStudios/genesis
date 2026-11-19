@@ -226,6 +226,19 @@ shuttle:
   tls_skip_verify: false
 ```
 
+`auth` is a credential like the others. A path names the secret holding `access_key_id` and `secret_access_key` under those names. Where they are stored under other names, give each as `<path>:<key>`:
+
+```yaml
+shuttle:
+  backend: s3
+  bucket:  genesis-pipelines
+  auth:
+    access_key_id:     management-bucket:aws_access_key_id
+    secret_access_key: management-bucket:aws_secret_access_key
+```
+
+A block may also name a `path` and one key, the other being read from the path. It has no `type`: the backend already says S3.
+
 Each deployment `<env>-<type>` has three paths in the bucket: `<env>-<type>/deployed` and `<env>-<type>/redeployed`, the events its deploy and redeploy write, and `<env>-<type>/redeploy`, the queue its redeploy job takes requests from. A tool outside the pipeline asks for a redeploy by writing to that queue. `image` and `image_tag` choose the resource's image.
 
 ## pipeline.notifications
