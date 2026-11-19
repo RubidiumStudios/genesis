@@ -1581,10 +1581,18 @@ sub _check_pipeline_secrets {
 	};
 	# What the apply itself did to a secret is said on that secret's line,
 	# with the word for it, where a block of its own once said it first.
+	# Where a secret is, is said as the scope it is in.  The reference before
+	# it has already named the secret, so its own path would say that twice.
+	my $scope = sub {
+		my ($path, $name) = @_;
+		$name =~ s{^/+}{};
+		return $path =~ s{/\Q$name\E\z}{}r;
+	};
 	my $acted = sub {
-		my ($did, $what) = @_;
+		my ($did, $what, $name) = @_;
 		$line->($did->{word} eq 'not copied' ? 'R' : 'G', $did->{word},
-			$what . ($did->{at} ? " at #C{$did->{at}}" : '') . ($did->{note} // ''));
+			$what . ($did->{at} ? sprintf(" at #C{%s}", $scope->($did->{at}, $name)) : '')
+			      . ($did->{note} // ''));
 	};
 	# A director's credentials are one secret of several keys, reported
 	# once beneath the rest and so left out of the list of references.
@@ -1604,12 +1612,12 @@ sub _check_pipeline_secrets {
 			next;
 		}
 		if (my $did = ($opts{written} || {})->{$ref}) {
-			$acted->($did, $ref);
+			$acted->($did, $ref, $name);
 			next;
 		}
 		my @paths = _concourse_secret_paths($store, $name);
 		if (my ($found) = grep {$vault->has($_, $key)} @paths) {
-			$line->('G', 'found', "$ref at #C{$found}");
+			$line->('G', 'found', sprintf("%s at #C{%s}", $ref, $scope->($found, $name)));
 		} else {
 			$line->('R', 'missing', sprintf("%s, used by %s; Concourse reads %s",
 				$ref, join(', ', @{$used{$ref}}), join(', then ', map {"#C{$_}"} @paths)));
@@ -1618,7 +1626,7 @@ sub _check_pipeline_secrets {
 	}
 	if (@directors) {
 		info("\n  #G{BOSH director credentials}, copied from each director's exodus record");
-		$acted->($_, $_->{name}) for @directors;
+		$acted->($_, $_->{name}, $_->{name}) for @directors;
 	}
 	return unless @missing && !$opts{dry_run} && !$opts{missing_ok};
 

@@ -2195,7 +2195,9 @@ B<Examples:>
 Checks every C<((name.key))> reference in the compiled pipeline against the
 secrets store before anything is set (D142, T472). Each reference is looked up
 where Concourse reads it, through C<Genesis::Top-E<gt>pipeline_secrets_vault>, and
-reported as found (with the path), missing (with the jobs and resources that use
+reported as found (with the scope it was found in, the pipeline's, the team's or
+the shared path, and not the secret's own path, which the reference before it
+has already named), missing (with the jobs and resources that use
 it and every path Concourse reads), unverified (where C<--skip-vault> was given or
 the store is not reachable and authenticated), or not checked (a reference to a
 var source of its own). No value is ever printed. A missing reference refuses

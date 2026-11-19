@@ -81,8 +81,9 @@ sub vault_get {
 # The pipeline-scope path the apply reports writing to.
 sub copied_to {
 	my ($said, $director) = @_;
-	my ($path) = $said =~ m{(/?concourse/main/[^/\s]+/bosh/\Q$director\E)\b};
-	return $path ? ($path =~ s{^/}{}r) : undef;
+	# The line names the scope the copy is in, and the name gives the rest.
+	my ($scope) = $said =~ m{bosh/\Q$director\E at (/?concourse/main/[^/\s,]+)};
+	return $scope ? (("$scope/bosh/$director") =~ s{^/}{}r) : undef;
 }
 
 subtest 'a real apply copies the credentials to the pipeline scope' => sub {
@@ -99,7 +100,7 @@ subtest 'a real apply copies the credentials to the pipeline scope' => sub {
 		'the four keys under their pipeline names');
 	# One line for the director, in the secrets list and under a heading of
 	# its own, where a block of its own and four lines of the check stood.
-	like($said, qr{Checking the pipeline's secrets.*BOSH director credentials.*copied\s+bosh/mgmt-copy at /?\Q$path\E}s,
+	like($said, qr{Checking the pipeline's secrets.*BOSH director credentials.*copied\s+bosh/mgmt-copy at /concourse/main/[^/\s,]+, from}s,
 		'the copy is reported in the secret check, under the directors\' heading');
 	unlike($said, qr{bosh/mgmt-copy\.(?:url|ca_cert|client|client_secret)\b},
 		'with no line for each key beside it');
@@ -116,7 +117,7 @@ subtest 'a second apply writes only on a difference' => sub {
 
 	($exit, $said) = apply($h, '-y');
 	is($exit, 0, 'the second apply succeeds') or return diag($said);
-	like($said, qr{found\s+bosh/mgmt-again at /?\Q$path\E}, 'reporting the copy found where it is');
+	like($said, qr{found\s+bosh/mgmt-again at /concourse/main/[^/\s]+$}m, 'reporting the copy found, in the scope it is in');
 
 	$h->_write_record(exodus_path($h, 'mgmt-again'), %RECORD, admin_password => 'rotated-password');
 	($exit, $said) = apply($h, '-y');
@@ -141,7 +142,7 @@ subtest 'a dry run says what it would copy and writes nothing' => sub {
 	my $h = on_director('mgmt-dry');
 	my ($exit, $said) = apply($h, '--dry-run');
 	is($exit, 0, 'the dry run succeeds') or return diag($said);
-	like($said, qr{pending\s+bosh/mgmt-dry at \S+, which this apply would copy from}, 'saying it would copy, as pending');
+	like($said, qr{pending\s+bosh/mgmt-dry at /concourse/main/[^/\s,]+, which this apply would copy from}, 'saying it would copy, as pending');
 	unlike($said, qr/missing\s+bosh\/mgmt-dry/, 'and the check does not count it missing');
 	my $path = copied_to($said, 'mgmt-dry');
 	ok(!$path || !%{vault_get($h, $path)}, 'and nothing is written');

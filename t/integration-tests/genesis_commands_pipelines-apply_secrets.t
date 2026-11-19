@@ -49,7 +49,9 @@ subtest 'a secret where Concourse reads it is reported found' => sub {
 	my $h = make_harness(envs => ['qa'], provider => 'concourse');
 	my ($exit, $said, $fly) = apply($h, '-y');
 	is($exit, 0, 'the apply succeeds') or return diag($said);
-	like($said, qr{found\s+\Q$REF\E.*/concourse/main/secret/ci/git}, 'the reference is found at the team scope');
+	# The line names the scope it was found in and not the secret's own
+	# path again, the reference before it having said that much.
+	like($said, qr{found\s+\Q$REF\E at /concourse/main$}m, 'the reference is found at the team scope');
 	unlike($said, qr/harness-clone-key/, 'and its value is never printed');
 	like($fly, qr/set-pipeline/, 'and the pipeline is set');
 };
@@ -77,7 +79,7 @@ subtest 'a secret held at the shared path alone is found there' => sub {
 	$h->_write_record('concourse/shared/secret/ci/git', private_key => 'harness-shared-key');
 	my ($exit, $said, $fly) = apply($h, '-y');
 	is($exit, 0, 'the apply succeeds') or diag($said);
-	like($said, qr{found\s+\Q$REF\E.*/concourse/shared/secret/ci/git}, 'the reference is found at the shared path');
+	like($said, qr{found\s+\Q$REF\E at /concourse/shared$}m, 'the reference is found at the shared path');
 	unlike($said, qr/harness-shared-key/, 'and its value is never printed');
 	like($fly, qr/set-pipeline/, 'and the pipeline is set');
 	Genesis::run({env => {SAFE_TARGET => $h->{vault_target}}, stderr => 0},
@@ -147,7 +149,7 @@ subtest "a director's credentials published at the team scope are found" => sub 
 		ca_cert => 'harness-ca', client => 'reader', client_secret => 'harness-director-secret');
 	my ($exit, $said, $fly) = apply($h, '-y');
 	is($exit, 0, 'the apply succeeds') or return diag($said);
-	like($said, qr{found\s+\Q$_\E.*/concourse/main/bosh/mgmt}, "finding $_") for @BOSH;
+	like($said, qr{found\s+\Q$_\E at /concourse/main$}m, "finding $_") for @BOSH;
 	unlike($said, qr/harness-director-secret/, 'and never printing a value');
 	like($fly, qr/set-pipeline/, 'and the pipeline is set');
 };

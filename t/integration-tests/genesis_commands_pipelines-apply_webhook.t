@@ -86,13 +86,13 @@ subtest 'a first apply writes the token and creates the hook' => sub {
 	like($said, qr/created.*hook|hook.*created/i, 'and reported created');
 	# The token is a line of the secret check, with what the apply did to
 	# it, where a block of its own said so ahead of the check.
-	like($said, qr{Checking the pipeline's secrets.*generated\s+webhook\.token at \S+/webhook}s,
+	like($said, qr{Checking the pipeline's secrets.*generated\s+webhook\.token at /concourse/main/[^/\s]+\n}s,
 		'the secret check reports the token generated, and where');
 	unlike($said, qr/The webhook token at/, 'with no block of its own');
 
 	($exit, $said) = apply($h, '-y');
 	is($exit, 0, 'a second apply succeeds');
-	like($said, qr{found\s+webhook\.token at \S+/webhook}, 'the check finding the token as it finds any other');
+	like($said, qr{found\s+webhook\.token at /concourse/main/[^/\s]+$}m, 'the check finding the token as it finds any other');
 	is(token_of($h), $token, 'leaving the token as it was');
 	is(scalar(our_hooks($h)), 1, 'and the one hook');
 	like($said, qr/already in place/i, 'reported already in place');
@@ -155,7 +155,7 @@ subtest 'a dry run says what it would write and writes nothing' => sub {
 	like($said, qr/would generate/i, 'it would generate the token');
 	like($said, qr/would create/i, 'and create the hook');
 	unlike($said, qr/missing\s+webhook\.token/, 'the secret check not counting the token missing');
-	like($said, qr{pending\s+webhook\.token at \S+/webhook, which this apply would generate},
+	like($said, qr{pending\s+webhook\.token at /concourse/main/[^/\s,]+, which this apply would generate},
 		'but pending, with where and what this apply would do to write it');
 	unlike($said, qr/The webhook token at|would generate it/, 'and in no block of its own');
 	is(token_of($h), undef, 'no token is written');
