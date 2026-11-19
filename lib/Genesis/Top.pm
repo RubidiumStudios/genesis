@@ -3172,7 +3172,7 @@ sub _pipeline_config_schema {
 					},
 					# The token propagate opens pull requests with, where the
 					# clone's own credential is not one (contract f8).
-					api_token => {type => 'string', description => 'Vault reference, as <path>:<key> or ((path.key)), to the GitHub token propagate opens pull requests with'},
+					api_token => {type => 'string', description => 'Vault reference, as <path>:<key> or ((path.key)), to the GitHub token propagate opens pull requests with, and pipeline-apply acts with where GITHUB_AUTH_TOKEN is unset'},
 					# Optional; pipeline_identity answers what is left unsaid (D172).
 					identity => {
 						type        => 'hash',

@@ -87,6 +87,13 @@ sub apply {
 		$top->control_branch
 	) unless $git->branch_exists($top->control_branch);
 
+	# The token the apply acts on GitHub with: the shell's, else the one
+	# api_token names in the provider's store (D177).  It stands in for the
+	# shell's from here to the end of the apply.
+	my ($stored, $token_at, $no_token) = $ENV{GITHUB_AUTH_TOKEN} ? ()
+		: _github_token_from_store($top, $platform, skip_vault => $opts->{'skip-vault'});
+	local $ENV{GITHUB_AUTH_TOKEN} = $stored if defined $stored;
+
 	# The host is asked about the repository before anything is cut (D118).
 	Genesis::CI::Preflight::refuse_once(
 		problems => [Genesis::CI::Preflight::host_repository_problems($top, $top->github_client)],
@@ -142,6 +149,11 @@ sub apply {
 	_apply_init_branches($top, $git, dry_run => $dry_run);
 
 	if ($ENV{GITHUB_AUTH_TOKEN}) {
+		info(
+			"  #Gi{using} the GitHub token at #C{%s}, which ".
+			"#C{pipeline.source_control.api_token} names, as ".
+			"#C{GITHUB_AUTH_TOKEN} is not set", $token_at
+		) if defined $token_at;
 		my $owner_repo = $top->source_control_repository;
 		my @branches = ({
 			branch => $top->control_branch,
@@ -169,10 +181,10 @@ sub apply {
 	} else {
 		info(
 			"  #Yi{skipped} the branch protection, because ".
-			"#C{GITHUB_AUTH_TOKEN} is not set"
+			"#C{GITHUB_AUTH_TOKEN} is not set%s", $no_token // ''
 		);
-		_apply_webhook_hook($top, undef, undef, dry_run => $dry_run)
-			if $platform eq 'concourse';
+		_apply_webhook_hook($top, undef, undef, dry_run => $dry_run,
+			no_token => $no_token) if $platform eq 'concourse';
 	}
 
 	# What the pipeline left for environments whose files are gone (D153).
@@ -1497,6 +1509,43 @@ sub open_control_session {
 # }}}
 ### Internal Compiler Helpers {{{
 
+# _github_token_from_store - the token api_token names, where the provider's store holds it (D177) {{{
+#
+# Answers the token and where it was read from, or neither and why not, the
+# reason worded to follow "GITHUB_AUTH_TOKEN is not set".
+sub _github_token_from_store {
+	my ($top, $platform, %opts) = @_;
+	return () if $platform eq 'manual'; # no store to read
+
+	my $key  = '#C{pipeline.source_control.api_token}';
+	my $said = (($top->pipeline_section || {})->{source_control} || {})->{api_token};
+	return (undef, undef, " and $key names no token")
+		unless defined $said && length $said;
+
+	require Genesis::CI::ProviderCompiler;
+	my ($ref) = Genesis::CI::ProviderCompiler->secret_ref($said) =~ /\A\s*\(\(\s*(.*?)\s*\)\)\s*\z/;
+	my ($name, $field) = defined $ref ? _split_reference($ref) : ();
+	return (undef, undef, " and $key names no secret of this store")
+		unless defined $name;
+
+	my $unread = " and the token $key names was not read (%s)";
+	return (undef, undef, sprintf($unread, '--skip-vault was given')) if $opts{skip_vault};
+	my $store  = $top->pipeline_secrets_store or return ();
+	my $vault  = eval {$top->pipeline_secrets_vault};
+	my $status = $vault ? (eval {$vault->status} // 'unreachable') : 'unreachable';
+	return (undef, undef, sprintf($unread, "the store is $status")) unless $status eq 'ok';
+
+	my @paths = _concourse_secret_paths($store, $name);
+	for my $path (@paths) {
+		next unless $vault->has($path, $field);
+		my $token = $vault->get($path, $field);
+		return ($token, "$path:$field") if defined $token && length $token;
+	}
+	return (undef, undef, sprintf(" and #C{%s}, which %s names, is at none of %s",
+		$ref, $key, join(', ', map {"#C{$_}"} @paths)));
+}
+
+# }}}
 # _check_pipeline_secrets - every reference, where Concourse will read it (D142) {{{
 sub _check_pipeline_secrets {
 	my ($top, $yaml, %opts) = @_;
@@ -1899,8 +1948,8 @@ sub _apply_webhook_hook {
 	my $shown = "$base?webhook_token=<the token at $path:token>";
 
 	unless ($gh && $owner_repo) {
-		info("  #Yi{skipped} the GitHub webhook, because #C{GITHUB_AUTH_TOKEN} is not set; ".
-			"configure a push hook calling #C{%s}", $shown) if $on;
+		info("  #Yi{skipped} the GitHub webhook, because #C{GITHUB_AUTH_TOKEN} is not set%s; ".
+			"configure a push hook calling #C{%s}", $opts{no_token} // '', $shown) if $on;
 		return;
 	}
 

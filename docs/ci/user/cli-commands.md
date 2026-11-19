@@ -27,7 +27,7 @@ The apply runs from `control`, committed and in step with the remote, and does i
    - each tracked director's credentials, copied from the director's exodus record, where an environment sets `genesis.pipeline.track_bosh_configs`.
 2. Checks every other `((name.key))` the pipeline references where Concourse will look for it, reporting each as found, missing or unverified, never with its value. A missing one refuses the apply.
 3. Cuts the deployment branches.
-4. Sets the branch rulesets and the GitHub push hook, where `GITHUB_AUTH_TOKEN` allows it.
+4. Sets the branch rulesets and the GitHub push hook, where its GitHub token allows it. The token is `GITHUB_AUTH_TOKEN`, or, where that is not set, the one `pipeline.source_control.api_token` names in the secrets store.
 5. Writes the applied record.
 6. Sets the pipeline.
 

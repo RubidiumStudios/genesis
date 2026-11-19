@@ -168,7 +168,10 @@ request, which a branch in no pull request mode does not have. Each branch
 gets one ruleset named for it, so a re-run replaces rather than
 accumulates. A user whose token cannot grant a setting is told which branch
 and which settings, and the run carries on. A run that carries no
-C<GITHUB_AUTH_TOKEN> skips the stage, names the variable, and carries on as
+C<GITHUB_AUTH_TOKEN> uses the token C<pipeline.source_control.api_token>
+names, read from the provider's secrets store, and says where it was read
+from (D177, L</_github_token_from_store>). Where there is neither, it skips
+the stage, says why, and carries on as
 well: the branches are in place either way, and protection is the one stage
 an operator can apply later.
 
@@ -2116,7 +2119,8 @@ refusal and the push hooks already there, and the apply goes on either way. A
 dry run says what it would do.
 
 B<Parameters:> the repository handle, the GitHub client and C<owner/repo> (both
-undef without a token), then C<token> and C<dry_run>.
+undef without a token), then C<token>, C<dry_run>, and C<no_token>, the
+reason the store gave no token either, which the skipped line carries.
 
 B<Returns:> nothing.
 
@@ -2125,6 +2129,44 @@ B<Errors:> None; every failure is a warning.
 B<Examples:>
 
   _apply_webhook_hook($top, $top->github_client, 'owner/repo', token => $token);
+
+=head2 _github_token_from_store
+
+  my ($token, $at, $why_not) = _github_token_from_store($top, $platform,
+      skip_vault => 0);
+
+The GitHub token C<pipeline.source_control.api_token> names, read from the
+provider's secrets store, for an apply whose shell carries no
+C<GITHUB_AUTH_TOKEN> (D177). The reference is looked for where Concourse
+reads it, at the pipeline scope, the team scope and then the shared path
+(L</_concourse_secret_paths>), and the first that holds it is the one
+read.
+
+C<apply> calls it once, only where C<GITHUB_AUTH_TOKEN> is not set, and
+lets the token stand in for the shell's for the rest of the run, so the
+repository check, the branch rulesets, the push hook and the orphan
+report's pull requests all use it as they would the operator's own.
+
+The token is the one a pipeline task opens pull requests with. Where it
+lacks the rights a ruleset or a hook needs, the stage that needs them warns
+as it does for any token.
+
+B<Parameters:> the repository handle, the provider type, and C<skip_vault>.
+
+B<Returns:> the token and C<< <path>:<key> >> it was read from; or two
+undefs and why there is none, worded to follow "GITHUB_AUTH_TOKEN is not
+set": the key names no token, the token was not read (C<--skip-vault>, or
+a store that is not reachable), or the reference is at none of the paths,
+which are named. Under the manual provider, which has no store, it answers
+nothing at all and the skip reads as it always did.
+
+B<Errors:> None. The value is never printed.
+
+B<Examples:>
+
+  my ($token, $at, $why) = _github_token_from_store($top, 'concourse');
+  # ('ghp_...', '/concourse/main/gh:pipeline_admin')
+  # or (undef, undef, ' and pipeline.source_control.api_token names no token')
 
 =head2 _check_pipeline_secrets
 
