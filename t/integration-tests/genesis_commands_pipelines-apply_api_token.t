@@ -92,14 +92,33 @@ subtest 'the token is found where Concourse would find it' => sub {
 		'at the shared path, where the team scope holds none');
 };
 
-subtest "the shell's token wins" => sub {
+# The token the repository names is known to be the one for this
+# repository.  The shell's may be there for another reason altogether.
+subtest "the store's token wins over the shell's" => sub {
 	plan tests => 3;
 
 	my $h = harness(held_at => 'concourse/main/gh');
 	my ($exit, $said) = apply($h, {no_token => 0}, '-y');
 	is($exit, 0, 'the apply succeeds') or diag($said);
+	is_deeply([tokens($h)], [$STORED], 'every call carried the token the store holds');
+	like($said, qr{GitHub token at /concourse/main/gh:pipeline_admin.*in place of GITHUB_AUTH_TOKEN}s,
+		'and the apply says it set the shell\'s aside');
+};
+
+subtest "the shell's token serves where the store gives none" => sub {
+	plan tests => 5;
+
+	my $h = harness();
+	my ($exit, $said) = apply($h, {no_token => 0}, '-y', '--missing-secrets-ok');
+	is($exit, 0, 'with the reference found nowhere the apply succeeds') or diag($said);
 	is_deeply([tokens($h)], [$h->{gh}{token}], 'every call carried the token the shell gave');
-	unlike($said, qr/GitHub token at/, 'and the store is not said to have given one');
+	like($said, qr{using GITHUB_AUTH_TOKEN, as gh\.pipeline_admin, which pipeline\.source_control\.api_token names, is at none of},
+		'and the apply says why it is the shell\'s');
+
+	$h = harness(no_key => 1);
+	($exit, $said) = apply($h, {no_token => 0}, '-y');
+	is_deeply([tokens($h)], [$h->{gh}{token}], 'with no api_token the shell\'s is used as it always was');
+	unlike($said, qr/using GITHUB_AUTH_TOKEN|GitHub token at/, 'with nothing said of it');
 };
 
 subtest 'a dry run reads the token too' => sub {

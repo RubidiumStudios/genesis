@@ -87,11 +87,13 @@ sub apply {
 		$top->control_branch
 	) unless $git->branch_exists($top->control_branch);
 
-	# The token the apply acts on GitHub with: the shell's, else the one
-	# api_token names in the provider's store (D177).  It stands in for the
-	# shell's from here to the end of the apply.
-	my ($stored, $token_at, $no_token) = $ENV{GITHUB_AUTH_TOKEN} ? ()
-		: _github_token_from_store($top, $platform, skip_vault => $opts->{'skip-vault'});
+	# The token the apply acts on GitHub with: the one api_token names in the
+	# provider's store, which is known to be this repository's, else the
+	# shell's, which may be there for another reason (D177).  The store's
+	# stands in for the shell's from here to the end of the apply.
+	my $shell_token = $ENV{GITHUB_AUTH_TOKEN} ? 1 : 0;
+	my ($stored, $token_at, $no_token) =
+		_github_token_from_store($top, $platform, skip_vault => $opts->{'skip-vault'});
 	local $ENV{GITHUB_AUTH_TOKEN} = $stored if defined $stored;
 
 	# The host is asked about the repository before anything is cut (D118).
@@ -149,11 +151,17 @@ sub apply {
 	_apply_init_branches($top, $git, dry_run => $dry_run);
 
 	if ($ENV{GITHUB_AUTH_TOKEN}) {
-		info(
-			"  #Gi{using} the GitHub token at #C{%s}, which ".
-			"#C{pipeline.source_control.api_token} names, as ".
-			"#C{GITHUB_AUTH_TOKEN} is not set", $token_at
-		) if defined $token_at;
+		if (defined $token_at) {
+			info(
+				"  #Gi{using} the GitHub token at #C{%s}, which ".
+				"#C{pipeline.source_control.api_token} names%s", $token_at,
+				$shell_token ? ', in place of #C{GITHUB_AUTH_TOKEN}' : ''
+			);
+		} elsif (defined $no_token && $no_token !~ /names no token\z/) {
+			# The key names a token the store did not give, so the
+			# operator is told the shell's is what is acting.
+			info("  #Yi{using} #C{GITHUB_AUTH_TOKEN}, as%s", $no_token =~ s/\A and//r);
+		}
 		my $owner_repo = $top->source_control_repository;
 		my @branches = ({
 			branch => $top->control_branch,

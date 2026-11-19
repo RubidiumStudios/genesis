@@ -167,10 +167,11 @@ marker that rebase-only protects can only be lost by squashing a pull
 request, which a branch in no pull request mode does not have. Each branch
 gets one ruleset named for it, so a re-run replaces rather than
 accumulates. A user whose token cannot grant a setting is told which branch
-and which settings, and the run carries on. A run that carries no
-C<GITHUB_AUTH_TOKEN> uses the token C<pipeline.source_control.api_token>
-names, read from the provider's secrets store, and says where it was read
-from (D177, L</_github_token_from_store>). Where there is neither, it skips
+and which settings, and the run carries on. The run acts with the token
+C<pipeline.source_control.api_token> names, read from the provider's
+secrets store, and says where it was read from (D177,
+L</_github_token_from_store>). Where the store gives none it acts with
+C<GITHUB_AUTH_TOKEN>. Where there is neither, it skips
 the stage, says why, and carries on as
 well: the branches are in place either way, and protection is the one stage
 an operator can apply later.
@@ -2136,16 +2137,20 @@ B<Examples:>
       skip_vault => 0);
 
 The GitHub token C<pipeline.source_control.api_token> names, read from the
-provider's secrets store, for an apply whose shell carries no
-C<GITHUB_AUTH_TOKEN> (D177). The reference is looked for where Concourse
-reads it, at the pipeline scope, the team scope and then the shared path
+provider's secrets store, which is the token an apply acts with (D177).
+The reference is looked for where Concourse reads it, at the pipeline
+scope, the team scope and then the shared path
 (L</_concourse_secret_paths>), and the first that holds it is the one
 read.
 
-C<apply> calls it once, only where C<GITHUB_AUTH_TOKEN> is not set, and
+C<apply> calls it once, whether or not C<GITHUB_AUTH_TOKEN> is set, and
 lets the token stand in for the shell's for the rest of the run, so the
 repository check, the branch rulesets, the push hook and the orphan
-report's pull requests all use it as they would the operator's own.
+report's pull requests all use it. It is preferred to the shell's because
+the token the repository names is known to be this repository's, where a
+C<GITHUB_AUTH_TOKEN> may be in the shell for another reason. Where it
+answers no token, C<apply> acts with the shell's, and says so where the
+key named one the store did not give.
 
 The token is the one a pipeline task opens pull requests with. Where it
 lacks the rights a ruleset or a hook needs, the stage that needs them warns

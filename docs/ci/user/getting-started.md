@@ -96,7 +96,7 @@ genesis pipeline-apply
 This does five things:
 
 - cuts a deployment branch for every environment;
-- applies the branch protection each one's `require_pr` asks for, where its GitHub token is an admin one: `GITHUB_AUTH_TOKEN`, or the token `pipeline.source_control.api_token` names where that is not set;
+- applies the branch protection each one's `require_pr` asks for, where its GitHub token is an admin one: the token `pipeline.source_control.api_token` names, or `GITHUB_AUTH_TOKEN` where that gives none;
 - checks that every secret the pipeline references is where Concourse will look for it;
 - writes the exodus records;
 - compiles the pipeline and uploads it to the provider.
