@@ -2845,7 +2845,7 @@ sub _validate_config_to_save {
 	local $self->{__config_repair} = 0;
 	local $self->{__config_to_save} = sprintf(
 		'the configuration this run would write (#C{%s} is left as it was)',
-		$self->path('.genesis/config')
+		humanize_path($self->path('.genesis/config'))
 	);
 	return $self->_validate_config;
 }
@@ -2856,7 +2856,7 @@ sub _refuse_config {
 	my ($self, @problems) = @_;
 	return push @{$self->{__problems}}, @problems if $self->{__problems}; # one refusal (T411)
 	bail({exitcode => CONFIG}, "Configuration validation failed for %s:%s",
-		$self->{__config_to_save} // sprintf('#C{%s}', $self->path('.genesis/config')),
+		$self->{__config_to_save} // sprintf('#C{%s}', humanize_path($self->path('.genesis/config'))),
 		join('', map {"\n[[".Genesis::Term::bullet('', inline => 1, indent => 0).">>$_"} @problems));
 }
 
@@ -2867,7 +2867,7 @@ sub _refuse_config_text {
 	return push @{$self->{__problems}}, sprintf($fmt, @args) if $self->{__problems};
 	bail({exitcode => CONFIG}, $fmt.($self->{__config_to_save}
 		? "\n\nNothing was written: #C{%s} is left as it was." : ''),
-		@args, ($self->{__config_to_save} ? $self->path('.genesis/config') : ()));
+		@args, ($self->{__config_to_save} ? humanize_path($self->path('.genesis/config')) : ()));
 }
 
 # }}}

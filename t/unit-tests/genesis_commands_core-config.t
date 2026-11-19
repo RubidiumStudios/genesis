@@ -876,7 +876,7 @@ CFG
 };
 
 subtest 'a run whose result the load would refuse writes nothing' => sub {
-	plan tests => 4;
+	plan tests => 6;
 
 	my $dir = ci_repo('config-set-still-refused');
 	my $before = slurp("$dir/.genesis/config");
@@ -892,6 +892,12 @@ subtest 'a run whose result the load would refuse writes nothing' => sub {
 		"naming the key the result still carries, as retired (T404)");
 	like($err, qr/configuration this run would write/,
 		"as a problem with what the run would write, which has not been written");
+	# The file is named as Genesis names any path to an operator, from where
+	# they stand, and not by its full path, which wrapped across two lines.
+	(my $said = $err) =~ s/\s+//g;
+	like($said, qr/\(\.?\/?\.genesis\/configisleftasitwas\)/,
+		"naming the file from where the operator stands");
+	unlike($said, qr/\Q$dir\E/, "and not by its full path");
 	is(slurp("$dir/.genesis/config"), $before, "and the file is as it was");
 };
 
