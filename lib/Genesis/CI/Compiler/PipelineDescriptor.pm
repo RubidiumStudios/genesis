@@ -1607,7 +1607,7 @@ sub _task_config {
 	}
 	if ($vault->{options}) {
 		$params{VAULT_SKIP_VERIFY}  = $vault->{options}{tls_verify} ? 'false' : 'true';
-		$params{VAULT_NO_STRONGBOX} = '"true"' if $vault->{options}{no_strongbox};
+		$params{VAULT_NO_STRONGBOX} = 'true' if $vault->{options}{no_strongbox};
 	}
 	$params{VAULT_NAMESPACE} = $vault->{namespace} if $vault->{namespace};
 
@@ -1676,7 +1676,7 @@ sub _errand_config {
 	}
 	if ($vault->{options}) {
 		$params{VAULT_SKIP_VERIFY}  = $vault->{options}{tls_verify} ? 'false' : 'true';
-		$params{VAULT_NO_STRONGBOX} = '"true"' if $vault->{options}{no_strongbox};
+		$params{VAULT_NO_STRONGBOX} = 'true' if $vault->{options}{no_strongbox};
 	}
 	$params{VAULT_NAMESPACE} = $vault->{namespace} if $vault->{namespace};
 	$params{DEBUG} = $config->{debug} if $config->{debug};

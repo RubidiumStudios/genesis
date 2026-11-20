@@ -77,6 +77,7 @@ subtest 'Stage 1 rows over a default doomsday root' => sub {
 		['((secret/ci/vault.role_id))', '((secret/ci/vault.secret_id))'],
 		'f5: approle auth gives the role and secret as references');
 	ok(!exists $env{VAULT_AUTH_TOKEN}, 'f5: and no token');
+	ok(!exists $env{VAULT_NO_STRONGBOX}, 'f5: and no VAULT_NO_STRONGBOX, the repository saying nothing of strongbox');
 	ok(!exists $env{CURRENT_ENV} && !exists $env{GIT_BRANCH}, 'f7: no CURRENT_ENV or GIT_BRANCH');
 	is($env{CI_NO_REDACT}, 0, 'f9: CI_NO_REDACT is 0 by default');
 };
@@ -92,6 +93,7 @@ subtest 'Stage 1 rows the configuration changes' => sub {
 			# is changed.
 			'pipeline.vault.auth.type'    => 'token',
 			'secrets_provider.insecure'   => 'true',
+			'secrets_provider.strongbox'  => 'false',
 		},
 		pipeline => {manual => 'false'},
 	);
@@ -114,6 +116,9 @@ subtest 'Stage 1 rows the configuration changes' => sub {
 		'f5: and no other vault credential');
 	# TLS is the repository's vault's to say (D169).
 	is($env{VAULT_SKIP_VERIFY}, 'true', 'f5: an insecure repository vault skips verification');
+	# The word alone.  The v2 generator printed it as YAML text, quoted, and
+	# the quotes came along into the value when the compiler took the line.
+	is($env{VAULT_NO_STRONGBOX}, 'true', 'f5: and one run without strongbox says so, as the word true');
 	is($env{CI_NO_REDACT}, 1, 'f9: pipeline.unredacted sets CI_NO_REDACT');
 };
 

@@ -68,8 +68,17 @@ subtest 'Stage 2 rows over a default doomsday root' => sub {
 	is_deeply([@env{qw/GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL/}], [@deploy{qw/GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL/}],
 		"f4: the deploy's commit identity");
 	is($env{VAULT_ADDR}, $deploy{VAULT_ADDR}, "f5: the deploy's vault");
+	ok(!exists $env{VAULT_NO_STRONGBOX}, 'f5: and no VAULT_NO_STRONGBOX, the repository saying nothing of strongbox');
 
 	ok(!grep({($_->{put} // '') =~ /-lock$/} plan_steps($jb)), 'g7: it holds no lock');
+};
+
+subtest 'f5: a repository vault run without strongbox says so to propagate' => sub {
+	my $h = contract_harness(config => {'secrets_provider.strongbox' => 'false'});
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'the dry apply prints a pipeline') or return diag($why);
+	my %env = %{(task_step(pipeline_job($p, 'propagate')) || {})->{config}{params} || {}};
+	is($env{VAULT_NO_STRONGBOX}, 'true', 'as the word true, with no quotes in the value');
 };
 
 done_testing;
