@@ -92,7 +92,7 @@ The pipeline's name in its provider, which defaults to `deployment_type`. It is 
 | `url`, `team` | The Concourse URL and team. Required. Each operator's own fly target is found by these, or given with `--target`; `target` is retired |
 | `insecure` | Skip TLS verification with fly |
 | `public` | Make every job's build log public. False by default |
-| `task.image`, `task.version` | The image every task runs in, by default `genesiscommunity/concourse:latest`. It needs git 2.34.1 or later. An image named here is taken as written, host included |
+| `task.image`, `task.version` | The image every task runs in, by default `genesiscommunity/concourse:latest`. It needs git 2.34.1 or later. An image named here with a registry domain is taken as written; one with none is pulled from the host of `pipeline.registry`, where that is set |
 | `task.privileged` | Environments whose deploy task runs privileged, such as a create-env director |
 | `git.webhooks` | `true` puts a webhook token on every git resource, has propagate ask Concourse to check each branch it pushes, and has `genesis pipeline-apply` keep the token and a GitHub push hook. False by default |
 | `git.check_every`, `git.control_check_every` | How often the deployment branches, and control, are polled: a Concourse duration (`30s`, `5m`, `1h`) or `never`. Concourse's default, 1m, where unset. With webhooks on, `1h` for the deployment branches keeps GitHub's traffic low |
@@ -274,7 +274,11 @@ registry:
     path: registry                  # username and password
 ```
 
-An image named in the configuration, `provider.task.image` or `shuttle.image`, is taken as written. It carries the registry's credentials only where it begins with the registry's host.
+An image named in the configuration, `provider.task.image` or `shuttle.image`, is read by whether it names a registry domain, as Docker reads one: a first path segment with a dot or a port in it, or `localhost`.
+
+- **With no domain,** it is pulled from the registry's host, the first segment of `uri`, with the registry's credentials. Under the `uri` above, `image-shared/genesis-task` is pulled as `registry.example.com/image-shared/genesis-task`. The host is used and not the whole `uri`, because the `uri` carries the path the default images are mirrored under and a named image has a path of its own.
+- **With the registry's host as its domain,** it is taken as written and carries the registry's credentials.
+- **With any other domain,** it is taken as written and carries none. `docker.io/someorg/image` is how a named image is pulled from Docker Hub with a registry set.
 
 ## pipeline.redeploy
 

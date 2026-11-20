@@ -208,7 +208,7 @@ registry:
     path: concourse/registry   # holds username and password
 ```
 
-Where Concourse cannot pull from public registries, `registry` names the mirror it pulls through. `uri` prefixes every image Genesis names by default: each resource type the pipeline declares, the task image, and the shuttle image. Each of those sources carries the credential as references, `username` and `password` read from `path` or given one by one as `<path>:<key>`. An image you name yourself, `provider.task.image` or `shuttle.image`, is used exactly as you write it, so a mirror that keeps your own images under a different path than the public ones is written in full there; it carries the credential when it begins with the registry's host. Without the block every image is pulled as named.
+Where Concourse cannot pull from public registries, `registry` names the mirror it pulls through. `uri` prefixes every image Genesis names by default: each resource type the pipeline declares, the task image, and the shuttle image. Each of those sources carries the credential as references, `username` and `password` read from `path` or given one by one as `<path>:<key>`. An image you name yourself, `provider.task.image` or `shuttle.image`, is pulled from the registry's host, the first segment of `uri`, where it names no registry domain of its own, so a mirror that keeps your own images under a different path than the public ones needs only that path: `image-shared/genesis-task`. One that names a domain is used exactly as you write it. Either carries the credential when it is under the registry's host. Without the block every image is pulled as named.
 
 ## The Override File
 

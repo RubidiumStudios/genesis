@@ -448,6 +448,10 @@ sub _image_source {
 	my ($host)   = ($uri // '') =~ m{^([^/]+)};
 	undef $named if defined $named && $named eq $default;
 
+	# A named image with no domain of its own is the registry host's.
+	$named = "$host/$named" if defined $named && $uri
+		&& !_has_registry_domain($named) && $named !~ m{^\Q$host\E/};
+
 	my $repository = defined $named ? $named : $uri ? "$uri/$default" : $default;
 	my $pulled_through = $uri && defined $registry->{username}
 		&& (!defined $named || $named =~ m{^\Q$host\E/});
@@ -459,6 +463,15 @@ sub _image_source {
 			password => _unwrap_ref($registry->{password}),
 		) : ()),
 	};
+}
+
+# }}}
+# _has_registry_domain - whether an image names the registry it is pulled from, as Docker reads one {{{
+sub _has_registry_domain {
+	my ($image) = @_;
+	my ($first, $rest) = split m{/}, $image, 2;
+	return 0 unless defined $rest;
+	return $first =~ /[.:]/ || $first eq 'localhost' ? 1 : 0;
 }
 
 # }}}
@@ -2177,9 +2190,15 @@ each resource type, the default task image and the default shuttle image, is
 pulled through its C<uri>, and each such source carries the registry's
 C<username> and C<password> references, through C<_image_source> (D137,
 contract a18, e8).  An image the operator names, C<task.image> or
-C<shuttle.image>, is taken as written, and carries the credentials only when
-its repository begins with the registry's host; one equal to the compiler's
-default counts as the default, since the schema fills the default in.  A
+C<shuttle.image>, with no registry domain is pulled from the registry's
+host, the first segment of C<uri>, and not through the whole C<uri>, which
+carries the path the default images are mirrored under.  One that names a
+domain, as Docker reads one (a first segment holding a dot or a colon, or
+C<localhost>), is taken as written, so C<docker.io/...> pulls from Docker
+Hub past the registry.  Either carries the credentials only when its
+repository is under the registry's host.  A named image equal to the
+compiler's default counts as the default, since the schema fills the
+default in.  A
 legacy C<ci.yml> named its task image relative to the registry, so
 ASTBuilder prefixes it there and the rule above then finds it under the host.
 
