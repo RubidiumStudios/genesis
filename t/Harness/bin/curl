@@ -311,8 +311,8 @@ if ($kind eq 'other') {
 		$state->{rulesets} ||= [];
 
 		# GitHub refuses a pull_request rule missing any parameter its schema
-		# requires, naming the rule by its index, and stores nothing.  The
-		# lmelt PoC met this as a bare 422 the double never gave.
+		# requires, naming the rule by its index, and stores nothing.  A
+		# proof of concept met this as a bare 422 the double never gave.
 		my @required = qw/dismiss_stale_reviews_on_push require_code_owner_review
 			require_last_push_approval required_approving_review_count
 			required_review_thread_resolution/;

@@ -18,7 +18,7 @@ slack:
   mentions_on_failure:
     - '@sre-oncall'
   per_env_overrides:
-    lm-aws-useast1-hs-prod:
+    acme-aws-useast1-prod:
       channel:  '#prod-deployments'
       mentions_on_failure:
         - '@prod-sre'
@@ -104,7 +104,7 @@ slack:
   channel: '#deployments'
   mentions_on_failure: []
   per_env_overrides:
-    lm-aws-useast1-hs-prod:
+    acme-aws-useast1-prod:
       channel:  '#prod-critical'
       mentions_on_failure:
         - '@prod-sre'

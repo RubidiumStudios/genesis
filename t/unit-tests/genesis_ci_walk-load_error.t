@@ -19,7 +19,7 @@ $ENV{NOCOLOR} = 1;
 # Narrow, so bail wraps the first sentence across lines.
 $ENV{GENESIS_OUTPUT_COLUMNS} = 60;
 
-my $sentence = 'lmelt-vsphere-canwest-1-mgmt declares the kit vault/2.0.1, '.
+my $sentence = 'acme-vsphere-west-1-mgmt declares the kit vault/2.0.1, '.
 	'which the commit 0a0f983f96 does not carry.';
 
 eval {

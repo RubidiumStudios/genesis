@@ -6,7 +6,7 @@
 # opens; while one is open, the branch is rebuilt and that pull request is
 # updated in place.
 #
-# What the rows catch: the lmelt PoC's second delivery to lab, whose push
+# What the rows catch: a proof of concept's second delivery to lab, whose push
 # was refused as "stale info" because the lease said the branch R still
 # carried after the merge must not exist.  Every earlier row ran its second
 # propagate in the clone whose own first push had set the tracking ref.

@@ -7,7 +7,7 @@
 # Ahead still refuses there, and behind still refuses for an operator.
 #
 # What the rows catch: a build red for nothing but timing, which is what the
-# lmelt PoC's propagate showed after two quick pushes and after a prior
+# a live propagate showed after two quick pushes and after a prior
 # environment's deploy started it before Concourse had found a push; an
 # older Genesis reading a tip that embeds a newer one; and a pass that waved
 # through an unpublished control, or an operator's stale clone, which D30

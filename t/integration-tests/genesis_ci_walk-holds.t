@@ -90,7 +90,7 @@ subtest 'a hold stops the delivery and holds everything after it' => sub {
 };
 
 # T461: the undeployed set is what changed after the certified commit, not
-# what differs between the two trees.  The lmelt PoC held lab behind mgmt
+# what differs between the two trees.  A proof of concept held lab behind mgmt
 # for good once mgmt deployed past two embeds, each changing the binary.
 subtest 'an ancestor certified past the commit releases it' => sub {
 	plan tests => 3;

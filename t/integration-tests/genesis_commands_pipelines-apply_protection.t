@@ -181,7 +181,7 @@ subtest 'a non-admin gets the list and the run carries on' => sub {
 	like($said, qr{qa/bosh}, 'the report names the branch');
 	like($said, qr/non_fast_forward/,
 		'the report names the setting that could not be granted');
-	# The lmelt PoC's warning said only "HTTP 422 - 422", HTTP/2's status
+	# A proof of concept's warning said only "HTTP 422 - 422", HTTP/2's status
 	# line having no words; GitHub's reason is in the body.
 	like($said, qr/HTTP 403 - Resource not accessible by personal access token/,
 		'and gives GitHub\'s own reason');

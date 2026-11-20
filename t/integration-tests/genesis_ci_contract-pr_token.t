@@ -6,7 +6,7 @@
 # with no api_token is refused at compile, naming the key; and a pipeline with
 # no such environment carries no token at all.
 #
-# What the rows catch: the lmelt PoC's pull request test meeting a propagate
+# What the rows catch: a live pull request test meeting a propagate
 # task that cannot open a pull request, which every pipeline compiled before
 # this row did, and a token handed to a task that has no use for it.
 use strict;

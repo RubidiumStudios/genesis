@@ -786,7 +786,7 @@ environment certified past the commit under consideration, which contains
 it, has nothing undeployed for it. A tree comparison, C<certified..upto>,
 would list every file that differs between the two, so an ancestor that had
 deployed past two commits changing one file would hold the first for as long
-as it kept deploying ahead (T461; the lmelt PoC's lab, 2026-11-01).
+as it kept deploying ahead (T461; a proof of concept's lab, 2026-11-01).
 
 An environment that has never certified a commit is holding everything below
 it, so with no certified commit the answer is the whole set rather than the

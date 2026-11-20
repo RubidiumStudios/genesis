@@ -3,7 +3,7 @@
 # branch is checked out.  The delivery used to read its set again after the
 # switch, so the kit's blueprint ran with the working tree on the branch,
 # and on a branch carrying only its init commit a hook calling back into the
-# repository's embedded Genesis found none (the lmelt PoC's lab, 2026-10-30).
+# repository's embedded Genesis found none (a live lab, 2026-10-30).
 #
 # The hook records the branch the clone stands on each time it runs, so the
 # rows ask the one thing directly, rather than through whatever a missing

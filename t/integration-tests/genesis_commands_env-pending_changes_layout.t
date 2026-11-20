@@ -9,7 +9,7 @@
 # What the rows catch: a summary that is not the first thing printed, or that
 # counts what the sections below it do not show; a verdict that calls a deploy
 # with nothing to change on the director pending changes, which is what the
-# lmelt notify job said of a branch that carried Genesis updates alone; a range
+# a notify job said of a branch that carried Genesis updates alone; a range
 # that lists the seed or starts from the wrong base; commits newest first; and
 # folding that merges commits by different authors or hides them under
 # --verbose.
