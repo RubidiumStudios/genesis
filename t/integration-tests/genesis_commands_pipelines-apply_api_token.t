@@ -121,6 +121,23 @@ subtest "the shell's token serves where the store gives none" => sub {
 	unlike($said, qr/using GITHUB_AUTH_TOKEN|GitHub token at/, 'with nothing said of it');
 };
 
+# The token a pipeline task is given where api_token is unset (contract f8),
+# so the apply acts with the one the pipeline itself will (D178).
+subtest "with no api_token, an https clone credential's password is the token" => sub {
+	plan tests => 4;
+
+	my $h = harness(no_key => 1);
+	$h->set_repo_config('pipeline.source_control.auth.type' => 'https');
+	$h->set_repo_config('pipeline.source_control.auth.path' => 'gh');
+	$h->_write_record('concourse/main/gh', username => 'bot', password => $STORED);
+	my ($exit, $said) = apply($h, {}, '-y');
+	is($exit, 0, 'the apply succeeds') or diag($said);
+	is_deeply([tokens($h)], [$STORED], 'every call to GitHub carried the password the store holds');
+	like($said, qr{GitHub token at /concourse/main/gh:password, which pipeline\.source_control\.auth names},
+		'and the apply says the clone credential named it');
+	unlike($said, qr/\Q$STORED\E/, 'never printing it');
+};
+
 subtest 'a dry run reads the token too' => sub {
 	plan tests => 3;
 

@@ -44,7 +44,7 @@ sub store_with {
 	return load_with($h, join("\n", @lines))->pipeline_secrets_store;
 }
 
-sub looked_for { [Genesis::Commands::Pipelines::_concourse_secret_paths($_[0], 'management-bucket')] }
+sub looked_for { [Genesis::Top::secret_store_paths($_[0], 'management-bucket')] }
 
 subtest 'with nothing said, the shared path is shared, under the prefix' => sub {
 	plan tests => 2;

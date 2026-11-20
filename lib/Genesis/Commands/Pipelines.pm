@@ -87,14 +87,14 @@ sub apply {
 		$top->control_branch
 	) unless $git->branch_exists($top->control_branch);
 
-	# The token the apply acts on GitHub with: the one api_token names in the
-	# provider's store, which is known to be this repository's, else the
-	# shell's, which may be there for another reason (D177).  The store's
-	# stands in for the shell's from here to the end of the apply.
+	# The token the apply acts on GitHub with: the one the configuration
+	# names in the provider's store, which is known to be this repository's,
+	# else the shell's, which may be there for another reason (D177).  The
+	# store's stands in for the shell's from here to the end of the apply.
 	my $shell_token = $ENV{GITHUB_AUTH_TOKEN} ? 1 : 0;
-	my ($stored, $token_at, $no_token) =
-		_github_token_from_store($top, $platform, skip_vault => $opts->{'skip-vault'});
-	local $ENV{GITHUB_AUTH_TOKEN} = $stored if defined $stored;
+	my $named       = $top->pipeline_github_token(skip_vault => $opts->{'skip-vault'});
+	my $no_token    = $named->{why};
+	local $ENV{GITHUB_AUTH_TOKEN} = $named->{token} if defined $named->{token};
 
 	# The host is asked about the repository before anything is cut (D118).
 	Genesis::CI::Preflight::refuse_once(
@@ -153,17 +153,7 @@ sub apply {
 	_apply_init_branches($top, $git, dry_run => $dry_run);
 
 	if ($ENV{GITHUB_AUTH_TOKEN}) {
-		if (defined $token_at) {
-			info(
-				"  #Gi{using} the GitHub token at #C{%s}, which ".
-				"#C{pipeline.source_control.api_token} names%s", $token_at,
-				$shell_token ? ', in place of #C{GITHUB_AUTH_TOKEN}' : ''
-			);
-		} elsif (defined $no_token && $no_token !~ /names no token\z/) {
-			# The key names a token the store did not give, so the
-			# operator is told the shell's is what is acting.
-			info("  #Yi{using} #C{GITHUB_AUTH_TOKEN}, as%s", $no_token =~ s/\A and//r);
-		}
+		_say_github_token($named, $shell_token);
 		my $owner_repo = $top->source_control_repository;
 		my @branches = ({
 			branch => $top->control_branch,
@@ -511,6 +501,11 @@ sub propagate {
 	my $top     = Genesis::Top->new('.');
 	my $git     = Service::Git->new('.');
 	my $control = $top->control_branch;
+
+	# The first stage takes the token the configuration names, once it has
+	# the shape to read it from, and it is this run's alone (D178).
+	local $ENV{GITHUB_AUTH_TOKEN} = $ENV{GITHUB_AUTH_TOKEN};
+	delete $ENV{GITHUB_AUTH_TOKEN} unless defined $ENV{GITHUB_AUTH_TOKEN};
 
 	# Every question first, against a snapshot of R, and one refusal (D115).
 	my $checked = _propagate_check_first($top, $git, $opts);
@@ -1360,6 +1355,11 @@ sub _propagate_check_first {
 				tracking => $ns);
 			push @problems, @prefix, @initial;
 
+			# By hand, the token the configuration names stands in for the
+			# shell's wherever a pull request is read or written (D178).
+			_take_named_github_token($top)
+				if grep {$topology->{nodes}{$_}{require_pr}} @{$topology->{order}};
+
 			# The reviews are read by pull request branch, so a branch that
 			# collides would be asked about under a name that is not its own.
 			if (@prefix) {
@@ -1519,40 +1519,34 @@ sub open_control_session {
 # }}}
 ### Internal Compiler Helpers {{{
 
-# _github_token_from_store - the token api_token names, where the provider's store holds it (D177) {{{
+# _take_named_github_token - act with the token the configuration names, for the caller's scope (D178) {{{
 #
-# Answers the token and where it was read from, or neither and why not, the
-# reason worded to follow "GITHUB_AUTH_TOKEN is not set".
-sub _github_token_from_store {
-	my ($top, $platform, %opts) = @_;
-	return () if $platform eq 'manual'; # no store to read
+# Assigns GITHUB_AUTH_TOKEN, which the caller has localised.
+sub _take_named_github_token {
+	my ($top) = @_;
+	my $shell_token = $ENV{GITHUB_AUTH_TOKEN} ? 1 : 0;
+	my $named       = $top->pipeline_github_token;
+	$ENV{GITHUB_AUTH_TOKEN} = $named->{token} if defined $named->{token};
+	_say_github_token($named, $shell_token);
+	return $named;
+}
 
-	my $key  = '#C{pipeline.source_control.api_token}';
-	my $said = (($top->pipeline_section || {})->{source_control} || {})->{api_token};
-	return (undef, undef, " and $key names no token")
-		unless defined $said && length $said;
-
-	require Genesis::CI::ProviderCompiler;
-	my ($ref) = Genesis::CI::ProviderCompiler->secret_ref($said) =~ /\A\s*\(\(\s*(.*?)\s*\)\)\s*\z/;
-	my ($name, $field) = defined $ref ? _split_reference($ref) : ();
-	return (undef, undef, " and $key names no secret of this store")
-		unless defined $name;
-
-	my $unread = " and the token $key names was not read (%s)";
-	return (undef, undef, sprintf($unread, '--skip-vault was given')) if $opts{skip_vault};
-	my $store  = $top->pipeline_secrets_store or return ();
-	my $vault  = eval {$top->pipeline_secrets_vault};
-	my $status = $vault ? (eval {$vault->status} // 'unreachable') : 'unreachable';
-	return (undef, undef, sprintf($unread, "the store is $status")) unless $status eq 'ok';
-
-	my @paths = _concourse_secret_paths($store, $name);
-	for my $path (@paths) {
-		next unless $vault->has($path, $field);
-		my $token = $vault->get($path, $field);
-		return ($token, "$path:$field") if defined $token && length $token;
+# }}}
+# _say_github_token - which token the command acts on GitHub with, where the store was asked (D177, D178) {{{
+sub _say_github_token {
+	my ($named, $shell_token) = @_;
+	if (defined $named->{at}) {
+		info(
+			"  #Gi{using} the GitHub token at #C{%s}, which %s names%s",
+			$named->{at}, $named->{named_by},
+			$shell_token ? ', in place of #C{GITHUB_AUTH_TOKEN}' : ''
+		);
+	} elsif ($shell_token && defined $named->{named_by}) {
+		# The configuration names a token the store did not give, so the
+		# operator is told the shell's is what is acting.
+		info("  #Yi{using} #C{GITHUB_AUTH_TOKEN}, as%s", $named->{why} =~ s/\A and//r);
 	}
-	return (undef, undef, sprintf(" and #C{%s}, which %s names, is at none of %s",
-		$ref, $key, join(', ', map {"#C{$_}"} @paths)));
+	return;
 }
 
 # }}}
@@ -1602,7 +1596,7 @@ sub _check_pipeline_secrets {
 	my @missing;
 	for my $ref (sort keys %used) {
 		next if $grouped{$ref};
-		my ($name, $key) = _split_reference($ref);
+		my ($name, $key) = Genesis::Top::secret_reference_parts($ref);
 		unless (defined $name) {
 			info("  #Ki{not checked} %s, from a var source of its own", $ref);
 			next;
@@ -1615,7 +1609,7 @@ sub _check_pipeline_secrets {
 			$acted->($did, $ref, $name);
 			next;
 		}
-		my @paths = _concourse_secret_paths($store, $name);
+		my @paths = $top->pipeline_secret_paths($name);
 		if (my ($found) = grep {$vault->has($_, $key)} @paths) {
 			$line->('G', 'found', sprintf("%s at #C{%s}", $ref, $scope->($found, $name)));
 		} else {
@@ -2063,29 +2057,6 @@ sub _secret_references {
 		$walk->($_, "$kind $_->{name}") for grep {ref($_) eq 'HASH'} @{$pipeline->{$section} || []};
 	}
 	return %used;
-}
-
-# }}}
-# _split_reference - a reference's secret and field, or undef for a var source's {{{
-sub _split_reference {
-	my ($ref) = @_;
-	return () if $ref =~ /^[^".]+:/;   # ((source:path.field)) is another source's
-	my ($name, $key) = $ref =~ /^"?([^"]+?)"?(?:\.(.+))?$/;
-	return ($name, $key // 'value');
-}
-
-# }}}
-# _concourse_secret_paths - where Concourse looks for a secret, in its order {{{
-sub _concourse_secret_paths {
-	my ($store, $name) = @_;
-	$name =~ s{^/+}{};
-	my $prefix = $store->{path_prefix};
-	return (
-		"$prefix/$store->{team}/$store->{pipeline}/$name",
-		"$prefix/$store->{team}/$name",
-		(defined $store->{shared_path} && length $store->{shared_path}
-			? ("$prefix/" . ($store->{shared_path} =~ s{^/+|/+$}{}gr) . "/$name") : ()),
-	);
 }
 
 # }}}

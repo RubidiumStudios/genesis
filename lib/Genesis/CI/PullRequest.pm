@@ -829,22 +829,24 @@ sub client_for_run {
 		my @delivering = map {$_->{env} // ()} grep {$_->{pr}} @$records;
 		return undef unless grep {$_->{pr}} @$records;
 		my $named = @delivering ? join(', ', map {"#C{$_}"} @delivering) : 'this run';
+		# Why the store gave none either, where the run asked it (D178).
+		my $unstored = $top->pipeline_github_token->{why} // '';
 		if ($opts{dry_run}) {
 			warning(
-				"#C{GITHUB_AUTH_TOKEN} is not set, so this preview cannot read ".
+				"#C{GITHUB_AUTH_TOKEN} is not set%s, so this preview cannot read ".
 				"the review state of the pull requests %s deliver%s into, and a ".
 				"real run would refuse until it is set.",
-				$named, @delivering == 1 ? 's' : '');
+				$unstored, $named, @delivering == 1 ? 's' : '');
 			return undef;
 		}
 		($opts{refuse} || \&bail)->(
 			{exitcode => Genesis::Exit::CONFIG},
-			"#C{GITHUB_AUTH_TOKEN} is not set, so this run cannot read the ".
+			"#C{GITHUB_AUTH_TOKEN} is not set%s, so this run cannot read the ".
 			"review state of the pull requests %s deliver%s into, and it will ".
 			"not guess what to do with %s pull request branch%s.\n\n".
 			"Set #C{GITHUB_AUTH_TOKEN} to a token that can read the ".
 			"repository's pull requests, and run this again.",
-			$named, @delivering == 1 ? 's' : '',
+			$unstored, $named, @delivering == 1 ? 's' : '',
 			@delivering == 1 ? 'its' : 'their', @delivering == 1 ? '' : 'es');
 		return undef;
 	}

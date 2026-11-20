@@ -27,7 +27,7 @@ The apply runs from `control`, committed and in step with the remote, and does i
    - each tracked director's credentials, copied from the director's exodus record, where an environment sets `genesis.pipeline.track_bosh_configs`.
 2. Checks every other `((name.key))` the pipeline references where Concourse will look for it, reporting each as found, missing or unverified, never with its value. A missing one refuses the apply.
 3. Cuts the deployment branches.
-4. Sets the branch rulesets and the GitHub push hook, where its GitHub token allows it. The token is the one `pipeline.source_control.api_token` names in the secrets store, or, where that gives none, `GITHUB_AUTH_TOKEN`.
+4. Sets the branch rulesets and the GitHub push hook, where its GitHub token allows it. The token is the one `pipeline.source_control.api_token` names in the secrets store, or an HTTPS clone credential's password where that key is unset, or, where the store gives none, `GITHUB_AUTH_TOKEN`.
 5. Writes the applied record.
 6. Sets the pipeline.
 
@@ -106,6 +106,8 @@ Before anything moves, the run reads the remote once and asks every question it 
 
 A pipeline that is not enabled is refused at `CONFIG`. Where `pipeline-apply` has applied it, the refusal is the disowned pipeline's; where it never has, the refusal names `pipeline.enabled`. A control branch whose configuration has no `pipeline` section is refused before the remote is read at all.
 
+Where an environment delivers into a pull request, a run by hand reads and writes pull requests with the GitHub token the configuration names, read from the provider's secrets store: the one `pipeline.source_control.api_token` names, or an HTTPS clone credential's password. It says which path the token came from. `GITHUB_AUTH_TOKEN` serves where the configuration names none or the store gave none. A pipeline task is handed its token by the pipeline.
+
 ### Options
 
 `--dry-run` or `-n` reports what each environment would receive, per control commit, and writes nothing. It asks the same questions and refuses the same way. It brings the remote-tracking refs up to what it read of the remote, so it previews exactly what a run would read, but it creates, resets, and fast-forwards no branch. Each move a run would make before it walks is named as one the preview assumes: an unpushed control commit, a marker-only commit a run would reset, a branch a run would fast-forward, and a branch a run would create. With control ahead of the remote, the preview reads the pipeline as your unpushed control has it. The preview switches no branch: it reads control's commits from git, so it runs from any branch, and a clone with no local control branch previews control as the remote has it. Because propagation delivers commits, a change in the deployment root must be committed, though not pushed, before a preview can show it; changes in other deployment roots of the same repository do not matter to it.
@@ -127,6 +129,8 @@ Each environment carries one reading of whether what its branch holds has been d
 The command reads the remote once and brings the remote-tracking refs for control and the deployment branches up to it. It creates no local branch, moves no branch you have, and leaves a pull request branch's remote-tracking ref where the last publish put it. It reports control as the remote holds it, whatever branch you stand on: every environment is read from control's own files, with the same load a propagate makes, never from your working tree, and an unpushed control commit is not in effect. Where the remote cannot be reached it fails at `TEMPFAIL`, naming the network, and `--no-refresh` is the way to report without it.
 
 The command takes no lock, so it never makes a propagate fail. Where a propagate in this clone is running, it leaves the remote-tracking refs to that run, reads them as the run left them, and says the run is in progress. While that run stands on a deployment branch to deliver to it, your working tree has no deployment root to read, so the status refuses at `TEMPFAIL`, naming the run, and says to run it again once the run finishes or from another clone.
+
+The review state of each pull request is read with the GitHub token the configuration names, from the provider's secrets store, or with `GITHUB_AUTH_TOKEN` where that gives none. With no token the report is still produced: the pull request column is read from each environment's proposed record and flagged as possibly outdated, and where the configuration named a token the store did not give, standard error says why.
 
 ### Options
 

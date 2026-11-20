@@ -170,7 +170,7 @@ accumulates. A user whose token cannot grant a setting is told which branch
 and which settings, and the run carries on. The run acts with the token
 C<pipeline.source_control.api_token> names, read from the provider's
 secrets store, and says where it was read from (D177,
-L</_github_token_from_store>). Where the store gives none it acts with
+L<Genesis::Top/pipeline_github_token>). Where the store gives none it acts with
 C<GITHUB_AUTH_TOKEN>. Where there is neither, it skips
 the stage, says why, and carries on as
 well: the branches are in place either way, and protection is the one stage
@@ -2146,47 +2146,60 @@ B<Examples:>
 
   _apply_webhook_hook($top, $top->github_client, 'owner/repo', token => $token);
 
-=head2 _github_token_from_store
+=head2 _take_named_github_token
 
-  my ($token, $at, $why_not) = _github_token_from_store($top, $platform,
-      skip_vault => 0);
+  local $ENV{GITHUB_AUTH_TOKEN} = $ENV{GITHUB_AUTH_TOKEN};
+  my $named = _take_named_github_token($top);
 
-The GitHub token C<pipeline.source_control.api_token> names, read from the
-provider's secrets store, which is the token an apply acts with (D177).
-The reference is looked for where Concourse reads it, at the pipeline
-scope, the team scope and then the shared path
-(L</_concourse_secret_paths>), and the first that holds it is the one
-read.
+Puts the GitHub token the configuration names in C<GITHUB_AUTH_TOKEN>, where
+the provider's store gives one, and says which token the command acts with
+(L</_say_github_token>). It is how a C<propagate> run by hand comes to act
+with the token the pipeline's own propagate task is given (D178).
 
-C<apply> calls it once, whether or not C<GITHUB_AUTH_TOKEN> is set, and
-lets the token stand in for the shell's for the rest of the run, so the
-repository check, the branch rulesets, the push hook and the orphan
-report's pull requests all use it. It is preferred to the shell's because
-the token the repository names is known to be this repository's, where a
-C<GITHUB_AUTH_TOKEN> may be in the shell for another reason. Where it
-answers no token, C<apply> acts with the shell's, and says so where the
-key named one the store did not give.
+It assigns the variable and does not localise it, so the caller localises
+it first and the token lasts for the caller's scope. C<propagate> calls it
+from its first stage, once the shape has been read from the snapshot, and
+only where an environment delivers into a pull request: asked any earlier it
+would be the run's first read of the shape, ahead of the snapshot the shape
+is meant to be read from.
 
-The token is the one a pipeline task opens pull requests with. Where it
-lacks the rights a ruleset or a hook needs, the stage that needs them warns
-as it does for any token.
+B<Parameters:> the repository handle.
 
-B<Parameters:> the repository handle, the provider type, and C<skip_vault>.
-
-B<Returns:> the token and C<< <path>:<key> >> it was read from; or two
-undefs and why there is none, worded to follow "GITHUB_AUTH_TOKEN is not
-set": the key names no token, the token was not read (C<--skip-vault>, or
-a store that is not reachable), or the reference is at none of the paths,
-which are named. Under the manual provider, which has no store, it answers
-nothing at all and the skip reads as it always did.
+B<Returns:> what L<Genesis::Top/pipeline_github_token> answered.
 
 B<Errors:> None. The value is never printed.
 
 B<Examples:>
 
-  my ($token, $at, $why) = _github_token_from_store($top, 'concourse');
-  # ('ghp_...', '/concourse/main/gh:pipeline_admin')
-  # or (undef, undef, ' and pipeline.source_control.api_token names no token')
+  local $ENV{GITHUB_AUTH_TOKEN} = $ENV{GITHUB_AUTH_TOKEN};
+  _take_named_github_token($top);
+  $top->github_client;   # built with the token the store holds
+
+=head2 _say_github_token
+
+  _say_github_token($named, $shell_token);
+
+Says which GitHub token a command acts with, where the store was asked for
+one (D177, D178). Where the store gave it, the line names the path and key
+it was read from and the configuration key that named it, and says the
+shell's was set aside where the shell had one. Where the configuration
+named a token the store did not give and the shell's is acting, it says so
+and why. Where the configuration names none it says nothing, and the
+shell's is used as it always was.
+
+B<Parameters:> what L<Genesis::Top/pipeline_github_token> answered, and
+whether C<GITHUB_AUTH_TOKEN> was set before it was asked.
+
+B<Returns:> nothing.
+
+B<Errors:> None. The value is never printed.
+
+B<Examples:>
+
+  _say_github_token({at => '/concourse/main/gh:token',
+      named_by => '#C{pipeline.source_control.api_token}'}, 1);
+  # using the GitHub token at /concourse/main/gh:token, which
+  # pipeline.source_control.api_token names, in place of GITHUB_AUTH_TOKEN
 
 =head2 _check_pipeline_secrets
 
@@ -2243,47 +2256,6 @@ B<Errors:> None.
 B<Examples:>
 
   _secret_references($yaml);   # ('secret/ci/git.private_key' => ['resource qa-branch', ...])
-
-=head2 _split_reference
-
-  my ($name, $key) = _split_reference('secret/ci/git.private_key');
-
-A reference's secret path and field, the field being C<value> where none is
-given, as Concourse reads it; a quoted path loses its quotes. A reference to a var
-source of its own, C<((source:path.field))>, answers an empty list.
-
-B<Parameters:> the reference, without its parentheses.
-
-B<Returns:> the path and the field, or an empty list.
-
-B<Errors:> None.
-
-B<Examples:>
-
-  _split_reference('github.token');     # ('github', 'token')
-  _split_reference('vault-src:x.y');    # ()
-
-=head2 _concourse_secret_paths
-
-  my @paths = _concourse_secret_paths($store, $name);
-
-Where Concourse looks for a secret, in its order: the pipeline scope,
-C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/E<lt>pipelineE<gt>/name>, then the team scope,
-C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/name>, then the shared path,
-C<E<lt>path_prefixE<gt>/E<lt>shared_pathE<gt>/name>, which is C<shared> unless the store
-says otherwise and is left out where the store gives it as empty (D170).
-
-B<Parameters:> the store, as C<Genesis::Top-E<gt>pipeline_secrets_store> gives it, and
-the secret's path.
-
-B<Returns:> the paths, in Concourse's order.
-
-B<Errors:> None.
-
-B<Examples:>
-
-  _concourse_secret_paths($store, 'secret/ci/git');
-  # ('/concourse/main/bosh/secret/ci/git', '/concourse/main/secret/ci/git')
 
 =head2 _compile_pipeline
 
@@ -2478,6 +2450,14 @@ the topology is read from control; so does a prefix collision for the
 reviews alone, which are read by pull request branch; and so does a
 repository the host would not answer for, for the reviews alone, which are
 read from it. Each names what it left unasked in the refusal.
+
+Ahead of the two questions put to GitHub, and only where an environment
+delivers into a pull request, a run by hand takes the token the
+configuration names from the provider's store
+(L</_take_named_github_token>, D178), so both are asked with it and so is
+everything the run does after. C<propagate> localises C<GITHUB_AUTH_TOKEN>
+around the stage, so the token lasts for the run and no longer. A pipeline
+task has its token from the compiler and reads no store.
 
 A run that finds nothing confirms the provider's gate at a terminal, the one
 question put to a person, and only then acts: the snapshot is promoted into

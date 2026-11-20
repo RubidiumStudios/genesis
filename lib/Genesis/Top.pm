@@ -1872,6 +1872,87 @@ sub pipeline_secrets_vault {
 }
 
 # }}}
+# pipeline_secret_paths - where Concourse looks for a secret, in its order {{{
+sub pipeline_secret_paths {
+	my ($self, $name) = @_;
+	my $store = $self->pipeline_secrets_store or return ();
+	return secret_store_paths($store, $name);
+}
+
+# }}}
+# secret_store_paths - a store's paths for a secret: pipeline, team, then shared {{{
+sub secret_store_paths {
+	my ($store, $name) = @_;
+	$name =~ s{^/+}{};
+	my $prefix = $store->{path_prefix};
+	return (
+		"$prefix/$store->{team}/$store->{pipeline}/$name",
+		"$prefix/$store->{team}/$name",
+		(defined $store->{shared_path} && length $store->{shared_path}
+			? ("$prefix/" . ($store->{shared_path} =~ s{^/+|/+$}{}gr) . "/$name") : ()),
+	);
+}
+
+# }}}
+# secret_reference_parts - a reference's secret and field, or none for a var source's {{{
+sub secret_reference_parts {
+	my ($ref) = @_;
+	return () if $ref =~ /^[^".]+:/;   # ((source:path.field)) is another source's
+	my ($name, $key) = $ref =~ /^"?([^"]+?)"?(?:\.(.+))?$/;
+	return ($name, $key // 'value');
+}
+
+# }}}
+# pipeline_github_token - the GitHub token the configuration names, from the store (D177, D178) {{{
+sub pipeline_github_token {
+	my ($self, %opts) = @_;
+	return $self->_memoize(sub {
+		# The compiler hands a task its token in the environment (f8).
+		return {} if $ENV{GENESIS_PIPELINE_TASK};
+		my $store = $self->pipeline_secrets_store or return {};
+
+		# The token a task is given: api_token, else an https clone
+		# credential's password.
+		my $sc    = ($self->pipeline_section || {})->{source_control} || {};
+		my $key   = '#C{pipeline.source_control.api_token}';
+		my $said  = $sc->{api_token};
+		unless (defined $said && length $said) {
+			my $auth = ref($sc->{auth}) eq 'HASH' ? $sc->{auth} : {};
+			return {why => " and $key names no token"}
+				unless ($auth->{type} // '') eq 'https';
+			$key  = '#C{pipeline.source_control.auth}';
+			$said = credential_components(source_control => $auth)->{password}{secret_ref};
+		}
+
+		require Genesis::CI::ProviderCompiler;
+		my ($ref) = (Genesis::CI::ProviderCompiler->secret_ref($said) // '')
+			=~ /\A\s*\(\(\s*(.*?)\s*\)\)\s*\z/;
+		my ($name, $field) = defined $ref ? secret_reference_parts($ref) : ();
+		return {named_by => $key, why => " and $key names no secret of this store"}
+			unless defined $name;
+
+		my $unread = " and the token $key names was not read (%s)";
+		return {named_by => $key, why => sprintf($unread, '--skip-vault was given')}
+			if $opts{skip_vault};
+		my $vault  = eval {$self->pipeline_secrets_vault};
+		my $status = $vault ? (eval {$vault->status} // 'unreachable') : 'unreachable';
+		return {named_by => $key, why => sprintf($unread, "the store is $status")}
+			unless $status eq 'ok';
+
+		my @paths = secret_store_paths($store, $name);
+		for my $path (@paths) {
+			next unless $vault->has($path, $field);
+			my $token = $vault->get($path, $field);
+			return {named_by => $key, token => $token, at => "$path:$field"}
+				if defined $token && length $token;
+		}
+		return {named_by => $key, why => sprintf(
+			" and #C{%s}, which %s names, is at none of %s",
+			$ref, $key, join(', ', map {"#C{$_}"} @paths))};
+	});
+}
+
+# }}}
 # pipeline_identity - the name and email a pipeline task commits under (D172) {{{
 sub pipeline_identity {
 	my ($self) = @_;
@@ -3172,7 +3253,7 @@ sub _pipeline_config_schema {
 					},
 					# The token propagate opens pull requests with, where the
 					# clone's own credential is not one (contract f8).
-					api_token => {type => 'string', description => 'Vault reference, as <path>:<key> or ((path.key)), to the GitHub token propagate opens pull requests with, and pipeline-apply acts with where GITHUB_AUTH_TOKEN is unset'},
+					api_token => {type => 'string', description => 'Vault reference, as <path>:<key> or ((path.key)), to the GitHub token propagate opens pull requests with, and pipeline-apply, propagate and pipeline-status act with by hand, ahead of GITHUB_AUTH_TOKEN'},
 					# Optional; pipeline_identity answers what is left unsaid (D172).
 					identity => {
 						type        => 'hash',

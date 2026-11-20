@@ -1128,7 +1128,8 @@ pull request and C<pipeline.source_control.repository> is neither set nor
 derivable from a git remote, naming the key to write. Refuses with C<CONFIG>
 where a writing run has no C<GITHUB_AUTH_TOKEN> and an environment would
 deliver into a pull request, naming the variable and the environments (D55,
-noted 2026-10-13). Refuses with C<CONFIG>
+noted 2026-10-13), and why the provider's store gave no token either, where
+L<Genesis::Top/pipeline_github_token> has a reason (D178). Refuses with C<CONFIG>
 again where the authentication call is answered and the answer names no user,
 because what the operator has to change is the token they set. Refuses with
 C<CONFIG> a third time where the repository's host answered the

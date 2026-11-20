@@ -34,6 +34,7 @@ $ENV{NOCOLOR} = 1;
 	package Repoless::Top;
 	sub new { return bless {}, shift }
 	sub source_control_repository { return undef }
+	sub pipeline_github_token { return {} } # no store to read one from
 }
 
 # The root the token rows need, which answers a pair so that the build gets
@@ -42,6 +43,7 @@ $ENV{NOCOLOR} = 1;
 	package Paired::Top;
 	sub new { return bless {}, shift }
 	sub source_control_repository { return 'owner/repo' }
+	sub pipeline_github_token { return {} } # no store to read one from
 	# The client is built by Top for the repository's host (D119), and a row
 	# that stands a client in replaces Service::Github::new, so this asks it.
 	sub github_client { return Service::Github->new(org => 'owner', host => 'github.com') }

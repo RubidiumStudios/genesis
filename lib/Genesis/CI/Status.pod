@@ -72,9 +72,11 @@ the record itself is the return value.
 
 It reads GitHub for one thing alone, which is the pull request each
 environment whose policy asks for one has open. The client is built by
-C<Genesis::CI::PullRequest::client_for_run>, and only where
-C<GITHUB_AUTH_TOKEN> is set, because a client asked for without one refuses, as
-a writing run must, and this command writes nothing. What the read answers is carried onto the walk's own records by
+C<Genesis::CI::PullRequest::client_for_run>, and only where there is a token,
+because a client asked for without one refuses, as
+a writing run must, and this command writes nothing. The token is the one the
+repository's configuration names, read from the provider's store
+(L<Genesis::Top/pipeline_github_token>, D178), else C<GITHUB_AUTH_TOKEN>. What the read answers is carried onto the walk's own records by
 C<Genesis::CI::PullRequest::carry_state>, and an environment whose pull
 request a reviewer has approved is frozen by
 C<Genesis::CI::PullRequest::freeze>, so the report and the propagation run
@@ -635,10 +637,19 @@ which C<genesis propagate> asks with a selection of its own. The selection
 here is the environments in scope that would deliver into a pull request, and
 no others.
 
-It asks for a client only where C<GITHUB_AUTH_TOKEN> is set. A client asked
+It asks for a client only where there is a token. A client asked
 for without one refuses, as a writing run must (D55, noted 2026-10-13), and a
 missing token is the fallback the pull request column is built for rather than
 something to refuse a report on.
+
+The token is the one the repository's configuration names, where the
+provider's store gives it (L<Genesis::Top/pipeline_github_token>, D178), and
+it stands in for C<GITHUB_AUTH_TOKEN> while the client is built, which is
+when a client takes its token. It is asked for here, after the refresh, and
+only where an environment in scope would deliver into a pull request. Where
+the configuration names a token the store did not give and the shell has
+none, the one line L</_unconsulted($why)> prints says why; where it names none,
+nothing is said, as before.
 
 No refusal the two subs raise ends this command. Both take a closure that
 records why the API went unasked and returns, so an API that will not answer

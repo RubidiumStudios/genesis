@@ -663,7 +663,16 @@ sub _pull_request_state {
 	my ($top, $scope) = @_;
 
 	my @wanted = grep {$_->{pr_branch}} @$scope;
-	return (undef, {}) unless @wanted && $ENV{GITHUB_AUTH_TOKEN};
+	return (undef, {}) unless @wanted;
+
+	# The token the configuration names, where the store gives it; the
+	# client built below takes it as it is made (D178).
+	my $named = $top->pipeline_github_token;
+	local $ENV{GITHUB_AUTH_TOKEN} = $named->{token} if defined $named->{token};
+	unless ($ENV{GITHUB_AUTH_TOKEN}) {
+		return (undef, {}) unless defined $named->{named_by};
+		return _unconsulted("GITHUB_AUTH_TOKEN is not set$named->{why}");
+	}
 
 	# What the run would have refused on, in this command's own words rather
 	# than the refusal's, because those are written for somebody who was

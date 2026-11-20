@@ -2172,6 +2172,113 @@ B<Examples:>
 
     $top->pipeline_secrets_vault->has('/concourse/main/github', 'token');
 
+=head2 pipeline_secret_paths
+
+    my @paths = $top->pipeline_secret_paths($name);
+
+Where Concourse looks for a secret of this pipeline, in its order
+(L</secret_store_paths>), for the store L</pipeline_secrets_store> answers.
+
+B<Parameters:> the secret's path, as a reference names it.
+
+B<Returns:> the paths, in Concourse's order; an empty list where the
+provider has no store.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    $top->pipeline_secret_paths('github');
+    # ('/concourse/main/bosh/github', '/concourse/main/github', '/concourse/shared/github')
+
+=head2 secret_store_paths
+
+    my @paths = Genesis::Top::secret_store_paths($store, $name);
+
+Where Concourse looks for a secret, in its order: the pipeline scope,
+C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/E<lt>pipelineE<gt>/name>, then the team scope,
+C<E<lt>path_prefixE<gt>/E<lt>teamE<gt>/name>, then the shared path,
+C<E<lt>path_prefixE<gt>/E<lt>shared_pathE<gt>/name>, which is C<shared> unless the store
+says otherwise and is left out where the store gives it as empty (D170). A
+plain function, so a caller holding a store of its own can ask.
+
+B<Parameters:> the store, as L</pipeline_secrets_store> gives it, and the
+secret's path.
+
+B<Returns:> the paths, in Concourse's order.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    Genesis::Top::secret_store_paths($store, 'secret/ci/git');
+    # ('/concourse/main/bosh/secret/ci/git', '/concourse/main/secret/ci/git',
+    #  '/concourse/shared/secret/ci/git')
+
+=head2 secret_reference_parts
+
+    my ($name, $key) = Genesis::Top::secret_reference_parts('secret/ci/git.private_key');
+
+A reference's secret path and field, the field being C<value> where none is
+given, as Concourse reads it; a quoted path loses its quotes. A reference to a var
+source of its own, C<((source:path.field))>, answers an empty list. A plain
+function.
+
+B<Parameters:> the reference, without its parentheses.
+
+B<Returns:> the path and the field, or an empty list.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    Genesis::Top::secret_reference_parts('github.token');     # ('github', 'token')
+    Genesis::Top::secret_reference_parts('vault-src:x.y');    # ()
+
+=head2 pipeline_github_token
+
+    my $named = $top->pipeline_github_token(skip_vault => 0);
+
+The GitHub token the repository's configuration names, read from the
+provider's secrets store (D177, D178). It is the token a pipeline's
+propagate task is given (contract f8): the one
+C<pipeline.source_control.api_token> names, else the C<password> of an
+C<https> clone credential. The reference is looked for where Concourse reads
+it (L</secret_store_paths>), and the first path that holds it is the one
+read.
+
+C<pipeline-apply>, C<propagate> and C<pipeline-status> each ask it when run
+by hand and act with the token in place of C<GITHUB_AUTH_TOKEN>: the token
+the repository names is known to be this repository's, where one in the
+shell may be there for another reason. Inside a pipeline task, where
+C<GENESIS_PIPELINE_TASK> is set, the compiler has already put the token in
+the environment and no store is read. The answer is memoized, so the first
+caller's C<skip_vault> is the one that counts.
+
+B<Parameters:> C<skip_vault>, true where the caller was told not to read the
+vault.
+
+B<Returns:> a hash reference, empty inside a task and under a provider with
+no store. Otherwise it holds C<named_by>, the configuration key that named
+the token, absent where none does; and either C<token> and C<at>, the
+C<< <path>:<key> >> it was read from, or C<why>, a clause worded to follow
+"GITHUB_AUTH_TOKEN is not set": the key names no token, the token was not
+read (C<skip_vault>, or a store that is not reachable), or the reference is
+at none of the paths, which are named.
+
+B<Errors:> None; a store that cannot be reached is a reason, not a refusal.
+The value is never logged.
+
+B<Examples:>
+
+    $top->pipeline_github_token;
+    # {named_by => '#C{pipeline.source_control.api_token}',
+    #  token => 'ghp_...', at => '/concourse/main/gh:pipeline_admin'}
+    # or {why => ' and #C{pipeline.source_control.api_token} names no token'}
+
+B<Limitations:> the manual provider has no store, so a repository under it
+gets no token from here. The memo is not keyed on C<skip_vault>.
+
 =head2 pipeline_identity
 
     my $identity = $top->pipeline_identity;
