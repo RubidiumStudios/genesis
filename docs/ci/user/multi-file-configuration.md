@@ -47,7 +47,7 @@ provider:
   insecure: false
   min_fly_version: 7.9.0
   public: false
-  pause_after_set: false
+  pipeline_state_after_apply: unchanged
   group_commits: true
   task:
     image: genesiscommunity/concourse

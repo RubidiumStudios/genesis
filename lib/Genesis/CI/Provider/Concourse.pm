@@ -348,7 +348,8 @@ sub provider_options_schema {
 			}
 		},
 
-		pause_after_set => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Leave the pipeline paused after fly set-pipeline'},
+		pipeline_state_after_apply => {type => 'enum', values => [qw/paused unpaused unchanged/], default => 'unchanged',
+			description => 'The pause state pipeline-apply leaves the pipeline in'},
 		# How the git resources learn a branch moved (D143).
 		git => {
 			type        => 'hash',

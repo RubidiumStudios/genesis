@@ -27,9 +27,11 @@ $ENV{GENESIS_FLY_BIN} = "$ENV{HOME}/bin/fly";
 mkfile_or_fail("$ENV{HOME}/.flyrc",
 	"targets:\n  harness-main:\n    api: https://ci.harness.example\n    team: main\n");
 
-# A fly that logs its arguments, answers --version with $version, and answers
+# A fly that logs its arguments, answers --version with $version, answers
 # set-pipeline --dry-run with $dry, a change to the pipeline unless a row
-# says otherwise (T440).
+# says otherwise (T440), and answers `pipelines --json` with the pipeline
+# held and running, which an apply puts back as it found it (D184; T520 has
+# the other states).
 sub stub_fly {
 	my ($version, $dry) = @_;
 	$dry //= "jobs:\n  job deploy-qa has changed:\n  + serial: true\n";
@@ -41,6 +43,7 @@ sub stub_fly {
 		"echo \"\$*\" >> '$log'",
 		"case \"\$*\" in *--version*) echo $version; exit 0;; esac",
 		"case \"\$*\" in *--dry-run*) cat '$answer'; exit 0;; esac",
+		'case "$*" in *"pipelines --json"*) echo \'[{"name":"bosh","paused":false,"team_name":"main"}]\'; exit 0;; esac',
 		'exit 0', ''));
 }
 
@@ -71,7 +74,7 @@ subtest 'the apply sets the pipeline at the target ~/.flyrc names' => sub {
 	my @calls = fly_calls();
 	my @verbs = fly_writes();
 	is_deeply([@verbs[0..2]], [qw/pause-pipeline set-pipeline unpause-pipeline/],
-		'pausing, setting, then unpausing the pipeline')
+		'pausing, setting, then unpausing the pipeline it found running')
 		or diag(join("\n", @calls));
 	like($verbs[3] // '', qr/^(?:expose|hide)-pipeline$/, 'and exposing or hiding it');
 	ok(@calls && !grep({!/-t harness-main\b/} @calls), 'every call at the matched target')

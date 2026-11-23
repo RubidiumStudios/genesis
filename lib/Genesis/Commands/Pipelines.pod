@@ -6,7 +6,7 @@ Genesis::Commands::Pipelines - Command handlers for Genesis CI/CD pipeline manag
 
   # Registered in bin/genesis via define_command:
   genesis embed
-  genesis pipeline-apply [--target <fly-target>] [--dry-run] [--yes] [--paused] [--output-dir <dir>] [--debug-dir <dir>] [--skip-vault]
+  genesis pipeline-apply [--target <fly-target>] [--dry-run] [--yes] [--paused|--unpaused] [--output-dir <dir>] [--debug-dir <dir>] [--skip-vault]
   genesis pipeline-graph
   genesis pipeline-describe
 
@@ -293,9 +293,15 @@ the same reason C<--output-dir> is.
 
 Skip the interactive confirmation the provider would otherwise ask for.
 
-=item C<--paused>
+=item C<--paused>, C<--unpaused>
 
-Leave the pipeline paused after applying it instead of unpausing it.
+The pause state to leave the Concourse pipeline in when the apply ends,
+for this run: C<--paused> (C<-P>) or C<--unpaused> (C<-U>), whatever
+state it was found in. Both together is a usage error. Without either,
+C<pipeline.provider.pipeline_state_after_apply> decides, and where that
+is not set the pipeline is left as it was found, a new one paused (D184).
+The state is settled where the compiled pipeline changed nothing as well,
+so C<-U> on a pipeline that is already set unpauses it.
 
 =item C<--skip-vault>
 

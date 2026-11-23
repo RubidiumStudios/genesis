@@ -594,7 +594,7 @@ CFG
 		"the run is refused at the configuration exit code");
 	like($err, qr/pipeline\.provider\.target: unknown configuration key/,
 		"because target is declarable only while the provider that declares it is named");
-	unlike($err, qr/group_commits|insecure|pause_after_set|tagged|team|public|task/,
+	unlike($err, qr/group_commits|insecure|pipeline_state_after_apply|tagged|team|public|task/,
 		"and it names only the key the operator wrote, not the departing defaults");
 	like(slurp("$dir/.genesis/config"), qr/type:\s*concourse/,
 		"and the file is left exactly as it was");

@@ -345,10 +345,11 @@ A provider's command-line options in their configuration spelling, which
 is unprefixed and underscored where the command line is C<ci->-prefixed
 and hyphenated. The question goes to the named provider's own compiling
 class, because a provider may remap one of its options on the way
-through, as Concourse maps the command line's C<pause> onto the schema's
-C<pause_after_set>. A deploy asks the compiler it is holding, so routing
-the compile through the same class is what keeps the two paths answering
-alike about a flag an operator wrote once.
+through. None does today: Concourse mapped the command line's C<pause>
+onto a boolean that C<pipeline.provider.pipeline_state_after_apply> has
+since replaced (D184). A deploy asks the compiler it is holding, so
+routing the compile through the same class is what keeps the two paths
+answering alike about a flag an operator wrote once.
 
 B<Parameters:>
 
@@ -373,8 +374,8 @@ it knows but has no compiler for, both at C<Genesis::Exit::CONFIG>.
 B<Examples:>
 
     Genesis::CI::Compiler->_normalized_provider_opts(
-        'concourse', {'ci-pause' => 1});
-    # {pause_after_set => 1}
+        'concourse', {'ci-pipeline-name' => 'cf'});
+    # {pipeline_name => 'cf'}
 
 =head2 _flat_name($name)
 

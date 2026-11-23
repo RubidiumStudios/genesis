@@ -152,7 +152,7 @@ subtest 'the provider-specific keys are validated per provider type' => sub {
 	write_nested_env('qa');
 
 	lives_ok {load_with($h, automated_pipeline_block(provider_extra => [
-		'    public: true', '    pause_after_set: false',
+		'    public: true', '    pipeline_state_after_apply: paused',
 		'    task:', '      image: genesiscommunity/concourse',
 		'      version: latest']))}
 		'the four Concourse keys validate under Concourse';

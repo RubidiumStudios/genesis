@@ -41,7 +41,7 @@ Each write is reported as new, changed, or already in place, so a second run cha
 
 `--target` or `-t` names the fly target to apply through for this run (as shown by `fly targets`). A target is an entry in one operator's `~/.flyrc`, so none is read from `.genesis/config`, which names the Concourse by its `url` and `team` instead. Without `--target`, the target is this clone's own pin, set with `git config genesis.fly-target <target>` (in the clone's `.git/config`, never globally), or else the one `~/.flyrc` target whose URL and team are the configuration's. Two such targets are refused, naming both; none is refused with the `fly login` that makes one. The apply asks for the target before it writes anything.
 
-`--paused` or `-P` keeps the pipeline paused after uploading. By default, Genesis unpauses the pipeline after a successful `set-pipeline`.
+`--paused` or `-P` leaves the pipeline paused when the apply ends, and `--unpaused` or `-U` leaves it unpaused, whatever state it was found in. The two together are a usage error. Without either, `pipeline.provider.pipeline_state_after_apply` decides: `paused`, `unpaused`, or `unchanged`, the default, which puts an existing pipeline back as it was found and leaves a new one paused, as Concourse creates it. The state is settled where the compiled pipeline changed nothing as well, so `-U` on a pipeline that is already set unpauses it. The apply ends by saying which state it left the pipeline in and what decided it.
 
 `--output-dir` or `-o` writes compiled pipeline artifacts to a directory instead of deploying. This produces the pipeline YAML, an `ast.json` file containing the full AST, and any other provider output files.
 

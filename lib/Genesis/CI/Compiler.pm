@@ -219,8 +219,7 @@ sub validate_config_section {
 # The CLI spelling of an option is hyphenated and prefixed, and the
 # configuration spelling is neither, so the two have to be reconciled
 # before provider_option and provider_config see the keys.  A provider
-# may also remap one of its own on the way through, as Concourse maps
-# the CLI's pause onto the schema's pause_after_set, so the question
+# may also remap one of its own on the way through, so the question
 # goes to that provider's compiling class rather than to the base.  A
 # deploy already asks the compiler it holds, and this is what keeps the
 # two paths answering the same way about the same flag.

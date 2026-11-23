@@ -1892,7 +1892,14 @@ my @PIPELINE_APPLY_OPTIONS = (
 		"~/.flyrc target whose URL and team are the configuration's.",
 
 	'paused|P' =>
-		"Leave the pipeline paused after applying.",
+		"Leave the pipeline paused when the apply ends, whatever state it ".
+		"was found in.  Not with --unpaused.",
+
+	'unpaused|U' =>
+		"Leave the pipeline unpaused when the apply ends, whatever state it ".
+		"was found in.  Not with --paused.  Without either flag, ".
+		"pipeline.provider.pipeline_state_after_apply decides, which leaves ".
+		"the pipeline as it was found unless it says otherwise.",
 
 	'dry-run|n' =>
 		"Report every step and write nothing to the repository, the ".

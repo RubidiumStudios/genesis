@@ -101,7 +101,9 @@ subtest 'pipeline.public still decides the visibility' => sub {
 	mkpath("$dir/bin");
 	my $log = "$dir/fly.log";
 	open my $fly, '>', "$dir/bin/fly" or die $!;
-	print $fly "#!/bin/sh\necho \"\$@\" >> \"$log\"\nexit 0\n";
+	# It lists no pipeline, which the deploy asks before it pauses one (D184).
+	print $fly "#!/bin/sh\necho \"\$@\" >> \"$log\"\n".
+		"case \"\$*\" in *\"pipelines --json\"*) echo '[]';; esac\nexit 0\n";
 	close $fly;
 	chmod 0755, "$dir/bin/fly";
 
@@ -181,21 +183,31 @@ subtest 'the provider block is not checked a second time' => sub {
 subtest 'the compile normalizes through the provider its own compiler' => sub {
 	plan tests => 2;
 
-	# A deploy normalizes through the compiler it holds, so the Concourse
-	# remap of the CLI's pause onto the schema's pause_after_set applies
-	# there.  A compile that asked the base instead would leave the CLI
-	# spelling standing, and the two paths would answer differently about
-	# the same flag an operator wrote once.
-	my $cli = {'ci-pause' => 1, 'ci-target' => 'prod'};
+	# A deploy normalizes through the compiler it holds, so a remap a
+	# provider makes of its own applies there.  A compile that asked the
+	# base instead would leave the CLI spelling standing, and the two paths
+	# would answer differently about the same flag an operator wrote once.
+	# Concourse makes no remap since D184, so one is stood in for this row.
+	my $cli   = {'ci-held' => 1, 'ci-target' => 'prod'};
+	my $class = Genesis::CI::ProviderRegistry->compiler_class('concourse');
+	no strict 'refs';      ## no critic
+	no warnings 'once';
+	local *{"${class}::normalize_provider_opts"} = sub {
+		my ($self, $opts) = @_;
+		my $normalized = $self->Genesis::CI::ProviderCompiler::normalize_provider_opts($opts);
+		$normalized->{held_after_apply} = delete $normalized->{held}
+			if exists $normalized->{held};
+		return $normalized;
+	};
+	use strict 'refs';
 
-	my $deploy = Genesis::CI::ProviderRegistry->compiler_class('concourse')
-		->normalize_provider_opts($cli);
+	my $deploy  = $class->normalize_provider_opts($cli);
 	my $compile = Genesis::CI::Compiler->_normalized_provider_opts(
 		'concourse', $cli);
 
 	is_deeply $compile, $deploy,
 		'the compile and the deploy normalize a flag the same way';
-	is $compile->{pause_after_set}, 1,
+	is $compile->{held_after_apply}, 1,
 		"and the provider's own remap is what both of them ran";
 };
 

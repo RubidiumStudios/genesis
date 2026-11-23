@@ -37,6 +37,7 @@ mkfile_or_fail("$ENV{HOME}/bin/fly", 0755, join("\n",
 	"echo \"\$*\" >> '$LOG'",
 	'case "$*" in *--version*) echo 7.11.0; exit 0;; esac',
 	'case "$*" in *--dry-run*) echo "jobs:"; exit 0;; esac',
+	'case "$*" in *"pipelines --json"*) echo "[]"; exit 0;; esac', # none held yet (D184)
 	'exit 0', ''));
 
 my %RECORD = (url => 'https://10.0.0.6:25555', ca_cert => 'harness-director-ca',

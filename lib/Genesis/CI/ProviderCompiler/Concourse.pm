@@ -28,8 +28,8 @@ use JSON::PP;
 use constant {
 	DEFAULT_PIPELINE_NAME   => undef,    # falls back to deployment_type from Top
 	DEFAULT_EXPOSE          => 0,
-	DEFAULT_PAUSE_AFTER_SET => 0,
 	DEFAULT_INSECURE        => 0,
+	STATE_AFTER_APPLY_KEY   => 'pipeline.provider.pipeline_state_after_apply',
 };
 
 # }}}
@@ -95,17 +95,6 @@ sub provider_options_defaults {
 }
 
 # }}}
-# normalize_provider_opts - remap ci-pause (CLI) to pause_after_set (schema key) {{{
-sub normalize_provider_opts {
-	my ($class, $opts) = @_;
-	my $normalized = $class->SUPER::normalize_provider_opts($opts);
-	if (exists $normalized->{pause} && !exists $normalized->{pause_after_set}) {
-		$normalized->{pause_after_set} = delete $normalized->{pause};
-	}
-	return $normalized;
-}
-
-# }}}
 # describe_provider - structured self-description for display {{{
 # Shaped as Genesis::Kit::Provider::Github::status() is.
 sub describe_provider {
@@ -119,20 +108,20 @@ sub describe_provider {
 	my $team      = $self->provider_option('team') // $self->provider->team;
 	my $pipe_name = $self->provider_option('pipeline_name') || '(deployment type)';
 	my $expose    = $self->provider_option('expose')    ? 'yes' : 'no';
-	my $paused    = $self->provider_option('pause_after_set') ? 'yes' : 'no';
+	my $state     = $self->provider_option('pipeline_state_after_apply');
 	my $insecure  = $self->provider_option('insecure')  ? 'yes' : 'no';
 
-	my @extras = qw(Target Team Pipeline Expose PauseAfterSet Insecure);
+	my @extras = qw(Target Team Pipeline Expose StateAfterApply Insecure);
 	my %desc = (
-		type          => 'concourse',
-		label         => 'Concourse',
-		Target        => $target,
-		Team          => $team,
-		Pipeline      => $pipe_name,
-		Expose        => $expose,
-		PauseAfterSet => $paused,
-		Insecure      => $insecure,
-		status        => 'ok',
+		type            => 'concourse',
+		label           => 'Concourse',
+		Target          => $target,
+		Team            => $team,
+		Pipeline        => $pipe_name,
+		Expose          => $expose,
+		StateAfterApply => $state,
+		Insecure        => $insecure,
+		status          => 'ok',
 	);
 
 	# Augment with pipeline-level feature summary when AST is available
@@ -246,7 +235,8 @@ sub deploy {
 	my ($self, %opts) = @_;
 	my $config = $self->{config} || {}; # set only on the parse() path
 
-	# All keys use config-file names (target, team, pipeline_name, pause_after_set, expose).
+	# All keys use config-file names (target, team, pipeline_name, expose), but
+	# pipeline_state, which is the run's own answer to pipeline_state_after_apply.
 	# Callers are responsible for normalizing cli-prefixed keys before calling deploy().
 
 	# --- Resolve options from three tiers ---
@@ -268,12 +258,15 @@ sub deploy {
 		"deployment_type is set")
 		unless $pipeline_name;
 
-	# Pause/expose/dry-run/insecure: call-site override > provider_opts > defaults
+	# Expose/dry-run/insecure: call-site override > provider_opts > defaults
 	my $dry_run  = $opts{'dry-run'};
 	my $yes      = $opts{yes};
-	my $pause    = $opts{pause_after_set}
-		// $self->provider_option('pause_after_set')
-		// DEFAULT_PAUSE_AFTER_SET;
+
+	# The pause state to end in: this run's flag, else the key (D184).
+	my $state = $opts{pipeline_state}
+		// $self->provider_option('pipeline_state_after_apply');
+	my $state_why = defined $opts{pipeline_state} ? "--$state" : STATE_AFTER_APPLY_KEY;
+
 	my $expose   = $opts{expose}
 		// $self->provider_option('expose')
 		// _yaml_bool(($config->{pipeline} || {})->{public}, DEFAULT_EXPOSE);
@@ -310,12 +303,19 @@ sub deploy {
 	my ($dry, $drc) = $provider->fly({%at}, 'set-pipeline', '--team', $team,
 		'-p', $pipeline_name, '-c', "$dir/pipeline.yml", '--dry-run');
 	my $asked = !($drc && ($dry // '') =~ /unknown flag/);
+	bail("Could not compare pipeline %s through fly: %s", $pipeline_name,
+		$dry // 'no reason given') if $asked && $drc;
+
+	# Read ahead of the pause below, which would otherwise be all there is to find.
+	my %pause = (state => $state, why => $state_why);
+	$pause{found} = $self->_found_pause_state(\%at, $pipeline_name, $team)
+		if $state eq 'unchanged';
+
 	if ($asked) {
-		bail("Could not compare pipeline %s through fly: %s", $pipeline_name,
-			$dry // 'no reason given') if $drc;
 		if (($dry // '') =~ /no changes to apply/) {
 			info("  #Ki{already set} #C{%s}: it matches what this run compiled",
 				$pipeline_name);
+			$self->_settle_pause_state(\%at, $pipeline_name, %pause, set => 0);
 			return;
 		}
 		(my $shown = $dry // '') =~ s/\n*\S*pipeline name:.*\z//s;
@@ -344,12 +344,7 @@ sub deploy {
 		'set-pipeline', (($yes || $asked) ? ('-n') : ()), '--team', $team,
 		'-p', $pipeline_name, '-c', "$dir/pipeline.yml");
 
-	# Unpause pipeline (unless pipeline.provider.pause_after_set or --ci-pause)
-	unless ($pause) {
-		$provider->fly({%at, interactive => 1,
-			onfailure => "Could not unpause pipeline $pipeline_name"},
-			'unpause-pipeline', '-p', $pipeline_name);
-	}
+	$self->_settle_pause_state(\%at, $pipeline_name, %pause, set => 1);
 
 	# Set visibility (expose vs hide)
 	my $action = $expose ? 'expose' : 'hide';
@@ -358,6 +353,64 @@ sub deploy {
 		"$action-pipeline", '-p', $pipeline_name);
 
 	return;
+}
+
+# }}}
+# _found_pause_state - paused, unpaused or new, as Concourse holds the pipeline {{{
+sub _found_pause_state {
+	my ($self, $at, $name, $team) = @_;
+
+	# Apart from stdout, where a fly out of step with its Concourse warns.
+	my ($out, $rc, $err) = $self->provider->fly({%$at, stderr => 0}, 'pipelines', '--json');
+	my $list = $rc ? undef : eval {JSON::PP->new->decode($out // '')};
+	bail(
+		"Could not read whether pipeline #C{%s} is paused, which leaving it ".
+		"as it was found needs: %s\n\nNothing was paused or set.  Run with ".
+		"#C{--paused} or #C{--unpaused} to say which state to leave it in, ".
+		"which needs no reading.",
+		$name, $rc ? ($err || $out || 'fly gave no reason')
+		           : '`fly pipelines --json` did not answer with a list'
+	) unless ref($list) eq 'ARRAY';
+
+	my ($held) = grep {
+		ref($_) eq 'HASH'
+			&& ($_->{name} // '') eq $name
+			&& (!defined $_->{team_name} || $_->{team_name} eq $team)
+			&& !$_->{instance_vars}
+	} @$list;
+	return 'new' unless $held;
+	return $held->{paused} ? 'paused' : 'unpaused';
+}
+
+# }}}
+# _settle_pause_state - leave the pipeline in the state asked for, and say which {{{
+sub _settle_pause_state {
+	my ($self, $at, $name, %is) = @_;
+	my ($state, $found) = @is{qw/state found/};
+
+	my $end = $state ne 'unchanged' ? $state
+	        : $found eq 'new'       ? 'paused'
+	        :                         $found;
+
+	# A run that set the pipeline paused it first; one that did not left it as found.
+	my $act = $is{set} ? $end eq 'unpaused' : $state ne 'unchanged';
+	if ($act) {
+		my $verb = $end eq 'paused' ? 'pause' : 'unpause';
+		$self->provider->fly({%$at, interactive => 1,
+			onfailure => "Could not $verb pipeline $name"},
+			"$verb-pipeline", '-p', $name);
+	}
+
+	my $because =
+		  $state ne 'unchanged' ? "as #C{$is{why}} asks"
+		: $found eq 'new'       ? "a new pipeline, which Concourse creates paused; ".
+		                          "#C{--unpaused} starts it, as #C{genesis pipeline-resume} does"
+		: $end eq 'paused'      ? "as it was found; #C{--unpaused} starts it"
+		:                         "as it was found";
+	$because .= sprintf(" (#C{%s: unchanged})", STATE_AFTER_APPLY_KEY)
+		if $state eq 'unchanged';
+	info("  #Ki{%s} #C{%s}: %s", $end, $name, $because);
+	return $end;
 }
 
 # }}}

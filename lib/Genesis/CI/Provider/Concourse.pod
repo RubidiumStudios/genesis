@@ -164,7 +164,12 @@ C<type: concourse>, each with its type, its default where it has one, and
 the description C<genesis config> renders as help.
 
 The keys are C<target>, C<url>, C<team>, C<insecure>, C<min_fly_version>, C<fly_bin_path>,
-C<public>, C<show_all_group>, C<tagged>, C<task>, C<pause_after_set>, C<git>, C<secrets_store>, and C<group_commits>.
+C<public>, C<show_all_group>, C<tagged>, C<task>, C<pipeline_state_after_apply>, C<git>, C<secrets_store>, and C<group_commits>.
+
+C<pipeline_state_after_apply> is the pause state C<genesis pipeline-apply>
+leaves the pipeline in: C<paused>, C<unpaused>, or C<unchanged>, the
+default, which puts an existing pipeline back as it was found and leaves a
+new one paused (D184).
 
 C<show_all_group>, false by default, adds a last group named C<all> that
 lists every job of the pipeline (D179).

@@ -2545,7 +2545,9 @@ subtest 'Concourse - provider_options_schema has correct structure' => sub {
 	ok exists $schema->{target},          "'target' key present";
 	ok exists $schema->{team},            "'team' key present";
 	ok exists $schema->{public},          "'public' key present";
-	ok exists $schema->{pause_after_set}, "'pause_after_set' key present";
+	is_deeply $schema->{pipeline_state_after_apply}{values}, [qw/paused unpaused unchanged/],
+		"'pipeline_state_after_apply' is one of three states (D184)";
+	ok !exists $schema->{pause_after_set}, "and the boolean it replaced is gone";
 	ok !exists $schema->{team}{default},  "team declares no default (D86)";
 	ok $schema->{team}{required},         "and is required while the pipeline is on";
 };
@@ -2566,7 +2568,8 @@ subtest 'Concourse - provider_options_defaults returns expected defaults' => sub
 	ok ref($defaults) eq 'HASH',          "defaults is a hash";
 	ok !exists $defaults->{team},            "team has no default, being required (D86)";
 	is $defaults->{public},          0,      "public default is false";
-	is $defaults->{pause_after_set}, 0,      "pause_after_set default is false";
+	is $defaults->{pipeline_state_after_apply}, 'unchanged',
+		"pipeline_state_after_apply defaults to unchanged (D184)";
 };
 
 subtest 'Concourse - provider_config omits default values' => sub {
@@ -2592,12 +2595,13 @@ subtest 'Concourse - provider_config includes non-default values' => sub {
 		provider_opts => {
 			type            => 'concourse',
 			team            => 'my-team',   # non-default
-			pause_after_set => 1,           # non-default
+			pipeline_state_after_apply => 'paused',  # non-default
 		},
 	);
 	my $config = $provider->provider_config();
 	is $config->{team},            'my-team', "non-default team included";
-	is $config->{pause_after_set}, 1,         "non-default pause_after_set included";
+	is $config->{pipeline_state_after_apply}, 'paused',
+		"non-default pipeline_state_after_apply included";
 };
 
 subtest 'Concourse - provider_option applies defaults when not set' => sub {
@@ -2697,42 +2701,25 @@ subtest 'Concourse - describe_provider includes Insecure field' => sub {
 };
 
 ### ============================================================ ###
-### Concourse normalize_provider_opts override
+### Concourse normalize_provider_opts
 ### ============================================================ ###
 
-subtest 'Concourse - normalize_provider_opts remaps ci-pause to pause_after_set' => sub {
-	my $normalized = Genesis::CI::ProviderCompiler::Concourse->normalize_provider_opts({
-		'ci-pause' => 1,
-	});
-	ok !exists $normalized->{pause},          "raw 'pause' key not present after remap";
-	is $normalized->{pause_after_set}, 1,     "pause_after_set=1 after remapping ci-pause";
-};
-
-subtest 'Concourse - normalize_provider_opts does not remap if pause_after_set already set' => sub {
-	my $normalized = Genesis::CI::ProviderCompiler::Concourse->normalize_provider_opts({
-		'ci-pause'       => 0,
-		'pause_after_set' => 1,
-	});
-	is $normalized->{pause_after_set}, 1,
-		"explicit pause_after_set wins over ci-pause when both present";
-};
-
+# Concourse remaps nothing of its own since D184 took ci-pause and the
+# boolean it stood for away: the base's conversion is all there is.
 subtest 'Concourse - normalize_provider_opts handles full CLI key set' => sub {
 	my $normalized = Genesis::CI::ProviderCompiler::Concourse->normalize_provider_opts({
 		'ci-target'        => 'myci',
 		'ci-team'          => 'platform',
 		'ci-pipeline-name' => 'cf-deploy',
-		'ci-pause'         => 1,
 		'ci-expose'        => 0,
 		'ci-insecure'      => 1,
 	});
 	is $normalized->{target},          'myci',      "target normalized";
 	is $normalized->{team},            'platform',  "team normalized";
 	is $normalized->{pipeline_name},   'cf-deploy', "pipeline_name normalized";
-	is $normalized->{pause_after_set}, 1,           "pause_after_set normalized from ci-pause";
 	is $normalized->{expose},          0,           "expose normalized";
 	is $normalized->{insecure},        1,           "insecure normalized";
-	ok !exists $normalized->{pause},                "no stale 'pause' key present";
+	ok !exists $normalized->{pause_after_set},      "and no pause key is made up";
 };
 
 ### ============================================================ ###

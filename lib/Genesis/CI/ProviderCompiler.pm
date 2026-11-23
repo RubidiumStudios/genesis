@@ -191,7 +191,6 @@ sub describe_provider {
 #   ci-target        => target
 #   ci-team          => team
 #   ci-pipeline-name => pipeline_name
-#   ci-pause         => pause
 #   ci-expose        => expose
 #
 # Non-ci-prefixed keys are returned unchanged (already in config form).

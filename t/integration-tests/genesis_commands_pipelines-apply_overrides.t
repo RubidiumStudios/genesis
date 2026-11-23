@@ -74,6 +74,7 @@ subtest 'the real apply hands fly the merged pipeline' => sub {
 		"echo \"\$*\" >> '$log'",
 		'case "$*" in *--version*) echo 7.11.0; exit 0;; esac',
 		'case "$*" in *--dry-run*) echo "jobs:"; echo "  job operator-smoke has been added:"; exit 0;; esac',
+		'case "$*" in *"pipelines --json"*) echo "[]"; exit 0;; esac', # none held yet (D184)
 		'case "$*" in *set-pipeline*)',
 		'  while [ $# -gt 0 ]; do [ "$1" = "-c" ] && cp "$2" '."'$kept'".'; shift; done;;',
 		'esac',

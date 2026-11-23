@@ -49,6 +49,9 @@ sub embed {
 sub apply {
 	my $opts = get_options;
 
+	command_usage(1, "Cannot specify both --paused|-P and --unpaused|-U.")
+		if $opts->{paused} && $opts->{unpaused};
+
 	# Read raw, ahead of the vault _get_top connects to.
 	_refuse_disabled_pipeline();
 
@@ -243,7 +246,11 @@ sub apply {
 		}
 
 		# A target only where the operator names one; fly resolves it otherwise (D86).
-		my %deploy_opts = (pause_after_set => $opts->{paused});
+		# A flag says the pause state for this run; the key does otherwise (D184).
+		my %deploy_opts = (
+			  $opts->{paused}   ? (pipeline_state => 'paused')
+			: $opts->{unpaused} ? (pipeline_state => 'unpaused')
+			:                     ());
 		$deploy_opts{target} = $opts->{target} if defined $opts->{target};
 		$compiler->deploy(%deploy_opts, yaml => $output->{'pipeline.yml'},
 			pipeline_name => $name, yes => $opts->{yes});

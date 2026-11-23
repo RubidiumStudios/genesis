@@ -98,7 +98,7 @@ The pipeline's name in its provider, which defaults to `deployment_type`. It is 
 | `git.webhooks` | `true` puts a webhook token on every git resource, has propagate ask Concourse to check each branch it pushes, and has `genesis pipeline-apply` keep the token and a GitHub push hook. False by default |
 | `git.check_every`, `git.control_check_every` | How often the deployment branches, and control, are polled: a Concourse duration (`30s`, `5m`, `1h`) or `never`. Concourse's default, 1m, where unset. With webhooks on, `1h` for the deployment branches keeps GitHub's traffic low |
 | `secrets_store` | The vault Concourse resolves the pipeline's references from, where it is not the repository's own: `url`, `namespace`, `path_prefix` (default `/concourse`), `shared_path` (default `shared`, under the prefix; `""` where Concourse has none) and `insecure`. Unset, the store is the repository's vault under `/concourse` |
-| `pause_after_set` | Leave the pipeline paused after it is set. `genesis pipeline-apply --paused` does the same for one run |
+| `pipeline_state_after_apply` | The pause state `genesis pipeline-apply` leaves the pipeline in: `paused`, `unpaused`, or `unchanged`. `unchanged`, the default, puts an existing pipeline back as it was found and leaves a new one paused, as Concourse creates it. `--paused` or `--unpaused` says it for one run |
 | `min_fly_version`, `fly_bin_path` | The lowest fly the pipeline may be set with, and which fly to run; `GENESIS_FLY_BIN` overrides the latter |
 | `group_commits` | Deploy the tip of what arrived rather than each commit in turn. Only `true` is supported, and `false` is refused |
 

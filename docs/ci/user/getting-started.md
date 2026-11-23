@@ -101,7 +101,7 @@ This does five things:
 - writes the exodus records;
 - compiles the pipeline and uploads it to the provider.
 
-Run it from `control`, committed and pushed. Genesis asks for confirmation before uploading. `--paused` sets the pipeline paused, for a first look before anything runs. To skip the prompt:
+Run it from `control`, committed and pushed. Genesis asks for confirmation before uploading. A new pipeline is left paused, as Concourse creates it, for a first look before anything runs; `--unpaused` starts it as the apply ends, and `genesis pipeline-resume` starts it afterwards. To skip the prompt:
 
 ```bash
 genesis pipeline-apply --yes
