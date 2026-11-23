@@ -2438,10 +2438,12 @@ subtest 'Parser - genesis-config: sets env_dir when no pipeline section' => sub 
 	ok $parsed->{env_dir}, "env_dir is set when no pipeline section";
 	is $parsed->{env_dir}, '/myrepo', "env_dir is top->path()";
 	# The parse settles pipeline.name here, falling back to the
-	# deployment type, the repository-wide keys a task reads, and whether
-	# its jobs are public (D138), so the block carries those and nothing else.
+	# deployment type, the repository-wide keys a task reads, whether its
+	# jobs are public (D138), and whether it has an all group (D179), so the
+	# block carries those and nothing else.
 	is_deeply $parsed->{pipeline},
-		{metadata => {name => 'cf'}, configuration => {unredacted => 0, public => 0}},
+		{metadata => {name => 'cf'},
+			configuration => {unredacted => 0, public => 0, show_all_group => 0}},
 		"pipeline holds only what it settled (env-file topology mode)";
 };
 
