@@ -15,11 +15,22 @@ use POSIX qw/strftime mktime/;
 
 sub config {
 	my (@keys) = @_;
-	my $top = Genesis::Top->new('.', no_vault => 1, repair_config => 1);
 
 	my ($pairs, $from_files, $removals) =
 		@{get_options()}{qw/set set-from-file unset/};
 	my $writing = ($pairs || $from_files || $removals) ? 1 : 0;
+
+	# The user-level file, which needs no repository to stand in (D181).
+	my $globals = get_options->{globals} ? 1 : 0;
+	bail(
+		{exitcode => CONFIG},
+		"#C{--globals} reads your user-level configuration and does not write ".
+		"it.  #C{%s} is yours to edit by hand: a write from here would replace ".
+		"the file whole, without its comments.  Edit it directly.",
+		humanize_path($Genesis::RC->path)
+	) if $globals && $writing;
+	my $top    = $globals ? undef : Genesis::Top->new('.', no_vault => 1, repair_config => 1);
+	my $reading = $globals ? $Genesis::RC : $top->config;
 
 	# Keys only: a value may hold '=', and pairs arrive flat, key first.
 	my @eq = grep {$_ % 2 == 0 && $pairs->[$_] =~ /=/} 0..$#{$pairs || []};
@@ -77,15 +88,15 @@ sub config {
 		return 0;
 	}
 
-	return output(to_yaml($top->config->get_all)) unless @keys;
+	return output(to_yaml($reading->get_all)) unless @keys;
 
 	my $key = $keys[0];
-	unless ($top->config->has($key)) {
+	unless ($reading->has($key)) {
 		error("#Y{%s} is #Ki{(unset)}", $key);
 		return 1;
 	}
 
-	my $value = $top->config->get($key);
+	my $value = $reading->get($key);
 	output(
 		Scalar::Util::blessed($value) && $value->isa('JSON::PP::Boolean')
 			? ($value ? 'true' : 'false')

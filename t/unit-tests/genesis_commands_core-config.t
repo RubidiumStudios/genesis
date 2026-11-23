@@ -1338,4 +1338,103 @@ subtest 'a deployment root outside its repository exits 1' => sub {
 		'and names the root, the repository, and the branch');
 };
 
+# T515 (D181): --globals, or -G, reads the user-level file, ~/.genesis/config,
+# in place of the repository's.  The name was the help's until D180 freed it.
+
+# The user-level file as Genesis::Init reads it, since the command asks the
+# object Init made and a row that rewrites the file has to make it again.
+sub user_config {
+	my ($content) = @_;
+	mkdir_or_fail("$ENV{HOME}/.genesis");
+	mkfile_or_fail("$ENV{HOME}/.genesis/config", $content);
+	$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
+	Genesis::validate_global_config($Genesis::RC);
+	return "$ENV{HOME}/.genesis/config";
+}
+
+subtest 'config --globals reads the user-level configuration, outside a repository' => sub {
+	plan tests => 5;
+
+	# Keys no environment variable overrides, so the file is what answers.
+	user_config("---\noutput_style: fun # as the user wrote it\nembedded_genesis: warn\n");
+	my $nowhere = workdir('config-globals-nowhere');
+
+	pushd $nowhere;
+	prepare_command('config', '--globals');
+	build_command_environment;
+	my $out = stdout_from { Genesis::Commands::Core::config() };
+	like($out, qr/output_style:\s*fun/, 'the dump is the user-level file');
+	like($out, qr/embedded_genesis:\s*warn/, 'every key of it');
+
+	prepare_command('config', '-G');
+	build_command_environment;
+	$out = stdout_from { Genesis::Commands::Core::config('output_style') };
+	is($out, "fun\n", '-G is the same, and one key prints as a bare value');
+
+	prepare_command('config', '-G');
+	build_command_environment;
+	my ($err, $rc);
+	($out, $err) = output_from { $rc = Genesis::Commands::Core::config('no_such_key') };
+	like($err, qr/\(unset\)/, 'a key it does not hold is said to be unset');
+	isnt($rc, 0, 'with a non-zero exit');
+	popd;
+};
+
+subtest 'config --globals inside a repository still reads the user-level file' => sub {
+	plan tests => 2;
+
+	user_config("---\noutput_style: pointer\n");
+	pushd config_repo('config-globals-in-repo');
+	prepare_command('config', '--globals');
+	build_command_environment;
+	my $out = stdout_from { Genesis::Commands::Core::config() };
+	popd;
+
+	like($out, qr/output_style:\s*pointer/, 'the user-level value');
+	unlike($out, qr/manifest_store|deployment_type/, "and none of the repository's keys");
+};
+
+# The file is the user's own, written by hand and often commented.  A write
+# through Genesis::Config would replace it whole, comments gone, under a
+# header saying Genesis generated it, so until that is ruled on a write is
+# refused and the file is named.
+subtest 'config --globals does not write the user-level file' => sub {
+	plan tests => 6;
+
+	my $written = "---\noutput_style: fun # as the user wrote it\n";
+	my $file = user_config($written);
+	pushd workdir('config-globals-write');
+
+	for my $args (['--set', 'output_style', 'plain'], ['--unset', 'output_style']) {
+		prepare_command('config', '-G', @$args);
+		build_command_environment;
+		my $ok = eval { output_from { Genesis::Commands::Core::config() }; 1 };
+		ok(!$ok, "$args->[0] is refused");
+		like("$@", qr{\.genesis/config}, 'naming the file to edit');
+		is(slurp($file), $written, 'and the file is as the user left it');
+	}
+	popd;
+};
+
+# Through the dispatcher, which decides whether a command needs a repository
+# before the command runs.  The rows above call the command itself, and passed
+# while the real command line refused the directory as no repository.
+# embedded_genesis is warn here because that setting is one of the things
+# that sends the dispatcher looking for a repository.
+subtest 'the real command line reads the user-level file with no repository' => sub {
+	plan tests => 4;
+
+	user_config("---\noutput_style: fun\nembedded_genesis: warn\n");
+	my $nowhere = workdir('config-globals-cli');
+
+	for my $flag (qw/-G --globals/) {
+		my ($out, $rc, $err) = run({dir => $nowhere, stderr => 0, passfail => 0},
+			"$helper::TOPDIR/bin/genesis", 'config', $flag, 'output_style');
+		is($rc, 0, "config $flag exits 0 outside a repository") or diag($err);
+		is($out, 'fun', 'and prints the value');
+	}
+};
+
+user_config("--- {}\n");
+
 done_testing;

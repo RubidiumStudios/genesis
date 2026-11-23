@@ -1487,7 +1487,7 @@ define_command("repo-init", {
 # genesis config - get or set repository configuration values {{{
 define_command("config", {
 	summary => "Get or set values in the deployment repository configuration.",
-	usage => "config [<key> ...] [--set <key> <value>] [--unset <key>]",
+	usage => "config [-G|--globals] [<key> ...] [--set <key> <value>] [--unset <key>]",
 	description =>
 		"Reads and writes #C{.genesis/config}, the deployment repository's ".
 		"configuration file.\n".
@@ -1496,9 +1496,20 @@ define_command("config", {
 		"accident: #C{genesis config a b} retrieves both keys rather than ".
 		"assigning one to the other.",
 	function_group => Genesis::Commands::REPOSITORY,
-	scope => 'repo',
+	# A repository, unless it is the user-level file that is asked for.
+	scope => [['globals' => 'any'], ['!globals' => 'repo']],
 	option_group => Genesis::Commands::REPO_OPTIONS,
 	options => [
+		'globals|G' =>
+			"Read your user-level configuration, #C{~/.genesis/config}, in ".
+			"place of the repository's.  It works outside a repository.  ".
+			"The values shown are the ones in effect: the file's, the ".
+			"default for each key it leaves unsaid, and any an environment ".
+			"variable overrides.\n".
+			"\n".
+			"That file is yours to edit by hand, so #C{--set}, ".
+			"#C{--set-from-file} and #C{--unset} are refused with it.",
+
 		'set=s@{2}' =>
 			"Set #C{<key>} to #C{<value>}.  Repeat to set more than one key ".
 			"in a single run.\n".

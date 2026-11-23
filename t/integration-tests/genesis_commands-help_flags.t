@@ -74,12 +74,19 @@ subtest '--help-globals shows the global options alone' => sub {
 # The screen and the code, not the line naming the option: command_usage
 # prints that line only when the process is not under test.
 subtest '--globals is no longer taken from a command' => sub {
-	for my $cmd (qw/ping config/) {
+	for my $cmd (qw/ping secrets-provider/) {
 		my ($text, $exit) = said($cmd, '--globals');
 		is($exit, 2, "$cmd --globals is a usage error");
 		like($text, qr/^Usage: \S* ?\Q$cmd\E\b/m, 'answered with the command\'s own usage');
 		unlike($text, $GLOBAL, 'and the global options are not listed in its place');
 	}
+
+	# config is the command that now carries the name, for the user-level
+	# configuration (D181).
+	my ($text, $exit) = said('config', '--globals');
+	is($exit, 0, 'config --globals is the command\'s own option');
+	like($text, qr/^output_style:/m, 'and prints the user-level configuration');
+	unlike($text, $GLOBAL, 'not the global options');
 };
 
 subtest 'with no command' => sub {

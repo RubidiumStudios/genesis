@@ -131,9 +131,25 @@ B<Examples:>
   genesis config --set manifest_store exodus
   genesis config --set manifest_store exodus --set pipeline.enabled false
 
+  genesis config --globals            # your user-level configuration
+  genesis config -G output_style
+
 Reads and writes the deployment repository's configuration in
 F<.genesis/config>.  With no argument, prints the whole configuration as
 YAML; with a key, prints just that key's value.
+
+B<C<--globals>, or C<-G>, reads the user-level configuration,
+F<~/.genesis/config>, in place of the repository's> (D181).  It is the
+object C<Genesis::Init> loaded and validated, so the values printed are the
+ones in effect: the file's, the default for each key the file leaves
+unsaid, and any an environment variable overrides.  It needs no repository,
+which the command's scope says to the dispatcher: C<any> with the flag and
+C<repo> without it.  B<It does not write.>  That file is the user's own,
+kept by hand and often commented, and a save through L<Genesis::Config>
+replaces a file whole under a header saying Genesis generated it, so
+C<--set>, C<--set-from-file> and C<--unset> beside the flag are refused at
+C<CONFIG>, naming the file to edit.  The name was the help's until
+C<--help-globals> took its place (D180).
 
 B<Writing requires C<--set>, so a bare argument never assigns
 anything.> C<genesis config a b> reads two keys; it does not set C<a> to
