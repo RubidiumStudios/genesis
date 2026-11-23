@@ -246,7 +246,7 @@ pipeline.vault.auth.role_id              &lt;path&gt;:approle_id</code></pre>
   <tr><td>resource <code>&lt;env&gt;-bosh-lock</code> (locked by director URL)</td><td><code>&lt;bosh_env&gt;-bosh-lock</code> (locked by director name); none for a create-env deployment</td></tr>
   <tr><td>resources <code>&lt;env&gt;-cloud-config</code>, <code>&lt;env&gt;-runtime-config</code></td><td><code>&lt;bosh_env&gt;-bosh-&lt;cloud|runtime|cpi&gt;-config</code>, one per director and type</td></tr>
   <tr><td>a shuttle resource added by hand for redeploy requests</td><td><code>redeploy_&lt;env&gt;-&lt;type&gt;</code>, plus the events <code>&lt;env&gt;-&lt;type&gt;_deployed</code> and <code>&lt;env&gt;-&lt;type&gt;_redeployed</code></td></tr>
-  <tr><td>groups <code>&lt;name&gt;</code>, <code>notifications</code>, <code>genesis-updates</code>, and any added by hand</td><td><code>&lt;pipeline.name&gt;</code> (the deployments), <code>notifications</code> (style <code>grouped</code>), <code>redeploys</code> (where <code>pipeline.redeploy.style</code> is <code>grouped</code>), and <code>propagation</code>, last</td></tr>
+  <tr><td>groups <code>&lt;name&gt;</code>, <code>notifications</code>, <code>genesis-updates</code>, <code>all</code>, and any added by hand</td><td><code>&lt;pipeline.name&gt;</code> (the deployments), <code>notifications</code> (style <code>grouped</code>), <code>redeploys</code> (where <code>pipeline.redeploy.style</code> is <code>grouped</code>), <code>propagation</code>, and then <code>all</code>, listing every job, where <code>pipeline.provider.show_all_group</code> is true (it is false by default)</td></tr>
 </table>
 
 <h2>8. Tools outside the pipeline</h2>
@@ -346,7 +346,6 @@ pipeline.vault.auth.role_id              &lt;path&gt;:approle_id</code></pre>
       <li>when a stemcell or a director's config changes.</li>
     </ul></li>
   <li><strong>Automatic kit and Genesis updates</strong> (v2's <code>update-genesis-assets</code>).</li>
-  <li><strong>An <code>all</code> group.</strong></li>
   <li><strong>Errands and tasks</strong> run after a deploy.</li>
   <li><strong>A director's deploy refreshing</strong> the credential copies of the pipelines that track it. Until then, re-run <code>pipeline-apply</code> after a director's credentials rotate.</li>
   <li><strong>A watcher</strong> that checks a deployment branch when a pull request merges, instead of waiting for the poll.</li>

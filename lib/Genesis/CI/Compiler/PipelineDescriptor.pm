@@ -243,6 +243,17 @@ sub describe {
 	push @jobs, $self->_propagate_job($ast, \@ran_names);
 	push @groups, {name => 'propagation', jobs => ['propagate']} if @groups;
 
+	# Every job in one last group, where the repository asks for it: with
+	# groups, Concourse has no other view of the whole pipeline (D179).
+	if (($ast->configuration || {})->{show_all_group} && @groups) {
+		bail({exitcode => CONFIG},
+			"#C{pipeline.provider.show_all_group} adds a group named #C{all}, and ".
+			"this pipeline already has one.  Concourse takes no two groups of one ".
+			"name.  Rename the pipeline or the group, or set the key to false."
+		) if grep {$_->{name} eq 'all'} @groups;
+		push @groups, {name => 'all', jobs => [sort map {$_->{name}} @jobs]};
+	}
+
 	# The control-branch resource only where a job uses it, decided by
 	# reference so it stays right as those jobs change.
 	my $referenced = _referenced_resources(\@jobs);
@@ -2148,6 +2159,12 @@ where C<inline>, the default, leaves each beside its deploy.
 
 Every job's C<public> comes from C<pipeline.provider.public>, false unless
 set, through C<_job_public> (D138, contract b4).
+
+Where C<pipeline.provider.show_all_group> is set, the pipeline's last group is
+C<all>, after C<propagation>, and lists every job once, sorted (D179).
+Concourse shows every job at once only where a pipeline has no groups, and
+this one always has some.  A pipeline that already has a group named C<all>,
+which one named C<all> does, is refused at C<CONFIG> naming the key.
 
 C<pipeline.provider.git> sets, through C<_git_checks>, how C<control-branch> and
 each deployment branch's resource learn their branch moved (D143):

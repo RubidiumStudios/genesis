@@ -92,6 +92,7 @@ The pipeline's name in its provider, which defaults to `deployment_type`. It is 
 | `url`, `team` | The Concourse URL and team. Required. Each operator's own fly target is found by these, or given with `--target`; `target` is retired |
 | `insecure` | Skip TLS verification with fly |
 | `public` | Make every job's build log public. False by default |
+| `show_all_group` | Add a last group, `all`, that lists every job. Concourse shows every job at once only where a pipeline has no groups, and this one always has some. False by default |
 | `task.image`, `task.version` | The image every task runs in, by default `genesiscommunity/concourse:latest`. It needs git 2.34.1 or later. An image named here with a registry domain is taken as written; one with none is pulled from the host of `pipeline.registry`, where that is set |
 | `task.privileged` | Environments whose deploy task runs privileged, such as a create-env director |
 | `git.webhooks` | `true` puts a webhook token on every git resource, has propagate ask Concourse to check each branch it pushes, and has `genesis pipeline-apply` keep the token and a GitHub push hook. False by default |

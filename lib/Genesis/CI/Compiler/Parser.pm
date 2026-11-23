@@ -163,6 +163,7 @@ sub _parse_genesis_config {
 	$parsed{pipeline}{configuration}{task} = {%{$parsed{provider}{task}}}
 		if ref($parsed{provider}{task}) eq 'HASH';
 	$parsed{pipeline}{configuration}{public} = $parsed{provider}{public} ? 1 : 0;
+	$parsed{pipeline}{configuration}{show_all_group} = $parsed{provider}{show_all_group} ? 1 : 0;
 	$parsed{pipeline}{configuration}{git} = {%{$parsed{provider}{git}}}
 		if ref($parsed{provider}{git}) eq 'HASH';
 	# Where a task asks Concourse for something, as propagate's check requests do (D144).

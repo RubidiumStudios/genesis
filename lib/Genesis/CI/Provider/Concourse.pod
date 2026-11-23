@@ -164,7 +164,10 @@ C<type: concourse>, each with its type, its default where it has one, and
 the description C<genesis config> renders as help.
 
 The keys are C<target>, C<url>, C<team>, C<insecure>, C<min_fly_version>, C<fly_bin_path>,
-C<public>, C<tagged>, C<task>, C<pause_after_set>, C<git>, C<secrets_store>, and C<group_commits>.
+C<public>, C<show_all_group>, C<tagged>, C<task>, C<pause_after_set>, C<git>, C<secrets_store>, and C<group_commits>.
+
+C<show_all_group>, false by default, adds a last group named C<all> that
+lists every job of the pipeline (D179).
 
 C<git> says how the pipeline's git resources learn a branch moved (D143):
 C<webhooks>, false by default, puts the webhook token's reference on

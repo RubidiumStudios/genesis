@@ -135,6 +135,7 @@ genesis config --set pipeline.enabled true</pre>
 <tr><td><code>pipeline.provider.team</code></td><td>string</td><td>&ndash;</td><td>any string</td><td>When enabled</td><td>Concourse team name.</td></tr>
 <tr><td><code>pipeline.provider.insecure</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Skip TLS certificate verification.</td></tr>
 <tr><td><code>pipeline.provider.public</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Make build logs publicly viewable.</td></tr>
+<tr><td><code>pipeline.provider.show_all_group</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Add a last group, <code>all</code>, listing every job. Without it no view of a grouped pipeline shows every job at once.</td></tr>
 <tr><td><code>pipeline.provider.pause_after_set</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Leave the pipeline paused after <code>fly set-pipeline</code>.</td></tr>
 <tr><td><code>pipeline.provider.group_commits</code></td><td>boolean</td><td><code>true</code></td><td><code>true</code> only; <code>false</code> is refused</td><td>No</td><td>Deploy the tip of what arrived rather than each commit in turn.</td></tr>
 <tr><td><code>pipeline.provider.min_fly_version</code></td><td>semver</td><td>&ndash;</td><td>a semantic version</td><td>No</td><td>Lowest fly version this pipeline may be set with.</td></tr>

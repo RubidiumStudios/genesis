@@ -546,7 +546,8 @@ integration-tests/genesis_ci_contract-stage4.t                # and each deploym
 integration-tests/genesis_ci_contract-redeploy.t              # and the redeploy job, pulled forward from Stage 6 as a manual one
 integration-tests/genesis_ci_contract-notifications.t         # and a manual environment's notify job and every deploy's Slack messages (D122)
 integration-tests/genesis_ci_contract-pr_token.t              # propagate carries GITHUB_AUTH_TOKEN where an environment delivers by pull request, from api_token or the https password, and ssh alone refuses (f8)
-integration-tests/genesis_ci_contract-redeploy_block.t       # pipeline.redeploy: enabled emits the redeploy job, queue and event or none, refusing a redeploy_cron beside false; style grouped lists them apart (b9)
+integration-tests/genesis_ci_contract-all_group.t            # T513: pipeline.provider.show_all_group adds a last group listing every job, off by default (D179)
+integration-tests/genesis_ci_contract-redeploy_block.t      # pipeline.redeploy: enabled emits the redeploy job, queue and event or none, refusing a redeploy_cron beside false; style grouped lists them apart (b9)
 integration-tests/genesis_ci_contract-registry.t              # every default image is pulled through pipeline.registry, with its credentials under its host (D137)
 integration-tests/genesis_ci_contract-public.t                # every job's public is pipeline.provider.public, false unless set (D138, b4)
 integration-tests/genesis_ci_contract-worker_tag.t            # an environment's worker tag lands on the steps that reach its network alone (D139, b5)

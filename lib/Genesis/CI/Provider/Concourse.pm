@@ -328,6 +328,7 @@ sub provider_options_schema {
 		fly_bin_path    => {type => 'string', description => 'Path or name of the fly CLI this pipeline is set with; GENESIS_FLY_BIN overrides it'},
 
 		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
+		show_all_group => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Add a last group, all, listing every job'},
 		tagged   => {type => 'any', retired => 1, check => \&_tagged_retired, description => 'Retired: each environment names its workers with genesis.pipeline.provider.tag'},
 
 		# An empty hash by default, or validation never reaches its keys.
