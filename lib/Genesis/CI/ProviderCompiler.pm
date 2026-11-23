@@ -279,9 +279,12 @@ sub git_uri {
 	require Genesis::Top;
 	my $identity = Genesis::Top::repository_identity($repo) or return $repo;
 	my $path = "$identity->{owner}/$identity->{repo}";
+	# A repository derived from the clone's remote comes with the host it was
+	# found on; one written as owner/repo names none, and is GitHub's.
+	my $host = $source_control->{host} // $identity->{host};
 	return (($source_control->{auth} || {})->{type} // 'ssh') eq 'https'
-		? sprintf('https://%s/%s.git', $identity->{host}, $path)
-		: sprintf('git@%s:%s.git',     $identity->{host}, $path);
+		? sprintf('https://%s/%s.git', $host, $path)
+		: sprintf('git@%s:%s.git',     $host, $path);
 }
 
 # }}}

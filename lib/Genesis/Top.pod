@@ -2555,6 +2555,28 @@ B<Examples:>
     my $uri = $top->source_control_uri();
     # returns 'https://github.com/team/bosh-deployments.git'
 
+=head2 source_control_identity
+
+    my $identity = $top->source_control_identity;
+
+The repository the pipeline lives in, as its host, owner and repo: the one
+C<pipeline.source_control.repository> names where it is written, and
+otherwise the one derived from the clone's remote (D118). It is what
+L</source_control_repository> answers with the host kept, which a caller
+that composes a clone URL needs: the compiler asks it where the key is not
+written, so a pipeline's git resources clone the repository the root is in,
+on the host it is on.
+
+B<Returns:> a hash reference of C<host>, C<owner> and C<repo>.
+
+B<Errors:> Those of L</_source_control_identified>: refused at C<CONFIG>
+where the key is not written and no remote names a repository.
+
+B<Examples:>
+
+    $top->source_control_identity;
+    # {host => 'github.com', owner => 'acme', repo => 'bosh-deployments'}
+
 =head2 source_control_repository
 
     my $repo = $top->source_control_repository();

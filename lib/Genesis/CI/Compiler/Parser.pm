@@ -191,8 +191,18 @@ sub _source_control_model {
 	my $git      = $self->{top} ? eval {$self->{top}->git} : undef; # no clone: the root is '.'
 	my ($prefix) = $git ? $git->prefixed('') : ('');
 	$prefix = ($prefix // '') =~ s{/+$}{}r;
+
+	# Where the key is not written, the repository is the one the root is
+	# in, as its owner derives it from the clone's remote, on that remote's
+	# host (D118).  A repository that cannot be derived is refused there.
+	my ($repository, $host) = ($sc->{repository});
+	if ($self->{top} && !length($repository // '') && !length($sc->{uri} // '')) {
+		my $identity = $self->{top}->source_control_identity;
+		($repository, $host) = ("$identity->{owner}/$identity->{repo}", $identity->{host});
+	}
 	return {
-		repository     => $sc->{repository},
+		repository     => $repository,
+		(defined $host ? (host => $host) : ()),
 		uri            => $sc->{uri},
 		default_branch => $sc->{control_branch},
 		root           => length($prefix) ? $prefix : '.',

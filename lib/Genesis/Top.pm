@@ -2105,6 +2105,13 @@ sub source_control_repository {
 }
 
 # }}}
+# source_control_identity - the host, owner and repo of the repository the pipeline lives in {{{
+sub source_control_identity {
+	my ($self) = @_;
+	return $self->_source_control_identified->{identity};
+}
+
+# }}}
 # _source_control_identified - the source control, refused only where the repository is unknown {{{
 sub _source_control_identified {
 	my ($self) = @_;

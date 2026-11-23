@@ -389,6 +389,14 @@ host in the form C<auth.type> names, C<git@host:owner/repo.git> for C<ssh>,
 the default, and C<https://host/owner/repo.git> for C<https>. A repository
 that names none, such as a path, is returned as written.
 
+A declaration may carry a C<host> beside its repository. It is the host the
+repository was found on where the repository was not written and was
+derived from the clone's remote, which
+L<Genesis::CI::Compiler::Parser> fills in from
+L<Genesis::Top/source_control_identity>. It is used in place of the host
+the repository's own spelling names, since a derived repository is handed
+over as C<owner/repo>, which names none and would read as GitHub's.
+
 B<Parameters:>
 
 =over 4
@@ -413,6 +421,10 @@ B<Examples:>
 
     $compiler->git_uri({repository => 'https://git.corp.example/org/repo.git'});
     # 'git@git.corp.example:org/repo.git'
+
+    $compiler->git_uri({repository => 'org/repo', host => 'git.corp.example',
+        auth => {type => 'https'}});
+    # 'https://git.corp.example/org/repo.git'
 
 =head2 secret_ref($ref)
 

@@ -49,6 +49,9 @@ use_ok 'Genesis::CI::Compiler::Parser';
 	# The identity as its owner resolves it (D172), which for this stand-in
 	# is the one written.
 	sub pipeline_identity { (($_[0]->pipeline_section || {})->{source_control} || {})->{identity} }
+	# The repository as its owner derives it where the section writes none
+	# (D118).  This stand-in has no clone to derive one from, so it names one.
+	sub source_control_identity { {host => 'github.com', owner => 'acme', repo => 'stand-in'} }
 	sub pipeline_unredacted { (($_[0]->pipeline_section || {})->{unredacted}) ? 1 : 0 }
 	sub type   { $_[0]->{type} }
 	sub path {
