@@ -28,6 +28,33 @@ subtest 'bin/genesis' => sub {
 
 };
 
+# The help reads each argument, variable and option a command declares, and
+# one it cannot read ends the help as a bug in Genesis.  genesis version -h
+# did: it declared its optional argument as [env], where a name with a
+# question mark after it is what the help reads as optional.  No row rendered
+# every command's help, so nothing saw it.
+subtest 'every command renders its help' => sub {
+	my @broken;
+	for my $cmd (sort(Genesis::Commands::known_commands())) {
+		prepare_command($cmd);
+		# A definition the help cannot read is raised as a bug, which dies.
+		my ($exit, $stderr, $died);
+		eval {
+			(undef, $stderr) = output_from {$exit = exit_code {command_usage(0)}};
+			1;
+		} or $died = "$@";
+		push @broken, sprintf('%s (exit %s): %s', $cmd, $exit // 'none',
+			(grep {/invalid/i} split /\n/, ($died // '').($stderr // ''))[0] // 'no usage printed')
+			unless !$died && defined $exit && $exit == 0 && ($stderr // '') =~ /Usage:/;
+	}
+	is_deeply(\@broken, [], 'each exits 0 with a usage line') or diag(explain(\@broken));
+
+	prepare_command('version');
+	my (undef, $help) = output_from {exit_code {command_usage(0)}};
+	like($help, qr/\benv\b \(optional\)/, 'version shows its environment argument as optional');
+	unlike($help, qr/\[env\]/, 'and not in brackets of its own');
+};
+
 # An alias is one name, or a list under aliases.  pipeline-apply declared
 # its alias as a list under alias, which registered the list's address as
 # the alias, so help printed ARRAY(0x...) and pipeline-push resolved to

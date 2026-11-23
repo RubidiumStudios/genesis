@@ -86,6 +86,7 @@ define_command('help', {
 # genesis version - Print the version of Genesis. {{{
 define_command("version", {
 		summary => "Print the version of Genesis",
+		usage => "version [<env>] [<component> ...]",
 		description =>
 			"With no arguments, will print out a human-readable line specifying the ".
 			"version, commit hash and build code.  When run inside a Genesis ".
@@ -99,7 +100,7 @@ define_command("version", {
 		function_group => Genesis::Commands::GENESIS,
 		skip_check_prereqs => 1,
 		arguments => [
-			'[env]' =>
+			'env?' =>
 				"Optional environment name.  When supplied (and we are inside a ".
 				"repo), feature_compatibility and feature_compatibility_source ".
 				"reflect the effective minimum derived from both the env file ".
