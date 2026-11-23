@@ -7,6 +7,7 @@ use Genesis::Term qw/bullet decolorize/;
 use Genesis::Exit qw/CONFIG/;
 
 use JSON::PP ();
+use Scalar::Util ();
 use Digest::SHA qw/sha1_hex/;
 use File::Basename qw/dirname/;
 use POSIX qw/strftime/;
@@ -118,16 +119,172 @@ sub header {
 }
 
 # }}}
-# written_header - the first comment line of the file as it is on disk, or undef {{{
-sub written_header {
-	my ($self) = @_;
-	return undef unless $self->exists;
-	open my $fh, '<', $self->{path} or return undef;
-	while (my $line = <$fh>) {
-		next if $line =~ /^---\s*$/ || $line =~ /^\s*$/;
-		return $line =~ /^#\s?(.*?)\s*$/ ? $1 : undef;
+# save_in_place - write changes into the file as it is, keeping every line they do not touch {{{
+sub save_in_place {
+	my ($self, %changes) = @_;
+	return 0 unless $self->exists;
+
+	my @sets;
+	my @pairs = @{$changes{sets} || []};
+	while (my ($key, $value) = splice(@pairs, 0, 2)) {
+		push @sets, [$key, $self->_coerce_to_schema_type($key, $value)];
 	}
-	return undef;
+
+	open my $in, '<', $self->{path} or return 0;
+	my $text = do {local $/; <$in>};
+	close $in;
+	my $edited = edit_yaml_text($text, sets => \@sets, unsets => $changes{unsets});
+	return 0 unless defined $edited;
+
+	# The edit is checked, not trusted: what it wrote has to parse to what
+	# the file held before with these changes made and no other, or nothing
+	# is written.  The file is the measure and not this object, which holds
+	# the values as validation normalised them.
+	my ($want, $unread) = Genesis::load_yaml($text);
+	my ($wrote, $unreadable) = Genesis::load_yaml($edited);
+	return 0 if $unread || $unreadable;
+	$want //= {};
+	return 0 unless ref($want) eq 'HASH';
+	my $change = sub {
+		my ($path, $value, $remove) = @_;
+		my @path = split /\./, $path;
+		my $last = pop @path;
+		my $at   = $want;
+		for my $key (@path) {
+			return if $remove && ref($at->{$key}) ne 'HASH';
+			$at->{$key} = {} unless ref($at->{$key}) eq 'HASH';
+			$at = $at->{$key};
+		}
+		$remove ? delete $at->{$last} : ($at->{$last} = $value);
+		return;
+	};
+	$change->(@$_) for @sets;
+	$change->($_, undef, 1) for @{$changes{unsets} || []};
+	my $json = JSON::PP->new->canonical->allow_nonref;
+	return 0 unless $json->encode($wrote // {}) eq $json->encode($want);
+
+	my $tmp = "$self->{path}.$$";
+	open my $out, '>', $tmp or return 0;
+	print $out $edited;
+	close $out or return 0;
+	rename($tmp, $self->{path}) or do { unlink $tmp; return 0 };
+	$self->{persistent_signature} = $self->_signature;
+	return 1;
+}
+
+# }}}
+# edit_yaml_text - set and unset keys of a YAML text by editing its lines, or undef {{{
+sub edit_yaml_text {
+	my ($text, %changes) = @_;
+	my @lines = split /\n/, $text // '';
+
+	# Every key of a block mapping, with its line, indent and dotted path.
+	# Keys inside a list item or a block scalar are passed over.
+	my $keys = sub {
+		my (@found, @stack, $list, $scalar);
+		for my $i (0 .. $#lines) {
+			my $line = $lines[$i];
+			next if $line =~ /^\s*(?:#.*)?$/ || $line =~ /^---/;
+			return undef if $line =~ /^ *\t/;
+			my $indent = length(($line =~ /^( *)/)[0]);
+			if (defined $scalar) { next if $indent > $scalar; undef $scalar }
+			if ($line =~ /^ *-(?: |$)/) {
+				$list = $indent if !defined $list || $indent < $list;
+				next;
+			}
+			if (defined $list) { next if $indent > $list; undef $list }
+			my ($head, $key, $rest) = $line =~ /^( *([A-Za-z0-9_-]+) *:)(?: (.*)|)$/ or next;
+			pop @stack while @stack && $stack[-1][0] >= $indent;
+			push @stack, [$indent, $key];
+			$scalar = $indent if ($rest // '') =~ /^\s*[|>]/;
+			push @found, {at => $i, indent => $indent, head => $head, rest => $rest // '',
+				path => join('.', map {$_->[1]} @stack)};
+		}
+		return \@found;
+	};
+
+	# The last line of what a key holds: its own, or the last under it.
+	my $end = sub {
+		my ($entry) = @_;
+		my $last = $entry->{at};
+		for my $i ($entry->{at} + 1 .. $#lines) {
+			next if $lines[$i] =~ /^\s*(?:#.*)?$/;
+			my $indent = length(($lines[$i] =~ /^( *)/)[0]);
+			last if $indent < $entry->{indent}
+				|| ($indent == $entry->{indent} && $lines[$i] !~ /^ *-(?: |$)/);
+			$last = $i;
+		}
+		return $last;
+	};
+
+	# Plain where a plain scalar reads back as the same text, else quoted as
+	# JSON, which YAML reads as a double-quoted scalar.
+	my $scalar = sub {
+		my ($value) = @_;
+		return $value ? 'true' : 'false'
+			if Scalar::Util::blessed($value) && $value->isa('JSON::PP::Boolean');
+		return $value if $value =~ m{\A[A-Za-z_/<][A-Za-z0-9_./<>-]*\z}
+			&& $value !~ /\A(?:y|n|yes|no|on|off|true|false|null)\z/i;
+		return JSON::PP->new->allow_nonref->encode("$value");
+	};
+
+	for my $set (@{$changes{sets} || []}) {
+		my ($path, $value) = @$set;
+		return undef unless defined $value;
+		return undef if ref($value) && !(Scalar::Util::blessed($value) && $value->isa('JSON::PP::Boolean'));
+		my @path = split /\./, $path;
+		return undef if !@path || grep {!/\A[A-Za-z0-9_-]+\z/} @path;
+
+		my $found = $keys->() or return undef;
+		my %at;
+		$at{$_->{path}} //= $_ for @$found;
+
+		if (my $entry = $at{$path}) {
+			# One line holding a plain or a quoted scalar, and nothing under it.
+			return undef if $end->($entry) > $entry->{at};
+			# A comment starts at a # with a space before it, outside quotes;
+			# one inside quotes or hard against a plain value is the value's.
+			my ($lead, $old, $comment) = $entry->{rest} =~ /\A([ \t]*)("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#"'|>&*!{\[](?:\S|[ \t]+(?=[^ \t#]))*|)([ \t]+#.*|#.*)?[ \t]*\z/
+				or return undef;
+			$lead = '' unless length $old;
+			$comment //= '';
+			$comment = " $comment" if length $comment && $comment !~ /^\s/;
+			$lines[$entry->{at}] = "$entry->{head} $lead".$scalar->($value).$comment;
+			next;
+		}
+
+		# The nearest parent the file has, which has to be a mapping.
+		my ($depth, $parent) = (scalar(@path) - 1);
+		$depth-- until $depth == 0 || ($parent = $at{join('.', @path[0 .. $depth - 1])});
+		my ($indent, $after) = (0, $#lines);
+		if ($parent) {
+			return undef if $parent->{rest} !~ /\A\s*(?:#.*)?\z/;
+			my ($child) = grep {$_->{path} =~ /\A\Q$parent->{path}\E\.[^.]+\z/} @$found;
+			$after  = $end->($parent);
+			return undef if !$child && $after > $parent->{at};
+			$indent = $child ? $child->{indent} : $parent->{indent} + 2;
+		} else {
+			my ($top) = grep {$_->{path} !~ /\./} @$found;
+			$indent = $top->{indent} if $top;
+			$after-- while $after >= 0 && $lines[$after] =~ /^\s*$/;
+			$after = $#lines if $after < 0;
+		}
+		my @new;
+		for my $i ($depth .. $#path) {
+			push @new, (' ' x ($indent + 2 * ($i - $depth))) . "$path[$i]:"
+				. ($i == $#path ? ' '.$scalar->($value) : '');
+		}
+		$after = $#lines unless $parent;
+		splice(@lines, $after + 1, 0, @new);
+	}
+
+	for my $path (@{$changes{unsets} || []}) {
+		my $found = $keys->() or return undef;
+		my ($entry) = grep {$_->{path} eq $path} @$found or next;
+		splice(@lines, $entry->{at}, $end->($entry) - $entry->{at} + 1);
+	}
+
+	return @lines ? join("\n", @lines)."\n" : '';
 }
 
 # }}}

@@ -1507,11 +1507,12 @@ define_command("config", {
 			"default for each key it leaves unsaid, and any an environment ".
 			"variable overrides.\n".
 			"\n".
-			"With #C{--set}, #C{--set-from-file} or #C{--unset} it writes ".
-			"that file where there is none yet, holding only what you set, ".
-			"and updates one it wrote before.  A file you keep by hand is ".
-			"not rewritten, since a rewrite would drop its comments; edit ".
-			"that one directly.",
+			"With #C{--set} or #C{--unset} it writes that file.  Where there ".
+			"is none yet it makes one, holding only what you set.  Where ".
+			"there is one it changes the key's own line and leaves the rest ".
+			"as you wrote it, comments included.  A change it cannot make ".
+			"that way, such as a whole list or block, is refused and ".
+			"nothing is written; edit the file directly for those.",
 
 		'set=s@{2}' =>
 			"Set #C{<key>} to #C{<value>}.  Repeat to set more than one key ".

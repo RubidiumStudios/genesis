@@ -986,22 +986,88 @@ B<Examples:>
     $Genesis::RC->header('Written by genesis config --globals');
     $Genesis::RC->save;
 
-=head2 written_header
+=head2 save_in_place
 
-    my $line = $cfg->written_header;
+    my $ok = $cfg->save_in_place(sets => \@pairs, unsets => \@keys);
 
-The first comment line of the file as it is on disk, which is how a writer
-tells a file it wrote from one somebody else did. The document marker and
-blank lines ahead of it are passed over.
+Writes changes into the file as it stands, where L</save> would replace
+it, so every line the changes do not touch is kept: comments, blank lines
+and the order of the keys (D182). It is for a file somebody keeps by hand.
 
-B<Returns:> the line without its leading C<#>, or undef where there is no
-file, or where the file's first line of content is not a comment.
+The text is changed by L</edit_yaml_text>, and B<what that wrote is
+checked, not trusted>: the result is parsed, and has to equal what the
+file held before with these changes made and no other. The measure is the
+file and not this object, because validation holds some values in a form
+of its own (a labelled deployment root, written as a one-key mapping, is
+kept as a pair), and against that a file holding one could never be
+changed. Where the check fails, nothing is written. The new text goes to
+a file beside the old and is renamed over it, so a write that fails
+leaves the old one whole.
 
-B<Errors:> None; a file that cannot be opened answers undef.
+It does not validate. A caller validates the object against its schema
+first, as it would before L</save>.
+
+B<Parameters:> C<sets>, a flat list of key and value pairs, each value
+coerced to the type its schema declares; and C<unsets>, a list of keys.
+
+B<Returns:> 1 where the file was written, and 0 where it was not: there is
+no file, the change is one the editor declines, or the check failed. The
+file is then as it was.
+
+B<Errors:> None.
 
 B<Examples:>
 
-    if (($cfg->written_header // '') eq $mine) { ... }   # safe to rewrite
+    $cfg->set('output_style', 'plain');
+    $cfg->validate($schema);
+    $cfg->save_in_place(sets => [output_style => 'plain'])
+        or bail("cannot change %s in place", $cfg->path);
+
+B<Limitations:> a list, a nested block set as a whole, and any value that is
+not one line are declined, as are the shapes L</edit_yaml_text> declines.
+
+=head2 edit_yaml_text
+
+    my $text = Genesis::Config::edit_yaml_text($yaml,
+        sets => [[$key, $value], ...], unsets => [$key, ...]);
+
+Sets and unsets keys of a YAML text by editing its lines. It is a plain
+function, and it is not a YAML parser: it reads block mappings by their
+indentation, which is enough to find a key's line, and it leaves every
+other line alone.
+
+A key that is there has the value on its line replaced, keeping the
+indent, the key, the spacing and any comment after the value. A key that is
+not there is added under the nearest parent the text has, after that
+parent's last key and at its keys' indent, or at the end with every parent
+it lacks. An unset removes the key's line and whatever is under it; a
+comment on the line above stays, since nothing says which key it belonged
+to. A value is written plain where a plain scalar reads back as the same
+text, and quoted otherwise, so C<no>, C<12> and a value holding C<: > or
+C<#> are quoted. A boolean is written as the word.
+
+B<Parameters:> the text; C<sets>, a list of key and value pairs, each key
+a dotted path through mappings; and C<unsets>, a list of such paths.
+
+B<Returns:> the new text, or undef where it declines: a value that is not
+a scalar; a path into a list; a key inside a flow mapping; a key under one
+that holds a plain value; a plain value over a mapping or a list; a block
+scalar; a file indented with tabs.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    Genesis::Config::edit_yaml_text("a: 1 # one\nb: 2\n", sets => [[a => 'x']]);
+    # "a: x # one\nb: 2\n"
+
+    Genesis::Config::edit_yaml_text("a: {b: 1}\n", sets => [['a.b' => 2]]);
+    # undef
+
+B<Limitations:> keys are letters, digits, C<_> and C<->, unquoted. A key
+inside a list item is never matched. Anchors, aliases and tags are not
+understood; a caller that parses the result, as L</save_in_place> does,
+catches what this cannot see.
 
 =head2 schema_has
 

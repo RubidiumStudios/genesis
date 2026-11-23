@@ -1422,7 +1422,7 @@ subtest 'config --globals --set with no file writes one holding what was set' =>
 	my @keys = grep {/^[^#\s-][^#]*:/} split /\n/, $wrote;
 	is_deeply(\@keys, ['output_style: fun'], 'and no other, no default among them') or diag($wrote);
 	like($wrote, qr/^# .*genesis config --globals/m, 'under a header saying what wrote it');
-	unlike($wrote, qr/do not edit manually/, 'which does not forbid editing it');
+	like($wrote, qr/yours to edit/, 'and that it is the user\'s to edit');
 
 	user_config($wrote);
 	prepare_command('config', '-G');
@@ -1472,21 +1472,76 @@ subtest 'config --globals writes nothing for a value the schema refuses' => sub 
 };
 
 # The file is the user's own, written by hand and often commented.  A write
-# through Genesis::Config would replace it whole, comments gone, so a file
-# the command did not write is refused and named until that is ruled on.
-subtest 'config --globals does not rewrite a file kept by hand' => sub {
+# through Genesis::Config->save would replace it whole, comments gone, so a
+# file that is there is changed where it stands (D182).
+subtest 'config --globals changes a file kept by hand where it stands' => sub {
 	plan tests => 6;
 
-	my $written = "---\noutput_style: fun # as the user wrote it\n";
+	my $written = "---\n# How I like it.\noutput_style: fun # as the user wrote it\n\n".
+		"suppress_warnings:\n  # noisy\n  bosh_target: false\n";
 	my $file = user_config($written);
 	pushd workdir('config-globals-write');
 
-	for my $args (['--set', 'output_style', 'plain'], ['--unset', 'output_style']) {
-		prepare_command('config', '-G', @$args);
-		build_command_environment;
-		my $ok = eval { output_from { Genesis::Commands::Core::config() }; 1 };
-		ok(!$ok, "$args->[0] is refused");
-		like("$@", qr{\.genesis/config}, 'naming the file to edit');
+	my ($ok, $why) = write_globals('--set', 'output_style', 'plain');
+	ok($ok, 'a set goes through') or diag($why);
+	(my $want = $written) =~ s/output_style: fun #/output_style: plain #/;
+	is(slurp($file), $want, 'changing the value and no other byte, the comments kept');
+
+	user_config(slurp($file));
+	($ok, $why) = write_globals('--set', 'embedded_genesis', 'warn',
+		'--set', 'suppress_warnings.deprecations', 'true');
+	ok($ok, 'two keys the file lacks are added') or diag($why);
+	$want =~ s/(  bosh_target: false\n)/$1  deprecations: true\n/;
+	is(slurp($file), $want."embedded_genesis: warn\n",
+		'one under its parent and one at the end, the rest as it was');
+
+	user_config(slurp($file));
+	($ok, $why) = write_globals('--unset', 'output_style');
+	ok($ok, 'an unset goes through') or diag($why);
+	$want =~ s/output_style: plain # as the user wrote it\n//;
+	is(slurp($file), $want."embedded_genesis: warn\n", 'removing its line alone');
+	popd;
+};
+
+# Validation holds some values in a form of its own: a labelled deployment
+# root, written as a one-key mapping, is kept as a pair.  The edit is checked
+# against the file and not against that, or a file holding one could never
+# be changed, which is what a copy of a real user's file showed.
+subtest 'config --globals changes a file whose values validation normalises' => sub {
+	plan tests => 2;
+
+	my $written = "---\noutput_style: fun # loud\ndeployment_roots:\n- lab-ops: /ops/ # mine\n".
+		"logs:\n- file: ~/.genesis/logs/last-trace\n  level: TRACE # all of it\n";
+	mkdir_or_fail("$ENV{HOME}/.genesis/logs");
+	my $file = user_config($written);
+	pushd workdir('config-globals-normalised');
+	my ($ok, $why) = write_globals('--set', 'output_style', 'plain');
+	popd;
+
+	ok($ok, 'the set goes through') or diag($why);
+	(my $want = $written) =~ s/output_style: fun/output_style: plain/;
+	is(slurp($file), $want, 'changing the one value, the lists and their comments as they were');
+};
+
+# The edit is checked by parsing what it wrote, and one that cannot be made
+# without rewriting the file is refused, with the file left as it was.
+subtest 'config --globals refuses a change it cannot make in place' => sub {
+	plan tests => 6;
+
+	my $dir = workdir('config-globals-inplace-refused');
+	mkfile_or_fail("$dir/warnings.yml", "bosh_target: true\n");
+	pushd $dir;
+	for my $case (
+		["---\nui: {colors: {code: Yb}} # flow style\n", ['--set', 'ui.colors.code', 'Gb']],
+		# A whole block from a file is more than one line's change.
+		["---\n# mine\nsuppress_warnings:\n  bosh_target: false # noisy\n",
+			['--set-from-file', 'suppress_warnings', "$dir/warnings.yml"]],
+	) {
+		my ($written, $args) = @$case;
+		my $file = user_config($written);
+		my ($ok, $why) = write_globals(@$args);
+		ok(!$ok, "$args->[0] $args->[1] is refused");
+		like($why, qr{\.genesis/config.*nothing was written}s, 'naming the file and saying nothing was written');
 		is(slurp($file), $written, 'and the file is as the user left it');
 	}
 	popd;

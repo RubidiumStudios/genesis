@@ -13,11 +13,10 @@ use JSON::PP qw/encode_json/;
 use Scalar::Util ();
 use POSIX qw/strftime mktime/;
 
-# The first line of a user-level file this command wrote, which is how it
-# knows the file again and that there is no hand-kept comment in it to lose.
+# The first line of a user-level file this command makes where there was none.
 use constant USER_CONFIG_HEADER =>
-	'Written by genesis config --globals, which rewrites this file whole: '.
-	'a comment added by hand is not kept.';
+	'Your Genesis configuration, first written by genesis config --globals.  '.
+	'It is yours to edit, and that command keeps your comments.';
 
 sub config {
 	my (@keys) = @_;
@@ -31,17 +30,6 @@ sub config {
 	my $top     = $globals ? undef : Genesis::Top->new('.', no_vault => 1, repair_config => 1);
 	my $reading = $globals ? $Genesis::RC : $top->config;
 
-	# A save replaces a file whole, so the user-level file is written where
-	# there is none, or where this command wrote the one there is.  One kept
-	# by hand is left to its owner.
-	bail(
-		{exitcode => CONFIG},
-		"#C{%s} was not written by #C{genesis config --globals}, so it is not ".
-		"rewritten by it: a write from here would replace the file whole, without ".
-		"its comments.  Edit it directly.",
-		humanize_path($reading->path)
-	) if $globals && $writing && $reading->exists
-		&& ($reading->written_header // '') ne USER_CONFIG_HEADER;
 
 	# Keys only: a value may hold '=', and pairs arrive flat, key first.
 	my @eq = grep {$_ % 2 == 0 && $pairs->[$_] =~ /=/} 0..$#{$pairs || []};
@@ -101,8 +89,21 @@ sub config {
 		if ($globals) {
 			# Checked whole before anything is written, as the repository's is.
 			$config->validate(Genesis::global_config_schema());
-			$config->header(USER_CONFIG_HEADER);
-			$config->save;
+			if ($config->exists) {
+				# The file is its owner's, comments and all, so it is changed
+				# where it stands and never replaced (D182).
+				bail(
+					{exitcode => CONFIG},
+					"Could not make that change to #C{%s} without rewriting the ".
+					"file, which would drop its comments, so nothing was written.  ".
+					"This is so for a list, for a value that is not one line, and ".
+					"for a file written in YAML's flow style.  Edit it directly.",
+					humanize_path($config->path)
+				) unless $config->save_in_place(sets => \@pairs, unsets => $removals);
+			} else {
+				$config->header(USER_CONFIG_HEADER);
+				$config->save;
+			}
 		} else {
 			$top->_save_config;
 		}

@@ -139,7 +139,8 @@ unit-tests/genesis_ui-list_and_validation.t
 unit-tests/kit-archive-validation.t
 unit-tests/ocfp-show-network.t
 unit-tests/genesis_config-core.t
-unit-tests/genesis_config-document_marker.t      # save writes one --- even when spruce (graft) emits its own
+unit-tests/genesis_config-edit_text.t            # T516: edit_yaml_text sets and unsets keys by line, keeping every other line, and declines what it cannot edit (D182)
+unit-tests/genesis_config-document_marker.t     # save writes one --- even when spruce (graft) emits its own
 unit-tests/genesis_config-log_lifespan_schema.t     # global config schema accepts Genesis::Log lifespan grammar
 unit-tests/genesis_config-validate_subtree.t     # a schema applied to one block, filling its defaults where every reader looks
 unit-tests/genesis_config-custom_struct.t     # a block whose shape its own discriminator decides, dispatched to the owning module
