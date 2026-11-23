@@ -1346,7 +1346,10 @@ subtest 'a deployment root outside its repository exits 1' => sub {
 sub user_config {
 	my ($content) = @_;
 	mkdir_or_fail("$ENV{HOME}/.genesis");
-	mkfile_or_fail("$ENV{HOME}/.genesis/config", $content);
+	# No content is no file at all, which is how a new user starts.
+	defined $content
+		? mkfile_or_fail("$ENV{HOME}/.genesis/config", $content)
+		: unlink("$ENV{HOME}/.genesis/config");
 	$Genesis::RC = Genesis::Config->new("$ENV{HOME}/.genesis/config");
 	Genesis::validate_global_config($Genesis::RC);
 	return "$ENV{HOME}/.genesis/config";
@@ -1394,11 +1397,84 @@ subtest 'config --globals inside a repository still reads the user-level file' =
 	unlike($out, qr/manifest_store|deployment_type/, "and none of the repository's keys");
 };
 
+# One write of the command's, in a directory that is no repository.
+sub write_globals {
+	my (@args) = @_;
+	prepare_command('config', '-G', @args);
+	build_command_environment;
+	my $ok = eval { output_from { Genesis::Commands::Core::config() }; 1 };
+	return ($ok, "$@");
+}
+
+# With no file there is nothing of the user's to lose, so the first write
+# makes one, holding what was set and no more: no default is written out.
+subtest 'config --globals --set with no file writes one holding what was set' => sub {
+	plan tests => 7;
+
+	my $file = user_config(undef);
+	pushd workdir('config-globals-create');
+
+	my ($ok, $why) = write_globals('--set', 'output_style', 'fun');
+	ok($ok, 'the set goes through') or diag($why);
+	ok(-f $file, 'and the file exists');
+	my $wrote = slurp($file);
+	like($wrote, qr/^output_style: fun$/m, 'holding the key that was set');
+	my @keys = grep {/^[^#\s-][^#]*:/} split /\n/, $wrote;
+	is_deeply(\@keys, ['output_style: fun'], 'and no other, no default among them') or diag($wrote);
+	like($wrote, qr/^# .*genesis config --globals/m, 'under a header saying what wrote it');
+	unlike($wrote, qr/do not edit manually/, 'which does not forbid editing it');
+
+	user_config($wrote);
+	prepare_command('config', '-G');
+	build_command_environment;
+	is(stdout_from { Genesis::Commands::Core::config('output_style') }, "fun\n",
+		'and the file loads, reading back what was set');
+	popd;
+};
+
+subtest 'config --globals updates a file it wrote' => sub {
+	plan tests => 6;
+
+	my $file = user_config(undef);
+	pushd workdir('config-globals-update');
+
+	write_globals('--set', 'output_style', 'fun');
+	user_config(slurp($file));
+	my ($ok, $why) = write_globals('--set', 'embedded_genesis', 'warn');
+	ok($ok, 'a second set goes through') or diag($why);
+	like(slurp($file), qr/^embedded_genesis: warn$/m, 'adding its key');
+	like(slurp($file), qr/^output_style: fun$/m, 'beside the first');
+
+	user_config(slurp($file));
+	($ok, $why) = write_globals('--unset', 'output_style');
+	ok($ok, 'an unset goes through') or diag($why);
+	unlike(slurp($file), qr/^output_style:/m, 'removing its key');
+	like(slurp($file), qr/^embedded_genesis: warn$/m, 'and leaving the other');
+	popd;
+};
+
+subtest 'config --globals writes nothing for a value the schema refuses' => sub {
+	plan tests => 4;
+
+	my $file = user_config(undef);
+	pushd workdir('config-globals-refused');
+
+	my ($ok, $why) = write_globals('--set', 'output_style', 'sparkly');
+	ok(!$ok, 'a value that is not one of the key\'s is refused');
+	like($why, qr/output_style/, 'naming the key');
+	ok(!-f $file, 'and no file is made');
+
+	user_config(undef);
+	($ok, $why) = write_globals('--set', 'no_such_key', 'x');
+	ok(!$ok && !-f $file, 'a key the schema does not have is refused too, and no file is made')
+		or diag($why);
+	popd;
+};
+
 # The file is the user's own, written by hand and often commented.  A write
-# through Genesis::Config would replace it whole, comments gone, under a
-# header saying Genesis generated it, so until that is ruled on a write is
-# refused and the file is named.
-subtest 'config --globals does not write the user-level file' => sub {
+# through Genesis::Config would replace it whole, comments gone, so a file
+# the command did not write is refused and named until that is ruled on.
+subtest 'config --globals does not rewrite a file kept by hand' => sub {
 	plan tests => 6;
 
 	my $written = "---\noutput_style: fun # as the user wrote it\n";
@@ -1433,6 +1509,22 @@ subtest 'the real command line reads the user-level file with no repository' => 
 		is($rc, 0, "config $flag exits 0 outside a repository") or diag($err);
 		is($out, 'fun', 'and prints the value');
 	}
+};
+
+subtest 'the real command line makes the user-level file where there is none' => sub {
+	plan tests => 3;
+
+	my $file = user_config(undef);
+	my $nowhere = workdir('config-globals-cli-create');
+
+	my (undef, $rc, $err) = run({dir => $nowhere, stderr => 0, passfail => 0},
+		"$helper::TOPDIR/bin/genesis", 'config', '-G', '--set', 'output_style', 'pointer');
+	is($rc, 0, 'config -G --set exits 0 with no file and no repository') or diag($err);
+	like(-f $file ? slurp($file) : '', qr/^output_style: pointer$/m, 'and the file holds the key');
+
+	my ($out) = run({dir => $nowhere, stderr => 0, passfail => 0},
+		"$helper::TOPDIR/bin/genesis", 'config', '-G', 'output_style');
+	is($out, 'pointer', 'which the next run reads');
 };
 
 user_config("--- {}\n");

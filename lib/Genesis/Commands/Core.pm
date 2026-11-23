@@ -13,6 +13,12 @@ use JSON::PP qw/encode_json/;
 use Scalar::Util ();
 use POSIX qw/strftime mktime/;
 
+# The first line of a user-level file this command wrote, which is how it
+# knows the file again and that there is no hand-kept comment in it to lose.
+use constant USER_CONFIG_HEADER =>
+	'Written by genesis config --globals, which rewrites this file whole: '.
+	'a comment added by hand is not kept.';
+
 sub config {
 	my (@keys) = @_;
 
@@ -22,15 +28,20 @@ sub config {
 
 	# The user-level file, which needs no repository to stand in (D181).
 	my $globals = get_options->{globals} ? 1 : 0;
+	my $top     = $globals ? undef : Genesis::Top->new('.', no_vault => 1, repair_config => 1);
+	my $reading = $globals ? $Genesis::RC : $top->config;
+
+	# A save replaces a file whole, so the user-level file is written where
+	# there is none, or where this command wrote the one there is.  One kept
+	# by hand is left to its owner.
 	bail(
 		{exitcode => CONFIG},
-		"#C{--globals} reads your user-level configuration and does not write ".
-		"it.  #C{%s} is yours to edit by hand: a write from here would replace ".
-		"the file whole, without its comments.  Edit it directly.",
-		humanize_path($Genesis::RC->path)
-	) if $globals && $writing;
-	my $top    = $globals ? undef : Genesis::Top->new('.', no_vault => 1, repair_config => 1);
-	my $reading = $globals ? $Genesis::RC : $top->config;
+		"#C{%s} was not written by #C{genesis config --globals}, so it is not ".
+		"rewritten by it: a write from here would replace the file whole, without ".
+		"its comments.  Edit it directly.",
+		humanize_path($reading->path)
+	) if $globals && $writing && $reading->exists
+		&& ($reading->written_header // '') ne USER_CONFIG_HEADER;
 
 	# Keys only: a value may hold '=', and pairs arrive flat, key first.
 	my @eq = grep {$_ % 2 == 0 && $pairs->[$_] =~ /=/} 0..$#{$pairs || []};
@@ -45,7 +56,7 @@ sub config {
 		if @keys > 1;
 
 	if ($writing) {
-		my $config = $top->config;
+		my $config = $reading;
 
 		# Arity of 2 per occurrence, so the pairs arrive flat and even.
 		my @pairs = (@{$pairs || []}, _pairs_from_files($config, $from_files));
@@ -67,10 +78,13 @@ sub config {
 		) if @contested;
 
 		# Twice around the rebuild, so every value meets the schema the run's
-		# own version and provider type select; see the POD.
+		# own version and provider type select; see the POD.  The user-level
+		# schema is one schema, whatever the file says, so once is enough.
 		_apply_pairs($config, \@pairs);
-		$config->schema($top->_current_config_schema) if $config->schema;
-		_apply_pairs($config, \@pairs);
+		unless ($globals) {
+			$config->schema($top->_current_config_schema) if $config->schema;
+			_apply_pairs($config, \@pairs);
+		}
 
 		# Only an absent key no schema declares is a typo.
 		if (my @unknown = grep {
@@ -84,7 +98,14 @@ sub config {
 		}
 		$config->clear($_) for grep {$config->has($_)} @{$removals || []};
 
-		$top->_save_config;
+		if ($globals) {
+			# Checked whole before anything is written, as the repository's is.
+			$config->validate(Genesis::global_config_schema());
+			$config->header(USER_CONFIG_HEADER);
+			$config->save;
+		} else {
+			$top->_save_config;
+		}
 		return 0;
 	}
 
