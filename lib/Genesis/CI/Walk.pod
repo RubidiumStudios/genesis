@@ -1685,14 +1685,23 @@ B<Examples:>
 
     my $reading = Genesis::CI::Walk::_reading($marker, $deployed);
 
-Which of the four readings describes a deployment branch.
+Which reading describes a deployment branch the walk has read a marker off,
+or found none on.
 
 A branch with no marker has been cut and never delivered to, which is
 C<unseeded>.  A branch whose marker names the control commit the environment
-last deployed from is C<deployed>, and one whose marker has moved past it is
-C<pending-deploy>.  A branch whose deployment could not be read keeps
-C<not-propagated>, because claiming either of the other two would be claiming
-something no durable state said.
+last deployed from is C<deployed>.  Any other branch with a marker carries a
+delivery that has not been deployed, which is C<pending-deploy>, whether the
+environment deployed something older or has never deployed at all: the
+status page's lifecycle takes a branch from unseeded to pending when its
+first delivery lands, pushed or merged from a pull request.
+
+C<not-propagated> is not answered here.  It is the word for an environment
+waiting on C<genesis pipeline-apply>, one with no applied record, no branch
+or no pipeline record of its own, and the walk settles each of those before
+it asks this.  It once answered it for an environment that had never
+deployed, so a report said of an environment whose pull request had just
+merged that nothing had reached it.
 
 B<Parameters:>
 

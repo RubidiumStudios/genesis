@@ -1633,19 +1633,18 @@ sub deliver_pending {
 #
 # A branch with no marker has been cut and never delivered to, which is
 # unseeded.  A branch whose marker names the control commit the environment
-# last deployed from is deployed, and one whose marker has moved past it is
-# pending-deploy.  A branch we could read no deployment for keeps the
-# not-propagated reading, because claiming either of the other two would be
-# claiming something no durable state said.
+# last deployed from is deployed.  Any other branch with a marker carries a
+# delivery that has not been deployed, which is pending-deploy, whether the
+# environment deployed something older or has never deployed at all.
+# not-propagated is not answered here: it is the word for an environment
+# waiting on pipeline-apply, which the walk settles before it asks this.
 sub _reading {
 	my ($marker, $deployed) = @_;
 
 	return 'unseeded' unless defined $marker && length $marker;
 
 	my $certified = $deployed ? $deployed->{control_commit} : undef;
-	return 'not-propagated' unless defined $certified && length $certified;
-
-	return $marker eq $certified ? 'deployed' : 'pending-deploy';
+	return defined $certified && $marker eq $certified ? 'deployed' : 'pending-deploy';
 }
 
 # }}}

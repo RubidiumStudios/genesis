@@ -222,4 +222,55 @@ subtest 'a repository with no pipeline still shows the header whole' => sub {
 		'and the header is built without a warning about an empty cell');
 };
 
+# T518: a branch that carries a delivery and has never been deployed is
+# pending, which the status page says in so many words (unseeded to pending
+# when the first delivery lands).  It read not-propagated, the word for an
+# environment waiting on pipeline-apply, so a report said of an environment
+# whose pull request had just merged that nothing had reached it.
+#
+# One applied pipeline whose two environments have each been delivered to and
+# neither deployed: lab by a push, and qa by a pull request merged with a
+# merge commit, which leaves a commit with no marker at the branch's tip and
+# the marker on its second parent.
+subtest 'a delivery that has never been deployed is awaiting deployment' => sub {
+	# Nine assertions and one restoration for each of the two commands.
+	plan tests => 11;
+
+	my $h = make_harness(envs => ['lab', 'qa'], kit => 'omega-v2.7.0',
+		tracked => ['ops/shared.yml']);
+	fixture_vault($h);
+	init_branch($h, $_) for qw/lab qa/;
+	my $c1 = commit_on_control($h, files => {'ops/shared.yml' => "---\none\n"}, push => 1);
+	deliver($h, $_, control => $c1) for qw/lab qa/;
+
+	# qa's delivery as a merged pull request leaves it: the branch's tip is
+	# the merge, its first parent the branch as it was and its second the
+	# commit that carries the marker.
+	my $slug = $h->slug('qa');
+	run({dir => $h->b}, 'git', 'fetch', '-q', 'origin', $slug);
+	run({dir => $h->b}, 'git', 'checkout', '-q', '-B', 'merging', "origin/$slug~1");
+	run({dir => $h->b, onfailure => 'Failed to merge the delivery'},
+		'git', 'merge', '-q', '--no-ff', '-m', "Merge pull request #8 from genesis/pr/$slug", "origin/$slug");
+	run({dir => $h->b, onfailure => 'Failed to push the merge'},
+		'git', 'push', '-q', 'origin', "merging:$slug");
+
+	fixture_applied($h, control => $c1);
+	fixture_pipeline_record($h, $_) for qw/lab qa/;
+	refresh($h, 'a');
+
+	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status', '--json');
+	is($exit, 0, 'the report is produced') or diag($err);
+	my $record = decode_json($out);
+	for my $env (qw/lab qa/) {
+		my $row = env_row($record, $env);
+		is($row->{reading}, 'pending-deploy', "$env reads pending-deploy");
+		is($row->{merged}, $c1, "$env carries the delivery, read through whatever stands above it");
+		is($row->{deployed}, undef, "$env has no deployment");
+	}
+
+	my ($text) = run_genesis($h, 'pipeline-status');
+	like(env_line($text, 'qa'), qr/awaiting deployment/, 'the report says qa is awaiting deployment');
+	unlike(plain($text), qr/not propagated/, 'and says not propagated of neither');
+};
+
 done_testing;
