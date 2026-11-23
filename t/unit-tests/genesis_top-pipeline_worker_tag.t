@@ -60,14 +60,16 @@ subtest 'the manual provider declares no tag' => sub {
 		'it is refused as any provider key is';
 };
 
-subtest 'the boolean it replaces is refused as retired' => sub {
+# The repository-wide boolean is no key of the block, with no sentence of
+# its own (D185).
+subtest 'the boolean it replaced is refused as a key the block does not declare' => sub {
 	plan tests => 1;
 
 	write_env_file($h, 'qa', pipeline => {});
 	throws_ok {load_with($h, automated_config('concourse',
 		'url: https://ci.example.com', 'team: main', 'tagged: true'))}
-		qr/pipeline\.provider\.tagged: is no longer read.*genesis\.pipeline\.provider\.tag/s,
-		'naming the key that replaced it';
+		qr/pipeline\.provider\.tagged: unknown configuration key/,
+		'by name';
 };
 
 done_testing;

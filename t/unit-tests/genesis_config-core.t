@@ -1089,6 +1089,34 @@ subtest 'an unknown key lists the expected keys sorted (T383)' => sub {
 	like($nested, qr/expected one of ash, oak, yew$/, 'and a block\'s keys, sorted');
 };
 
+# Proves T521: a schema can mark a key retired, whichever keys are retired
+# at the time (D185).  The schema is this row's own for that reason.
+subtest 'a key marked retired is refused in its own words and never offered (T521)' => sub {
+	plan tests => 4;
+
+	my $schema = {
+		apple => {type => 'string'},
+		plum  => {type => 'any', retired => 1, check => sub {'is no longer read: it is apple now.'}},
+		block => {type => 'hash', schema => {
+			ash => {type => 'string'},
+			elm => {type => 'any', retired => 1, check => sub {'is no longer read: it is ash now.'}},
+		}},
+	};
+	my $problems = sub {
+		[map {Genesis::Term::csprintf('%s', $_)}
+			Genesis::Config->new(undef, 0, $_[0])->problems($schema)];
+	};
+
+	is_deeply($problems->({plum => 'x'}), ['plum: is no longer read: it is apple now.'],
+		'a retired key is refused with what its own check says');
+	is_deeply($problems->({block => {elm => 'x'}}), ['block.elm: is no longer read: it is ash now.'],
+		'and so is one inside a block');
+	like($problems->({zeta => 1})->[0], qr/expected one of apple, block$/,
+		'a retired key is not among those an unknown key is offered');
+	like($problems->({block => {bogus => 1}})->[0], qr/expected one of ash$/,
+		"nor among a block's");
+};
+
 subtest 'a scalar where a hash belongs names the keys the hash takes (T400)' => sub {
 	my $path = "$tmp/expected-hash.yml";
 	put_file($path, "---\nblock: a-string\n");

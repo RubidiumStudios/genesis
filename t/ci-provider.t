@@ -444,13 +444,15 @@ subtest 'validate_config: Concourse fails without url or team (D86)' => sub {
 	like join("\n", @errors), qr/missing required key team/, 'and team';
 };
 
+# The block declares no target, so a committed one is refused as any key it
+# does not declare is, with no sentence of its own (D86, D185).
 subtest 'validate_config: Concourse refuses a committed target (D86)' => sub {
 	my @errors = refusals_for('Genesis::CI::Provider::Concourse',
 		type => 'concourse', target => 'my-ci', url => 'https://ci.example.com',
 		team => 'main');
 	is scalar @errors, 1, 'one refusal';
-	like $errors[0], qr/pipeline\.provider\.target: is no longer read.*genesis\.fly-target/s,
-		'naming the key and what replaces it';
+	like $errors[0], qr/pipeline\.provider\.target: unknown configuration key/,
+		'naming the key, as one the block does not declare';
 };
 
 subtest 'validate_config: Concourse rejects malformed url' => sub {

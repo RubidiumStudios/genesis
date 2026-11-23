@@ -2542,7 +2542,7 @@ subtest 'Concourse - provider_options_schema has correct structure' => sub {
 	my $schema = Genesis::CI::Provider::Concourse->provider_options_schema();
 	ok ref($schema) eq 'HASH',            "schema is a hash";
 	ok !exists $schema->{type},           "'type' is the generic block's key, not this one's";
-	ok exists $schema->{target},          "'target' key present";
+	ok !exists $schema->{target},         "'target' is no key of the block (D86, D185)";
 	ok exists $schema->{team},            "'team' key present";
 	ok exists $schema->{public},          "'public' key present";
 	is_deeply $schema->{pipeline_state_after_apply}{values}, [qw/paused unpaused unchanged/],

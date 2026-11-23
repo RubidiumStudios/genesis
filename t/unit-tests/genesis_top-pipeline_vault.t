@@ -82,28 +82,22 @@ subtest 'the rest of the connection is the repository\'s vault\'s too' => sub {
 };
 
 # A task and an operator reach one endpoint, so the block has nothing to
-# say of where it is, and a key that says it is refused with where that is
-# said now.
-subtest 'a key that names the vault is refused, with where that is said' => sub {
-	plan tests => 4;
+# say of where it is, and a key that says it is refused as any key the
+# block does not declare is, with no sentence of its own (D169, D185).
+subtest 'a key that names the vault is refused by name' => sub {
+	plan tests => 3;
 
 	my @repository = ('  url: https://vault.example.com:8200');
-	my %retired = (
-		'url'       => [['    url: https://vault.internal:8200'], qr/secrets_provider\.url/],
-		'namespace' => [['    namespace: tasks'],                 qr/secrets_provider\.namespace/],
-		'options'   => [['    options:', '      tls_verify: false'],
-		                qr/secrets_provider\.insecure.*secrets_provider\.strongbox/s],
+	my %gone = (
+		'url'       => ['    url: https://vault.internal:8200'],
+		'namespace' => ['    namespace: tasks'],
+		'options'   => ['    options:', '      tls_verify: false'],
 	);
-	for my $key (sort keys %retired) {
-		my ($lines, $said_by) = @{$retired{$key}};
-		throws_ok {load_with($h, config_with(vault => [@AUTH, @$lines], repository => \@repository))}
-			qr/pipeline\.vault\.$key: is no longer read\..*$said_by/s,
-			"$key is refused by name, naming the key that says it";
+	for my $key (sort keys %gone) {
+		throws_ok {load_with($h, config_with(vault => [@AUTH, @{$gone{$key}}], repository => \@repository))}
+			qr/pipeline\.vault\.$key: unknown configuration key: expected one of auth$/m,
+			"$key is refused by name, with auth as all the block holds";
 	}
-	throws_ok {load_with($h, config_with(vault => [@AUTH, '    url: https://vault.internal:8200'],
-			repository => \@repository))}
-		qr/pipeline\.vault holds auth alone/,
-		'and each refusal says what the block holds';
 };
 
 # T504 (D173): the credential is the one thing the block says, and a task

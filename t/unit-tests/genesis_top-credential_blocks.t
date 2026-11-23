@@ -110,7 +110,9 @@ subtest "a component the type does not take is refused" => sub {
 		'naming the stray component and the type');
 };
 
-subtest "the source-control credential's retired vault key names path" => sub {
+# The one-reference key the credential had is no key of the block, with no
+# sentence of its own (D185).
+subtest "the source-control credential's old vault key is refused by name" => sub {
 	plan tests => 2;
 	# The source_control block is the fixture's own, so it is written whole.
 	my $dir = repo('retired');
@@ -133,8 +135,8 @@ EOF
 
 	my ($code, $err) = refused {Genesis::Top->new($dir, no_vault => 1)->config};
 	is($code, Genesis::Exit::CONFIG, 'at CONFIG');
-	like($err, qr/pipeline\.source_control\.auth\.vault: retired.*\bpath\b/,
-		'naming path as what replaces it');
+	like($err, qr/pipeline\.source_control\.auth\.vault: unknown configuration key.*\bpath\b/s,
+		'as one the block does not declare, with path among the keys it is offered');
 };
 
 subtest 'a save that would leave a component out is refused' => sub {

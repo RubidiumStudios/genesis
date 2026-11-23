@@ -144,7 +144,7 @@ git rm ci.yml</code></pre>
   <tr><td><code>locker.*</code></td><td><code>pipeline.locker.url</code>, <code>username</code>, <code>password</code>, <code>ca_cert</code>, <code>skip_ssl_validation</code></td><td>Required. <code>password</code> is written in Concourse's own form, for example <code>((locker/api.password))</code>. TLS verification is skipped unless you say otherwise, as under v2; see the callout below.</td></tr>
   <tr><td>(none)</td><td><code>pipeline.shuttle</code>: <code>backend: s3</code>, <code>bucket</code>, <code>region</code>, <code>endpoint</code>, <code>auth</code>, <code>tls_skip_verify</code></td><td>Required. <code>auth</code> is a path holding <code>access_key_id</code> and <code>secret_access_key</code>, or a block naming each as <code>&lt;path&gt;:&lt;key&gt;</code> where they are stored under other names (section 6).</td></tr>
   <tr><td><code>public</code></td><td><code>pipeline.provider.public</code></td><td>False by default: build logs are private unless you set it.</td></tr>
-  <tr><td><code>tagged: true</code></td><td><code>genesis.pipeline.provider.tag</code> per environment (section 5)</td><td><code>tagged</code> is refused as retired.</td></tr>
+  <tr><td><code>tagged: true</code></td><td><code>genesis.pipeline.provider.tag</code> per environment (section 5)</td><td><code>pipeline.provider.tagged</code> is not a key, and is refused as unknown.</td></tr>
   <tr><td><code>unredacted</code></td><td><code>pipeline.unredacted</code></td><td></td></tr>
   <tr><td><code>ocfp</code></td><td>none</td><td>OCFP is read from each environment's <code>kit.features</code>.</td></tr>
   <tr><td><code>debug</code>, <code>require-passed-caches</code></td><td>none</td><td>The v2 cache resources are gone.</td></tr>

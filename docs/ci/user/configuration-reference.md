@@ -89,7 +89,7 @@ The pipeline's name in its provider, which defaults to `deployment_type`. It is 
 
 | Key | What it does |
 |-----|--------------|
-| `url`, `team` | The Concourse URL and team. Required. Each operator's own fly target is found by these, or given with `--target`; `target` is retired |
+| `url`, `team` | The Concourse URL and team. Required. Each operator's own fly target is found by these, or given with `--target`; the block takes no `target` |
 | `insecure` | Skip TLS verification with fly |
 | `public` | Make every job's build log public. False by default |
 | `show_all_group` | Add a last group, `all`, that lists every job. Concourse shows every job at once only where a pipeline has no groups, and this one always has some. False by default |
@@ -102,7 +102,7 @@ The pipeline's name in its provider, which defaults to `deployment_type`. It is 
 | `min_fly_version`, `fly_bin_path` | The lowest fly the pipeline may be set with, and which fly to run; `GENESIS_FLY_BIN` overrides the latter |
 | `group_commits` | Deploy the tip of what arrived rather than each commit in turn. Only `true` is supported, and `false` is refused |
 
-`tagged` is retired: each environment names its own workers with `genesis.pipeline.provider.tag`.
+The block takes no `tagged`: each environment names its own workers with `genesis.pipeline.provider.tag`.
 
 ## pipeline.source_control
 
@@ -127,7 +127,7 @@ pipeline:
 
 `repository` names the repository, written as `owner/repo`, which means github.com, or as the repository's https or ssh URL, which carries its own host. Every form names one repository, so they are interchangeable. It can be left out where the clone's remotes leave no doubt which repository they point at.
 
-`auth` is the clone credential every task clones and pushes with: an SSH deploy key with write access, read as `((<path>.private_key))`, or an HTTPS username and token, read as `((<path>.username))` and `((<path>.password))`. Use the repository's automation account, not a person's. `auth.vault` is retired, and refused naming `path`.
+`auth` is the clone credential every task clones and pushes with: an SSH deploy key with write access, read as `((<path>.private_key))`, or an HTTPS username and token, read as `((<path>.username))` and `((<path>.password))`. Use the repository's automation account, not a person's. The block takes no `auth.vault`; `path` names the secret.
 
 `api_token` is the `path:key` of the GitHub token propagate opens pull requests with. It is needed wherever an environment sets `require_pr` and the clone credential is SSH, because GitHub's API takes no SSH key; with HTTPS auth the clone credential's password serves. It must belong to an automation account, because GitHub does not let a pull request's author approve it.
 
@@ -157,7 +157,7 @@ The remote is not configured. A remote's name and its protocol are each cloner's
 - Where two remotes point at the repository, the one the control branch tracks is used.
 - Where the remotes point at more than one repository and `repository` is unset, as with a fork beside the original, the configuration load refuses rather than guess, because a clone of a fork tracks the fork.
 
-`pipeline.source_control.remote` is no longer read, and a configuration that still sets it is refused, naming what replaces it.
+The block takes no `remote`: a configuration that sets `pipeline.source_control.remote` is refused, as any key the block does not declare is.
 
 A remote whose URL cannot be matched to the repository, such as an internal mirror on another host, is pinned instead:
 
@@ -184,7 +184,7 @@ vault:
 
 That is the whole block, and `auth` is required. A task logs in to the repository's own vault, the one its operators use, so where it is, is said once, by `secrets_provider` in the same file: its `url`, its `namespace`, whether TLS is verified (`insecure`), and whether the vault runs without strongbox (`strongbox: false`).
 
-`pipeline.vault.url`, `namespace` and `options` are retired, and each is refused by name with the `secrets_provider` key that says it now.
+The block holds `auth` alone: `pipeline.vault.url`, `namespace` and `options` are each refused by name, as keys it does not declare. `secrets_provider` says where the vault is, its namespace, and its TLS and strongbox settings.
 
 A repository with a pipeline has to name its vault. One with `pipeline.enabled: true` and no `secrets_provider.url` is refused when it is loaded, under the manual provider as under an automated one. Record the vault with:
 

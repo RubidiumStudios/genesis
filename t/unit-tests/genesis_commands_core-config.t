@@ -1044,7 +1044,9 @@ subtest 'Concourse without a url is refused by the schema (T369)' => sub {
 	like($err, qr/pipeline\.provider: missing required key url/, 'naming the key');
 };
 
-subtest 'a committed fly target is refused, with what replaces it (T369)' => sub {
+# The block declares no target, so the set is refused as one of any key it
+# does not declare, with no sentence of its own (T369, D185).
+subtest 'a committed fly target is refused by name (T369)' => sub {
 	plan tests => 4;
 
 	my $dir = concourse_full_repo('config-concourse-target');
@@ -1057,7 +1059,7 @@ subtest 'a committed fly target is refused, with what replaces it (T369)' => sub
 
 	is($code, Genesis::Exit::CONFIG, 'the run is refused at the configuration exit');
 	like($err, qr/pipeline\.provider\.target/, 'naming the key');
-	like($err, qr/genesis\.fly-target/, 'and the clone pin that replaces it');
+	like($err, qr/unknown configuration key/, 'as one the block does not declare');
 	is(slurp("$dir/.genesis/config"), $before, 'and nothing is written');
 };
 
@@ -1289,10 +1291,11 @@ subtest 'config refuses a repository that does not parse' => sub {
 subtest 'config refuses a retired key in the load\'s own words' => sub {
 	plan tests => 3;
 
-	my $dir = config_repo('config-set-retired-remote');
+	# ci, the one key of this file still marked retired (D185).
+	my $dir = config_repo('config-set-retired-ci');
 	my $before = slurp("$dir/.genesis/config");
 	pushd $dir;
-	prepare_command('config', '--set', 'pipeline.source_control.remote', 'origin');
+	prepare_command('config', '--set', 'ci', 'legacy');
 	build_command_environment;
 	my ($code, $err) = run_config();
 	popd;

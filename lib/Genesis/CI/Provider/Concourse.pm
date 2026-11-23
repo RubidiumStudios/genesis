@@ -319,9 +319,8 @@ EOF
 # provider_options_schema - schema for pipeline.provider: when type=concourse {{{
 sub provider_options_schema {
 	return {
-		# Declared to be refused by name, with what replaces it (D86).
-		target   => {type => 'string',  check => \&_target_retired, description => 'Retired: each operator resolves their own fly target'},
-		url      => {type => 'string',  required => \&_pipeline_enabled, description => 'Concourse API URL, used by fly login'},
+		# No target: each operator resolves their own fly target (D86).
+		url      =>{type => 'string',  required => \&_pipeline_enabled, description => 'Concourse API URL, used by fly login'},
 		team     => {type => 'string',  required => \&_pipeline_enabled, description => 'Concourse team name'},
 		insecure => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS certificate verification'},
 		min_fly_version => {type => 'semver', description => 'Lowest fly version this pipeline may be set with'},
@@ -329,7 +328,6 @@ sub provider_options_schema {
 
 		public   => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Make build logs publicly viewable'},
 		show_all_group => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Add a last group, all, listing every job'},
-		tagged   => {type => 'any', retired => 1, check => \&_tagged_retired, description => 'Retired: each environment names its workers with genesis.pipeline.provider.tag'},
 
 		# An empty hash by default, or validation never reaches its keys.
 		task     => {
@@ -425,7 +423,6 @@ sub _pipeline_enabled {
 }
 
 # }}}
-# _target_retired - a committed fly target is refused, with what replaces it {{{
 # request_branch_checks - ask Concourse to check the resources of branches just pushed (D144) {{{
 sub request_branch_checks {
 	my ($class, @resources) = @_;
@@ -466,16 +463,6 @@ sub _worker_tag_rule {
 	return "expected a worker tag or a list of them";
 }
 
-sub _tagged_retired {
-	return "is no longer read.  A tag belongs to the network an environment ".
-		"sits in rather than to its name, so each environment names the ".
-		"workers that reach it with #C{genesis.pipeline.provider.tag}, which ".
-		"a file several environments share can set once for all of them.  ".
-		"Remove the key; where it was true, set ".
-		"#C{genesis.pipeline.provider.tag: <env>} in each environment to keep ".
-		"the tags it gave.";
-}
-
 sub _group_commits_rule {
 	my ($value) = @_;
 	return undef if $value;
@@ -483,16 +470,6 @@ sub _group_commits_rule {
 		"the pipeline does not deploy that way yet: only #C{true} is supported ".
 		"for now, a deploy taking the tip of what arrived.  Remove the key or ".
 		"set it to #C{true}.";
-}
-
-sub _target_retired {
-	return "is no longer read.  A fly target is an entry in one operator's ".
-		"#C{~/.flyrc}, so a committed one means nothing on a teammate's machine.  ".
-		"Remove it, and name the Concourse with #C{pipeline.provider.url} and ".
-		"#C{pipeline.provider.team}.  Each operator's target is then the one ".
-		"#C{--target} names for a run, else the one this clone pins with ".
-		"#C{git config genesis.fly-target <target>}, else the one #C{~/.flyrc} ".
-		"target whose URL and team are the configuration's.";
 }
 
 # }}}

@@ -3245,7 +3245,6 @@ sub _pipeline_config_schema {
 					# Derived from git, with an explicit override.
 					uri        => {type => 'string', description => "The URL CI clones from, where it cannot be composed from the repository"},
 					repository => {type => 'string', check => \&_repository_rule, description => "The repository the pipeline lives in, as owner/repo or its URL"},
-					remote     => {type => 'any', retired => 1, check => \&_retired_remote_rule, description => 'Retired: a remote is found by the repository it points at'},
 
 					# Defaulted, and read through one accessor apiece.
 					control_branch      => {type => 'string',  default => DEFAULT_CONTROL_BRANCH, check => \&_control_branch_rule, description => "The control branch's name"},
@@ -3308,14 +3307,6 @@ sub _pipeline_config_schema {
 						%{_credential_schema(vault => 'The task credential, as a type and its vault paths')},
 						required => \&_automated_provider_configured,
 					},
-					# Declared only to be refused: a task and an operator reach
-					# one endpoint, which secrets_provider names (D169).
-					url       => {type => 'any', retired => 1, description => 'Retired: the vault is the one secrets_provider names',
-						check => sub {_retired_vault_key('#C{secrets_provider.url}')}},
-					namespace => {type => 'any', retired => 1, description => 'Retired: the namespace is secrets_provider.namespace',
-						check => sub {_retired_vault_key('#C{secrets_provider.namespace}')}},
-					options   => {type => 'any', retired => 1, description => 'Retired: TLS and strongbox follow secrets_provider',
-						check => sub {_retired_vault_key('#C{secrets_provider.insecure} for TLS and #C{secrets_provider.strongbox} for strongbox')}},
 				}
 			},
 
@@ -3393,21 +3384,6 @@ sub _refuse_v2_pipeline {
 		"the pipeline keys can be set in the same run."
 	) if $self->config->is_set('pipeline');
 	return 1;
-}
-
-# }}}
-# _retired_remote_rule - a committed remote name is refused, with what replaces it {{{
-sub _retired_remote_rule {
-	my ($named) = @_;
-	return sprintf(
-		"is set to #C{%s}, and is no longer read.  A remote's name is each ".
-		"clone's own, so the pipeline finds its remote by the repository it ".
-		"points at.  Remove the key, and set ".
-		"#C{pipeline.source_control.repository} to the repository the pipeline ".
-		"lives in wherever the clone's remotes do not settle it.  To keep using ".
-		"#C{%s} in this clone, pin it there: #C{git config genesis.remote %s}",
-		$named, $named, $named
-	);
 }
 
 # }}}
@@ -3525,8 +3501,6 @@ sub _credential_schema {
 			path => {type => 'string', description => 'The vault secret holding every component under its own name'},
 			(map {($_ => {type => 'string', description => "The <path>:<key> or ((path.key)) holding $_, in place of path's"})}
 				sort keys %components),
-			($block eq 'source_control' ? (vault => {type => 'string', check => \&_retired_credential_vault,
-				description => 'Retired: the vault secret is named by path'}) : ()),
 		},
 	};
 }
@@ -3547,13 +3521,6 @@ sub _credential_rule {
 		"#C{path}, or give each as <path>:<key>", $auth->{type}, join(', ', @missing),
 		@missing > 1 ? 'them' : 'it') if @missing;
 	return undef;
-}
-
-# }}}
-# _retired_credential_vault - the one-reference key the credential had before its components {{{
-sub _retired_credential_vault {
-	return "retired; name the vault secret holding the credential with #C{path}, ".
-		"or give each component as <path>:<key>";
 }
 
 # }}}
@@ -3580,18 +3547,6 @@ sub _automated_provider_configured {
 	return 0 unless $config && $config->get('pipeline.enabled');
 	my $type = $config->get('pipeline.provider.type', 'manual') // 'manual';
 	return $type eq 'manual' ? 0 : 1;
-}
-
-# }}}
-# _retired_vault_key - a pipeline.vault key that named the vault is refused, with where that is said now (D169) {{{
-sub _retired_vault_key {
-	my ($said_by) = @_;
-	return sprintf(
-		"is no longer read.  A pipeline task logs in to the repository's own ".
-		"vault, the one its operators use, so this is said once, by %s.  ".
-		"Remove the key; #C{pipeline.vault} holds #C{auth} alone.",
-		$said_by
-	);
 }
 
 # }}}

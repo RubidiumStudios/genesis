@@ -231,12 +231,13 @@ subtest "an environment block refusal carries no backtrace" => sub {
 };
 
 # Last, because the configuration it commits is one every later load refuses.
-subtest 'a committed fly target is refused at load, with what replaces it (T369)' => sub {
+subtest 'a committed fly target is refused at load, by name (T369)' => sub {
 	# Three explicit rows and one for each run's restoration assertion.
 	plan tests => 5;
 
 	# A target is one operator's ~/.flyrc entry, so a committed one means
-	# nothing on a teammate's machine (D86, noted 2026-10-15).
+	# nothing on a teammate's machine (D86, noted 2026-10-15).  The block
+	# declares none, so it is refused as any undeclared key is (D185).
 	commit_on_control($h, files => {
 		'.genesis/config' => join("\n",
 			'---', 'deployment_type: bosh', 'version: "3"',
@@ -257,8 +258,8 @@ subtest 'a committed fly target is refused at load, with what replaces it (T369)
 	my ($out, $err, $exit) = run_genesis($h, 'pipeline-status');
 	(my $flat = $err) =~ s/\s+/ /g;
 	is $exit, Genesis::Exit::CONFIG, 'pipeline-status refuses at CONFIG';
-	like $flat, qr/pipeline\.provider\.target.*genesis\.fly-target/,
-		'naming the key and the clone pin that replaces it';
+	like $flat, qr/pipeline\.provider\.target: unknown configuration key/,
+		'naming the key, as one the block does not declare';
 
 	($out, $err, $exit) = run_genesis($h, 'pipeline-apply', '--help');
 	unlike "$out$err", qr/Defaults to the pipeline name/,

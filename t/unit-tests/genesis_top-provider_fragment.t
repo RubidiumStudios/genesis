@@ -85,13 +85,14 @@ subtest "the configured provider's fragment is what the block declares" => sub {
 	# asking about one of the block's keys is answered by the provider the
 	# written type selects.  These are the readers that ask: the type
 	# coercion of a write, and the unknown-key check of a removal.
-	ok $top->config->schema_has('pipeline.provider.target'),
+	# url, since the fragment declares no target any more (D185).
+	ok $top->config->schema_has('pipeline.provider.url'),
 		'a key the fragment declares is one the schema answers for';
 	# insecure, because team is required and declares no default (D86).
 	is $top->config->_schema_for_key('pipeline.provider.insecure')->{default},
 		$fragment->{insecure}{default},
 		'with the default the fragment gave it';
-	ok length($top->config->_schema_for_key('pipeline.provider.target')
+	ok length($top->config->_schema_for_key('pipeline.provider.url')
 			->{description}),
 		'and its description, which genesis config renders as help';
 

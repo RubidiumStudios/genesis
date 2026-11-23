@@ -163,8 +163,8 @@ The keys an operator may write under C<pipeline.provider> beside
 C<type: concourse>, each with its type, its default where it has one, and
 the description C<genesis config> renders as help.
 
-The keys are C<target>, C<url>, C<team>, C<insecure>, C<min_fly_version>, C<fly_bin_path>,
-C<public>, C<show_all_group>, C<tagged>, C<task>, C<pipeline_state_after_apply>, C<git>, C<secrets_store>, and C<group_commits>.
+The keys are C<url>, C<team>, C<insecure>, C<min_fly_version>, C<fly_bin_path>,
+C<public>, C<show_all_group>, C<task>, C<pipeline_state_after_apply>, C<git>, C<secrets_store>, and C<group_commits>.
 
 C<pipeline_state_after_apply> is the pause state C<genesis pipeline-apply>
 leaves the pipeline in: C<paused>, C<unpaused>, or C<unchanged>, the
@@ -210,13 +210,12 @@ B<The block names the Concourse, not an operator's fly target> (D86, noted
 true, through L</_pipeline_enabled($siblings, $config)>, and not before,
 so a block can be built a key at a time with the pipeline off. C<team>
 declares no default: a required key with a default would never be
-required. C<target> is declared only so that it is refused by name,
-through L</_target_retired($value)>, and C<tagged> likewise through
-L</_tagged_retired($value)>, its place taken by each environment's
-C<genesis.pipeline.provider.tag> (D139),
-whether or not the pipeline is enabled: a target is an entry in one
+required. The block declares no C<target>, so a committed one is refused
+as any key it does not declare is (D185): a target is an entry in one
 operator's F<~/.flyrc>, so a committed one means nothing on a teammate's
-machine, and each operator's is resolved where C<fly> is needed.
+machine, and each operator's is resolved where C<fly> is needed. It
+declares no C<tagged> either, whose place each environment's
+C<genesis.pipeline.provider.tag> took (D139).
 
 C<fly_bin_path> names the C<fly> this repository is set with, a path or a
 bare name, so two repositories on two Concourse installations each keep
@@ -648,24 +647,6 @@ B<Examples:>
 
     _pipeline_enabled({}, $config);   # 1 once pipeline.enabled is true
 
-=head2 _target_retired($value)
-
-The C<check> rule of C<target>, which refuses any value, saying a target is
-each operator's own and naming what replaces it: C<url> and C<team> in the
-configuration, and, for each operator, C<--target>, a
-C<git config genesis.fly-target> pin in the clone, or the one F<~/.flyrc>
-target whose URL and team are the configuration's (D86, noted 2026-10-15).
-
-B<Parameters:> the written value, unused.
-
-B<Returns:> the refusal, without the key.
-
-B<Errors:> None; the schema reports it as C<pipeline.provider.target: ...>.
-
-B<Examples:>
-
-    _target_retired('ci');   # "is no longer read.  A fly target is ..."
-
 =head2 _check_interval_rule($value)
 
 The C<check> rule of C<git.control_check_every> and C<git.check_every>: a
@@ -700,22 +681,6 @@ B<Examples:>
     _worker_tag_rule('net-a');            # undef
     _worker_tag_rule([qw/net-a dmz/]);    # undef
     _worker_tag_rule({name => 'net-a'});  # "expected a worker tag or a list of them"
-
-=head2 _tagged_retired($value)
-
-The C<check> rule of the retired C<tagged>, which refuses any value, naming
-C<genesis.pipeline.provider.tag>, which replaced it, and how to keep the tags a
-true value gave (D139).
-
-B<Parameters:> the written value, unused.
-
-B<Returns:> the refusal, without the key.
-
-B<Errors:> None; the schema reports it as C<pipeline.provider.tagged: ...>.
-
-B<Examples:>
-
-    _tagged_retired(1);   # "is no longer read.  A tag belongs to ..."
 
 =head2 _group_commits_rule($value)
 

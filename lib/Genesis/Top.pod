@@ -2349,8 +2349,8 @@ C<options>, each where there is one, or undef where the configuration
 carries no C<pipeline.vault>.
 
 B<Errors:> None. The load refuses C<pipeline.vault.url>, C<namespace> and
-C<options> by name, since each said what C<secrets_provider> says
-(L</_retired_vault_key>).
+C<options> by name, as keys the block does not declare, since each said
+what C<secrets_provider> says (D169, D185).
 
 B<Limitations:> A C<secrets_provider.url> written as C<$NAME>, which
 L<Service::Vault::Remote/attach> reads from the environment, is answered as
@@ -4819,30 +4819,6 @@ B<Examples:>
     $top->_refuse_v2_pipeline;
     # returns 1 on a version 3 repository, whatever its pipeline says
 
-=head2 _retired_remote_rule
-
-    remote => {type => 'any', retired => 1, check => \&_retired_remote_rule}
-
-The schema's rule for C<pipeline.source_control.remote>, declared only to be
-refused. A remote's name is each clone's own, so the pipeline finds its remote
-by the repository it points at (D118), and the key is refused rather than read
-as an alias (D28). Declared retired, it is refused in the load's one refusal
-with every other problem, naming what replaces it, and never as a key never
-heard of (T411); it was a pass of its own before the schema.
-
-B<Parameters:> The value the key carries, a remote's name.
-
-B<Returns:> The message: the key "is set to" the name "and is no longer read",
-naming C<pipeline.source_control.repository> as what replaces it and the
-clone's own pin, C<git config genesis.remote> with that name.
-
-B<Errors:> None; the schema reports the message.
-
-B<Examples:>
-
-    Genesis::Top::_retired_remote_rule('origin');
-    # "is set to origin, and is no longer read.  ... git config genesis.remote origin"
-
 =head2 _provider_module_map
 
     my $map = $top->_provider_module_map();
@@ -4946,10 +4922,8 @@ B<Returns:> A hash reference.
 The schema entry for a credential block (D27, noted 2026-10-16): a hash with a
 required C<type> naming one of the block's credential types, an optional
 C<path>, and one optional C<path:key> string per component any of its types
-takes, judged as a whole by L</_credential_rule>.  The source-control block
-also declares its retired C<vault> key, so the load can refuse it by name
-through L</_retired_credential_vault>.  The types and their components live in
-one table, which L</credential_components> reads too.
+takes, judged as a whole by L</_credential_rule>.  The types and their
+components live in one table, which L</credential_components> reads too.
 
 B<Parameters:>
 
@@ -5033,25 +5007,6 @@ B<Examples:>
     # genesis.pipeline.required_files: is no longer read: it is
     # genesis.pipeline.track_additional_files, with the same paths.
 
-=head2 _retired_credential_vault
-
-    my $problem = _retired_credential_vault($value);
-
-The C<check> of C<source_control.auth.vault>, the one reference the block took
-before its components: it is always a problem, naming C<path> and the
-per-component form that replace it.
-
-B<Parameters:> The value, which is not read.
-
-B<Returns:> The message.
-
-B<Errors:> None.
-
-B<Examples:>
-
-    _retired_credential_vault('secret/ci/git');
-    # 'retired; name the vault secret holding the credential with path, ...'
-
 =head2 _automated_provider_configured
 
     my $bool = _automated_provider_configured($siblings, $config);
@@ -5089,41 +5044,6 @@ B<Examples:>
     my $bool = _automated_provider_configured({}, $config);
     # returns 1 where pipeline.provider.type is concourse
     # returns 0 where the pipeline is off, or the provider is manual
-
-=head2 _retired_vault_key
-
-    my $problem = _retired_vault_key($said_by);
-
-What the load says of a C<pipeline.vault> key that named the vault:
-C<url>, C<namespace> or C<options> (D169). A pipeline task logs in to the
-repository's own vault, the one its operators use, so where it is, is said
-once, by C<secrets_provider>, and C<pipeline.vault> holds C<auth> alone.
-Each of the three is declared in the schema only to be refused with this.
-
-Plain function, not a method: the schema's C<check> for each key calls it.
-
-B<Parameters:>
-
-=over 4
-
-=item C<$said_by>
-
-The C<secrets_provider> key, or keys, that say what the retired key said,
-with their colour markup, as the refusal names them.
-
-=back
-
-B<Returns:> the refusal's text, which the load reports after the key's
-name.
-
-B<Errors:> None.
-
-B<Examples:>
-
-    _retired_vault_key('#C{secrets_provider.url}');
-    # "is no longer read.  A pipeline task logs in to the repository's own
-    #  vault, ... said once, by secrets_provider.url.  Remove the key;
-    #  pipeline.vault holds auth alone."
 
 =head2 _source_control
 

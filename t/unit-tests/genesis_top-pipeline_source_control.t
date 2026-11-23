@@ -88,7 +88,7 @@ subtest 'the block declares three tiers and refuses runtime state' => sub {
 		'the overridable and defaulted fields are the five the design names, '.
 		'the api_token contract f8 adds, and the identity D172 defaults, '.
 		'with no remote among them (D118)';
-	ok $sc->{remote}{retired}, 'remote is declared only to be refused as retired (T411)';
+	ok !exists $sc->{remote}, 'remote is not declared at all (T411, D185)';
 	is_deeply [sort grep {$sc->{$_}{required}} keys %$sc],
 		[qw/auth/],
 		'auth is the one key required, the identity having a default (D172)';
@@ -522,10 +522,11 @@ subtest 'every refusal lists the remotes and gives its remedies' => sub {
 };
 
 # Proves T358's first half: the committed remote name is gone, and a
-# configuration still carrying it is refused by name, with what replaces it,
-# rather than read as an alias (D118, D28).
-subtest 'the committed remote name is refused, naming what replaces it' => sub {
-	plan tests => 4;
+# configuration still carrying it is refused by name rather than read as an
+# alias (D118, D28).  It is refused as any key the block does not declare
+# is, with no sentence of its own (D185).
+subtest 'the committed remote name is refused by name' => sub {
+	plan tests => 2;
 
 	my $body = join("\n", 'pipeline:', '  enabled: true',
 		'  source_control:', '    remote: origin');
@@ -534,13 +535,10 @@ subtest 'the committed remote name is refused, naming what replaces it' => sub {
 	my $error = $top ? '' : $@;
 	$error = eval {$top->source_control_remote; ''} // $@ if $top;
 
-	like($error, qr/pipeline\.source_control\.remote/, 'the key is named');
-	like($error, qr/pipeline\.source_control\.repository/,
-		'with the repository as what replaces it');
-	like($error, phrase('git config genesis.remote origin'),
-		"and the clone's own pin for the name it carried");
-	unlike($error, qr/unknown configuration key/,
-		'refused as retired, not as a key never heard of');
+	like($error, qr/pipeline\.source_control\.remote: unknown configuration key/,
+		'the key is named, as one the block does not declare');
+	like($error, qr/expected one of .*\brepository\b/,
+		'and repository is among the keys it is offered');
 };
 
 subtest 'a required flag can be a predicate' => sub {
