@@ -129,16 +129,16 @@ use constant REFRESH_MODES => ('optional', 'never'); # {{{
 
 our @global_options = ( # {{{
 	[
-		"help|h" =>
-			"Show this help screen.",
+		"help|h+" =>
+			"Show this help screen.  Given twice, as #y{-hh}, it includes the global options.",
 
 		"help-full" =>
-			"Show help screen with all available options including global options.",
+			"Show help screen with all available options including global options (same as -hh).",
 
 		"helpful" =>
 			"Show help screen with all available options including global options (same as --help-full, but more fun!).",
 
-		"globals" =>
+		"help-globals" =>
 			"Show only the global options available to all commands.",
 	],
 	[
@@ -1247,7 +1247,7 @@ sub _branch_class_marker {
 # }}}
 
 sub command_help { # {{{
-	my ($msg, $rc) = @_;
+	my ($msg, $rc, $show_global) = @_;
 	$rc = $msg ? 1 : 0 unless defined($rc);
 
 	# Usage and option errors exit 2, whatever number the caller passed.
@@ -1374,6 +1374,8 @@ sub command_help { # {{{
 			$out .= $entry."\n";
 		}
 	}
+
+	$out .= _global_options_text() if $show_global;
 
 	$out .= "\n$ver$hr\n";
 	info({raw => 1}, $out);
@@ -1555,8 +1557,8 @@ sub command_usage { # {{{
 
 	# Add notice about global options if they're not being shown
 	if (!$show_global && defined($show_global)) {
-		$out .= "\n#i{To see all options including global ones, use }#g{${\(humanize_bin)}} #G{$command} #y{--help-full}#i{ or }#y{--helpful}\n";
-		$out .= "#i{To see only global options, use }#g{${\(humanize_bin)}} #y{--globals}\n";
+		$out .= "\n#i{To see all options including global ones, use }#g{${\(humanize_bin)}} #G{$command} #y{-hh}#i{ or }#y{--help-full}\n";
+		$out .= "#i{To see only global options, use }#g{${\(humanize_bin)}} #y{--help-globals}\n";
 	}
 
 	# Extended usage: render help from registered handlers (preferred),
@@ -1600,7 +1602,15 @@ sub show_global_options { # {{{
 	my $out = "";
 	$out .= wrap("#G{Global Options} - Available to all Genesis commands", terminal_width)."\n\n";
 	$out .= wrap("#g{${\(humanize_bin)}} [<global options...>] #G{<command>} [<command options and args...>]",terminal_width,"#Wku{Usage:} ", 7)."\n";
+	$out .= _global_options_text();
 
+	info {raw => 1}, $out."\n$ver$hr\n";
+	exit 0;
+} # }}}
+
+# _global_options_text - the Global Options section, as the help screens print it {{{
+sub _global_options_text {
+	my $out = '';
 	my (%options_desc, %options_def, %options_order);
 	my $section = 0;
 	for my $global_opt_group (@global_options) {
@@ -1661,8 +1671,7 @@ sub show_global_options { # {{{
 		}
 	}
 
-	info {raw => 1}, $out."\n$ver$hr\n";
-	exit 0;
+	return $out;
 } # }}}
 
 sub set_top_path { # {{{

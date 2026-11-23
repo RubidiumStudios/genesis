@@ -54,7 +54,7 @@ define_command('help', {
 		no_vault => 1
 }, sub {
 	# First check if we just want to see global options alone
-	if (!@_ && get_options->{globals}) {
+	if (!@_ && get_options->{'help-globals'}) {
 		# Show only global options
 		Genesis::Commands::show_global_options();
 		return;
@@ -69,15 +69,16 @@ define_command('help', {
 			# Prepare command context for usage display
 			$Genesis::Commands::CALLED = $cmd;
 			$Genesis::Commands::COMMAND = $Genesis::Commands::GENESIS_COMMANDS{$cmd};
-			# Show globals if --globals, --help-full, or --helpful flag is present
-			my $show_global = (get_options->{globals} || get_options->{'help-full'} || get_options->{helpful}) ? 1 : 0;
+			# Show globals if --help-globals, --help-full, or --helpful flag is present
+			my $show_global = (get_options->{'help-globals'} || get_options->{'help-full'} || get_options->{helpful}) ? 1 : 0;
 			command_usage(0, undef, $show_global);
 		} else {
 			command_help("Unknown command: #G{$cmd}", 2);
 		}
 	} else {
-		# Show general help listing
-		command_help();
+		# The general listing, with the global options after it where they
+		# were asked for, as -hh with no command is.
+		command_help(undef, undef, (get_options->{'help-full'} || get_options->{helpful}) ? 1 : 0);
 	}
 });
 
@@ -2807,9 +2808,16 @@ sub main {
 		if (@args and scalar(@args) == 1 && $args[0] =~ m/^(-v|--version)$/) {
 			$cmd = 'version';
 			@args = ();
-		} elsif (grep {/^(-h|--help)$/} @args) {
-			$cmd = 'help',
-			@args = (grep {$_ !~ /^(-h|--help)$/} @args);
+		} elsif (my @asked = grep {/^(-h+|--help)$/} @args) {
+			# With no command, -h lists the commands, and -hh, or -h twice,
+			# adds the global options.
+			my $times = 0;
+			$times += /^-(h+)$/ ? length($1) : 1 for @asked;
+			$cmd = 'help';
+			@args = (grep {$_ !~ /^(-h+|--help)$/} @args);
+			push @args, '--help-full' if $times > 1;
+		} elsif (grep {/^--help-(globals|full)$|^--helpful$/} @args) {
+			$cmd = 'help';
 		} else {
 			command_help('No known command specified',2)
 		}
@@ -2825,13 +2833,17 @@ sub main {
 			prepare_command $cmd, @args;
 			set_top_path;
 			check_embedded_genesis;
-			# Check for help flags
-			if (get_options->{help} || get_options->{'help-full'} || get_options->{helpful}) {
-				# If both --help and --globals are specified, show full help with globals
-				my $show_global = (get_options->{'help-full'} || get_options->{helpful} || get_options->{globals}) ? 1 : 0;
-				command_usage(0, undef, $show_global);
-			} elsif (get_options->{globals} && $cmd ne 'help') {
-				# For non-help commands with --globals alone, show only global options
+			# Check for help flags.  -h is counted: once is the command's
+			# help, twice adds the global options, as --help-full does.
+			# The help command takes --help-full itself, to list every
+			# command with the global options after them.
+			my $help = get_options->{help} // 0;
+			my $full = (get_options->{'help-full'} || get_options->{helpful}) ? 1 : 0;
+			if ($help || ($full && $cmd ne 'help')) {
+				command_usage(0, undef,
+					($help > 1 || $full || get_options->{'help-globals'}) ? 1 : 0);
+			} elsif (get_options->{'help-globals'} && $cmd ne 'help') {
+				# --help-globals alone shows only the global options
 				Genesis::Commands::show_global_options();
 			}
 			build_command_environment;

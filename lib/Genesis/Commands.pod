@@ -27,7 +27,8 @@ Genesis::Commands - Command infrastructure and dispatch for Genesis CLI
   # CLI invocation (from the shell)
   genesis deploy my-env
   genesis --help
-  genesis deploy --help-full
+  genesis deploy -hh          # the command's help and the global options
+  genesis --help-globals      # the global options alone
 
 =head1 DESCRIPTION
 
@@ -149,7 +150,13 @@ global option set.
 
 =item C<BASE_OPTIONS> (1)
 
-Includes help flags (C<--help>, C<--help-full>, C<--helpful>, C<--globals>),
+Includes help flags (C<--help>, C<--help-full>, C<--helpful>,
+C<--help-globals>).  C<-h> is counted: once shows a command's help, and
+twice, as C<-hh>, adds the global options, as C<--help-full> does.
+C<--help-globals> shows the global options alone.  Every help flag begins
+with C<help>, so no other name is taken from the commands; C<--globals>,
+which this replaced, was read ahead of every command's own options, and a
+command could carry no option of that name or one it abbreviates.  Also
 logging and verbosity flags (C<--color>, C<--log>, C<--quiet>, C<--debug>,
 C<--trace>, C<--show-stack>).  This is the default for commands that do
 not specify C<option_group>.
@@ -1345,9 +1352,12 @@ B<Examples:>
   command_help();
   command_help($msg);
   command_help($msg, $rc);
+  command_help(undef, undef, $show_global);
 
 Displays the global Genesis help screen listing all registered commands
-grouped by function area, then exits.
+grouped by function area, then exits.  With C<$show_global> true, the global
+options follow the listing (L</_global_options_text>), which is what
+C<genesis -hh> with no command shows.
 
 When C<$msg> is provided, it is printed as a fatal error message before
 exiting.  A non-zero C<$rc> is normalised to C<2>, the code Genesis uses for
@@ -1369,6 +1379,11 @@ Optional error message to display before exiting.
 
 Optional exit code.  Any non-zero value exits C<2>.  Defaults to C<2> if
 C<$msg> is set, C<0> otherwise.
+
+=item C<$show_global>
+
+Optional boolean.  When true, the global options are listed after the
+commands.
 
 =back
 
@@ -1422,7 +1437,8 @@ to a message showing how the command was called.
 =item C<$show_global>
 
 Optional boolean.  When true, global options are appended to the output.
-When defined and false, a note is added directing users to C<--help-full>.
+When defined and false, a note is added directing users to C<-hh> and
+C<--help-globals>.
 When C<undef>, global options are shown if C<--help> was passed.
 
 =back
@@ -1476,7 +1492,7 @@ Thrown via C<bug()> if a global option specification cannot be parsed.
 
 B<Examples:>
 
-  # Triggered by: genesis --globals
+  # Triggered by: genesis --help-globals
   show_global_options();
   # prints: global options screen, then exits 0
 
@@ -2657,6 +2673,32 @@ B<Examples:>
 
   _parse_two_pass(\@args, [@base_spec, @opts_spec], 'permute');
   # '--set a 1 -qT' => set => ['a','1'], quiet => 1, trace => 1
+
+=head2 _global_options_text
+
+  my $text = _global_options_text();
+
+The Global Options section as every help screen prints it: a heading, then
+each global option with its description, in the order and under the section
+breaks C<@global_options> declares.  L</show_global_options> prints it under
+a header of its own, L</command_help> appends it to the command listing, and
+it reads no command's own options.
+
+B<Returns:> the section as marked-up text, beginning with a blank line.
+
+B<Errors:>
+
+=over 4
+
+=item C<"Global option definition invalid: E<lt>specE<gt>">
+
+Thrown via C<bug()> if a global option specification cannot be parsed.
+
+=back
+
+B<Examples:>
+
+  my $out = $listing . _global_options_text();
 
 =head1 SEE ALSO
 

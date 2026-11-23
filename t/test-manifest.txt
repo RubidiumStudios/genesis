@@ -433,7 +433,8 @@ integration-tests/genesis_commands-pipeline_ci_yml_gate.t     # pipeline command
 integration-tests/genesis_pipeline_config-validation_at_load.t # every command meets the same pipeline refusal at load
 integration-tests/genesis_pipeline_config-repository_where_judged.t # a pipeline is rehearsed before its remote exists
 integration-tests/genesis_config-repair_at_load.t             # genesis config repairs what every other command refuses at load
-integration-tests/genesis_exit-command_codes.t                # usage exits 2, prerequisites exit 86, no invented codes
+integration-tests/genesis_commands-help_flags.t               # T514: -h is counted, -hh adds the global options, --help-globals shows them alone, --globals is free (D180)
+integration-tests/genesis_exit-command_codes.t               # usage exits 2, prerequisites exit 86, no invented codes
 integration-tests/genesis_commands-git_floor.t                # the declared git floor is 2.34.1, for every command
 integration-tests/genesis_commands_pipelines-refresh_flags.t   # the refresh is unconditional and only pipeline-status opts out
 integration-tests/genesis_commands_pipelines-apply_refusals.t  # pipeline-apply refuses a disabled or absent pipeline alike
