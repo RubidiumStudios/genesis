@@ -180,7 +180,7 @@ genesis config --set pipeline.enabled true</pre>
 <tr><td><code>pipeline.locker.username</code></td><td>string</td><td>&ndash;</td><td>any string, or <code>((path.key))</code></td><td>No</td><td>Locker username. Written into the pipeline as given.</td></tr>
 <tr><td><code>pipeline.locker.password</code></td><td>string</td><td>&ndash;</td><td><code>((path.key))</code> only</td><td>No</td><td>Locker password. Written into the pipeline as given, so name the secret in Concourse's own form. <code>&lt;path&gt;:&lt;key&gt;</code> is not translated here and would be sent as the password itself.</td></tr>
 <tr><td><code>pipeline.locker.ca_cert</code></td><td>string</td><td>&ndash;</td><td>any string</td><td>No</td><td>CA certificate for the locker.</td></tr>
-<tr><td><code>pipeline.locker.skip_ssl_validation</code></td><td>boolean</td><td><code>false</code></td><td>true, false</td><td>No</td><td>Skip TLS verification.</td></tr>
+<tr><td><code>pipeline.locker.skip_ssl_validation</code></td><td>boolean</td><td><code>true</code></td><td>true, false</td><td>No</td><td>Skip TLS verification of the locker. True by default, as under v2, since the Concourse kit's locker certificate names no address a pipeline reaches it by. Set false, with <code>ca_cert</code>, to verify.</td></tr>
 
 <tr class="g"><td colspan="6"><strong><code>pipeline.shuttle</code></strong>:the object store behind every deployment's queue and event. Block required: <em>If automated</em>.</td></tr>
 <tr><td><code>pipeline.shuttle.backend</code></td><td>enum</td><td>&ndash;</td><td><code>s3</code></td><td>Yes</td><td>Selects the backend and the keys it reads. <code>s3</code> is the only backend.</td></tr>

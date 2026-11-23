@@ -141,7 +141,7 @@ git rm ci.yml</code></pre>
   <tr><td><code>notifications: inline | parallel | grouped</code></td><td><code>pipeline.notifications.style</code></td><td>Same meanings. <code>email</code> is not emitted.</td></tr>
   <tr><td><code>registry.uri</code>, <code>username</code>, <code>password</code></td><td><code>pipeline.registry.uri</code>, <code>pipeline.registry.auth: {type: basic, path: &lt;p&gt;}</code></td><td>The <code>uri</code> prefixes only the images Genesis names by default. A task image you name with no domain is pulled from the registry's host, the first segment of <code>uri</code>, with its credentials; one named with a domain is taken as written.</td></tr>
   <tr><td><code>task.image</code>, <code>version</code>, <code>privileged</code></td><td><code>pipeline.provider.task.image</code>, <code>.version</code>, <code>.privileged</code></td><td></td></tr>
-  <tr><td><code>locker.*</code></td><td><code>pipeline.locker.url</code>, <code>username</code>, <code>password</code>, <code>ca_cert</code>, <code>skip_ssl_validation</code></td><td>Required. <code>password</code> is written in Concourse's own form, for example <code>((locker/api.password))</code>. TLS is verified unless you say otherwise; see the callout below.</td></tr>
+  <tr><td><code>locker.*</code></td><td><code>pipeline.locker.url</code>, <code>username</code>, <code>password</code>, <code>ca_cert</code>, <code>skip_ssl_validation</code></td><td>Required. <code>password</code> is written in Concourse's own form, for example <code>((locker/api.password))</code>. TLS verification is skipped unless you say otherwise, as under v2; see the callout below.</td></tr>
   <tr><td>(none)</td><td><code>pipeline.shuttle</code>: <code>backend: s3</code>, <code>bucket</code>, <code>region</code>, <code>endpoint</code>, <code>auth</code>, <code>tls_skip_verify</code></td><td>Required. <code>auth</code> is a path holding <code>access_key_id</code> and <code>secret_access_key</code>, or a block naming each as <code>&lt;path&gt;:&lt;key&gt;</code> where they are stored under other names (section 6).</td></tr>
   <tr><td><code>public</code></td><td><code>pipeline.provider.public</code></td><td>False by default: build logs are private unless you set it.</td></tr>
   <tr><td><code>tagged: true</code></td><td><code>genesis.pipeline.provider.tag</code> per environment (section 5)</td><td><code>tagged</code> is refused as retired.</td></tr>
@@ -152,7 +152,7 @@ git rm ci.yml</code></pre>
   <tr><td><code>errands</code>, <code>auto-update</code></td><td>none yet</td><td>Section 10.</td></tr>
   <tr><td>top-level <code>jobs:</code>, <code>resources:</code>, <code>groups:</code> merged over the pipeline</td><td><code>.genesis/pipeline-overrides-concourse.yml</code></td><td>Merged as written. Review it first: an entry keyed to a v2 name now adds a new object rather than changing one.</td></tr>
 </table>
-<div class="callout"><strong>The locker's TLS default changed.</strong> v2 skipped certificate verification for the locker unless <code>ci.yml</code> said otherwise. v3 verifies it unless <code>pipeline.locker.skip_ssl_validation</code> is <code>true</code>. A repository whose <code>ci.yml</code> named neither <code>skip_ssl_validation</code> nor <code>ca_cert</code> was relying on the v2 default. Set <code>pipeline.locker.ca_cert</code>, or <code>skip_ssl_validation: true</code>, or every lock step fails its TLS handshake.</div>
+<div class="callout"><strong>The locker's TLS default is the same as v2's.</strong> Certificate verification for the locker is skipped unless <code>pipeline.locker.skip_ssl_validation</code> is set <code>false</code>, so a <code>ci.yml</code> that named neither <code>skip_ssl_validation</code> nor <code>ca_cert</code> needs neither key in v3. The default is skipped because the Concourse kit gives the locker a certificate for a name a pipeline does not reach it by. Where your locker's certificate matches its URL, set <code>skip_ssl_validation: false</code> and <code>ca_cert</code> to verify it.</div>
 <p class="small">New in v3, with nothing to map from:</p>
 <ul class="small">
   <li><code>pipeline.redeploy.enabled</code> and <code>.style</code>: the redeploy jobs, on by default.</li>
@@ -363,7 +363,7 @@ pipeline.vault.auth.role_id              &lt;path&gt;:approle_id</code></pre>
   <li>Environment files: <code>prior_env</code>, <code>manual: false</code> on every formerly <code>auto</code> environment, tags, and tracking (section 5).</li>
   <li>Genesis 3.2.x embedded.</li>
   <li>Secrets published at the team scope, with v2 key names changed where needed (section 6).</li>
-  <li>Locker TLS settled: <code>ca_cert</code> or <code>skip_ssl_validation: true</code> set where v2 relied on its default (section 4).</li>
+  <li>Locker TLS settled: nothing to set where v2 relied on its default, or <code>skip_ssl_validation: false</code> with <code>ca_cert</code> where the locker is to be verified (section 4).</li>
   <li><code>safe</code> is not 1.26.0, on your machine and in the task image.</li>
   <li><code>pipeline.name</code> differs from the v2 pipeline's.</li>
   <li>Previews clean, and <code>pipeline-apply --dry-run</code> finding every secret.</li>

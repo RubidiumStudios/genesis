@@ -143,7 +143,7 @@ locker:
   username: locker-user
   password: ((locker-password))
   ca_cert: null
-  skip_ssl_validation: false
+  skip_ssl_validation: true   # the default; set false to verify, with ca_cert
 
 shuttle:
   backend: s3

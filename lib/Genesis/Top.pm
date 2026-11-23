@@ -3329,7 +3329,8 @@ sub _pipeline_config_schema {
 					username             => {type => 'string',  description => 'Locker username'},
 					password             => {type => 'string',  description => 'Locker password, written into the pipeline as given; name a secret as ((path.key))'},
 					ca_cert              => {type => 'string',  description => 'CA certificate for the locker'},
-					skip_ssl_validation  => {type => 'boolean', default => Genesis::Config::FALSE, description => 'Skip TLS verification'},
+					# v2's default, until the locker has a certificate for a name a pipeline reaches it by (D183).
+					skip_ssl_validation  => {type => 'boolean', default => Genesis::Config::TRUE, description => 'Skip TLS verification of the locker; true unless set false'},
 				}
 			},
 

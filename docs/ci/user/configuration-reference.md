@@ -210,8 +210,10 @@ locker:
   username: locker
   password: ((locker/api.password))   # written in Concourse's own form
   ca_cert:  ((locker/api.ca_cert))
-  skip_ssl_validation: false
+  skip_ssl_validation: false          # verify; the default is true
 ```
+
+`skip_ssl_validation` is true unless you set it false, as it was under v2: the Concourse kit gives the locker a certificate for a name a pipeline does not reach it by, so a verifying client refuses it. Set it false, with `ca_cert`, where your locker's certificate matches its `url`.
 
 ## pipeline.shuttle
 

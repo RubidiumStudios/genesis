@@ -39,7 +39,8 @@ subtest 'Stage 3 rows for an environment its own director deploys' => sub {
 	is($own->{source}{lock_name}, $DN, 'a10: on the pool <dn>');
 	is($dir->{source}{lock_name}, 'mgmt-bosh', "a11: and one on its director's pool");
 	ok(!exists $dir->{source}{bosh_lock} && !exists $own->{source}{bosh_lock}, 'a11: never bosh_lock');
-	is($own->{source}{skip_ssl_validation}, 0, 'a13: skip_ssl_validation false by default');
+	is($own->{source}{skip_ssl_validation}, 1, 'a13: skip_ssl_validation true by default, as v2 had it (D183)');
+	is($dir->{source}{skip_ssl_validation}, 1, "a13: on the director's pool too");
 	is(scalar(grep {($_->{type} // '') eq 'locker'} @{$p->{resources} || []}), 2,
 		'g8: one resource per pool, and no other');
 
@@ -55,6 +56,31 @@ subtest 'Stage 3 rows for an environment its own director deploys' => sub {
 		'g5: released in reverse in its ensure');
 	is_deeply([map {$_->{params}{locked_by}} grep {$_->{put}} @do], [$DN, $DN], 'g1, g2: locked by <dn>');
 	is_deeply($jb->{serial_groups}, [$DN], 'g9: serial_groups [<dn>]');
+};
+
+# T519 (D183): the default is v2's, since the kit gives the locker a
+# certificate for a name no pipeline reaches it by.  The key stays, for a site
+# that can verify.
+subtest 'a13: the locker verifies only where the repository says to' => sub {
+	my $h = contract_harness(genesis => {bosh_env => 'mgmt'},
+		config => {'pipeline.locker.skip_ssl_validation' => 'false',
+		           'pipeline.locker.ca_cert'             => 'the-locker-ca'});
+	my ($p, $why) = dry_pipeline($h);
+	ok($p, 'set false, the dry apply prints a pipeline') or return diag($why);
+	my @lockers = grep {($_->{type} // '') eq 'locker'} @{$p->{resources} || []};
+	is(scalar(@lockers), 2, 'both pools');
+	is_deeply([map {$_->{source}{skip_ssl_validation} ? 1 : 0} @lockers], [0, 0],
+		'set false, each locker resource verifies');
+	is_deeply([map {$_->{source}{ca_cert}} @lockers], ['the-locker-ca', 'the-locker-ca'],
+		'against the CA it was given');
+
+	$h = contract_harness(genesis => {bosh_env => 'mgmt'},
+		config => {'pipeline.locker.skip_ssl_validation' => 'true'});
+	($p, $why) = dry_pipeline($h);
+	ok($p, 'set true, the dry apply prints a pipeline') or return diag($why);
+	is_deeply([map {$_->{source}{skip_ssl_validation} ? 1 : 0}
+			grep {($_->{type} // '') eq 'locker'} @{$p->{resources} || []}], [1, 1],
+		'set true, each skips verification, as with nothing said');
 };
 
 subtest 'a11: a create-env environment takes no director lock' => sub {

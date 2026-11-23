@@ -948,7 +948,10 @@ sub _locker_resources {
 		locker_uri          => _unwrap_ref($locker->{url}),
 		username            => _unwrap_ref($locker->{username}),
 		password            => _unwrap_ref($locker->{password}),
-		skip_ssl_validation => $locker->{skip_ssl_validation} ? JSON::PP::true : JSON::PP::false,
+		# Skipped unless the repository says to verify, as the schema
+		# defaults it; a block that reaches here without the key is the same.
+		skip_ssl_validation => (!defined $locker->{skip_ssl_validation} || $locker->{skip_ssl_validation})
+			? JSON::PP::true : JSON::PP::false,
 		ca_cert             => $locker->{ca_cert},
 	);
 

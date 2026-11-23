@@ -4725,8 +4725,11 @@ C<locker> is the locker the two deploy locks use. The block declares the
 locker and its credentials and says nothing about either lock, so how a
 pipeline takes them is settled where the pipeline is compiled rather than
 here. Its C<url> is required, C<username>, C<password>, and C<ca_cert> are
-optional, and C<skip_ssl_validation> defaults to false. It is required under
-an automated provider as well.
+optional, and C<skip_ssl_validation> defaults to true, as the v2 pipeline
+had it (D183): the Concourse kit gives the locker a certificate for a name a
+pipeline does not reach it by, so a verifying client refuses it. Set false,
+the locker resources verify, against C<ca_cert> where it is given. The block
+is required under an automated provider as well.
 
 C<notifications> is optional under every provider. Its C<style> is one of
 the legacy pipeline's, C<inline> (the default, a manual deploy waiting on
