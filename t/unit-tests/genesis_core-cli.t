@@ -30,13 +30,14 @@ subtest 'genesis config' => sub {
 
 	my %opts = command_properties('config')->{options}->@*;
 	# The @ matters: without it Getopt::Long keeps only the last
-	# occurrence's value and discards every key.
-	ok(exists $opts{'set=s@{2}'},
-		"config has a repeatable --set taking a key and a value");
+	# occurrence's value and discards every key.  -s is its short spelling.
+	ok(exists $opts{'set|s=s@{2}'},
+		"config has a repeatable --set, or -s, taking a key and a value");
 
-	# One value per occurrence, so no arity clause is needed here.
-	ok(exists $opts{'unset=s@'},
-		"config has a repeatable --unset taking a key");
+	# One value per occurrence, so no arity clause is needed here.  -u is
+	# its short spelling.
+	ok(exists $opts{'unset|u=s@'},
+		"config has a repeatable --unset, or -u, taking a key");
 
 	ok(exists $opts{'set-from-file=s@{2}'},
 		"config has a repeatable --set-from-file taking a key and a path");
