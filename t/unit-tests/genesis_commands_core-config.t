@@ -1099,6 +1099,35 @@ CI
 	return $dir;
 }
 
+# The short spellings: the command as c, and its two writes as -s and -u.
+subtest 'config answers to c, and --set and --unset to -s and -u' => sub {
+	plan tests => 5;
+
+	my $dir = config_repo('config-short-spellings');
+
+	pushd $dir;
+	prepare_command('c', '-s', 'minimum_version', '3.1.0', '-s', 'manifest_store', 'exodus');
+	build_command_environment;
+	my ($code, $err) = run_config();
+	popd;
+
+	is($code, 0, 'c -s sets a key') or diag($err);
+	like(slurp("$dir/.genesis/config"), qr/minimum_version:\s*3\.1\.0/, 'the value is saved');
+
+	pushd $dir;
+	prepare_command('c', '-u', 'minimum_version');
+	build_command_environment;
+	($code, $err) = run_config();
+	popd;
+
+	is($code, 0, 'c -u removes it') or diag($err);
+	unlike(slurp("$dir/.genesis/config"), qr/minimum_version/, 'and the key is gone from the file');
+
+	is(Genesis::Commands::command_properties('c')->{function_group},
+		Genesis::Commands::command_properties('config')->{function_group},
+		'c is the config command and no other');
+};
+
 subtest 'config writes on a version 2 repository are not refused' => sub {
 	plan tests => 6;
 

@@ -1487,7 +1487,8 @@ define_command("repo-init", {
 # genesis config - get or set repository configuration values {{{
 define_command("config", {
 	summary => "Get or set values in the deployment repository configuration.",
-	usage => "config [-G|--globals] [<key> ...] [--set <key> <value>] [--unset <key>]",
+	usage => "config [-G|--globals] [<key> ...] [-s|--set <key> <value>] [-u|--unset <key>]",
+	alias => 'c',
 	description =>
 		"Reads and writes #C{.genesis/config}, the deployment repository's ".
 		"configuration file.\n".
@@ -1514,7 +1515,7 @@ define_command("config", {
 			"that way, such as a whole list or block, is refused and ".
 			"nothing is written; edit the file directly for those.",
 
-		'set=s@{2}' =>
+		'set|s=s@{2}' =>
 			"Set #C{<key>} to #C{<value>}.  Repeat to set more than one key ".
 			"in a single run.\n".
 			"\n".
@@ -1530,7 +1531,7 @@ define_command("config", {
 			"holding a collection reads it as YAML or JSON, and a scalar ".
 			"key takes the text as-is, less one trailing newline.",
 
-		'unset=s@' =>
+		'unset|u=s@' =>
 			"Remove #C{<key>} from the configuration.  Repeat to remove ".
 			"more than one.\n".
 			"\n".

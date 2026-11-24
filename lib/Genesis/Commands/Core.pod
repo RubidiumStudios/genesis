@@ -134,6 +134,9 @@ B<Examples:>
   genesis config --globals            # your user-level configuration
   genesis config -G output_style
 
+  genesis c -s manifest_store exodus  # c for config, -s for --set
+  genesis c -u minimum_version        # -u for --unset
+
 Reads and writes the deployment repository's configuration in
 F<.genesis/config>.  With no argument, prints the whole configuration as
 YAML; with a key, prints just that key's value.
