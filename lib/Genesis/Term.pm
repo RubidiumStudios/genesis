@@ -524,8 +524,18 @@ sub decolorize {
 
 sub csize {
 	my $str = shift;
-	return length(decolorize($str)) + length(join('', (map {csprintf($_)} $str =~ m/#E\{[^\}]+}/g)));
+	return _columns(decolorize($str) . join('', map {csprintf($_)} $str =~ m/#E\{[^\}]+}/g));
 }
+
+# _columns - the terminal columns a string with no markup takes {{{
+sub _columns {
+	my ($text) = @_;
+	my $none = () = $text =~ /[\p{Mn}\p{Me}\x{200B}-\x{200D}\x{FE00}-\x{FE0F}]/g;
+	my $wide = () = $text =~ /[\p{Ea=W}\p{Ea=F}]/g;
+	return length($text) - $none + $wide;
+}
+
+# }}}
 
 sub wrap {
 	my ($str, $width, $prefix, $indent, $continue_prefix, $init_col) = @_;

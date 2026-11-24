@@ -226,9 +226,9 @@ subtest 'csize counts emoji display width' => sub {
 	local $ENV{GENESIS_NO_UTF8};
 	delete $ENV{GENESIS_NO_UTF8};
 
-	my $fire_len = length("\x{1F525}");
-	my $result = csize('#E{fire}');
-	is($result, $fire_len, 'emoji character length counted via csprintf');
+	# One character, and the two columns a terminal gives a wide emoji.  The
+	# row once expected its length, which is what csize counted then.
+	is(csize('#E{fire}'), 2, 'a wide emoji counts the two columns it takes');
 };
 
 subtest 'csize handles mixed markup and plain text' => sub {

@@ -344,9 +344,12 @@ B<Examples:>
 
   my $len = csize($str);
 
-Returns the display width of C<$str> as it would appear on the terminal - that is,
-the character count after stripping all color markup and adding back the rendered
-width of any emoji characters (which expand to their Unicode codepoint representations).
+Returns the display width of C<$str> as it would appear on the terminal: the
+columns its text takes once the color markup is stripped and each emoji marker
+is expanded. It is measured in columns and not in characters, through
+L</_columns>, so a wide emoji counts two and a variation selector none. A
+label measured a column out would put every wrapped line of its message a
+column out, which is what counting characters did.
 
 B<Parameters:>
 
@@ -369,6 +372,8 @@ B<Examples:>
 
   my $len2 = csize("plain text");
   print $len2; # prints '10'
+
+  csize('[#E{warning}WARNING] ');  # 12: the sign is one column, its selector none
 
 =head2 wrap
 
@@ -1505,6 +1510,45 @@ B<Examples:>
 
 These methods are internal to the implementation. They may change without notice
 and should not be called directly.
+
+=head2 _columns
+
+  my $columns = _columns($text);
+
+The terminal columns a string with no markup takes, which is what a terminal
+advances by and not how many characters the string holds. A character of East
+Asian width wide or fullwidth, as most emoji are, takes two. A combining
+mark, a zero-width space or joiner, and a variation selector take none.
+Everything else takes one.
+
+A sign that is text by default and carries an emoji selector, such as the
+warning sign, is counted as one column, which is what C<wcwidth> answers and
+what most terminals advance by; the emoji table follows each with a space for
+the glyph to spill into.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$text>
+
+The string to measure, as characters, with color markup already stripped and
+emoji markers already expanded.
+
+=back
+
+B<Returns:> the number of columns, as an integer.
+
+B<Errors:> None.
+
+B<Limitations:> A terminal that advances two columns for a sign with an emoji
+selector is measured one short for it. The widths are those of the Unicode
+tables the running Perl carries, so an emoji newer than they are counts one.
+
+B<Examples:>
+
+  _columns("\x{26A0}\x{FE0F} ");  # 2
+  _columns("\x{1F4A5}");          # 2
 
 =head2 _stty_size
 
