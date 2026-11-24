@@ -1370,7 +1370,11 @@ L</_report_protection>, as protected, updated, or already protected.
 
 A branch the token cannot protect is reported by name with the settings it
 needed, and the run carries on, because a user without admin should still be
-able to apply the pipeline and hand that list to whoever holds admin.
+able to apply the pipeline and hand that list to whoever holds admin. The
+refusals are printed together once every branch has been asked, each a
+paragraph of its own through L</_caution>, with what the branch needs on the
+line under it, and what to do with the lists said once, under the last
+(D186).
 
 Nothing here derives a rule. The caller has already done that through
 C<_protection_rules_for>, so this function takes the client, the pair, and
@@ -2136,7 +2140,9 @@ touched. With C<webhooks> on it creates the hook, updates it where its URL
 differs, or reports it already in place; with them off it removes its own hook.
 Without C<GITHUB_AUTH_TOKEN>, without the rights to read the hooks, or without
 the token, it reports the hook skipped or unverified and prints the URL to
-configure with the token named and not shown; at GitHub's limit it reports the
+configure with the token named and not shown. A warning puts that URL on a
+line of its own, with C<< <token> >> where the token goes and where it is
+kept on the line after, so the URL copies whole (D186). At GitHub's limit it reports the
 refusal and the push hooks already there, and the apply goes on either way. A
 dry run says what it would do.
 
@@ -2151,6 +2157,29 @@ B<Errors:> None; every failure is a warning.
 B<Examples:>
 
   _apply_webhook_hook($top, $top->github_client, 'owner/repo', token => $token);
+
+=head2 _caution
+
+    _caution($format, @args);
+
+Prints a warning as a paragraph of its own: one blank line before it and
+one after, and one between two in a row (D186). Every warning these
+commands print goes through it, so a warning never sits hard against the
+lines of a report, where it read as one of them. The logger does the
+spacing, through its C<paragraph> option; this is the one place that asks.
+
+A message is written from the label, with no leading spaces of its own, and
+a second line sits under the first one's text.
+
+B<Parameters:> a C<sprintf> format and its values, as C<warning> takes them.
+
+B<Returns:> what C<warning> returns, which is nothing of use.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    _caution("Could not protect #C{%s}: %s\nIt needs: %s", $branch, $reason, $rules);
 
 =head2 _take_named_github_token
 

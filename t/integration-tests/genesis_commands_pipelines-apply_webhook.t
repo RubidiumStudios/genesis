@@ -136,6 +136,15 @@ subtest 'without the rights to manage hooks the apply goes on' => sub {
 	like($said, $CHECK, 'and printing the URL to configure');
 	my $token = token_of($h);
 	unlike($said, qr/\Q$token\E/, 'without the token in it') if $token;
+
+	# T522 (D186): the warning is laid out to be read and to be copied from.
+	like($said, qr/\n\n[^\n]*\S unverified the GitHub webhook/,
+		'the warning has a blank line before it, and its text starts at the label')
+		or diag($said);
+	like($said, qr/^ +Configure a push hook calling:\n +https:\S+\/check\/webhook\?webhook_token=<token>\n/m,
+		'the URL is on a line of its own, with a placeholder where the token goes');
+	like($said, qr/^ +where <token> is the value at \S+\/webhook:token\n\n/m,
+		'and the line after says where the token is kept, a blank line after it');
 };
 
 subtest 'at the limit GitHub sets, the apply goes on' => sub {

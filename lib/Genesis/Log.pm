@@ -820,6 +820,7 @@ sub _log {
 		stack      => \@stack,
 		raw        => $options->{raw},
 		context    => $options->{context},
+		paragraph  => $options->{paragraph},
 
 		# Terminal specific options
 		prefix     => $options->{prefix},
@@ -891,9 +892,9 @@ sub flush_logs {
 		my $config = $self->{logs}{$log};
 		for my $line_number ($config->{next_entry}..$last_line) {
 			my (
-					$level, $ts,      $label, $colors, $emoji, $priority, $contents, $show_stack, $stack, $pending, $reset, $raw, $term_prefix, $term_style
+					$level, $ts,      $label, $colors, $emoji, $priority, $contents, $show_stack, $stack, $pending, $reset, $raw, $term_prefix, $term_style, $paragraph
 			)	= @{@{$self->{buffer}}[$line_number]}{
-				qw/level   timestamp label   colors   emoji   priority   contents   show_stack   stack   pending   reset   raw   prefix        style/
+				qw/level   timestamp label   colors   emoji   priority   contents   show_stack   stack   pending   reset   raw   prefix        style        paragraph/
 			};
 
 			next unless meets_level($config->{level},$level);
@@ -1024,7 +1025,17 @@ sub flush_logs {
 				$pre_pad =~ s/\A[\r\n]+// unless ($log eq '<terminal>' || ($last_waiting && !$reset));
 				$post_pad =~ s/[\r\n]+\z// unless ($log eq '<terminal>' || $pending);
 				$out .= "\n" unless $pending;
-				print $fh csprintf("%s", $reset.$pre_pad.$out.$post_pad);
+				my $text = $reset.$pre_pad.$out.$post_pad;
+				if ($log eq '<terminal>') {
+					# A paragraph stands apart by one blank line each side,
+					# and takes the one already there where there is one.
+					if ($paragraph && !$pending) {
+						$text = "\n$text" unless $config->{ended_blank} || $text =~ /\A\n/;
+						$text .= "\n" unless $text =~ /\n\n\z/;
+					}
+					$config->{ended_blank} = $text =~ /(?:\A|\n)[ \t]*\n\z/ ? 1 : 0;
+				}
+				print $fh csprintf("%s", $text);
 				$config->{last_label} = $label;
 
 				# Deal with stack

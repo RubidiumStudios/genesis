@@ -189,6 +189,39 @@ subtest 'a non-admin gets the list and the run carries on' => sub {
 		'the applied record was still written');
 };
 
+# Proves T522: what a non-admin is told is laid out to be read (D186).  Each
+# branch's refusal stands apart from the lines around it, what it needs sits
+# under the refusal's own text, and what to do with the lists is said once.
+subtest "a non-admin's refusals are laid out as paragraphs" => sub {
+	# Seven rows, and one more for the run's own restoration assertion.
+	plan tests => 8;
+
+	my $h = make_harness(envs => ['qa'], github => 1);
+	github_double($h, admin => 0);
+
+	my (undef, $err, $exit) = run_genesis($h, 'pipeline-apply');
+	is($exit, 0, 'the run carries on and exits 0');
+
+	my $refused = () = $err =~ /Could not protect /g;
+	is($refused, 2, 'control and the deployment branch are each refused');
+
+	my $apart = () = $err =~ /\n\n[^\n]*Could not protect /g;
+	is($apart, 2, 'each refusal has a blank line before it') or diag($err);
+
+	my @ragged = grep {length($_->[0]) != length($_->[1])}
+		map {[$_ =~ /\A(.*?)Could not protect [^\n]*\n( *)It needs: /]}
+		$err =~ /^([^\n]*Could not protect [^\n]*\n[^\n]*)/mg;
+	is(scalar(@ragged), 0, "and what it needs sits under the refusal's own text")
+		or diag($err);
+
+	my $handed = () = $err =~ /Hand those lists to whoever holds admin/g;
+	is($handed, 1, 'what to do with the lists is said once');
+	ok(index($err, 'Hand those lists') > rindex($err, 'Could not protect '),
+		'after the last refusal');
+	like($err, qr/Everything else was applied\.\n\n/,
+		'and a blank line follows it') or diag($err);
+};
+
 subtest 'approvals are left standing' => sub {
 	# Two rows, and one more for the run's own restoration assertion.
 	plan tests => 3;

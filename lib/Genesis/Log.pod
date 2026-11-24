@@ -1228,6 +1228,9 @@ B<Examples:>
   $logger->warning({context => 'deprecation'}, "%s is deprecated", $thing);
   # prints to STDERR unless the deprecation context is suppressed
 
+  $logger->warning({paragraph => 1}, "Could not protect %s", $branch);
+  # on the terminal, with one blank line before it and one after
+
 =head2 error
 
   $logger->error($format, @args);
@@ -1684,7 +1687,18 @@ used when capturing the call stack.
 
 The buffer entry includes: C<level>, C<label>, C<colors>, C<emoji>,
 C<priority>, C<timestamp>, C<contents>, C<pending>, C<reset>,
-C<show_stack>, C<stack>, C<raw>, C<prefix>, and C<style>.
+C<show_stack>, C<stack>, C<raw>, C<paragraph>, C<prefix>, and C<style>.
+
+C<paragraph>, where true, has the terminal write the message with one blank
+line before it and one after, so it stands apart from the lines around it.
+The terminal's entry remembers whether the last thing written to it ended
+on a blank line, so a paragraph that follows one adds none, and two
+paragraphs in a row have one blank line between them. A message that
+begins with a newline of its own gets no second one. It is the terminal's
+alone: a log file drops blank lines, and a pending message, which has no
+line end yet, is written as it always was. What some other program wrote
+to the terminal in between is not seen, so a blank line may be added after
+it.
 
 Stack frames are captured for all entries whose level meets
 C<capture_stack_min_level> (ordinal 2, i.e., C<FATAL>/C<ERROR> and above),

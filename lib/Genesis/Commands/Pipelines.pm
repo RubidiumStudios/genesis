@@ -813,8 +813,8 @@ sub propagate {
 	exit ABORTED if $publish && $publish->{declined};
 
 	my $status = run_status($record);
-	warning(
-		"\nThe run was partial.  Everything the report says was published ".
+	_caution(
+		"The run was partial.  Everything the report says was published ".
 		"still stands, and the next run repairs the rest."
 	) if $status;
 	exit $status;
@@ -1526,6 +1526,12 @@ sub open_control_session {
 # }}}
 ### Internal Compiler Helpers {{{
 
+# _caution - a warning as a paragraph of its own, apart from the report's lines (D186) {{{
+sub _caution {
+	return warning({paragraph => 1, offset => 1}, @_);
+}
+
+# }}}
 # _take_named_github_token - act with the token the configuration names, for the caller's scope (D178) {{{
 #
 # Assigns GITHUB_AUTH_TOKEN, which the caller has localised.
@@ -1789,7 +1795,7 @@ sub _apply_orphans {
 			next;
 		}
 		info("    record        #C{%s}", $_) for @{$o->{records}};
-		warning("#C{%s} is still deployed, by its exodus record at #C{%s}: removing its file did not ".
+		_caution("#C{%s} is still deployed, by its exodus record at #C{%s}: removing its file did not ".
 			"tear it down.  Restore the file from #C{%s} and run #C{genesis %s terminate}.",
 			$o->{env}, $o->{exodus}, $o->{branch}, $o->{env}) if $o->{deployed};
 	}
@@ -1805,7 +1811,7 @@ sub _apply_orphans {
 
 	unless ($opts{cleanup}) {
 		info("  Nothing was removed; #C{--cleanup-orphans} removes these traces.");
-		warning(
+		_caution(
 			"The report above is incomplete: the vault records of %s could not be read.  ".
 			"The apply goes on, and exits non-zero when it is done.",
 			join(', ', map {"#C{$_->{env}}"} @failures)
@@ -1924,7 +1930,7 @@ sub _cleanup_orphan {
 	my ($gh, $repo) = @opts{qw/gh owner_repo/};
 	my $done = sub {
 		my ($what, $why, $did) = @_;
-		$why ? warning("#Y{could not %s} %s: %s", $did ? 'close' : 'remove', $what, $why)
+		$why ? _caution("#Y{could not %s} %s: %s", $did ? 'close' : 'remove', $what, $why)
 		     : info("  #G{%s} %s", $did // 'removed', $what);
 	};
 
@@ -1975,6 +1981,9 @@ sub _apply_webhook_hook {
 	my $path = _webhook_store_path($top);
 	# What an operator configures by hand: the token is named, never shown.
 	my $shown = "$base?webhook_token=<the token at $path:token>";
+	# The same for a warning, the URL on a line of its own so it copies whole.
+	my $by_hand = "calling:\n  #C{$base?webhook_token=<token>}\n".
+		"where #C{<token>} is the value at #C{$path:token}";
 
 	unless ($gh && $owner_repo) {
 		info("  #Yi{skipped} the GitHub webhook, because #C{GITHUB_AUTH_TOKEN} is not set%s; ".
@@ -1984,8 +1993,8 @@ sub _apply_webhook_hook {
 
 	my ($code, $hooks, $why) = $gh->list_hooks($owner_repo);
 	unless (defined $hooks) {
-		warning("  #Y{unverified} the GitHub webhook, because the repository's hooks could not be read ".
-			"(%s); configure a push hook calling #C{%s}", $why, $shown) if $on;
+		_caution("#Y{unverified} the GitHub webhook, because the repository's hooks could not be read ".
+			"(%s).\nConfigure a push hook %s", $why, $by_hand) if $on;
 		return;
 	}
 	my @ours = grep {index($_->{config}{url} // '', $base) == 0} @$hooks;
@@ -1997,7 +2006,7 @@ sub _apply_webhook_hook {
 				next;
 			}
 			my (undef, $err) = $gh->delete_hook($owner_repo, $hook->{id});
-			$err ? warning("  #Y{could not remove} the GitHub webhook calling #C{%s}: %s", $base, $err)
+			$err ? _caution("#Y{could not remove} the GitHub webhook calling #C{%s}: %s", $base, $err)
 			     : info("  #G{removed} the GitHub webhook calling #C{%s}", $base);
 		}
 		return;
@@ -2008,8 +2017,8 @@ sub _apply_webhook_hook {
 		if ($opts{dry_run}) {
 			info("  #Yi{would %s} the GitHub webhook calling #C{%s}", $hook ? 'update' : 'create', $base);
 		} else {
-			warning("  #Y{unverified} the GitHub webhook, because the token could not be read; ".
-				"configure a push hook calling #C{%s}", $shown);
+			_caution("#Y{unverified} the GitHub webhook, because the token could not be read.\n".
+				"Configure a push hook %s", $by_hand);
 		}
 		return;
 	}
@@ -2032,12 +2041,12 @@ sub _apply_webhook_hook {
 	}
 	if ($answered == 422 && !$hook) {
 		my $pushes = grep {grep {$_ eq 'push'} @{$_->{events} || []}} @$hooks;
-		warning("  #Y{not created} the GitHub webhook: %s, with %d push hook%s already on the ".
-			"repository; configure one calling #C{%s} in place of another, or let the fallback ".
-			"poll find each push", $err, $pushes, $pushes == 1 ? '' : 's', $shown);
+		_caution("#Y{not created} the GitHub webhook: %s, with %d push hook%s already on the ".
+			"repository.\nIn place of another, configure one %s\n".
+			"or let the fallback poll find each push.", $err, $pushes, $pushes == 1 ? '' : 's', $by_hand);
 		return;
 	}
-	warning("  #Y{unverified} the GitHub webhook: %s; configure a push hook calling #C{%s}", $err, $shown);
+	_caution("#Y{unverified} the GitHub webhook: %s.\nConfigure a push hook %s", $err, $by_hand);
 }
 
 # }}}
@@ -2314,7 +2323,7 @@ sub _protection_rules_for {
 sub _apply_branch_protection {
 	my ($gh, $owner_repo, %opts) = @_;
 
-	my %missing;
+	my (%missing, @refused);
 	for my $spec (@{$opts{branches} || []}) {
 		my %ruleset = (
 			name     => sprintf('genesis-%s', $spec->{branch}),
@@ -2344,12 +2353,20 @@ sub _apply_branch_protection {
 		}
 
 		$missing{$spec->{branch}} = [map {$_->{type}} @{$spec->{rules}}];
-		warning(
-			"Could not protect #C{%s}: %s\n".
-			"  needed: %s\n".
-			"Hand that list to whoever holds admin on the repository.  ".
-			"Everything else was applied.",
-			$spec->{branch}, $reason, join(', ', @{$missing{$spec->{branch}}})
+		push @refused, [$spec->{branch}, $reason];
+	}
+
+	# After the branches that were protected, and what to do with the lists
+	# said once, under the last of them (D186).
+	for my $i (0..$#refused) {
+		my ($branch, $reason) = @{$refused[$i]};
+		_caution(
+			"Could not protect #C{%s}: %s\nIt needs: %s%s",
+			$branch, $reason, join(', ', @{$missing{$branch}}),
+			$i < $#refused ? '' : sprintf(
+				"\n\nHand %s to whoever holds admin on the repository.  ".
+				"Everything else was applied.",
+				@refused > 1 ? 'those lists' : 'that list')
 		);
 	}
 
@@ -2403,7 +2420,7 @@ sub _apply_records {
 	# refuses where there is no environment to read it from, which would turn
 	# the stage that stands aside into the stage that stopped the run.
 	if ($opts{skip_vault}) {
-		warning(
+		_caution(
 			"Not writing the applied record, because #C{--skip-vault} was ".
 			"given and that record lives in the vault.  Until an apply ".
 			"writes it, nothing can tell this pipeline from one nobody has ".
@@ -2495,7 +2512,7 @@ sub _apply_records {
 			$env  = Genesis::Env->bare($name, $top);
 			$deps = [$env->_declared_dependencies];
 
-			warning(
+			_caution(
 				"Could not load #C{%s}, so only its declared dependencies ".
 				"are wired: %s\n".
 				"Re-run #C{genesis pipeline-apply} once it loads.",
@@ -2780,7 +2797,7 @@ sub _worktree_banner {
 	return unless @lines;
 
 	my $t = $gaps->{tracking};
-	warning(join("\n",
+	_caution(join("\n",
 		sprintf("#Y{This preview reads the working tree of }#C{%s}#Y{, not control on the remote.}%s",
 			($top->git->prefixed(''))[0] || './',
 			$t ? sprintf("  #C{%s} at #C{%s}, as last fetched, is what a real apply reads.",
