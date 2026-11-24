@@ -52,7 +52,7 @@
 
 <h2>2. Before you start</h2>
 <ul>
-  <li><strong>Genesis 3.2.x embedded</strong> in the deployment root (<code>genesis embed</code>). Every pipeline task runs the root's own <code>.genesis/bin/genesis</code>, and the compile refuses without it.</li>
+  <li><strong>Genesis 3.2.x embedded</strong> in the deployment root (<code>genesis embed</code>). Every pipeline task runs the root's own <code>.genesis/bin/genesis</code>, and the compile refuses without it. <code>genesis pipeline-apply</code> also refuses where the Genesis embedded at <code>control</code> is not the one running the apply, so embed, commit and push (or merge) before you apply, each time you change Genesis; <code>--embed-mismatch-ok</code> applies anyway.</li>
   <li><strong>A task image with git 2.34.1 or later.</strong> The default is <code>genesiscommunity/concourse:latest</code>.</li>
   <li><strong>A <code>safe</code> other than 1.26.0</strong>, on your machine and in the task image. That one release exports secrets in a form Genesis doesn't read, and Genesis refuses its output by name. Use 1.26.1 or later. The deployment vault's mount can be KV version 1 or 2.</li>
   <li><strong>Manifests kept in exodus</strong> (<code>manifest_store: exodus</code>), and every kit at 3.1.0 or later. The load refuses older ones.</li>

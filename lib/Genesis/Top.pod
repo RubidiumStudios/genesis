@@ -1550,6 +1550,104 @@ B<Examples:>
     # Copies binary to /srv/cf-deployments/.genesis/bin/genesis
     # Returns: 1
 
+=head2 embedded_genesis
+
+    my $found = $top->embedded_genesis(commit => $sha);
+    my $found = $top->embedded_genesis();   # the working tree
+
+How the Genesis embedded in this repository compares with the one running
+(D189). Every task of a pipeline runs C<.genesis/bin/genesis> from its
+branch, so C<pipeline-apply> asks this of the control commit it reads its
+shape from, and of the working tree under a dry run.
+
+What is running is the file L</embed> would write: the binary this process
+was started from. The two are compared as git blobs, so no encoding comes
+between them, and only where they differ is a version read out of the
+embedded one, through L</embedded_genesis_verdict>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<commit>
+
+The commit to read the embedded file at. Without it the working tree's file
+is read.
+
+=back
+
+B<Returns:> the hash reference L</embedded_genesis_verdict> answers.
+
+B<Errors:> C<DATAERR> where the commit cannot be read, as
+L<Service::Git/read_blobs> raises it.
+
+B<Examples:>
+
+    $top->embedded_genesis(commit => $top->shape_commit)->{is};   # 'same'
+
+=head2 embedded_genesis_verdict
+
+    my $found = Genesis::Top::embedded_genesis_verdict($held, $running_sha, $running);
+
+Judges an embedded Genesis against the one running. Plain function, so it
+can be asked without a repository.
+
+The same blob is C<same>, whatever it holds. Other bytes of the running
+version are C<same-version>, another build of it. Another version, or a file
+no version can be read from, C<differs>. None at all is C<missing>.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$held>
+
+What is embedded, as a hash reference of C<sha> and C<content>, or undef
+where there is none.
+
+=item C<$running_sha>
+
+The git blob sha of the binary running.
+
+=item C<$running>
+
+The running Genesis's version.
+
+=back
+
+B<Returns:> a hash reference: C<is>, one of the four words above;
+C<running>, the running version; and C<embedded>, the embedded one where it
+could be read.
+
+B<Errors:> None.
+
+B<Examples:>
+
+    embedded_genesis_verdict(undef, $sha, '3.2.0');   # {is => 'missing', running => '3.2.0'}
+
+=head2 packed_genesis_version
+
+    my $version = Genesis::Top::packed_genesis_version($bytes);
+
+The version a packed Genesis was branded with, read out of the file's own
+contents: the library C<./pack> appends after the end marker, gzipped and in
+base64, carries a C<$VERSION = "X.Y.Z";> line, and builds before that wrote
+C<$Genesis::VERSION>. Plain function.
+
+B<Parameters:> the file's contents.
+
+B<Returns:> the version, or undef where the file is no packed build or
+carries no such line.
+
+B<Errors:> None; a payload that will not unpack answers undef.
+
+B<Limitations:> C<Genesis::Commands::check_embedded_genesis> reads the same
+line with code of its own, written before this; the two are not yet one.
+
+B<Examples:>
+
+    packed_genesis_version(slurp('.genesis/bin/genesis'));   # '3.2.0'
+
 =head2 download_kit
 
     $top->download_kit($id, %opts);

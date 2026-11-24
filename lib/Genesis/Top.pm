@@ -1057,6 +1057,61 @@ sub embed {
 }
 
 # }}}
+# embedded_genesis - how the Genesis embedded here compares with the one running (D189) {{{
+#
+# At a commit, or in the working tree where none is named.  What is running
+# is the file embed would write.
+sub embedded_genesis {
+	my ($self, %at) = @_;
+	my $path = '.genesis/bin/genesis';
+	my $hash = sub {
+		my ($sha, $rc) = run({stderr => 0}, 'git', 'hash-object', '--no-filters', '--', $_[0]);
+		return $rc ? undef : $sha =~ s/\s+\z//r;
+	};
+
+	my $held;
+	if (defined $at{commit}) {
+		my ($in_git) = $self->git->prefixed($path);
+		$held = $self->git->read_blobs($at{commit}, $in_git)->{$in_git};
+	} elsif (-f $self->path($path)) {
+		$held = {sha => $hash->($self->path($path)), content => slurp($self->path($path))};
+	}
+
+	return embedded_genesis_verdict(
+		$held, $hash->(Cwd::abs_path($ENV{GENESIS_CALLBACK_BIN} || $0)), $Genesis::VERSION);
+}
+
+# }}}
+# embedded_genesis_verdict - same, same-version, differs or missing, with both versions {{{
+sub embedded_genesis_verdict {
+	my ($held, $running_sha, $running) = @_;
+	return {is => 'missing', running => $running} unless $held;
+	return {is => 'same', running => $running, embedded => $running}
+		if defined $running_sha && ($held->{sha} // '') eq $running_sha;
+
+	my $embedded = packed_genesis_version($held->{content});
+	my $alike    = defined $embedded && defined $running && $embedded eq $running;
+	return {is => $alike ? 'same-version' : 'differs', running => $running, embedded => $embedded};
+}
+
+# }}}
+# packed_genesis_version - the version a packed Genesis was branded with, or undef {{{
+sub packed_genesis_version {
+	my ($bytes) = @_;
+	my ($payload) = ($bytes // '') =~ /^__(?:END|DATA)__\n[^\n]*\n(.+)\z/ms or return undef;
+
+	require MIME::Base64;
+	require IO::Uncompress::Gunzip;
+	my $packed = MIME::Base64::decode_base64($payload);
+	my $tar;
+	IO::Uncompress::Gunzip::gunzip(\$packed => \$tar) or return undef;
+
+	# pack writes `$VERSION = "X.Y.Z";`; earlier releases wrote $Genesis::VERSION.
+	my ($version) = ($tar // '') =~ /^\$(?:Genesis::)?VERSION\s*=\s*"([^"]*)"/m;
+	return $version;
+}
+
+# }}}
 # path - return the path of the repo, or absolute path of the specified relative path {{{
 sub path {
 	my ($self, $relative) = @_;

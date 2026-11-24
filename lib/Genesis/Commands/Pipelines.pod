@@ -309,6 +309,19 @@ Build the repository handle without a vault connection, for compiling
 where no vault is running.  The applied record is written to the vault, so
 this flag leaves it unwritten and the run says so.
 
+=item C<--embed-mismatch-ok>
+
+Apply although the Genesis embedded at control is not the one running the
+apply. Under an automated provider every task runs C<.genesis/bin/genesis>
+from its branch, so the apply compares that file at the control commit it
+reads with its own binary and refuses, before anything is written, where
+control embeds another version, a file no version can be read from, or
+none; the refusal names C<genesis embed>, the commit, and the push or pull
+request control takes (D189). Another build of the same version is a
+warning. With this flag the apply warns and goes on, which is for a change
+that is the apply's own and no task's. A dry run reads the working tree and
+warns where a real apply would refuse.
+
 =back
 
 B<Returns:> Nothing.  Exits 0 on success, and exits 0 early under
@@ -2180,6 +2193,49 @@ B<Errors:> None.
 B<Examples:>
 
     _caution("Could not protect #C{%s}: %s\nIt needs: %s", $branch, $reason, $rules);
+
+=head2 _check_embedded_genesis
+
+    _check_embedded_genesis($top, dry_run => $dry_run, mismatch_ok => $flag);
+
+Refuses a control whose embedded Genesis is not the one running the apply
+(D189). C<apply> calls it for every provider but C<manual>, which has no
+task to run one, once the control branch is known to be in the clone and
+before anything is written.
+
+It asks L<Genesis::Top/embedded_genesis> of the commit the shape is read
+from, or of the working tree under a dry run. The same binary passes in
+silence. Another build of the running version is a warning. Anything else
+is refused, unless the run is a dry run or carries C<--embed-mismatch-ok>,
+which warn and go on.
+
+B<Parameters:>
+
+=over 4
+
+=item C<$top>
+
+The repository handle.
+
+=item C<dry_run>
+
+True for a preview, which reads the working tree and refuses nothing.
+
+=item C<mismatch_ok>
+
+True where C<--embed-mismatch-ok> was given.
+
+=back
+
+B<Returns:> 1 where the apply may go on.
+
+B<Errors:> C<CONFIG> where control embeds another version, a file no version
+can be read from, or no Genesis, naming both versions and the steps that
+embed the running one.
+
+B<Examples:>
+
+    _check_embedded_genesis($top, dry_run => 0, mismatch_ok => $opts->{'embed-mismatch-ok'});
 
 =head2 _take_named_github_token
 

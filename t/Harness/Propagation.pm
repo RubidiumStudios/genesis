@@ -1128,18 +1128,28 @@ sub _install_kit {
 # }}}
 # _embed_genesis - stand a genesis in at .genesis/bin/genesis {{{
 #
-# Genesis::Top::embed writes the running genesis there for CI to call, and a
-# row that wants that path in a tree wants a file rather than the megabytes of
-# the real one, so the harness writes an executable stub and commits it with
-# the deployment root.
+# Genesis::Top::embed writes the running genesis there for CI to call, and the
+# harness does as it does: a copy of the genesis under test, committed with
+# the deployment root, so an apply finds the Genesis running it embedded at
+# control and does not refuse (D189).  The copy is the script alone, with no
+# library beside it, so nothing can run it from there.
 sub _embed_genesis {
 	my ($self, $root) = @_;
 
 	helper::mkdir_or_fail("$root/.genesis/bin") unless -d "$root/.genesis/bin";
+	my $path = "$root/.genesis/bin/genesis";
+
 	# embed => 'real' runs the genesis under test, for a pipeline rehearsal.
-	helper::put_file("$root/.genesis/bin/genesis", 0755, ($self->{embed} // '') eq 'real'
-		? "#!/bin/sh\n# runs the genesis under test, as Top::embed's copy would\nexec \"\$GENESIS_TOPDIR/bin/genesis\" \"\$@\"\n"
-		: "#!/bin/sh\n# stands in for the genesis Top::embed writes\nexit 0\n");
+	if (($self->{embed} // '') eq 'real') {
+		helper::put_file($path, 0755,
+			"#!/bin/sh\n# runs the genesis under test, as Top::embed's copy would\nexec \"\$GENESIS_TOPDIR/bin/genesis\" \"\$@\"\n");
+		return $self;
+	}
+
+	require File::Copy;
+	File::Copy::copy("$ENV{GENESIS_TOPDIR}/bin/genesis", $path)
+		or die "Could not embed the genesis under test at $path: $!\n";
+	chmod 0755, $path;
 
 	return $self;
 }

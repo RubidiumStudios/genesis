@@ -90,6 +90,13 @@ sub apply {
 		$top->control_branch
 	) unless $git->branch_exists($top->control_branch);
 
+	# Every task runs the Genesis embedded at control, so it has to be the
+	# one compiling the pipeline here (D189).  A manual provider has no task.
+	_check_embedded_genesis($top,
+		dry_run     => $dry_run,
+		mismatch_ok => $opts->{'embed-mismatch-ok'},
+	) unless $platform eq 'manual';
+
 	# The token the apply acts on GitHub with: the one the configuration
 	# names in the provider's store, which is known to be this repository's,
 	# else the shell's, which may be there for another reason (D177).  The
@@ -1529,6 +1536,51 @@ sub open_control_session {
 # _caution - a warning as a paragraph of its own, apart from the report's lines (D186) {{{
 sub _caution {
 	return warning({paragraph => 1, offset => 1}, @_);
+}
+
+# }}}
+# _check_embedded_genesis - refuse a control whose embedded Genesis is not the one applying (D189) {{{
+sub _check_embedded_genesis {
+	my ($top, %opts) = @_;
+
+	# A dry run reads the tree in front of it, as it reads the shape (D112).
+	my $found = $top->embedded_genesis(commit => $opts{dry_run} ? undef : $top->shape_commit);
+	return 1 if $found->{is} eq 'same';
+
+	my $at    = $opts{dry_run} ? 'in this working tree' : sprintf('at #C{%s}', $top->control_branch);
+	my $steps = sprintf(
+		"To embed this one: run #C{genesis embed}, commit #C{.genesis/bin/genesis}, ".
+		"and get it to #C{%s} by the push or pull request it takes.", $top->control_branch);
+
+	if ($found->{is} eq 'same-version') {
+		_caution(
+			"The Genesis embedded %s is another build of #C{%s}, the version running ".
+			"this apply.  The pipeline's tasks run the embedded one.\n%s",
+			$at, $found->{running}, $steps);
+		return 1;
+	}
+
+	my $what = $found->{is} eq 'missing' ? "No Genesis is embedded $at"
+		: defined $found->{embedded}     ? "The Genesis embedded $at is #C{$found->{embedded}}"
+		:                                  "The Genesis embedded $at is not a build a version can be read from";
+	my $why = sprintf(
+		"%s, and this apply is run by #C{%s}.  Every task of the pipeline runs ".
+		"the embedded one, so the pipeline this sets is compiled by a Genesis ".
+		"its tasks do not run.\n%s",
+		$what, $found->{running} // 'a Genesis of no known version', $steps);
+
+	if ($opts{dry_run}) {
+		_caution("%s\nA real apply refuses here; #C{--embed-mismatch-ok} has it go on.", $why);
+		return 1;
+	}
+	if ($opts{mismatch_ok}) {
+		_caution("%s\nGoing on, as #C{--embed-mismatch-ok} asks.", $why);
+		return 1;
+	}
+	bail(
+		{exitcode => CONFIG},
+		"Refusing to apply.  %s\n\nNothing was written.  #C{--embed-mismatch-ok} ".
+		"applies anyway, for a change that is the apply's own and no task's.", $why);
 }
 
 # }}}

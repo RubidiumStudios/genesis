@@ -370,6 +370,7 @@ unit-tests/genesis_top-pipeline_git_checks.t # pipeline.provider.git's webhooks 
 unit-tests/genesis_top-pipeline_bosh_configs.t # track_bosh_configs on an OCFP environment is refused, naming its file (D147)
 unit-tests/genesis_top-merged_env_params.t   # the load-time merge is spruce's, so append and prune apply across the hierarchy
 unit-tests/genesis_top-pipeline_blocks.t     # the shuttle, vault, locker and notification blocks of the pipeline section
+unit-tests/genesis_top-embedded_genesis.t    # the embedded Genesis told apart from the one running: same, another build, another version, none
 unit-tests/genesis_top-pipeline_repo_keys.t  # the pipeline label and the repository-wide recreate key
 unit-tests/genesis_top-shuttle_backends.t    # the shuttle block, declared on the backend that decides its shape
 ci-provider.t                                # the CI provider classes, their fragments, and the rules each states for its own block
@@ -537,6 +538,7 @@ integration-tests/genesis_commands_pipelines-invalid_control.t # control's tree 
 integration-tests/genesis_commands_pipelines-apply_root_committed.t # the apply needs its own deployment root committed, and no other
 integration-tests/genesis_commands_pipelines-apply_concourse.t # a real apply sets the pipeline at the resolved target, refusing before it writes
 integration-tests/genesis_commands_pipelines-apply_pause_state.t # the pause state an apply leaves the pipeline in: as found, or as the key or a flag says
+integration-tests/genesis_commands_pipelines-apply_embedded_genesis.t # the apply refuses a control whose embedded Genesis is not the one running it
 integration-tests/genesis_commands_pipelines-apply_overrides.t   # an operator's pipeline fragment reaches the dry apply and the file fly set-pipeline is handed
 integration-tests/genesis_commands_pipelines-concourse_gate.t # diff, jobs, pause and resume refuse what is not a live Concourse pipeline before they compile
 integration-tests/genesis_commands_pipelines-diff.t           # pipeline-diff previews the tree, compares as data, and takes --from
