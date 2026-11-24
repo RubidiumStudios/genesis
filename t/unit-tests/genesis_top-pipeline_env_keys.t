@@ -92,8 +92,8 @@ subtest 'the redeploy keys are declared in their settled form' => sub {
 
 	for my $gone (qw/redeploy redeploy_cron_start redeploy_cron_stop/) {
 		throws_ok {load_env_with({$gone => '0 3 * * *'})}
-			qr/genesis\.pipeline\.$gone: is no longer read.*redeploy_cron/s,
-			"$gone is refused by name, as retired (T404)";
+			qr/genesis\.pipeline\.$gone: unknown configuration key.*redeploy_cron/s,
+			"$gone is refused by name, with redeploy_cron among the keys offered (T404, D185)";
 	}
 };
 
@@ -101,8 +101,8 @@ subtest 'the tracked-files key is renamed and behaves as before' => sub {
 	plan tests => 5;
 
 	throws_ok {load_env_with({required_files => ['ops/<env>.yml']})}
-		qr/genesis\.pipeline\.required_files: is no longer read.*track_additional_files/s,
-		'the old name is refused by name, naming the new one (T404)';
+		qr/genesis\.pipeline\.required_files: unknown configuration key.*track_additional_files/s,
+		'the old name is refused by name, with the new one among the keys offered (T404, D185)';
 	lives_ok {load_env_with({track_additional_files => ['ops/<env>.yml']})}
 		'the new name is declared in its place';
 
@@ -130,8 +130,8 @@ subtest 'the per-environment notifications key is refused' => sub {
 	plan tests => 4;
 
 	throws_ok {load_env_with({notifications => {style => 'grouped'}})}
-		qr/genesis\.pipeline\.notifications: is no longer read.*pipeline\.notifications.*\.genesis\/config/s,
-		'naming the key and where notifications are set';
+		qr/genesis\.pipeline\.notifications: unknown configuration key/,
+		'by name, as a key an environment does not have (D185)';
 	lives_ok {load_env_with({manual => 'true'})} 'the same file without it loads';
 
 	my $g = make_harness(envs => [], pipeline => 1, vault => 0);
@@ -147,9 +147,10 @@ subtest 'the per-environment notifications key is refused' => sub {
 	like($refusal, qr/\bset in us\.yml\b/, 'naming the shared file that sets it');
 };
 
-# A key the schema itself refuses, retired or unknown, was refused on the
-# environment but never named the file that set it when that was a shared one,
-# which the custom checks above always did.  Green for an own-file key.
+# A key the schema itself refuses was refused on the environment but never
+# named the file that set it when that was a shared one, which the custom
+# checks above always did.  Green for an own-file key.  The key is one an
+# rc build wrote, refused as unknown since D185.
 subtest 'an inherited key the schema refuses names the file that sets it' => sub {
 	plan tests => 2;
 
@@ -161,11 +162,11 @@ subtest 'an inherited key the schema refuses names the file that sets it' => sub
 	my $refusal = '';
 	eval {my $t = Genesis::Top->new($g->a, no_vault => 1); $t->config; 1} or $refusal = $@;
 	$refusal = Genesis::Term::decolorize($refusal) =~ s/\s+/ /gr;
-	like($refusal, qr/genesis\.pipeline\.required_files: is no longer read.*\(in us-east-qa, set in us\.yml\)/,
-		'the retired key names the environment and the shared file');
+	like($refusal, qr/genesis\.pipeline\.required_files: unknown configuration key.*\(in us-east-qa, set in us\.yml\)/,
+		'the refused key names the environment and the shared file');
 
 	throws_ok {load_env_with({required_files => ['ops/x.yml']})}
-		qr/required_files: is no longer read.*\(in qa\)/s,
+		qr/required_files: unknown configuration key.*\(in qa\)/s,
 		'and its own file still reads as before';
 };
 

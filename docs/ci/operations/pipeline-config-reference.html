@@ -279,17 +279,12 @@ genesis config --set pipeline.enabled true</pre>
 </table>
 
 <h2 style="break-before: page">Retired and refused keys</h2>
-<p class="note">Each key below is declared only so that it can be refused by name, and its refusal says what replaced it. Any other undeclared key is refused as <code>unknown configuration key</code>, listing the keys expected, and <code>genesis config --unset</code> removes one the file still carries. No key under <code>pipeline</code> in <code>.genesis/config</code> is on this list: a key of that section which a release candidate wrote and no release reads is refused as unknown.</p>
+<p class="note">The one key below is declared only so that it can be refused by name, and its refusal says what replaced it. Any other undeclared key is refused as <code>unknown configuration key</code>, listing the keys expected, and <code>genesis config --unset</code> removes one <code>.genesis/config</code> still carries. That goes for every key a release candidate wrote and no release reads, under <code>pipeline</code> in <code>.genesis/config</code> and under <code>genesis.pipeline</code> in an environment file, a per-environment <code>notifications</code> among them.</p>
 <table class="ret">
 <colgroup><col class="c1"><col class="c2"><col class="c3"></colgroup>
 <thead><tr><th>Retired key</th><th>Where it was written</th><th>What replaced it</th></tr></thead>
 <tbody>
 <tr><td><code>ci</code> (the whole block)</td><td><code>.genesis/config</code></td><td>The <code>pipeline</code> block in the same file. Set its keys there, then remove the old block with <code>genesis config --unset ci</code>.</td></tr>
-<tr><td><code>genesis.pipeline.locks</code></td><td>environment file</td><td>Nothing: both deploy locks are mandatory, backed by <code>pipeline.locker</code> in <code>.genesis/config</code>. Remove it.</td></tr>
-<tr><td><code>genesis.pipeline.status_signal</code><br><code>genesis.pipeline.signal_prefix</code></td><td>environment file</td><td>Signalling is <code>pipeline.shuttle</code> in <code>.genesis/config</code>. Remove them.</td></tr>
-<tr><td><code>genesis.pipeline.required_files</code></td><td>environment file</td><td><code>genesis.pipeline.track_additional_files</code>, with the same paths.</td></tr>
-<tr><td><code>genesis.pipeline.redeploy</code><br><code>genesis.pipeline.redeploy_cron_start</code><br><code>genesis.pipeline.redeploy_cron_stop</code></td><td>environment file</td><td><code>genesis.pipeline.redeploy_cron</code>: one crontab expression or a list of them, in UTC.</td></tr>
-<tr><td><code>genesis.pipeline.notifications</code></td><td>environment file</td><td>Notifications are the repository's settings, in <code>pipeline.notifications</code> of <code>.genesis/config</code>. Remove it.</td></tr>
 </tbody>
 </table>
 <p class="note">Refused values: <code>pipeline.shuttle.backend</code> set to anything but <code>s3</code> (<code>file</code> and <code>gcs</code> included), and <code>pipeline.provider.group_commits: false</code>. A legacy <code>ci.yml</code> whose top-level key is <code>pipeline:</code> is not read as configuration; beside an enabled version 3 pipeline it produces a warning asking for its removal.</p>

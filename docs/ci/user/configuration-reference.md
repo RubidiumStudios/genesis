@@ -29,7 +29,7 @@ The block is read merged, so a key written in a site file is inherited by every 
 
 The environment's director is `genesis.bosh_env`, outside the block, as for a deploy by hand. It also names the director's lock pool, `<bosh_env>-bosh`.
 
-These keys are retired and refused, each naming its replacement: `locks`, `status_signal`, `signal_prefix`, `required_files`, `redeploy`, `redeploy_cron_start` and `redeploy_cron_stop`.
+A key the block does not declare is refused by name, as unknown. That includes `notifications`, which is the repository's setting and never an environment's.
 
 ### `manual`
 

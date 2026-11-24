@@ -142,7 +142,7 @@ subtest "notifications are optional and the repository's alone" => sub {
 	write_nested_env('qa', '    notifications:', '      style: parallel');
 	throws_ok {load_with($h, join("\n", automated_pipeline_block(),
 		'  notifications:', '    style: grouped'))}
-		qr/genesis\.pipeline\.notifications: is no longer read/,
+		qr/genesis\.pipeline\.notifications: unknown configuration key/,
 		'and an environment may not override it (D152)';
 };
 
@@ -171,37 +171,29 @@ subtest 'the provider-specific keys are validated per provider type' => sub {
 		'the task image has the default the fragment gave it';
 };
 
-subtest 'the removed keys are refused by name, with what replaced them' => sub {
-	# T404: each was refused as an unknown key, which said nothing of what to
-	# write instead; a retired key is now refused as no longer read, naming
-	# its replacement.
-	my @retired = (
-		[['    locks:', '      bosh_upgrade: x'], 'locks', qr/mandatory.*pipeline\.locker/],
-		[['    status_signal: x'],       'status_signal',       qr/pipeline\.shuttle/],
-		[['    signal_prefix: x'],       'signal_prefix',       qr/pipeline\.shuttle/],
-		[['    redeploy: x'],            'redeploy',            qr/redeploy_cron/],
-		[['    redeploy_cron_start: x'], 'redeploy_cron_start', qr/redeploy_cron/],
-		[['    redeploy_cron_stop: x'],  'redeploy_cron_stop',  qr/redeploy_cron/],
-		[['    required_files: [x]'],    'required_files',      qr/genesis\.pipeline\.track_additional_files/],
+subtest 'the keys an rc build wrote in an environment are refused by name' => sub {
+	# T404 had each refused as retired, naming what replaced it.  None was
+	# ever released, so each is refused as any key the block does not
+	# declare is (D185).
+	my @gone = (
+		[['    locks:', '      bosh_upgrade: x'], 'locks'],
+		[['    status_signal: x'],       'status_signal'],
+		[['    signal_prefix: x'],       'signal_prefix'],
+		[['    redeploy: x'],            'redeploy'],
+		[['    redeploy_cron_start: x'], 'redeploy_cron_start'],
+		[['    redeploy_cron_stop: x'],  'redeploy_cron_stop'],
+		[['    required_files: [x]'],    'required_files'],
 	);
-	plan tests => 2 * @retired + 1;
+	plan tests => scalar @gone;
 
-	# And a key nobody declared is not offered a retired one in its list.
-	write_nested_env('qa', '    bogus: x');
-	my $listed = '';
-	eval {load_with($h, automated_pipeline_block()); 1}
-		or $listed = Genesis::Term::decolorize("$@") =~ s/\s+/ /gr;
-	unlike($listed, qr/expected one of[^.]*\b(?:locks|required_files|status_signal)\b/,
-		'an unknown key is offered no retired key among those expected');
-
-	for my $case (@retired) {
-		my ($lines, $key, $replacement) = @$case;
+	for my $case (@gone) {
+		my ($lines, $key) = @$case;
 		write_nested_env('qa', @$lines);
 		my $said = '';
 		eval {load_with($h, automated_pipeline_block()); 1}
 			or $said = Genesis::Term::decolorize("$@") =~ s/\s+/ /gr;
-		like($said, qr/genesis\.pipeline\.$key: is no longer read/, "$key is refused as retired");
-		like($said, $replacement, 'naming what replaced it');
+		like($said, qr/genesis\.pipeline\.$key: unknown configuration key/,
+			"$key is refused as a key the block does not declare");
 	}
 	write_nested_env('qa');
 };

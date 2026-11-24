@@ -4894,9 +4894,9 @@ which is a list of crontab expressions in UTC, C<track_dependencies>,
 C<track_additional_files>, and C<track_bosh_configs>, which are the three
 sources the propagation set and the redeploy triggers are built from, and
 C<provider>, whose keys are whatever the configured provider declares through
-L</_provider_env_options_schema> (D139). C<notifications> is declared retired
-and refused naming C<pipeline.notifications>, because notifications are the
-repository's settings (D152).
+L</_provider_env_options_schema> (D139). C<notifications> is not declared,
+and so is refused as unknown, because notifications are the repository's
+settings (D152).
 
 Two of those carry a shape the declaration cannot state, and
 L</_validate_env_pipeline_block> checks both beside it.
@@ -4911,7 +4911,8 @@ pattern of its own. C<track_additional_files> was once C<required_files>, with
 the same path semantics. C<track_bosh_configs> is per environment only, its
 global fallback gone with the multi-file layout; a boolean turns every config
 type on and a list names them, so it is declared C<any> and its shape is
-checked beside it. The retired keys are declared through L</_retired_key>.
+checked beside it. No key is declared retired here: one an rc build wrote
+and no release reads is refused as unknown (D185).
 
 B<Returns:> A hash reference.
 
@@ -4988,11 +4989,10 @@ B<Examples:>
 A schema entry for a key a decision retired: it accepts any value, is flagged
 C<retired> so no "expected one of" list offers it, and its C<check> always
 refuses it as "is no longer read", followed by what replaced it (T404). The
-retired keys are the rc builds' C<ci> block, and in an environment's
-C<genesis.pipeline>: C<locks> (D22), C<status_signal> and C<signal_prefix>
-(D23), C<required_files> (now C<track_additional_files>, D24), and C<redeploy>,
-C<redeploy_cron_start> and C<redeploy_cron_stop> (now C<redeploy_cron>, D21).
-A key no decision names is still refused as unknown.
+one retired key is the rc builds' C<ci> block. The keys those builds wrote
+under C<pipeline>, and in an environment's C<genesis.pipeline>, were retired
+the same way until D185, and are refused as unknown now, as any key no
+schema declares is.
 
 B<Parameters:> The sentence naming what replaced the key.
 
@@ -5003,9 +5003,9 @@ every save.
 
 B<Examples:>
 
-    required_files => _retired_key("it is genesis.pipeline.track_additional_files, with the same paths"),
-    # genesis.pipeline.required_files: is no longer read: it is
-    # genesis.pipeline.track_additional_files, with the same paths.
+    ci => _retired_key("the pipeline is configured under pipeline in this file"),
+    # ci: is no longer read: the pipeline is configured under pipeline in
+    # this file.
 
 =head2 _automated_provider_configured
 

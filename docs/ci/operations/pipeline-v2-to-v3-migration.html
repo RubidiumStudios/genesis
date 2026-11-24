@@ -182,7 +182,7 @@ git rm ci.yml</code></pre>
   <li><code>track_dependencies</code>, <code>redeploy_cron</code>: accepted, but nothing acts on them yet (section 10).</li>
   <li>The director is <code>genesis.bosh_env</code>, as before. It also names the director's lock.</li>
 </ul>
-<p class="small">Retired keys are refused naming their replacement. This covers <code>locks</code>, <code>status_signal</code>, <code>signal_prefix</code>, <code>required_files</code>, <code>redeploy</code>, <code>redeploy_cron_start</code> and <code>redeploy_cron_stop</code>. The per-environment <code>notifications</code> override loads but is not honoured yet, so leave it unset.</p>
+<p class="small">A key the block does not declare is refused by name, as unknown. That includes a per-environment <code>notifications</code>: notifications are the repository's settings, under <code>pipeline.notifications</code> in <code>.genesis/config</code>.</p>
 
 <h2>6. Secrets</h2>
 <p>The pipeline carries no secret. Each is a Concourse variable, <code>((path.key))</code>, which Concourse resolves from its own vault in this order:</p>

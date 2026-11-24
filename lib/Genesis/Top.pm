@@ -3433,14 +3433,6 @@ sub _pipeline_env_keys_schema {
 				schema      => $self->_provider_env_options_schema,
 			},
 
-			# Retired keys, refused naming what replaced them (T404).
-			locks          => _retired_key("both deploy locks are mandatory, backed by #C{pipeline.locker} in #C{.genesis/config}; remove it"),
-			status_signal  => _retired_key("signalling is the #C{pipeline.shuttle} in #C{.genesis/config}; remove it"),
-			signal_prefix  => _retired_key("signalling is the #C{pipeline.shuttle} in #C{.genesis/config}; remove it"),
-			required_files => _retired_key("it is #C{genesis.pipeline.track_additional_files}, with the same paths"),
-			(map {$_ => _retired_key("the redeploy is #C{genesis.pipeline.redeploy_cron}, one crontab expression or a list of them, in UTC")}
-				qw/redeploy redeploy_cron_start redeploy_cron_stop/),
-
 			# A bare string is normalised to a one-element list before validation.
 			redeploy_cron => {
 				type        => 'array',
@@ -3471,10 +3463,7 @@ sub _pipeline_env_keys_schema {
 				type        => 'any',
 				description => "The director's BOSH config types a Classic environment watches, notifying on a change"
 			},
-
-			# The pipeline's settings, never an environment's (D152).
-			notifications => _retired_key("notifications are the repository's settings, in ".
-				"#C{pipeline.notifications} of #C{.genesis/config}; remove it"),
+			# No notifications: they are the pipeline's, never an environment's (D152).
 		}
 	};
 }
